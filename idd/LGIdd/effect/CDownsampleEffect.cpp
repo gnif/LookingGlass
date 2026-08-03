@@ -241,7 +241,7 @@ ComPtr<ID3D12Resource> CDownsampleEffect::Run(
   UNREFERENCED_PARAMETER(dirtyRects);
   UNREFERENCED_PARAMETER(nbDirtyRects);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_COPY_SOURCE,
+  TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   D3D12_CPU_DESCRIPTOR_HANDLE handle =
@@ -273,6 +273,6 @@ ComPtr<ID3D12Resource> CDownsampleEffect::Run(
   commandList->Dispatch(m_threadsX, m_threadsY, 1);
 
   TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-    D3D12_RESOURCE_STATE_COPY_SOURCE);
+    D3D12_RESOURCE_STATE_COMMON);
   return m_dst;
 }

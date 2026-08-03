@@ -41,13 +41,9 @@ CFrameBufferResource * CFrameBufferPool::Get(
   if (buffer.frameIndex > ARRAYSIZE(m_buffers) - 1)
     return nullptr;
 
-  CFrameBufferResource* fbr = &m_buffers[buffer.frameIndex];
-  if (!fbr->IsValid() || fbr->GetBase() != buffer.mem || fbr->GetSize() < minSize)
-  {
-    fbr->Reset();
-    if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem, minSize))
-      return nullptr;
-  }
+  CFrameBufferResource * fbr = &m_buffers[buffer.frameIndex];
+  if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem, minSize))
+    return nullptr;
 
   return fbr;
 }

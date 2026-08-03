@@ -37,6 +37,8 @@ namespace PostProcessUtil
 
   bool CreateDefaultTexture(const ComPtr<ID3D12Device3>& device,
     const D3D12_RESOURCE_DESC& desc, ComPtr<ID3D12Resource>& resource);
+  bool CreateDefaultBuffer(const ComPtr<ID3D12Device3>& device,
+    UINT64 size, ComPtr<ID3D12Resource>& resource);
 }
 
 class CComputeEffect : public CPostProcessEffect

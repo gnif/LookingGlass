@@ -1249,6 +1249,11 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 {
   PreparedFrameBuffer result = {};
 
+  const unsigned dataWidth  = dstFormat.dataWidth ?
+    dstFormat.dataWidth : (unsigned)dstFormat.desc.Width;
+  const unsigned dataHeight = dstFormat.dataHeight ?
+    dstFormat.dataHeight : dstFormat.desc.Height;
+
   if (!FrameBufferAvailable())
     return result;
 
@@ -1268,17 +1273,21 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
       expected, true, std::memory_order_acq_rel))
     return result;
 
-  if (m_width     != dstFormat.desc.Width  ||
-      m_height    != dstFormat.desc.Height ||
-      m_pitch     != pitch                 ||
-      m_format    != dstFormat.desc.Format ||
-      m_frameType != dstFormat.format)
+  if (m_width       != dataWidth             ||
+      m_height      != dataHeight            ||
+      m_frameWidth  != dstFormat.width       ||
+      m_frameHeight != dstFormat.height      ||
+      m_pitch       != pitch                 ||
+      m_format      != dstFormat.desc.Format ||
+      m_frameType   != dstFormat.format)
   {
-    m_width     = (unsigned)dstFormat.desc.Width;
-    m_height    = dstFormat.desc.Height;
-    m_format    = dstFormat.desc.Format;
-    m_frameType = dstFormat.format;
-    m_pitch     = pitch;
+    m_width       = dataWidth;
+    m_height      = dataHeight;
+    m_frameWidth  = dstFormat.width;
+    m_frameHeight = dstFormat.height;
+    m_pitch       = pitch;
+    m_format      = dstFormat.desc.Format;
+    m_frameType   = dstFormat.format;
     ++m_formatVer;
   }
 
@@ -1326,15 +1335,15 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
     (dstFormat.hdrPQ       ? FRAME_FLAG_HDR_PQ       : 0) |
     (dstFormat.hdrMetadata ? FRAME_FLAG_HDR_METADATA : 0);
 
-  if (maxRows < dstFormat.desc.Height)
+  if (maxRows < dataHeight)
     flags |= FRAME_FLAG_TRUNCATED;
 
   fi->formatVer        = m_formatVer;
   fi->frameSerial      = m_frameSerial++;
   fi->screenWidth      = srcFormat.width;
   fi->screenHeight     = srcFormat.height;
-  fi->dataWidth        = (unsigned)dstFormat.desc.Width;
-  fi->dataHeight       = min(maxRows, dstFormat.desc.Height);
+  fi->dataWidth        = dataWidth;
+  fi->dataHeight       = min(maxRows, dataHeight);
   fi->frameWidth       = dstFormat.width;
   fi->frameHeight      = dstFormat.height;
   fi->stride           = pitch / bpp;

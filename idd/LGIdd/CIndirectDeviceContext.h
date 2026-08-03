@@ -113,15 +113,18 @@ private:
   KVMFRFrame      * m_frame      [LGMP_Q_FRAME_LEN] = {};
   FrameBuffer     * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
 
-  unsigned    m_width    = 0;
-  unsigned    m_height   = 0;
-  unsigned    m_pitch    = 0;
-  DXGI_FORMAT m_format   = DXGI_FORMAT_UNKNOWN;
-  FrameType   m_frameType = FRAME_TYPE_INVALID;
-  UINT m_iddCxVersion = 0;
-  bool m_hasIddCx110DDIs = false;
-  bool m_canProcessFP16 = false;
-  bool m_softwareMode   = true;
+  unsigned    m_width       = 0;
+  unsigned    m_height      = 0;
+  unsigned    m_frameWidth  = 0;
+  unsigned    m_frameHeight = 0;
+  unsigned    m_pitch       = 0;
+  DXGI_FORMAT m_format      = DXGI_FORMAT_UNKNOWN;
+  FrameType   m_frameType   = FRAME_TYPE_INVALID;
+
+  UINT        m_iddCxVersion    = 0;
+  bool        m_hasIddCx110DDIs = false;
+  bool        m_canProcessFP16  = false;
+  bool        m_softwareMode    = true;
 
   // Previous HDR metadata used to detect changes for formatVer bumps
   uint16_t m_lastHDRDisplayPrimary[3][2]      = {};

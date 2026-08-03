@@ -33,25 +33,24 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    bool                   m_valid            = false;
-    unsigned               m_frameIndex       = 0;
-    uint8_t              * m_base             = nullptr;
-    size_t                 m_size             = 0;
-    size_t                 m_frameSize        = 0;
-    uint64_t               m_captureTime      = 0;
-    uint64_t               m_postProcessStart = 0;
-    uint64_t               m_copyStart        = 0;
+    unsigned               m_frameIndex        = 0;
+    uint8_t              * m_base              = nullptr;
+    size_t                 m_size              = 0;
+    size_t                 m_frameSize         = 0;
+    uint64_t               m_captureTime       = 0;
+    uint64_t               m_postProcessStart  = 0;
+    uint64_t               m_copyStart         = 0;
+    unsigned               m_timingEffectIndex = 0;
+    uint64_t               m_timingToken       = 0;
+    bool                   m_fullCopy          = false;
     ComPtr<ID3D12Resource> m_res;
-    void                 * m_map              = nullptr;
+    void                 * m_map               = nullptr;
 
   public:
     bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size);
     void Reset();
 
-    bool      IsValid()       { return m_valid;      }
     unsigned  GetFrameIndex() { return m_frameIndex; }
-    uint8_t * GetBase()       { return m_base;       }
-    size_t    GetSize()       { return m_size;       }
     size_t    GetFrameSize()  { return m_frameSize;  }
     void *    GetMap()        { return m_map;        }
 
@@ -65,6 +64,17 @@ class CFrameBufferResource
     uint64_t GetCaptureTime     () const { return m_captureTime;      }
     uint64_t GetPostProcessStart() const { return m_postProcessStart; }
     uint64_t GetCopyStart       () const { return m_copyStart;        }
+
+    void SetPostProcessSample(
+      unsigned effectIndex, uint64_t token, bool fullCopy)
+    {
+      m_timingEffectIndex = effectIndex;
+      m_timingToken       = token;
+      m_fullCopy          = fullCopy;
+    }
+    unsigned GetTimingEffectIndex() const { return m_timingEffectIndex; }
+    uint64_t GetTimingToken      () const { return m_timingToken;       }
+    bool     IsFullCopy          () const { return m_fullCopy;          }
 
     ComPtr<ID3D12Resource> Get() { return m_res; }
 };

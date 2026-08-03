@@ -28,7 +28,8 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
 
   if (size > swapChain->GetDevice()->GetMaxFrameSize())
   {
-    DEBUG_ERROR("Frame size of %lu is too large to fit in available shared ram");
+    DEBUG_ERROR("Frame size of %llu is too large to fit in shared ram",
+      (unsigned long long)size);
     return false;
   }
 
@@ -97,7 +98,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
       swapChain->GetD3D12Device()->GetHeap().Get(),
       (uintptr_t)base - (uintptr_t)swapChain->GetDevice()->GetIVSHMEM().GetMem(),
       &desc,
-      D3D12_RESOURCE_STATE_COPY_DEST,
+      D3D12_RESOURCE_STATE_COMMON,
       NULL,
       IID_PPV_ARGS(&m_res)
     );
@@ -115,7 +116,6 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
   m_base      = base;
   m_size      = size;
   m_frameSize = size;
-  m_valid     = true;
   return true;
 }
 
@@ -131,5 +131,4 @@ void CFrameBufferResource::Reset()
   m_size      = 0;
   m_frameSize = 0;
   m_res.Reset();
-  m_valid     = false;
 }

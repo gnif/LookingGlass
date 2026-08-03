@@ -27,7 +27,7 @@
 
 namespace PostProcessUtil
 {
-  bool CreateDefaultTexture(const ComPtr<ID3D12Device3>& device,
+  static bool CreateDefaultResource(const ComPtr<ID3D12Device3>& device,
     const D3D12_RESOURCE_DESC& desc, ComPtr<ID3D12Resource>& resource)
   {
     D3D12_HEAP_PROPERTIES heapProps = {};
@@ -41,16 +41,37 @@ namespace PostProcessUtil
       &heapProps,
       D3D12_HEAP_FLAG_CREATE_NOT_ZEROED,
       &desc,
-      D3D12_RESOURCE_STATE_COPY_SOURCE,
+      D3D12_RESOURCE_STATE_COMMON,
       nullptr,
       IID_PPV_ARGS(&resource));
     if (FAILED(hr))
     {
-      DEBUG_ERROR_HR(hr, "Failed to create post-processing destination texture");
+      DEBUG_ERROR_HR(hr, "Failed to create post-processing destination resource");
       return false;
     }
 
     return true;
+  }
+
+  bool CreateDefaultTexture(const ComPtr<ID3D12Device3>& device,
+    const D3D12_RESOURCE_DESC& desc, ComPtr<ID3D12Resource>& resource)
+  {
+    return CreateDefaultResource(device, desc, resource);
+  }
+
+  bool CreateDefaultBuffer(const ComPtr<ID3D12Device3>& device,
+    UINT64 size, ComPtr<ID3D12Resource>& resource)
+  {
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width              = size;
+    desc.Height             = 1;
+    desc.DepthOrArraySize   = 1;
+    desc.MipLevels          = 1;
+    desc.SampleDesc.Count   = 1;
+    desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags              = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+    return CreateDefaultResource(device, desc, resource);
   }
 }
 

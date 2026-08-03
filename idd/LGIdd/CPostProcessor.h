@@ -55,15 +55,18 @@ bool IsIdentityColorTransform(const D12ColorTransform& transform);
 
 struct D12FrameFormat
 {
-  D3D12_RESOURCE_DESC desc = {};
-  unsigned            width = 0;
-  unsigned            height = 0;
-  FrameType           format = FRAME_TYPE_INVALID;
-  bool                hdr = false;
-  bool                hdrPQ = false;
-  bool                hdrMetadata = false;
-  uint32_t            sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT;
-  std::shared_ptr<const D12ColorTransform> colorTransform;
+  D3D12_RESOURCE_DESC                       desc          = {};
+  unsigned                                  dataWidth     = 0;
+  unsigned                                  dataHeight    = 0;
+  unsigned                                  pitch         = 0;
+  unsigned                                  width         = 0;
+  unsigned                                  height        = 0;
+  FrameType                                 format        = FRAME_TYPE_INVALID;
+  bool                                      hdr           = false;
+  bool                                      hdrPQ         = false;
+  bool                                      hdrMetadata   = false;
+  uint32_t                                  sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT;
+  std::shared_ptr<const D12ColorTransform>  colorTransform;
 
   // HDR static metadata (SMPTE ST 2086)
   // Display color primaries in 0.00002 units (xy coordinates)
@@ -84,6 +87,51 @@ class CPostProcessEffect
 public:
   virtual ~CPostProcessEffect() {}
   virtual const char * GetName() const = 0;
+  virtual void ShareState(const CPostProcessEffect& other)
+  {
+    UNREFERENCED_PARAMETER(other);
+  }
+  virtual void Update(const D12FrameFormat& format)
+  {
+    UNREFERENCED_PARAMETER(format);
+  }
+  virtual bool NeedsReconfigure() const { return false; }
+  virtual bool RequiresFullDamage() const { return false; }
+  virtual uint64_t GetTimingToken() const { return 0; }
+  virtual void RecordTiming(
+    uint64_t token, bool fullCopy, uint64_t totalTime)
+  {
+    UNREFERENCED_PARAMETER(token);
+    UNREFERENCED_PARAMETER(fullCopy);
+    UNREFERENCED_PARAMETER(totalTime);
+  }
+  // A final effect with a non-texture output owns its framebuffer copy.
+  virtual bool GetCopyLayout(
+    unsigned * pitch, unsigned * dataHeight) const
+  {
+    UNREFERENCED_PARAMETER(pitch);
+    UNREFERENCED_PARAMETER(dataHeight);
+    return false;
+  }
+  virtual bool ShouldCopyFully(
+    const RECT dirtyRects[], unsigned nbDirtyRects) const
+  {
+    UNREFERENCED_PARAMETER(dirtyRects);
+    UNREFERENCED_PARAMETER(nbDirtyRects);
+    return false;
+  }
+  virtual void CopyFrame(
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    ID3D12Resource * dst, ID3D12Resource * src,
+    const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const
+  {
+    UNREFERENCED_PARAMETER(commandList);
+    UNREFERENCED_PARAMETER(dst);
+    UNREFERENCED_PARAMETER(src);
+    UNREFERENCED_PARAMETER(dirtyRects);
+    UNREFERENCED_PARAMETER(nbDirtyRects);
+    UNREFERENCED_PARAMETER(fullCopy);
+  }
   virtual PostProcessStatus SetFormat(const ComPtr<ID3D12Device3>& device,
     const D12FrameFormat& src, D12FrameFormat& dst) = 0;
   virtual void AdjustDamage(RECT dirtyRects[], unsigned * nbDirtyRects) { UNREFERENCED_PARAMETER(dirtyRects); UNREFERENCED_PARAMETER(nbDirtyRects); }
@@ -102,15 +150,23 @@ private:
   std::vector<std::unique_ptr<CPostProcessEffect>> m_effects;
   D12FrameFormat                                   m_srcFormat     = {};
   D12FrameFormat                                   m_dstFormat     = {};
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT               m_copyLayout    = {};
+  CPostProcessEffect                             * m_copyEffect    = nullptr;
+  size_t                                           m_frameSize     = 0;
+  unsigned                                         m_pitch         = 0;
   bool                                             m_effectsActive = false;
   bool                                             m_configured    = false;
 
 public:
-  bool Init(std::shared_ptr<CD3D12Device> dx12Device);
+  bool Init(std::shared_ptr<CD3D12Device> dx12Device,
+    bool enableEffects);
   void Reset();
 
   bool HasSameEffectChain(const CPostProcessor& other) const;
+  bool ShareEffectState(const CPostProcessor& other);
+  void Update(const D12FrameFormat& srcFormat);
   bool NeedsReconfigure(const D12FrameFormat& srcFormat) const;
+  bool RequiresFullDamage() const;
   bool Configure(const D12FrameFormat& srcFormat, bool * formatChanged);
   void AdjustFrameDamage(RECT dirtyRects[], unsigned * nbDirtyRects);
   ComPtr<ID3D12Resource> Run(
@@ -120,4 +176,15 @@ public:
 
   const D12FrameFormat& GetOutputFormat() const { return m_dstFormat; }
   bool HasActiveEffects() const { return m_effectsActive; }
+  void GetTimingToken(unsigned * effectIndex, uint64_t * token) const;
+  void RecordTiming(unsigned effectIndex, uint64_t token,
+    bool fullCopy, uint64_t totalTime);
+  unsigned GetOutputPitch() const { return m_pitch;     }
+  size_t   GetOutputSize () const { return m_frameSize; }
+  bool ShouldCopyFully(
+    const RECT dirtyRects[], unsigned nbDirtyRects) const;
+  void CopyFrame(
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    ID3D12Resource * dst, ID3D12Resource * src,
+    const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const;
 };

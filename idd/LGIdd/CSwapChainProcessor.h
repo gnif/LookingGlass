@@ -63,9 +63,9 @@ private:
   DWORD           m_lastShapeId = 0;
   std::atomic<UINT> m_sdrWhiteLevel { KVMFR_SDR_WHITE_LEVEL_DEFAULT };
 
-  // Output-space damage from the previous published frame. The shared-memory
-  // frame buffers alternate, so this must be copied along with the current
-  // damage to bring the older target buffer up to date.
+  // Logical output-space damage from the previous published frame. The
+  // shared-memory frame buffers alternate, so this must be copied along with
+  // the current damage to bring the older target buffer up to date.
   RECT     m_dirtyRects[LG_MAX_DIRTY_RECTS] = {};
   unsigned m_nbDirtyRects = 0;
 

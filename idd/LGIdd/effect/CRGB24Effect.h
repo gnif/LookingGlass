@@ -24,10 +24,33 @@
 
 class CRGB24Effect : public CComputeEffect
 {
+private:
+  struct State;
+  std::shared_ptr<State> m_state;
+  unsigned               m_width  = 0;
+  unsigned               m_height = 0;
+  unsigned               m_pitch  = 0;
+
 public:
   const char * GetName() const override { return "RGB24"; }
 
   bool Init(const ComPtr<ID3D12Device3>& device);
+  void ShareState(const CPostProcessEffect& other) override;
+  void Update(const D12FrameFormat& format) override;
+  bool NeedsReconfigure() const override;
+  bool RequiresFullDamage() const override;
+  uint64_t GetTimingToken() const override;
+  void RecordTiming(
+    uint64_t token, bool fullCopy, uint64_t totalTime) override;
+  bool GetCopyLayout(
+    unsigned * pitch, unsigned * dataHeight) const override;
+  bool ShouldCopyFully(
+    const RECT dirtyRects[], unsigned nbDirtyRects) const override;
+  void CopyFrame(
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    ID3D12Resource * dst, ID3D12Resource * src,
+    const RECT dirtyRects[], unsigned nbDirtyRects,
+    bool fullCopy) const override;
 
   PostProcessStatus SetFormat(const ComPtr<ID3D12Device3>& device,
     const D12FrameFormat& src, D12FrameFormat& dst) override;

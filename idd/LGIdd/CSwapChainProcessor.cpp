@@ -79,33 +79,37 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 {
   m_resPool.Init(dx11Device, dx12Device);
   m_fbPool.Init(this);
-  if (m_dx11Device->IsSoftware())
+  const bool enableEffects = !m_dx11Device->IsSoftware();
+  if (!enableEffects)
     DEBUG_INFO("Software render adapter: post-processing disabled");
-  else
-  {
-    bool initialized = true;
-    for (CPostProcessor& postProcessor : m_postProcessors)
-      if (!postProcessor.Init(dx12Device))
+
+  bool initialized = true;
+  for (CPostProcessor& postProcessor : m_postProcessors)
+    if (!postProcessor.Init(dx12Device, enableEffects))
+    {
+      initialized = false;
+      break;
+    }
+
+  if (initialized)
+    for (unsigned i = 1; i < ARRAYSIZE(m_postProcessors); ++i)
+      if (!m_postProcessors[i].ShareEffectState(m_postProcessors[0]))
       {
+        DEBUG_ERROR("Post processor effect chains do not match");
         initialized = false;
         break;
       }
 
-    if (initialized)
-      for (unsigned i = 1; i < ARRAYSIZE(m_postProcessors); ++i)
-        if (!m_postProcessors[0].HasSameEffectChain(m_postProcessors[i]))
-        {
-          DEBUG_ERROR("Post processor effect chains do not match");
-          initialized = false;
-          break;
-        }
-
-    if (!initialized)
+  if (!initialized)
+  {
+    for (CPostProcessor& postProcessor : m_postProcessors)
     {
-      for (CPostProcessor& postProcessor : m_postProcessors)
-        postProcessor.Reset();
-      DEBUG_ERROR("Failed to initialize post processors");
+      postProcessor.Reset();
+      if (!postProcessor.Init(dx12Device, false))
+        DEBUG_ERROR("Failed to initialize post processor copy support");
     }
+    DEBUG_WARN(
+      "Failed to initialize post-processing effects; effects disabled");
   }
 
   // Manual-reset: both worker threads wait on this, so it must stay signalled
@@ -363,7 +367,7 @@ void CSwapChainProcessor::CompletionFunction(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
 
   // Queue waits execute before the start timestamp. The end timestamp follows
-  // the last CopyTextureRegion, separating GPU work from readiness dispatch.
+  // the last copy command, separating GPU work from readiness dispatch.
   const bool gpuTimingValid =
     slot->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
 
@@ -384,6 +388,9 @@ void CSwapChainProcessor::CompletionFunction(
     readyTime       = readyEnd - gpuCopyEnd;
   }
 
+  sc->m_postProcessors[fbRes->GetFrameIndex()].RecordTiming(
+    fbRes->GetTimingEffectIndex(), fbRes->GetTimingToken(),
+    fbRes->IsFullCopy(), postProcessTime + copyTime + readyTime);
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
   sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex());
@@ -391,14 +398,14 @@ void CSwapChainProcessor::CompletionFunction(
 
 
 static bool IsFullDamage(const RECT * dirtyRects, unsigned nbDirtyRects,
-  const D3D12_RESOURCE_DESC& desc)
+  unsigned width, unsigned height)
 {
   for (const RECT * rect = dirtyRects;
        rect < dirtyRects + nbDirtyRects; ++rect)
-    if (rect->left   == 0                &&
-        rect->top    == 0                &&
-        rect->right  == (LONG)desc.Width &&
-        rect->bottom == (LONG)desc.Height)
+    if (rect->left   == 0            &&
+        rect->top    == 0            &&
+        rect->right  == (LONG)width  &&
+        rect->bottom == (LONG)height)
       return true;
 
   return false;
@@ -470,9 +477,9 @@ static bool AddCopyDirtyRect(RECT dirtyRects[], unsigned capacity,
 }
 
 static bool CopyAreaCoversFrame(const RECT * dirtyRects,
-  unsigned nbDirtyRects, const D3D12_RESOURCE_DESC& desc)
+  unsigned nbDirtyRects, unsigned width, unsigned height)
 {
-  const uint64_t frameArea = (uint64_t)desc.Width * desc.Height;
+  const uint64_t frameArea = (uint64_t)width * height;
   uint64_t       copyArea  = 0;
 
   for (const RECT * rect = dirtyRects;
@@ -487,26 +494,10 @@ static bool CopyAreaCoversFrame(const RECT * dirtyRects,
   return false;
 }
 
-static void CopyDirtyRect(ComPtr<ID3D12GraphicsCommandList> list,
-  D3D12_TEXTURE_COPY_LOCATION * dstLoc,
-  D3D12_TEXTURE_COPY_LOCATION * srcLoc,
-  const RECT& rect)
+static bool ClipDirtyRect(RECT& rect, unsigned width, unsigned height)
 {
-  D3D12_BOX box = {};
-  box.left   = rect.left;
-  box.top    = rect.top;
-  box.front  = 0;
-  box.right  = rect.right;
-  box.bottom = rect.bottom;
-  box.back   = 1;
-
-  list->CopyTextureRegion(dstLoc, box.left, box.top, 0, srcLoc, &box);
-}
-
-static bool ClipDirtyRect(RECT& rect, const D3D12_RESOURCE_DESC& desc)
-{
-  const LONG maxRight  = (LONG)desc.Width;
-  const LONG maxBottom = (LONG)desc.Height;
+  const LONG maxRight  = (LONG)width;
+  const LONG maxBottom = (LONG)height;
 
   if (rect.left   < 0        ) rect.left   = 0;
   if (rect.top    < 0        ) rect.top    = 0;
@@ -517,13 +508,13 @@ static bool ClipDirtyRect(RECT& rect, const D3D12_RESOURCE_DESC& desc)
 }
 
 static void ClipDirtyRects(RECT dirtyRects[], unsigned * nbDirtyRects,
-  const D3D12_RESOURCE_DESC& desc)
+  unsigned width, unsigned height)
 {
   unsigned out = 0;
   for (unsigned i = 0; i < *nbDirtyRects; ++i)
   {
     RECT rect = dirtyRects[i];
-    if (ClipDirtyRect(rect, desc))
+    if (ClipDirtyRect(rect, width, height))
       dirtyRects[out++] = rect;
   }
   *nbDirtyRects = out;
@@ -816,6 +807,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       break;
   }
 
+  m_postProcessors[0].Update(srcFormat);
+
   const bool frameMetadataChanged = noImageUpdate &&
     FrameMetadataChanged(m_postProcessors[0].GetOutputFormat(), srcFormat);
 
@@ -836,18 +829,40 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     m_dx12Device->WaitForIdle();
   }
 
+  // An optional adaptive effect can reject its candidate while configuring
+  // either slot. Both queues are already idle, so allow one convergence pass
+  // to return both effect chains to the same mode.
   bool postProcessFormatChanged = false;
-  for (unsigned i = 0; i < ARRAYSIZE(m_postProcessors); ++i)
+  bool configurationStable      = false;
+  for (unsigned pass = 0; pass < 2 && !configurationStable; ++pass)
   {
-    bool formatChanged = false;
-    if (!m_postProcessors[i].Configure(srcFormat, &formatChanged))
+    for (unsigned i = 0; i < ARRAYSIZE(m_postProcessors); ++i)
     {
-      SetFullPendingDamage();
-      return false;
+      bool formatChanged = false;
+      if (!m_postProcessors[i].Configure(srcFormat, &formatChanged))
+      {
+        SetFullPendingDamage();
+        return false;
+      }
+
+      if (i == 0)
+        postProcessFormatChanged |= formatChanged;
     }
 
-    if (i == 0)
-      postProcessFormatChanged = formatChanged;
+    configurationStable = true;
+    for (const CPostProcessor& postProcessor : m_postProcessors)
+      if (postProcessor.NeedsReconfigure(srcFormat))
+      {
+        configurationStable = false;
+        break;
+      }
+  }
+
+  if (!configurationStable)
+  {
+    DEBUG_ERROR("Post processor configuration did not stabilize");
+    SetFullPendingDamage();
+    return false;
   }
 
   if (postProcessFormatChanged)
@@ -858,37 +873,34 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   else if (frameMetadataChanged)
     SetFullPendingDamage();
 
+  // Adaptive effects need comparable full-frame samples until they lock.
+  if (m_postProcessors[0].RequiresFullDamage())
+    SetFullPendingDamage();
+
   if (noImageUpdate && !m_hasPendingDamage)
     return true;
 
   const D12FrameFormat& dstFormat =
     m_postProcessors[0].GetOutputFormat();
+  const unsigned pitch     = m_postProcessors[0].GetOutputPitch();
+  const size_t   frameSize = m_postProcessors[0].GetOutputSize();
 
-  D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout;
-  m_dx12Device->GetDevice()->GetCopyableFootprints(
-    &dstFormat.desc,
-    0,
-    1,
-    0,
-    &layout,
-    NULL,
-    NULL,
-    NULL);
-
-  RECT currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  RECT frameDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbDirtyRects = m_nbPendingDirtyRects;
+  RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+  RECT     frameDirtyRects[LG_MAX_DIRTY_RECTS]   = {};
+  unsigned nbDirtyRects                          = m_nbPendingDirtyRects;
+  unsigned frameDirtyRectCount                   = nbDirtyRects;
   if (nbDirtyRects)
   {
-    memcpy(currentDirtyRects, m_pendingDirtyRects, nbDirtyRects * sizeof(*currentDirtyRects));
-    memcpy(frameDirtyRects, currentDirtyRects, nbDirtyRects * sizeof(*frameDirtyRects));
+    memcpy(currentDirtyRects, m_pendingDirtyRects,
+      nbDirtyRects * sizeof(*currentDirtyRects));
+    memcpy(frameDirtyRects, currentDirtyRects,
+      nbDirtyRects * sizeof(*frameDirtyRects));
   }
-  unsigned frameDirtyRectCount = nbDirtyRects;
   m_postProcessors[0].AdjustFrameDamage(
     frameDirtyRects, &frameDirtyRectCount);
 
   auto buffer = m_devContext->PrepareFrameBuffer(
-    (unsigned)layout.Footprint.RowPitch,
+    pitch,
     srcFormat,
     dstFormat,
     frameDirtyRects,
@@ -899,8 +911,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!buffer.mem)
     return true;
 
-  CFrameBufferResource * fbRes = m_fbPool.Get(buffer,
-    (size_t)layout.Footprint.RowPitch * dstFormat.desc.Height);
+  CFrameBufferResource * fbRes = m_fbPool.Get(buffer, frameSize);
 
   if (!fbRes)
   {
@@ -986,22 +997,13 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  ClipDirtyRects(currentDirtyRects, &nbDirtyRects, dstFormat.desc);
+  ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
+    dstFormat.width, dstFormat.height);
 
   const uint64_t copyStart = Nanotime();
   fbRes->SetTiming(captureTime, postProcessStart, copyStart);
 
   copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
-
-  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-  srcLoc.pResource        = copySrcResource.Get();
-  srcLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-  srcLoc.SubresourceIndex = 0;
-
-  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-  dstLoc.pResource       = fbRes->Get().Get();
-  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  dstLoc.PlacedFootprint = layout;
 
   /* Each destination is reused every other frame, so repair both the prior
    * and current damage. Coalesce them first to avoid copying overlapping
@@ -1017,7 +1019,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
          rect < m_dirtyRects + m_nbDirtyRects && !fullCopy; ++rect)
     {
       RECT clipped = *rect;
-      if (ClipDirtyRect(clipped, dstFormat.desc) &&
+      if (ClipDirtyRect(clipped, dstFormat.width, dstFormat.height) &&
           !AddCopyDirtyRect(copyDirtyRects, ARRAYSIZE(copyDirtyRects),
             &nbCopyDirtyRects, clipped))
         fullCopy = true;
@@ -1031,25 +1033,29 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
     if (!fullCopy)
       fullCopy = IsFullDamage(
-          copyDirtyRects, nbCopyDirtyRects, dstFormat.desc) ||
+          copyDirtyRects, nbCopyDirtyRects,
+          dstFormat.width, dstFormat.height) ||
         CopyAreaCoversFrame(
-          copyDirtyRects, nbCopyDirtyRects, dstFormat.desc);
+          copyDirtyRects, nbCopyDirtyRects,
+          dstFormat.width, dstFormat.height);
+
+    if (!fullCopy)
+      fullCopy = postProcessor.ShouldCopyFully(
+        copyDirtyRects, nbCopyDirtyRects);
   }
+
+  unsigned timingEffectIndex = 0;
+  uint64_t timingToken       = 0;
+  postProcessor.GetTimingToken(&timingEffectIndex, &timingToken);
+  fbRes->SetPostProcessSample(
+    timingEffectIndex, timingToken, fullCopy);
 
   // Source/compute waits are submitted immediately before this command list.
   // The timestamp therefore marks the first actual copy operation.
   copySlot->BeginTiming();
-  if (fullCopy)
-  {
-    copySlot->GetGfxList()->CopyTextureRegion(
-      &dstLoc, 0, 0, 0, &srcLoc, NULL);
-  }
-  else
-  {
-    for (const RECT * rect = copyDirtyRects;
-         rect < copyDirtyRects + nbCopyDirtyRects; ++rect)
-      CopyDirtyRect(copySlot->GetGfxList(), &dstLoc, &srcLoc, *rect);
-  }
+  postProcessor.CopyFrame(
+    copySlot->GetGfxList(), fbRes->Get().Get(), copySrcResource.Get(),
+    copyDirtyRects, nbCopyDirtyRects, fullCopy);
   copySlot->EndTiming();
 
   if (!copySlot->Execute())

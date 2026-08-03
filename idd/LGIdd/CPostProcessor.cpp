@@ -28,6 +28,7 @@
 #include "effect/CRGB24Effect.h"
 
 #include <cstring>
+#include <limits>
 #include <utility>
 
 namespace
@@ -82,11 +83,15 @@ static void CopyHDRMetadata(D12FrameFormat& dst, const D12FrameFormat& src)
   dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
 }
 
-bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device)
+bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device,
+  bool enableEffects)
 {
   m_dx12Device = dx12Device;
-  m_device = dx12Device->GetDevice();
+  m_device      = dx12Device->GetDevice();
   m_effects.clear();
+
+  if (!enableEffects)
+    return true;
 
   std::unique_ptr<CColorTransformEffect> colorTransform(new CColorTransformEffect());
   if (colorTransform->Init(m_device))
@@ -130,6 +135,10 @@ void CPostProcessor::Reset()
   m_device.Reset();
   m_srcFormat     = {};
   m_dstFormat     = {};
+  m_copyLayout    = {};
+  m_copyEffect    = nullptr;
+  m_frameSize     = 0;
+  m_pitch         = 0;
   m_effectsActive = false;
   m_configured    = false;
 }
@@ -147,9 +156,26 @@ bool CPostProcessor::HasSameEffectChain(const CPostProcessor& other) const
   return true;
 }
 
+bool CPostProcessor::ShareEffectState(const CPostProcessor& other)
+{
+  if (!HasSameEffectChain(other))
+    return false;
+
+  for (size_t i = 0; i < m_effects.size(); ++i)
+    m_effects[i]->ShareState(*other.m_effects[i]);
+
+  return true;
+}
+
+void CPostProcessor::Update(const D12FrameFormat& srcFormat)
+{
+  for (const auto& effect : m_effects)
+    effect->Update(srcFormat);
+}
+
 bool CPostProcessor::NeedsReconfigure(const D12FrameFormat& srcFormat) const
 {
-  return !m_configured ||
+  if (!m_configured ||
     srcFormat.desc.Width     != m_srcFormat.desc.Width  ||
     srcFormat.desc.Height    != m_srcFormat.desc.Height ||
     srcFormat.desc.Format    != m_srcFormat.desc.Format ||
@@ -158,7 +184,23 @@ bool CPostProcessor::NeedsReconfigure(const D12FrameFormat& srcFormat) const
     srcFormat.height         != m_srcFormat.height      ||
     srcFormat.hdr            != m_srcFormat.hdr         ||
     srcFormat.hdrPQ          != m_srcFormat.hdrPQ       ||
-    srcFormat.colorTransform != m_srcFormat.colorTransform;
+    srcFormat.colorTransform != m_srcFormat.colorTransform)
+    return true;
+
+  for (const auto& effect : m_effects)
+    if (effect->NeedsReconfigure())
+      return true;
+
+  return false;
+}
+
+bool CPostProcessor::RequiresFullDamage() const
+{
+  for (const auto& effect : m_effects)
+    if (effect->RequiresFullDamage())
+      return true;
+
+  return false;
 }
 
 bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
@@ -170,15 +212,16 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
   if (!NeedsReconfigure(srcFormat))
   {
     // Static HDR metadata may change independently of the resource format.
-    // Propagate it without recreating textures or post-processing state.
+    // Propagate it without recreating resources or post-processing state.
     CopyHDRMetadata(m_srcFormat, srcFormat);
     CopyHDRMetadata(m_dstFormat, srcFormat);
     return true;
   }
 
-  D12FrameFormat oldDst        = m_dstFormat;
-  D12FrameFormat cur           = srcFormat;
-  bool           effectsActive = false;
+  D12FrameFormat       oldDst        = m_dstFormat;
+  D12FrameFormat       cur           = srcFormat;
+  CPostProcessEffect * outputEffect  = nullptr;
+  bool                 effectsActive = false;
 
   for (const auto& effect : m_effects)
   {
@@ -189,6 +232,7 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
       effect->Enabled = true;
       effectsActive   = true;
       cur             = dst;
+      outputEffect    = effect.get();
       DEBUG_INFO("Post-processing effect active: %s", effect->GetName());
       break;
 
@@ -202,23 +246,154 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
     }
   }
 
+  D3D12_PLACED_SUBRESOURCE_FOOTPRINT copyLayout = {};
+  CPostProcessEffect * copyEffect               = nullptr;
+  unsigned             pitch                    = 0;
+  unsigned             dataHeight               = 0;
+  if (outputEffect && outputEffect->GetCopyLayout(&pitch, &dataHeight))
+    copyEffect = outputEffect;
+  else
+  {
+    if (cur.desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+    {
+      DEBUG_ERROR("Post-processing output has no copy implementation");
+      return false;
+    }
+
+    m_device->GetCopyableFootprints(
+      &cur.desc,
+      0,
+      1,
+      0,
+      &copyLayout,
+      nullptr,
+      nullptr,
+      nullptr);
+    pitch      = copyLayout.Footprint.RowPitch;
+    dataHeight = cur.desc.Height;
+  }
+
+  if (!pitch || !dataHeight ||
+      pitch > (std::numeric_limits<size_t>::max)() / dataHeight)
+  {
+    DEBUG_ERROR("Invalid post-processing output layout");
+    return false;
+  }
+
+  const size_t frameSize = (size_t)pitch * dataHeight;
+  if (copyEffect && cur.desc.Width < frameSize)
+  {
+    DEBUG_ERROR("Post-processing output buffer is too small");
+    return false;
+  }
+
   m_srcFormat     = srcFormat;
   m_dstFormat     = cur;
+  m_copyLayout    = copyLayout;
+  m_copyEffect    = copyEffect;
+  m_frameSize     = frameSize;
+  m_pitch         = pitch;
   m_effectsActive = effectsActive;
   m_configured    = true;
   if (formatChanged)
     *formatChanged =
-      oldDst.desc.Width     != m_dstFormat.desc.Width     ||
-      oldDst.desc.Height    != m_dstFormat.desc.Height    ||
-      oldDst.desc.Format    != m_dstFormat.desc.Format    ||
-      oldDst.format         != m_dstFormat.format         ||
-      oldDst.width          != m_dstFormat.width          ||
-      oldDst.height         != m_dstFormat.height         ||
-      oldDst.hdr            != m_dstFormat.hdr            ||
-      oldDst.hdrPQ          != m_dstFormat.hdrPQ          ||
-      oldDst.sdrWhiteLevel  != m_dstFormat.sdrWhiteLevel  ||
+      oldDst.desc.Width     != m_dstFormat.desc.Width      ||
+      oldDst.desc.Height    != m_dstFormat.desc.Height     ||
+      oldDst.desc.Format    != m_dstFormat.desc.Format     ||
+      oldDst.dataWidth      != m_dstFormat.dataWidth       ||
+      oldDst.dataHeight     != m_dstFormat.dataHeight      ||
+      oldDst.pitch          != m_dstFormat.pitch           ||
+      oldDst.format         != m_dstFormat.format          ||
+      oldDst.width          != m_dstFormat.width           ||
+      oldDst.height         != m_dstFormat.height          ||
+      oldDst.hdr            != m_dstFormat.hdr             ||
+      oldDst.hdrPQ          != m_dstFormat.hdrPQ           ||
+      oldDst.sdrWhiteLevel  != m_dstFormat.sdrWhiteLevel   ||
       oldDst.colorTransform != m_dstFormat.colorTransform;
   return true;
+}
+
+void CPostProcessor::GetTimingToken(
+  unsigned * effectIndex, uint64_t * token) const
+{
+  if (effectIndex)
+    *effectIndex = 0;
+  if (token)
+    *token = 0;
+
+  for (size_t i = 0; i < m_effects.size(); ++i)
+  {
+    const uint64_t value = m_effects[i]->GetTimingToken();
+    if (!value)
+      continue;
+
+    if (effectIndex)
+      *effectIndex = (unsigned)i;
+    if (token)
+      *token = value;
+    return;
+  }
+}
+
+void CPostProcessor::RecordTiming(
+  unsigned effectIndex, uint64_t token, bool fullCopy, uint64_t totalTime)
+{
+  if (!token || effectIndex >= m_effects.size())
+    return;
+
+  m_effects[effectIndex]->RecordTiming(token, fullCopy, totalTime);
+}
+
+bool CPostProcessor::ShouldCopyFully(
+  const RECT dirtyRects[], unsigned nbDirtyRects) const
+{
+  return m_copyEffect &&
+    m_copyEffect->ShouldCopyFully(dirtyRects, nbDirtyRects);
+}
+
+void CPostProcessor::CopyFrame(
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  ID3D12Resource * dst, ID3D12Resource * src,
+  const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const
+{
+  if (m_copyEffect)
+  {
+    m_copyEffect->CopyFrame(
+      commandList, dst, src, dirtyRects, nbDirtyRects, fullCopy);
+    return;
+  }
+
+  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+  srcLoc.pResource        = src;
+  srcLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+  srcLoc.SubresourceIndex = 0;
+
+  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+  dstLoc.pResource       = dst;
+  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dstLoc.PlacedFootprint = m_copyLayout;
+
+  if (fullCopy)
+  {
+    commandList->CopyTextureRegion(
+      &dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    return;
+  }
+
+  for (const RECT * rect = dirtyRects;
+       rect < dirtyRects + nbDirtyRects; ++rect)
+  {
+    D3D12_BOX box = {};
+    box.left   = rect->left;
+    box.top    = rect->top;
+    box.front  = 0;
+    box.right  = rect->right;
+    box.bottom = rect->bottom;
+    box.back   = 1;
+
+    commandList->CopyTextureRegion(
+      &dstLoc, box.left, box.top, 0, &srcLoc, &box);
+  }
 }
 
 void CPostProcessor::AdjustFrameDamage(RECT dirtyRects[], unsigned * nbDirtyRects)
