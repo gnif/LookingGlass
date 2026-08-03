@@ -22,6 +22,7 @@
 #include "common/util.h"
 #include "common/cpuinfo.h"
 
+#include <math.h>
 #include <stdlib.h>
 #include <immintrin.h>
 
@@ -37,6 +38,19 @@ struct Edge
   int x;
   int delta;
 };
+
+void rectScaleOutward(struct Rect * rect, double scale)
+{
+  const int left   = (int)floor(rect->x * scale);
+  const int top    = (int)floor(rect->y * scale);
+  const int right  = (int)ceil(((double)rect->x + rect->w) * scale);
+  const int bottom = (int)ceil(((double)rect->y + rect->h) * scale);
+
+  rect->x = left;
+  rect->y = top;
+  rect->w = right  - left;
+  rect->h = bottom - top;
+}
 
 inline static bool rectIntersects(const FrameDamageRect * r1,
     const FrameDamageRect * r2)

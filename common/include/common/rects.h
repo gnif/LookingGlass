@@ -31,6 +31,8 @@ extern void (*rectCopyUnaligned)(
     uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width);
 
+void rectScaleOutward(struct Rect * rect, double scale);
+
 void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch);

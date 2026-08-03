@@ -30,6 +30,7 @@
 #include "kb.h"
 
 #include "common/debug.h"
+#include "common/rects.h"
 #include "common/stringutils.h"
 #include "interface/overlay.h"
 #include "overlays.h"
@@ -1073,12 +1074,7 @@ render_again:
           buffer, MAX_OVERLAY_RECTS);
 
     for (int i = 0; i < written; ++i)
-    {
-      buffer[i].x *= g_state.windowScale;
-      buffer[i].y *= g_state.windowScale;
-      buffer[i].w *= g_state.windowScale;
-      buffer[i].h *= g_state.windowScale;
-    }
+      rectScaleOutward(buffer + i, g_state.windowScale);
 
     // It is an error to run out of rectangles, because we will not be able to
     // correctly calculate the damage of the next frame.

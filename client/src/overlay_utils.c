@@ -20,6 +20,7 @@
 
 #include "overlay_utils.h"
 
+#include <math.h>
 #include <string.h>
 
 #include "common/open.h"
@@ -41,13 +42,19 @@
 
 void overlayGetImGuiRect(struct Rect * rect)
 {
-  ImVec2 pos  = igGetWindowPos();
-  ImVec2 size = igGetWindowSize();
+  const ImVec2 pos    = igGetWindowPos();
+  const ImVec2 size   = igGetWindowSize();
+  const float  border = igGetStyle()->WindowBorderSize;
+  const float  margin = border > 1.0f ? border : 1.0f;
+  const int    left   = (int)floorf(pos.x - margin);
+  const int    top    = (int)floorf(pos.y - margin);
+  const int    right  = (int)ceilf(pos.x + size.x + margin);
+  const int    bottom = (int)ceilf(pos.y + size.y + margin);
 
-  rect->x = pos.x;
-  rect->y = pos.y;
-  rect->w = size.x;
-  rect->h = size.y;
+  rect->x = left;
+  rect->y = top;
+  rect->w = right  - left;
+  rect->h = bottom - top;
 }
 
 ImVec2 * overlayGetScreenSize(void)
