@@ -145,9 +145,7 @@ static bool libdecor_shellInit(
   libdecor_frame_map(state.libdecorFrame);
 
   // Get the xdg_toplevel for icon setting
-  struct xdg_surface * xdgSurface = libdecor_frame_get_xdg_surface(state.libdecorFrame);
-  if (xdgSurface)
-    wlWm.xdgToplevel = xdg_surface_get_toplevel(xdgSurface);
+  wlWm.xdgToplevel = libdecor_frame_get_xdg_toplevel(state.libdecorFrame);
 
   if (fullscreen)
     libdecor_frame_set_fullscreen(state.libdecorFrame, NULL);
