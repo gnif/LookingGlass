@@ -50,6 +50,7 @@ typedef struct OverlayFrameTiming
   float    capture;
   float    postProcess;
   float    copy;
+  float    ready;
   float    import;
   float    render;
 }

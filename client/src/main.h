@@ -154,6 +154,7 @@ struct AppState
   atomic_uint_least64_t producerCaptureTime;
   atomic_uint_least64_t producerPostProcessTime;
   atomic_uint_least64_t producerCopyTime;
+  atomic_uint_least64_t producerReadyTime;
   atomic_uint_least64_t clientImportTime;
   atomic_uint_least64_t renderCount, frameCount;
   _Atomic(float)        fps, ups;

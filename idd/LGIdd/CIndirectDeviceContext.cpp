@@ -1302,6 +1302,7 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->captureTime      = 0;
   fi->postProcessTime  = 0;
   fi->copyTime         = 0;
+  fi->readyTime        = 0;
   fi->timingSerial     = 0;
   InterlockedExchange((volatile LONG *)&fi->timingValid, 0);
   fi->rotation         = FRAME_ROT_0;
@@ -1370,7 +1371,8 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
 }
 
 void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
-  uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime)
+  uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
+  uint64_t readyTime)
 {
   if (frameIndex >= LGMP_Q_FRAME_LEN)
     return;
@@ -1379,6 +1381,7 @@ void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
   frame->captureTime      = captureTime;
   frame->postProcessTime  = postProcessTime;
   frame->copyTime         = copyTime;
+  frame->readyTime        = readyTime;
   frame->timingSerial     = frame->frameSerial;
   InterlockedExchange((volatile LONG *)&frame->timingValid, 1);
 }

@@ -318,32 +318,38 @@ void CSwapChainProcessor::CompletionFunction(
   auto sc    = (CSwapChainProcessor   *)param1;
   auto fbRes = (CFrameBufferResource *)param2;
 
-  uint64_t copyStart    = fbRes->GetCopyStart();
-  uint64_t gpuCopyStart = 0;
+  const uint64_t cpuCopyStart = fbRes->GetCopyStart();
+  uint64_t       gpuCopyStart = 0;
+  uint64_t       gpuCopyEnd   = 0;
 
   if (result && sc->m_dx12Device->IsIndirectCopy())
     sc->m_devContext->WriteFrameBuffer(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
 
-  // Queue waits execute before this timestamp. Use it as the boundary so the
-  // source fence and effects are charged to Post, while Copy retains the full
-  // time through buffer readiness and any indirect memcpy.
-  const bool gpuTimingValid = result && queue->GetGPUStartTime(gpuCopyStart);
+  // Queue waits execute before the start timestamp. The end timestamp follows
+  // the last CopyTextureRegion, separating GPU work from readiness dispatch.
+  const bool gpuTimingValid = result &&
+    queue->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
 
   // Publish readiness before sampling the endpoint. Timing has its own valid
   // flag and is published immediately afterwards.
   sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-  const uint64_t copyEnd = Nanotime();
+  const uint64_t readyEnd = Nanotime();
+
+  uint64_t postProcessTime = cpuCopyStart - fbRes->GetPostProcessStart();
+  uint64_t copyTime        = readyEnd - cpuCopyStart;
+  uint64_t readyTime       = 0;
   if (gpuTimingValid &&
       gpuCopyStart >= fbRes->GetPostProcessStart() &&
-      gpuCopyStart <= copyEnd)
-    copyStart = gpuCopyStart;
+      gpuCopyEnd <= readyEnd)
+  {
+    postProcessTime = gpuCopyStart - fbRes->GetPostProcessStart();
+    copyTime        = gpuCopyEnd - gpuCopyStart;
+    readyTime       = readyEnd - gpuCopyEnd;
+  }
 
-  const uint64_t postProcessTime = copyStart -
-    fbRes->GetPostProcessStart();
-  const uint64_t copyTime        = copyEnd - copyStart;
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime);
+    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
 }
 
 

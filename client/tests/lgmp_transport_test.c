@@ -136,6 +136,7 @@ int main(void)
   wireFrame->captureTime     = 100;
   wireFrame->postProcessTime = 200;
   wireFrame->copyTime        = 300;
+  wireFrame->readyTime       = 400;
   wireFrame->timingSerial    = wireFrame->frameSerial;
   wireFrame->timingValid     = 1;
   FrameBuffer * framebuffer = (FrameBuffer *)((uint8_t *)wireFrame +
@@ -182,6 +183,7 @@ int main(void)
   CHECK(timing.captureTime == wireFrame->captureTime);
   CHECK(timing.postProcessTime == wireFrame->postProcessTime);
   CHECK(timing.copyTime == wireFrame->copyTime);
+  CHECK(timing.readyTime == wireFrame->readyTime);
   LGT_LGMP.releaseFrame(transport, &frame);
   CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
   LGT_LGMP.releasePointer(transport, &pointer);

@@ -194,7 +194,7 @@ static bool d12_copyTimingInit(
 
 static void d12_copyTimingDeinit(void);
 static void d12_copyTimingUpdateCalibration(void);
-static bool d12_copyTimingGetStart(uint64_t * start);
+static bool d12_copyTimingGetTimes(uint64_t * start, uint64_t * end);
 
 // implementation
 
@@ -241,7 +241,7 @@ static bool d12_copyTimingInit(
   D3D12_QUERY_HEAP_DESC queryDesc =
   {
     .Type  = D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP,
-    .Count = 1
+    .Count = 2
   };
 
   comRef_defineLocal(ID3D12QueryHeap, heap);
@@ -262,7 +262,7 @@ static bool d12_copyTimingInit(
   D3D12_RESOURCE_DESC resourceDesc =
   {
     .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
-    .Width              = sizeof(UINT64),
+    .Width              = sizeof(UINT64) * 2,
     .Height             = 1,
     .DepthOrArraySize   = 1,
     .MipLevels          = 1,
@@ -285,7 +285,7 @@ static bool d12_copyTimingInit(
   if (FAILED(hr))
     goto exit;
 
-  D3D12_RANGE readRange    = {0, sizeof(UINT64)};
+  D3D12_RANGE readRange    = {0, sizeof(UINT64) * 2};
   void      * timestampMap = NULL;
   hr = ID3D12Resource_Map(*readback, 0, &readRange, &timestampMap);
   if (FAILED(hr))
@@ -340,39 +340,45 @@ static void d12_copyTimingUpdateCalibration(void)
   }
 }
 
-static bool d12_copyTimingGetStart(uint64_t * start)
+static bool d12_copyTimingConvert(UINT64 gpuTime, uint64_t * cpuTime)
 {
-  if (!this->copyTiming.supported)
-    return false;
-
-  const UINT64 gpuStart = *this->copyTiming.map;
-  UINT64 cpuStart;
-  if (gpuStart < this->copyTiming.calibrationGPU)
+  UINT64 qpcTime;
+  if (gpuTime < this->copyTiming.calibrationGPU)
   {
     const UINT64 delta = d12_scaleTicks(
-      this->copyTiming.calibrationGPU - gpuStart,
+      this->copyTiming.calibrationGPU - gpuTime,
       this->copyTiming.qpcFrequency,
       this->copyTiming.timestampFrequency);
     if (delta > this->copyTiming.calibrationCPU)
       return false;
 
-    cpuStart = this->copyTiming.calibrationCPU - delta;
+    qpcTime = this->copyTiming.calibrationCPU - delta;
   }
   else
   {
     const UINT64 delta = d12_scaleTicks(
-      gpuStart - this->copyTiming.calibrationGPU,
+      gpuTime - this->copyTiming.calibrationGPU,
       this->copyTiming.qpcFrequency,
       this->copyTiming.timestampFrequency);
     if (UINT64_MAX - this->copyTiming.calibrationCPU < delta)
       return false;
 
-    cpuStart = this->copyTiming.calibrationCPU + delta;
+    qpcTime = this->copyTiming.calibrationCPU + delta;
   }
 
-  *start = d12_scaleTicks(
-    cpuStart, 1000000000ULL, this->copyTiming.qpcFrequency);
+  *cpuTime = d12_scaleTicks(
+    qpcTime, 1000000000ULL, this->copyTiming.qpcFrequency);
   return true;
+}
+
+static bool d12_copyTimingGetTimes(uint64_t * start, uint64_t * end)
+{
+  if (!this->copyTiming.supported ||
+      this->copyTiming.map[1] < this->copyTiming.map[0])
+    return false;
+
+  return d12_copyTimingConvert(this->copyTiming.map[0], start) &&
+    d12_copyTimingConvert(this->copyTiming.map[1], end);
 }
 
 static void d12_initOptions(void)
@@ -980,6 +986,10 @@ static CaptureResult d12_getFrame(
   CaptureFrame * captureFrame)
 {
   const uint64_t postProcessStart = nanotime();
+  captureFrame->postProcessTime   = 0;
+  captureFrame->copyTime          = 0;
+  captureFrame->readyTime         = 0;
+  captureFrame->copyTimingValid   = false;
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
@@ -1139,14 +1149,22 @@ static CaptureResult d12_getFrame(
   }
 
   if (this->copyTiming.supported)
+  {
+    ID3D12GraphicsCommandList_EndQuery(
+      *this->copyCommand.gfxList,
+      *this->copyTiming.heap,
+      D3D12_QUERY_TYPE_TIMESTAMP,
+      1);
+
     ID3D12GraphicsCommandList_ResolveQueryData(
       *this->copyCommand.gfxList,
       *this->copyTiming.heap,
       D3D12_QUERY_TYPE_TIMESTAMP,
       0,
-      1,
+      2,
       *this->copyTiming.readback,
       0);
+  }
 
   // execute the compute commands
   if (this->effectsActive)
@@ -1171,14 +1189,22 @@ static CaptureResult d12_getFrame(
   d12_commandGroupWait(&this->copyCommand);
 
   const uint64_t copyComplete = nanotime();
-  uint64_t copyStart;
-  if (!d12_copyTimingGetStart(&copyStart) ||
-      copyStart < postProcessStart || copyStart > copyComplete)
-    copyStart = fallbackCopyStart;
-
-  // The caller derives Copy from its getFrame wall time minus Post, preserving
-  // the exact producer total while moving the real queue wait to Post.
-  captureFrame->postProcessTime = copyStart - postProcessStart;
+  uint64_t       copyStart;
+  uint64_t       copyEnd      = 0;
+  if (d12_copyTimingGetTimes(&copyStart, &copyEnd) &&
+      copyStart >= postProcessStart && copyStart <= copyEnd &&
+      copyEnd <= copyComplete)
+  {
+    captureFrame->postProcessTime = copyStart - postProcessStart;
+    captureFrame->copyTime        = copyEnd - copyStart;
+    captureFrame->copyTimingValid = true;
+  }
+  else
+  {
+    // Preserve the legacy attribution when copy-queue timestamps are not
+    // available or cannot be correlated safely with the producer clock.
+    captureFrame->postProcessTime = fallbackCopyStart - postProcessStart;
+  }
 
   if (this->indirectCopy)
   {
@@ -1204,6 +1230,10 @@ static CaptureResult d12_getFrame(
     framebuffer_set_write_ptr(frameBuffer,
       this->dstFormat.desc.Height * this->pitch);
   }
+
+  const uint64_t readyEnd = nanotime();
+  if (captureFrame->copyTimingValid)
+    captureFrame->readyTime = readyEnd - copyEnd;
 
   // reset the command queues
   if (this->effectsActive)

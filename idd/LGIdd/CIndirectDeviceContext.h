@@ -218,7 +218,7 @@ public:
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex);
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
-    uint64_t postProcessTime, uint64_t copyTime);
+    uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 

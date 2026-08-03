@@ -67,6 +67,7 @@ class CD3D12CommandQueue
 
     bool InitTiming(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type);
     void UpdateClockCalibration();
+    bool ConvertGPUTimestamp(UINT64 timestamp, uint64_t& result) const;
 
     void OnCompletion()
     {
@@ -108,8 +109,8 @@ class CD3D12CommandQueue
     bool BeginTiming();
     void EndTiming();
 
-    // Return the command-list start in QueryPerformanceCounter-domain ns.
-    bool GetGPUStartTime(uint64_t& start);
+    // Return the copy boundaries in QueryPerformanceCounter-domain ns.
+    bool GetGPUTimes(uint64_t& start, uint64_t& end) const;
 
     //void Wait();
     bool   IsReady () const { return !m_pending   ; }

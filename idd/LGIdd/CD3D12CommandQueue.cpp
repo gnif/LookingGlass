@@ -56,7 +56,7 @@ bool CD3D12CommandQueue::InitTiming(ID3D12Device3 * device,
 
   D3D12_QUERY_HEAP_DESC queryDesc = {};
   queryDesc.Type  = D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP;
-  queryDesc.Count = 1;
+  queryDesc.Count = 2;
 
   hr = device->CreateQueryHeap(&queryDesc, IID_PPV_ARGS(&m_timestampHeap));
   if (FAILED(hr))
@@ -71,7 +71,7 @@ bool CD3D12CommandQueue::InitTiming(ID3D12Device3 * device,
 
   D3D12_RESOURCE_DESC resourceDesc = {};
   resourceDesc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-  resourceDesc.Width              = sizeof(UINT64);
+  resourceDesc.Width              = sizeof(UINT64) * 2;
   resourceDesc.Height             = 1;
   resourceDesc.DepthOrArraySize   = 1;
   resourceDesc.MipLevels          = 1;
@@ -91,7 +91,7 @@ bool CD3D12CommandQueue::InitTiming(ID3D12Device3 * device,
     return false;
   }
 
-  D3D12_RANGE readRange    = { 0, sizeof(UINT64) };
+  D3D12_RANGE readRange    = { 0, sizeof(UINT64) * 2 };
   void      * timestampMap = nullptr;
   hr = m_timestampReadback->Map(0, &readRange, &timestampMap);
   if (FAILED(hr))
@@ -298,37 +298,47 @@ void CD3D12CommandQueue::EndTiming()
   if (!m_timingActive)
     return;
 
+  m_gfxList->EndQuery(
+    m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP, 1);
   m_gfxList->ResolveQueryData(
     m_timestampHeap.Get(), D3D12_QUERY_TYPE_TIMESTAMP,
-    0, 1, m_timestampReadback.Get(), 0);
+    0, 2, m_timestampReadback.Get(), 0);
 }
 
-bool CD3D12CommandQueue::GetGPUStartTime(uint64_t& start)
+bool CD3D12CommandQueue::ConvertGPUTimestamp(
+  UINT64 timestamp, uint64_t& result) const
 {
-  if (!m_timingActive)
-    return false;
-
-  const UINT64 gpuStart = m_timestampMap[0];
-
-  UINT64 cpuStart;
-  if (gpuStart < m_calibrationGPU)
+  UINT64 cpuTimestamp;
+  if (timestamp < m_calibrationGPU)
   {
     const UINT64 delta = ScaleTicks(
-      m_calibrationGPU - gpuStart, m_qpcFrequency, m_timestampFrequency);
+      m_calibrationGPU - timestamp, m_qpcFrequency, m_timestampFrequency);
     if (delta > m_calibrationCPU)
       return false;
-    cpuStart = m_calibrationCPU - delta;
+    cpuTimestamp = m_calibrationCPU - delta;
   }
   else
   {
     const UINT64 delta = ScaleTicks(
-      gpuStart - m_calibrationGPU, m_qpcFrequency, m_timestampFrequency);
+      timestamp - m_calibrationGPU, m_qpcFrequency, m_timestampFrequency);
     if (UINT64_MAX - m_calibrationCPU < delta)
       return false;
-    cpuStart = m_calibrationCPU + delta;
+    cpuTimestamp = m_calibrationCPU + delta;
   }
 
-  start = TicksToNanoseconds(cpuStart, m_qpcFrequency);
+  result = TicksToNanoseconds(cpuTimestamp, m_qpcFrequency);
+  return true;
+}
+
+bool CD3D12CommandQueue::GetGPUTimes(
+  uint64_t& start, uint64_t& end) const
+{
+  if (!m_timingActive ||
+      !ConvertGPUTimestamp(m_timestampMap[0], start) ||
+      !ConvertGPUTimestamp(m_timestampMap[1], end) ||
+      end < start)
+    return false;
+
   return true;
 }
 

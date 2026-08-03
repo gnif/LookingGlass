@@ -205,6 +205,7 @@ struct RenderTiming
   uint64_t captureTime;
   uint64_t postProcessTime;
   uint64_t copyTime;
+  uint64_t readyTime;
   uint64_t importTime;
 };
 
@@ -225,6 +226,8 @@ static struct RenderTiming frameTimingLoad(void)
         &g_state.producerPostProcessTime, memory_order_seq_cst);
     timing.copyTime        = atomic_load_explicit(
         &g_state.producerCopyTime, memory_order_seq_cst);
+    timing.readyTime       = atomic_load_explicit(
+        &g_state.producerReadyTime, memory_order_seq_cst);
     timing.importTime      = atomic_load_explicit(
         &g_state.clientImportTime, memory_order_seq_cst);
 
@@ -245,6 +248,8 @@ static void frameTimingStore(const LG_TransportFrameTiming * timing,
       timing->postProcessTime, memory_order_seq_cst);
   atomic_store_explicit(&g_state.producerCopyTime,
       timing->copyTime, memory_order_seq_cst);
+  atomic_store_explicit(&g_state.producerReadyTime,
+      timing->readyTime, memory_order_seq_cst);
   atomic_store_explicit(&g_state.clientImportTime,
       importTime, memory_order_seq_cst);
   atomic_fetch_add_explicit(
@@ -257,13 +262,14 @@ static void preSwapCallback(void * udata)
   const uint64_t timestamp  = nanotime();
   const uint64_t renderTime = timestamp - timing->renderStart;
   if (timing->captureTime || timing->postProcessTime || timing->copyTime ||
-      timing->importTime)
+      timing->readyTime || timing->importTime)
   {
     const OverlayFrameTiming frameTiming = {
       .timestamp   = timestamp,
       .capture     = timing->captureTime     * 1e-6f,
       .postProcess = timing->postProcessTime * 1e-6f,
       .copy        = timing->copyTime        * 1e-6f,
+      .ready       = timing->readyTime       * 1e-6f,
       .import      = timing->importTime      * 1e-6f,
       .render      = renderTime              * 1e-6f,
     };

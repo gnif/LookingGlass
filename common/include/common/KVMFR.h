@@ -30,7 +30,7 @@
 #include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 24
+#define KVMFR_VERSION 25
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -201,11 +201,17 @@ typedef struct KVMFRFrame
   uint64_t        captureTime;
   uint64_t        postProcessTime;
   uint64_t        copyTime;
+  // Time from copy completion until FrameBuffer::wp publishes readiness.
+  uint64_t        readyTime;
 
   // Published after the timing fields and matched against frameSerial by the
   // client. timingValid is written last by the producer.
   uint32_t        timingSerial;
   uint32_t        timingValid;
+
+  // Keep the conditional HDR block and damage rectangles on separate cache
+  // lines from the producer timing fields.
+  uint8_t         timingReserved[24];
 
   // HDR static metadata (valid when FRAME_FLAG_HDR_METADATA is set)
   // Display color primaries in 0.00002 units (SMPTE ST 2086 format)
@@ -220,6 +226,8 @@ typedef struct KVMFRFrame
   uint32_t hdrMaxContentLightLevel;      // MaxCLL (cd/m²)
   uint32_t hdrMaxFrameAverageLightLevel; // MaxFALL (cd/m²)
 
+  uint8_t  hdrReserved[32];
+
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
 KVMFRFrame;
@@ -227,12 +235,16 @@ KVMFRFrame;
 #if defined(__cplusplus)
 static_assert(offsetof(KVMFRFrame, captureTime) == 64,
     "KVMFRFrame hot fields must fit in one cache line");
-static_assert(offsetof(KVMFRFrame, damageRects) == 128,
+static_assert(offsetof(KVMFRFrame, hdrDisplayPrimary) == 128,
+    "KVMFRFrame HDR metadata must be cache-line aligned");
+static_assert(offsetof(KVMFRFrame, damageRects) == 192,
     "KVMFRFrame damage rectangles must be cache-line aligned");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(offsetof(KVMFRFrame, captureTime) == 64,
     "KVMFRFrame hot fields must fit in one cache line");
-_Static_assert(offsetof(KVMFRFrame, damageRects) == 128,
+_Static_assert(offsetof(KVMFRFrame, hdrDisplayPrimary) == 128,
+    "KVMFRFrame HDR metadata must be cache-line aligned");
+_Static_assert(offsetof(KVMFRFrame, damageRects) == 192,
     "KVMFRFrame damage rectangles must be cache-line aligned");
 #endif
 

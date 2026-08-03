@@ -179,7 +179,7 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
 #define TIMING_PLOT_WINDOW_NS 20000000000ULL
 #define TIMING_PLOT_BUCKET_NS \
   (TIMING_PLOT_WINDOW_NS / TIMING_PLOT_BUCKETS)
-#define TIMING_STAGE_COUNT    5
+#define TIMING_STAGE_COUNT    6
 
 struct TimingPlotData
 {
@@ -239,6 +239,7 @@ static bool accumulateTimingSample(int index, void * value_, void * udata_)
     timing->capture,
     timing->postProcess,
     timing->copy,
+    timing->ready,
     timing->import,
     timing->render,
   };
@@ -349,6 +350,7 @@ static void renderTimingStatistic(struct OverlayGraph * graph,
     "Capture",
     "Post",
     "Copy",
+    "Ready",
     "Import",
     "Render",
   };

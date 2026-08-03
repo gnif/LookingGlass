@@ -103,6 +103,9 @@ typedef struct CaptureFrame
   uint64_t        captureTime;
   uint64_t        postProcessTime;
   uint64_t        copyTime;
+  uint64_t        readyTime;
+  // True when Copy is an explicit stage rather than the getFrame residual.
+  bool            copyTimingValid;
 }
 CaptureFrame;
 

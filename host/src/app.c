@@ -401,6 +401,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   fi->captureTime       = frame.captureTime;
   fi->postProcessTime   = 0;
   fi->copyTime          = 0;
+  fi->readyTime         = 0;
   fi->timingSerial      = 0;
   __atomic_store_n(&fi->timingValid, 0, __ATOMIC_RELAXED);
   if (frame.hdrMetadata)
@@ -449,9 +450,19 @@ static bool sendFrame(CaptureResult result, bool * restart)
   const uint64_t copyEnd = nanotime();
 
   fi->postProcessTime = frame.postProcessTime;
-  frame.copyTime      = copyEnd - copyStart > frame.postProcessTime ?
-    copyEnd - copyStart - frame.postProcessTime : 0;
+  const uint64_t totalTime        = copyEnd - copyStart;
+  const bool     splitTimingValid = frame.copyTimingValid &&
+      frame.postProcessTime <= totalTime &&
+      frame.copyTime <= totalTime - frame.postProcessTime &&
+      frame.readyTime <= totalTime - frame.postProcessTime - frame.copyTime;
+  if (!splitTimingValid)
+  {
+    frame.copyTime  = totalTime > frame.postProcessTime ?
+      totalTime - frame.postProcessTime : 0;
+    frame.readyTime = 0;
+  }
   fi->copyTime        = frame.copyTime;
+  fi->readyTime       = frame.readyTime;
   fi->timingSerial    = fi->frameSerial;
   __atomic_store_n(&fi->timingValid, 1, __ATOMIC_RELEASE);
 

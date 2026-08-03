@@ -637,6 +637,7 @@ static void lgmp_getFrameTiming(LG_Transport * this,
   timing->captureTime     = this->pendingFrame->captureTime;
   timing->postProcessTime = this->pendingFrame->postProcessTime;
   timing->copyTime        = this->pendingFrame->copyTime;
+  timing->readyTime       = this->pendingFrame->readyTime;
 }
 
 static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
