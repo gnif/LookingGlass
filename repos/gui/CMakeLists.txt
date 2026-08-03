@@ -12,6 +12,18 @@ add_library(lg_gui STATIC
   cimplot/implot/implot_items.cpp
 )
 
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(lg_gui PRIVATE "-fno-fast-math")
+
+  set_source_files_properties(cimgui/cimgui.cpp PROPERTIES
+    COMPILE_FLAGS "-Wno-error=unused-function"
+  )
+  set_source_files_properties(cimplot/cimplot.cpp PROPERTIES
+    COMPILE_FLAGS
+      "-Wno-error=array-bounds -Wno-error=unused-function"
+  )
+endif()
+
 target_compile_definitions(lg_gui PUBLIC
   IMGUI_DISABLE_OBSOLETE_FUNCTIONS=1
   IMGUI_USE_WCHAR32
