@@ -28,6 +28,9 @@
 static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
 static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
 
+static_assert(LGMP_Q_FRAME_LEN == 2,
+  "IDD damage repair assumes two alternating frame buffers");
+
 static uint64_t Nanotime()
 {
   static const uint64_t frequency = []()
@@ -356,12 +359,98 @@ void CSwapChainProcessor::CompletionFunction(
 static bool IsFullDamage(const RECT * dirtyRects, unsigned nbDirtyRects,
   const D3D12_RESOURCE_DESC& desc)
 {
-  return nbDirtyRects == 0 ||
-    (nbDirtyRects == 1 &&
-      dirtyRects[0].left   == 0 &&
-      dirtyRects[0].top    == 0 &&
-      dirtyRects[0].right  == (LONG)desc.Width &&
-      dirtyRects[0].bottom == (LONG)desc.Height);
+  for (const RECT * rect = dirtyRects;
+       rect < dirtyRects + nbDirtyRects; ++rect)
+    if (rect->left   == 0                &&
+        rect->top    == 0                &&
+        rect->right  == (LONG)desc.Width &&
+        rect->bottom == (LONG)desc.Height)
+      return true;
+
+  return false;
+}
+
+static bool DirtyRectContains(const RECT& outer, const RECT& inner)
+{
+  return outer.left   <= inner.left  &&
+         outer.top    <= inner.top   &&
+         outer.right  >= inner.right &&
+         outer.bottom >= inner.bottom;
+}
+
+static bool DirtyRectsTouchOrIntersect(const RECT& a, const RECT& b)
+{
+  return a.left <= b.right  && a.right  >= b.left &&
+         a.top  <= b.bottom && a.bottom >= b.top;
+}
+
+static RECT MergeDirtyRects(const RECT& a, const RECT& b)
+{
+  RECT result;
+  result.left   = min(a.left  , b.left  );
+  result.top    = min(a.top   , b.top   );
+  result.right  = max(a.right , b.right );
+  result.bottom = max(a.bottom, b.bottom);
+  return result;
+}
+
+static uint64_t DirtyRectArea(const RECT& rect)
+{
+  const uint64_t width  = (uint64_t)((int64_t)rect.right  - rect.left);
+  const uint64_t height = (uint64_t)((int64_t)rect.bottom - rect.top );
+  return width * height;
+}
+
+static bool AddCopyDirtyRect(RECT dirtyRects[], unsigned capacity,
+  unsigned * nbDirtyRects, const RECT& dirtyRect)
+{
+  RECT candidate = dirtyRect;
+  for (unsigned i = 0; i < *nbDirtyRects;)
+  {
+    if (DirtyRectContains(dirtyRects[i], candidate))
+      return true;
+
+    const RECT merged = MergeDirtyRects(dirtyRects[i], candidate);
+    // Reduce command and overlap cost without copying more pixels than the
+    // two original rectangles would have copied.
+    if (DirtyRectContains(candidate, dirtyRects[i]) ||
+        (DirtyRectsTouchOrIntersect(dirtyRects[i], candidate) &&
+          DirtyRectArea(merged) <=
+            DirtyRectArea(dirtyRects[i]) + DirtyRectArea(candidate)))
+    {
+      candidate = merged;
+      --(*nbDirtyRects);
+      dirtyRects[i] = dirtyRects[*nbDirtyRects];
+      i = 0;
+      continue;
+    }
+
+    ++i;
+  }
+
+  if (*nbDirtyRects >= capacity)
+    return false;
+
+  dirtyRects[(*nbDirtyRects)++] = candidate;
+  return true;
+}
+
+static bool CopyAreaCoversFrame(const RECT * dirtyRects,
+  unsigned nbDirtyRects, const D3D12_RESOURCE_DESC& desc)
+{
+  const uint64_t frameArea = (uint64_t)desc.Width * desc.Height;
+  uint64_t       copyArea  = 0;
+
+  for (const RECT * rect = dirtyRects;
+       rect < dirtyRects + nbDirtyRects; ++rect)
+  {
+    const uint64_t area = DirtyRectArea(*rect);
+    if (area >= frameArea - copyArea)
+      return true;
+    copyArea += area;
+  }
+
+  return false;
 }
 
 static void CopyDirtyRect(ComPtr<ID3D12GraphicsCommandList> list,
@@ -802,30 +891,51 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dstLoc.PlacedFootprint = layout;
 
+  /* Each destination is reused every other frame, so repair both the prior
+   * and current damage. Coalesce them first to avoid copying overlapping
+   * regions, especially a prior full frame, more than once. */
+  RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
+  unsigned nbCopyDirtyRects                       = 0;
+  bool     fullCopy                               =
+    nbDirtyRects == 0 || m_nbDirtyRects == 0;
+
+  if (!fullCopy)
+  {
+    for (const RECT * rect = m_dirtyRects;
+         rect < m_dirtyRects + m_nbDirtyRects && !fullCopy; ++rect)
+    {
+      RECT clipped = *rect;
+      if (ClipDirtyRect(clipped, dstFormat.desc) &&
+          !AddCopyDirtyRect(copyDirtyRects, ARRAYSIZE(copyDirtyRects),
+            &nbCopyDirtyRects, clipped))
+        fullCopy = true;
+    }
+
+    for (const RECT * rect = currentDirtyRects;
+         rect < currentDirtyRects + nbDirtyRects && !fullCopy; ++rect)
+      if (!AddCopyDirtyRect(copyDirtyRects, ARRAYSIZE(copyDirtyRects),
+          &nbCopyDirtyRects, *rect))
+        fullCopy = true;
+
+    if (!fullCopy)
+      fullCopy = IsFullDamage(
+          copyDirtyRects, nbCopyDirtyRects, dstFormat.desc) ||
+        CopyAreaCoversFrame(
+          copyDirtyRects, nbCopyDirtyRects, dstFormat.desc);
+  }
+
   // The source/compute waits were inserted directly on the queue above. The
   // command-list timestamp therefore marks the first actual copy operation.
   copyQueue->BeginTiming();
-  if (IsFullDamage(currentDirtyRects, nbDirtyRects, dstFormat.desc) ||
-      nbDirtyRects > KVMFR_MAX_DAMAGE_RECTS || m_nbDirtyRects == 0)
-  {
-    copyQueue->GetGfxList()->CopyTextureRegion(
-      &dstLoc, 0, 0, 0, &srcLoc, NULL);
-  }
-  else if (m_nbDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
+  if (fullCopy)
   {
     copyQueue->GetGfxList()->CopyTextureRegion(
       &dstLoc, 0, 0, 0, &srcLoc, NULL);
   }
   else
   {
-    for (const RECT * rect = m_dirtyRects; rect < m_dirtyRects + m_nbDirtyRects; ++rect)
-    {
-      RECT clipped = *rect;
-      if (ClipDirtyRect(clipped, dstFormat.desc))
-        CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, clipped);
-    }
-
-    for (const RECT * rect = currentDirtyRects; rect < currentDirtyRects + nbDirtyRects; ++rect)
+    for (const RECT * rect = copyDirtyRects;
+         rect < copyDirtyRects + nbCopyDirtyRects; ++rect)
       CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
   }
   copyQueue->EndTiming();
