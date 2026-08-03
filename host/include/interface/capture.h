@@ -97,6 +97,12 @@ typedef struct CaptureFrame
 
   uint32_t        damageRectsCount;
   FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
+
+  // Producer-local durations. Absolute timestamps must not cross KVMFR as the
+  // client and producer use different monotonic clock domains.
+  uint64_t        captureTime;
+  uint64_t        postProcessTime;
+  uint64_t        copyTime;
 }
 CaptureFrame;
 
@@ -146,8 +152,9 @@ typedef struct CaptureInterface
     CaptureFrame * frame,
     const size_t maxFrameSize);
   CaptureResult (*getFrame  )(
-    unsigned frameBufferIndex,
+    unsigned       frameBufferIndex,
     FrameBuffer  * frame,
-    const size_t maxFrameSize);
+    const size_t   maxFrameSize,
+    CaptureFrame * captureFrame);
 }
 CaptureInterface;

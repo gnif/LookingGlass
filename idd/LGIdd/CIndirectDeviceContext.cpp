@@ -212,7 +212,8 @@ void CIndirectDeviceContext::InitAdapter()
     return;
   }
 
-  if (InterlockedCompareExchange(&m_initInProgress, 1, 0) != 0)
+  LONG initExpected = 0;
+  if (!m_initInProgress.compare_exchange_strong(initExpected, 1))
   {
     DEBUG_TRACE("Adapter initialization skipped: initialization already in progress");
     return;
@@ -227,7 +228,7 @@ void CIndirectDeviceContext::InitAdapter()
     {
       DEBUG_WARN("IVSHMEM not available yet, scheduling init retry");
       ScheduleInitRetry();
-      InterlockedExchange(&m_initInProgress, 0);
+      m_initInProgress.store(0);
       return;
     }
     m_ivshmemOpened = true;
@@ -370,7 +371,7 @@ void CIndirectDeviceContext::InitAdapter()
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxAdapterInitAsync Failed");
-    InterlockedExchange(&m_initInProgress, 0);
+    m_initInProgress.store(0);
     return;
   }
 
@@ -378,7 +379,7 @@ void CIndirectDeviceContext::InitAdapter()
   if (!m_adapter)
   {
     DEBUG_ERROR("IddCxAdapterInitAsync succeeded without returning an adapter object");
-    InterlockedExchange(&m_initInProgress, 0);
+    m_initInProgress.store(0);
     return;
   }
 
@@ -401,7 +402,7 @@ void CIndirectDeviceContext::InitAdapter()
 
   // Adapter is up; no need to keep retrying.
   StopInitRetry();
-  InterlockedExchange(&m_initInProgress, 0);
+  m_initInProgress.store(0);
   DEBUG_INFO("Adapter initialization request complete; returning to IddCx");
 }
 
@@ -501,7 +502,7 @@ void CIndirectDeviceContext::ReplugMonitor()
     ReleaseSRWLockExclusive(&m_stateLock);
     // Either no monitor yet, or one is already pending; build it now and
     // cancel any queued rebuild so we do not create two.
-    InterlockedExchange(&m_finishInitQueued, 0);
+    m_finishInitQueued.store(0);
     FinishInit(0);
     return;
   }
@@ -537,7 +538,7 @@ void CIndirectDeviceContext::ReplugMonitor()
   // If there was no swap chain there will be no unassign callback to queue the
   // rebuild. Otherwise OnSwapChainReleased does so after teardown has drained.
   if (rebuild)
-    InterlockedExchange(&m_finishInitQueued, 1);
+    m_finishInitQueued.store(1);
 }
 
 void CIndirectDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
@@ -571,7 +572,7 @@ void CIndirectDeviceContext::OnSwapChainReleased()
   ReleaseSRWLockExclusive(&m_stateLock);
 
   if (rebuild)
-    InterlockedExchange(&m_finishInitQueued, 1);
+    m_finishInitQueued.store(1);
 }
 
 void CIndirectDeviceContext::OnSwapChainReady()
@@ -613,7 +614,7 @@ void CIndirectDeviceContext::OnSwapChainReady()
   g_pipe.SetDeviceContext(this);
 
   if (replug)
-    InterlockedExchange(&m_replugQueued, 1);
+    m_replugQueued.store(1);
   else if (doSetMode)
     g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
 }
@@ -1100,7 +1101,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
 void CIndirectDeviceContext::DeInitLGMP()
 {
-  InterlockedExchange(&m_publishedFrameIndex, -1);
+  m_publishedFrameIndex.store(-1);
 
   // The retry timer callback dereferences this context, so make sure it is
   // stopped and drained before we tear anything down. Wait for any in-flight
@@ -1135,13 +1136,13 @@ void CIndirectDeviceContext::DeInitLGMP()
 void CIndirectDeviceContext::LGMPTimer()
 {
   // Rebuild the monitor queued by ReplugMonitor, off the IddCx callback thread.
-  if (InterlockedExchange(&m_finishInitQueued, 0))
+  if (m_finishInitQueued.exchange(0))
   {
     FinishInit(0);
     return;
   }
 
-  if (InterlockedExchange(&m_replugQueued, 0))
+  if (m_replugQueued.exchange(0))
   {
     ReplugMonitor();
     return;
@@ -1188,8 +1189,7 @@ void CIndirectDeviceContext::LGMPTimer()
 
   if (lgmpHostQueueNewSubs(m_frameQueue) && m_monitor)
   {
-    const LONG frameIndex =
-      InterlockedCompareExchange(&m_publishedFrameIndex, 0, 0);
+    const LONG frameIndex = m_publishedFrameIndex.load();
     if (frameIndex >= 0)
       lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
   }
@@ -1299,6 +1299,11 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   // fi->offset is initialized at startup
   fi->flags            = flags;
   fi->sdrWhiteLevel    = dstFormat.sdrWhiteLevel;
+  fi->captureTime      = 0;
+  fi->postProcessTime  = 0;
+  fi->copyTime         = 0;
+  fi->timingSerial     = 0;
+  InterlockedExchange((volatile LONG *)&fi->timingValid, 0);
   fi->rotation         = FRAME_ROT_0;
   fi->type             = dstFormat.format;
 
@@ -1351,7 +1356,7 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   /* Make resends select this submitted frame before posting it. This prevents
    * a new subscriber racing publication from receiving the previous frame
    * after the new one. */
-  InterlockedExchange(&m_publishedFrameIndex, (LONG)frameIndex);
+  m_publishedFrameIndex.store(static_cast<LONG>(frameIndex));
 
   const LGMP_STATUS status =
     lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
@@ -1362,6 +1367,20 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   }
 
   return true;
+}
+
+void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
+  uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime)
+{
+  if (frameIndex >= LGMP_Q_FRAME_LEN)
+    return;
+
+  KVMFRFrame * frame      = m_frame[frameIndex];
+  frame->captureTime      = captureTime;
+  frame->postProcessTime  = postProcessTime;
+  frame->copyTime         = copyTime;
+  frame->timingSerial     = frame->frameSerial;
+  InterlockedExchange((volatile LONG *)&frame->timingValid, 1);
 }
 
 void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const

@@ -28,6 +28,22 @@
 static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
 static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
 
+static uint64_t Nanotime()
+{
+  static const uint64_t frequency = []()
+  {
+    LARGE_INTEGER value;
+    QueryPerformanceFrequency(&value);
+    return (uint64_t)value.QuadPart;
+  }();
+
+  LARGE_INTEGER counter;
+  QueryPerformanceCounter(&counter);
+  const uint64_t ticks = (uint64_t)counter.QuadPart;
+  return ticks / frequency * 1000000000ULL +
+    ticks % frequency * 1000000000ULL / frequency;
+}
+
 CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
     CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
@@ -192,6 +208,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     // path HDR is not available, so default to SDR.
     DXGI_COLOR_SPACE_TYPE colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     UINT sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+    const uint64_t captureStart = Nanotime();
 
 #ifdef HAS_IDDCX_110
     if (m_devContext->HasIddCx110DDIs())
@@ -252,7 +269,8 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       if (frameNumber != lastFrameNumber)
       {
         lastFrameNumber = frameNumber;
-        if (!SwapChainNewFrame(surface, dirtyRectCount, colorSpace, sdrWhiteLevel))
+        if (!SwapChainNewFrame(surface, dirtyRectCount, colorSpace,
+              sdrWhiteLevel, Nanotime() - captureStart))
           DEBUG_WARN("Failed to submit frame");
       }
 
@@ -286,16 +304,21 @@ void CSwapChainProcessor::CompletionFunction(
   // fail gracefully
   if (!result)
   {
+    sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
+      fbRes->GetCaptureTime(), fbRes->GetPostProcessTime(),
+      Nanotime() - fbRes->GetCopyStart());
     sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
     return;
   }
 
   if (sc->m_dx12Device->IsIndirectCopy())
     sc->m_devContext->WriteFrameBuffer(
-      fbRes->GetFrameIndex(),
-      fbRes->GetMap(), 0, fbRes->GetFrameSize(), true);
-  else
-    sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+      fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
+
+  const uint64_t copyTime = Nanotime() - fbRes->GetCopyStart();
+  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
+    fbRes->GetCaptureTime(), fbRes->GetPostProcessTime(), copyTime);
+  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
 }
 
 
@@ -470,8 +493,9 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 #endif
 }
 
-bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
-  DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel)
+bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
+  unsigned dirtyRectCount, DXGI_COLOR_SPACE_TYPE colorSpace,
+  UINT sdrWhiteLevel, uint64_t captureTime)
 {
   // Preserve the fast drop path: never hold an IddCx frame while waiting for
   // a slow or disconnected client. We have not read its rectangles, so force
@@ -481,6 +505,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     SetFullPendingDamage();
     return true;
   }
+
+  const uint64_t postProcessStart = Nanotime();
 
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
@@ -707,6 +733,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     SetFullPendingDamage();
     return false;
   }
+
+  const uint64_t copyStart = Nanotime();
+  fbRes->SetTiming(captureTime, copyStart - postProcessStart, copyStart);
 
   copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
 

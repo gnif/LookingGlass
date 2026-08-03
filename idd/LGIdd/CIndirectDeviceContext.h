@@ -23,6 +23,7 @@
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
+#include <atomic>
 #include <vector>
 
 #include "CIVSHMEM.h"
@@ -78,9 +79,9 @@ private:
 
   // Retry state for InitAdapter. At boot the IVSHMEM device may not have
   // enumerated yet; if so we re-attempt from a timer instead of giving up.
-  WDFTIMER      m_initTimer     = nullptr;
-  bool          m_ivshmemOpened = false;
-  volatile LONG m_initInProgress = 0;
+  WDFTIMER          m_initTimer       = nullptr;
+  bool              m_ivshmemOpened   = false;
+  std::atomic<LONG> m_initInProgress  = 0;
 
   CIVSHMEM m_ivshmem;
 
@@ -99,16 +100,16 @@ private:
   bool m_cursorVisible = false;
   int m_cursorX = 0, m_cursorY = 0;
 
-  size_t         m_alignSize           = 0;
-  size_t         m_frameMemoryOffset   = 0;
-  size_t         m_maxFrameSize        = 0;
-  int            m_frameIndex          = 0;
-  volatile LONG  m_publishedFrameIndex = -1;
-  uint32_t       m_formatVer           = 0;
-  uint32_t       m_frameSerial         = 0;
-  PLGMPMemory    m_frameMemory[LGMP_Q_FRAME_LEN] = {};
-  KVMFRFrame   * m_frame      [LGMP_Q_FRAME_LEN] = {};
-  FrameBuffer  * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
+  size_t            m_alignSize           = 0;
+  size_t            m_frameMemoryOffset   = 0;
+  size_t            m_maxFrameSize        = 0;
+  int               m_frameIndex          = 0;
+  std::atomic<LONG> m_publishedFrameIndex = -1;
+  uint32_t          m_formatVer           = 0;
+  uint32_t          m_frameSerial         = 0;
+  PLGMPMemory       m_frameMemory[LGMP_Q_FRAME_LEN] = {};
+  KVMFRFrame      * m_frame      [LGMP_Q_FRAME_LEN] = {};
+  FrameBuffer     * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
 
   unsigned    m_width    = 0;
   unsigned    m_height   = 0;
@@ -164,8 +165,8 @@ private:
 
   // Set by ReplugMonitor after a departure to rebuild the monitor from the LGMP
   // timer, off the IddCx callback thread.
-  volatile LONG m_finishInitQueued = 0;
-  volatile LONG m_replugQueued     = 0;
+  std::atomic<LONG> m_finishInitQueued = 0;
+  std::atomic<LONG> m_replugQueued     = 0;
 
 public:
   CIndirectDeviceContext(_In_ WDFDEVICE wdfDevice) :
@@ -216,6 +217,8 @@ public:
   bool FrameBufferAvailable() const;
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex);
+  void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
+    uint64_t postProcessTime, uint64_t copyTime);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 

@@ -199,11 +199,21 @@ static bool tickTimerFn(void * unused)
   return true;
 }
 
+struct RenderTiming
+{
+  uint64_t renderStart;
+  uint64_t producerTime;
+};
+
 static void preSwapCallback(void * udata)
 {
-  const uint64_t * renderStart = (const uint64_t *)udata;
-  ringbuffer_push(g_state.renderDuration,
-      &(float) {(nanotime() - *renderStart) * 1e-6f});
+  const struct RenderTiming * timing = (const struct RenderTiming *)udata;
+  const uint64_t renderTime = nanotime() - timing->renderStart;
+  ringbuffer_push(g_state.renderDuration, &(float) {renderTime * 1e-6f});
+
+  if (timing->producerTime)
+    ringbuffer_push(g_state.endToEndDuration,
+        &(float) {(timing->producerTime + renderTime) * 1e-6f});
 
 #ifdef ENABLE_TESTS
   if (!l_testCapture.enabled || l_testCapture.complete)
@@ -397,13 +407,17 @@ static int renderThread(void * unused)
 
     const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
 
-    const uint64_t renderStart = nanotime();
+    const struct RenderTiming renderTiming = {
+      .renderStart  = nanotime(),
+      .producerTime = newFrame ? atomic_load_explicit(
+          &g_state.producerFrameTime, memory_order_acquire) : 0,
+    };
     LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
 
     if (unlikely(!RENDERER(render, g_params.winRotate, newFrame, invalidate,
-          preSwapCallback, (void *)&renderStart)))
+          preSwapCallback, (void *)&renderTiming)))
     {
       LG_UNLOCK(g_state.lgrLock);
       break;
@@ -777,6 +791,21 @@ int main_frameThread(void * unused)
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
+
+    LG_TransportFrameTiming timing = {};
+    if (g_state.transportOps->getFrameTiming)
+      g_state.transportOps->getFrameTiming(
+          g_state.transport, &frame, &timing);
+
+    ringbuffer_push(g_state.captureDuration,
+        &(float) {timing.captureTime * 1e-6f});
+    ringbuffer_push(g_state.postProcessDuration,
+        &(float) {timing.postProcessTime * 1e-6f});
+    ringbuffer_push(g_state.copyDuration,
+        &(float) {timing.copyTime * 1e-6f});
+    atomic_store_explicit(&g_state.producerFrameTime,
+        timing.captureTime + timing.postProcessTime + timing.copyTime,
+        memory_order_release);
 
     overlaySplash_show(false);
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
@@ -1305,12 +1334,20 @@ static int lg_run(void)
   DEBUG_INFO("Using font: %s", g_state.fontName);
 
   // initialize metrics ringbuffers
-  g_state.renderTimings  = ringbuffer_new(256, sizeof(float));
-  g_state.uploadTimings  = ringbuffer_new(256, sizeof(float));
-  g_state.renderDuration = ringbuffer_new(256, sizeof(float));
-  overlayGraph_register("FRAME" , g_state.renderTimings , 0.0f, 50.0f, NULL);
-  overlayGraph_register("UPLOAD", g_state.uploadTimings , 0.0f, 50.0f, NULL);
-  overlayGraph_register("RENDER", g_state.renderDuration, 0.0f, 10.0f, NULL);
+  g_state.renderTimings       = ringbuffer_new(256, sizeof(float));
+  g_state.uploadTimings       = ringbuffer_new(256, sizeof(float));
+  g_state.renderDuration      = ringbuffer_new(256, sizeof(float));
+  g_state.captureDuration     = ringbuffer_new(256, sizeof(float));
+  g_state.postProcessDuration = ringbuffer_new(256, sizeof(float));
+  g_state.copyDuration        = ringbuffer_new(256, sizeof(float));
+  g_state.endToEndDuration    = ringbuffer_new(256, sizeof(float));
+  overlayGraph_register("FRAME"       , g_state.renderTimings      , 0.0f, 50.0f, NULL);
+  overlayGraph_register("UPLOAD"      , g_state.uploadTimings      , 0.0f, 50.0f, NULL);
+  overlayGraph_register("RENDER"      , g_state.renderDuration     , 0.0f, 10.0f, NULL);
+  overlayGraph_register("CAPTURE"     , g_state.captureDuration    , 0.0f, 20.0f, NULL);
+  overlayGraph_register("POST PROCESS", g_state.postProcessDuration, 0.0f, 20.0f, NULL);
+  overlayGraph_register("COPY"        , g_state.copyDuration       , 0.0f, 20.0f, NULL);
+  overlayGraph_register("END TO END"  , g_state.endToEndDuration   , 0.0f, 50.0f, NULL);
 
   // unknown guest OS at this time
   g_state.guestOS = LG_TRANSPORT_OS_OTHER;
@@ -1795,6 +1832,10 @@ static void lg_shutdown(void)
   ringbuffer_free(&g_state.renderTimings);
   ringbuffer_free(&g_state.uploadTimings);
   ringbuffer_free(&g_state.renderDuration);
+  ringbuffer_free(&g_state.captureDuration);
+  ringbuffer_free(&g_state.postProcessDuration);
+  ringbuffer_free(&g_state.copyDuration);
+  ringbuffer_free(&g_state.endToEndDuration);
 
   free(g_state.fontName);
   igDestroyContext(NULL);

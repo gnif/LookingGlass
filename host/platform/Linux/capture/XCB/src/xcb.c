@@ -299,10 +299,12 @@ static CaptureResult xcb_waitFrame(
 }
 
 static CaptureResult xcb_getFrame(
-  unsigned frameBufferIndex,
+  unsigned       frameBufferIndex,
   FrameBuffer  * frame,
-  const size_t maxFrameSize)
+  const size_t   maxFrameSize,
+  CaptureFrame * captureFrame)
 {
+  (void)captureFrame;
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
 

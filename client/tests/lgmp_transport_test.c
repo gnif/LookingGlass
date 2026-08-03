@@ -122,17 +122,22 @@ int main(void)
   wireFrame->formatVer   = 1;
   wireFrame->frameSerial = 1;
   wireFrame->type        = FRAME_TYPE_BGRA;
-  wireFrame->screenWidth = 1;
-  wireFrame->screenHeight = 1;
-  wireFrame->dataWidth   = 1;
-  wireFrame->dataHeight  = 1;
-  wireFrame->frameWidth  = 1;
-  wireFrame->frameHeight = 1;
-  wireFrame->rotation    = FRAME_ROT_0;
-  wireFrame->stride      = 1;
-  wireFrame->pitch       = sizeof(uint32_t);
-  wireFrame->offset      = sizeof(*wireFrame);
-  wireFrame->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  wireFrame->screenWidth     = 1;
+  wireFrame->screenHeight    = 1;
+  wireFrame->dataWidth       = 1;
+  wireFrame->dataHeight      = 1;
+  wireFrame->frameWidth      = 1;
+  wireFrame->frameHeight     = 1;
+  wireFrame->rotation        = FRAME_ROT_0;
+  wireFrame->stride          = 1;
+  wireFrame->pitch           = sizeof(uint32_t);
+  wireFrame->offset          = sizeof(*wireFrame);
+  wireFrame->sdrWhiteLevel   = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+  wireFrame->captureTime     = 100;
+  wireFrame->postProcessTime = 200;
+  wireFrame->copyTime        = 300;
+  wireFrame->timingSerial    = wireFrame->frameSerial;
+  wireFrame->timingValid     = 1;
   FrameBuffer * framebuffer = (FrameBuffer *)((uint8_t *)wireFrame +
       wireFrame->offset);
   atomic_store(&framebuffer->wp, sizeof(uint32_t));
@@ -172,6 +177,11 @@ int main(void)
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
   CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
+  LG_TransportFrameTiming timing;
+  LGT_LGMP.getFrameTiming(transport, &frame, &timing);
+  CHECK(timing.captureTime == wireFrame->captureTime);
+  CHECK(timing.postProcessTime == wireFrame->postProcessTime);
+  CHECK(timing.copyTime == wireFrame->copyTime);
   LGT_LGMP.releaseFrame(transport, &frame);
   CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
   LGT_LGMP.releasePointer(transport, &pointer);
@@ -212,7 +222,8 @@ int main(void)
    * Also recover when the host has already marked the cached handles bad.
    * LGMP leaves a timed-out handle non-NULL when unsubscribe fails.
    */
-  wireFrame->frameSerial = 2;
+  wireFrame->frameSerial  = 2;
+  wireFrame->timingSerial = wireFrame->frameSerial;
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);

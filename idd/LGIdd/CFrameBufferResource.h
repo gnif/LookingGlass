@@ -33,13 +33,16 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    bool                   m_valid      = false;
-    unsigned               m_frameIndex = 0;
-    uint8_t              * m_base       = nullptr;
-    size_t                 m_size       = 0;
-    size_t                 m_frameSize  = 0;
+    bool                   m_valid           = false;
+    unsigned               m_frameIndex      = 0;
+    uint8_t              * m_base            = nullptr;
+    size_t                 m_size            = 0;
+    size_t                 m_frameSize       = 0;
+    uint64_t               m_captureTime     = 0;
+    uint64_t               m_postProcessTime = 0;
+    uint64_t               m_copyStart       = 0;
     ComPtr<ID3D12Resource> m_res;
-    void                 * m_map        = nullptr;
+    void                 * m_map             = nullptr;
 
   public:
     bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size);
@@ -51,6 +54,17 @@ class CFrameBufferResource
     size_t    GetSize()       { return m_size;       }
     size_t    GetFrameSize()  { return m_frameSize;  }
     void *    GetMap()        { return m_map;        }
+
+    void SetTiming(uint64_t captureTime, uint64_t postProcessTime,
+      uint64_t copyStart)
+    {
+      m_captureTime     = captureTime;
+      m_postProcessTime = postProcessTime;
+      m_copyStart       = copyStart;
+    }
+    uint64_t GetCaptureTime    () const { return m_captureTime;     }
+    uint64_t GetPostProcessTime() const { return m_postProcessTime; }
+    uint64_t GetCopyStart      () const { return m_copyStart;       }
 
     ComPtr<ID3D12Resource> Get() { return m_res; }
 };

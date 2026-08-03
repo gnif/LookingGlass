@@ -463,10 +463,12 @@ static CaptureResult pipewire_waitFrame(
 }
 
 static CaptureResult pipewire_getFrame(
-  unsigned frameBufferIndex,
+  unsigned       frameBufferIndex,
   FrameBuffer  * frame,
-  const size_t maxFrameSize)
+  const size_t   maxFrameSize,
+  CaptureFrame * captureFrame)
 {
+  (void)captureFrame;
   if (this->stop || !this->frameData)
     return CAPTURE_RESULT_REINIT;
 

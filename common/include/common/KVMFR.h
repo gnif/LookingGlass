@@ -25,11 +25,12 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include "types.h"
 #include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 23
+#define KVMFR_VERSION 24
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -165,6 +166,11 @@ typedef uint32_t KVMFRFrameFlags;
 
 typedef struct KVMFRFrame
 {
+  /*
+   * Keep the fields consumed for every frame in the first cache line. The
+   * timing and HDR metadata below are diagnostic/conditional, while the large
+   * damage rectangle array is deliberately last.
+   */
   uint32_t        formatVer;          // the frame format version number
   uint32_t        frameSerial;        // the unique frame number
   FrameType       type;               // the frame data type
@@ -178,9 +184,28 @@ typedef struct KVMFRFrame
   uint32_t        stride;             // the row stride (zero if compressed data)
   uint32_t        pitch;              // the row pitch  (stride in bytes or the compressed frame size)
   uint32_t        offset;             // offset from the start of this header to the FrameBuffer header
-  uint32_t        damageRectsCount;   // the number of damage rectangles (zero for full-frame damage)
-  FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
   KVMFRFrameFlags flags;              // bit field combination of FRAME_FLAG_*
+  uint32_t        damageRectsCount;   // the number of damage rectangles (zero for full-frame damage)
+
+  // White level in nits for SDR content composited into an HDR frame, such as
+  // the hardware cursor. Valid for all frames; SDR modes normally report 80.
+  uint32_t        sdrWhiteLevel;
+
+  /*
+   * Producer stage durations in nanoseconds. These are durations rather than
+   * absolute timestamps because the producer runs in a VM whose monotonic
+   * clock has a different epoch from the client. Durations can safely be
+   * combined with the client's local render duration for an end-to-end
+   * processing time.
+   */
+  uint64_t        captureTime;
+  uint64_t        postProcessTime;
+  uint64_t        copyTime;
+
+  // Published after the timing fields and matched against frameSerial by the
+  // client. timingValid is written last by the producer.
+  uint32_t        timingSerial;
+  uint32_t        timingValid;
 
   // HDR static metadata (valid when FRAME_FLAG_HDR_METADATA is set)
   // Display color primaries in 0.00002 units (SMPTE ST 2086 format)
@@ -195,11 +220,21 @@ typedef struct KVMFRFrame
   uint32_t hdrMaxContentLightLevel;      // MaxCLL (cd/m²)
   uint32_t hdrMaxFrameAverageLightLevel; // MaxFALL (cd/m²)
 
-  // White level in nits for SDR content composited into an HDR frame, such as
-  // the hardware cursor. Valid for all frames; SDR modes normally report 80.
-  uint32_t sdrWhiteLevel;
+  FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 }
 KVMFRFrame;
+
+#if defined(__cplusplus)
+static_assert(offsetof(KVMFRFrame, captureTime) == 64,
+    "KVMFRFrame hot fields must fit in one cache line");
+static_assert(offsetof(KVMFRFrame, damageRects) == 128,
+    "KVMFRFrame damage rectangles must be cache-line aligned");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(KVMFRFrame, captureTime) == 64,
+    "KVMFRFrame hot fields must fit in one cache line");
+_Static_assert(offsetof(KVMFRFrame, damageRects) == 128,
+    "KVMFRFrame damage rectangles must be cache-line aligned");
+#endif
 
 typedef struct KVMFRMessage
 {

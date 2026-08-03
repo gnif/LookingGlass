@@ -1504,9 +1504,13 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult dxgi_getFrame(unsigned frameBufferIndex,
-  FrameBuffer * frame, const size_t maxFrameSize)
+static CaptureResult dxgi_getFrame(
+  unsigned       frameBufferIndex,
+  FrameBuffer  * frame,
+  const size_t   maxFrameSize,
+  CaptureFrame * captureFrame)
 {
+  (void)captureFrame;
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
 

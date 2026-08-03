@@ -102,7 +102,7 @@ private:
 #endif
   bool GetContentHDRMetadata(D12FrameFormat& format) const;
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer, unsigned dirtyRectCount,
-    DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel);
+    DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel, uint64_t captureTime);
 
 public:
   CSwapChainProcessor(CIndirectMonitorContext * monitorContext, UINT64 assignmentGeneration,

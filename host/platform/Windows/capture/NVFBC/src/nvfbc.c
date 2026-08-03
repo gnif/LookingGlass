@@ -718,9 +718,13 @@ static CaptureResult nvfbc_waitFrame(unsigned frameBufferIndex,
   return CAPTURE_RESULT_OK;
 }
 
-static CaptureResult nvfbc_getFrame(unsigned frameBufferIndex,
-    FrameBuffer * frame, const size_t maxFrameSize)
+static CaptureResult nvfbc_getFrame(
+  unsigned       frameBufferIndex,
+  FrameBuffer  * frame,
+  const size_t   maxFrameSize,
+  CaptureFrame * captureFrame)
 {
+  (void)captureFrame;
   const unsigned int h = DIFF_MAP_DIM(this->grabHeight, this->diffShift);
   const unsigned int w = DIFF_MAP_DIM(this->grabWidth,  this->diffShift);
   uint8_t * frameData = framebuffer_get_data(frame);

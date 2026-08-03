@@ -29,6 +29,7 @@
 #include "common/rects.h"
 #include "common/vector.h"
 #include "common/display.h"
+#include "common/time.h"
 #include "com_ref.h"
 
 #include "backend.h"
@@ -771,8 +772,11 @@ exit:
   return result;
 }
 
-static CaptureResult d12_getFrame(unsigned frameBufferIndex,
-  FrameBuffer * frameBuffer, const size_t maxFrameSize)
+static CaptureResult d12_getFrame(
+  unsigned       frameBufferIndex,
+  FrameBuffer  * frameBuffer,
+  const size_t   maxFrameSize,
+  CaptureFrame * captureFrame)
 {
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
@@ -808,6 +812,7 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
+  const uint64_t postProcessStart = nanotime();
   ID3D12Resource * next = *src;
   D12Effect * effect;
   vector_forEach(effect, &this->effects)
@@ -934,6 +939,8 @@ static CaptureResult d12_getFrame(unsigned frameBufferIndex,
     ID3D12CommandQueue_Wait(*this->copyQueue,
       *this->computeCommand.fence, this->computeCommand.fenceValue);
   }
+  captureFrame->postProcessTime = this->effectsActive ?
+    nanotime() - postProcessStart : 0;
 
   // execute the copy commands
   DEBUG_TRACE("Execute copy commands");

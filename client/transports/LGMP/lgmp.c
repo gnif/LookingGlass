@@ -56,6 +56,7 @@ struct LG_Transport
   bool     allowDMA;
   bool     connected;
   bool     framePending;
+  const KVMFRFrame * pendingFrame;
   uint32_t frameSerial;
   bool     formatValid;
   LG_TransportFrameFormat format;
@@ -214,6 +215,7 @@ static void lgmp_stopFrame(struct LG_Transport * this)
           lgmpStatusString(status));
   }
   this->framePending = false;
+  this->pendingFrame = NULL;
   LGMP_STATUS status = lgmpClientUnsubscribe(&this->frameQueue);
   if (status != LGMP_OK)
   {
@@ -602,7 +604,39 @@ static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
     DEBUG_WARN("Invalid damage rectangles, forcing a full update");
 
   this->framePending = true;
+  this->pendingFrame = frame;
   return LG_TRANSPORT_OK;
+}
+
+static bool lgmp_frameTimingReady(const KVMFRFrame * frame)
+{
+  return __atomic_load_n(&frame->timingValid, __ATOMIC_ACQUIRE) &&
+    frame->timingSerial == frame->frameSerial;
+}
+
+static void lgmp_getFrameTiming(LG_Transport * this,
+    const LG_TransportFrame * frame, LG_TransportFrameTiming * timing)
+{
+  memset(timing, 0, sizeof(*timing));
+  if (!this->framePending || !this->pendingFrame ||
+      this->pendingFrame->frameSerial != frame->serial)
+    return;
+
+  /* The producer writes these immediately before completing the framebuffer.
+   * nextFrame can observe the header earlier, so sample them only after the
+   * renderer's onFrame call has consumed the framebuffer. */
+  for (unsigned i = 0;
+       !lgmp_frameTimingReady(this->pendingFrame) &&
+       i < 1000;
+       ++i)
+    usleep(1);
+
+  if (!lgmp_frameTimingReady(this->pendingFrame))
+    return;
+
+  timing->captureTime     = this->pendingFrame->captureTime;
+  timing->postProcessTime = this->pendingFrame->postProcessTime;
+  timing->copyTime        = this->pendingFrame->copyTime;
 }
 
 static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
@@ -610,6 +644,7 @@ static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
   if (this->framePending && this->frameQueue)
     lgmpClientMessageDone(this->frameQueue);
   this->framePending = false;
+  this->pendingFrame = NULL;
   memset(frame, 0, sizeof(*frame));
 }
 
@@ -800,6 +835,7 @@ const LG_TransportOps LGT_LGMP =
   .attachRenderer = lgmp_attachRenderer,
   .detachRenderer = lgmp_detachRenderer,
   .nextFrame      = lgmp_nextFrame,
+  .getFrameTiming = lgmp_getFrameTiming,
   .releaseFrame   = lgmp_releaseFrame,
   .stopFrame      = lgmp_stopFrame,
   .nextPointer    = lgmp_nextPointer,

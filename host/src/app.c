@@ -109,6 +109,7 @@ struct app
   bool           frameValid;
   uint32_t       frameSerial;
   uint32_t       formatVer;
+  uint64_t       captureTime[LGMP_Q_FRAME_LEN];
   unsigned int   captureFormatVer;
   bool           hdr;
   bool           hdrPQ;
@@ -291,6 +292,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   }
 
   KVMFRFrame * fi = app.frame[app.captureIndex];
+  frame.captureTime = app.captureTime[app.captureIndex];
   const uint32_t sdrWhiteLevel = frame.sdrWhiteLevel ?
     frame.sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
   const bool metadataChanged =
@@ -396,6 +398,11 @@ static bool sendFrame(CaptureResult result, bool * restart)
   // fi->offset is initialized at startup
   fi->flags             = flags;
   fi->sdrWhiteLevel     = sdrWhiteLevel;
+  fi->captureTime       = frame.captureTime;
+  fi->postProcessTime   = 0;
+  fi->copyTime          = 0;
+  fi->timingSerial      = 0;
+  __atomic_store_n(&fi->timingValid, 0, __ATOMIC_RELAXED);
   if (frame.hdrMetadata)
   {
     memcpy(fi->hdrDisplayPrimary, frame.hdrDisplayPrimary,
@@ -433,10 +440,20 @@ static bool sendFrame(CaptureResult result, bool * restart)
     return true;
   }
 
+  const uint64_t copyStart = nanotime();
   app.iface->getFrame(
     app.captureIndex,
     app.frameBuffer[app.captureIndex],
-    app.maxFrameSize);
+    app.maxFrameSize,
+    &frame);
+  const uint64_t copyEnd = nanotime();
+
+  fi->postProcessTime = frame.postProcessTime;
+  frame.copyTime      = copyEnd - copyStart > frame.postProcessTime ?
+    copyEnd - copyStart - frame.postProcessTime : 0;
+  fi->copyTime        = frame.copyTime;
+  fi->timingSerial    = fi->frameSerial;
+  __atomic_store_n(&fi->timingValid, 1, __ATOMIC_RELEASE);
 
   app.readIndex = app.captureIndex;
   if (++app.captureIndex == LGMP_Q_FRAME_LEN)
@@ -1108,13 +1125,15 @@ int app_main(int argc, char * argv[])
             nsleep(us * 1000);
         }
 
-        const uint64_t captureStartTime = microtime();
+        const uint64_t captureStartTime = nanotime();
 
         const CaptureResult result = app.iface->capture(
           app.captureIndex, app.frameBuffer[app.captureIndex]);
 
+        app.captureTime[app.captureIndex] = nanotime() - captureStartTime;
+
         if (likely(result == CAPTURE_RESULT_OK))
-          previousFrameTime = captureStartTime;
+          previousFrameTime = captureStartTime / 1000;
         else if (likely(result == CAPTURE_RESULT_TIMEOUT))
         {
           if (!app.iface->asyncCapture)

@@ -92,6 +92,14 @@ enum
 
 typedef uint32_t LG_TransportFrameFlags;
 
+typedef struct LG_TransportFrameTiming
+{
+  uint64_t captureTime;
+  uint64_t postProcessTime;
+  uint64_t copyTime;
+}
+LG_TransportFrameTiming;
+
 typedef struct LG_TransportFrameFormat
 {
   uint32_t version;
@@ -200,6 +208,11 @@ typedef struct LG_TransportOps
 
   LG_TransportStatus (*nextFrame)(LG_Transport * transport, bool useDMA,
       LG_TransportFrame * frame);
+  /* Read producer timings after the renderer has consumed the frame. Some
+   * transports publish the frame while its asynchronous copy is in progress,
+   * so these values are intentionally sampled late. */
+  void (*getFrameTiming)(LG_Transport * transport,
+      const LG_TransportFrame * frame, LG_TransportFrameTiming * timing);
   void (*releaseFrame)(LG_Transport * transport, LG_TransportFrame * frame);
   /* Called by the frame consumer as it exits. A backend may release transient
    * stream resources; nextFrame must reacquire them when the consumer restarts. */
