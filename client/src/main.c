@@ -606,13 +606,16 @@ static int renderThread(void * unused)
       const bool forceRender = g_state.ds->waitFrame();
       app_handleRenderEvent(microtime());
 
-      const uint64_t pending =
+      const uint64_t pending       =
         atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
+      const bool     overlayRender = app_overlayNeedsRender() &&
+        (!g_state.lastRenderTimeValid ||
+         nanotime() - g_state.lastRenderTime >= g_state.overlayFrameTime);
 
       if (!lgResetEvent(g_state.frameEvent)
           && !forceRender
           && !pending
-          && !app_overlayNeedsRender())
+          && !overlayRender)
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
@@ -625,18 +628,7 @@ static int renderThread(void * unused)
     else if (g_params.fpsMin != 0)
     {
       app_handleRenderEvent(microtime());
-
-      float ups = atomic_load_explicit(&g_state.ups, memory_order_relaxed);
-
-      if (unlikely(
-            !lgWaitEventAbs(g_state.frameEvent, &time) ||
-            ups > g_params.fpsMin))
-      {
-        /* only update the time if we woke up early */
-        clock_gettime(CLOCK_MONOTONIC, &time);
-        tsAdd(&time, app_isOverlayMode() ?
-            g_state.overlayFrameTime : g_state.frameTime);
-      }
+      lgWaitEventAbs(g_state.frameEvent, &time);
     }
 
     frameTimingPublishReady();
@@ -707,6 +699,14 @@ static int renderThread(void * unused)
 
     g_state.lastRenderTime = t;
     atomic_fetch_add_explicit(&g_state.renderCount, 1, memory_order_relaxed);
+
+    if (!g_state.jitRender && g_params.fpsMin != 0)
+    {
+      /* A frame-driven swap also satisfies the minimum render rate. */
+      clock_gettime(CLOCK_MONOTONIC, &time);
+      tsAdd(&time, app_isOverlayMode() ?
+          g_state.overlayFrameTime : g_state.frameTime);
+    }
 
     if (likely(g_state.lastRenderTimeValid))
     {
