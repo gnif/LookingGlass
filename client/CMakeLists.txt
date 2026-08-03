@@ -177,6 +177,12 @@ set(SOURCES
   src/overlay/status.c
 )
 
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  set_source_files_properties(src/overlay/graphs.c PROPERTIES
+    COMPILE_FLAGS "-fno-fast-math"
+  )
+endif()
+
 if(ENABLE_AUDIO)
   list(APPEND SOURCES src/audio.c)
 endif()
