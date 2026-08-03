@@ -1533,6 +1533,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     ImGui_ImplOpenGL3_NewFrame();
     if (drawOverlay)
     {
+      /* ImGui uploads atlas updates from CPU memory. The streamed desktop
+       * path may have left its pixel unpack buffer bound. */
+      egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
       ImGui_ImplOpenGL3_RenderDrawData(igGetDrawData());
       egl_stateInvalidate();
     }
