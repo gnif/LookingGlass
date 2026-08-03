@@ -220,22 +220,37 @@ void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
 struct FromFramebufferData
 {
   const FrameBuffer * frame;
-  int pitch;
+  int                 pitch;
+  uint64_t          * waitTimeNs;
 };
 
 static bool fbRowStart(int y, void * opaque)
 {
   struct FromFramebufferData * data = opaque;
-  return framebuffer_wait(data->frame, y * data->pitch);
+  return framebuffer_wait_timed(
+      data->frame, y * data->pitch, data->waitTimeNs);
+}
+
+bool rectsFramebufferToBufferTimed(FrameDamageRect * rects, int count, int bpp,
+  uint8_t * dst, int dstPitch, int height,
+  const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs)
+{
+  struct FromFramebufferData data =
+  {
+    .frame      = frame,
+    .pitch      = srcPitch,
+    .waitTimeNs = waitTimeNs
+  };
+  return rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
+    framebuffer_get_buffer(frame), srcPitch, &data, fbRowStart, NULL);
 }
 
 bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch)
 {
-  struct FromFramebufferData data = { .frame = frame, .pitch = srcPitch };
-  return rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
-    framebuffer_get_buffer(frame), srcPitch, &data, fbRowStart, NULL);
+  return rectsFramebufferToBufferTimed(rects, count, bpp, dst, dstPitch,
+      height, frame, srcPitch, NULL);
 }
 
 int rectsMergeOverlapping(FrameDamageRect * rects, int count)

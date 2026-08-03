@@ -58,6 +58,19 @@ struct D12Interface
   D12CommandGroup       copyCommand;
   D12CommandGroup       computeCommand;
 
+  struct
+  {
+    ID3D12QueryHeap ** heap;
+    ID3D12Resource  ** readback;
+    UINT64           * map;
+    UINT64             timestampFrequency;
+    UINT64             qpcFrequency;
+    UINT64             calibrationGPU;
+    UINT64             calibrationCPU;
+    bool               supported;
+  }
+  copyTiming;
+
   void        * ivshmemBase;
   ID3D12Heap ** ivshmemHeap;
   bool          indirectCopy;
@@ -176,11 +189,190 @@ static ID3D12Resource * d12_frameBufferToResource(
   unsigned size,
   void ** map);
 
+static bool d12_copyTimingInit(
+  ID3D12Device3 * device, ID3D12CommandQueue * queue);
+
+static void d12_copyTimingDeinit(void);
+static void d12_copyTimingUpdateCalibration(void);
+static bool d12_copyTimingGetStart(uint64_t * start);
+
 // implementation
 
 static const char * d12_getName(void)
 {
   return "D12";
+}
+
+static uint64_t d12_scaleTicks(
+  uint64_t ticks, uint64_t targetFrequency, uint64_t sourceFrequency)
+{
+  return ticks / sourceFrequency * targetFrequency +
+    ticks % sourceFrequency * targetFrequency / sourceFrequency;
+}
+
+static bool d12_copyTimingInit(
+  ID3D12Device3 * device, ID3D12CommandQueue * queue)
+{
+  D3D12_FEATURE_DATA_D3D12_OPTIONS3 options = {0};
+  HRESULT hr = ID3D12Device3_CheckFeatureSupport(device,
+    D3D12_FEATURE_D3D12_OPTIONS3, &options, sizeof(options));
+  if (FAILED(hr) || !options.CopyQueueTimestampQueriesSupported)
+    return false;
+
+  UINT64 timestampFrequency;
+  hr = ID3D12CommandQueue_GetTimestampFrequency(queue, &timestampFrequency);
+  if (FAILED(hr) || !timestampFrequency)
+    return false;
+
+  LARGE_INTEGER qpcFrequency;
+  if (!QueryPerformanceFrequency(&qpcFrequency) || !qpcFrequency.QuadPart)
+    return false;
+
+  UINT64 calibrationGPU;
+  UINT64 calibrationCPU;
+  hr = ID3D12CommandQueue_GetClockCalibration(
+    queue, &calibrationGPU, &calibrationCPU);
+  if (FAILED(hr))
+    return false;
+
+  bool result = false;
+  comRef_scopePush(2);
+
+  D3D12_QUERY_HEAP_DESC queryDesc =
+  {
+    .Type  = D3D12_QUERY_HEAP_TYPE_COPY_QUEUE_TIMESTAMP,
+    .Count = 1
+  };
+
+  comRef_defineLocal(ID3D12QueryHeap, heap);
+  hr = ID3D12Device3_CreateQueryHeap(device, &queryDesc,
+    &IID_ID3D12QueryHeap, (void **)heap);
+  if (FAILED(hr))
+    goto exit;
+
+  D3D12_HEAP_PROPERTIES heapProps =
+  {
+    .Type                 = D3D12_HEAP_TYPE_READBACK,
+    .CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+    .MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN,
+    .CreationNodeMask     = 1,
+    .VisibleNodeMask      = 1
+  };
+
+  D3D12_RESOURCE_DESC resourceDesc =
+  {
+    .Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER,
+    .Width              = sizeof(UINT64),
+    .Height             = 1,
+    .DepthOrArraySize   = 1,
+    .MipLevels          = 1,
+    .Format             = DXGI_FORMAT_UNKNOWN,
+    .SampleDesc.Count   = 1,
+    .Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+    .Flags              = D3D12_RESOURCE_FLAG_NONE
+  };
+
+  comRef_defineLocal(ID3D12Resource, readback);
+  hr = ID3D12Device3_CreateCommittedResource(
+    device,
+    &heapProps,
+    D3D12_HEAP_FLAG_NONE,
+    &resourceDesc,
+    D3D12_RESOURCE_STATE_COPY_DEST,
+    NULL,
+    &IID_ID3D12Resource,
+    (void **)readback);
+  if (FAILED(hr))
+    goto exit;
+
+  D3D12_RANGE readRange    = {0, sizeof(UINT64)};
+  void      * timestampMap = NULL;
+  hr = ID3D12Resource_Map(*readback, 0, &readRange, &timestampMap);
+  if (FAILED(hr))
+    goto exit;
+
+  comRef_toGlobal(this->copyTiming.heap    , heap    );
+  comRef_toGlobal(this->copyTiming.readback, readback);
+  this->copyTiming.map                = timestampMap;
+  this->copyTiming.timestampFrequency = timestampFrequency;
+  this->copyTiming.qpcFrequency       = qpcFrequency.QuadPart;
+  this->copyTiming.calibrationGPU     = calibrationGPU;
+  this->copyTiming.calibrationCPU     = calibrationCPU;
+  this->copyTiming.supported          = true;
+  result = true;
+
+exit:
+  comRef_scopePop();
+  return result;
+}
+
+static void d12_copyTimingDeinit(void)
+{
+  if (this->copyTiming.map)
+  {
+    const D3D12_RANGE writeRange = {0, 0};
+    ID3D12Resource_Unmap(
+      *this->copyTiming.readback, 0, &writeRange);
+  }
+
+  memset(&this->copyTiming, 0, sizeof(this->copyTiming));
+}
+
+static void d12_copyTimingUpdateCalibration(void)
+{
+  if (!this->copyTiming.supported)
+    return;
+
+  LARGE_INTEGER now;
+  if (QueryPerformanceCounter(&now) &&
+      (UINT64)now.QuadPart >= this->copyTiming.calibrationCPU &&
+      (UINT64)now.QuadPart - this->copyTiming.calibrationCPU <
+        this->copyTiming.qpcFrequency)
+    return;
+
+  UINT64 calibrationGPU;
+  UINT64 calibrationCPU;
+  if (SUCCEEDED(ID3D12CommandQueue_GetClockCalibration(
+        *this->copyQueue, &calibrationGPU, &calibrationCPU)))
+  {
+    this->copyTiming.calibrationGPU = calibrationGPU;
+    this->copyTiming.calibrationCPU = calibrationCPU;
+  }
+}
+
+static bool d12_copyTimingGetStart(uint64_t * start)
+{
+  if (!this->copyTiming.supported)
+    return false;
+
+  const UINT64 gpuStart = *this->copyTiming.map;
+  UINT64 cpuStart;
+  if (gpuStart < this->copyTiming.calibrationGPU)
+  {
+    const UINT64 delta = d12_scaleTicks(
+      this->copyTiming.calibrationGPU - gpuStart,
+      this->copyTiming.qpcFrequency,
+      this->copyTiming.timestampFrequency);
+    if (delta > this->copyTiming.calibrationCPU)
+      return false;
+
+    cpuStart = this->copyTiming.calibrationCPU - delta;
+  }
+  else
+  {
+    const UINT64 delta = d12_scaleTicks(
+      gpuStart - this->copyTiming.calibrationGPU,
+      this->copyTiming.qpcFrequency,
+      this->copyTiming.timestampFrequency);
+    if (UINT64_MAX - this->copyTiming.calibrationCPU < delta)
+      return false;
+
+    cpuStart = this->copyTiming.calibrationCPU + delta;
+  }
+
+  *start = d12_scaleTicks(
+    cpuStart, 1000000000ULL, this->copyTiming.qpcFrequency);
+  return true;
 }
 
 static void d12_initOptions(void)
@@ -418,6 +610,9 @@ static bool d12_init(void * ivshmemBase, unsigned * alignSize)
     *device, D3D12_COMMAND_LIST_TYPE_COMPUTE, &this->computeCommand, L"Compute"))
     goto exit;
 
+  if (!d12_copyTimingInit(*device, *copyQueue))
+    DEBUG_WARN("Copy queue GPU timing is unavailable");
+
   comRef_defineLocal(ID3D12Heap, ivshmemHeap);
   if (!this->indirectCopy)
   {
@@ -498,6 +693,7 @@ exit:
   if (!result)
   {
     DEBUG_TRACE("Init failed");
+    d12_copyTimingDeinit();
     D12Effect * effect;
     vector_forEach(effect, &this->effects)
       d12_effectFree(&effect);
@@ -541,6 +737,8 @@ static bool d12_deinit(void)
   DEBUG_TRACE("commandGroupFree");
   d12_commandGroupFree(&this->copyCommand   );
   d12_commandGroupFree(&this->computeCommand);
+
+  d12_copyTimingDeinit();
 
   DEBUG_TRACE("comRef_freeScope");
   IDXGIFactory2 * factory = *this->factory;
@@ -765,6 +963,9 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     }
   }
 
+  // Refresh before getFrame so calibration work does not perturb Post/Copy.
+  d12_copyTimingUpdateCalibration();
+
   result = CAPTURE_RESULT_OK;
 
 exit:
@@ -778,6 +979,7 @@ static CaptureResult d12_getFrame(
   const size_t   maxFrameSize,
   CaptureFrame * captureFrame)
 {
+  const uint64_t postProcessStart = nanotime();
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
@@ -812,7 +1014,6 @@ static CaptureResult d12_getFrame(
   if (result != CAPTURE_RESULT_OK)
     goto exit;
 
-  const uint64_t postProcessStart = nanotime();
   ID3D12Resource * next = *src;
   D12Effect * effect;
   vector_forEach(effect, &this->effects)
@@ -854,6 +1055,15 @@ static CaptureResult d12_getFrame(
       }
     }
   };
+
+  // Queue waits run before this command list. This timestamp is therefore the
+  // boundary between source/effect readiness and the framebuffer copy.
+  if (this->copyTiming.supported)
+    ID3D12GraphicsCommandList_EndQuery(
+      *this->copyCommand.gfxList,
+      *this->copyTiming.heap,
+      D3D12_QUERY_TYPE_TIMESTAMP,
+      0);
 
   // if full frame damage
   if (desc.nbDirtyRects == 0)
@@ -928,6 +1138,16 @@ static CaptureResult d12_getFrame(
     this->nbDirtyRects = desc.nbDirtyRects;
   }
 
+  if (this->copyTiming.supported)
+    ID3D12GraphicsCommandList_ResolveQueryData(
+      *this->copyCommand.gfxList,
+      *this->copyTiming.heap,
+      D3D12_QUERY_TYPE_TIMESTAMP,
+      0,
+      1,
+      *this->copyTiming.readback,
+      0);
+
   // execute the compute commands
   if (this->effectsActive)
   {
@@ -939,8 +1159,8 @@ static CaptureResult d12_getFrame(
     ID3D12CommandQueue_Wait(*this->copyQueue,
       *this->computeCommand.fence, this->computeCommand.fenceValue);
   }
-  captureFrame->postProcessTime = this->effectsActive ?
-    nanotime() - postProcessStart : 0;
+
+  const uint64_t fallbackCopyStart = nanotime();
 
   // execute the copy commands
   DEBUG_TRACE("Execute copy commands");
@@ -949,6 +1169,16 @@ static CaptureResult d12_getFrame(
   // wait for the copy to complete
   DEBUG_TRACE("Fence wait");
   d12_commandGroupWait(&this->copyCommand);
+
+  const uint64_t copyComplete = nanotime();
+  uint64_t copyStart;
+  if (!d12_copyTimingGetStart(&copyStart) ||
+      copyStart < postProcessStart || copyStart > copyComplete)
+    copyStart = fallbackCopyStart;
+
+  // The caller derives Copy from its getFrame wall time minus Post, preserving
+  // the exact producer total while moving the real queue wait to Post.
+  captureFrame->postProcessTime = copyStart - postProcessStart;
 
   if (this->indirectCopy)
   {

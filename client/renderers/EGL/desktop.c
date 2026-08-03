@@ -391,11 +391,13 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 }
 
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount)
+    const FrameDamageRect * damageRects, int damageRectsCount,
+    uint64_t * waitTimeNs)
 {
   if (likely(desktop->useDMA && dmaFd >= 0))
   {
-    if (likely(egl_textureUpdateFromDMA(desktop->texture, frame, dmaFd)))
+    if (likely(egl_textureUpdateFromDMA(
+            desktop->texture, frame, dmaFd, waitTimeNs)))
     {
       atomic_store(&desktop->processFrame, true);
       return true;
@@ -437,7 +439,7 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame, int dma
    * previous texture contents instead.
    */
   if (likely(egl_textureUpdateFromFrame(desktop->texture, frame,
-        damageRects, damageRectsCount)))
+        damageRects, damageRectsCount, waitTimeNs)))
     return true;
 
   return false;

@@ -39,6 +39,11 @@ bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch);
 
+/* As above, accumulating producer wait time in nanoseconds. */
+bool rectsFramebufferToBufferTimed(FrameDamageRect * rects, int count, int bpp,
+  uint8_t * dst, int dstPitch, int height,
+  const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs);
+
 int rectsMergeOverlapping(FrameDamageRect * rects, int count);
 int rectsRejectContained(FrameDamageRect * rects, int count);
 

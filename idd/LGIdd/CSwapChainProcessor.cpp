@@ -289,7 +289,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       {
         lastFrameNumber = frameNumber;
         if (!SwapChainNewFrame(surface, dirtyRectCount, moveRegionCount,
-              colorSpace, sdrWhiteLevel, Nanotime() - captureStart))
+              colorSpace, sdrWhiteLevel, captureStart))
           DEBUG_WARN("Failed to submit frame");
       }
 
@@ -315,29 +315,35 @@ bool CSwapChainProcessor::SwapChainThreadCore()
 void CSwapChainProcessor::CompletionFunction(
   CD3D12CommandQueue * queue, bool result, void * param1, void * param2)
 {
-  UNREFERENCED_PARAMETER(queue);
+  auto sc    = (CSwapChainProcessor   *)param1;
+  auto fbRes = (CFrameBufferResource *)param2;
 
-  auto sc    = (CSwapChainProcessor *)param1;
-  auto fbRes = (CFrameBufferResource*)param2;
+  uint64_t copyStart    = fbRes->GetCopyStart();
+  uint64_t gpuCopyStart = 0;
 
-  // fail gracefully
-  if (!result)
-  {
-    sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-      fbRes->GetCaptureTime(), fbRes->GetPostProcessTime(),
-      Nanotime() - fbRes->GetCopyStart());
-    sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-    return;
-  }
-
-  if (sc->m_dx12Device->IsIndirectCopy())
+  if (result && sc->m_dx12Device->IsIndirectCopy())
     sc->m_devContext->WriteFrameBuffer(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
 
-  const uint64_t copyTime = Nanotime() - fbRes->GetCopyStart();
-  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), fbRes->GetPostProcessTime(), copyTime);
+  // Queue waits execute before this timestamp. Use it as the boundary so the
+  // source fence and effects are charged to Post, while Copy retains the full
+  // time through buffer readiness and any indirect memcpy.
+  const bool gpuTimingValid = result && queue->GetGPUStartTime(gpuCopyStart);
+
+  // Publish readiness before sampling the endpoint. Timing has its own valid
+  // flag and is published immediately afterwards.
   sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+  const uint64_t copyEnd = Nanotime();
+  if (gpuTimingValid &&
+      gpuCopyStart >= fbRes->GetPostProcessStart() &&
+      gpuCopyStart <= copyEnd)
+    copyStart = gpuCopyStart;
+
+  const uint64_t postProcessTime = copyStart -
+    fbRes->GetPostProcessStart();
+  const uint64_t copyTime        = copyEnd - copyStart;
+  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
+    fbRes->GetCaptureTime(), postProcessTime, copyTime);
 }
 
 
@@ -515,8 +521,11 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
   unsigned dirtyRectCount, unsigned moveRegionCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
-  uint64_t captureTime)
+  uint64_t captureStart)
 {
+  const uint64_t postProcessStart = Nanotime();
+  const uint64_t captureTime      = postProcessStart - captureStart;
+
   // Preserve the fast drop path: never hold an IddCx frame while waiting for
   // a slow or disconnected client. We have not read its rectangles, so force
   // the next published frame to invalidate the entire image.
@@ -525,8 +534,6 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     SetFullPendingDamage();
     return true;
   }
-
-  const uint64_t postProcessStart = Nanotime();
 
   ComPtr<ID3D11Texture2D> texture;
   HRESULT hr = acquiredBuffer.As(&texture);
@@ -775,7 +782,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
 
   const uint64_t copyStart = Nanotime();
-  fbRes->SetTiming(captureTime, copyStart - postProcessStart, copyStart);
+  fbRes->SetTiming(captureTime, postProcessStart, copyStart);
 
   copyQueue->SetCompletionCallback(&CompletionFunction, this, fbRes);
 
@@ -789,6 +796,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dstLoc.PlacedFootprint = layout;
 
+  // The source/compute waits were inserted directly on the queue above. The
+  // command-list timestamp therefore marks the first actual copy operation.
+  copyQueue->BeginTiming();
   if (IsFullDamage(currentDirtyRects, nbDirtyRects, dstFormat.desc) ||
       nbDirtyRects > KVMFR_MAX_DAMAGE_RECTS || m_nbDirtyRects == 0)
   {
@@ -812,6 +822,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     for (const RECT * rect = currentDirtyRects; rect < currentDirtyRects + nbDirtyRects; ++rect)
       CopyDirtyRect(copyQueue->GetGfxList(), &dstLoc, &srcLoc, *rect);
   }
+  copyQueue->EndTiming();
 
   if (!copyQueue->Execute())
   {

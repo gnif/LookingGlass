@@ -104,7 +104,7 @@ private:
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
     unsigned dirtyRectCount, unsigned moveRegionCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
-    uint64_t captureTime);
+    uint64_t captureStart);
 
 public:
   CSwapChainProcessor(CIndirectMonitorContext * monitorContext, UINT64 assignmentGeneration,

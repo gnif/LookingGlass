@@ -41,6 +41,7 @@ typedef struct EGL_TexUpdate
 {
   /* the type of this update */
   EGL_TexType type;
+  uint64_t  * waitTimeNs;
 
   int x, y, width, height;
 
@@ -125,10 +126,10 @@ bool egl_textureUpdateRect(EGL_Texture * texture,
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,
     const FrameBuffer * frame, const FrameDamageRect * damageRects,
-    int damageRectsCount);
+    int damageRectsCount, uint64_t * waitTimeNs);
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
-    const FrameBuffer * frame, const int dmaFd);
+    const FrameBuffer * frame, const int dmaFd, uint64_t * waitTimeNs);
 
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture);
 

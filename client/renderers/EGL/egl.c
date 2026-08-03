@@ -748,14 +748,21 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int d
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
 
-  const uint64_t start = nanotime();
+  const uint64_t start      = nanotime();
+  uint64_t       waitTimeNs = 0;
   if (unlikely(!egl_desktopUpdate(
-          this->desktop, frame, dmaFd, damageRects, damageRectsCount)))
+          this->desktop, frame, dmaFd, damageRects, damageRectsCount,
+          &waitTimeNs)))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
   }
-  app_setFrameImportTime(nanotime() - start);
+  const uint64_t elapsed = nanotime() - start;
+
+  /* Producer Copy already covers the interval before FrameBuffer::wp becomes
+   * ready. Exclude that overlapping wait from the client Import stage. */
+  app_setFrameImportTime(
+      elapsed > waitTimeNs ? elapsed - waitTimeNs : 0);
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     struct DesktopDamage * damage = this->desktopDamage + this->desktopDamageIdx;

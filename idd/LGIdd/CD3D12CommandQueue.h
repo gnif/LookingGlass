@@ -25,6 +25,7 @@
 #include <wrl.h>
 #include <d3d12.h>
 #include <atomic>
+#include <stdint.h>
 
 using namespace Microsoft::WRL;
 using namespace Microsoft::WRL::Wrappers;
@@ -41,11 +42,21 @@ class CD3D12CommandQueue
     ComPtr<ID3D12CommandList        > m_cmdList;
     ComPtr<ID3D12Fence              > m_fence;
 
-    std::atomic<bool> m_pending = false;
+    ComPtr<ID3D12QueryHeap>  m_timestampHeap;
+    ComPtr<ID3D12Resource >  m_timestampReadback;
+    UINT64                 * m_timestampMap       = nullptr;
+    UINT64                   m_timestampFrequency = 0;
+    UINT64                   m_calibrationGPU     = 0;
+    UINT64                   m_calibrationCPU     = 0;
+    UINT64                   m_qpcFrequency       = 0;
+    bool                     m_timingSupported    = false;
+    bool                     m_timingActive       = false;
+
+    std::atomic<bool>         m_pending    = false;
     HandleT<HANDLENullTraits> m_event;
-    HANDLE m_waitHandle = INVALID_HANDLE_VALUE;
-    UINT64 m_fenceValue = 0;
-    bool m_needsReset = false;
+    HANDLE                    m_waitHandle = INVALID_HANDLE_VALUE;
+    UINT64                    m_fenceValue = 0;
+    bool                      m_needsReset = false;
 
     typedef void (*CompletionFunction)(CD3D12CommandQueue * queue,
       bool result, void * param1, void * param2);
@@ -53,6 +64,9 @@ class CD3D12CommandQueue
     CompletionFunction   m_completionCallback = nullptr;
     void               * m_completionParams[2];
     bool                 m_completionResult = true;
+
+    bool InitTiming(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type);
+    void UpdateClockCalibration();
 
     void OnCompletion()
     {
@@ -62,6 +76,7 @@ class CD3D12CommandQueue
           m_completionResult,
           m_completionParams[0],
           m_completionParams[1]);
+      UpdateClockCalibration();
       m_pending = false;
     }
 
@@ -89,6 +104,12 @@ class CD3D12CommandQueue
 
     bool Reset();
     bool Execute();
+
+    bool BeginTiming();
+    void EndTiming();
+
+    // Return the command-list start in QueryPerformanceCounter-domain ns.
+    bool GetGPUStartTime(uint64_t& start);
 
     //void Wait();
     bool   IsReady () const { return !m_pending   ; }

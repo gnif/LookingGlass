@@ -45,6 +45,13 @@ typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 bool framebuffer_wait(const FrameBuffer * frame, size_t size);
 
 /**
+ * Wait for the framebuffer to fill to the specified size and accumulate the
+ * nanoseconds spent waiting for the producer in `waitTimeNs`.
+ */
+bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
+    uint64_t * waitTimeNs);
+
+/**
  * Read `size` bytes from the KVMFRFrame into the dst buffer
  */
 bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
@@ -55,6 +62,14 @@ bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
  */
 bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
     size_t height, size_t width, size_t bpp, size_t pitch);
+
+/**
+ * Read data from the KVMFRFrame and accumulate the nanoseconds spent waiting
+ * for the producer in `waitTimeNs`.
+ */
+bool framebuffer_read_timed(const FrameBuffer * frame, void * dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch,
+    uint64_t * waitTimeNs);
 
 /**
  * Read data from the KVMFRFrame using a callback

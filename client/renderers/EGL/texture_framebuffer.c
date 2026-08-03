@@ -94,14 +94,15 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
 
   if (damageAll)
   {
-    complete = framebuffer_read(
+    complete = framebuffer_read_timed(
       update->frame,
       parent->buf[parent->bufIndex].map,
       texture->format.pitch,
       texture->format.height,
       texture->format.width,
       texture->format.bpp,
-      texture->format.pitch
+      texture->format.pitch,
+      update->waitTimeNs
     );
   }
   else
@@ -123,7 +124,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
         scaledDamageRects[i] = rect;
       }
 
-      complete = rectsFramebufferToBuffer(
+      complete = rectsFramebufferToBufferTimed(
         scaledDamageRects,
         damage->count,
         texture->format.bpp,
@@ -131,12 +132,13 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
         texture->format.pitch,
         texture->format.height,
         update->frame,
-        texture->format.pitch
+        texture->format.pitch,
+        update->waitTimeNs
       );
     }
     else
     {
-      complete = rectsFramebufferToBuffer(
+      complete = rectsFramebufferToBufferTimed(
         damage->rects,
         damage->count,
         texture->format.bpp,
@@ -144,7 +146,8 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
         texture->format.pitch,
         texture->format.height,
         update->frame,
-        texture->format.pitch
+        texture->format.pitch,
+        update->waitTimeNs
       );
     }
   }

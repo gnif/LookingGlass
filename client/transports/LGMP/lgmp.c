@@ -622,7 +622,7 @@ static void lgmp_getFrameTiming(LG_Transport * this,
       this->pendingFrame->frameSerial != frame->serial)
     return;
 
-  /* The producer writes these immediately before completing the framebuffer.
+  /* The producer writes these immediately after completing the framebuffer.
    * nextFrame can observe the header earlier, so sample them only after the
    * renderer's onFrame call has consumed the framebuffer. */
   for (unsigned i = 0;

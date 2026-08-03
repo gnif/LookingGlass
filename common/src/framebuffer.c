@@ -21,6 +21,7 @@
 #include "common/framebuffer.h"
 #include "common/cpuinfo.h"
 #include "common/debug.h"
+#include "common/time.h"
 
 //#define FB_PROFILE
 #ifdef FB_PROFILE
@@ -33,24 +34,42 @@
 #include <immintrin.h>
 #include <unistd.h>
 
-bool framebuffer_wait(const FrameBuffer * frame, size_t size)
+bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
+    uint64_t * waitTimeNs)
 {
+  if (atomic_load_explicit(&frame->wp, memory_order_acquire) >= size)
+    return true;
+
+  const uint64_t waitStart = waitTimeNs ? nanotime() : 0;
+
   while(atomic_load_explicit(&frame->wp, memory_order_acquire) < size)
   {
     int spinCount = 0;
     while(frame->wp < size)
     {
       if (++spinCount == FB_SPIN_LIMIT)
+      {
+        if (waitTimeNs)
+          *waitTimeNs += nanotime() - waitStart;
         return false;
+      }
       usleep(1);
     }
   }
 
+  if (waitTimeNs)
+    *waitTimeNs += nanotime() - waitStart;
+
   return true;
 }
 
-bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
-    size_t size)
+bool framebuffer_wait(const FrameBuffer * frame, size_t size)
+{
+  return framebuffer_wait_timed(frame, size, NULL);
+}
+
+static bool framebuffer_read_linear_timed(const FrameBuffer * frame,
+    void * restrict dst, size_t size, uint64_t * waitTimeNs)
 {
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
@@ -67,7 +86,7 @@ bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
   while(size)
   {
     const size_t copy = size < FB_CHUNK_SIZE ? size : FB_CHUNK_SIZE;
-    if (!framebuffer_wait(frame, rp + copy))
+    if (!framebuffer_wait_timed(frame, rp + copy, waitTimeNs))
       return false;
 
     memcpy(d, frame->data + rp, copy);
@@ -85,11 +104,19 @@ bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
   return true;
 }
 
-bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
-    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
+bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
+    size_t size)
+{
+  return framebuffer_read_linear_timed(frame, dst, size, NULL);
+}
+
+bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch,
+    uint64_t * waitTimeNs)
 {
   if (dstpitch == pitch)
-    return framebuffer_read_linear(frame, dst, height * pitch);
+    return framebuffer_read_linear_timed(
+        frame, dst, height * pitch, waitTimeNs);
 
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
@@ -106,7 +133,7 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
   const size_t linewidth = width * bpp;
   for(size_t y = 0; y < height; ++y)
   {
-    if (!framebuffer_wait(frame, rp + linewidth))
+    if (!framebuffer_wait_timed(frame, rp + linewidth, waitTimeNs))
       return false;
 
     memcpy(d, frame->data + rp, dstpitch);
@@ -121,6 +148,13 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
 #endif
 
   return true;
+}
+
+bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
+{
+  return framebuffer_read_timed(frame, dst, dstpitch, height, width, bpp,
+      pitch, NULL);
 }
 
 bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,

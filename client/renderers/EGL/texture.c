@@ -161,27 +161,28 @@ bool egl_textureUpdateRect(EGL_Texture * this,
 
 bool egl_textureUpdateFromFrame(EGL_Texture * this,
     const FrameBuffer * frame, const FrameDamageRect * damageRects,
-    int damageRectsCount)
+    int damageRectsCount, uint64_t * waitTimeNs)
 {
   const struct EGL_TexUpdate update =
   {
-    .type      = EGL_TEXTYPE_FRAMEBUFFER,
-    .x         = 0,
-    .y         = 0,
-    .width     = this->format.width,
-    .height    = this->format.height,
-    .pitch     = this->format.pitch,
-    .stride    = this->format.stride,
-    .frame     = frame,
-    .rects     = damageRects,
-    .rectCount = damageRectsCount,
+    .type       = EGL_TEXTYPE_FRAMEBUFFER,
+    .x          = 0,
+    .y          = 0,
+    .width      = this->format.width,
+    .height     = this->format.height,
+    .pitch      = this->format.pitch,
+    .stride     = this->format.stride,
+    .frame      = frame,
+    .rects      = damageRects,
+    .rectCount  = damageRectsCount,
+    .waitTimeNs = waitTimeNs,
   };
 
   return this->ops.update(this, &update);
 }
 
 bool egl_textureUpdateFromDMA(EGL_Texture * this,
-    const FrameBuffer * frame, const int dmaFd)
+    const FrameBuffer * frame, const int dmaFd, uint64_t * waitTimeNs)
 {
   const struct EGL_TexUpdate update =
   {
@@ -196,7 +197,8 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
   };
 
   /* wait for completion */
-  if (unlikely(!framebuffer_wait(frame, this->format.dataSize)))
+  if (unlikely(!framebuffer_wait_timed(
+          frame, this->format.dataSize, waitTimeNs)))
     return false;
 
   return this->ops.update(this, &update);
