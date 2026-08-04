@@ -32,24 +32,24 @@ CSettings::CSettings()
 {
 }
 
-void CSettings::LoadModes()
+CSettings::DisplayModes CSettings::LoadModes()
 {
   const unsigned defaultRefresh = GetDefaultRefresh();
-  m_displayModes.clear();
+  DisplayModes displayModes;
 
   bool hasPreferred = false;
   DisplayMode m;
   if (GetExtraMode(m))
   {
     DEBUG_INFO("ExtraMode: %ux%u@%u%s", m.width, m.height, m.refresh, m.preferred ? "*" : "");
-    m_displayModes.push_back(m);
+    displayModes.push_back(m);
     hasPreferred = m.preferred;
   }
 
   std::vector<std::wstring> entries;
   if (!ReadModesValue(entries))
   {
-    m_displayModes.reserve(m_displayModes.size() +
+    displayModes.reserve(displayModes.size() +
       ARRAYSIZE(DefaultDisplayModes));
 
     for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
@@ -59,9 +59,9 @@ void CSettings::LoadModes()
       m.refresh   = defaultRefresh;
       m.preferred = !hasPreferred && (i == DefaultPreferredDisplayMode);
       m.extraMode = false;
-      m_displayModes.push_back(m);
+      displayModes.push_back(m);
     }
-    return;
+    return displayModes;
   }
 
   for (const auto& line : entries)
@@ -69,10 +69,11 @@ void CSettings::LoadModes()
     {
       if (hasPreferred)
         m.preferred = false;
-      m_displayModes.push_back(m);
+      displayModes.push_back(m);
     }
 
-  DEBUG_INFO("Parsed %d modes", m_displayModes.size());
+  DEBUG_INFO("Parsed %d modes", displayModes.size());
+  return displayModes;
 }
 
 void CSettings::SetExtraMode(const DisplayMode& mode)

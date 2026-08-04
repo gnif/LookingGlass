@@ -148,20 +148,21 @@ void CIndirectDeviceContext::QueryIddCxCapabilities()
 
 bool CIndirectDeviceContext::PopulateDefaultModes()
 {
-  g_settings.LoadModes();
+  const CSettings::DisplayModes configuredModes =
+    g_settings.LoadModes();
 
   // Build the new mode list into a local first so we only hold the lock for
   // the swap. IddCx readers may be iterating the live container on another
   // thread; a clear()/push_back() under them would reallocate the backing
   // store and crash. std::move makes the publish a pointer swap.
   CSettings::DisplayModes newModes;
-  newModes.reserve(g_settings.GetDisplayModes().size());
+  newModes.reserve(configuredModes.size());
 
   const UINT64 alignment = m_alignSize ? m_alignSize :
     D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
 
   bool hasPreferred = false;
-  for (const auto& configuredMode : g_settings.GetDisplayModes())
+  for (const auto& configuredMode : configuredModes)
   {
     UINT64 frameSize;
     UINT64 requiredIVSHMEMSize;
