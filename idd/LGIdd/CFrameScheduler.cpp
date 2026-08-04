@@ -28,6 +28,7 @@ static const uint32_t MIN_LEASE_MS    = 100;
 static const uint32_t MAX_LEASE_MS    = 5000;
 static const uint64_t MIN_SAFETY_NS   = 250000ULL;
 static const uint64_t LOG_INTERVAL_NS = 5000000000ULL;
+static const uint64_t CADENCE_BREAK   = 4;
 
 uint64_t CFrameScheduler::Nanotime()
 {
@@ -308,7 +309,14 @@ void CFrameScheduler::ObserveFrame(uint64_t now)
   if (m_lastArrival && now > m_lastArrival)
   {
     const uint64_t interval = now - m_lastArrival;
-    if (interval >= MIN_PERIOD_NS && interval <= MAX_PERIOD_NS)
+    if (m_guestPeriod && interval > m_guestPeriod * CADENCE_BREAK)
+    {
+      m_guestPeriod    = 0;
+      m_guestJitter    = 0;
+      m_arrivalSamples = 0;
+      m_forceNext      = true;
+    }
+    else if (interval >= MIN_PERIOD_NS && interval <= MAX_PERIOD_NS)
     {
       if (!m_guestPeriod)
         m_guestPeriod = interval;
