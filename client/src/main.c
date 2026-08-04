@@ -212,6 +212,8 @@ enum FrameTimingReady
 struct FrameTimingRecord
 {
   LG_RendererFrameToken token;
+  uint64_t              frameSerial;
+  uint32_t              scheduleGeneration;
   unsigned              readyMask;
   bool                  producerValid;
 
@@ -323,7 +325,8 @@ static void frameTimingCancel(LG_RendererFrameToken token)
   });
 }
 
-static void frameTimingQueue(LG_RendererFrameToken token, uint64_t importTime,
+static void frameTimingQueue(LG_RendererFrameToken token, uint64_t frameSerial,
+    uint32_t scheduleGeneration, uint64_t importTime,
     uint64_t importWaitTime, uint64_t dispatchStart, uint64_t queueStart)
 {
   INTERLOCKED_SECTION(l_frameTiming.lock, {
@@ -333,10 +336,12 @@ static void frameTimingQueue(LG_RendererFrameToken token, uint64_t importTime,
       const uint64_t elapsed   = queueStart > dispatchStart ?
         queueStart - dispatchStart : 0;
       const uint64_t accounted = importTime + importWaitTime;
-      record->importTime     = importTime;
-      record->importWaitTime = importWaitTime;
-      record->dispatchTime   = elapsed > accounted ? elapsed - accounted : 0;
-      record->queueStart     = queueStart;
+      record->importTime         = importTime;
+      record->importWaitTime     = importWaitTime;
+      record->dispatchTime       = elapsed > accounted ? elapsed - accounted : 0;
+      record->queueStart         = queueStart;
+      record->frameSerial        = frameSerial;
+      record->scheduleGeneration = scheduleGeneration;
       if (record->timestamp < queueStart)
         record->timestamp = queueStart;
     }
@@ -382,44 +387,55 @@ static void frameTimingFinishFrame(LG_RendererFrameToken token,
 static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
     uint64_t prepareStart, uint64_t prepareTime, uint64_t timestamp)
 {
-  INTERLOCKED_SECTION(l_frameTiming.lock, {
-    if (l_frameTiming.retireToken <= timing->frameToken)
-      l_frameTiming.retireToken = timing->frameToken + 1;
+  uint64_t feedbackFrameSerial = 0;
+  uint64_t feedbackQueueStart  = 0;
+  uint32_t feedbackGeneration  = 0;
 
-    struct FrameTimingRecord * record = frameTimingRecord(timing->frameToken);
-    if (record->token == timing->frameToken)
+  LG_LOCK(l_frameTiming.lock);
+  if (l_frameTiming.retireToken <= timing->frameToken)
+    l_frameTiming.retireToken = timing->frameToken + 1;
+
+  struct FrameTimingRecord * record = frameTimingRecord(timing->frameToken);
+  if (record->token == timing->frameToken)
+  {
+    record->prepareStart = prepareStart;
+    record->prepareTime  = prepareTime;
+    if (record->timestamp < timestamp)
+      record->timestamp = timestamp;
+    record->setupTime   = timing->setupTime;
+    record->effectsTime = timing->effectsTime;
+    record->desktopTime = timing->desktopTime;
+    record->composeTime = timing->composeTime;
+    record->swapTime    = timing->swapTime;
+    record->readyMask  |= FRAME_TIMING_RENDER_READY;
+
+    feedbackFrameSerial = record->frameSerial;
+    feedbackGeneration  = record->scheduleGeneration;
+    feedbackQueueStart  = record->queueStart;
+
+    if (unlikely(
+        l_frameTiming.publishCount == FRAME_TIMING_RECORD_COUNT))
     {
-      record->prepareStart = prepareStart;
-      record->prepareTime  = prepareTime;
-      if (record->timestamp < timestamp)
-        record->timestamp = timestamp;
-      record->setupTime   = timing->setupTime;
-      record->effectsTime = timing->effectsTime;
-      record->desktopTime = timing->desktopTime;
-      record->composeTime = timing->composeTime;
-      record->swapTime    = timing->swapTime;
-      record->readyMask  |= FRAME_TIMING_RENDER_READY;
-
-      if (unlikely(
-          l_frameTiming.publishCount == FRAME_TIMING_RECORD_COUNT))
+      if (!l_frameTiming.overflowWarning)
       {
-        if (!l_frameTiming.overflowWarning)
-        {
-          DEBUG_WARN("Frame timing publish queue exhausted; sample lost");
-          l_frameTiming.overflowWarning = true;
-        }
-        *record = (struct FrameTimingRecord) {};
+        DEBUG_WARN("Frame timing publish queue exhausted; sample lost");
+        l_frameTiming.overflowWarning = true;
       }
-      else
-      {
-        l_frameTiming.publishToken[l_frameTiming.publishWrite] =
-          timing->frameToken;
-        l_frameTiming.publishWrite =
-          (l_frameTiming.publishWrite + 1) % FRAME_TIMING_RECORD_COUNT;
-        ++l_frameTiming.publishCount;
-      }
+      *record = (struct FrameTimingRecord) {};
     }
-  });
+    else
+    {
+      l_frameTiming.publishToken[l_frameTiming.publishWrite] =
+        timing->frameToken;
+      l_frameTiming.publishWrite =
+        (l_frameTiming.publishWrite + 1) % FRAME_TIMING_RECORD_COUNT;
+      ++l_frameTiming.publishCount;
+    }
+  }
+  LG_UNLOCK(l_frameTiming.lock);
+
+  frameScheduler_feedback(feedbackFrameSerial, feedbackGeneration,
+      feedbackQueueStart, prepareStart);
 }
 
 static void frameTimingPublishReady(void)
@@ -1083,8 +1099,9 @@ int main_frameThread(void * unused)
     atomic_store_explicit(&l_testFrameSerial, frame.serial,
         memory_order_release);
 #endif
-    frameTimingQueue(frameToken, g_state.frameImportTime,
-        g_state.frameImportWaitTime, dispatchStart, queueStart);
+    frameTimingQueue(frameToken, frame.serial, frame.scheduleGeneration,
+        g_state.frameImportTime, g_state.frameImportWaitTime,
+        dispatchStart, queueStart);
 
     if (g_state.jitRender)
     {

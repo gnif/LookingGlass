@@ -48,6 +48,7 @@ private:
     uint64_t period;
     uint64_t targetSlack;
     uint64_t expiry;
+    uint32_t lastFeedbackFrameSerial;
     bool     subscribed;
     bool     active;
   };
@@ -66,8 +67,11 @@ private:
   unsigned m_arrivalSamples = 0;
   unsigned m_timingSamples  = 0;
 
+  uint32_t m_lastPublishedFrameSerial = 0;
+
   Client * FindClient(uint32_t clientID);
   void ElectOwner(uint64_t now);
+  void ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
 
 public:
   static uint64_t Nanotime();
@@ -79,6 +83,7 @@ public:
   bool GetSchedule(Schedule& schedule) const;
   void ObserveFrame(uint64_t now);
   bool SelectFrame(uint64_t now, bool force, uint32_t& generation);
-  void FramePublished(uint32_t generation, uint64_t now);
+  void FramePublished(uint32_t generation, uint32_t frameSerial,
+    uint64_t now);
   void RecordFrameTiming(uint64_t duration);
 };

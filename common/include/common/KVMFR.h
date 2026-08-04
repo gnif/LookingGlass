@@ -291,11 +291,12 @@ typedef struct KVMFRFrameSchedule
   uint32_t                clientID;
   uint32_t                generation;
   KVMFRFrameScheduleFlags flags;
-  uint64_t                period;
-  uint64_t                targetSlack;
-  int64_t                 phaseError;
+  uint64_t                period;       // requested presentation period (ns)
+  uint64_t                targetSlack;  // desired ready-to-render lead (ns)
+  // Positive when the frame arrived early, negative when it arrived late.
+  int64_t                 phaseError;   // ready-to-render phase error (ns)
   uint32_t                feedbackFrameSerial;
-  uint32_t                lease;
+  uint32_t                lease;        // lease duration (ms)
   uint8_t                 reserved[16];
 }
 KVMFRFrameSchedule;

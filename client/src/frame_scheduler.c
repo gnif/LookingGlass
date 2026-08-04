@@ -31,6 +31,7 @@
 
 #define FRAME_SCHEDULER_LEASE_MS        1000U
 #define FRAME_SCHEDULER_RENEW_NS        250000000ULL
+#define FRAME_SCHEDULER_FEEDBACK_NS     50000000ULL
 #define FRAME_SCHEDULER_TARGET_SLACK_NS 500000ULL
 #define FRAME_SCHEDULER_MIN_PERIOD_NS   2000000ULL
 #define FRAME_SCHEDULER_MAX_PERIOD_NS   1000000000ULL
@@ -40,13 +41,18 @@ static struct
 {
   LG_Lock lock;
 
-  bool     supported;
-  bool     active;
-  bool     controlPending;
-  uint32_t generation;
-  uint64_t period;
-  uint64_t lastSend;
-  uint64_t lastCadence;
+  _Atomic(bool)     supported;
+  _Atomic(bool)     active;
+  bool              controlPending;
+  _Atomic(uint32_t) generation;
+  _Atomic(uint64_t) period;
+  uint64_t          lastSend;
+  uint64_t          lastCadence;
+
+  int64_t  phaseError;
+  uint32_t feedbackFrameSerial;
+  unsigned feedbackSamples;
+  bool     feedbackDirty;
 
   LG_TransportControlToken controlToken;
 
@@ -79,7 +85,11 @@ static uint64_t fallbackPeriod(void)
     return 0;
 
   qsort(samples, count, sizeof(*samples), compareU64);
-  return samples[count / 2];
+  const uint64_t period = samples[count / 2];
+  if (samples[count * 3 / 4] - samples[count / 4] > period / 20)
+    return 0;
+
+  return period;
 }
 
 static uint64_t presentationPeriod(void)
@@ -89,7 +99,7 @@ static uint64_t presentationPeriod(void)
       g_state.ds->getFramePeriod(&period))
     return period;
 
-  return g_state.jitRender ? fallbackPeriod() : 0;
+  return fallbackPeriod();
 }
 
 static bool controlReady(void)
@@ -112,14 +122,23 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
   if (!controlReady())
     return false;
 
+  int64_t  phaseError;
+  uint32_t feedbackFrameSerial;
+  LG_LOCK(l_frameScheduler.lock);
+  phaseError          = l_frameScheduler.phaseError;
+  feedbackFrameSerial = l_frameScheduler.feedbackFrameSerial;
+  LG_UNLOCK(l_frameScheduler.lock);
+
   const LG_TransportControl control = {
     .type = LG_TRANSPORT_CONTROL_FRAME_SCHEDULE,
     .frameSchedule = {
-      .generation  = l_frameScheduler.generation,
-      .flags       = flags,
-      .period      = period,
-      .targetSlack = FRAME_SCHEDULER_TARGET_SLACK_NS,
-      .lease       = FRAME_SCHEDULER_LEASE_MS,
+      .generation          = l_frameScheduler.generation,
+      .flags               = flags,
+      .period              = period,
+      .targetSlack         = FRAME_SCHEDULER_TARGET_SLACK_NS,
+      .phaseError          = phaseError,
+      .feedbackFrameSerial = feedbackFrameSerial,
+      .lease               = FRAME_SCHEDULER_LEASE_MS,
     },
   };
 
@@ -134,6 +153,10 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
   }
 
   l_frameScheduler.controlPending = true;
+  LG_LOCK(l_frameScheduler.lock);
+  if (l_frameScheduler.feedbackFrameSerial == feedbackFrameSerial)
+    l_frameScheduler.feedbackDirty = false;
+  LG_UNLOCK(l_frameScheduler.lock);
   return true;
 }
 
@@ -160,9 +183,13 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
   ++l_frameScheduler.generation;
 
   LG_LOCK(l_frameScheduler.lock);
-  l_frameScheduler.renderSampleIndex = 0;
-  l_frameScheduler.renderSampleCount = 0;
-  l_frameScheduler.lastRender        = 0;
+  l_frameScheduler.renderSampleIndex   = 0;
+  l_frameScheduler.renderSampleCount   = 0;
+  l_frameScheduler.lastRender          = 0;
+  l_frameScheduler.phaseError          = 0;
+  l_frameScheduler.feedbackFrameSerial = 0;
+  l_frameScheduler.feedbackSamples     = 0;
+  l_frameScheduler.feedbackDirty       = false;
   LG_UNLOCK(l_frameScheduler.lock);
 }
 
@@ -213,9 +240,16 @@ void frameScheduler_update(void)
     l_frameScheduler.period =
       (l_frameScheduler.period * 7 + period) / 8;
 
-  if (l_frameScheduler.active && !reset &&
-      now - l_frameScheduler.lastSend < FRAME_SCHEDULER_RENEW_NS)
-    return;
+  if (l_frameScheduler.active && !reset)
+  {
+    LG_LOCK(l_frameScheduler.lock);
+    const bool feedbackDirty = l_frameScheduler.feedbackDirty;
+    LG_UNLOCK(l_frameScheduler.lock);
+    const uint64_t interval = feedbackDirty ?
+      FRAME_SCHEDULER_FEEDBACK_NS : FRAME_SCHEDULER_RENEW_NS;
+    if (now - l_frameScheduler.lastSend < interval)
+      return;
+  }
 
   LG_TransportFrameScheduleFlags flags =
     LG_TRANSPORT_FRAME_SCHEDULE_ACTIVE;
@@ -231,9 +265,6 @@ void frameScheduler_update(void)
 
 void frameScheduler_observeRender(uint64_t timestamp)
 {
-  if (!g_state.jitRender)
-    return;
-
   LG_LOCK(l_frameScheduler.lock);
   if (l_frameScheduler.lastRender &&
       timestamp > l_frameScheduler.lastRender)
@@ -247,5 +278,42 @@ void frameScheduler_observeRender(uint64_t timestamp)
       ++l_frameScheduler.renderSampleCount;
   }
   l_frameScheduler.lastRender = timestamp;
+  LG_UNLOCK(l_frameScheduler.lock);
+}
+
+void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
+    uint64_t queueStart, uint64_t prepareStart)
+{
+  if (!generation || !queueStart || prepareStart < queueStart)
+    return;
+
+  const uint64_t slack = prepareStart - queueStart;
+  LG_LOCK(l_frameScheduler.lock);
+  if (!l_frameScheduler.supported || !l_frameScheduler.active ||
+      generation != l_frameScheduler.generation)
+  {
+    LG_UNLOCK(l_frameScheduler.lock);
+    return;
+  }
+
+  int64_t error = slack > FRAME_SCHEDULER_TARGET_SLACK_NS ?
+    (int64_t)(slack - FRAME_SCHEDULER_TARGET_SLACK_NS) :
+    -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - slack);
+  const int64_t limit = (int64_t)(l_frameScheduler.period / 2);
+  if (error > limit)
+    error = limit;
+  else if (error < -limit)
+    error = -limit;
+
+  if (!l_frameScheduler.feedbackSamples)
+    l_frameScheduler.phaseError = error;
+  else
+    l_frameScheduler.phaseError =
+      (l_frameScheduler.phaseError * 7 + error) / 8;
+  if (l_frameScheduler.feedbackSamples < 32)
+    ++l_frameScheduler.feedbackSamples;
+
+  l_frameScheduler.feedbackFrameSerial = (uint32_t)frameSerial;
+  l_frameScheduler.feedbackDirty       = true;
   LG_UNLOCK(l_frameScheduler.lock);
 }

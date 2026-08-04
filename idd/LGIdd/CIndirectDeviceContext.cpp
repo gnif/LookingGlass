@@ -945,7 +945,8 @@ bool CIndirectDeviceContext::InitializeLGMP()
     kvmfr.version  = KVMFR_VERSION;
     kvmfr.features =
       KVMFR_FEATURE_SETCURSORPOS |
-      KVMFR_FEATURE_WINDOWSIZE;
+      KVMFR_FEATURE_WINDOWSIZE   |
+      KVMFR_FEATURE_FRAME_SCHEDULE;
     strncpy_s(kvmfr.hostver, LG_VERSION_STR, sizeof(kvmfr.hostver) - 1);
     ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
   }
@@ -1523,7 +1524,8 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
 
   if (status == LGMP_OK)
     m_frameScheduler.FramePublished(
-      scheduleGeneration, CFrameScheduler::Nanotime());
+      scheduleGeneration, m_frame[frameIndex]->frameSerial,
+      CFrameScheduler::Nanotime());
 
   if (status != LGMP_OK)
   {
