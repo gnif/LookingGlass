@@ -56,6 +56,8 @@ static void presentationFeedbackPresented(void * opaque,
     uint32_t tvNsec, uint32_t refresh, uint32_t seqHi, uint32_t seqLo, uint32_t flags)
 {
   struct FrameData * data = opaque;
+  if (refresh)
+    atomic_store(&wlWm.presentationPeriod, refresh);
   struct timespec present = {
     .tv_sec = (uint64_t) tvSecHi << 32 | tvSecLo,
     .tv_nsec = tvNsec,
@@ -67,6 +69,16 @@ static void presentationFeedbackPresented(void * opaque,
       &(float){ delta.tv_sec * 1e3f + delta.tv_nsec * 1e-6f });
   free(data);
   wp_presentation_feedback_destroy(feedback);
+}
+
+bool waylandGetFramePeriod(uint64_t * period)
+{
+  const uint64_t value = atomic_load(&wlWm.presentationPeriod);
+  if (!value)
+    return false;
+
+  *period = value;
+  return true;
 }
 
 static void presentationFeedbackDiscarded(void * data,

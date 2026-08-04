@@ -75,6 +75,7 @@ struct X11DSState
   int               xpresentOp;
   bool              jitRender;
   _Atomic(uint64_t) presentMsc, presentUst;
+  _Atomic(uint64_t) presentPeriod;
   uint32_t          presentSerial;
   Pixmap            presentPixmap;
   XserverRegion     presentRegion;

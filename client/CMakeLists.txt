@@ -162,6 +162,7 @@ set(SOURCES
   src/gl_dynprocs.c
   src/egl_dynprocs.c
   src/eglutil.c
+  src/frame_scheduler.c
   src/overlay_utils.c
   src/render_queue.c
   src/evdev.c

@@ -196,6 +196,9 @@ struct LG_DisplayServerOps
   /* This is used to interrupt waitFrame. */
   void (*stopWaitFrame)(void);
 
+  /* Returns the current presentation period in nanoseconds when known. */
+  bool (*getFramePeriod)(uint64_t * period);
+
   /* dm specific cursor implementations */
   void (*guestPointerUpdated)(double x, double y, double localX, double localY);
   void (*setPointer)(LG_DSPointer pointer);

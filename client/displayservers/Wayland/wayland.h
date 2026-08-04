@@ -158,6 +158,7 @@ struct WaylandDSState
 
   struct wp_presentation * presentation;
   clockid_t clkId;
+  _Atomic(uint64_t) presentationPeriod;
   RingBuffer photonTimings;
   GraphHandle photonGraph;
 
@@ -399,6 +400,7 @@ bool waylandPollUnregister(int fd);
 bool waylandPresentationInit(void);
 void waylandPresentationFrame(void);
 void waylandPresentationFree(void);
+bool waylandGetFramePeriod(uint64_t * period);
 
 // registry module
 bool waylandRegistryInit(void);

@@ -68,6 +68,7 @@
 #include "util.h"
 #include "render_queue.h"
 #include "evdev.h"
+#include "frame_scheduler.h"
 
 #ifdef ENABLE_TESTS
 #include "interface/test_capture.h"
@@ -698,6 +699,7 @@ static int renderThread(void * unused)
     const uint64_t delta = t - g_state.lastRenderTime;
 
     g_state.lastRenderTime = t;
+    frameScheduler_observeRender(t);
     atomic_fetch_add_explicit(&g_state.renderCount, 1, memory_order_relaxed);
 
     if (!g_state.jitRender && g_params.fpsMin != 0)
@@ -1689,6 +1691,7 @@ static int lg_run(void)
 
   //setup the render command queue
   renderQueue_init();
+  frameScheduler_init();
 
   const PSInit psInit =
   {
@@ -1996,6 +1999,7 @@ restart:
   if (session.uuidValid)
     memcpy(g_state.guestUUID, session.uuid, sizeof(g_state.guestUUID));
   g_state.transportFeatures = session.features;
+  frameScheduler_start(session.features);
 
   if (g_state.spiceReady && g_params.useSpiceInput)
     keybind_spiceRegister();
@@ -2020,8 +2024,11 @@ restart:
       break;
     }
     lgMessage_process();
+    frameScheduler_update();
     g_state.ds->wait(100);
   }
+
+  frameScheduler_stop();
 
   if (app_getState() == APP_STATE_RESTART)
   {
@@ -2043,6 +2050,7 @@ restart:
 static void lg_shutdown(void)
 {
   app_setState(APP_STATE_SHUTDOWN);
+  frameScheduler_stop();
 
   if (t_spice)
     lgJoinThread(t_spice, NULL);
@@ -2093,6 +2101,7 @@ static void lg_shutdown(void)
     g_state.ds->free();
 
   renderQueue_free();
+  frameScheduler_free();
 
   // free metrics ringbuffers
   ringbuffer_free(&g_state.renderTimings);

@@ -1487,6 +1487,15 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
     case PresentCompleteNotify:
     {
       XPresentCompleteNotifyEvent * e = cookie->data;
+      const uint64_t previousMsc = atomic_load(&x11.presentMsc);
+      const uint64_t previousUst = atomic_load(&x11.presentUst);
+      if (previousMsc && e->msc > previousMsc && e->ust > previousUst)
+      {
+        const uint64_t period =
+          (e->ust - previousUst) * 1000 / (e->msc - previousMsc);
+        if (period)
+          atomic_store(&x11.presentPeriod, period);
+      }
       x11DoPresent(e->msc);
       atomic_store(&x11.presentMsc, e->msc);
       atomic_store(&x11.presentUst, e->ust);
@@ -1494,6 +1503,16 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
       break;
     }
   }
+}
+
+static bool x11GetFramePeriod(uint64_t * period)
+{
+  const uint64_t value = atomic_load(&x11.presentPeriod);
+  if (!value)
+    return false;
+
+  *period = value;
+  return true;
 }
 
 #ifdef ENABLE_EGL
@@ -2025,6 +2044,7 @@ struct LG_DisplayServerOps LGDS_X11 =
 #endif
   .waitFrame           = x11WaitFrame,
   .stopWaitFrame       = x11StopWaitFrame,
+  .getFramePeriod      = x11GetFramePeriod,
   .guestPointerUpdated = x11GuestPointerUpdated,
   .setPointer          = x11SetPointer,
   .grabPointer         = x11GrabPointer,
