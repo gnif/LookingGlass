@@ -32,6 +32,6 @@ void frameScheduler_stop(void);
 void frameScheduler_update(void);
 void frameScheduler_observeRender(uint64_t timestamp);
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
-    uint64_t queueStart, uint64_t prepareStart);
+    uint64_t measuredPhase);
 
 #endif

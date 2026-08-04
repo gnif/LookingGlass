@@ -217,7 +217,16 @@ void frameScheduler_update(void)
         now - l_frameScheduler.lastCadence > FRAME_SCHEDULER_RENEW_NS * 2)
     {
       if (sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0))
+      {
         l_frameScheduler.active = false;
+        l_frameScheduler.period = 0;
+        LG_LOCK(l_frameScheduler.lock);
+        l_frameScheduler.phaseError          = 0;
+        l_frameScheduler.feedbackFrameSerial = 0;
+        l_frameScheduler.feedbackSamples     = 0;
+        l_frameScheduler.feedbackDirty       = false;
+        LG_UNLOCK(l_frameScheduler.lock);
+      }
     }
     return;
   }
@@ -235,6 +244,12 @@ void frameScheduler_update(void)
   {
     l_frameScheduler.period = period;
     ++l_frameScheduler.generation;
+    LG_LOCK(l_frameScheduler.lock);
+    l_frameScheduler.phaseError          = 0;
+    l_frameScheduler.feedbackFrameSerial = 0;
+    l_frameScheduler.feedbackSamples     = 0;
+    l_frameScheduler.feedbackDirty       = false;
+    LG_UNLOCK(l_frameScheduler.lock);
   }
   else
     l_frameScheduler.period =
@@ -282,12 +297,11 @@ void frameScheduler_observeRender(uint64_t timestamp)
 }
 
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
-    uint64_t queueStart, uint64_t prepareStart)
+    uint64_t measuredPhase)
 {
-  if (!generation || !queueStart || prepareStart < queueStart)
+  if (!generation)
     return;
 
-  const uint64_t slack = prepareStart - queueStart;
   LG_LOCK(l_frameScheduler.lock);
   if (!l_frameScheduler.supported || !l_frameScheduler.active ||
       generation != l_frameScheduler.generation)
@@ -296,14 +310,21 @@ void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
     return;
   }
 
-  int64_t error = slack > FRAME_SCHEDULER_TARGET_SLACK_NS ?
-    (int64_t)(slack - FRAME_SCHEDULER_TARGET_SLACK_NS) :
-    -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - slack);
-  const int64_t limit = (int64_t)(l_frameScheduler.period / 2);
-  if (error > limit)
-    error = limit;
-  else if (error < -limit)
-    error = -limit;
+  const int64_t period = (int64_t)l_frameScheduler.period;
+  if (!period)
+  {
+    LG_UNLOCK(l_frameScheduler.lock);
+    return;
+  }
+
+  int64_t error = measuredPhase > FRAME_SCHEDULER_TARGET_SLACK_NS ?
+    (int64_t)(measuredPhase - FRAME_SCHEDULER_TARGET_SLACK_NS) :
+    -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - measuredPhase);
+  error %= period;
+  if (error > period / 2)
+    error -= period;
+  else if (error < -period / 2)
+    error += period;
 
   if (!l_frameScheduler.feedbackSamples)
     l_frameScheduler.phaseError = error;

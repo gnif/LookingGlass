@@ -1304,6 +1304,8 @@ void CIndirectDeviceContext::LGMPTimer()
     lgmpHostAckData(m_pointerQueue);
   }
 
+  m_frameScheduler.LogStatistics(now);
+
   AcquireSRWLockExclusive(&m_framePublishLock);
   if (lgmpHostQueueNewSubs(m_frameQueue))
     m_frameResendPending = true;

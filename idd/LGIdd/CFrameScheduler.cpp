@@ -22,13 +22,12 @@
 
 #include "CDebug.h"
 
-#include <algorithm>
-
-static const uint64_t MIN_PERIOD_NS = 2000000ULL;
-static const uint64_t MAX_PERIOD_NS = 1000000000ULL;
-static const uint32_t MIN_LEASE_MS  = 100;
-static const uint32_t MAX_LEASE_MS  = 5000;
-static const uint64_t MIN_SAFETY_NS = 250000ULL;
+static const uint64_t MIN_PERIOD_NS   = 2000000ULL;
+static const uint64_t MAX_PERIOD_NS   = 1000000000ULL;
+static const uint32_t MIN_LEASE_MS    = 100;
+static const uint32_t MAX_LEASE_MS    = 5000;
+static const uint64_t MIN_SAFETY_NS   = 250000ULL;
+static const uint64_t LOG_INTERVAL_NS = 5000000000ULL;
 
 uint64_t CFrameScheduler::Nanotime()
 {
@@ -112,6 +111,11 @@ void CFrameScheduler::ElectOwner(uint64_t now)
     m_forceNext    = m_scheduling;
 
     m_lastPublishedFrameSerial = 0;
+    m_lastPhaseError            = 0;
+    m_lastLog                   = now;
+    m_lastLogAcquired           = m_acquiredFrames;
+    m_lastLogSkipped            = m_skippedFrames;
+    m_lastLogPublished          = m_publishedFrames;
 
     if (m_scheduling)
       DEBUG_INFO("Frame timing owner %u generation %u at %.3f Hz",
@@ -140,6 +144,15 @@ void CFrameScheduler::Reset()
   m_timingSamples  = 0;
 
   m_lastPublishedFrameSerial = 0;
+
+  m_lastPhaseError   = 0;
+  m_acquiredFrames   = 0;
+  m_skippedFrames    = 0;
+  m_publishedFrames  = 0;
+  m_lastLog          = 0;
+  m_lastLogAcquired  = 0;
+  m_lastLogSkipped   = 0;
+  m_lastLogPublished = 0;
   ReleaseSRWLockExclusive(&m_lock);
 }
 
@@ -260,7 +273,18 @@ void CFrameScheduler::ApplyFeedback(Client& client,
     m_nextDeadline = m_nextDeadline > advance ?
       m_nextDeadline - advance : 0;
   }
+  m_lastPhaseError = schedule.phaseError;
   client.lastFeedbackFrameSerial = schedule.feedbackFrameSerial;
+}
+
+void CFrameScheduler::AdvanceDeadline(uint64_t now)
+{
+  if (m_nextDeadline > now)
+    return;
+
+  const uint64_t periods =
+    (now - m_nextDeadline) / m_schedule.period + 1;
+  m_nextDeadline += periods * m_schedule.period;
 }
 
 bool CFrameScheduler::GetSchedule(Schedule& schedule) const
@@ -276,6 +300,7 @@ bool CFrameScheduler::GetSchedule(Schedule& schedule) const
 void CFrameScheduler::ObserveFrame(uint64_t now)
 {
   AcquireSRWLockExclusive(&m_lock);
+  ++m_acquiredFrames;
   if (m_lastArrival && now > m_lastArrival)
   {
     const uint64_t interval = now - m_lastArrival;
@@ -311,8 +336,7 @@ bool CFrameScheduler::SelectFrame(uint64_t now, bool force,
   }
 
   generation = m_schedule.generation;
-  while (m_nextDeadline <= now)
-    m_nextDeadline += m_schedule.period;
+  AdvanceDeadline(now);
 
   if (force)
     m_forceNext = true;
@@ -324,11 +348,13 @@ bool CFrameScheduler::SelectFrame(uint64_t now, bool force,
   }
 
   const uint64_t safety =
-    std::max(MIN_SAFETY_NS,
-      std::max(m_guestJitter * 2, m_workEstimate / 8));
+    max(MIN_SAFETY_NS,
+      max(m_guestJitter * 2, m_workEstimate / 8));
   const uint64_t nextArrival = m_lastArrival + m_guestPeriod;
   const bool process = nextArrival <= now ||
     nextArrival + m_workEstimate + safety > m_nextDeadline;
+  if (!process)
+    ++m_skippedFrames;
   ReleaseSRWLockExclusive(&m_lock);
   return process;
 }
@@ -341,10 +367,41 @@ void CFrameScheduler::FramePublished(uint32_t generation,
   {
     m_forceNext = false;
     m_lastPublishedFrameSerial = frameSerial;
-    do
-      m_nextDeadline += m_schedule.period;
-    while (m_nextDeadline <= now);
+    ++m_publishedFrames;
+    m_nextDeadline += m_schedule.period;
+    AdvanceDeadline(now);
   }
+  ReleaseSRWLockExclusive(&m_lock);
+}
+
+void CFrameScheduler::LogStatistics(uint64_t now)
+{
+  AcquireSRWLockExclusive(&m_lock);
+  if (!m_scheduling || now - m_lastLog < LOG_INTERVAL_NS)
+  {
+    ReleaseSRWLockExclusive(&m_lock);
+    return;
+  }
+
+  const uint64_t acquired  = m_acquiredFrames  - m_lastLogAcquired;
+  const uint64_t skipped   = m_skippedFrames   - m_lastLogSkipped;
+  const uint64_t published = m_publishedFrames - m_lastLogPublished;
+  DEBUG_TRACE("Frame schedule owner %u: %.3f Hz client, %.3f Hz guest, "
+    "%.3f ms work, %.3f ms phase; %llu acquired, %llu skipped, "
+    "%llu published",
+    m_schedule.clientID,
+    1000000000.0 / m_schedule.period,
+    m_guestPeriod ? 1000000000.0 / m_guestPeriod : 0.0,
+    m_workEstimate / 1000000.0,
+    m_lastPhaseError / 1000000.0,
+    static_cast<unsigned long long>(acquired),
+    static_cast<unsigned long long>(skipped),
+    static_cast<unsigned long long>(published));
+
+  m_lastLog          = now;
+  m_lastLogAcquired  = m_acquiredFrames;
+  m_lastLogSkipped   = m_skippedFrames;
+  m_lastLogPublished = m_publishedFrames;
   ReleaseSRWLockExclusive(&m_lock);
 }
 

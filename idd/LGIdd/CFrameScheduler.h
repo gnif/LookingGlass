@@ -69,9 +69,19 @@ private:
 
   uint32_t m_lastPublishedFrameSerial = 0;
 
+  int64_t  m_lastPhaseError   = 0;
+  uint64_t m_acquiredFrames   = 0;
+  uint64_t m_skippedFrames    = 0;
+  uint64_t m_publishedFrames  = 0;
+  uint64_t m_lastLog          = 0;
+  uint64_t m_lastLogAcquired  = 0;
+  uint64_t m_lastLogSkipped   = 0;
+  uint64_t m_lastLogPublished = 0;
+
   Client * FindClient(uint32_t clientID);
   void ElectOwner(uint64_t now);
   void ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
+  void AdvanceDeadline(uint64_t now);
 
 public:
   static uint64_t Nanotime();
@@ -86,4 +96,5 @@ public:
   void FramePublished(uint32_t generation, uint32_t frameSerial,
     uint64_t now);
   void RecordFrameTiming(uint64_t duration);
+  void LogStatistics(uint64_t now);
 };

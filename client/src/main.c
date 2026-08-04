@@ -434,8 +434,18 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
   }
   LG_UNLOCK(l_frameTiming.lock);
 
-  frameScheduler_feedback(feedbackFrameSerial, feedbackGeneration,
-      feedbackQueueStart, prepareStart);
+  if (feedbackFrameSerial && feedbackGeneration)
+  {
+    uint64_t measuredPhase = timing->swapTime;
+    if (g_state.jitRender)
+    {
+      if (!feedbackQueueStart || prepareStart < feedbackQueueStart)
+        return;
+      measuredPhase = prepareStart - feedbackQueueStart;
+    }
+    frameScheduler_feedback(
+        feedbackFrameSerial, feedbackGeneration, measuredPhase);
+  }
 }
 
 static void frameTimingPublishReady(void)
