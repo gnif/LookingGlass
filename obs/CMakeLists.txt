@@ -104,6 +104,7 @@ link_libraries(
 
 set(SOURCES
   ${CMAKE_BINARY_DIR}/version.c
+  frame_scheduler.c
   main.c
   lg.c
 )

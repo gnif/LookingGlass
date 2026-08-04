@@ -23,6 +23,7 @@
 #include <obs/obs-config.h>
 #include <obs/obs-module.h>
 #include <obs/util/threading.h>
+#include <obs/util/platform.h>
 #include <obs/graphics/graphics.h>
 #include <obs/graphics/matrix4.h>
 
@@ -40,6 +41,7 @@
 #include "rgb24.effect.h"
 #include "hdrpq.effect.h"
 #include "cursor.effect.h"
+#include "frame_scheduler.h"
 
 /* scRGB reference white in cd/m² (OBS GS_CS_709_SCRGB is defined as
  * 1.0 = 80 cd/m²). PQ encodes an absolute 0..10000 cd/m² range, so linear
@@ -122,6 +124,8 @@ typedef struct
 
   pthread_t            frameThread, pointerThread;
   os_sem_t           * frameSem;
+  pthread_mutex_t      pointerLock;
+  LGFrameScheduler     frameScheduler;
 
   bool                 cursorMono;
   gs_texture_t       * cursorTex;
@@ -168,6 +172,16 @@ LGPlugin;
 static void * frameThread(void * data);
 static void * pointerThread(void * data);
 static void lgUpdate(void * data, obs_data_t * settings);
+
+static uint64_t lgFramePeriod(void)
+{
+  struct obs_video_info videoInfo;
+  if (!obs_get_video_info(&videoInfo) ||
+      !videoInfo.fps_num || !videoInfo.fps_den)
+    return 0;
+
+  return 1000000000ULL * videoInfo.fps_den / videoInfo.fps_num;
+}
 
 static const char * lgGetName(void * unused)
 {
@@ -266,6 +280,7 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
 
   os_sem_init (&this->frameSem , 0);
   os_sem_init (&this->cursorSem, 1);
+  pthread_mutex_init(&this->pointerLock, NULL);
   atomic_store(&this->cursorVer, 0);
   atomic_store(&this->cursorTransformVer, 0);
   atomic_store(&this->sdrWhiteLevel, KVMFR_SDR_WHITE_LEVEL_DEFAULT);
@@ -422,6 +437,7 @@ static void lgDestroy(void * data)
   deinit(this);
   os_sem_destroy(this->frameSem );
   os_sem_destroy(this->cursorSem);
+  pthread_mutex_destroy(&this->pointerLock);
 
   obs_enter_graphics();
   gs_effect_destroy(this->unpackEffect);
@@ -488,6 +504,23 @@ static void * frameThread(void * data)
         break;
       }
     }
+
+    const uint64_t now = os_gettime_ns();
+    if (status == LGMP_OK)
+    {
+      LGMPMessage msg;
+      if (lgmpClientProcess(this->frameQueue, &msg) == LGMP_OK)
+      {
+        const KVMFRFrame * frame = (const KVMFRFrame *)msg.mem;
+        lgFrameSchedulerObserveFrame(&this->frameScheduler,
+          frame->frameSerial, msg.udata, now);
+      }
+    }
+
+    pthread_mutex_lock(&this->pointerLock);
+    lgFrameSchedulerUpdate(&this->frameScheduler,
+      this->pointerQueue, now);
+    pthread_mutex_unlock(&this->pointerLock);
     os_sem_post(this->frameSem);
     usleep(1000);
   }
@@ -511,8 +544,11 @@ static void * pointerThread(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
 
-  if (lgmpClientSubscribe(
-        this->lgmp, LGMP_Q_POINTER, &this->pointerQueue) != LGMP_OK)
+  pthread_mutex_lock(&this->pointerLock);
+  const LGMP_STATUS subscribeStatus = lgmpClientSubscribe(
+    this->lgmp, LGMP_Q_POINTER, &this->pointerQueue);
+  pthread_mutex_unlock(&this->pointerLock);
+  if (subscribeStatus != LGMP_OK)
   {
     this->state = STATE_STOPPING;
     return NULL;
@@ -523,8 +559,10 @@ static void * pointerThread(void * data)
     LGMP_STATUS status;
     LGMPMessage msg;
 
+    pthread_mutex_lock(&this->pointerLock);
     if ((status = lgmpClientProcess(this->pointerQueue, &msg)) != LGMP_OK)
     {
+      pthread_mutex_unlock(&this->pointerLock);
       if (status != LGMP_ERR_QUEUE_EMPTY)
       {
         printf("lgmpClientProcess: %s\n", lgmpStatusString(status));
@@ -651,9 +689,12 @@ static void * pointerThread(void * data)
     }
 
     lgmpClientMessageDone(this->pointerQueue);
+    pthread_mutex_unlock(&this->pointerLock);
   }
 
+  pthread_mutex_lock(&this->pointerLock);
   lgmpClientUnsubscribe(&this->pointerQueue);
+  pthread_mutex_unlock(&this->pointerLock);
 
   bfree(this->cursorData);
   this->cursorData = NULL;
@@ -693,9 +734,10 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   usleep(200000);
 
+  uint32_t clientID;
   uint32_t remoteVersion;
   if ((status = lgmpClientSessionInit(this->lgmp, &udataSize,
-      (uint8_t **)&udata, NULL, &remoteVersion)) != LGMP_OK)
+      (uint8_t **)&udata, &clientID, &remoteVersion)) != LGMP_OK)
   {
     printf("lgmpClientSessionInit: %s", lgmpStatusString(status));
     if (status == LGMP_ERR_INVALID_VERSION)
@@ -718,6 +760,10 @@ static void lgUpdate(void * data, obs_data_t * settings)
     printf("This is not a Looking Glass error, do not report this\n");
     return;
   }
+
+  lgFrameSchedulerInit(&this->frameScheduler,
+    udata->features & KVMFR_FEATURE_FRAME_SCHEDULE, clientID);
+  lgFrameSchedulerSetPeriod(&this->frameScheduler, lgFramePeriod());
 
   this->state = STATE_STARTING;
   createThreads(this);
@@ -1075,6 +1121,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
 static void lgVideoTick(void * data, float seconds)
 {
   LGPlugin * this = (LGPlugin *)data;
+  (void)seconds;
 
   if (this->state == STATE_RESTARTING)
   {
@@ -1086,6 +1133,8 @@ static void lgVideoTick(void * data, float seconds)
   if (this->state != STATE_RUNNING)
     return;
 
+  const uint64_t tickTime    = os_gettime_ns();
+  const uint64_t framePeriod = lgFramePeriod();
   LGMP_STATUS status;
   LGMPMessage msg;
 
@@ -1095,6 +1144,8 @@ static void lgVideoTick(void * data, float seconds)
     os_sem_post(this->frameSem);
     return;
   }
+
+  lgFrameSchedulerSetPeriod(&this->frameScheduler, framePeriod);
 
   this->cursorRect.x = this->cursor.x;
   this->cursorRect.y = this->cursor.y;
@@ -1236,6 +1287,10 @@ static void lgVideoTick(void * data, float seconds)
   }
 
   const KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
+  lgFrameSchedulerObserveFrame(&this->frameScheduler,
+    frame->frameSerial, msg.udata, tickTime);
+  lgFrameSchedulerFeedback(&this->frameScheduler,
+    frame->frameSerial, msg.udata, tickTime);
 
   bool textureValid = (this->dmabufTested && this->dmabuf) || this->texture;
   if (!textureValid || this->formatVer != frame->formatVer)
