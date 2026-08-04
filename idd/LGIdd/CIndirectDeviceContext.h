@@ -148,13 +148,14 @@ private:
   void ScheduleInitRetry();
   void StopInitRetry();
 
+  bool InitializeLGMP();
   void DeInitLGMP();
   void LGMPTimer();
   void ResendCursor();
   void SendColorTransform();
   void InitializeEdid();
   bool GetResolutionMemoryRequirements(uint32_t width, uint32_t height,
-    UINT64& frameSize, UINT64& ivshmemSize) const;
+    UINT64 alignment, UINT64& frameSize, UINT64& ivshmemSize) const;
 
   // Guards m_displayModes and m_edid. The mode list is rebuilt on the LGMP
   // timer thread (SetResolution) while IddCx concurrently enumerates it on its
@@ -181,7 +182,7 @@ public:
 
   bool SetupLGMP(size_t alignSize);
 
-  void PopulateDefaultModes();
+  bool PopulateDefaultModes();
   void InitAdapter();
   void FinishInit(UINT connectorIndex);
   void ReplugMonitor();

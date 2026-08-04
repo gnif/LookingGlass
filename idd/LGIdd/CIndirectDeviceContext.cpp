@@ -46,7 +46,6 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
-static const UINT64 MIB = 1024ULL * 1024ULL;
 static const UINT64 FRAME_BYTES_PER_PIXEL = 4;
 
 static bool AlignUp(UINT64 value, UINT64 alignment, UINT64& result)
@@ -55,17 +54,30 @@ static bool AlignUp(UINT64 value, UINT64 alignment, UINT64& result)
     return false;
 
   const UINT64 mask = alignment - 1;
-  if (value > UINT64_MAX - mask)
+  result = (value + mask) & ~mask;
+  return true;
+}
+
+static bool CalculateFrameSize(uint32_t width, uint32_t height,
+  UINT64& frameSize)
+{
+  frameSize = 0;
+  if (!width || !height)
     return false;
 
-  result = (value + mask) & ~mask;
+  UINT64 pitch;
+  if (!AlignUp((UINT64)width * FRAME_BYTES_PER_PIXEL,
+      D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, pitch))
+    return false;
+
+  frameSize = pitch * height;
   return true;
 }
 
 static uint32_t RecommendedIVSHMEMSizeMiB(UINT64 requiredSize)
 {
-  UINT64 sizeMiB = requiredSize / MIB;
-  if (requiredSize % MIB)
+  UINT64 sizeMiB = requiredSize / 1048576;
+  if (requiredSize % 1048576)
     ++sizeMiB;
 
   UINT64 result = 1;
@@ -134,7 +146,7 @@ void CIndirectDeviceContext::QueryIddCxCapabilities()
     DEBUG_INFO("HDR/WCG disabled for software rendering");
 }
 
-void CIndirectDeviceContext::PopulateDefaultModes()
+bool CIndirectDeviceContext::PopulateDefaultModes()
 {
   g_settings.LoadModes();
 
@@ -144,12 +156,61 @@ void CIndirectDeviceContext::PopulateDefaultModes()
   // store and crash. std::move makes the publish a pointer swap.
   CSettings::DisplayModes newModes;
   newModes.reserve(g_settings.GetDisplayModes().size());
-  for (auto& dm : g_settings.GetDisplayModes())
-    newModes.push_back(dm);
+
+  const UINT64 alignment = m_alignSize ? m_alignSize :
+    D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+
+  bool hasPreferred = false;
+  for (const auto& configuredMode : g_settings.GetDisplayModes())
+  {
+    UINT64 frameSize;
+    UINT64 requiredIVSHMEMSize;
+    if (!GetResolutionMemoryRequirements(configuredMode.width,
+        configuredMode.height, alignment, frameSize, requiredIVSHMEMSize))
+    {
+      DEBUG_WARN("Filtering invalid %s mode %ux%u@%u",
+        configuredMode.extraMode ? "extra" : "configured",
+        configuredMode.width, configuredMode.height,
+        configuredMode.refresh);
+      continue;
+    }
+
+    if (requiredIVSHMEMSize > m_ivshmem.GetSize())
+    {
+      DEBUG_WARN(
+        "Filtering %s mode %ux%u@%u: requires %llu bytes of IVSHMEM, only %llu bytes are available",
+        configuredMode.extraMode ? "extra" : "configured",
+        configuredMode.width, configuredMode.height,
+        configuredMode.refresh,
+        (unsigned long long)requiredIVSHMEMSize,
+        (unsigned long long)m_ivshmem.GetSize());
+      continue;
+    }
+
+    CSettings::DisplayMode mode = configuredMode;
+    if (mode.preferred)
+    {
+      mode.preferred = !hasPreferred;
+      hasPreferred   = true;
+    }
+    newModes.push_back(mode);
+  }
+
+  if (newModes.empty())
+  {
+    DEBUG_ERROR("No configured display modes fit in IVSHMEM");
+    return false;
+  }
+
+  // ExtraMode may have been the preferred mode. If it did not fit, promote
+  // the first remaining mode so the list still has a valid preference.
+  if (!hasPreferred)
+    newModes.front().preferred = true;
 
   AcquireSRWLockExclusive(&m_modeLock);
   m_displayModes = std::move(newModes);
   ReleaseSRWLockExclusive(&m_modeLock);
+  return true;
 }
 
 void CIndirectDeviceContext::InitializeEdid()
@@ -297,8 +358,18 @@ void CIndirectDeviceContext::InitAdapter()
     DEBUG_INFO("No hardware render adapter available; using SDR software mode");
 
   QueryIddCxCapabilities();
+  DEBUG_TRACE("Initializing LGMP metadata");
+  if (!InitializeLGMP())
+  {
+    m_initInProgress.store(0);
+    return;
+  }
   DEBUG_TRACE("Loading configured display modes");
-  PopulateDefaultModes();
+  if (!PopulateDefaultModes())
+  {
+    m_initInProgress.store(0);
+    return;
+  }
   DEBUG_TRACE("Initializing monitor EDID");
   InitializeEdid();
 
@@ -787,33 +858,23 @@ NTSTATUS CIndirectDeviceContext::MonitorQueryTargetModes2(
 #endif
 
 bool CIndirectDeviceContext::GetResolutionMemoryRequirements(
-  uint32_t width, uint32_t height, UINT64& frameSize,
-  UINT64& ivshmemSize) const
+  uint32_t width, uint32_t height, UINT64 alignment,
+  UINT64& frameSize, UINT64& ivshmemSize) const
 {
-  frameSize = 0;
+  frameSize   = 0;
   ivshmemSize = 0;
 
-  if (!width || !height || !m_alignSize || !m_frameMemoryOffset)
+  if (!alignment || !m_frameMemoryOffset ||
+      !CalculateFrameSize(width, height, frameSize))
     return false;
-
-  UINT64 pitch;
-  if (!AlignUp((UINT64)width * FRAME_BYTES_PER_PIXEL,
-      D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, pitch) ||
-      pitch > UINT64_MAX / height)
-    return false;
-
-  frameSize = pitch * height;
 
   UINT64 frameAllocationSize;
-  if (frameSize > UINT64_MAX - m_alignSize ||
-      !AlignUp(frameSize + m_alignSize, m_alignSize,
+  if (!AlignUp(frameSize + alignment, alignment,
         frameAllocationSize))
     return false;
 
   UINT64 frameMemoryStart;
-  if (!AlignUp(m_frameMemoryOffset, m_alignSize, frameMemoryStart) ||
-      frameAllocationSize >
-        (UINT64_MAX - frameMemoryStart) / LGMP_Q_FRAME_LEN)
+  if (!AlignUp(m_frameMemoryOffset, alignment, frameMemoryStart))
     return false;
 
   ivshmemSize = frameMemoryStart +
@@ -825,14 +886,14 @@ void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
 {
   UINT64 frameSize;
   UINT64 requiredIVSHMEMSize;
-  if (!GetResolutionMemoryRequirements(width, height, frameSize,
-      requiredIVSHMEMSize))
+  if (!GetResolutionMemoryRequirements(width, height, m_alignSize,
+      frameSize, requiredIVSHMEMSize))
   {
     DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
     return;
   }
 
-  if (frameSize > m_maxFrameSize)
+  if (requiredIVSHMEMSize > m_ivshmem.GetSize())
   {
     const uint32_t requiredMiB =
       RecommendedIVSHMEMSizeMiB(requiredIVSHMEMSize);
@@ -859,7 +920,11 @@ void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
 
   g_settings.SetExtraMode(mode);
 
-  PopulateDefaultModes();
+  if (!PopulateDefaultModes())
+  {
+    DEBUG_ERROR("Failed to rebuild the display mode list");
+    return;
+  }
 
   // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode list,
   // so the only reliable way to apply a new mode is to depart and re-arrive the
@@ -867,14 +932,10 @@ void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
   ReplugMonitor();
 }
 
-bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
+bool CIndirectDeviceContext::InitializeLGMP()
 {
-  // this may get called multiple times as we need to delay calling it until
-  // we can determine the required alignment from the GPU in use
   if (m_lgmp)
     return true;
-
-  m_alignSize = alignSize;
 
   std::stringstream ss;
   {
@@ -1003,6 +1064,22 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
       sizeof(KVMFRCursor) + sizeof(KVMFRColorTransform));
   }
 
+  m_frameMemoryOffset = m_ivshmem.GetSize() - lgmpHostMemAvail(m_lgmp);
+  return true;
+}
+
+bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
+{
+  // This may get called multiple times as we need to delay allocating the
+  // frame buffers until the GPU-specific alignment is known.
+  if (m_maxFrameSize)
+    return true;
+
+  if (!InitializeLGMP())
+    return false;
+
+  m_alignSize = alignSize;
+
   if (!m_alignSize || (m_alignSize & (m_alignSize - 1)) ||
       m_alignSize < sizeof(KVMFRFrame) + sizeof(FrameBuffer))
   {
@@ -1012,7 +1089,6 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   }
 
   const size_t available = lgmpHostMemAvail(m_lgmp);
-  m_frameMemoryOffset = m_ivshmem.GetSize() - available;
 
   UINT64 alignedFrameMemoryOffset;
   if (!AlignUp(m_frameMemoryOffset, m_alignSize,
@@ -1044,10 +1120,11 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
   // The KVMFR frame header and FrameBuffer write position occupy the first
   // alignment unit. Only the bytes after it are usable for pixel data.
-  m_maxFrameSize = frameAllocationSize - m_alignSize;
+  const size_t maxFrameSize = frameAllocationSize - m_alignSize;
   DEBUG_INFO("Max Frame Data Size: %u MiB",
-    (unsigned int)(m_maxFrameSize / MIB));
+    (unsigned int)(maxFrameSize / 1048576));
 
+  LGMP_STATUS status;
   for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
     if ((status = lgmpHostMemAllocAligned(m_lgmp,
@@ -1069,6 +1146,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     m_frameInFlight[i].store(false, std::memory_order_release);
   }
 
+  m_maxFrameSize = maxFrameSize;
   m_publishedFrameIndex.store(-1, std::memory_order_release);
   m_frameResendPending = false;
 

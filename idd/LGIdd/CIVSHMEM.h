@@ -46,7 +46,6 @@ public:
   bool Open();
   void Close();
 
-  size_t GetSize() { return m_size; }
-  void * GetMem () { return m_mem;  }
+  size_t GetSize() const { return m_size; }
+  void * GetMem ()       { return m_mem;  }
 };
-
