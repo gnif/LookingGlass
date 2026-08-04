@@ -31,22 +31,6 @@ static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
 static_assert(LGMP_Q_FRAME_LEN == 2,
   "IDD damage repair assumes two alternating frame buffers");
 
-static uint64_t Nanotime()
-{
-  static const uint64_t frequency = []()
-  {
-    LARGE_INTEGER value;
-    QueryPerformanceFrequency(&value);
-    return (uint64_t)value.QuadPart;
-  }();
-
-  LARGE_INTEGER counter;
-  QueryPerformanceCounter(&counter);
-  const uint64_t ticks = (uint64_t)counter.QuadPart;
-  return ticks / frequency * 1000000000ULL +
-    ticks % frequency * 1000000000ULL / frequency;
-}
-
 static bool FrameMetadataChanged(const D12FrameFormat& previous,
   const D12FrameFormat& current)
 {
@@ -258,7 +242,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     // path HDR is not available, so default to SDR.
     DXGI_COLOR_SPACE_TYPE colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     UINT sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
-    const uint64_t captureStart = Nanotime();
+    const uint64_t captureStart = CFrameScheduler::Nanotime();
 
 #ifdef HAS_IDDCX_110
     if (m_devContext->HasIddCx110DDIs())
@@ -374,7 +358,7 @@ void CSwapChainProcessor::CompletionFunction(
   // Publish readiness before sampling the endpoint. Timing has its own valid
   // flag and is published immediately afterwards.
   sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-  const uint64_t readyEnd = Nanotime();
+  const uint64_t readyEnd = CFrameScheduler::Nanotime();
 
   uint64_t postProcessTime = cpuCopyStart - fbRes->GetPostProcessStart();
   uint64_t copyTime        = readyEnd - cpuCopyStart;
@@ -391,6 +375,8 @@ void CSwapChainProcessor::CompletionFunction(
   sc->m_postProcessors[fbRes->GetFrameIndex()].RecordTiming(
     fbRes->GetTimingEffectIndex(), fbRes->GetTimingToken(),
     fbRes->IsFullCopy(), postProcessTime + copyTime + readyTime);
+  sc->m_devContext->RecordFrameTiming(
+    postProcessTime + copyTime + readyTime);
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
   sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex());
@@ -643,8 +629,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
   uint64_t captureStart)
 {
-  const uint64_t postProcessStart = Nanotime();
+  const uint64_t postProcessStart = CFrameScheduler::Nanotime();
   const uint64_t captureTime      = postProcessStart - captureStart;
+
+  m_devContext->ObserveFrame(postProcessStart);
 
   // Preserve the fast drop path: never hold an IddCx frame while waiting for
   // a slow or disconnected client. We have not read its rectangles, so force
@@ -874,10 +862,19 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     SetFullPendingDamage();
 
   // Adaptive effects need comparable full-frame samples until they lock.
-  if (m_postProcessors[0].RequiresFullDamage())
+  const bool requiresFullDamage =
+    m_postProcessors[0].RequiresFullDamage();
+  if (requiresFullDamage)
     SetFullPendingDamage();
 
   if (noImageUpdate && !m_hasPendingDamage)
+    return true;
+
+  uint32_t scheduleGeneration = 0;
+  if (!m_devContext->SelectFrame(CFrameScheduler::Nanotime(),
+        needsReconfigure || postProcessFormatChanged ||
+          frameMetadataChanged || requiresFullDamage,
+        scheduleGeneration))
     return true;
 
   const D12FrameFormat& dstFormat =
@@ -1000,7 +997,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
     dstFormat.width, dstFormat.height);
 
-  const uint64_t copyStart = Nanotime();
+  const uint64_t copyStart = CFrameScheduler::Nanotime();
   fbRes->SetTiming(captureTime, postProcessStart, copyStart);
 
   copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
@@ -1070,7 +1067,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  if (!m_devContext->PublishFrameBuffer(buffer.frameIndex))
+  if (!m_devContext->PublishFrameBuffer(
+        buffer.frameIndex, scheduleGeneration))
   {
     SetFullPendingDamage();
     return false;

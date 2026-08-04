@@ -56,6 +56,15 @@ private:
   Client          m_clients[LGMP_MAX_CLIENTS] = {};
   Schedule        m_schedule                  = {};
   bool            m_scheduling                = false;
+  bool            m_forceNext                 = false;
+
+  uint64_t m_lastArrival    = 0;
+  uint64_t m_guestPeriod    = 0;
+  uint64_t m_guestJitter    = 0;
+  uint64_t m_workEstimate   = 0;
+  uint64_t m_nextDeadline   = 0;
+  unsigned m_arrivalSamples = 0;
+  unsigned m_timingSamples  = 0;
 
   Client * FindClient(uint32_t clientID);
   void ElectOwner(uint64_t now);
@@ -68,4 +77,8 @@ public:
     uint64_t now);
   bool UpdateSchedule(const KVMFRFrameSchedule& schedule, uint64_t now);
   bool GetSchedule(Schedule& schedule) const;
+  void ObserveFrame(uint64_t now);
+  bool SelectFrame(uint64_t now, bool force, uint32_t& generation);
+  void FramePublished(uint32_t generation, uint64_t now);
+  void RecordFrameTiming(uint64_t duration);
 };

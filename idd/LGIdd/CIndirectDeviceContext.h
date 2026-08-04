@@ -225,7 +225,7 @@ public:
 
   bool FrameBufferAvailable() const;
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
-  bool PublishFrameBuffer(unsigned frameIndex);
+  bool PublishFrameBuffer(unsigned frameIndex, uint32_t scheduleGeneration);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
   void CompleteFrameBuffer(unsigned frameIndex);
@@ -233,6 +233,10 @@ public:
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
+
+  void ObserveFrame(uint64_t now);
+  bool SelectFrame(uint64_t now, bool force, uint32_t& generation);
+  void RecordFrameTiming(uint64_t duration);
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data,
     UINT sdrWhiteLevel);

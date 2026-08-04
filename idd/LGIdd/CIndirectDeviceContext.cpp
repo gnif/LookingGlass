@@ -1503,14 +1503,16 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   return result;
 }
 
-bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
+bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
+  uint32_t scheduleGeneration)
 {
   if (!m_frameQueue || frameIndex >= LGMP_Q_FRAME_LEN)
     return false;
 
   AcquireSRWLockExclusive(&m_framePublishLock);
   const LGMP_STATUS status =
-    lgmpHostQueuePost(m_frameQueue, 0, m_frameMemory[frameIndex]);
+    lgmpHostQueuePost(
+      m_frameQueue, scheduleGeneration, m_frameMemory[frameIndex]);
   if (status == LGMP_OK)
   {
     m_publishedFrameIndex.store(
@@ -1519,6 +1521,10 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   }
   ReleaseSRWLockExclusive(&m_framePublishLock);
 
+  if (status == LGMP_OK)
+    m_frameScheduler.FramePublished(
+      scheduleGeneration, CFrameScheduler::Nanotime());
+
   if (status != LGMP_OK)
   {
     DEBUG_ERROR("Failed to publish frame: %s", lgmpStatusString(status));
@@ -1526,6 +1532,22 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex)
   }
 
   return true;
+}
+
+void CIndirectDeviceContext::ObserveFrame(uint64_t now)
+{
+  m_frameScheduler.ObserveFrame(now);
+}
+
+bool CIndirectDeviceContext::SelectFrame(uint64_t now, bool force,
+  uint32_t& generation)
+{
+  return m_frameScheduler.SelectFrame(now, force, generation);
+}
+
+void CIndirectDeviceContext::RecordFrameTiming(uint64_t duration)
+{
+  m_frameScheduler.RecordFrameTiming(duration);
 }
 
 void CIndirectDeviceContext::AbortFrameBuffer(unsigned frameIndex)

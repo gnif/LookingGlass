@@ -22,10 +22,13 @@
 
 #include "CDebug.h"
 
+#include <algorithm>
+
 static const uint64_t MIN_PERIOD_NS = 2000000ULL;
 static const uint64_t MAX_PERIOD_NS = 1000000000ULL;
 static const uint32_t MIN_LEASE_MS  = 100;
 static const uint32_t MAX_LEASE_MS  = 5000;
+static const uint64_t MIN_SAFETY_NS = 250000ULL;
 
 uint64_t CFrameScheduler::Nanotime()
 {
@@ -105,6 +108,9 @@ void CFrameScheduler::ElectOwner(uint64_t now)
   if (oldClientID != m_schedule.clientID ||
       oldGeneration != m_schedule.generation)
   {
+    m_nextDeadline = m_scheduling ? now + m_schedule.period : 0;
+    m_forceNext    = m_scheduling;
+
     if (m_scheduling)
       DEBUG_INFO("Frame timing owner %u generation %u at %.3f Hz",
         m_schedule.clientID, m_schedule.generation,
@@ -121,6 +127,15 @@ void CFrameScheduler::Reset()
     client = {};
   m_schedule   = {};
   m_scheduling = false;
+  m_forceNext  = false;
+
+  m_lastArrival    = 0;
+  m_guestPeriod    = 0;
+  m_guestJitter    = 0;
+  m_workEstimate   = 0;
+  m_nextDeadline   = 0;
+  m_arrivalSamples = 0;
+  m_timingSamples  = 0;
   ReleaseSRWLockExclusive(&m_lock);
 }
 
@@ -213,4 +228,93 @@ bool CFrameScheduler::GetSchedule(Schedule& schedule) const
     schedule = m_schedule;
   ReleaseSRWLockShared(&m_lock);
   return result;
+}
+
+void CFrameScheduler::ObserveFrame(uint64_t now)
+{
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_lastArrival && now > m_lastArrival)
+  {
+    const uint64_t interval = now - m_lastArrival;
+    if (interval >= MIN_PERIOD_NS && interval <= MAX_PERIOD_NS)
+    {
+      if (!m_guestPeriod)
+        m_guestPeriod = interval;
+      else
+      {
+        const uint64_t error = m_guestPeriod > interval ?
+          m_guestPeriod - interval : interval - m_guestPeriod;
+        m_guestPeriod = (m_guestPeriod * 7 + interval) / 8;
+        m_guestJitter = (m_guestJitter * 7 + error) / 8;
+      }
+
+      if (m_arrivalSamples < 32)
+        ++m_arrivalSamples;
+    }
+  }
+  m_lastArrival = now;
+  ReleaseSRWLockExclusive(&m_lock);
+}
+
+bool CFrameScheduler::SelectFrame(uint64_t now, bool force,
+  uint32_t& generation)
+{
+  generation = 0;
+  AcquireSRWLockExclusive(&m_lock);
+  if (!m_scheduling)
+  {
+    ReleaseSRWLockExclusive(&m_lock);
+    return true;
+  }
+
+  generation = m_schedule.generation;
+  while (m_nextDeadline <= now)
+    m_nextDeadline += m_schedule.period;
+
+  if (force)
+    m_forceNext = true;
+
+  if (m_forceNext || m_arrivalSamples < 4 || m_timingSamples < 4)
+  {
+    ReleaseSRWLockExclusive(&m_lock);
+    return true;
+  }
+
+  const uint64_t safety =
+    std::max(MIN_SAFETY_NS,
+      std::max(m_guestJitter * 2, m_workEstimate / 8));
+  const uint64_t nextArrival = m_lastArrival + m_guestPeriod;
+  const bool process = nextArrival <= now ||
+    nextArrival + m_workEstimate + safety > m_nextDeadline;
+  ReleaseSRWLockExclusive(&m_lock);
+  return process;
+}
+
+void CFrameScheduler::FramePublished(uint32_t generation, uint64_t now)
+{
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_scheduling && generation == m_schedule.generation)
+  {
+    m_forceNext = false;
+    do
+      m_nextDeadline += m_schedule.period;
+    while (m_nextDeadline <= now);
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+}
+
+void CFrameScheduler::RecordFrameTiming(uint64_t duration)
+{
+  if (!duration)
+    return;
+
+  AcquireSRWLockExclusive(&m_lock);
+  if (!m_workEstimate || duration > m_workEstimate)
+    m_workEstimate = duration;
+  else
+    m_workEstimate = (m_workEstimate * 31 + duration) / 32;
+
+  if (m_timingSamples < 32)
+    ++m_timingSamples;
+  ReleaseSRWLockExclusive(&m_lock);
 }
