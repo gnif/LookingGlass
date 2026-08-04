@@ -29,6 +29,7 @@
     <ClCompile Include="CEdid.cpp" />
     <ClCompile Include="CFrameBufferPool.cpp" />
     <ClCompile Include="CFrameBufferResource.cpp" />
+    <ClCompile Include="CFrameScheduler.cpp" />
     <ClCompile Include="CIndirectDeviceContext.cpp" />
     <ClCompile Include="CIndirectMonitorContext.cpp" />
     <ClCompile Include="CInteropResourcePool.cpp" />
@@ -55,6 +56,7 @@
     <ClInclude Include="CEdid.h" />
     <ClInclude Include="CFrameBufferPool.h" />
     <ClInclude Include="CFrameBufferResource.h" />
+    <ClInclude Include="CFrameScheduler.h" />
     <ClInclude Include="CIndirectMonitorContext.h" />
     <ClInclude Include="CInteropResourcePool.h" />
     <ClInclude Include="CInteropResource.h" />

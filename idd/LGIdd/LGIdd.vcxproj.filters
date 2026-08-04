@@ -82,6 +82,9 @@
     <ClInclude Include="CFrameBufferPool.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CFrameScheduler.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
     <ClInclude Include="CPipeServer.h">
       <Filter>Header Files</Filter>
@@ -120,6 +123,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CIndirectDeviceContext.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CFrameScheduler.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CIndirectMonitorContext.cpp">

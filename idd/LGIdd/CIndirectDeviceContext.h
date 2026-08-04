@@ -30,6 +30,7 @@
 #include "CSettings.h"
 #include "CEdid.h"
 #include "CPostProcessor.h"
+#include "CFrameScheduler.h"
 
 extern "C" {
   #include "lgmp/host.h"
@@ -88,6 +89,8 @@ private:
   PLGMPHost      m_lgmp       = nullptr;
   WDFTIMER       m_lgmpTimer  = nullptr;
   PLGMPHostQueue m_frameQueue = nullptr;
+
+  CFrameScheduler m_frameScheduler;
 
   PLGMPHostQueue m_pointerQueue = nullptr;
   PLGMPMemory    m_pointerMemory     [LGMP_Q_POINTER_LEN   ] = {};

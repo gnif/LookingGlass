@@ -1195,6 +1195,7 @@ void CIndirectDeviceContext::DeInitLGMP()
 
   if (m_lgmp == nullptr)
   {
+    m_frameScheduler.Reset();
     m_publishedFrameIndex.store(-1, std::memory_order_release);
     m_frameResendPending = false;
     return;
@@ -1205,6 +1206,8 @@ void CIndirectDeviceContext::DeInitLGMP()
     WdfTimerStop(m_lgmpTimer, TRUE);
     m_lgmpTimer = nullptr;
   }
+
+  m_frameScheduler.Reset();
 
   AcquireSRWLockExclusive(&m_framePublishLock);
   m_publishedFrameIndex.store(-1, std::memory_order_release);
@@ -1256,6 +1259,16 @@ void CIndirectDeviceContext::LGMPTimer()
     return;
   }
 
+  const uint64_t now = CFrameScheduler::Nanotime();
+  uint32_t clientIDs[LGMP_MAX_CLIENTS] = {};
+  unsigned clientCount                = 0;
+  status = lgmpHostGetClientIDs(m_frameQueue, clientIDs, &clientCount);
+  if (status == LGMP_OK)
+    m_frameScheduler.UpdateSubscribers(clientIDs, clientCount, now);
+  else
+    DEBUG_WARN("Failed to query LGMP frame subscribers: %s",
+      lgmpStatusString(status));
+
   uint8_t data[LGMP_MSGS_SIZE];
   size_t  size;
   while ((status = lgmpHostReadData(m_pointerQueue, &data, &size)) == LGMP_OK)
@@ -1274,6 +1287,16 @@ void CIndirectDeviceContext::LGMPTimer()
       {
         KVMFRWindowSize* ws = (KVMFRWindowSize*)msg;
         SetResolution(ws->w, ws->h);
+        break;
+      }
+
+      case KVMFR_MESSAGE_FRAME_SCHEDULE:
+      {
+        if (size != sizeof(KVMFRFrameSchedule) ||
+            !m_frameScheduler.UpdateSchedule(
+              *reinterpret_cast<KVMFRFrameSchedule *>(msg), now))
+          DEBUG_WARN("Ignoring invalid KVMFR frame schedule");
+        break;
       }
     }
 
