@@ -508,7 +508,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 
   egl_desktopRectsMatrix(desktop->matrix,
       width, height, x, y, scaleX, scaleY, rotate);
-  egl_desktopRectsUpdate(desktop->mesh, rects, width, height);
+  egl_desktopRectsUpdate(desktop->mesh,
+      rects ? rects->rects : NULL, rects ? rects->count : -1,
+      width, height);
 
   const bool hdr = desktop->hdr && !desktop->useSpice;
   uint32_t hdrPeak = 0;
@@ -539,7 +541,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     {
       /* The filter output may have changed everywhere, but this only applies
        * to the render that actually evaluated the filter. */
-      egl_desktopRectsUpdate(desktop->mesh, NULL, width, height);
+      egl_desktopRectsUpdate(desktop->mesh, NULL, -1, width, height);
       *fullFrame = true;
     }
   }

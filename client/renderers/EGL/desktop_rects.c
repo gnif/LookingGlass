@@ -107,18 +107,18 @@ inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect
   vertex[7] = rect->y + rect->height;
 }
 
-void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects * data,
-    int width, int height)
+void egl_desktopRectsUpdate(EGL_DesktopRects * rects,
+    const FrameDamageRect * data, int count, int width, int height)
 {
-  if (data && data->count == 0)
+  if (count == 0)
   {
     rects->count = 0;
     return;
   }
 
-  const int count = (!data || data->count < 0 ? 1 : data->count) * 8;
-  GLfloat vertices[count];
-  if (!data || data->count < 0)
+  const int vertexCount = (count < 0 ? 1 : count) * 8;
+  GLfloat vertices[vertexCount];
+  if (count < 0)
   {
     FrameDamageRect full = {
       .x = 0, .y = 0, .width = width, .height = height,
@@ -128,36 +128,37 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects, const struct DamageRects *
   }
   else
   {
-    rects->count = data->count;
+    rects->count = count;
     DEBUG_ASSERT(rects->count <= rects->maxCount);
 
     for (int i = 0; i < rects->count; ++i)
-      rectToVertices(vertices + i * 8, data->rects + i);
+      rectToVertices(vertices + i * 8, data + i);
   }
 
   // check if the value actually changed and needs updating
-  if (count == rects->lastVerticesCount &&
-      memcmp(rects->lastVertices, vertices, sizeof(GLfloat) * count) == 0)
+  if (vertexCount == rects->lastVerticesCount &&
+      memcmp(rects->lastVertices, vertices,
+        sizeof(GLfloat) * vertexCount) == 0)
     return;
 
   // ensure the local storage is large enough
-  if (count > rects->lastVerticesSize)
+  if (vertexCount > rects->lastVerticesSize)
   {
     if (rects->lastVertices)
       free(rects->lastVertices);
 
-    rects->lastVertices = malloc(sizeof(GLfloat) * count);
+    rects->lastVertices = malloc(sizeof(GLfloat) * vertexCount);
     if (!rects->lastVertices)
     {
       DEBUG_ERROR("out of memory");
       return;
     }
-    rects->lastVerticesSize = count;
+    rects->lastVerticesSize = vertexCount;
   }
 
   // copy the last value for later comparison
-  rects->lastVerticesCount = count;
-  memcpy(rects->lastVertices, vertices, sizeof(GLfloat) * count);
+  rects->lastVerticesCount = vertexCount;
+  memcpy(rects->lastVertices, vertices, sizeof(GLfloat) * vertexCount);
 
   egl_stateBindBuffer(GL_ARRAY_BUFFER, rects->buffers[0]);
   glBufferSubData(GL_ARRAY_BUFFER, 0, rects->count * 8 * sizeof(GLfloat), vertices);

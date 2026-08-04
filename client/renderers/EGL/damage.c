@@ -169,7 +169,7 @@ bool egl_damageRender(EGL_Damage * damage, LG_RendererRotate rotate, const struc
   egl_shaderUse(damage->shader);
 
   if (data && data->count != 0)
-    egl_desktopRectsUpdate(damage->mesh, (const struct DamageRects *) data,
+    egl_desktopRectsUpdate(damage->mesh, data->rects, data->count,
         damage->width, damage->height);
 
   egl_desktopRectsRender(damage->mesh);

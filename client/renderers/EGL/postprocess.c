@@ -906,13 +906,15 @@ bool egl_postProcessRun(EGL_PostProcess * this, EGL_Texture * tex,
     }
 
     rects = this->rects;
-    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
+    egl_desktopRectsUpdate(
+        rects, NULL, -1, desktopWidth, desktopHeight);
   }
 
   if (this->config.fullFrame)
   {
     rects = this->rects;
-    egl_desktopRectsUpdate(rects, NULL, desktopWidth, desktopHeight);
+    egl_desktopRectsUpdate(
+        rects, NULL, -1, desktopWidth, desktopHeight);
   }
 
   EGL_FilterRects filterRects = {
