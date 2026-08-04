@@ -104,8 +104,8 @@ void CFrameScheduler::ElectOwner(uint64_t now)
     m_scheduling = true;
   }
 
-  if (oldClientID != m_schedule.clientID ||
-      oldGeneration != m_schedule.generation)
+  const bool ownerChanged = oldClientID != m_schedule.clientID;
+  if (ownerChanged || oldGeneration != m_schedule.generation)
   {
     m_nextDeadline = m_scheduling ? now + m_schedule.period : 0;
     m_forceNext    = m_scheduling;
@@ -117,11 +117,11 @@ void CFrameScheduler::ElectOwner(uint64_t now)
     m_lastLogSkipped            = m_skippedFrames;
     m_lastLogPublished          = m_publishedFrames;
 
-    if (m_scheduling)
+    if (ownerChanged && m_scheduling)
       DEBUG_INFO("Frame timing owner %u generation %u at %.3f Hz",
         m_schedule.clientID, m_schedule.generation,
         1000000000.0 / m_schedule.period);
-    else if (oldClientID)
+    else if (ownerChanged && oldClientID)
       DEBUG_INFO("Frame timing owner released; using push delivery");
   }
 }
@@ -202,19 +202,23 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
 
   AcquireSRWLockExclusive(&m_lock);
   Client * client = FindClient(schedule.clientID);
+
+  if (schedule.flags & KVMFR_FRAME_SCHEDULE_RELEASE)
+  {
+    if (client && client->subscribed)
+    {
+      client->active = false;
+      client->expiry = 0;
+      ElectOwner(now);
+    }
+    ReleaseSRWLockExclusive(&m_lock);
+    return true;
+  }
+
   if (!client || !client->subscribed)
   {
     ReleaseSRWLockExclusive(&m_lock);
     return false;
-  }
-
-  if (schedule.flags & KVMFR_FRAME_SCHEDULE_RELEASE)
-  {
-    client->active = false;
-    client->expiry = 0;
-    ElectOwner(now);
-    ReleaseSRWLockExclusive(&m_lock);
-    return true;
   }
 
   if (!(schedule.flags & KVMFR_FRAME_SCHEDULE_ACTIVE) ||

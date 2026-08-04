@@ -47,7 +47,6 @@ static struct
   _Atomic(uint32_t) generation;
   _Atomic(uint64_t) period;
   uint64_t          lastSend;
-  uint64_t          lastCadence;
 
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
@@ -177,15 +176,10 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
     features & LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
   l_frameScheduler.active         = false;
   l_frameScheduler.controlPending = false;
-  l_frameScheduler.period         = 0;
   l_frameScheduler.lastSend       = 0;
-  l_frameScheduler.lastCadence    = 0;
   ++l_frameScheduler.generation;
 
   LG_LOCK(l_frameScheduler.lock);
-  l_frameScheduler.renderSampleIndex   = 0;
-  l_frameScheduler.renderSampleCount   = 0;
-  l_frameScheduler.lastRender          = 0;
   l_frameScheduler.phaseError          = 0;
   l_frameScheduler.feedbackFrameSerial = 0;
   l_frameScheduler.feedbackSamples     = 0;
@@ -208,30 +202,17 @@ void frameScheduler_update(void)
   if (!l_frameScheduler.supported)
     return;
 
-  const uint64_t now    = nanotime();
-  const uint64_t period = presentationPeriod();
+  const uint64_t now = nanotime();
+  uint64_t period    = presentationPeriod();
   if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
       period > FRAME_SCHEDULER_MAX_PERIOD_NS)
   {
-    if (l_frameScheduler.active && l_frameScheduler.lastCadence &&
-        now - l_frameScheduler.lastCadence > FRAME_SCHEDULER_RENEW_NS * 2)
-    {
-      if (sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0))
-      {
-        l_frameScheduler.active = false;
-        l_frameScheduler.period = 0;
-        LG_LOCK(l_frameScheduler.lock);
-        l_frameScheduler.phaseError          = 0;
-        l_frameScheduler.feedbackFrameSerial = 0;
-        l_frameScheduler.feedbackSamples     = 0;
-        l_frameScheduler.feedbackDirty       = false;
-        LG_UNLOCK(l_frameScheduler.lock);
-      }
-    }
-    return;
+    period = l_frameScheduler.period;
+    if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
+        period > FRAME_SCHEDULER_MAX_PERIOD_NS)
+      return;
   }
 
-  l_frameScheduler.lastCadence = now;
   bool reset = !l_frameScheduler.period;
   if (!reset)
   {
