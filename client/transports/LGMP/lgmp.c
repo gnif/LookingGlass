@@ -59,6 +59,7 @@ struct LG_Transport
   bool     connected;
   bool     framePending;
   const KVMFRFrame * pendingFrame;
+  uint32_t clientID;
   uint32_t frameSerial;
   bool     formatValid;
   LG_TransportFrameFormat format;
@@ -297,6 +298,8 @@ static bool lgmp_parseSession(const uint8_t * data, uint32_t size,
     session->features |= LG_TRANSPORT_FEATURE_SET_CURSOR_POS;
   if (header->features & KVMFR_FEATURE_WINDOWSIZE)
     session->features |= LG_TRANSPORT_FEATURE_WINDOW_SIZE;
+  if (header->features & KVMFR_FEATURE_FRAME_SCHEDULE)
+    session->features |= LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
 
   data += sizeof(*header);
   size -= sizeof(*header);
@@ -359,8 +362,8 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
   uint32_t size;
   uint8_t * data;
   uint32_t remoteVersion;
-  LGMP_STATUS status = lgmpClientSessionInit(this->client, &size, &data, NULL,
-      &remoteVersion);
+  LGMP_STATUS status = lgmpClientSessionInit(this->client, &size, &data,
+      &this->clientID, &remoteVersion);
   session->remoteVersion = remoteVersion;
   switch (status)
   {
@@ -390,6 +393,7 @@ static void lgmp_disconnect(LG_Transport * this)
   lgmp_closeQueues(this);
   lgmp_closeDMA(this);
   this->connected = false;
+  this->clientID  = 0;
 }
 
 static bool lgmp_sessionValid(LG_Transport * this)
@@ -538,7 +542,8 @@ static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
   this->frameSerial = frame->frameSerial;
 
   memset(result, 0, sizeof(*result));
-  result->serial = frame->frameSerial;
+  result->serial             = frame->frameSerial;
+  result->scheduleGeneration = message.udata;
   if (frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER)
     result->flags |= LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
   if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
@@ -763,7 +768,7 @@ static void lgmp_releasePointer(LG_Transport * this,
 static LG_TransportStatus lgmp_sendControl(LG_Transport * this,
     const LG_TransportControl * control, LG_TransportControlToken * token)
 {
-  uint8_t buffer[sizeof(KVMFRWindowSize)];
+  uint8_t buffer[LGMP_MSGS_SIZE];
   uint32_t size;
   switch (control->type)
   {
@@ -784,6 +789,23 @@ static LG_TransportStatus lgmp_sendControl(LG_Transport * this,
         .msg.type = KVMFR_MESSAGE_WINDOWSIZE,
         .w        = control->windowSize.width,
         .h        = control->windowSize.height,
+      };
+      memcpy(buffer, &message, sizeof(message));
+      size = sizeof(message);
+      break;
+    }
+    case LG_TRANSPORT_CONTROL_FRAME_SCHEDULE:
+    {
+      const KVMFRFrameSchedule message = {
+        .msg.type            = KVMFR_MESSAGE_FRAME_SCHEDULE,
+        .clientID            = this->clientID,
+        .generation          = control->frameSchedule.generation,
+        .flags               = control->frameSchedule.flags,
+        .period              = control->frameSchedule.period,
+        .targetSlack         = control->frameSchedule.targetSlack,
+        .phaseError          = control->frameSchedule.phaseError,
+        .feedbackFrameSerial = control->frameSchedule.feedbackFrameSerial,
+        .lease               = control->frameSchedule.lease,
       };
       memcpy(buffer, &message, sizeof(message));
       size = sizeof(message);

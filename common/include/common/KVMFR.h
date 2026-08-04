@@ -30,7 +30,7 @@
 #include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 25
+#define KVMFR_VERSION 26
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -59,8 +59,9 @@ typedef uint32_t KVMFRCursorFlags;
 
 enum
 {
-  KVMFR_FEATURE_SETCURSORPOS = 0x1,
-  KVMFR_FEATURE_WINDOWSIZE   = 0x2
+  KVMFR_FEATURE_SETCURSORPOS   = 0x1,
+  KVMFR_FEATURE_WINDOWSIZE     = 0x2,
+  KVMFR_FEATURE_FRAME_SCHEDULE = 0x4
 };
 
 typedef uint32_t KVMFRFeatureFlags;
@@ -68,7 +69,8 @@ typedef uint32_t KVMFRFeatureFlags;
 enum
 {
   KVMFR_MESSAGE_SETCURSORPOS,
-  KVMFR_MESSAGE_WINDOWSIZE
+  KVMFR_MESSAGE_WINDOWSIZE,
+  KVMFR_MESSAGE_FRAME_SCHEDULE
 };
 
 typedef uint32_t KVMFRMessageType;
@@ -267,6 +269,44 @@ typedef struct KVMFRWindowSize
   uint32_t w, h;
 }
 KVMFRWindowSize;
+
+enum
+{
+  KVMFR_FRAME_SCHEDULE_ACTIVE    = 0x1,
+  KVMFR_FRAME_SCHEDULE_RELEASE   = 0x2,
+  KVMFR_FRAME_SCHEDULE_RESET     = 0x4,
+  KVMFR_FRAME_SCHEDULE_IMMEDIATE = 0x8
+};
+
+typedef uint32_t KVMFRFrameScheduleFlags;
+
+/*
+ * Client presentation scheduling is expressed entirely as durations. Client
+ * and producer monotonic clocks have unrelated epochs and must never be
+ * compared directly.
+ */
+typedef struct KVMFRFrameSchedule
+{
+  KVMFRMessage            msg;
+  uint32_t                clientID;
+  uint32_t                generation;
+  KVMFRFrameScheduleFlags flags;
+  uint64_t                period;
+  uint64_t                targetSlack;
+  int64_t                 phaseError;
+  uint32_t                feedbackFrameSerial;
+  uint32_t                lease;
+  uint8_t                 reserved[16];
+}
+KVMFRFrameSchedule;
+
+#if defined(__cplusplus)
+static_assert(sizeof(KVMFRFrameSchedule) == 64,
+    "KVMFR frame schedule must fit in one LGMP control message");
+#elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(sizeof(KVMFRFrameSchedule) == 64,
+    "KVMFR frame schedule must fit in one LGMP control message");
+#endif
 
 #ifdef _MSC_VER
 #pragma warning(pop)

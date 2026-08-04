@@ -59,6 +59,7 @@ enum
 {
   LG_TRANSPORT_FEATURE_SET_CURSOR_POS = 0x1,
   LG_TRANSPORT_FEATURE_WINDOW_SIZE    = 0x2,
+  LG_TRANSPORT_FEATURE_FRAME_SCHEDULE = 0x4,
 };
 
 typedef uint32_t LG_TransportFeatureFlags;
@@ -133,6 +134,7 @@ typedef struct LG_TransportFrame
 {
   uint64_t serial;
   uint64_t timestamp;
+  uint32_t scheduleGeneration;
   LG_TransportFrameFlags flags;
   // Backend-owned immutable metadata, valid until releaseFrame.
   const LG_TransportFrameFormat * format;
@@ -176,8 +178,19 @@ typedef enum LG_TransportControlType
 {
   LG_TRANSPORT_CONTROL_SET_CURSOR_POS,
   LG_TRANSPORT_CONTROL_WINDOW_SIZE,
+  LG_TRANSPORT_CONTROL_FRAME_SCHEDULE,
 }
 LG_TransportControlType;
+
+enum
+{
+  LG_TRANSPORT_FRAME_SCHEDULE_ACTIVE    = 0x1,
+  LG_TRANSPORT_FRAME_SCHEDULE_RELEASE   = 0x2,
+  LG_TRANSPORT_FRAME_SCHEDULE_RESET     = 0x4,
+  LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE = 0x8,
+};
+
+typedef uint32_t LG_TransportFrameScheduleFlags;
 
 typedef struct LG_TransportControl
 {
@@ -186,6 +199,17 @@ typedef struct LG_TransportControl
   {
     struct { int32_t x, y; } cursorPos;
     struct { uint32_t width, height; } windowSize;
+    struct
+    {
+      uint32_t                       generation;
+      LG_TransportFrameScheduleFlags flags;
+      uint64_t                       period;
+      uint64_t                       targetSlack;
+      int64_t                        phaseError;
+      uint32_t                       feedbackFrameSerial;
+      uint32_t                       lease;
+    }
+    frameSchedule;
   };
 }
 LG_TransportControl;
