@@ -154,7 +154,9 @@ void debug_trace(const char * file, unsigned int line, const char * function,
   if (!(__VA_ARGS__)) \
   { \
     DEBUG_ASSERT_PRINT(__VA_ARGS__); \
+    DEBUG_PRINT_BACKTRACE(); \
     abort(); \
+    DEBUG_UNREACHABLE_MARKER(); \
   } \
 } while (0)
 

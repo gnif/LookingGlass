@@ -156,6 +156,10 @@ bool installCrashHandler(const char * exe, char * argv0)
   return true;
 }
 
+void printBacktrace(void)
+{
+}
+
 void printAllThreadBacktraces(void)
 {
 }
@@ -166,6 +170,10 @@ bool installCrashHandler(const char * exe, char * argv0)
   (void)exe;
   (void)argv0;
   return true;
+}
+
+void printBacktrace(void)
+{
 }
 
 void printAllThreadBacktraces(void)
