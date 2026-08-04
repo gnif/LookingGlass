@@ -233,13 +233,15 @@ static bool splash_tick(void * udata, unsigned long long tickCount)
     if (g_params.quickSplash)
     {
       l_fadeDone = true;
-      return true;
+      app_invalidateWindow(true);
+      return false;
     }
 
     l_alpha -= 1.0f / TICK_RATE;
     if (l_alpha <= 0.0f)
       l_fadeDone = true;
-    return true;
+    app_invalidateWindow(true);
+    return false;
   }
 
   return false;
@@ -261,4 +263,5 @@ void overlaySplash_show(bool show)
 
   l_show = show;
   app_invalidateOverlay(true);
+  app_invalidateWindow(true);
 }
