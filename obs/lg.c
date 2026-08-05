@@ -118,6 +118,8 @@ typedef struct
   bool                 dmabuf;
   bool                 dmabufTested;
   DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_BUFFER_LEN];
+  gs_texrender_t     * dmaCopyRender;
+  gs_samplerstate_t  * dmaCopySampler;
   gs_timer_t         * dmaCopyTimer;
 #endif
 
@@ -426,6 +428,18 @@ static void dmabufInvalidateTextures(LGPlugin * this)
 static void dmabufReset(LGPlugin * this)
 {
   dmabufInvalidateTextures(this);
+
+  if (this->dmaCopyRender)
+  {
+    gs_texrender_destroy(this->dmaCopyRender);
+    this->dmaCopyRender = NULL;
+  }
+
+  if (this->dmaCopySampler)
+  {
+    gs_samplerstate_destroy(this->dmaCopySampler);
+    this->dmaCopySampler = NULL;
+  }
 
   if (this->dmaCopyTimer)
   {
@@ -992,6 +1006,44 @@ static bool dmabufCreateTexture(LGPlugin * this, DMAFrameInfo * fi,
 
   return fi->texture != NULL;
 }
+
+static bool dmabufCopyTexture(LGPlugin * this, gs_texture_t * texture)
+{
+  gs_texrender_reset(this->dmaCopyRender);
+  if (!gs_texrender_begin(
+      this->dmaCopyRender, this->dataWidth, this->dataHeight))
+    return false;
+
+  gs_ortho(0.0f, (float)this->dataWidth,
+    0.0f, (float)this->dataHeight, -100.0f, 100.0f);
+
+  gs_effect_t * effect = obs_get_base_effect(OBS_EFFECT_DEFAULT);
+  gs_eparam_t * image  = effect ?
+    gs_effect_get_param_by_name(effect, "image") : NULL;
+  if (!image)
+  {
+    gs_texrender_end(this->dmaCopyRender);
+    return false;
+  }
+
+  /* EGLImages can use XRGB storage that is incompatible with GL copy-image.
+   * A render pass samples across that storage boundary while preserving the
+   * RGBA channels needed by the packed frame formats. */
+  const bool framebufferSRGB = gs_framebuffer_srgb_enabled();
+  gs_enable_framebuffer_srgb(false);
+  gs_effect_set_texture(image, texture);
+  gs_effect_set_next_sampler(image, this->dmaCopySampler);
+  gs_blend_state_push();
+  gs_enable_blending(false);
+  while (gs_effect_loop(effect, "Draw"))
+    gs_draw_sprite(texture, 0, this->dataWidth, this->dataHeight);
+  gs_effect_set_texture(image, NULL);
+  gs_blend_state_pop();
+  gs_enable_framebuffer_srgb(framebufferSRGB);
+
+  gs_texrender_end(this->dmaCopyRender);
+  return gs_texrender_get_texture(this->dmaCopyRender) != NULL;
+}
 #endif
 
 static bool mat3Inverse(const double m[9], double out[9])
@@ -1120,6 +1172,11 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
   obs_enter_graphics();
 #if LIBOBS_API_MAJOR_VER >= 27
   dmabufInvalidateTextures(this);
+  if (this->dmaCopyRender)
+  {
+    gs_texrender_destroy(this->dmaCopyRender);
+    this->dmaCopyRender = NULL;
+  }
 #endif
   if (this->unpack && this->dstTexture)
   {
@@ -1231,21 +1288,32 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
       puts("Failed to create DMA copy timer");
       this->dmabuf = false;
     }
+
+    if (this->dmabuf && !this->dmaCopySampler)
+    {
+      const struct gs_sampler_info samplerInfo =
+      {
+        .filter    = GS_FILTER_POINT,
+        .address_u = GS_ADDRESS_CLAMP,
+        .address_v = GS_ADDRESS_CLAMP,
+        .address_w = GS_ADDRESS_CLAMP,
+      };
+      this->dmaCopySampler = gs_samplerstate_create(&samplerInfo);
+      if (!this->dmaCopySampler)
+      {
+        puts("Failed to create DMA copy sampler");
+        this->dmabuf = false;
+      }
+    }
   }
 
   if (this->dmabuf)
   {
-    this->texture = gs_texture_create(
-      this->dataWidth,
-      this->dataHeight,
-      this->format,
-      1,
-      NULL,
-      0);
-
-    if (!this->texture)
+    this->dmaCopyRender =
+      gs_texrender_create(this->format, GS_ZS_NONE);
+    if (!this->dmaCopyRender)
     {
-      puts("Failed to create DMA copy texture");
+      puts("Failed to create DMA copy render target");
       this->dmabuf = false;
     }
   }
@@ -1500,10 +1568,11 @@ static void lgVideoTick(void * data, float seconds)
   this->frameSerial      = frame->frameSerial;
   this->frameSerialValid = true;
 
-  const bool textureValid = this->texture &&
-    (this->dmabuf ?
-      this->dmabufTested && this->dmaCopyTimer :
-      this->textureMapped);
+  const bool textureValid = this->dmabuf ?
+    this->dmabufTested && this->dmaCopyRender && this->dmaCopySampler &&
+      this->dmaCopyTimer &&
+      gs_texrender_get_texture(this->dmaCopyRender) :
+    this->texture && this->textureMapped;
   if (!textureValid || this->formatVer != frame->formatVer)
     lgFormatInit(this, frame, &frameMessage.msg, frameMessage.queue);
 
@@ -1536,7 +1605,7 @@ static void lgVideoTick(void * data, float seconds)
       obs_enter_graphics();
       uint64_t copyTime;
       gs_timer_begin(this->dmaCopyTimer);
-      gs_copy_texture(this->texture, fi->texture);
+      const bool copied = dmabufCopyTexture(this, fi->texture);
       gs_timer_end(this->dmaCopyTimer);
       if (!gs_timer_get_data(this->dmaCopyTimer, &copyTime))
       {
@@ -1548,12 +1617,18 @@ static void lgVideoTick(void * data, float seconds)
       }
       obs_leave_graphics();
 
-      lgmpClientMessageDone(frameMessage.queue);
-      os_sem_post(this->frameSem);
-      return;
+      if (copied)
+      {
+        lgmpClientMessageDone(frameMessage.queue);
+        os_sem_post(this->frameSem);
+        return;
+      }
+
+      importFailed = true;
     }
 
-    puts("Failed to create dmabuf texture, falling back to CPU upload");
+    puts("Failed to import or snapshot dmabuf texture, "
+      "falling back to CPU upload");
     this->dmabuf = false;
     lgFormatInit(this, frame, &frameMessage.msg, frameMessage.queue);
   }
@@ -1623,6 +1698,12 @@ static void lgVideoRender(void * data, gs_effect_t * effect)
 {
   LGPlugin * this = (LGPlugin *)data;
   gs_texture_t * texture = this->texture;
+
+#if LIBOBS_API_MAJOR_VER >= 27
+  if (this->dmabuf)
+    texture = this->dmaCopyRender ?
+      gs_texrender_get_texture(this->dmaCopyRender) : NULL;
+#endif
 
   if (!texture)
     return;
