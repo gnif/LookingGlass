@@ -111,9 +111,15 @@ private:
   std::atomic<LONG> m_publishedFrameIndex = -1;
   std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_BUFFER_LEN] = {};
   SRWLOCK           m_framePublishLock     = SRWLOCK_INIT;
-  bool              m_frameResendPending   = false;
   uint64_t          m_framePublishSequence = 0;
   uint64_t          m_frameLastPublishSequence[LGMP_Q_FRAME_BUFFER_LEN] = {};
+
+  enum SharedFramePostResult
+  {
+    SHARED_FRAME_FAILED,
+    SHARED_FRAME_IDLE,
+    SHARED_FRAME_POSTED,
+  };
 
   struct FrameDelivery
   {
@@ -122,7 +128,6 @@ private:
     uint32_t sharedOwnerClientID = 0;
     bool     sharedOwnerPending  = false;
     bool     sharedPending       = false;
-    bool     sharedDelivered     = false;
   };
 
   struct OwnerDelivery
@@ -185,7 +190,8 @@ private:
   int FindOwnerDelivery(uint32_t clientID) const;
   int FindSharedOwnerDelivery(uint32_t clientID) const;
   bool HasOwnerDelivery(uint32_t clientID) const;
-  bool PostSharedFrame(unsigned frameIndex, uint32_t excludeClientID);
+  SharedFramePostResult PostSharedFrame(unsigned frameIndex,
+    uint32_t excludeClientID, uint64_t now);
   bool PostSharedOwnerFrame(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule);
   void ResendCursor();
@@ -264,6 +270,8 @@ public:
     return m_publishedFrameIndex.load(std::memory_order_acquire) >= 0;
   }
   void ProcessFrameQueue();
+  bool GetSharedFrameTarget(uint64_t now, uint64_t& target);
+  bool ReplaySharedFrame(uint64_t now, bool& retry);
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule);

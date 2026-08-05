@@ -231,11 +231,15 @@ void CSwapChainProcessor::PublisherThread()
     m_devContext->GetPublishTarget(
       now, target, schedule, periodic, republish);
 
-    if (!HasReadyCandidate())
+    const bool ready = HasReadyCandidate();
+    if (!ready)
     {
+      m_devContext->ProcessFrameQueue();
+      if (HasReadyCandidate())
+        continue;
+
       if (republish && m_devContext->HasPublishedFrame())
       {
-        m_devContext->ProcessFrameQueue();
         if (m_devContext->RepublishFrameBuffer(schedule))
           continue;
 
@@ -247,10 +251,69 @@ void CSwapChainProcessor::PublisherThread()
         continue;
       }
 
+      const uint64_t replayNow = CFrameScheduler::Nanotime();
+      uint64_t       replayTarget;
+      if (m_devContext->GetSharedFrameTarget(replayNow, replayTarget))
+      {
+        bool retry = false;
+        if (replayTarget <= replayNow)
+        {
+          if (m_devContext->ReplaySharedFrame(replayNow, retry))
+            continue;
+          if (!retry)
+          {
+            if (m_publishTimer.Get())
+              CancelWaitableTimer(m_publishTimer.Get());
+            if (WaitForMultipleObjects(
+                  ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+                WAIT_OBJECT_0)
+              break;
+            continue;
+          }
+        }
+
+        const uint64_t delay = replayTarget > replayNow ?
+          replayTarget - replayNow : PUBLISH_RETRY_NS;
+        ArmPublishTimer(m_publishTimer.Get(), delay);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
       if (m_publishTimer.Get())
         CancelWaitableTimer(m_publishTimer.Get());
       if (WaitForMultipleObjects(
             ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+          WAIT_OBJECT_0)
+        break;
+      continue;
+    }
+
+    uint64_t replayTarget;
+    if (m_devContext->GetSharedFrameTarget(now, replayTarget) &&
+        replayTarget < target)
+    {
+      if (replayTarget <= now)
+      {
+        m_devContext->ProcessFrameQueue();
+        bool retry = false;
+        if (m_devContext->ReplaySharedFrame(
+              CFrameScheduler::Nanotime(), retry))
+          continue;
+
+        if (retry)
+          replayTarget = now + PUBLISH_RETRY_NS;
+        else
+          replayTarget = target;
+      }
+
+      const uint64_t delay = replayTarget > now ?
+        replayTarget - now : PUBLISH_RETRY_NS;
+      ArmPublishTimer(m_publishTimer.Get(), delay);
+      if (WaitForMultipleObjects(
+            ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
           WAIT_OBJECT_0)
         break;
       continue;
