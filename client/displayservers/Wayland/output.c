@@ -316,8 +316,9 @@ static void outputModeHandler(void * opaque, struct wl_output * wl_output, uint3
     return;
 
   struct WaylandOutput * node = opaque;
-  node->modeWidth  = width;
-  node->modeHeight = height;
+  node->modeWidth   = width;
+  node->modeHeight  = height;
+  node->modeRefresh = refresh;
 }
 
 static void outputDoneHandler(void * opaque, struct wl_output * output)
@@ -482,4 +483,28 @@ struct WaylandScale waylandOutputGetScale(struct wl_output * output)
     if (node->output == output)
       return node->scale;
   return waylandScaleFromInt(0);
+}
+
+bool waylandOutputGetFramePeriod(uint64_t * period)
+{
+  uint64_t fastest = 0;
+  struct SurfaceOutput * surfaceOutput;
+  wl_list_for_each(surfaceOutput, &wlWm.surfaceOutputs, link)
+  {
+    const struct WaylandOutput * output =
+      outputFind(surfaceOutput->output);
+    if (!output || output->modeRefresh <= 0)
+      continue;
+
+    const uint64_t candidate =
+      1000000000000ULL / (uint64_t)output->modeRefresh;
+    if (!fastest || candidate < fastest)
+      fastest = candidate;
+  }
+
+  if (!fastest)
+    return false;
+
+  *period = fastest;
+  return true;
 }

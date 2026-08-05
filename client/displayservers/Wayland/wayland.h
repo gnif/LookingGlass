@@ -78,6 +78,7 @@ struct WaylandOutput
   int32_t logicalHeight;
   int32_t modeWidth;
   int32_t modeHeight;
+  int32_t modeRefresh;
   bool    modeRotate;
   struct wl_output * output;
   struct zxdg_output_v1 * xdgOutput;
@@ -386,6 +387,7 @@ void waylandOutputFree(void);
 void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
 struct WaylandScale waylandOutputGetScale(struct wl_output * output);
+bool waylandOutputGetFramePeriod(uint64_t * period);
 void waylandOutputColorMgmtInit(struct WaylandOutput * output);
 void waylandOutputColorMgmtInitAll(void);
 void waylandOutputUpdateHDRWhiteLevel(void);
