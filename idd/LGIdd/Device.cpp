@@ -92,7 +92,7 @@ NTSTATUS LGIddAdapterInitFinished(IDDCX_ADAPTER adapter, const IDARG_IN_ADAPTER_
   }
 
   DEBUG_INFO("Adapter initialized, creating monitor");
-  wrapper->context->FinishInit(0);
+  wrapper->context->FinishAdapterInit(0);
   return STATUS_SUCCESS;
 }
 

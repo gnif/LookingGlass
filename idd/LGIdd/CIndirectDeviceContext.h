@@ -64,14 +64,16 @@ class CIndirectDeviceContext
 {
 private:
   WDFDEVICE     m_wdfDevice;
-  IDDCX_ADAPTER m_adapter       = nullptr;
-  IDDCX_MONITOR m_monitor       = nullptr;
-  bool          m_replugMonitor = false;
-  bool          m_replugPending = false;
-  bool          m_monitorDeparted = false;
-  bool          m_swapChainAssigned = false;
-  bool          m_swapChainReady = false;
-  bool          m_waitForSwapChainRelease = false;
+  IDDCX_ADAPTER m_adapter                    = nullptr;
+  IDDCX_MONITOR m_monitor                    = nullptr;
+  LUID          m_preferredRenderAdapter     = {};
+  bool          m_havePreferredRenderAdapter = false;
+  bool          m_replugMonitor              = false;
+  bool          m_replugPending              = false;
+  bool          m_monitorDeparted            = false;
+  bool          m_swapChainAssigned          = false;
+  bool          m_swapChainReady             = false;
+  bool          m_waitForSwapChainRelease    = false;
 
   // Guards the adapter/monitor init handshake and the replug state machine
   // (monitor/replug/swap-chain state, m_doSetMode, m_setMode). These are
@@ -227,6 +229,7 @@ public:
 
   bool PopulateDefaultModes();
   void InitAdapter();
+  void FinishAdapterInit(UINT connectorIndex);
   void FinishInit(UINT connectorIndex);
   void ReplugMonitor();
 

@@ -315,8 +315,8 @@ void CIndirectDeviceContext::InitAdapter()
   // Select the render adapter before advertising capabilities. If no hardware
   // adapter is available, this is a software-rendered display and must remain
   // SDR-only; the software path must never depend on compute processing.
-  bool havePreferredRenderAdapter = false;
-  LUID preferredRenderAdapter = {};
+  m_havePreferredRenderAdapter = false;
+  m_preferredRenderAdapter     = {};
   IDXGIFactory1 * factory = NULL;
   HRESULT factoryStatus = CreateDXGIFactory1(
     __uuidof(IDXGIFactory1), (void **)&factory);
@@ -362,15 +362,15 @@ void CIndirectDeviceContext::InitAdapter()
 
       DEBUG_INFO("Selected render adapter %ls (vendor 0x%04x, device 0x%04x)",
         adapterDesc.Description, adapterDesc.VendorId, adapterDesc.DeviceId);
-      preferredRenderAdapter = adapterDesc.AdapterLuid;
-      havePreferredRenderAdapter = true;
+      m_preferredRenderAdapter     = adapterDesc.AdapterLuid;
+      m_havePreferredRenderAdapter = true;
       break;
     }
 
     factory->Release();
   }
 
-  m_softwareMode = !havePreferredRenderAdapter;
+  m_softwareMode = !m_havePreferredRenderAdapter;
   if (m_softwareMode)
     DEBUG_INFO("No hardware render adapter available; using SDR software mode");
 
@@ -471,27 +471,32 @@ void CIndirectDeviceContext::InitAdapter()
     return;
   }
 
-  DEBUG_INFO("IddCxAdapterInitAsync started successfully (adapter %p)",
-    m_adapter);
-
-  // Try to co-exist with the virtual video device by telling IddCx which
-  // hardware adapter we prefer to render on.
-  if (havePreferredRenderAdapter)
-  {
-    IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
-    args.PreferredRenderAdapter = preferredRenderAdapter;
-    IddCxAdapterSetRenderAdapter(m_adapter, &args);
-    DEBUG_INFO("Preferred render adapter set");
-  }
-
   auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(m_adapter);
   wrapper->context = this;
+  DEBUG_INFO("IddCxAdapterInitAsync started successfully (adapter %p)",
+    m_adapter);
   DEBUG_INFO("Adapter context attached; waiting for initialization callback");
 
   // Adapter is up; no need to keep retrying.
   StopInitRetry();
   m_initInProgress.store(0);
   DEBUG_INFO("Adapter initialization request complete; returning to IddCx");
+}
+
+void CIndirectDeviceContext::FinishAdapterInit(UINT connectorIndex)
+{
+  // Try to co-exist with the virtual video device by telling IddCx which
+  // hardware adapter we prefer to render on. Do this only after the adapter
+  // has finished initializing, but before adding its monitor.
+  if (m_havePreferredRenderAdapter)
+  {
+    IDARG_IN_ADAPTERSETRENDERADAPTER args = {};
+    args.PreferredRenderAdapter = m_preferredRenderAdapter;
+    IddCxAdapterSetRenderAdapter(m_adapter, &args);
+    DEBUG_INFO("Preferred render adapter set");
+  }
+
+  FinishInit(connectorIndex);
 }
 
 void CIndirectDeviceContext::FinishInit(UINT connectorIndex)
