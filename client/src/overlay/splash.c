@@ -30,21 +30,32 @@
 #include "common/appstrings.h"
 #include "common/stringlist.h"
 #include "common/stringutils.h"
+#include "common/time.h"
 
 #include "resources/lg-logo.svg.h"
 
 #include <string.h>
 #include <math.h>
+#include <stdatomic.h>
 
-#define SEGMENTS 12
+#define SEGMENTS    12
+#define FADE_TIME_NS 1000000000ULL
 
-static bool         l_show;
-static bool         l_fadeDone;
-static float        l_alpha;
-static OverlayImage l_logo;
-static float        l_vectors[SEGMENTS][2];
-static StringList   l_tagline;
-static StringList   l_footline;
+enum SplashState
+{
+  SPLASH_VISIBLE,
+  SPLASH_FADING,
+  SPLASH_HIDDEN,
+};
+
+static _Atomic(bool)    l_requestedShow;
+static bool             l_appliedShow;
+static enum SplashState l_state;
+static uint64_t         l_fadeStart;
+static OverlayImage     l_logo;
+static float            l_vectors[SEGMENTS][2];
+static StringList       l_tagline;
+static StringList       l_footline;
 
 static void calcRadialVectors(float vectors[][2], int segments)
 {
@@ -87,9 +98,10 @@ static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
 
 static bool splash_init(void ** udata, const void * params)
 {
-  l_show     = true;
-  l_fadeDone = false;
-  l_alpha    = 1.0f;
+  atomic_store_explicit(&l_requestedShow, true, memory_order_relaxed);
+  l_appliedShow = true;
+  l_state       = SPLASH_VISIBLE;
+  l_fadeStart   = 0;
 
   overlayLoadSVG(b_lg_logo_svg, b_lg_logo_svg_size, &l_logo, 200, 200);
   calcRadialVectors(l_vectors, ARRAY_LENGTH(l_vectors));
@@ -155,10 +167,20 @@ static void renderText(ImDrawList * list, int x, int y, ImU32 color,
 static int splash_render(void * udata, bool interactive, struct Rect * windowRects,
     int maxRects)
 {
-  if (!l_show && l_fadeDone)
+  float alpha = 1.0f;
+  if (l_state == SPLASH_HIDDEN)
     return 0;
+  if (l_state == SPLASH_FADING)
+  {
+    const uint64_t elapsed = nanotime() - l_fadeStart;
+    if (elapsed >= FADE_TIME_NS)
+    {
+      l_state = SPLASH_HIDDEN;
+      return 0;
+    }
+    alpha -= (float)elapsed / (float)FADE_TIME_NS;
+  }
 
-  const float  alpha  = l_fadeDone ? 1.0f : l_alpha;
   ImVec2     * screen = overlayGetScreenSize();
   ImDrawList * list   = igGetBackgroundDrawList_Nil();
 
@@ -226,30 +248,36 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
   return 1;
 }
 
-static bool splash_tick(void * udata, unsigned long long tickCount)
+static bool splash_needsRender(void * udata, bool interactive)
 {
-  if (!l_show && !l_fadeDone)
-  {
-    if (g_params.quickSplash)
-    {
-      l_fadeDone = true;
-      app_invalidateWindow(true);
-      return false;
-    }
-
-    l_alpha -= 1.0f / TICK_RATE;
-    if (l_alpha <= 0.0f)
-      l_fadeDone = true;
-    app_invalidateWindow(true);
-    return false;
-  }
-
-  return false;
+  return l_state == SPLASH_FADING ||
+    atomic_load_explicit(&l_requestedShow, memory_order_acquire) !=
+      l_appliedShow;
 }
 
 static bool splash_needsFullRender(void * udata)
 {
-  return !l_show && !l_fadeDone;
+  const bool show =
+    atomic_load_explicit(&l_requestedShow, memory_order_acquire);
+  const bool changed = show != l_appliedShow;
+  if (changed)
+  {
+    l_appliedShow = show;
+    if (show)
+    {
+      l_state     = SPLASH_VISIBLE;
+      l_fadeStart = 0;
+    }
+    else if (g_params.quickSplash)
+      l_state = SPLASH_HIDDEN;
+    else
+    {
+      l_state     = SPLASH_FADING;
+      l_fadeStart = nanotime();
+    }
+  }
+
+  return changed || l_state == SPLASH_FADING;
 }
 
 struct LG_OverlayOps LGOverlaySplash =
@@ -257,17 +285,16 @@ struct LG_OverlayOps LGOverlaySplash =
   .name              = "splash",
   .init              = splash_init,
   .free              = splash_free,
+  .needs_render      = splash_needsRender,
   .needs_full_render = splash_needsFullRender,
   .render            = splash_render,
-  .tick              = splash_tick,
 };
 
 void overlaySplash_show(bool show)
 {
-  if (l_show == show)
+  if (atomic_exchange_explicit(
+        &l_requestedShow, show, memory_order_acq_rel) == show)
     return;
 
-  l_show = show;
-  app_invalidateOverlay(true);
   app_invalidateWindow(true);
 }

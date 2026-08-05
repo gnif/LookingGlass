@@ -630,9 +630,16 @@ static int renderThread(void * unused)
 
       const uint64_t pending       =
         atomic_load_explicit(&g_state.pendingCount, memory_order_acquire);
-      const bool     overlayRender = app_overlayNeedsRender() &&
-        (!g_state.lastRenderTimeValid ||
-         nanotime() - g_state.lastRenderTime >= g_state.overlayFrameTime);
+      const bool     overlayNeeded = app_overlayNeedsRender();
+      uint64_t       outputPeriod  = 0;
+      const bool     periodKnown   = overlayNeeded &&
+        g_state.ds->getFramePeriod &&
+        g_state.ds->getFramePeriod(&outputPeriod);
+      const uint64_t elapsed       = g_state.lastRenderTimeValid ?
+        nanotime() - g_state.lastRenderTime : 0;
+      const bool     overlayRender = overlayNeeded &&
+        (!g_state.lastRenderTimeValid || !periodKnown ||
+         elapsed + outputPeriod >= g_state.overlayFrameTime);
 
       if (!lgResetEvent(g_state.frameEvent)
           && !forceRender
@@ -690,10 +697,6 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    const bool invalidate =
-      atomic_exchange(&g_state.invalidateWindow, false) ||
-      app_overlayNeedsFullRender();
-
     const LG_RendererFrameToken frameTokenLimit = frameTimingQueuedToken();
     const uint64_t              prepareStart    = nanotime();
 
@@ -701,6 +704,10 @@ static int renderThread(void * unused)
 
     renderQueue_process();
 
+    const bool windowInvalid =
+      atomic_exchange(&g_state.invalidateWindow, false);
+    const bool overlayFull   = app_overlayNeedsFullRender();
+    const bool invalidate    = windowInvalid || overlayFull;
     const uint64_t prepareTime = nanotime() - prepareStart;
 
     LG_RendererFrameTiming rendererTiming = {};
@@ -728,7 +735,7 @@ static int renderThread(void * unused)
     {
       /* A frame-driven swap also satisfies the minimum render rate. */
       clock_gettime(CLOCK_MONOTONIC, &time);
-      tsAdd(&time, app_isOverlayMode() ?
+      tsAdd(&time, app_overlayNeedsRender() ?
           g_state.overlayFrameTime : g_state.frameTime);
     }
 
@@ -1114,16 +1121,19 @@ int main_frameThread(void * unused)
       if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
         atomic_fetch_add_explicit(&g_state.pendingCount, 1,
             memory_order_release);
+      overlaySplash_show(false);
     }
     else
+    {
+      overlaySplash_show(false);
       lgSignalEvent(g_state.frameEvent);
+    }
 
     LG_TransportFrameTiming timing = {};
     if (g_state.transportOps->getFrameTiming)
       g_state.transportOps->getFrameTiming(
           g_state.transport, &frame, &timing);
 
-    overlaySplash_show(false);
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
         g_params.requestActivation)
       g_state.ds->requestActivation();

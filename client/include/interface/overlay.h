@@ -41,7 +41,7 @@ struct LG_OverlayOps
   /* final free */
   void (*free)(void * udata);
 
-  /* return true if realtime rendering is required when in jitRender mode
+  /* return true if realtime rendering is required
    * optional, if omitted assumes false */
   bool (*needs_render)(void * udata, bool interactive);
 
