@@ -798,12 +798,48 @@ static FrameType GetFrameType(DXGI_FORMAT format)
   }
 }
 
+static void AccumulatePendingDamage(
+  RECT pendingDirtyRects[], unsigned * nbPendingDirtyRects,
+  bool * hasPendingDamage, const RECT dirtyRects[], unsigned nbDirtyRects)
+{
+  if (nbDirtyRects > LG_MAX_DIRTY_RECTS)
+    nbDirtyRects = 0;
+
+  if (!*hasPendingDamage)
+  {
+    *hasPendingDamage    = true;
+    *nbPendingDirtyRects = nbDirtyRects;
+    if (nbDirtyRects)
+      memcpy(pendingDirtyRects, dirtyRects,
+        nbDirtyRects * sizeof(*pendingDirtyRects));
+    return;
+  }
+
+  // Zero dirty rectangles represents full-frame damage. Once an accumulated
+  // set is full, no later rectangles can narrow that same set again.
+  if (*nbPendingDirtyRects == 0 || nbDirtyRects == 0 ||
+      *nbPendingDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
+  {
+    *nbPendingDirtyRects = 0;
+    return;
+  }
+
+  memcpy(pendingDirtyRects + *nbPendingDirtyRects, dirtyRects,
+    nbDirtyRects * sizeof(*pendingDirtyRects));
+  *nbPendingDirtyRects += nbDirtyRects;
+}
+
 void CSwapChainProcessor::SetFullPendingDamage()
 {
   AcquireSRWLockExclusive(&m_damageLock);
   m_hasPendingDamage    = true;
   m_nbPendingDirtyRects = 0;
-  ++m_damageGeneration;
+  for (CandidateDamageTail& tail : m_candidateDamageTail)
+    if (tail.active)
+    {
+      tail.hasDamage    = true;
+      tail.nbDirtyRects = 0;
+    }
   ReleaseSRWLockExclusive(&m_damageLock);
 }
 
@@ -811,40 +847,14 @@ void CSwapChainProcessor::AccumulateFrameDamage(
   const RECT * dirtyRects, unsigned nbDirtyRects)
 {
   AcquireSRWLockExclusive(&m_damageLock);
-  ++m_damageGeneration;
-  if (nbDirtyRects > LG_MAX_DIRTY_RECTS)
-    nbDirtyRects = 0;
-
-  if (!m_hasPendingDamage)
-  {
-    m_hasPendingDamage    = true;
-    m_nbPendingDirtyRects = nbDirtyRects;
-    if (nbDirtyRects)
-      memcpy(m_pendingDirtyRects, dirtyRects,
-        nbDirtyRects * sizeof(*m_pendingDirtyRects));
-    ReleaseSRWLockExclusive(&m_damageLock);
-    return;
-  }
-
-  // Zero dirty rectangles represents full-frame damage. Once any skipped
-  // frame requires a full update, no later rectangles can narrow it again.
-  if (m_nbPendingDirtyRects == 0 || nbDirtyRects == 0)
-  {
-    m_nbPendingDirtyRects = 0;
-    ReleaseSRWLockExclusive(&m_damageLock);
-    return;
-  }
-
-  if (m_nbPendingDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
-  {
-    m_nbPendingDirtyRects = 0;
-    ReleaseSRWLockExclusive(&m_damageLock);
-    return;
-  }
-
-  memcpy(m_pendingDirtyRects + m_nbPendingDirtyRects, dirtyRects,
-    nbDirtyRects * sizeof(*m_pendingDirtyRects));
-  m_nbPendingDirtyRects += nbDirtyRects;
+  AccumulatePendingDamage(
+    m_pendingDirtyRects, &m_nbPendingDirtyRects, &m_hasPendingDamage,
+    dirtyRects, nbDirtyRects);
+  for (CandidateDamageTail& tail : m_candidateDamageTail)
+    if (tail.active)
+      AccumulatePendingDamage(
+        tail.dirtyRects, &tail.nbDirtyRects, &tail.hasDamage,
+        dirtyRects, nbDirtyRects);
   ReleaseSRWLockExclusive(&m_damageLock);
 }
 
@@ -994,6 +1004,11 @@ void CSwapChainProcessor::ResetCandidates()
   for (FrameCandidate& candidate : m_candidates)
     candidate = {};
   ReleaseSRWLockExclusive(&m_candidateLock);
+
+  AcquireSRWLockExclusive(&m_damageLock);
+  for (CandidateDamageTail& tail : m_candidateDamageTail)
+    tail = {};
+  ReleaseSRWLockExclusive(&m_damageLock);
   SignalCandidateState();
 }
 
@@ -1057,8 +1072,9 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     return false;
   }
 
-  FrameCandidate& candidate = m_candidates[candidateIndex];
-  CPostProcessor& postProcessor = m_postProcessors[candidateIndex];
+  FrameCandidate& candidate        = m_candidates[candidateIndex];
+  CPostProcessor& postProcessor    = m_postProcessors[candidateIndex];
+  const uint64_t candidateSequence = candidate.sequence;
 
   auto buffer = m_devContext->PrepareFrameBuffer(
     candidate.pitch,
@@ -1194,10 +1210,16 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     memcpy(m_dirtyRects, candidate.dirtyRects,
       candidate.nbDirtyRects * sizeof(*m_dirtyRects));
   m_nbDirtyRects = candidate.nbDirtyRects;
-  if (candidate.damageGeneration == m_damageGeneration)
+  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
+  if (tail.active && tail.ownerSequence == candidateSequence)
   {
-    m_hasPendingDamage    = false;
-    m_nbPendingDirtyRects = 0;
+    m_hasPendingDamage    = tail.hasDamage;
+    m_nbPendingDirtyRects = tail.nbDirtyRects;
+    if (tail.hasDamage && tail.nbDirtyRects)
+      memcpy(m_pendingDirtyRects, tail.dirtyRects,
+        tail.nbDirtyRects * sizeof(*m_pendingDirtyRects));
+    tail.ownerSequence = 0;
+    tail.active        = false;
   }
   ReleaseSRWLockExclusive(&m_damageLock);
 
@@ -1545,6 +1567,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
   const unsigned candidateIndex =
     static_cast<unsigned>(selectedCandidate);
+  FrameCandidate& candidate = m_candidates[candidateIndex];
 
   CSRWExclusiveLock pipelineLock(&m_pipelineLock);
   CPostProcessor& postProcessor = m_postProcessors[candidateIndex];
@@ -1552,17 +1575,20 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
   unsigned nbDirtyRects                          = 0;
-  uint64_t damageGeneration                      = 0;
-  AcquireSRWLockShared(&m_damageLock);
+  AcquireSRWLockExclusive(&m_damageLock);
   if (m_hasPendingDamage)
   {
     nbDirtyRects = m_nbPendingDirtyRects;
     if (nbDirtyRects)
       memcpy(currentDirtyRects, m_pendingDirtyRects,
         nbDirtyRects * sizeof(*currentDirtyRects));
-    damageGeneration = m_damageGeneration;
   }
-  ReleaseSRWLockShared(&m_damageLock);
+  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
+  tail.ownerSequence = candidate.sequence;
+  tail.nbDirtyRects  = 0;
+  tail.hasDamage     = false;
+  tail.active        = true;
+  ReleaseSRWLockExclusive(&m_damageLock);
 
   CD3D12CommandSlot * copySlot =
     m_dx12Device->GetCopySlot(candidateIndex);
@@ -1651,13 +1677,11 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  FrameCandidate& candidate = m_candidates[candidateIndex];
   candidate.srcFormat         = srcFormat;
   candidate.dstFormat         = dstFormat;
   candidate.nbDirtyRects      = nbDirtyRects;
   candidate.pitch             = postProcessor.GetOutputPitch();
   candidate.frameSize         = postProcessor.GetOutputSize();
-  candidate.damageGeneration  = damageGeneration;
   candidate.captureTime       = captureTime;
   candidate.postProcessStart  = postProcessStart;
   candidate.prepareCopyStart  = CFrameScheduler::Nanotime();

@@ -75,7 +75,6 @@ private:
     unsigned               pitch             = 0;
     size_t                 frameSize         = 0;
     uint64_t               sequence          = 0;
-    uint64_t               damageGeneration  = 0;
     uint64_t               captureTime       = 0;
     uint64_t               postProcessStart  = 0;
     uint64_t               prepareCopyStart  = 0;
@@ -87,12 +86,22 @@ private:
     bool                   prepareTimingValid = false;
   };
 
-  FrameCandidate m_candidates[LGMP_Q_FRAME_LEN];
-  SRWLOCK        m_candidateLock    = SRWLOCK_INIT;
-  SRWLOCK        m_damageLock       = SRWLOCK_INIT;
-  SRWLOCK        m_pipelineLock     = SRWLOCK_INIT;
-  uint64_t       m_candidateSequence = 0;
-  uint64_t       m_damageGeneration  = 0;
+  struct CandidateDamageTail
+  {
+    uint64_t ownerSequence = 0;
+    RECT     dirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned nbDirtyRects  = 0;
+    bool     hasDamage     = false;
+    bool     active        = false;
+  };
+
+  // An active tail records only damage received after its candidate snapshot.
+  FrameCandidate      m_candidates[LGMP_Q_FRAME_LEN];
+  CandidateDamageTail m_candidateDamageTail[LGMP_Q_FRAME_LEN];
+  SRWLOCK             m_candidateLock     = SRWLOCK_INIT;
+  SRWLOCK             m_damageLock        = SRWLOCK_INIT;
+  SRWLOCK             m_pipelineLock      = SRWLOCK_INIT;
+  uint64_t            m_candidateSequence = 0;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
