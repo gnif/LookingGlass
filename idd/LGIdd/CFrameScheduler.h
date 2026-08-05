@@ -54,6 +54,7 @@ private:
   };
 
   mutable SRWLOCK m_lock = SRWLOCK_INIT;
+  HANDLE          m_wakeEvent = nullptr;
   Client          m_clients[LGMP_MAX_CLIENTS] = {};
   Schedule        m_schedule                  = {};
   bool            m_scheduling                = false;
@@ -61,11 +62,8 @@ private:
 
   uint64_t m_lastArrival    = 0;
   uint64_t m_guestPeriod    = 0;
-  uint64_t m_guestJitter    = 0;
   uint64_t m_workEstimate   = 0;
   uint64_t m_nextDeadline   = 0;
-  unsigned m_arrivalSamples = 0;
-  unsigned m_timingSamples  = 0;
 
   uint32_t m_lastPublishedFrameSerial = 0;
 
@@ -79,11 +77,15 @@ private:
   uint64_t m_lastLogPublished = 0;
 
   Client * FindClient(uint32_t clientID);
-  void ElectOwner(uint64_t now);
-  void ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
+  bool ElectOwner(uint64_t now);
+  bool ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
   void AdvanceDeadline(uint64_t now);
+  void WakePublisher() const;
 
 public:
+  CFrameScheduler();
+  ~CFrameScheduler();
+
   static uint64_t Nanotime();
 
   void Reset();
@@ -91,10 +93,14 @@ public:
     uint64_t now);
   bool UpdateSchedule(const KVMFRFrameSchedule& schedule, uint64_t now);
   bool GetSchedule(Schedule& schedule) const;
+  HANDLE GetWakeEvent() const { return m_wakeEvent; }
   void ObserveFrame(uint64_t now);
-  bool SelectFrame(uint64_t now, bool force, uint32_t& generation);
+  void ForceFrame();
+  bool GetPublishTarget(uint64_t now, uint64_t& target,
+    uint32_t& generation, bool& periodic);
+  void FrameSuperseded();
   void FramePublished(uint32_t generation, uint32_t frameSerial,
-    uint64_t now);
+    uint64_t now, bool periodic);
   void RecordFrameTiming(uint64_t duration);
   void LogStatistics(uint64_t now);
 };

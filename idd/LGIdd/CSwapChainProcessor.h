@@ -55,8 +55,50 @@ private:
   CFrameBufferPool     m_fbPool;
   CPostProcessor       m_postProcessors[LGMP_Q_FRAME_LEN];
 
-  Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[2];
+  enum CandidateState
+  {
+    CANDIDATE_FREE,
+    CANDIDATE_PREPARING,
+    CANDIDATE_READY,
+    CANDIDATE_PUBLISHING,
+    CANDIDATE_HELD,
+  };
+
+  struct FrameCandidate
+  {
+    CandidateState         state             = CANDIDATE_FREE;
+    ComPtr<ID3D12Resource> resource;
+    D12FrameFormat         srcFormat          = {};
+    D12FrameFormat         dstFormat          = {};
+    RECT                   dirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned               nbDirtyRects      = 0;
+    unsigned               pitch             = 0;
+    size_t                 frameSize         = 0;
+    uint64_t               sequence          = 0;
+    uint64_t               damageGeneration  = 0;
+    uint64_t               captureTime       = 0;
+    uint64_t               postProcessStart  = 0;
+    uint64_t               prepareCopyStart  = 0;
+    uint64_t               prepareReady      = 0;
+    uint64_t               prepareGPUStart   = 0;
+    uint64_t               prepareGPUEnd     = 0;
+    unsigned               timingEffectIndex = 0;
+    uint64_t               timingToken       = 0;
+    bool                   prepareTimingValid = false;
+  };
+
+  FrameCandidate m_candidates[LGMP_Q_FRAME_LEN];
+  SRWLOCK        m_candidateLock    = SRWLOCK_INIT;
+  SRWLOCK        m_damageLock       = SRWLOCK_INIT;
+  SRWLOCK        m_pipelineLock     = SRWLOCK_INIT;
+  uint64_t       m_candidateSequence = 0;
+  uint64_t       m_damageGeneration  = 0;
+
+  Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
+  Wrappers::Event m_candidateEvent;
+  Wrappers::Event m_candidateAvailableEvent;
+  Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_publishTimer;
 
   Wrappers::Event m_cursorDataEvent;
   BYTE*           m_shapeBuffer;
@@ -89,11 +131,25 @@ private:
   void SwapChainThread();
   bool SwapChainThreadCore();
 
+  static DWORD CALLBACK _PublisherThread(LPVOID arg);
+  void PublisherThread();
+  bool PublishNewestCandidate(
+    uint32_t scheduleGeneration, bool periodic, uint64_t publishStart);
+  bool HasReadyCandidate();
+  int AcquireCandidate();
+  void ReleaseCandidate(unsigned candidateIndex);
+  bool EnsureCandidateResource(unsigned candidateIndex,
+    ID3D12Resource * source);
+  void ResetCandidates();
+  void SignalCandidateState();
+
   static DWORD CALLBACK _CursorThread(LPVOID arg);
   bool QueryHWCursor();
   void CursorThread();
 
   static void CompletionFunction(
+    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
+  static void CandidateCompletionFunction(
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
   void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
   void SetFullPendingDamage();

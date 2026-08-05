@@ -30,6 +30,23 @@ static const uint64_t MIN_SAFETY_NS   = 250000ULL;
 static const uint64_t LOG_INTERVAL_NS = 5000000000ULL;
 static const uint64_t CADENCE_BREAK   = 4;
 
+CFrameScheduler::CFrameScheduler()
+{
+  m_wakeEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+}
+
+CFrameScheduler::~CFrameScheduler()
+{
+  if (m_wakeEvent)
+    CloseHandle(m_wakeEvent);
+}
+
+void CFrameScheduler::WakePublisher() const
+{
+  if (m_wakeEvent)
+    SetEvent(m_wakeEvent);
+}
+
 uint64_t CFrameScheduler::Nanotime()
 {
   static const uint64_t frequency = []()
@@ -58,7 +75,7 @@ CFrameScheduler::Client * CFrameScheduler::FindClient(uint32_t clientID)
   return nullptr;
 }
 
-void CFrameScheduler::ElectOwner(uint64_t now)
+bool CFrameScheduler::ElectOwner(uint64_t now)
 {
   Client * fastest     = nullptr;
   Client * incumbent   = FindClient(m_schedule.clientID);
@@ -91,6 +108,8 @@ void CFrameScheduler::ElectOwner(uint64_t now)
 
   const uint32_t oldClientID   = m_schedule.clientID;
   const uint32_t oldGeneration = m_schedule.generation;
+  const uint64_t oldPeriod     = m_schedule.period;
+  const uint64_t oldSlack      = m_schedule.targetSlack;
   if (!fastest)
   {
     m_schedule   = {};
@@ -125,6 +144,9 @@ void CFrameScheduler::ElectOwner(uint64_t now)
     else if (ownerChanged && oldClientID)
       DEBUG_INFO("Frame timing owner released; using push delivery");
   }
+
+  return ownerChanged || oldGeneration != m_schedule.generation ||
+    oldPeriod != m_schedule.period || oldSlack != m_schedule.targetSlack;
 }
 
 void CFrameScheduler::Reset()
@@ -138,11 +160,8 @@ void CFrameScheduler::Reset()
 
   m_lastArrival    = 0;
   m_guestPeriod    = 0;
-  m_guestJitter    = 0;
   m_workEstimate   = 0;
   m_nextDeadline   = 0;
-  m_arrivalSamples = 0;
-  m_timingSamples  = 0;
 
   m_lastPublishedFrameSerial = 0;
 
@@ -155,6 +174,7 @@ void CFrameScheduler::Reset()
   m_lastLogSkipped   = 0;
   m_lastLogPublished = 0;
   ReleaseSRWLockExclusive(&m_lock);
+  WakePublisher();
 }
 
 void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
@@ -185,8 +205,10 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
     if (client.clientID && !client.subscribed)
       client = {};
 
-  ElectOwner(now);
+  const bool changed = ElectOwner(now);
   ReleaseSRWLockExclusive(&m_lock);
+  if (changed)
+    WakePublisher();
 }
 
 bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
@@ -203,6 +225,7 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
 
   AcquireSRWLockExclusive(&m_lock);
   Client * client = FindClient(schedule.clientID);
+  bool wake = false;
 
   if (schedule.flags & KVMFR_FRAME_SCHEDULE_RELEASE)
   {
@@ -210,9 +233,11 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
     {
       client->active = false;
       client->expiry = 0;
-      ElectOwner(now);
+      wake = ElectOwner(now);
     }
     ReleaseSRWLockExclusive(&m_lock);
+    if (wake)
+      WakePublisher();
     return true;
   }
 
@@ -242,14 +267,19 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
   client->expiry      = now + static_cast<uint64_t>(schedule.lease) * 1000000;
   client->active      = true;
   if (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE)
+  {
     m_forceNext = true;
-  ElectOwner(now);
-  ApplyFeedback(*client, schedule);
+    wake        = true;
+  }
+  wake |= ElectOwner(now);
+  wake |= ApplyFeedback(*client, schedule);
   ReleaseSRWLockExclusive(&m_lock);
+  if (wake)
+    WakePublisher();
   return true;
 }
 
-void CFrameScheduler::ApplyFeedback(Client& client,
+bool CFrameScheduler::ApplyFeedback(Client& client,
   const KVMFRFrameSchedule& schedule)
 {
   if (!m_scheduling || client.clientID != m_schedule.clientID ||
@@ -261,7 +291,7 @@ void CFrameScheduler::ApplyFeedback(Client& client,
       !m_lastPublishedFrameSerial ||
       static_cast<int32_t>(schedule.feedbackFrameSerial -
         m_lastPublishedFrameSerial) > 0)
-    return;
+    return false;
 
   int64_t correction = schedule.phaseError / 4;
   const int64_t limit = static_cast<int64_t>(m_schedule.period / 4);
@@ -280,6 +310,7 @@ void CFrameScheduler::ApplyFeedback(Client& client,
   }
   m_lastPhaseError = schedule.phaseError;
   client.lastFeedbackFrameSerial = schedule.feedbackFrameSerial;
+  return correction != 0;
 }
 
 void CFrameScheduler::AdvanceDeadline(uint64_t now)
@@ -311,35 +342,35 @@ void CFrameScheduler::ObserveFrame(uint64_t now)
     const uint64_t interval = now - m_lastArrival;
     if (m_guestPeriod && interval > m_guestPeriod * CADENCE_BREAK)
     {
-      m_guestPeriod    = 0;
-      m_guestJitter    = 0;
-      m_arrivalSamples = 0;
-      m_forceNext      = true;
+      m_guestPeriod = 0;
+      m_forceNext   = true;
     }
     else if (interval >= MIN_PERIOD_NS && interval <= MAX_PERIOD_NS)
     {
       if (!m_guestPeriod)
         m_guestPeriod = interval;
       else
-      {
-        const uint64_t error = m_guestPeriod > interval ?
-          m_guestPeriod - interval : interval - m_guestPeriod;
         m_guestPeriod = (m_guestPeriod * 7 + interval) / 8;
-        m_guestJitter = (m_guestJitter * 7 + error) / 8;
-      }
-
-      if (m_arrivalSamples < 32)
-        ++m_arrivalSamples;
     }
   }
   m_lastArrival = now;
   ReleaseSRWLockExclusive(&m_lock);
 }
 
-bool CFrameScheduler::SelectFrame(uint64_t now, bool force,
-  uint32_t& generation)
+void CFrameScheduler::ForceFrame()
 {
+  AcquireSRWLockExclusive(&m_lock);
+  m_forceNext = true;
+  ReleaseSRWLockExclusive(&m_lock);
+  WakePublisher();
+}
+
+bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
+  uint32_t& generation, bool& periodic)
+{
+  target     = now;
   generation = 0;
+  periodic   = false;
   AcquireSRWLockExclusive(&m_lock);
   if (!m_scheduling)
   {
@@ -348,31 +379,41 @@ bool CFrameScheduler::SelectFrame(uint64_t now, bool force,
   }
 
   generation = m_schedule.generation;
-  AdvanceDeadline(now);
 
-  if (force)
-    m_forceNext = true;
+  if (m_forceNext)
+  {
+    periodic = m_nextDeadline <= now;
+    ReleaseSRWLockExclusive(&m_lock);
+    return true;
+  }
 
-  if (m_forceNext || m_arrivalSamples < 4 || m_timingSamples < 4)
+  periodic = true;
+  if (m_nextDeadline <= now)
   {
     ReleaseSRWLockExclusive(&m_lock);
     return true;
   }
 
   const uint64_t safety =
-    max(MIN_SAFETY_NS,
-      max(m_guestJitter * 2, m_workEstimate / 8));
-  const uint64_t nextArrival = m_lastArrival + m_guestPeriod;
-  const bool process = nextArrival <= now ||
-    nextArrival + m_workEstimate + safety > m_nextDeadline;
-  if (!process)
-    ++m_skippedFrames;
+    max(MIN_SAFETY_NS, m_workEstimate / 8);
+  const uint64_t lead =
+    m_schedule.targetSlack + m_workEstimate + safety;
+  target = m_nextDeadline > lead ? m_nextDeadline - lead : now;
+  if (target < now)
+    target = now;
   ReleaseSRWLockExclusive(&m_lock);
-  return process;
+  return true;
+}
+
+void CFrameScheduler::FrameSuperseded()
+{
+  AcquireSRWLockExclusive(&m_lock);
+  ++m_skippedFrames;
+  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CFrameScheduler::FramePublished(uint32_t generation,
-  uint32_t frameSerial, uint64_t now)
+  uint32_t frameSerial, uint64_t now, bool periodic)
 {
   AcquireSRWLockExclusive(&m_lock);
   if (m_scheduling && generation == m_schedule.generation)
@@ -380,8 +421,11 @@ void CFrameScheduler::FramePublished(uint32_t generation,
     m_forceNext = false;
     m_lastPublishedFrameSerial = frameSerial;
     ++m_publishedFrames;
-    m_nextDeadline += m_schedule.period;
-    AdvanceDeadline(now);
+    if (periodic)
+    {
+      m_nextDeadline += m_schedule.period;
+      AdvanceDeadline(now);
+    }
   }
   ReleaseSRWLockExclusive(&m_lock);
 }
@@ -428,7 +472,5 @@ void CFrameScheduler::RecordFrameTiming(uint64_t duration)
   else
     m_workEstimate = (m_workEstimate * 31 + duration) / 32;
 
-  if (m_timingSamples < 32)
-    ++m_timingSamples;
   ReleaseSRWLockExclusive(&m_lock);
 }

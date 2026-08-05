@@ -43,6 +43,7 @@ class CFrameBufferResource
     unsigned               m_timingEffectIndex = 0;
     uint64_t               m_timingToken       = 0;
     bool                   m_fullCopy          = false;
+    unsigned               m_candidateIndex    = 0;
     ComPtr<ID3D12Resource> m_res;
     void                 * m_map               = nullptr;
 
@@ -75,6 +76,8 @@ class CFrameBufferResource
     unsigned GetTimingEffectIndex() const { return m_timingEffectIndex; }
     uint64_t GetTimingToken      () const { return m_timingToken;       }
     bool     IsFullCopy          () const { return m_fullCopy;          }
+    void     SetCandidateIndex(unsigned index) { m_candidateIndex = index; }
+    unsigned GetCandidateIndex() const         { return m_candidateIndex; }
 
     ComPtr<ID3D12Resource> Get() { return m_res; }
 };

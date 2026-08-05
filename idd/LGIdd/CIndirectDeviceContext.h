@@ -86,9 +86,10 @@ private:
 
   CIVSHMEM m_ivshmem;
 
-  PLGMPHost      m_lgmp       = nullptr;
-  WDFTIMER       m_lgmpTimer  = nullptr;
-  PLGMPHostQueue m_frameQueue = nullptr;
+  PLGMPHost      m_lgmp            = nullptr;
+  WDFTIMER       m_lgmpTimer       = nullptr;
+  PLGMPHostQueue m_frameQueue      = nullptr;
+  SRWLOCK        m_lgmpProcessLock = SRWLOCK_INIT;
 
   CFrameScheduler m_frameScheduler;
 
@@ -224,8 +225,11 @@ public:
   };
 
   bool FrameBufferAvailable() const;
+  void ProcessFrameQueue();
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
   bool PublishFrameBuffer(unsigned frameIndex, uint32_t scheduleGeneration);
+  void CommitFrameBuffer(unsigned frameIndex, uint32_t scheduleGeneration,
+    bool periodic);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
   void CompleteFrameBuffer(unsigned frameIndex);
@@ -235,7 +239,14 @@ public:
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 
   void ObserveFrame(uint64_t now);
-  bool SelectFrame(uint64_t now, bool force, uint32_t& generation);
+  void ForceFrame();
+  bool GetPublishTarget(uint64_t now, uint64_t& target,
+    uint32_t& generation, bool& periodic);
+  void FrameSuperseded();
+  HANDLE GetFrameScheduleEvent() const
+  {
+    return m_frameScheduler.GetWakeEvent();
+  }
   void RecordFrameTiming(uint64_t duration);
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data,

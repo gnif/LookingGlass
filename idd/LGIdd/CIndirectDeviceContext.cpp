@@ -1246,7 +1246,10 @@ void CIndirectDeviceContext::LGMPTimer()
   }
 
   LGMP_STATUS status;
-  if ((status = lgmpHostProcess(m_lgmp)) != LGMP_OK)
+  AcquireSRWLockExclusive(&m_lgmpProcessLock);
+  status = lgmpHostProcess(m_lgmp);
+  ReleaseSRWLockExclusive(&m_lgmpProcessLock);
+  if (status != LGMP_OK)
   {
     if (status == LGMP_ERR_CORRUPTED)
     {
@@ -1346,6 +1349,19 @@ bool CIndirectDeviceContext::FrameBufferAvailable() const
     static_cast<unsigned>(publishedFrameIndex + 1) % LGMP_Q_FRAME_LEN;
 
   return !m_frameInFlight[frameIndex].load(std::memory_order_acquire);
+}
+
+void CIndirectDeviceContext::ProcessFrameQueue()
+{
+  if (!m_lgmp)
+    return;
+
+  AcquireSRWLockExclusive(&m_lgmpProcessLock);
+  const LGMP_STATUS status = lgmpHostProcess(m_lgmp);
+  ReleaseSRWLockExclusive(&m_lgmpProcessLock);
+
+  if (status != LGMP_OK && status != LGMP_ERR_CORRUPTED)
+    DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
@@ -1524,11 +1540,6 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
   }
   ReleaseSRWLockExclusive(&m_framePublishLock);
 
-  if (status == LGMP_OK)
-    m_frameScheduler.FramePublished(
-      scheduleGeneration, m_frame[frameIndex]->frameSerial,
-      CFrameScheduler::Nanotime());
-
   if (status != LGMP_OK)
   {
     DEBUG_ERROR("Failed to publish frame: %s", lgmpStatusString(status));
@@ -1538,15 +1549,37 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
   return true;
 }
 
+void CIndirectDeviceContext::CommitFrameBuffer(unsigned frameIndex,
+  uint32_t scheduleGeneration, bool periodic)
+{
+  if (frameIndex >= LGMP_Q_FRAME_LEN)
+    return;
+
+  m_frameScheduler.FramePublished(
+    scheduleGeneration, m_frame[frameIndex]->frameSerial,
+    CFrameScheduler::Nanotime(), periodic);
+}
+
 void CIndirectDeviceContext::ObserveFrame(uint64_t now)
 {
   m_frameScheduler.ObserveFrame(now);
 }
 
-bool CIndirectDeviceContext::SelectFrame(uint64_t now, bool force,
-  uint32_t& generation)
+void CIndirectDeviceContext::ForceFrame()
 {
-  return m_frameScheduler.SelectFrame(now, force, generation);
+  m_frameScheduler.ForceFrame();
+}
+
+bool CIndirectDeviceContext::GetPublishTarget(uint64_t now,
+  uint64_t& target, uint32_t& generation, bool& periodic)
+{
+  return m_frameScheduler.GetPublishTarget(
+    now, target, generation, periodic);
+}
+
+void CIndirectDeviceContext::FrameSuperseded()
+{
+  m_frameScheduler.FrameSuperseded();
 }
 
 void CIndirectDeviceContext::RecordFrameTiming(uint64_t duration)
