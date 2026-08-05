@@ -1030,6 +1030,27 @@ bool app_overlayNeedsRender(void)
   return result;
 }
 
+bool app_overlayNeedsFullRender(void)
+{
+  bool result = false;
+  struct Overlay * overlay;
+  ll_lock(g_state.overlays);
+  ll_forEachNL(g_state.overlays, item, overlay)
+  {
+    if (!overlay->ops->needs_full_render)
+      continue;
+
+    if (overlay->ops->needs_full_render(overlay->udata))
+    {
+      result = true;
+      break;
+    }
+  }
+  ll_unlock(g_state.overlays);
+
+  return result;
+}
+
 int app_renderOverlay(struct Rect * rects, int maxRects)
 {
   int  totalRects  = 0;

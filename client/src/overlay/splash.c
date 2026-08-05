@@ -247,13 +247,19 @@ static bool splash_tick(void * udata, unsigned long long tickCount)
   return false;
 }
 
+static bool splash_needsFullRender(void * udata)
+{
+  return !l_show && !l_fadeDone;
+}
+
 struct LG_OverlayOps LGOverlaySplash =
 {
-  .name   = "splash",
-  .init   = splash_init,
-  .free   = splash_free,
-  .render = splash_render,
-  .tick   = splash_tick,
+  .name              = "splash",
+  .init              = splash_init,
+  .free              = splash_free,
+  .needs_full_render = splash_needsFullRender,
+  .render            = splash_render,
+  .tick              = splash_tick,
 };
 
 void overlaySplash_show(bool show)

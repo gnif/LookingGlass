@@ -45,6 +45,10 @@ struct LG_OverlayOps
    * optional, if omitted assumes false */
   bool (*needs_render)(void * udata, bool interactive);
 
+  /* return true if the overlay must be drawn over a fully restored frame
+   * optional, if omitted assumes false */
+  bool (*needs_full_render)(void * udata);
+
   /* return true if the overlay currently requires overlay mode
    * optional, if omitted assumes false */
   bool (*needs_overlay)(void * udata);

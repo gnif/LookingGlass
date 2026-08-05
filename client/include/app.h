@@ -114,6 +114,7 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params);
 void app_initOverlays(void);
 void app_setOverlay(bool enable);
 bool app_overlayNeedsRender(void);
+bool app_overlayNeedsFullRender(void);
 /**
  * render the overlay
  * returns:

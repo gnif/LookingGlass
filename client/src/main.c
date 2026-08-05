@@ -695,7 +695,9 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    const bool invalidate = atomic_exchange(&g_state.invalidateWindow, false);
+    const bool invalidate =
+      atomic_exchange(&g_state.invalidateWindow, false) ||
+      app_overlayNeedsFullRender();
 
     const LG_RendererFrameToken frameTokenLimit = frameTimingQueuedToken();
     const uint64_t              prepareStart    = nanotime();
