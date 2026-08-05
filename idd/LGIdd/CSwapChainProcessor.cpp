@@ -552,6 +552,7 @@ void CSwapChainProcessor::CandidateCompletionFunction(
   uint64_t gpuEnd   = 0;
   const bool timingValid = result && slot->GetGPUTimes(gpuStart, gpuEnd);
 
+  bool forceFrame = false;
   AcquireSRWLockExclusive(&sc->m_candidateLock);
   if (candidate->state == CANDIDATE_PREPARING)
   {
@@ -559,7 +560,9 @@ void CSwapChainProcessor::CandidateCompletionFunction(
     candidate->prepareGPUStart    = gpuStart;
     candidate->prepareGPUEnd      = gpuEnd;
     candidate->prepareTimingValid = timingValid;
-    candidate->state = result ? CANDIDATE_READY : CANDIDATE_FREE;
+    candidate->state              =
+      result ? CANDIDATE_READY : CANDIDATE_FREE;
+    forceFrame = result && candidate->timingToken != 0;
   }
   ReleaseSRWLockExclusive(&sc->m_candidateLock);
 
@@ -568,6 +571,8 @@ void CSwapChainProcessor::CandidateCompletionFunction(
     sc->SetFullPendingDamage();
     sc->m_devContext->ForceFrame();
   }
+  else if (forceFrame)
+    sc->m_devContext->ForceFrame();
   sc->SignalCandidateState();
 }
 
@@ -604,12 +609,18 @@ void CSwapChainProcessor::CompletionFunction(
   ReleaseSRWLockShared(&sc->m_candidateLock);
 
   const uint64_t publishStart = fbRes->GetCopyStart();
-  uint64_t       gpuCopyStart = 0;
-  uint64_t       gpuCopyEnd   = 0;
-
+  uint64_t       gpuCopyStart     = 0;
+  uint64_t       gpuCopyEnd       = 0;
+  uint64_t       indirectCopyTime = 0;
   if (sc->m_dx12Device->IsIndirectCopy())
+  {
+    // GPU timestamps end at the readback copy. Include the following CPU copy
+    // to IVSHMEM in effect benchmark samples without charging it to Ready.
+    const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
     sc->m_devContext->WriteFrameBuffer(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
+    indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
+  }
 
   // Queue waits execute before the start timestamp. The end timestamp follows
   // the last copy command, separating GPU work from readiness dispatch.
@@ -634,7 +645,7 @@ void CSwapChainProcessor::CompletionFunction(
   uint64_t publishCopyTime = readyEnd - publishStart;
   if (gpuTimingValid && gpuCopyStart >= publishStart &&
       gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= readyEnd)
-    publishCopyTime = gpuCopyEnd - gpuCopyStart;
+    publishCopyTime = gpuCopyEnd - gpuCopyStart + indirectCopyTime;
 
   const uint64_t copyTime = prepareCopyTime + publishCopyTime;
   const uint64_t elapsed  = readyEnd - postProcessStart;
@@ -837,7 +848,7 @@ void CSwapChainProcessor::AccumulateFrameDamage(
   ReleaseSRWLockExclusive(&m_damageLock);
 }
 
-int CSwapChainProcessor::AcquireCandidate()
+int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
 {
   HANDLE waitHandles[] =
   {
@@ -850,21 +861,28 @@ int CSwapChainProcessor::AcquireCandidate()
     int      selected   = -1;
     uint64_t oldest     = UINT64_MAX;
     bool     superseded = false;
+    bool     idle       = true;
 
     AcquireSRWLockExclusive(&m_candidateLock);
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-      if (m_candidates[i].state == CANDIDATE_FREE)
+      if (m_candidates[i].state != CANDIDATE_FREE)
+        idle = false;
+      else if (selected < 0)
       {
         selected = static_cast<int>(i);
-        break;
       }
+
+    // Effect timing samples must not queue behind work which can later be
+    // superseded, otherwise that discarded work contaminates the sample.
+    if (exclusiveSample && !idle)
+      selected = -1;
 
     unsigned readyCount = 0;
     for (const FrameCandidate& candidate : m_candidates)
       if (candidate.state == CANDIDATE_READY)
         ++readyCount;
 
-    if (selected < 0 && readyCount > 1)
+    if (!exclusiveSample && selected < 0 && readyCount > 1)
       for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
         if (m_candidates[i].state == CANDIDATE_READY &&
             m_candidates[i].sequence < oldest)
@@ -1428,6 +1446,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   bool needsReconfigure         = false;
   bool postProcessFormatChanged = false;
   bool requiresFullDamage       = false;
+  unsigned timingEffectIndex    = 0;
+  uint64_t timingToken          = 0;
   {
     CSRWExclusiveLock pipelineLock(&m_pipelineLock);
     m_postProcessors[0].Update(srcFormat);
@@ -1500,6 +1520,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     requiresFullDamage = m_postProcessors[0].RequiresFullDamage();
     if (requiresFullDamage)
       SetFullPendingDamage();
+
+    m_postProcessors[0].GetTimingToken(
+      &timingEffectIndex, &timingToken);
   }
 
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)
@@ -1514,7 +1537,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       return true;
   }
 
-  const int selectedCandidate = AcquireCandidate();
+  const int selectedCandidate = AcquireCandidate(timingToken != 0);
   if (selectedCandidate < 0)
   {
     m_devContext->FrameSuperseded();
@@ -1645,8 +1668,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (nbDirtyRects)
     memcpy(candidate.dirtyRects, currentDirtyRects,
       nbDirtyRects * sizeof(*candidate.dirtyRects));
-  postProcessor.GetTimingToken(
-    &candidate.timingEffectIndex, &candidate.timingToken);
+  candidate.timingEffectIndex = timingEffectIndex;
+  candidate.timingToken       = timingToken;
 
   copySlot->SetCompletionCallback(
     &CandidateCompletionFunction, this, &candidate);

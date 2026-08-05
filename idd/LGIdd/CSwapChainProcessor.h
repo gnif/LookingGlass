@@ -137,7 +137,7 @@ private:
     const CFrameScheduler::Schedule& schedule, bool periodic,
     uint64_t publishStart);
   bool HasReadyCandidate();
-  int AcquireCandidate();
+  int AcquireCandidate(bool exclusiveSample);
   void ReleaseCandidate(unsigned candidateIndex);
   bool EnsureCandidateResource(unsigned candidateIndex,
     ID3D12Resource * source);
