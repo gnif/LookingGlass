@@ -970,14 +970,23 @@ static bool ResourceDescMatches(
 }
 
 bool CSwapChainProcessor::EnsureCandidateResource(
-  unsigned candidateIndex, ID3D12Resource * source)
+  unsigned candidateIndex, size_t frameSize)
 {
   FrameCandidate& candidate = m_candidates[candidateIndex];
-  D3D12_RESOURCE_DESC desc  = source->GetDesc();
-  desc.Alignment = 0;
-  desc.Flags     = static_cast<D3D12_RESOURCE_FLAGS>(
-    static_cast<UINT>(desc.Flags) &
-      ~static_cast<UINT>(D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER));
+
+  // Keep the transport layout in local GPU memory so publication does not
+  // combine texture detiling with the IVSHMEM or readback transfer.
+  D3D12_RESOURCE_DESC desc = {};
+  desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
+  desc.Width              = frameSize;
+  desc.Height             = 1;
+  desc.DepthOrArraySize   = 1;
+  desc.MipLevels          = 1;
+  desc.Format             = DXGI_FORMAT_UNKNOWN;
+  desc.SampleDesc.Count   = 1;
+  desc.SampleDesc.Quality = 0;
+  desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
 
   if (candidate.resource &&
       ResourceDescMatches(candidate.resource->GetDesc(), desc))
@@ -1178,7 +1187,7 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
 
   copySlot->BeginTiming();
-  postProcessor.CopyFrame(
+  postProcessor.CopyFromCandidate(
     copySlot->GetGfxList(), fbRes->Get().Get(), candidate.resource.Get(),
     copyDirtyRects, nbCopyDirtyRects, fullCopy);
   copySlot->EndTiming();
@@ -1682,7 +1691,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
     dstFormat.width, dstFormat.height);
 
-  if (!EnsureCandidateResource(candidateIndex, copySrcResource.Get()))
+  const size_t frameSize = postProcessor.GetOutputSize();
+  if (!EnsureCandidateResource(candidateIndex, frameSize))
   {
     copySlot->Cancel();
     if (computeSlot)
@@ -1696,7 +1706,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   candidate.dstFormat          = dstFormat;
   candidate.nbDirtyRects       = nbDirtyRects;
   candidate.pitch              = postProcessor.GetOutputPitch();
-  candidate.frameSize          = postProcessor.GetOutputSize();
+  candidate.frameSize          = frameSize;
   candidate.captureTime        = captureTime;
   candidate.postProcessStart   = postProcessStart;
   candidate.prepareCopyStart   = CFrameScheduler::Nanotime();
@@ -1714,26 +1724,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   copySlot->SetCompletionCallback(
     &CandidateCompletionFunction, this, &candidate);
   copySlot->BeginTiming();
-  const D3D12_RESOURCE_DESC copySrcDesc = copySrcResource->GetDesc();
-  if (copySrcDesc.Dimension == D3D12_RESOURCE_DIMENSION_BUFFER)
-    copySlot->GetGfxList()->CopyBufferRegion(
-      candidate.resource.Get(), 0, copySrcResource.Get(), 0,
-      copySrcDesc.Width);
-  else
-  {
-    D3D12_TEXTURE_COPY_LOCATION srcLocation = {};
-    srcLocation.pResource        = copySrcResource.Get();
-    srcLocation.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    srcLocation.SubresourceIndex = 0;
-
-    D3D12_TEXTURE_COPY_LOCATION dstLocation = {};
-    dstLocation.pResource        = candidate.resource.Get();
-    dstLocation.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
-    dstLocation.SubresourceIndex = 0;
-
-    copySlot->GetGfxList()->CopyTextureRegion(
-      &dstLocation, 0, 0, 0, &srcLocation, nullptr);
-  }
+  postProcessor.CopyToCandidate(
+    copySlot->GetGfxList(), candidate.resource.Get(),
+    copySrcResource.Get());
   copySlot->EndTiming();
 
   if (!copySlot->Execute())

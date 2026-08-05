@@ -351,15 +351,14 @@ bool CPostProcessor::ShouldCopyFully(
     m_copyEffect->ShouldCopyFully(dirtyRects, nbDirtyRects);
 }
 
-void CPostProcessor::CopyFrame(
+void CPostProcessor::CopyToCandidate(
   const ComPtr<ID3D12GraphicsCommandList>& commandList,
-  ID3D12Resource * dst, ID3D12Resource * src,
-  const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const
+  ID3D12Resource * dst, ID3D12Resource * src) const
 {
   if (m_copyEffect)
   {
     m_copyEffect->CopyFrame(
-      commandList, dst, src, dirtyRects, nbDirtyRects, fullCopy);
+      commandList, dst, src, nullptr, 0, true);
     return;
   }
 
@@ -373,10 +372,36 @@ void CPostProcessor::CopyFrame(
   dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
   dstLoc.PlacedFootprint = m_copyLayout;
 
+  commandList->CopyTextureRegion(
+    &dstLoc, 0, 0, 0, &srcLoc, nullptr);
+}
+
+void CPostProcessor::CopyFromCandidate(
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  ID3D12Resource * dst, ID3D12Resource * src,
+  const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const
+{
+  if (m_copyEffect)
+  {
+    m_copyEffect->CopyFrame(
+      commandList, dst, src, dirtyRects, nbDirtyRects, fullCopy);
+    return;
+  }
+
+  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
+  srcLoc.pResource       = src;
+  srcLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  srcLoc.PlacedFootprint = m_copyLayout;
+
+  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
+  dstLoc.pResource       = dst;
+  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+  dstLoc.PlacedFootprint = m_copyLayout;
+
   if (fullCopy)
   {
-    commandList->CopyTextureRegion(
-      &dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    commandList->CopyBufferRegion(
+      dst, 0, src, 0, m_frameSize);
     return;
   }
 

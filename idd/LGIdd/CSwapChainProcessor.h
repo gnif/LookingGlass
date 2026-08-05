@@ -149,8 +149,8 @@ private:
   bool HasReadyCandidate();
   int AcquireCandidate(bool exclusiveSample);
   void ReleaseCandidate(unsigned candidateIndex);
-  bool EnsureCandidateResource(unsigned candidateIndex,
-    ID3D12Resource * source);
+  bool EnsureCandidateResource(
+    unsigned candidateIndex, size_t frameSize);
   void ResetCandidates();
   void SignalCandidateState();
 
