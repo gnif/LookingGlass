@@ -505,15 +505,22 @@ static void * frameThread(void * data)
       }
     }
 
-    const uint64_t now = os_gettime_ns();
+    uint64_t now = os_gettime_ns();
     if (status == LGMP_OK)
     {
       LGMPMessage msg;
       if (lgmpClientProcess(this->frameQueue, &msg) == LGMP_OK)
       {
-        const KVMFRFrame * frame = (const KVMFRFrame *)msg.mem;
-        lgFrameSchedulerObserveFrame(&this->frameScheduler,
-          frame->frameSerial, msg.udata, now);
+        const KVMFRFrame  * frame = (const KVMFRFrame *)msg.mem;
+        const FrameBuffer * fb =
+          (const FrameBuffer *)((const uint8_t *)frame + frame->offset);
+        if (framebuffer_wait(
+              fb, (size_t)frame->dataHeight * frame->pitch))
+        {
+          now = os_gettime_ns();
+          lgFrameSchedulerObserveFrame(&this->frameScheduler,
+            frame->frameSerial, msg.udata, now);
+        }
       }
     }
 
@@ -1287,8 +1294,6 @@ static void lgVideoTick(void * data, float seconds)
   }
 
   const KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
-  lgFrameSchedulerObserveFrame(&this->frameScheduler,
-    frame->frameSerial, msg.udata, tickTime);
   lgFrameSchedulerFeedback(&this->frameScheduler,
     frame->frameSerial, msg.udata, tickTime);
 

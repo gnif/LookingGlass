@@ -262,11 +262,11 @@ void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
   int64_t error = measuredPhase > FRAME_SCHEDULER_TARGET_SLACK_NS ?
     (int64_t)(measuredPhase - FRAME_SCHEDULER_TARGET_SLACK_NS) :
     -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - measuredPhase);
-  error %= period;
-  if (error > period / 2)
-    error -= period;
-  else if (error < -period / 2)
-    error += period;
+  const int64_t limit = period / 2;
+  if (error > limit)
+    error = limit;
+  else if (error < -limit)
+    error = -limit;
 
   if (!l_frameScheduler.feedbackSamples)
     l_frameScheduler.phaseError = error;

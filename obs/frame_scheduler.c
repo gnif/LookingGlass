@@ -98,11 +98,11 @@ void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
     (int64_t)(measuredPhase - FRAME_SCHEDULER_TARGET_SLACK_NS) :
     -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - measuredPhase);
   const int64_t period = (int64_t)scheduler->period;
-  error %= period;
-  if (error > period / 2)
-    error -= period;
-  else if (error < -period / 2)
-    error += period;
+  const int64_t limit = period / 2;
+  if (error > limit)
+    error = limit;
+  else if (error < -limit)
+    error = -limit;
 
   if (!scheduler->feedbackSamples)
     scheduler->phaseError = error;
