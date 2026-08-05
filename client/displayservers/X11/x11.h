@@ -76,10 +76,14 @@ struct X11DSState
   bool              jitRender;
   _Atomic(uint64_t) presentMsc, presentUst;
   _Atomic(uint64_t) presentPeriod;
+  _Atomic(uint64_t) nominalPeriod;
   uint32_t          presentSerial;
   Pixmap            presentPixmap;
   XserverRegion     presentRegion;
   LGEvent *         frameEvent;
+
+  bool xrandrSupported;
+  int  xrandrEvent;
 
   LGThread * eventThread;
 

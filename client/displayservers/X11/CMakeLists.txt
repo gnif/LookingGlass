@@ -10,6 +10,7 @@ pkg_check_modules(DISPLAYSERVER_X11 REQUIRED IMPORTED_TARGET
   xinerama
   xcursor
   xpresent
+  xrandr
   xkbcommon
 )
 

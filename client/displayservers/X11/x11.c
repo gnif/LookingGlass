@@ -38,6 +38,7 @@
 #include <X11/extensions/scrnsaver.h>
 #include <X11/extensions/Xinerama.h>
 #include <X11/extensions/Xpresent.h>
+#include <X11/extensions/Xrandr.h>
 #include <X11/Xcursor/Xcursor.h>
 #include <X11/XKBlib.h>
 
@@ -93,6 +94,67 @@ static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11UpdateKeyboardGroup(void);
 static void x11GrabPointer(void);
+
+static uint64_t x11ModePeriod(
+    const XRRScreenResources * resources, RRMode modeID)
+{
+  for (int i = 0; i < resources->nmode; ++i)
+  {
+    const XRRModeInfo * mode = resources->modes + i;
+    if (mode->id != modeID || !mode->dotClock ||
+        !mode->hTotal || !mode->vTotal)
+      continue;
+
+    uint64_t pixels = (uint64_t)mode->hTotal * mode->vTotal;
+    if (mode->modeFlags & RR_DoubleScan)
+      pixels *= 2;
+    if (mode->modeFlags & RR_Interlace)
+      pixels /= 2;
+
+    return pixels / mode->dotClock * 1000000000ULL +
+      pixels % mode->dotClock * 1000000000ULL / mode->dotClock;
+  }
+
+  return 0;
+}
+
+static void x11UpdateFramePeriod(void)
+{
+  uint64_t fastest = 0;
+  const Window root = DefaultRootWindow(x11.display);
+  XRRScreenResources * resources =
+    XRRGetScreenResourcesCurrent(x11.display, root);
+  if (!resources)
+  {
+    atomic_store(&x11.nominalPeriod, 0);
+    return;
+  }
+
+  for (int i = 0; i < resources->ncrtc; ++i)
+  {
+    XRRCrtcInfo * crtc =
+      XRRGetCrtcInfo(x11.display, resources, resources->crtcs[i]);
+    if (!crtc)
+      continue;
+
+    const bool intersects = crtc->mode && crtc->width && crtc->height &&
+      x11.rect.x < crtc->x + (int)crtc->width &&
+      x11.rect.x + x11.rect.w > crtc->x &&
+      x11.rect.y < crtc->y + (int)crtc->height &&
+      x11.rect.y + x11.rect.h > crtc->y;
+    if (intersects)
+    {
+      const uint64_t candidate = x11ModePeriod(resources, crtc->mode);
+      if (candidate && (!fastest || candidate < fastest))
+        fastest = candidate;
+    }
+
+    XRRFreeCrtcInfo(crtc);
+  }
+
+  XRRFreeScreenResources(resources);
+  atomic_store(&x11.nominalPeriod, fastest);
+}
 
 static void x11DoPresent(uint64_t msc)
 {
@@ -284,6 +346,12 @@ static bool x11Init(const LG_DSInitParams params)
   x11.display   = XOpenDisplay(NULL);
   x11.jitRender = params.jitRender;
   x11.wm        = &X11WM_Default;
+  x11.rect      = (struct Rect) {
+    .x = params.x,
+    .y = params.y,
+    .w = params.w,
+    .h = params.h,
+  };
 
   XSetWindowAttributes swa =
   {
@@ -689,6 +757,18 @@ static bool x11Init(const LG_DSInitParams params)
   /* default to the square cursor */
   XDefineCursor(x11.display, x11.window, x11.cursors[LG_POINTER_SQUARE]);
 
+  x11.xrandrSupported =
+    XRRQueryExtension(x11.display, &x11.xrandrEvent, &error);
+  if (x11.xrandrSupported)
+  {
+    XRRSelectInput(x11.display, DefaultRootWindow(x11.display),
+      RRScreenChangeNotifyMask | RRCrtcChangeNotifyMask |
+      RROutputChangeNotifyMask);
+    x11UpdateFramePeriod();
+  }
+  else
+    DEBUG_WARN("X11 nominal output refresh is unavailable");
+
   if (x11.jitRender)
   {
     x11.frameEvent = lgCreateEvent(true, 0);
@@ -899,6 +979,16 @@ static int x11EventThread(void * unused)
     XEvent xe;
     XNextEvent(x11.display, &xe);
 
+    if (x11.xrandrSupported &&
+        (xe.type == x11.xrandrEvent + RRScreenChangeNotify ||
+         xe.type == x11.xrandrEvent + RRNotify))
+    {
+      if (xe.type == x11.xrandrEvent + RRScreenChangeNotify)
+        XRRUpdateConfiguration(&xe);
+      x11UpdateFramePeriod();
+      continue;
+    }
+
     // call the clipboard handling code
     if (x11CBEventThread(&xe))
       continue;
@@ -932,6 +1022,8 @@ static int x11EventThread(void * unused)
         x11.rect.y = y;
         x11.rect.w = xe.xconfigure.width;
         x11.rect.h = xe.xconfigure.height;
+        if (x11.xrandrSupported)
+          x11UpdateFramePeriod();
 
         app_updateWindowPos(x, y);
 
@@ -1507,7 +1599,7 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
 
 static bool x11GetFramePeriod(uint64_t * period)
 {
-  const uint64_t value = atomic_load(&x11.presentPeriod);
+  const uint64_t value = atomic_load(&x11.nominalPeriod);
   if (!value)
     return false;
 

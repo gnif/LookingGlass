@@ -133,6 +133,8 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     return false;
   }
 
+  wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
+
   if (wlWm.fractionalScaleManager)
   {
     wlWm.fractionalScaleInterface = wp_fractional_scale_manager_v1_get_fractional_scale(
@@ -140,8 +142,6 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     wp_fractional_scale_v1_add_listener(wlWm.fractionalScaleInterface,
         &fractionalScaleListener, NULL);
   }
-  else
-    wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
 
   if (wlWm.contentTypeManager)
   {

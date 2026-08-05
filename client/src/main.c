@@ -727,7 +727,6 @@ static int renderThread(void * unused)
     const uint64_t delta = t - g_state.lastRenderTime;
 
     g_state.lastRenderTime = t;
-    frameScheduler_observeRender(t);
     atomic_fetch_add_explicit(&g_state.renderCount, 1, memory_order_relaxed);
 
     if (!g_state.jitRender && g_params.fpsMin != 0)

@@ -26,16 +26,15 @@
 #include "common/time.h"
 
 #include <stdbool.h>
-#include <stdlib.h>
 #include <string.h>
 
-#define FRAME_SCHEDULER_LEASE_MS        1000U
-#define FRAME_SCHEDULER_RENEW_NS        250000000ULL
-#define FRAME_SCHEDULER_FEEDBACK_NS     50000000ULL
-#define FRAME_SCHEDULER_TARGET_SLACK_NS 500000ULL
-#define FRAME_SCHEDULER_MIN_PERIOD_NS   2000000ULL
-#define FRAME_SCHEDULER_MAX_PERIOD_NS   1000000000ULL
-#define FRAME_SCHEDULER_SAMPLE_COUNT    9U
+#define FRAME_SCHEDULER_LEASE_MS          1000U
+#define FRAME_SCHEDULER_RENEW_NS          250000000ULL
+#define FRAME_SCHEDULER_FEEDBACK_NS       50000000ULL
+#define FRAME_SCHEDULER_CADENCE_GRACE_NS 500000000ULL
+#define FRAME_SCHEDULER_TARGET_SLACK_NS   500000ULL
+#define FRAME_SCHEDULER_MIN_PERIOD_NS     2000000ULL
+#define FRAME_SCHEDULER_MAX_PERIOD_NS     1000000000ULL
 
 static struct
 {
@@ -47,6 +46,7 @@ static struct
   _Atomic(uint32_t) generation;
   _Atomic(uint64_t) period;
   uint64_t          lastSend;
+  uint64_t          lastCadence;
 
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
@@ -54,42 +54,8 @@ static struct
   bool     feedbackDirty;
 
   LG_TransportControlToken controlToken;
-
-  uint64_t renderSamples[FRAME_SCHEDULER_SAMPLE_COUNT];
-  unsigned renderSampleIndex;
-  unsigned renderSampleCount;
-  uint64_t lastRender;
 }
 l_frameScheduler;
-
-static int compareU64(const void * a, const void * b)
-{
-  const uint64_t lhs = *(const uint64_t *)a;
-  const uint64_t rhs = *(const uint64_t *)b;
-  return (lhs > rhs) - (lhs < rhs);
-}
-
-static uint64_t fallbackPeriod(void)
-{
-  uint64_t samples[FRAME_SCHEDULER_SAMPLE_COUNT];
-  unsigned count;
-
-  LG_LOCK(l_frameScheduler.lock);
-  count = l_frameScheduler.renderSampleCount;
-  memcpy(samples, l_frameScheduler.renderSamples,
-      count * sizeof(*samples));
-  LG_UNLOCK(l_frameScheduler.lock);
-
-  if (count < 5)
-    return 0;
-
-  qsort(samples, count, sizeof(*samples), compareU64);
-  const uint64_t period = samples[count / 2];
-  if (samples[count * 3 / 4] - samples[count / 4] > period / 20)
-    return 0;
-
-  return period;
-}
 
 static uint64_t presentationPeriod(void)
 {
@@ -98,7 +64,7 @@ static uint64_t presentationPeriod(void)
       g_state.ds->getFramePeriod(&period))
     return period;
 
-  return fallbackPeriod();
+  return 0;
 }
 
 static bool controlReady(void)
@@ -177,6 +143,7 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
   l_frameScheduler.active         = false;
   l_frameScheduler.controlPending = false;
   l_frameScheduler.lastSend       = 0;
+  l_frameScheduler.lastCadence    = 0;
   ++l_frameScheduler.generation;
 
   LG_LOCK(l_frameScheduler.lock);
@@ -203,15 +170,27 @@ void frameScheduler_update(void)
     return;
 
   const uint64_t now = nanotime();
-  uint64_t period    = presentationPeriod();
+  const uint64_t period = presentationPeriod();
   if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
       period > FRAME_SCHEDULER_MAX_PERIOD_NS)
   {
-    period = l_frameScheduler.period;
-    if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
-        period > FRAME_SCHEDULER_MAX_PERIOD_NS)
-      return;
+    if (l_frameScheduler.active && l_frameScheduler.lastCadence &&
+        now - l_frameScheduler.lastCadence >
+          FRAME_SCHEDULER_CADENCE_GRACE_NS &&
+        sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0))
+    {
+      l_frameScheduler.active = false;
+      l_frameScheduler.period = 0;
+      LG_LOCK(l_frameScheduler.lock);
+      l_frameScheduler.phaseError          = 0;
+      l_frameScheduler.feedbackFrameSerial = 0;
+      l_frameScheduler.feedbackSamples     = 0;
+      l_frameScheduler.feedbackDirty       = false;
+      LG_UNLOCK(l_frameScheduler.lock);
+    }
+    return;
   }
+  l_frameScheduler.lastCadence = now;
 
   bool reset = !l_frameScheduler.period;
   if (!reset)
@@ -257,24 +236,6 @@ void frameScheduler_update(void)
     l_frameScheduler.active   = true;
     l_frameScheduler.lastSend = now;
   }
-}
-
-void frameScheduler_observeRender(uint64_t timestamp)
-{
-  LG_LOCK(l_frameScheduler.lock);
-  if (l_frameScheduler.lastRender &&
-      timestamp > l_frameScheduler.lastRender)
-  {
-    l_frameScheduler.renderSamples[l_frameScheduler.renderSampleIndex] =
-      timestamp - l_frameScheduler.lastRender;
-    l_frameScheduler.renderSampleIndex =
-      (l_frameScheduler.renderSampleIndex + 1) %
-        FRAME_SCHEDULER_SAMPLE_COUNT;
-    if (l_frameScheduler.renderSampleCount < FRAME_SCHEDULER_SAMPLE_COUNT)
-      ++l_frameScheduler.renderSampleCount;
-  }
-  l_frameScheduler.lastRender = timestamp;
-  LG_UNLOCK(l_frameScheduler.lock);
 }
 
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,

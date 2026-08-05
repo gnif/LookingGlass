@@ -30,7 +30,6 @@ void frameScheduler_free(void);
 void frameScheduler_start(LG_TransportFeatureFlags features);
 void frameScheduler_stop(void);
 void frameScheduler_update(void);
-void frameScheduler_observeRender(uint64_t timestamp);
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
     uint64_t measuredPhase);
 

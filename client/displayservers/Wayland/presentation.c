@@ -76,15 +76,7 @@ bool waylandGetFramePeriod(uint64_t * period)
   /* Frame demand must use the output's nominal rate. Basing demand on the
    * observed presentation interval can lock a VRR session at its current,
    * slower cadence. */
-  if (waylandOutputGetFramePeriod(period))
-    return true;
-
-  const uint64_t value = atomic_load(&wlWm.presentationPeriod);
-  if (!value)
-    return false;
-
-  *period = value;
-  return true;
+  return waylandOutputGetFramePeriod(period);
 }
 
 static void presentationFeedbackDiscarded(void * data,
