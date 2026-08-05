@@ -459,6 +459,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     LG_RendererFrameToken damageFrameToken,
     LG_RendererFrameToken frameTokenLimit, bool * fullFrame,
     LG_RendererFrameToken * consumedFrameToken,
+    LG_RendererFrameToken * renderedFrameToken,
     uint64_t * effectsTime, EGL_Framebuffer * target)
 {
   EGL_Texture * tex;
@@ -489,6 +490,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   const bool               textureUpdated = status == EGL_TEX_STATUS_UPDATED;
 
   *consumedFrameToken = frameToken;
+  *renderedFrameToken = LG_RENDERER_FRAME_TOKEN_NONE;
   *effectsTime        = 0;
   if (unlikely(status != EGL_TEX_STATUS_OK && !textureUpdated))
   {
@@ -567,7 +569,14 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     egl_resetViewport(desktop->egl);
   }
 
-  egl_textureBind(texture);
+  const EGL_TexStatus bindStatus = egl_textureBind(texture);
+  if (unlikely(bindStatus != EGL_TEX_STATUS_OK))
+  {
+    if (bindStatus != EGL_TEX_STATUS_NOTREADY)
+      DEBUG_ERROR("Failed to bind the desktop texture");
+    return false;
+  }
+  *renderedFrameToken = tex->frameToken;
 
   if (finalSizeX > width || finalSizeY > height)
     scaleType = EGL_DESKTOP_DOWNSCALE;

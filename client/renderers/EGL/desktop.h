@@ -60,6 +60,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     LG_RendererFrameToken damageFrameToken,
     LG_RendererFrameToken frameTokenLimit, bool * fullFrame,
     LG_RendererFrameToken * consumedFrameToken,
+    LG_RendererFrameToken * renderedFrameToken,
     uint64_t * effectsTime, EGL_Framebuffer * target);
 
 void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height);

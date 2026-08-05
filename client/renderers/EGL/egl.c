@@ -1300,6 +1300,31 @@ static int egl_mergeSurfaceDamage(struct Rect * damage, int count)
   return count;
 }
 
+static void egl_requeueDesktopDamage(
+    struct Inst * this, const struct DesktopDamage * damage)
+{
+  if (damage->count == 0)
+    return;
+
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    struct DesktopDamage * pending =
+      this->desktopDamage + this->desktopDamageIdx;
+
+    if (damage->count < 0 || pending->count < 0 ||
+        damage->count + pending->count >= LG_MAX_FRAME_DAMAGE_RECTS)
+      pending->count = -1;
+    else
+    {
+      memcpy(pending->rects + pending->count, damage->rects,
+          damage->count * sizeof(FrameDamageRect));
+      pending->count += damage->count;
+    }
+
+    if (pending->frameToken == LG_RENDERER_FRAME_TOKEN_NONE)
+      pending->frameToken = damage->frameToken;
+  });
+}
+
 inline static void renderLetterBox(struct Inst * this)
 {
   bool hLB = this->destRect.x > 0;
@@ -1461,10 +1486,11 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   bool                  deferredLogicalCursor = false;
   const bool            haveDesktop           = likely(
       this->destRect.w > 0 && this->destRect.h > 0);
-  bool                  desktopRendered       = false;
-  const uint64_t        desktopStart          = nanotime();
-  uint64_t              effectsTime           = 0;
-  LG_RendererFrameToken frameToken            = LG_RENDERER_FRAME_TOKEN_NONE;
+  bool                  desktopRendered    = false;
+  const uint64_t        desktopStart       = nanotime();
+  uint64_t              effectsTime        = 0;
+  LG_RendererFrameToken frameToken         = LG_RENDERER_FRAME_TOKEN_NONE;
+  LG_RendererFrameToken renderedFrameToken = LG_RENDERER_FRAME_TOKEN_NONE;
 
   timing->setupTime = desktopStart - setupStart;
   if (haveDesktop)
@@ -1474,8 +1500,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
         this->translateX, this->translateY,
         this->scaleX    , this->scaleY    ,
         this->scaleType , rotate, renderAll ? NULL : accumulated,
-        desktopDamage->frameToken, frameTokenLimit, &fullFrame, &frameToken,
-        &effectsTime,
+        desktopDamage->frameToken, frameTokenLimit, &fullFrame,
+        &frameToken, &renderedFrameToken, &effectsTime,
         egl_hdrComposeGetFramebuffer(this->hdrCompose));
   }
   const uint64_t composeStart = nanotime();
@@ -1489,8 +1515,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   else
     timing->setupTime += composeStart - desktopStart;
 
-  timing->frameToken       = frameToken;
-  const bool frameConsumed = frameToken != LG_RENDERER_FRAME_TOKEN_NONE;
+  const bool frameConsumed = desktopRendered &&
+    frameToken != LG_RENDERER_FRAME_TOKEN_NONE;
+  timing->frameToken = frameConsumed ?
+    frameToken : LG_RENDERER_FRAME_TOKEN_NONE;
 
   if (haveDesktop)
   {
@@ -1509,6 +1537,18 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
    * redraws older swapchain buffers correctly. */
   if (fullFrame)
     desktopDamage->count = -1;
+
+  /* A texture slot can be published before its matching damage and timing
+   * record. If this render could not consume that slot, retain the damage so
+   * it is merged into the next drawable frame instead of retiring it. */
+  const bool damageRendered = desktopRendered &&
+    (desktopDamage->frameToken == LG_RENDERER_FRAME_TOKEN_NONE ||
+     desktopDamage->frameToken == renderedFrameToken ||
+     ((renderAll || fullFrame) &&
+      renderedFrameToken != LG_RENDERER_FRAME_TOKEN_NONE &&
+      renderedFrameToken > desktopDamage->frameToken));
+  if (!damageRendered)
+    egl_requeueDesktopDamage(this, desktopDamage);
 
   renderLetterBox(this);
 
