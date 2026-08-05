@@ -598,6 +598,7 @@ void CSwapChainProcessor::CompletionFunction(
   uint64_t prepareReady;
   uint64_t prepareGPUStart;
   uint64_t prepareGPUEnd;
+  uint64_t timingStart;
   bool     prepareTimingValid;
   AcquireSRWLockShared(&sc->m_candidateLock);
   const FrameCandidate& candidate = sc->m_candidates[candidateIndex];
@@ -605,6 +606,7 @@ void CSwapChainProcessor::CompletionFunction(
   prepareReady       = candidate.prepareReady;
   prepareGPUStart    = candidate.prepareGPUStart;
   prepareGPUEnd      = candidate.prepareGPUEnd;
+  timingStart        = candidate.timingStart;
   prepareTimingValid = candidate.prepareTimingValid;
   ReleaseSRWLockShared(&sc->m_candidateLock);
 
@@ -614,8 +616,8 @@ void CSwapChainProcessor::CompletionFunction(
   uint64_t       indirectCopyTime = 0;
   if (sc->m_dx12Device->IsIndirectCopy())
   {
-    // GPU timestamps end at the readback copy. Include the following CPU copy
-    // to IVSHMEM in effect benchmark samples without charging it to Ready.
+    // GPU timestamps end at the readback copy. Track the following CPU copy
+    // separately for frame metrics; benchmark wall time includes it directly.
     const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
     sc->m_devContext->WriteFrameBuffer(
       fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
@@ -652,9 +654,18 @@ void CSwapChainProcessor::CompletionFunction(
   const uint64_t measured = postProcessTime + copyTime;
   const uint64_t readyTime = elapsed > measured ? elapsed - measured : 0;
 
-  sc->m_postProcessors[candidateIndex].RecordTiming(
-    fbRes->GetTimingEffectIndex(), fbRes->GetTimingToken(),
-    fbRes->IsFullCopy(), postProcessTime + copyTime);
+  // Use matching wall-clock boundaries for both modes. The split excludes the
+  // cadence hold while including the indirect CPU copy only when it occurs.
+  const uint64_t timingToken = fbRes->GetTimingToken();
+  if (timingToken && timingStart && prepareReady >= timingStart &&
+      readyEnd >= publishStart)
+  {
+    const uint64_t totalTime =
+      (prepareReady - timingStart) + (readyEnd - publishStart);
+    sc->m_postProcessors[candidateIndex].RecordTiming(
+      fbRes->GetTimingEffectIndex(), timingToken,
+      fbRes->IsFullCopy(), totalTime);
+  }
   sc->m_devContext->RecordFrameTiming(readyEnd - publishStart);
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
@@ -943,9 +954,10 @@ void CSwapChainProcessor::ReleaseCandidate(unsigned candidateIndex)
 static bool ResourceDescMatches(
   const D3D12_RESOURCE_DESC& left, const D3D12_RESOURCE_DESC& right)
 {
+  // Alignment is allocation metadata. GetDesc may report the resolved value
+  // when the creation descriptor requested automatic alignment.
   return
     left.Dimension          == right.Dimension          &&
-    left.Alignment          == right.Alignment          &&
     left.Width              == right.Width              &&
     left.Height             == right.Height             &&
     left.DepthOrArraySize   == right.DepthOrArraySize   &&
@@ -963,7 +975,7 @@ bool CSwapChainProcessor::EnsureCandidateResource(
   FrameCandidate& candidate = m_candidates[candidateIndex];
   D3D12_RESOURCE_DESC desc  = source->GetDesc();
   desc.Alignment = 0;
-  desc.Flags = static_cast<D3D12_RESOURCE_FLAGS>(
+  desc.Flags     = static_cast<D3D12_RESOURCE_FLAGS>(
     static_cast<UINT>(desc.Flags) &
       ~static_cast<UINT>(D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER));
 
@@ -1599,6 +1611,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     SetFullPendingDamage();
     return false;
   }
+  // Candidate and copy-slot acquisition are common to both benchmark modes.
+  const uint64_t timingStart = timingToken ?
+    CFrameScheduler::Nanotime() : 0;
 
   ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
   CD3D12CommandSlot    * computeSlot     = nullptr;
@@ -1677,23 +1692,24 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  candidate.srcFormat         = srcFormat;
-  candidate.dstFormat         = dstFormat;
-  candidate.nbDirtyRects      = nbDirtyRects;
-  candidate.pitch             = postProcessor.GetOutputPitch();
-  candidate.frameSize         = postProcessor.GetOutputSize();
-  candidate.captureTime       = captureTime;
-  candidate.postProcessStart  = postProcessStart;
-  candidate.prepareCopyStart  = CFrameScheduler::Nanotime();
-  candidate.prepareReady      = 0;
-  candidate.prepareGPUStart   = 0;
-  candidate.prepareGPUEnd     = 0;
+  candidate.srcFormat          = srcFormat;
+  candidate.dstFormat          = dstFormat;
+  candidate.nbDirtyRects       = nbDirtyRects;
+  candidate.pitch              = postProcessor.GetOutputPitch();
+  candidate.frameSize          = postProcessor.GetOutputSize();
+  candidate.captureTime        = captureTime;
+  candidate.postProcessStart   = postProcessStart;
+  candidate.prepareCopyStart   = CFrameScheduler::Nanotime();
+  candidate.prepareReady       = 0;
+  candidate.prepareGPUStart    = 0;
+  candidate.prepareGPUEnd      = 0;
+  candidate.timingStart        = timingStart;
   candidate.prepareTimingValid = false;
   if (nbDirtyRects)
     memcpy(candidate.dirtyRects, currentDirtyRects,
       nbDirtyRects * sizeof(*candidate.dirtyRects));
-  candidate.timingEffectIndex = timingEffectIndex;
-  candidate.timingToken       = timingToken;
+  candidate.timingEffectIndex  = timingEffectIndex;
+  candidate.timingToken        = timingToken;
 
   copySlot->SetCompletionCallback(
     &CandidateCompletionFunction, this, &candidate);

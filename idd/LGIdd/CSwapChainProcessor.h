@@ -66,24 +66,25 @@ private:
 
   struct FrameCandidate
   {
-    CandidateState         state             = CANDIDATE_FREE;
+    CandidateState         state               = CANDIDATE_FREE;
     ComPtr<ID3D12Resource> resource;
-    D12FrameFormat         srcFormat          = {};
-    D12FrameFormat         dstFormat          = {};
+    D12FrameFormat         srcFormat           = {};
+    D12FrameFormat         dstFormat           = {};
     RECT                   dirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned               nbDirtyRects      = 0;
-    unsigned               pitch             = 0;
-    size_t                 frameSize         = 0;
-    uint64_t               sequence          = 0;
-    uint64_t               captureTime       = 0;
-    uint64_t               postProcessStart  = 0;
-    uint64_t               prepareCopyStart  = 0;
-    uint64_t               prepareReady      = 0;
-    uint64_t               prepareGPUStart   = 0;
-    uint64_t               prepareGPUEnd     = 0;
-    unsigned               timingEffectIndex = 0;
-    uint64_t               timingToken       = 0;
-    bool                   prepareTimingValid = false;
+    unsigned               nbDirtyRects        = 0;
+    unsigned               pitch               = 0;
+    size_t                 frameSize           = 0;
+    uint64_t               sequence            = 0;
+    uint64_t               captureTime         = 0;
+    uint64_t               postProcessStart    = 0;
+    uint64_t               prepareCopyStart    = 0;
+    uint64_t               prepareReady        = 0;
+    uint64_t               prepareGPUStart     = 0;
+    uint64_t               prepareGPUEnd       = 0;
+    uint64_t               timingStart         = 0;
+    unsigned               timingEffectIndex   = 0;
+    uint64_t               timingToken         = 0;
+    bool                   prepareTimingValid  = false;
   };
 
   struct CandidateDamageTail
