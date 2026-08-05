@@ -256,9 +256,8 @@ NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSW
 {
   DEBUG_INFO("Swap chain assigned to monitor %p", monitor);
   auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  wrapper->context->AssignSwapChain(
+  return wrapper->context->AssignSwapChain(
     inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
-  return STATUS_SUCCESS;
 }
 
 NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)

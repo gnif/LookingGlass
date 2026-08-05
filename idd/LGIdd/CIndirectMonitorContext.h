@@ -47,7 +47,6 @@ private:
   // while still allowing UnassignSwapChain to cancel the active one.
   std::mutex m_assignMutex;
   std::shared_ptr<CD3D11Device> m_dx11Device;
-  std::shared_ptr<CD3D12Device> m_dx12Device;
 
   CIndirectDeviceContext * m_devContext;
   std::unique_ptr<CSwapChainProcessor> m_swapChain;
@@ -64,7 +63,8 @@ public:
 
   virtual ~CIndirectMonitorContext();
   
-  void AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent);
+  NTSTATUS AssignSwapChain(
+    IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent);
   void UnassignSwapChain();
   bool IsAssignmentCurrent(UINT64 generation) const
   {

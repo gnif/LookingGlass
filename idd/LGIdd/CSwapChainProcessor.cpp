@@ -20,8 +20,10 @@
 
 #include "CSwapChainProcessor.h"
 #include "CIndirectMonitorContext.h"
+#include "CPlatformInfo.h"
 
 #include <avrt.h>
+#include <new>
 #include "CDebug.h"
 #include "CPipeServer.h"
 
@@ -73,18 +75,96 @@ static bool FrameMetadataChanged(const D12FrameFormat& previous,
 
 CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
-    CIndirectDeviceContext* devContext, IDDCX_SWAPCHAIN hSwapChain,
-    std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent) :
+    CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
+    LUID renderAdapter, std::shared_ptr<CD3D11Device> dx11Device,
+    HANDLE newFrameEvent) :
   m_monitorContext(monitorContext),
   m_assignmentGeneration(assignmentGeneration),
   m_monitor(monitor),
   m_devContext(devContext),
   m_hSwapChain(hSwapChain),
+  m_renderAdapter(renderAdapter),
   m_dx11Device(dx11Device),
-  m_dx12Device(dx12Device),
   m_newFrameEvent(newFrameEvent)
 {
-  m_resPool.Init(dx11Device, dx12Device);
+  // Manual-reset: all worker threads wait on this, so it must stay signalled
+  // once set or only one thread would ever observe termination.
+  m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
+  m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_candidateAvailableEvent.Attach(
+    CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
+  if (!m_publishTimer.Get())
+    m_publishTimer.Attach(CreateWaitableTimerExW(
+      nullptr, nullptr, 0, TIMER_ALL_ACCESS));
+  m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_shapeBuffer = new (std::nothrow) BYTE[512 * 512 * 4];
+}
+
+bool CSwapChainProcessor::Start()
+{
+  if (!m_terminateEvent.Get() || !m_candidateEvent.Get() ||
+      !m_candidateAvailableEvent.Get() || !m_publishTimer.Get() ||
+      !m_cursorDataEvent.Get() || !m_shapeBuffer)
+  {
+    DEBUG_ERROR("Failed to initialize swap chain worker resources");
+    return false;
+  }
+
+  // Bind the swap chain before initializing the expensive transport pipeline.
+  m_thread[0].Attach(CreateThread(
+    nullptr, 0, _SwapChainThread, this, 0, nullptr));
+  if (!m_thread[0].Get())
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create swap chain worker");
+    return false;
+  }
+  return true;
+}
+
+bool CSwapChainProcessor::InitializePipeline()
+{
+  for (;;)
+  {
+    if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+        WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+      return false;
+
+    UINT64 alignSize = CPlatformInfo::GetPageSize();
+    auto dx12Device = std::make_shared<CD3D12Device>(m_renderAdapter);
+    const CD3D12Device::InitResult result = dx12Device->Init(
+      m_devContext->GetIVSHMEM(), alignSize, !m_dx11Device->IsSoftware());
+    if (result == CD3D12Device::RETRY)
+    {
+      const HRESULT deviceStatus =
+        m_dx11Device->GetDevice()->GetDeviceRemovedReason();
+      if (FAILED(deviceStatus))
+      {
+        DEBUG_ERROR_HR(deviceStatus,
+          "D3D11 device removed during D3D12 initialization");
+        return false;
+      }
+      continue;
+    }
+    if (result == CD3D12Device::FAILURE)
+      return false;
+
+    if (!m_devContext->SetupLGMP(alignSize))
+    {
+      DEBUG_ERROR("SetupLGMP failed");
+      return false;
+    }
+
+    m_dx12Device = std::move(dx12Device);
+    break;
+  }
+
+  if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+      WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+    return false;
+
+  m_resPool.Init(m_dx11Device, m_dx12Device);
   m_fbPool.Init(this);
   const bool enableEffects = !m_dx11Device->IsSoftware();
   if (!enableEffects)
@@ -92,7 +172,7 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 
   bool initialized = true;
   for (CPostProcessor& postProcessor : m_postProcessors)
-    if (!postProcessor.Init(dx12Device, enableEffects))
+    if (!postProcessor.Init(m_dx12Device, enableEffects))
     {
       initialized = false;
       break;
@@ -112,32 +192,25 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
     for (CPostProcessor& postProcessor : m_postProcessors)
     {
       postProcessor.Reset();
-      if (!postProcessor.Init(dx12Device, false))
+      if (!postProcessor.Init(m_dx12Device, false))
         DEBUG_ERROR("Failed to initialize post processor copy support");
     }
     DEBUG_WARN(
       "Failed to initialize post-processing effects; effects disabled");
   }
 
-  // Manual-reset: all worker threads wait on this, so it must stay signalled
-  // once set or only one thread would ever observe termination.
-  m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
-  m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_candidateAvailableEvent.Attach(
-    CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
-    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
-  if (!m_publishTimer.Get())
-    m_publishTimer.Attach(CreateWaitableTimerExW(
-      nullptr, nullptr, 0, TIMER_ALL_ACCESS));
-  m_cursorDataEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_shapeBuffer = new BYTE[512 * 512 * 4];
+  if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+      WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+    return false;
 
-  // Start the worker only after every object it can access is initialized.
-  m_thread[0].Attach(CreateThread(
-    nullptr, 0, _SwapChainThread, this, 0, nullptr));
   m_thread[2].Attach(CreateThread(
     nullptr, 0, _PublisherThread, this, 0, nullptr));
+  if (!m_thread[2].Get())
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create publisher thread");
+    return false;
+  }
+  return true;
 }
 
 CSwapChainProcessor::~CSwapChainProcessor()
@@ -153,8 +226,11 @@ CSwapChainProcessor::~CSwapChainProcessor()
   // Drain in-flight GPU work / completion callbacks before releasing the
   // resources they reference. The swap chain was already released in the
   // worker epilogue, so this does not hold an IddCx frame.
-  m_dx12Device->WaitForIdle();
-  ResetCandidates();
+  if (m_dx12Device)
+  {
+    m_dx12Device->WaitForIdle();
+    ResetCandidates();
+  }
 
   for (CPostProcessor& postProcessor : m_postProcessors)
     postProcessor.Reset();
@@ -353,26 +429,51 @@ void CSwapChainProcessor::SwapChainThread()
 
   DEBUG_INFO("Start Thread");
 
-  // Only delete the swap chain if we took ownership of it (SetDevice
-  // succeeded). If SetDevice failed IddCx still owns and tears it down, so
-  // deleting it here would double-free the WDF object. Releasing it when we do
-  // own it hands the acquired frame back to IddCx promptly.
-  if (SwapChainThreadCore())
-    WdfObjectDelete((WDFOBJECT)m_hSwapChain);
+  SwapChainThreadCore();
+
+  // Returning success from EvtIddCxMonitorAssignSwapChain transfers ownership
+  // to the driver, regardless of whether SetDevice or later initialization
+  // succeeds. Release it on every worker exit.
+  WdfObjectDelete((WDFOBJECT)m_hSwapChain);
   m_hSwapChain = nullptr;
 
   AvRevertMmThreadCharacteristics(avTaskHandle);
 }
 
-bool CSwapChainProcessor::SwapChainThreadCore()
+void CSwapChainProcessor::SwapChainThreadCore()
 {
   ComPtr<IDXGIDevice> dxgiDevice;
   HRESULT hr = m_dx11Device->GetDevice().As(&dxgiDevice);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to get the dxgiDevice");
-    return false;
+    return;
   }
+
+  IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
+  setDevice.pDevice = dxgiDevice.Get();
+
+  // IddCx can unassign a swap chain before its worker binds the device. Avoid
+  // using an invalidated handle; the worker epilogue still releases the
+  // driver-owned swap chain.
+  if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+      WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+    return;
+
+  // A failure here (commonly DXGI_ERROR_ACCESS_LOST on the first assignment)
+  // is not recoverable on this handle - IddCx reassigns a fresh swap chain,
+  // which is what actually succeeds. Bail cleanly and let that happen.
+  hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
+  if (FAILED(hr))
+  {
+    if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
+        WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
+      DEBUG_INFO("Swap chain was unassigned during device setup");
+    else
+      DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
+    return;
+  }
+  DEBUG_INFO("Swap chain device set");
 
   if (IDD_IS_FUNCTION_AVAILABLE(IddCxSetRealtimeGPUPriority))
   {
@@ -389,31 +490,12 @@ bool CSwapChainProcessor::SwapChainThreadCore()
     dxgiDevice->SetGPUThreadPriority(7);
   }
 
-  IDARG_IN_SWAPCHAINSETDEVICE setDevice = {};
-  setDevice.pDevice = dxgiDevice.Get();
+  if (!InitializePipeline())
+    return;
 
-  // IddCx can unassign a swap chain while its devices are still being
-  // created. In that case the owner signals termination and IddCx retains
-  // responsibility for the handle because SetDevice has not succeeded.
   if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
       WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
-    return false;
-
-  // A failure here (commonly DXGI_ERROR_ACCESS_LOST on the first assignment)
-  // is not recoverable on this handle - IddCx reassigns a fresh swap chain,
-  // which is what actually succeeds. Bail cleanly and let that happen.
-  hr = IddCxSwapChainSetDevice(m_hSwapChain, &setDevice);
-  if (FAILED(hr))
-  {
-    if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
-        WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
-      DEBUG_INFO("Swap chain was unassigned during device setup");
-    else
-      DEBUG_ERROR_HR(hr, "IddCxSwapChainSetDevice Failed");
-    return false;
-  }
-  // Past this point SetDevice succeeded: we own the swap chain and are
-  // responsible for deleting it.
+    return;
 
   IDARG_IN_SETUP_HWCURSOR c = {};
   c.CursorInfo.Size                  = sizeof(c.CursorInfo);
@@ -426,7 +508,7 @@ bool CSwapChainProcessor::SwapChainThreadCore()
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR("IddCxMonitorSetupHardwareCursor Failed (0x%08x)", status);
-    return true;
+    return;
   }
 
   m_lastShapeId = 0;
@@ -539,7 +621,6 @@ bool CSwapChainProcessor::SwapChainThreadCore()
       break;
   }
 
-  return true;
 }
 
 void CSwapChainProcessor::CandidateCompletionFunction(

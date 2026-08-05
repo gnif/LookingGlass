@@ -19,7 +19,6 @@
  */
 
 #include "CIndirectMonitorContext.h"
-#include "CPlatformInfo.h"
 #include "CDebug.h"
 #include "CPipeServer.h"
 
@@ -35,7 +34,8 @@ CIndirectMonitorContext::~CIndirectMonitorContext()
   m_devContext->OnMonitorDestroyed(m_monitor);
 }
 
-void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
+NTSTATUS CIndirectMonitorContext::AssignSwapChain(
+  IDDCX_SWAPCHAIN swapChain, LUID renderAdapter, HANDLE newFrameEvent)
 {
   std::lock_guard<std::mutex> assignGuard(m_assignMutex);
 
@@ -48,43 +48,15 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   const UINT64 assignmentGeneration =
     m_assignmentGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-  // Build the devices into locals so the members are never observed
-  // half-constructed and the expensive initialization stays outside m_lock.
-  std::shared_ptr<CD3D11Device> dx11Device;
-  std::shared_ptr<CD3D12Device> dx12Device;
-
-  for (;;)
+  // Build the D3D11 device into a local so the member is never observed
+  // half-constructed. The worker binds it before performing the expensive
+  // D3D12, LGMP and post-processing initialization.
+  auto dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
+  const HRESULT initStatus = dx11Device->Init();
+  if (FAILED(initStatus))
   {
-    dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
-    if (FAILED(dx11Device->Init()))
-    {
-      WdfObjectDelete(swapChain);
-      return;
-    }
-
-    UINT64 alignSize = CPlatformInfo::GetPageSize();
-    dx12Device = std::make_shared<CD3D12Device>(renderAdapter);
-    CD3D12Device::InitResult r = dx12Device->Init(
-      m_devContext->GetIVSHMEM(), alignSize, !dx11Device->IsSoftware());
-    if (r == CD3D12Device::RETRY)
-    {
-      dx12Device.reset();
-      dx11Device.reset();
-      continue;
-    }
-    if (r == CD3D12Device::FAILURE)
-    {
-      WdfObjectDelete(swapChain);
-      return;
-    }
-
-    if (!m_devContext->SetupLGMP(alignSize))
-    {
-      WdfObjectDelete(swapChain);
-      DEBUG_ERROR("SetupLGMP failed");
-      return;
-    }
-    break;
+    DEBUG_ERROR_HR(initStatus, "Failed to initialize D3D11 device");
+    return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
 
   AcquireSRWLockExclusive(&m_lock);
@@ -92,7 +64,7 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   {
     ReleaseSRWLockExclusive(&m_lock);
     DEBUG_INFO("Swap chain assignment canceled before processor startup");
-    return;
+    return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
 
   // Publish the assignment atomically with starting its worker. An unassign
@@ -100,11 +72,21 @@ void CIndirectMonitorContext::AssignSwapChain(IDDCX_SWAPCHAIN swapChain, LUID re
   // signal and join the processor normally.
   m_devContext->OnSwapChainAssigned();
   m_dx11Device = std::move(dx11Device);
-  m_dx12Device = std::move(dx12Device);
   m_swapChain.reset(new CSwapChainProcessor(
     this, assignmentGeneration, m_monitor, m_devContext, swapChain,
-    m_dx11Device, m_dx12Device, newFrameEvent));
+    renderAdapter, m_dx11Device, newFrameEvent));
+  if (!m_swapChain->Start())
+  {
+    auto processor = std::move(m_swapChain);
+    dx11Device      = std::move(m_dx11Device);
+    ReleaseSRWLockExclusive(&m_lock);
+    processor.reset();
+    dx11Device.reset();
+    m_devContext->OnSwapChainReleased();
+    return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
+  }
   ReleaseSRWLockExclusive(&m_lock);
+  return STATUS_SUCCESS;
 }
 
 void CIndirectMonitorContext::DetachSwapChain()
@@ -119,18 +101,15 @@ void CIndirectMonitorContext::DetachSwapChain()
   // method on another thread - holding the lock across that would deadlock.
   std::unique_ptr<CSwapChainProcessor> processor;
   std::shared_ptr<CD3D11Device>        dx11Device;
-  std::shared_ptr<CD3D12Device>        dx12Device;
 
   AcquireSRWLockExclusive(&m_lock);
   processor  = std::move(m_swapChain);
   dx11Device = std::move(m_dx11Device);
-  dx12Device = std::move(m_dx12Device);
   ReleaseSRWLockExclusive(&m_lock);
 
   const bool hadSwapChain = !!processor;
   processor.reset();
   dx11Device.reset();
-  dx12Device.reset();
 
   if (hadSwapChain)
     m_devContext->OnSwapChainReleased();

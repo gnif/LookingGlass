@@ -47,6 +47,7 @@ private:
   IDDCX_MONITOR                   m_monitor;
   CIndirectDeviceContext        * m_devContext;
   IDDCX_SWAPCHAIN                 m_hSwapChain;
+  LUID                            m_renderAdapter;
   std::shared_ptr<CD3D11Device>   m_dx11Device;
   std::shared_ptr<CD3D12Device>   m_dx12Device;
   HANDLE                          m_newFrameEvent;
@@ -139,7 +140,8 @@ private:
 
   static DWORD CALLBACK _SwapChainThread(LPVOID arg);
   void SwapChainThread();
-  bool SwapChainThreadCore();
+  void SwapChainThreadCore();
+  bool InitializePipeline();
 
   static DWORD CALLBACK _PublisherThread(LPVOID arg);
   void PublisherThread();
@@ -176,8 +178,10 @@ private:
 public:
   CSwapChainProcessor(CIndirectMonitorContext * monitorContext, UINT64 assignmentGeneration,
     IDDCX_MONITOR monitor, CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
-    std::shared_ptr<CD3D11Device> dx11Device, std::shared_ptr<CD3D12Device> dx12Device, HANDLE newFrameEvent);
+    LUID renderAdapter, std::shared_ptr<CD3D11Device> dx11Device,
+    HANDLE newFrameEvent);
   ~CSwapChainProcessor();
+  bool Start();
 
   CIndirectDeviceContext * GetDevice() { return m_devContext; }
   std::shared_ptr<CD3D12Device> GetD3D12Device() { return m_dx12Device; }
