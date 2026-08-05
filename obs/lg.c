@@ -104,6 +104,7 @@ typedef struct
   PLGMPClientQueue     pointerQueue;
   gs_texture_t       * texture;
   gs_texture_t       * dstTexture;
+  bool                 textureMapped;
   uint8_t            * texData;
   uint32_t             linesize;
 
@@ -117,7 +118,7 @@ typedef struct
   bool                 dmabuf;
   bool                 dmabufTested;
   DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_BUFFER_LEN];
-  gs_texture_t       * dmaTexture;
+  gs_timer_t         * dmaCopyTimer;
 #endif
 
 #if LIBOBS_API_MAJOR_VER >= 28
@@ -418,7 +419,6 @@ static void dmabufInvalidateTextures(LGPlugin * this)
     this->dmaInfo[i].texture = NULL;
   }
 
-  this->dmaTexture   = NULL;
   this->dmabufTested = false;
 }
 
@@ -426,6 +426,12 @@ static void dmabufInvalidateTextures(LGPlugin * this)
 static void dmabufReset(LGPlugin * this)
 {
   dmabufInvalidateTextures(this);
+
+  if (this->dmaCopyTimer)
+  {
+    gs_timer_destroy(this->dmaCopyTimer);
+    this->dmaCopyTimer = NULL;
+  }
 
   /* Ensure the driver releases every DMA-BUF attachment before the exported
    * FDs and their backing IVSHMEM device are closed. */
@@ -486,11 +492,14 @@ static void deinit(LGPlugin * this)
 
   if (this->texture)
   {
-    if (!this->dmabuf)
+    if (this->textureMapped)
       gs_texture_unmap(this->texture);
     gs_texture_destroy(this->texture);
-    this->texture = NULL;
+    this->texture       = NULL;
+    this->textureMapped = false;
   }
+  this->texData  = NULL;
+  this->linesize = 0;
 
   if (this->cursorTex)
   {
@@ -1120,12 +1129,15 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
 
   if (this->texture)
   {
-    if (!this->dmabuf)
+    if (this->textureMapped)
       gs_texture_unmap(this->texture);
 
     gs_texture_destroy(this->texture);
-    this->texture = NULL;
+    this->texture       = NULL;
+    this->textureMapped = false;
   }
+  this->texData  = NULL;
+  this->linesize = 0;
 
   this->dataWidth     = frame->dataWidth;
   this->unpack        = false;
@@ -1211,6 +1223,31 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
 
       this->dmabufTested = true;
     }
+
+    if (!this->dmaCopyTimer)
+      this->dmaCopyTimer = gs_timer_create();
+    if (!this->dmaCopyTimer)
+    {
+      puts("Failed to create DMA copy timer");
+      this->dmabuf = false;
+    }
+  }
+
+  if (this->dmabuf)
+  {
+    this->texture = gs_texture_create(
+      this->dataWidth,
+      this->dataHeight,
+      this->format,
+      1,
+      NULL,
+      0);
+
+    if (!this->texture)
+    {
+      puts("Failed to create DMA copy texture");
+      this->dmabuf = false;
+    }
   }
 #else
   (void)drmFormat;
@@ -1235,7 +1272,16 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
       return;
     }
 
-    gs_texture_map(this->texture, &this->texData, &this->linesize);
+    this->textureMapped =
+      gs_texture_map(this->texture, &this->texData, &this->linesize);
+    if (!this->textureMapped)
+    {
+      puts("Failed to map upload texture");
+      gs_texture_destroy(this->texture);
+      this->texture  = NULL;
+      this->texData  = NULL;
+      this->linesize = 0;
+    }
   }
 
   if (this->unpack)
@@ -1454,7 +1500,10 @@ static void lgVideoTick(void * data, float seconds)
   this->frameSerial      = frame->frameSerial;
   this->frameSerialValid = true;
 
-  bool textureValid = (this->dmabufTested && this->dmabuf) || this->texture;
+  const bool textureValid = this->texture &&
+    (this->dmabuf ?
+      this->dmabufTested && this->dmaCopyTimer :
+      this->textureMapped);
   if (!textureValid || this->formatVer != frame->formatVer)
     lgFormatInit(this, frame, &frameMessage.msg, frameMessage.queue);
 
@@ -1471,19 +1520,35 @@ static void lgVideoTick(void * data, float seconds)
 
     if (!importFailed)
     {
-      // wait for the frame to be complete before we try to use it
+      // Wait for the frame to be complete before copying it into OBS-owned
+      // storage. The imported texture remains backed by reusable IVSHMEM.
       if (!frameComplete)
         frameComplete = framebuffer_wait(
           fb, (size_t)frame->dataHeight * frame->pitch);
-      lgmpClientMessageDone(frameMessage.queue);
 
       if (!frameComplete)
       {
+        lgmpClientMessageDone(frameMessage.queue);
         os_sem_post(this->frameSem);
         return;
       }
 
-      this->dmaTexture = fi->texture;
+      obs_enter_graphics();
+      uint64_t copyTime;
+      gs_timer_begin(this->dmaCopyTimer);
+      gs_copy_texture(this->texture, fi->texture);
+      gs_timer_end(this->dmaCopyTimer);
+      if (!gs_timer_get_data(this->dmaCopyTimer, &copyTime))
+      {
+        blog(LOG_ERROR, "Failed to wait for DMA frame copy");
+        obs_leave_graphics();
+        this->state = STATE_STOPPING;
+        os_sem_post(this->frameSem);
+        return;
+      }
+      obs_leave_graphics();
+
+      lgmpClientMessageDone(frameMessage.queue);
       os_sem_post(this->frameSem);
       return;
     }
@@ -1494,7 +1559,7 @@ static void lgVideoTick(void * data, float seconds)
   }
 #endif
 
-  if (!this->texture)
+  if (!this->texture || !this->textureMapped || !this->texData)
   {
     lgmpClientMessageDone(frameMessage.queue);
     os_sem_post(this->frameSem);
@@ -1515,8 +1580,19 @@ static void lgVideoTick(void * data, float seconds)
   os_sem_post(this->frameSem);
 
   obs_enter_graphics();
-  gs_texture_unmap(this->texture);
-  gs_texture_map(this->texture, &this->texData, &this->linesize);
+  if (this->textureMapped)
+    gs_texture_unmap(this->texture);
+  this->textureMapped = false;
+  this->texData       = NULL;
+  this->linesize      = 0;
+  this->textureMapped =
+    gs_texture_map(this->texture, &this->texData, &this->linesize);
+  if (!this->textureMapped)
+  {
+    blog(LOG_ERROR, "Failed to remap upload texture");
+    gs_texture_destroy(this->texture);
+    this->texture = NULL;
+  }
   obs_leave_graphics();
 }
 
@@ -1546,13 +1622,7 @@ static void lgSetupCursorEffect(LGPlugin * this, int outputTransfer)
 static void lgVideoRender(void * data, gs_effect_t * effect)
 {
   LGPlugin * this = (LGPlugin *)data;
-  gs_texture_t * texture;
-
-#if LIBOBS_API_MAJOR_VER >= 27
-  texture = this->dmaTexture;
-  if (!texture)
-    texture = this->texture;
-#endif
+  gs_texture_t * texture = this->texture;
 
   if (!texture)
     return;
