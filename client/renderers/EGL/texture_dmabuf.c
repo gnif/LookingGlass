@@ -42,7 +42,7 @@ typedef struct TexDMABUF
 
   EGLDisplay display;
 
-  struct FdImage images[2];
+  struct FdImage images[EGL_TEX_BUFFER_MAX];
   int            lastIndex;
   int            renderIndex;
 
@@ -220,11 +220,28 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
 
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_DMABUF);
 
-  struct FdImage *fdImage =
-    (this->images[0].fd == update->dmaFD) ? &this->images[0] :
-    (this->images[1].fd == update->dmaFD) ? &this->images[1] :
-    (this->images[0].fd == -1)            ? &this->images[0] :
-                                            &this->images[1];
+  struct FdImage *fdImage = NULL;
+  for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
+    if (this->images[i].fd == update->dmaFD)
+    {
+      fdImage = &this->images[i];
+      break;
+    }
+
+  if (!fdImage)
+    for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
+      if (this->images[i].fd == -1)
+      {
+        fdImage = &this->images[i];
+        break;
+      }
+
+  if (!fdImage)
+  {
+    DEBUG_ERROR("No free DMABUF image slot");
+    return false;
+  }
+
   EGLImage image = fdImage->image;
   if (unlikely(image == EGL_NO_IMAGE))
   {
@@ -255,7 +272,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     fdImage->fd    = update->dmaFD;
     fdImage->image = image;
 
-    int slot = (fdImage == &this->images[0]) ? 0 : 1;
+    const int slot = (int)(fdImage - this->images);
     fdImage->texIndex = slot;
     GLsync sync = 0;
     INTERLOCKED_SECTION(parent->copyLock,
@@ -287,7 +304,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
   INTERLOCKED_SECTION(parent->copyLock,
   {
     fdImage->frameToken = update->frameToken;
-    this->lastIndex     = (fdImage == &this->images[0]) ? 0 : 1;
+    this->lastIndex     = (int)(fdImage - this->images);
   });
 
   return true;

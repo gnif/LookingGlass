@@ -89,6 +89,7 @@ private:
   PLGMPHost      m_lgmp            = nullptr;
   WDFTIMER       m_lgmpTimer       = nullptr;
   PLGMPHostQueue m_frameQueue      = nullptr;
+  PLGMPHostQueue m_frameOwnerQueue[LGMP_Q_FRAME_LEN] = {};
   SRWLOCK        m_lgmpProcessLock = SRWLOCK_INIT;
 
   CFrameScheduler m_frameScheduler;
@@ -108,14 +109,37 @@ private:
   size_t            m_frameMemoryOffset   = 0;
   size_t            m_maxFrameSize        = 0;
   std::atomic<LONG> m_publishedFrameIndex = -1;
-  std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_LEN] = {};
-  SRWLOCK           m_framePublishLock    = SRWLOCK_INIT;
-  bool              m_frameResendPending  = false;
-  uint32_t          m_formatVer           = 0;
-  uint32_t          m_frameSerial         = 0;
-  PLGMPMemory       m_frameMemory[LGMP_Q_FRAME_LEN] = {};
-  KVMFRFrame      * m_frame      [LGMP_Q_FRAME_LEN] = {};
-  FrameBuffer     * m_frameBuffer[LGMP_Q_FRAME_LEN] = {};
+  std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  SRWLOCK           m_framePublishLock     = SRWLOCK_INIT;
+  bool              m_frameResendPending   = false;
+  uint64_t          m_framePublishSequence = 0;
+  uint64_t          m_frameLastPublishSequence[LGMP_Q_FRAME_BUFFER_LEN] = {};
+
+  struct FrameDelivery
+  {
+    uint64_t sharedOwnerToken    = 0;
+    unsigned ownerQueueMask      = 0;
+    uint32_t sharedOwnerClientID = 0;
+    bool     sharedOwnerPending  = false;
+    bool     sharedPending       = false;
+    bool     sharedDelivered     = false;
+  };
+
+  struct OwnerDelivery
+  {
+    uint64_t token      = 0;
+    uint32_t clientID   = 0;
+    unsigned frameIndex = 0;
+    bool     active     = false;
+  };
+
+  FrameDelivery m_frameDelivery[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  OwnerDelivery m_ownerDelivery[LGMP_Q_FRAME_LEN] = {};
+  uint32_t      m_formatVer   = 0;
+  uint32_t      m_frameSerial = 0;
+  PLGMPMemory   m_frameMemory[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  KVMFRFrame  * m_frame      [LGMP_Q_FRAME_BUFFER_LEN] = {};
+  FrameBuffer * m_frameBuffer[LGMP_Q_FRAME_BUFFER_LEN] = {};
 
   unsigned    m_width       = 0;
   unsigned    m_height      = 0;
@@ -155,6 +179,15 @@ private:
   bool InitializeLGMP();
   void DeInitLGMP();
   void LGMPTimer();
+  void ProcessFrameDeliveries();
+  int FindAvailableFrameBuffer() const;
+  int FindAvailableOwnerQueue(unsigned preferredIndex) const;
+  int FindOwnerDelivery(uint32_t clientID) const;
+  int FindSharedOwnerDelivery(uint32_t clientID) const;
+  bool HasOwnerDelivery(uint32_t clientID) const;
+  bool PostSharedFrame(unsigned frameIndex, uint32_t excludeClientID);
+  bool PostSharedOwnerFrame(unsigned frameIndex,
+    const CFrameScheduler::Schedule& schedule);
   void ResendCursor();
   void SendColorTransform();
   void InitializeEdid();
@@ -222,14 +255,21 @@ public:
   {
     unsigned frameIndex;
     uint8_t* mem;
+    bool     fullCopy;
   };
 
-  bool FrameBufferAvailable() const;
+  bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule);
+  bool HasPublishedFrame() const
+  {
+    return m_publishedFrameIndex.load(std::memory_order_acquire) >= 0;
+  }
   void ProcessFrameQueue();
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
-  bool PublishFrameBuffer(unsigned frameIndex, uint32_t scheduleGeneration);
-  void CommitFrameBuffer(unsigned frameIndex, uint32_t scheduleGeneration,
-    bool periodic);
+  bool PublishFrameBuffer(unsigned frameIndex,
+    const CFrameScheduler::Schedule& schedule);
+  bool RepublishFrameBuffer(const CFrameScheduler::Schedule& schedule);
+  void CommitFrameBuffer(unsigned frameIndex,
+    const CFrameScheduler::Schedule& schedule, bool periodic);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
   void CompleteFrameBuffer(unsigned frameIndex);
@@ -241,7 +281,7 @@ public:
   void ObserveFrame(uint64_t now);
   void ForceFrame();
   bool GetPublishTarget(uint64_t now, uint64_t& target,
-    uint32_t& generation, bool& periodic);
+    CFrameScheduler::Schedule& schedule, bool& periodic, bool& republish);
   void FrameSuperseded();
   HANDLE GetFrameScheduleEvent() const
   {

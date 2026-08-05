@@ -35,7 +35,7 @@ static const uint64_t PUBLISH_RETRY_NS      = 1000000ULL;
 static const DWORD    CANDIDATE_WAIT_MS     = 2;
 
 static_assert(LGMP_Q_FRAME_LEN == 2,
-  "IDD damage repair assumes two alternating frame buffers");
+  "IDD candidate pipeline assumes two slots");
 
 class CSRWExclusiveLock
 {
@@ -223,8 +223,30 @@ void CSwapChainProcessor::PublisherThread()
 
   for (;;)
   {
+    const uint64_t            now = CFrameScheduler::Nanotime();
+    uint64_t                  target;
+    CFrameScheduler::Schedule schedule;
+    bool                      periodic;
+    bool                      republish;
+    m_devContext->GetPublishTarget(
+      now, target, schedule, periodic, republish);
+
     if (!HasReadyCandidate())
     {
+      if (republish && m_devContext->HasPublishedFrame())
+      {
+        m_devContext->ProcessFrameQueue();
+        if (m_devContext->RepublishFrameBuffer(schedule))
+          continue;
+
+        ArmPublishTimer(m_publishTimer.Get(), PUBLISH_RETRY_NS);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
       if (m_publishTimer.Get())
         CancelWaitableTimer(m_publishTimer.Get());
       if (WaitForMultipleObjects(
@@ -233,12 +255,6 @@ void CSwapChainProcessor::PublisherThread()
         break;
       continue;
     }
-
-    const uint64_t now = CFrameScheduler::Nanotime();
-    uint64_t       target;
-    uint32_t       generation;
-    bool           periodic;
-    m_devContext->GetPublishTarget(now, target, generation, periodic);
 
     if (target > now)
     {
@@ -252,9 +268,9 @@ void CSwapChainProcessor::PublisherThread()
 
     const uint64_t publishStart = CFrameScheduler::Nanotime();
     m_devContext->ProcessFrameQueue();
-    if (!m_devContext->FrameBufferAvailable() ||
+    if (!m_devContext->FrameBufferAvailable(schedule) ||
         !PublishNewestCandidate(
-          generation, periodic, publishStart))
+          schedule, periodic, publishStart))
     {
       ArmPublishTimer(m_publishTimer.Get(), PUBLISH_RETRY_NS);
       if (WaitForMultipleObjects(
@@ -907,7 +923,8 @@ void CSwapChainProcessor::SignalCandidateState()
 }
 
 bool CSwapChainProcessor::PublishNewestCandidate(
-  uint32_t scheduleGeneration, bool periodic, uint64_t publishStart)
+  const CFrameScheduler::Schedule& schedule, bool periodic,
+  uint64_t publishStart)
 {
   int      selectedCandidate = -1;
   uint64_t newestSequence    = 0;
@@ -1007,7 +1024,7 @@ bool CSwapChainProcessor::PublishNewestCandidate(
 
   RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
   unsigned nbCopyDirtyRects                       = 0;
-  bool     fullCopy =
+  bool     fullCopy = buffer.fullCopy ||
     candidate.nbDirtyRects == 0 || nbPreviousDirtyRects == 0;
 
   if (!fullCopy)
@@ -1060,7 +1077,7 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   // Reserve the LGMP message before submitting the copy. This makes post
   // failure recoverable without racing a very fast GPU completion callback.
   if (!m_devContext->PublishFrameBuffer(
-        buffer.frameIndex, scheduleGeneration))
+        buffer.frameIndex, schedule))
   {
     copySlot->Cancel();
     m_devContext->AbortFrameBuffer(buffer.frameIndex);
@@ -1104,7 +1121,7 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   ReleaseSRWLockExclusive(&m_damageLock);
 
   m_devContext->CommitFrameBuffer(
-    buffer.frameIndex, scheduleGeneration, periodic);
+    buffer.frameIndex, schedule, periodic);
 
   unsigned superseded = 0;
   AcquireSRWLockExclusive(&m_candidateLock);

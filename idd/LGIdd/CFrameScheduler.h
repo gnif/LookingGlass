@@ -36,6 +36,7 @@ public:
   {
     uint32_t clientID;
     uint32_t generation;
+    uint32_t epoch;
     uint64_t period;
     uint64_t targetSlack;
   };
@@ -50,7 +51,9 @@ private:
     uint64_t expiry;
     uint32_t lastFeedbackFrameSerial;
     bool     subscribed;
+    bool     subscriptionSeen;
     bool     active;
+    bool     immediate;
   };
 
   mutable SRWLOCK m_lock = SRWLOCK_INIT;
@@ -59,6 +62,8 @@ private:
   Schedule        m_schedule                  = {};
   bool            m_scheduling                = false;
   bool            m_forceNext                 = false;
+  bool            m_republishNext             = false;
+  uint32_t        m_epoch                     = 0;
 
   uint64_t m_lastArrival    = 0;
   uint64_t m_guestPeriod    = 0;
@@ -91,16 +96,19 @@ public:
   void Reset();
   void UpdateSubscribers(const uint32_t * clientIDs, unsigned count,
     uint64_t now);
-  bool UpdateSchedule(const KVMFRFrameSchedule& schedule, uint64_t now);
+  bool UpdateSchedule(uint32_t sourceClientID,
+    const KVMFRFrameSchedule& schedule, uint64_t now);
   bool GetSchedule(Schedule& schedule) const;
   HANDLE GetWakeEvent() const { return m_wakeEvent; }
   void ObserveFrame(uint64_t now);
   void ForceFrame();
   bool GetPublishTarget(uint64_t now, uint64_t& target,
-    uint32_t& generation, bool& periodic);
+    Schedule& schedule, bool& periodic, bool& republish);
   void FrameSuperseded();
-  void FramePublished(uint32_t generation, uint32_t frameSerial,
+  void FramePublished(const Schedule& schedule, uint32_t frameSerial,
     uint64_t now, bool periodic);
+  void FrameRepublished(const Schedule& schedule, uint32_t frameSerial);
+  void FrameDelivered(const uint32_t * clientIDs, unsigned count);
   void RecordFrameTiming(uint64_t duration);
   void LogStatistics(uint64_t now);
 };

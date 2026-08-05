@@ -99,7 +99,9 @@ typedef struct
   int                  bpp;
   struct IVSHMEM       shmDev;
   PLGMPClient          lgmp;
-  PLGMPClientQueue     frameQueue, pointerQueue;
+  PLGMPClientQueue     frameQueue;
+  PLGMPClientQueue     frameOwnerQueue[LGMP_Q_FRAME_LEN];
+  PLGMPClientQueue     pointerQueue;
   gs_texture_t       * texture;
   gs_texture_t       * dstTexture;
   uint8_t            * texData;
@@ -114,7 +116,7 @@ typedef struct
 #if LIBOBS_API_MAJOR_VER >= 27
   bool                 dmabuf;
   bool                 dmabufTested;
-  DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_LEN];
+  DMAFrameInfo         dmaInfo[LGMP_Q_FRAME_BUFFER_LEN];
   gs_texture_t       * dmaTexture;
 #endif
 
@@ -124,6 +126,8 @@ typedef struct
 
   pthread_t            frameThread, pointerThread;
   os_sem_t           * frameSem;
+  uint32_t             frameSerial;
+  bool                 frameSerialValid;
   pthread_mutex_t      pointerLock;
   LGFrameScheduler     frameScheduler;
 
@@ -169,6 +173,16 @@ typedef struct
 }
 LGPlugin;
 
+typedef struct
+{
+  LGMPMessage      msg;
+  PLGMPClientQueue queue;
+  uint32_t         generation;
+  uint32_t         scheduleEpoch;
+  bool             owner;
+}
+LGFrameMessage;
+
 static void * frameThread(void * data);
 static void * pointerThread(void * data);
 static void lgUpdate(void * data, obs_data_t * settings);
@@ -186,6 +200,95 @@ static uint64_t lgFramePeriod(void)
 static const char * lgGetName(void * unused)
 {
   return obs_module_text("Looking Glass Client");
+}
+
+static bool lgFrameSerialNewer(uint32_t lhs, uint32_t rhs)
+{
+  return (int32_t)(lhs - rhs) > 0;
+}
+
+static LGMP_STATUS lgFrameProcessNewest(LGPlugin * this,
+    LGFrameMessage * result)
+{
+  struct
+  {
+    PLGMPClientQueue queue;
+    bool             owner;
+  }
+  queues[LGMP_Q_FRAME_LEN + 1] =
+  {
+    { this->frameQueue, false },
+  };
+  for (unsigned int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    queues[i + 1].queue = this->frameOwnerQueue[i];
+    queues[i + 1].owner = true;
+  }
+
+  memset(result, 0, sizeof(*result));
+  for (unsigned int i = 0; i < ARRAY_LENGTH(queues); ++i)
+  {
+    if (!queues[i].queue)
+      continue;
+
+    LGMP_STATUS status = lgmpClientAdvanceToLast(queues[i].queue);
+    if (status != LGMP_OK && status != LGMP_ERR_QUEUE_EMPTY)
+      return status;
+
+    LGMPMessage msg;
+    status = lgmpClientProcess(queues[i].queue, &msg);
+    if (status == LGMP_ERR_QUEUE_EMPTY)
+      continue;
+    if (status != LGMP_OK)
+      return status;
+
+    const KVMFRFrame * frame = (const KVMFRFrame *)msg.mem;
+    const bool owner = queues[i].owner || msg.udata != 0;
+
+    if (!result->queue)
+    {
+      result->msg   = msg;
+      result->queue = queues[i].queue;
+      result->owner = owner;
+      continue;
+    }
+
+    const KVMFRFrame * selected = (const KVMFRFrame *)result->msg.mem;
+    const bool replace = lgFrameSerialNewer(
+      frame->frameSerial, selected->frameSerial) ||
+      (frame->frameSerial == selected->frameSerial &&
+        owner && !result->owner);
+    PLGMPClientQueue discard = queues[i].queue;
+    if (replace)
+    {
+      discard       = result->queue;
+      result->msg   = msg;
+      result->queue = queues[i].queue;
+      result->owner = owner;
+    }
+
+    status = lgmpClientMessageDone(discard);
+    if (status != LGMP_OK)
+      return status;
+  }
+
+  if (result->owner)
+  {
+    result->generation    = (uint32_t)(result->msg.udata >> 32);
+    result->scheduleEpoch = (uint32_t)result->msg.udata;
+  }
+
+  return result->queue ? LGMP_OK : LGMP_ERR_QUEUE_EMPTY;
+}
+
+static void lgFrameUnsubscribeOwnerQueues(LGPlugin * this)
+{
+  for (unsigned int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    if (this->frameOwnerQueue[i])
+      lgmpClientUnsubscribe(&this->frameOwnerQueue[i]);
+    this->frameOwnerQueue[i] = NULL;
+  }
 }
 
 static void * lgCreate(obs_data_t * settings, obs_source_t * context)
@@ -479,6 +582,12 @@ static obs_properties_t * lgGetProperties(void * data)
 static void * frameThread(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
+  for (unsigned int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    this->frameOwnerQueue[i] = NULL;
+
+  this->frameQueue       = NULL;
+  this->frameSerial      = 0;
+  this->frameSerialValid = false;
 
   if (lgmpClientSubscribe(
         this->lgmp, LGMP_Q_FRAME, &this->frameQueue) != LGMP_OK)
@@ -487,31 +596,47 @@ static void * frameThread(void * data)
     return NULL;
   }
 
+  if (this->frameScheduler.supported)
+  {
+    for (unsigned int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    {
+      if (lgmpClientSubscribe(
+            this->lgmp, LGMP_Q_FRAME_OWNER + i,
+            &this->frameOwnerQueue[i]) == LGMP_OK)
+        continue;
+
+      lgFrameUnsubscribeOwnerQueues(this);
+      lgmpClientUnsubscribe(&this->frameQueue);
+      this->frameQueue = NULL;
+      this->state      = STATE_STOPPING;
+      return NULL;
+    }
+  }
+
+  lgFrameSchedulerRequestImmediate(&this->frameScheduler);
+
   this->state = STATE_RUNNING;
   os_sem_post(this->frameSem);
 
   while(this->state == STATE_RUNNING)
   {
-    LGMP_STATUS status;
-
     os_sem_wait(this->frameSem);
-    if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
+    LGFrameMessage frameMessage;
+    const LGMP_STATUS status = lgFrameProcessNewest(this, &frameMessage);
+    if (status != LGMP_OK && status != LGMP_ERR_QUEUE_EMPTY)
     {
-      if (status != LGMP_ERR_QUEUE_EMPTY)
-      {
-        os_sem_post(this->frameSem);
-        printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
-        break;
-      }
+      os_sem_post(this->frameSem);
+      printf("lgFrameProcessNewest: %s\n", lgmpStatusString(status));
+      break;
     }
 
     uint64_t now = os_gettime_ns();
     if (status == LGMP_OK)
     {
-      LGMPMessage msg;
-      if (lgmpClientProcess(this->frameQueue, &msg) == LGMP_OK)
+      const KVMFRFrame * frame =
+        (const KVMFRFrame *)frameMessage.msg.mem;
+      if (frameMessage.owner)
       {
-        const KVMFRFrame  * frame = (const KVMFRFrame *)msg.mem;
         const FrameBuffer * fb =
           (const FrameBuffer *)((const uint8_t *)frame + frame->offset);
         if (framebuffer_wait(
@@ -519,7 +644,8 @@ static void * frameThread(void * data)
         {
           now = os_gettime_ns();
           lgFrameSchedulerObserveFrame(&this->frameScheduler,
-            frame->frameSerial, msg.udata, now);
+            frame->frameSerial, frameMessage.generation,
+            frameMessage.scheduleEpoch, now);
         }
       }
     }
@@ -532,8 +658,10 @@ static void * frameThread(void * data)
     usleep(1000);
   }
 
+  lgFrameUnsubscribeOwnerQueues(this);
   lgmpClientUnsubscribe(&this->frameQueue);
-  this->state = STATE_RESTARTING;
+  this->frameQueue = NULL;
+  this->state      = STATE_RESTARTING;
   return NULL;
 }
 
@@ -584,7 +712,7 @@ static void * pointerThread(void * data)
     if (msg.udata & CURSOR_FLAG_VISIBLE_VALID)
     {
       this->cursorVisible = this->hideMouse ?
-        0 : msg.udata & CURSOR_FLAG_VISIBLE;
+        false : (msg.udata & CURSOR_FLAG_VISIBLE) != 0;
       if (cursor->sdrWhiteLevel)
         atomic_store(&this->sdrWhiteLevel, cursor->sdrWhiteLevel);
     }
@@ -966,7 +1094,7 @@ static void lgComputeColorMatrix(LGPlugin * this)
 }
 
 static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
-    LGMPMessage * msg)
+    LGMPMessage * msg, PLGMPClientQueue frameQueue)
 {
   this->formatVer    = frame->formatVer;
   this->screenWidth  = frame->screenWidth;
@@ -1061,7 +1189,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
 
     default:
       printf("invalid type %d\n", this->type);
-      lgmpClientMessageDone(this->frameQueue);
+      lgmpClientMessageDone(frameQueue);
       os_sem_post(this->frameSem);
       obs_leave_graphics();
       return;
@@ -1101,7 +1229,7 @@ static void lgFormatInit(LGPlugin * this, const KVMFRFrame * frame,
     if (!this->texture)
     {
       printf("create texture failed\n");
-      lgmpClientMessageDone(this->frameQueue);
+      lgmpClientMessageDone(frameQueue);
       os_sem_post(this->frameSem);
       obs_leave_graphics();
       return;
@@ -1143,7 +1271,7 @@ static void lgVideoTick(void * data, float seconds)
   const uint64_t tickTime    = os_gettime_ns();
   const uint64_t framePeriod = lgFramePeriod();
   LGMP_STATUS status;
-  LGMPMessage msg;
+  LGFrameMessage frameMessage;
 
   os_sem_wait(this->frameSem);
   if (this->state != STATE_RUNNING)
@@ -1269,17 +1397,7 @@ static void lgVideoTick(void * data, float seconds)
     os_sem_post(this->cursorSem);
   }
 
-  if ((status = lgmpClientAdvanceToLast(this->frameQueue)) != LGMP_OK)
-  {
-    if (status != LGMP_ERR_QUEUE_EMPTY)
-    {
-      os_sem_post(this->frameSem);
-      printf("lgmpClientAdvanceToLast: %s\n", lgmpStatusString(status));
-      return;
-    }
-  }
-
-  if ((status = lgmpClientProcess(this->frameQueue, &msg)) != LGMP_OK)
+  if ((status = lgFrameProcessNewest(this, &frameMessage)) != LGMP_OK)
   {
     if (status == LGMP_ERR_QUEUE_EMPTY)
     {
@@ -1287,25 +1405,64 @@ static void lgVideoTick(void * data, float seconds)
       return;
     }
 
-    printf("lgmpClientProcess: %s\n", lgmpStatusString(status));
+    printf("lgFrameProcessNewest: %s\n", lgmpStatusString(status));
     this->state = STATE_STOPPING;
     os_sem_post(this->frameSem);
     return;
   }
 
-  const KVMFRFrame * frame = (KVMFRFrame *)msg.mem;
-  lgFrameSchedulerFeedback(&this->frameScheduler,
-    frame->frameSerial, msg.udata, tickTime);
+  const KVMFRFrame * frame = (const KVMFRFrame *)frameMessage.msg.mem;
+  const bool equalSerial = this->frameSerialValid &&
+    frame->frameSerial == this->frameSerial;
+  if (this->frameSerialValid && !equalSerial &&
+      !lgFrameSerialNewer(frame->frameSerial, this->frameSerial))
+  {
+    lgmpClientMessageDone(frameMessage.queue);
+    os_sem_post(this->frameSem);
+    return;
+  }
+  if (equalSerial && !frameMessage.owner)
+  {
+    lgmpClientMessageDone(frameMessage.queue);
+    os_sem_post(this->frameSem);
+    return;
+  }
+
+  const FrameBuffer * fb =
+    (const FrameBuffer *)((const uint8_t *)frame + frame->offset);
+  bool frameComplete = false;
+  if (frameMessage.owner)
+  {
+    frameComplete = framebuffer_wait(
+      fb, (size_t)frame->dataHeight * frame->pitch);
+    if (!frameComplete)
+    {
+      lgmpClientMessageDone(frameMessage.queue);
+      os_sem_post(this->frameSem);
+      return;
+    }
+
+    const uint64_t readyTime = os_gettime_ns();
+    lgFrameSchedulerObserveFrame(&this->frameScheduler,
+      frame->frameSerial, frameMessage.generation,
+      frameMessage.scheduleEpoch, readyTime);
+    lgFrameSchedulerFeedback(&this->frameScheduler,
+      frame->frameSerial, frameMessage.generation,
+      frameMessage.scheduleEpoch, tickTime);
+  }
+
+  this->frameSerial      = frame->frameSerial;
+  this->frameSerialValid = true;
 
   bool textureValid = (this->dmabufTested && this->dmabuf) || this->texture;
   if (!textureValid || this->formatVer != frame->formatVer)
-    lgFormatInit(this, frame, &msg);
+    lgFormatInit(this, frame, &frameMessage.msg, frameMessage.queue);
 
 #if LIBOBS_API_MAJOR_VER >= 27
   if (this->dmabuf)
   {
     obs_enter_graphics();
-    DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, &msg, frame,
+    DMAFrameInfo * fi = dmabufOpenDMAFrameInfo(this, &frameMessage.msg, frame,
       (size_t)frame->dataHeight * frame->pitch);
     bool importFailed = !fi;
     if (fi && !fi->texture)
@@ -1315,12 +1472,12 @@ static void lgVideoTick(void * data, float seconds)
     if (!importFailed)
     {
       // wait for the frame to be complete before we try to use it
-      FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
-      const bool complete = framebuffer_wait(
-        fb, (size_t)frame->dataHeight * frame->pitch);
-      lgmpClientMessageDone(this->frameQueue);
+      if (!frameComplete)
+        frameComplete = framebuffer_wait(
+          fb, (size_t)frame->dataHeight * frame->pitch);
+      lgmpClientMessageDone(frameMessage.queue);
 
-      if (!complete)
+      if (!frameComplete)
       {
         os_sem_post(this->frameSem);
         return;
@@ -1333,18 +1490,17 @@ static void lgVideoTick(void * data, float seconds)
 
     puts("Failed to create dmabuf texture, falling back to CPU upload");
     this->dmabuf = false;
-    lgFormatInit(this, frame, &msg);
+    lgFormatInit(this, frame, &frameMessage.msg, frameMessage.queue);
   }
 #endif
 
   if (!this->texture)
   {
-    lgmpClientMessageDone(this->frameQueue);
+    lgmpClientMessageDone(frameMessage.queue);
     os_sem_post(this->frameSem);
     return;
   }
 
-  FrameBuffer * fb = (FrameBuffer *)(((uint8_t*)frame) + frame->offset);
   framebuffer_read(
       fb,
       this->texData   , // dst
@@ -1355,7 +1511,7 @@ static void lgVideoTick(void * data, float seconds)
       frame->pitch
   );
 
-  lgmpClientMessageDone(this->frameQueue);
+  lgmpClientMessageDone(frameMessage.queue);
   os_sem_post(this->frameSem);
 
   obs_enter_graphics();

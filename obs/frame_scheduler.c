@@ -35,8 +35,9 @@ void lgFrameSchedulerInit(LGFrameScheduler * scheduler, bool supported,
     uint32_t clientID)
 {
   memset(scheduler, 0, sizeof(*scheduler));
-  scheduler->supported = supported;
-  scheduler->clientID  = clientID;
+  scheduler->supported        = supported;
+  scheduler->immediatePending = supported;
+  scheduler->clientID         = clientID;
 }
 
 void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
@@ -60,43 +61,62 @@ void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
     return;
 
   ++scheduler->generation;
-  scheduler->resetPending        = true;
-  scheduler->phaseError          = 0;
-  scheduler->feedbackFrameSerial = 0;
-  scheduler->feedbackSamples     = 0;
-  scheduler->feedbackDirty       = false;
+  scheduler->resetPending          = true;
+  scheduler->immediatePending      = true;
+  scheduler->phaseError            = 0;
+  scheduler->feedbackFrameSerial   = 0;
+  scheduler->feedbackScheduleEpoch = 0;
+  scheduler->feedbackSamples       = 0;
+  scheduler->feedbackDirty         = false;
+}
+
+void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler)
+{
+  if (scheduler->supported)
+    scheduler->immediatePending = true;
 }
 
 void lgFrameSchedulerObserveFrame(LGFrameScheduler * scheduler,
-    uint32_t frameSerial, uint32_t generation, uint64_t readyTime)
+    uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
+    uint64_t readyTime)
 {
-  if (!generation ||
+  if (!generation || !scheduleEpoch ||
       (scheduler->readyFrameSerial == frameSerial &&
-        scheduler->readyGeneration == generation))
+        scheduler->readyGeneration == generation &&
+        scheduler->readyScheduleEpoch == scheduleEpoch))
     return;
 
-  scheduler->readyFrameSerial = frameSerial;
-  scheduler->readyGeneration  = generation;
-  scheduler->readyTime        = readyTime;
+  scheduler->readyFrameSerial   = frameSerial;
+  scheduler->readyGeneration    = generation;
+  scheduler->readyScheduleEpoch = scheduleEpoch;
+  scheduler->readyTime          = readyTime;
 }
 
 void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
-    uint32_t frameSerial, uint32_t generation, uint64_t neededTime)
+    uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
+    uint64_t tickTime)
 {
   if (!scheduler->active || generation != scheduler->generation ||
-      frameSerial == scheduler->feedbackFrameSerial)
+      !scheduleEpoch ||
+      (frameSerial == scheduler->feedbackFrameSerial &&
+        scheduleEpoch == scheduler->feedbackScheduleEpoch) ||
+      scheduler->readyFrameSerial != frameSerial ||
+      scheduler->readyGeneration != generation ||
+      scheduler->readyScheduleEpoch != scheduleEpoch)
     return;
 
-  uint64_t readyTime = neededTime;
-  if (scheduler->readyFrameSerial == frameSerial &&
-      scheduler->readyGeneration == generation)
-    readyTime = scheduler->readyTime;
+  if (scheduler->feedbackScheduleEpoch &&
+      scheduler->feedbackScheduleEpoch != scheduleEpoch)
+  {
+    scheduler->phaseError      = 0;
+    scheduler->feedbackSamples = 0;
+  }
 
-  const uint64_t measuredPhase = neededTime > readyTime ?
-    neededTime - readyTime : 0;
-  int64_t error = measuredPhase > FRAME_SCHEDULER_TARGET_SLACK_NS ?
-    (int64_t)(measuredPhase - FRAME_SCHEDULER_TARGET_SLACK_NS) :
-    -(int64_t)(FRAME_SCHEDULER_TARGET_SLACK_NS - measuredPhase);
+  const int64_t measuredPhase = tickTime >= scheduler->readyTime ?
+    (int64_t)(tickTime - scheduler->readyTime) :
+    -(int64_t)(scheduler->readyTime - tickTime);
+  int64_t error = measuredPhase -
+    (int64_t)FRAME_SCHEDULER_TARGET_SLACK_NS;
   const int64_t period = (int64_t)scheduler->period;
   const int64_t limit = period / 2;
   if (error > limit)
@@ -111,8 +131,9 @@ void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
   if (scheduler->feedbackSamples < 32)
     ++scheduler->feedbackSamples;
 
-  scheduler->feedbackFrameSerial = frameSerial;
-  scheduler->feedbackDirty       = true;
+  scheduler->feedbackFrameSerial    = frameSerial;
+  scheduler->feedbackScheduleEpoch = scheduleEpoch;
+  scheduler->feedbackDirty          = true;
 }
 
 void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
@@ -124,33 +145,41 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
   const uint64_t interval = scheduler->feedbackDirty ?
     FRAME_SCHEDULER_FEEDBACK_NS : FRAME_SCHEDULER_RENEW_NS;
   if (scheduler->active && !scheduler->resetPending &&
+      !scheduler->immediatePending &&
       now - scheduler->lastSend < interval)
     return;
 
   KVMFRFrameScheduleFlags flags = KVMFR_FRAME_SCHEDULE_ACTIVE;
   if (scheduler->resetPending)
     flags |= KVMFR_FRAME_SCHEDULE_RESET;
+  if (scheduler->immediatePending)
+    flags |= KVMFR_FRAME_SCHEDULE_IMMEDIATE;
 
   const uint32_t feedbackFrameSerial =
     scheduler->feedbackFrameSerial;
+  const uint32_t feedbackScheduleEpoch =
+    scheduler->feedbackScheduleEpoch;
   const KVMFRFrameSchedule message = {
-    .msg.type            = KVMFR_MESSAGE_FRAME_SCHEDULE,
-    .clientID            = scheduler->clientID,
-    .generation          = scheduler->generation,
-    .flags               = flags,
-    .period              = scheduler->period,
-    .targetSlack         = FRAME_SCHEDULER_TARGET_SLACK_NS,
-    .phaseError          = scheduler->phaseError,
-    .feedbackFrameSerial = feedbackFrameSerial,
-    .lease               = FRAME_SCHEDULER_LEASE_MS,
+    .msg.type              = KVMFR_MESSAGE_FRAME_SCHEDULE,
+    .clientID              = scheduler->clientID,
+    .generation            = scheduler->generation,
+    .flags                 = flags,
+    .period                = scheduler->period,
+    .targetSlack           = FRAME_SCHEDULER_TARGET_SLACK_NS,
+    .phaseError            = scheduler->phaseError,
+    .feedbackFrameSerial   = feedbackFrameSerial,
+    .feedbackScheduleEpoch = feedbackScheduleEpoch,
+    .lease                 = FRAME_SCHEDULER_LEASE_MS,
   };
 
   if (lgmpClientSendData(queue, &message, sizeof(message), NULL) != LGMP_OK)
     return;
 
-  scheduler->active       = true;
-  scheduler->resetPending = false;
-  scheduler->lastSend     = now;
-  if (scheduler->feedbackFrameSerial == feedbackFrameSerial)
+  scheduler->active           = true;
+  scheduler->resetPending     = false;
+  scheduler->immediatePending = false;
+  scheduler->lastSend         = now;
+  if (scheduler->feedbackFrameSerial == feedbackFrameSerial &&
+      scheduler->feedbackScheduleEpoch == feedbackScheduleEpoch)
     scheduler->feedbackDirty = false;
 }

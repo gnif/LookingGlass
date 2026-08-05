@@ -134,7 +134,8 @@ private:
   static DWORD CALLBACK _PublisherThread(LPVOID arg);
   void PublisherThread();
   bool PublishNewestCandidate(
-    uint32_t scheduleGeneration, bool periodic, uint64_t publishStart);
+    const CFrameScheduler::Schedule& schedule, bool periodic,
+    uint64_t publishStart);
   bool HasReadyCandidate();
   int AcquireCandidate();
   void ReleaseCandidate(unsigned candidateIndex);

@@ -22,9 +22,10 @@
 
 #include "texture.h"
 #include "texture_util.h"
+#include "common/LGMPConfig.h"
 #include "common/locking.h"
 
-#define EGL_TEX_BUFFER_MAX 2
+#define EGL_TEX_BUFFER_MAX LGMP_Q_FRAME_BUFFER_LEN
 
 typedef struct TextureBuffer
 {

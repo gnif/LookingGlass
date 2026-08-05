@@ -135,7 +135,9 @@ typedef struct LG_TransportFrame
   uint64_t serial;
   uint64_t timestamp;
   uint32_t scheduleGeneration;
+  uint32_t scheduleEpoch;
   LG_TransportFrameFlags flags;
+  bool scheduleOwner;
   // Backend-owned immutable metadata, valid until releaseFrame.
   const LG_TransportFrameFormat * format;
 
@@ -207,6 +209,7 @@ typedef struct LG_TransportControl
       uint64_t                       targetSlack;
       int64_t                        phaseError;
       uint32_t                       feedbackFrameSerial;
+      uint32_t                       feedbackScheduleEpoch;
       uint32_t                       lease;
     }
     frameSchedule;

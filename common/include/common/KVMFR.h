@@ -30,7 +30,7 @@
 #include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 26
+#define KVMFR_VERSION 27
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -296,8 +296,9 @@ typedef struct KVMFRFrameSchedule
   // Positive when the frame arrived early, negative when it arrived late.
   int64_t                 phaseError;   // ready-to-render phase error (ns)
   uint32_t                feedbackFrameSerial;
+  uint32_t                feedbackScheduleEpoch;
   uint32_t                lease;        // lease duration (ms)
-  uint8_t                 reserved[16];
+  uint8_t                 reserved[12];
 }
 KVMFRFrameSchedule;
 

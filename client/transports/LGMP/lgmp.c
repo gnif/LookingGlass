@@ -47,24 +47,28 @@ struct DMAFrameInfo
 
 struct LG_Transport
 {
-  struct IVSHMEM  shm;
-  PLGMPClient     client;
-  PLGMPClientQueue frameQueue;
-  PLGMPClientQueue pointerQueue;
-  LG_Lock         pointerLock;
+  struct IVSHMEM    shm;
+  PLGMPClient       client;
+  PLGMPClientQueue  frameQueue;
+  PLGMPClientQueue  ownerFrameQueue[LGMP_Q_FRAME_LEN];
+  PLGMPClientQueue  pendingFrameQueue;
+  PLGMPClientQueue  pointerQueue;
+  LG_Lock           pointerLock;
 
   unsigned cursorPollInterval;
   unsigned framePollInterval;
   bool     allowDMA;
   bool     connected;
   bool     framePending;
+  bool     frameScheduleSupported;
   const KVMFRFrame * pendingFrame;
   uint32_t clientID;
   uint32_t frameSerial;
+  bool     frameSerialValid;
   bool     formatValid;
   LG_TransportFrameFormat format;
 
-  struct DMAFrameInfo dma[LGMP_Q_FRAME_LEN];
+  struct DMAFrameInfo dma[LGMP_Q_FRAME_BUFFER_LEN];
   uint8_t            * pointerData;
   size_t               pointerDataSize;
 };
@@ -180,7 +184,7 @@ static bool lgmp_create(LG_Transport ** result)
   this->framePollInterval  = framePoll;
   this->cursorPollInterval = cursorPoll;
 
-  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     this->dma[i].fd = -1;
 
   LG_LOCK_INIT(this->pointerLock);
@@ -210,25 +214,39 @@ static bool lgmp_create(LG_Transport ** result)
 
 static void lgmp_stopFrame(struct LG_Transport * this)
 {
-  if (this->framePending && this->frameQueue)
+  if (this->framePending && this->pendingFrameQueue)
   {
-    const LGMP_STATUS status = lgmpClientMessageDone(this->frameQueue);
+    const LGMP_STATUS status =
+      lgmpClientMessageDone(this->pendingFrameQueue);
     if (status != LGMP_OK)
       DEBUG_WARN("Failed to release pending LGMP frame: %s",
           lgmpStatusString(status));
   }
-  this->framePending = false;
-  this->pendingFrame = NULL;
+  this->framePending      = false;
+  this->pendingFrame      = NULL;
+  this->pendingFrameQueue = NULL;
+
   LGMP_STATUS status = lgmpClientUnsubscribe(&this->frameQueue);
   if (status != LGMP_OK)
   {
-    DEBUG_WARN("Failed to unsubscribe from the LGMP frame queue: %s",
+    DEBUG_WARN("Failed to unsubscribe from the shared LGMP frame queue: %s",
         lgmpStatusString(status));
     this->frameQueue = NULL;
   }
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    status = lgmpClientUnsubscribe(&this->ownerFrameQueue[i]);
+    if (status != LGMP_OK)
+    {
+      DEBUG_WARN("Failed to unsubscribe from owner LGMP frame queue %u: %s",
+          i, lgmpStatusString(status));
+      this->ownerFrameQueue[i] = NULL;
+    }
+  }
 
-  this->frameSerial = 0;
-  this->formatValid = false;
+  this->frameSerial      = 0;
+  this->frameSerialValid = false;
+  this->formatValid      = false;
 }
 
 static void lgmp_stopPointer(struct LG_Transport * this)
@@ -252,7 +270,7 @@ static void lgmp_closeQueues(struct LG_Transport * this)
 
 static void lgmp_closeDMA(struct LG_Transport * this)
 {
-  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
   {
     if (this->dma[i].fd >= 0)
       close(this->dma[i].fd);
@@ -370,9 +388,12 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
     case LGMP_OK:
       if (!lgmp_parseSession(data, size, session))
         return LG_TRANSPORT_INVALID_VERSION;
-      this->connected   = true;
-      this->frameSerial = 0;
-      this->formatValid = false;
+      this->connected              = true;
+      this->frameScheduleSupported =
+        session->features & LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
+      this->frameSerial            = 0;
+      this->frameSerialValid       = false;
+      this->formatValid            = false;
       return LG_TRANSPORT_OK;
 
     case LGMP_ERR_INVALID_VERSION:
@@ -392,8 +413,9 @@ static void lgmp_disconnect(LG_Transport * this)
 {
   lgmp_closeQueues(this);
   lgmp_closeDMA(this);
-  this->connected = false;
-  this->clientID  = 0;
+  this->connected              = false;
+  this->frameScheduleSupported = false;
+  this->clientID               = 0;
 }
 
 static bool lgmp_sessionValid(LG_Transport * this)
@@ -457,11 +479,119 @@ static LG_TransportStatus lgmp_process(PLGMPClientQueue queue,
   }
 }
 
+struct LGMPFrameMessage
+{
+  PLGMPClientQueue   queue;
+  LGMPMessage        message;
+  const KVMFRFrame * frame;
+  bool               owner;
+};
+
+static LG_TransportStatus lgmp_pollFrameQueue(PLGMPClientQueue queue,
+    bool owner, struct LGMPFrameMessage * result)
+{
+  const LGMP_STATUS advance = lgmpClientAdvanceToLast(queue);
+  switch (advance)
+  {
+    case LGMP_OK:
+      break;
+    case LGMP_ERR_QUEUE_EMPTY:
+      break;
+    case LGMP_ERR_INVALID_SESSION:
+      return LG_TRANSPORT_DISCONNECTED;
+    default:
+      DEBUG_ERROR("lgmpClientAdvanceToLast failed: %s",
+          lgmpStatusString(advance));
+      return LG_TRANSPORT_ERROR;
+  }
+
+  const LG_TransportStatus status = lgmp_process(queue, 0, &result->message);
+  if (status == LG_TRANSPORT_OK)
+  {
+    result->queue = queue;
+    result->owner = owner || result->message.udata != 0;
+  }
+  return status;
+}
+
+static LG_TransportStatus lgmp_doneFrameMessage(
+    struct LGMPFrameMessage * message)
+{
+  if (!message || !message->queue)
+    return LG_TRANSPORT_OK;
+
+  const LGMP_STATUS status = lgmpClientMessageDone(message->queue);
+  message->queue = NULL;
+  message->frame = NULL;
+
+  if (status == LGMP_OK)
+    return LG_TRANSPORT_OK;
+  if (status == LGMP_ERR_INVALID_SESSION)
+    return LG_TRANSPORT_DISCONNECTED;
+
+  DEBUG_WARN("Failed to release discarded LGMP frame: %s",
+      lgmpStatusString(status));
+  return LG_TRANSPORT_ERROR;
+}
+
+static void lgmp_mergeFrameStatus(LG_TransportStatus status,
+    LG_TransportStatus * result)
+{
+  if (status != LG_TRANSPORT_OK &&
+      (*result == LG_TRANSPORT_OK ||
+       status == LG_TRANSPORT_DISCONNECTED))
+    *result = status;
+}
+
+static bool lgmp_validateFrameMessage(struct LGMPFrameMessage * message)
+{
+  if (message->message.size < sizeof(KVMFRFrame))
+  {
+    DEBUG_ERROR("LGMP frame payload is too small");
+    return false;
+  }
+
+  const KVMFRFrame * frame = (const KVMFRFrame *)message->message.mem;
+  const size_t frameDataSize = (size_t)frame->dataHeight * frame->pitch;
+  if (frame->type <= FRAME_TYPE_INVALID || frame->type >= FRAME_TYPE_MAX ||
+      frame->offset > message->message.size - sizeof(FrameBuffer) ||
+      frameDataSize >
+        message->message.size - frame->offset - sizeof(FrameBuffer))
+  {
+    DEBUG_ERROR("LGMP frame payload contains invalid dimensions or offsets");
+    return false;
+  }
+
+  message->frame = frame;
+  return true;
+}
+
+static bool lgmp_frameSerialNewer(uint32_t lhs, uint32_t rhs)
+{
+  return lhs != rhs &&
+    (uint32_t)(lhs - rhs) < UINT32_C(0x80000000);
+}
+
+static void lgmp_selectNewestFrameMessage(
+    struct LGMPFrameMessage * candidate,
+    struct LGMPFrameMessage ** selected)
+{
+  if (!candidate->frame)
+    return;
+
+  if (!*selected ||
+      lgmp_frameSerialNewer(candidate->frame->frameSerial,
+        (*selected)->frame->frameSerial) ||
+      (candidate->frame->frameSerial == (*selected)->frame->frameSerial &&
+       candidate->owner && !(*selected)->owner))
+    *selected = candidate;
+}
+
 static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
     size_t dataSize)
 {
   struct DMAFrameInfo * dma = NULL;
-  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     if (this->dma[i].frame == frame)
     {
       dma = &this->dma[i];
@@ -474,7 +604,7 @@ static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
     }
 
   if (!dma)
-    for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
       if (!this->dma[i].frame)
       {
         dma = &this->dma[i];
@@ -502,48 +632,144 @@ static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
   if (this->framePending)
     return LG_TRANSPORT_ERROR;
 
-  LG_TransportStatus status = lgmp_subscribe(this->client, LGMP_Q_FRAME,
-      &this->frameQueue);
-  if (status != LG_TRANSPORT_OK)
+  if (this->frameScheduleSupported)
+    for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    {
+      const LG_TransportStatus status = lgmp_subscribe(this->client,
+          LGMP_Q_FRAME_OWNER + i, &this->ownerFrameQueue[i]);
+      if (status != LG_TRANSPORT_OK && status != LG_TRANSPORT_TIMEOUT)
+        return status;
+    }
+
+  const LG_TransportStatus sharedSubscribe = lgmp_subscribe(this->client,
+      LGMP_Q_FRAME, &this->frameQueue);
+  if (sharedSubscribe != LG_TRANSPORT_OK &&
+      sharedSubscribe != LG_TRANSPORT_TIMEOUT)
+    return sharedSubscribe;
+
+  struct LGMPFrameMessage owner[LGMP_Q_FRAME_LEN] = {};
+  struct LGMPFrameMessage shared = {};
+  LG_TransportStatus sharedStatus = LG_TRANSPORT_TIMEOUT;
+  LG_TransportStatus ownerStatus[LGMP_Q_FRAME_LEN];
+
+  /* Select the newest frame across the shared and owner delivery lanes. */
+  if (this->frameQueue)
+    sharedStatus = lgmp_pollFrameQueue(this->frameQueue, false, &shared);
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if (status == LG_TRANSPORT_TIMEOUT)
-      usleep(1000);
-    return status;
+    ownerStatus[i] = LG_TRANSPORT_TIMEOUT;
+    if (this->ownerFrameQueue[i])
+      ownerStatus[i] = lgmp_pollFrameQueue(
+          this->ownerFrameQueue[i], true, &owner[i]);
   }
 
-  LGMPMessage message;
-  status = lgmp_process(this->frameQueue, this->framePollInterval, &message);
-  if (status != LG_TRANSPORT_OK)
-    return status;
+  LG_TransportStatus failure = LG_TRANSPORT_OK;
+  if (sharedStatus != LG_TRANSPORT_OK &&
+      sharedStatus != LG_TRANSPORT_TIMEOUT)
+    failure = sharedStatus;
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (ownerStatus[i] != LG_TRANSPORT_OK &&
+        ownerStatus[i] != LG_TRANSPORT_TIMEOUT &&
+        (failure == LG_TRANSPORT_OK ||
+         ownerStatus[i] == LG_TRANSPORT_DISCONNECTED))
+      failure = ownerStatus[i];
 
-  if (message.size < sizeof(KVMFRFrame))
+  if (failure != LG_TRANSPORT_OK)
   {
-    lgmpClientMessageDone(this->frameQueue);
-    DEBUG_ERROR("LGMP frame payload is too small");
-    return LG_TRANSPORT_ERROR;
+    lgmp_mergeFrameStatus(
+        lgmp_doneFrameMessage(&shared), &failure);
+    for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+      lgmp_mergeFrameStatus(
+          lgmp_doneFrameMessage(&owner[i]), &failure);
+    return failure;
   }
 
-  const KVMFRFrame * frame = (const KVMFRFrame *)message.mem;
-  const size_t frameDataSize = (size_t)frame->dataHeight * frame->pitch;
-  if (frame->type <= FRAME_TYPE_INVALID || frame->type >= FRAME_TYPE_MAX ||
-      frame->offset > message.size - sizeof(FrameBuffer) ||
-      frameDataSize > message.size - frame->offset - sizeof(FrameBuffer))
+  bool malformed = false;
+  LG_TransportStatus releaseFailure = LG_TRANSPORT_OK;
+  if (sharedStatus == LG_TRANSPORT_OK &&
+      !lgmp_validateFrameMessage(&shared))
   {
-    lgmpClientMessageDone(this->frameQueue);
-    DEBUG_ERROR("LGMP frame payload contains invalid dimensions or offsets");
-    return LG_TRANSPORT_ERROR;
+    malformed = true;
+    releaseFailure = lgmp_doneFrameMessage(&shared);
+  }
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (ownerStatus[i] == LG_TRANSPORT_OK &&
+        !lgmp_validateFrameMessage(&owner[i]))
+    {
+      malformed = true;
+      const LG_TransportStatus done =
+        lgmp_doneFrameMessage(&owner[i]);
+      lgmp_mergeFrameStatus(done, &releaseFailure);
+    }
+
+  if (releaseFailure != LG_TRANSPORT_OK)
+  {
+    lgmp_mergeFrameStatus(
+        lgmp_doneFrameMessage(&shared), &releaseFailure);
+    for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+      lgmp_mergeFrameStatus(
+          lgmp_doneFrameMessage(&owner[i]), &releaseFailure);
+    return releaseFailure;
   }
 
-  if (frame->frameSerial == this->frameSerial && this->frameSerial)
+  struct LGMPFrameMessage * selected = NULL;
+  lgmp_selectNewestFrameMessage(&shared, &selected);
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    lgmp_selectNewestFrameMessage(&owner[i], &selected);
+
+  if (!selected)
   {
-    lgmpClientMessageDone(this->frameQueue);
-    return LG_TRANSPORT_TIMEOUT;
+    if (this->framePollInterval)
+      usleep(this->framePollInterval);
+    return malformed ? LG_TRANSPORT_ERROR : LG_TRANSPORT_TIMEOUT;
   }
-  this->frameSerial = frame->frameSerial;
+
+  if (selected != &shared)
+    releaseFailure = lgmp_doneFrameMessage(&shared);
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (selected != &owner[i])
+    {
+      const LG_TransportStatus done =
+        lgmp_doneFrameMessage(&owner[i]);
+      lgmp_mergeFrameStatus(done, &releaseFailure);
+    }
+
+  if (releaseFailure != LG_TRANSPORT_OK)
+  {
+    lgmp_mergeFrameStatus(
+        lgmp_doneFrameMessage(selected), &releaseFailure);
+    return releaseFailure;
+  }
+
+  const KVMFRFrame * frame = selected->frame;
+  const bool equalSerial = this->frameSerialValid &&
+    frame->frameSerial == this->frameSerial;
+  if (this->frameSerialValid && !equalSerial &&
+      !lgmp_frameSerialNewer(frame->frameSerial, this->frameSerial))
+  {
+    const LG_TransportStatus done = lgmp_doneFrameMessage(selected);
+    return done == LG_TRANSPORT_OK ? LG_TRANSPORT_TIMEOUT : done;
+  }
+  if (equalSerial && !selected->owner)
+  {
+    const LG_TransportStatus done = lgmp_doneFrameMessage(selected);
+    return done == LG_TRANSPORT_OK ? LG_TRANSPORT_TIMEOUT : done;
+  }
+
+  const bool fullDamage = !this->frameSerialValid || equalSerial ||
+    frame->frameSerial != this->frameSerial + 1;
+  this->frameSerial      = frame->frameSerial;
+  this->frameSerialValid = true;
 
   memset(result, 0, sizeof(*result));
-  result->serial             = frame->frameSerial;
-  result->scheduleGeneration = message.udata;
+  result->serial = frame->frameSerial;
+  if (selected->owner)
+  {
+    const uint64_t scheduleToken = selected->message.udata;
+    result->scheduleGeneration   = (uint32_t)(scheduleToken >> 32);
+    result->scheduleEpoch        = (uint32_t)scheduleToken;
+    result->scheduleOwner        = true;
+  }
   if (frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER)
     result->flags |= LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
   if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
@@ -596,22 +822,24 @@ static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
     result->dmaFD = lgmp_getDMA(this, frame, dataSize);
     if (result->dmaFD < 0)
     {
-      lgmpClientMessageDone(this->frameQueue);
+      const LG_TransportStatus done = lgmp_doneFrameMessage(selected);
       DEBUG_ERROR("Failed to obtain a DMA buffer for the frame");
-      return LG_TRANSPORT_ERROR;
+      return done == LG_TRANSPORT_DISCONNECTED ?
+        done : LG_TRANSPORT_ERROR;
     }
   }
 
-  if (frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
+  if (!fullDamage && frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
   {
     result->damageRects      = frame->damageRects;
     result->damageRectsCount = frame->damageRectsCount;
   }
-  else
+  else if (!fullDamage)
     DEBUG_WARN("Invalid damage rectangles, forcing a full update");
 
-  this->framePending = true;
-  this->pendingFrame = frame;
+  this->framePending      = true;
+  this->pendingFrame      = frame;
+  this->pendingFrameQueue = selected->queue;
   return LG_TRANSPORT_OK;
 }
 
@@ -652,10 +880,11 @@ static void lgmp_getFrameTiming(LG_Transport * this,
 
 static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
 {
-  if (this->framePending && this->frameQueue)
-    lgmpClientMessageDone(this->frameQueue);
-  this->framePending = false;
-  this->pendingFrame = NULL;
+  if (this->framePending && this->pendingFrameQueue)
+    lgmpClientMessageDone(this->pendingFrameQueue);
+  this->framePending      = false;
+  this->pendingFrame      = NULL;
+  this->pendingFrameQueue = NULL;
   memset(frame, 0, sizeof(*frame));
 }
 
@@ -721,7 +950,7 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
           if (status == LG_TRANSPORT_OK)
           {
             memcpy(this->pointerData, message.mem, needed);
-            pointerFlags = message.udata;
+            pointerFlags = (uint32_t)message.udata;
           }
           lgmpClientMessageDone(this->pointerQueue);
         }
@@ -797,15 +1026,17 @@ static LG_TransportStatus lgmp_sendControl(LG_Transport * this,
     case LG_TRANSPORT_CONTROL_FRAME_SCHEDULE:
     {
       const KVMFRFrameSchedule message = {
-        .msg.type            = KVMFR_MESSAGE_FRAME_SCHEDULE,
-        .clientID            = this->clientID,
-        .generation          = control->frameSchedule.generation,
-        .flags               = control->frameSchedule.flags,
-        .period              = control->frameSchedule.period,
-        .targetSlack         = control->frameSchedule.targetSlack,
-        .phaseError          = control->frameSchedule.phaseError,
-        .feedbackFrameSerial = control->frameSchedule.feedbackFrameSerial,
-        .lease               = control->frameSchedule.lease,
+        .msg.type              = KVMFR_MESSAGE_FRAME_SCHEDULE,
+        .clientID              = this->clientID,
+        .generation            = control->frameSchedule.generation,
+        .flags                 = control->frameSchedule.flags,
+        .period                = control->frameSchedule.period,
+        .targetSlack           = control->frameSchedule.targetSlack,
+        .phaseError            = control->frameSchedule.phaseError,
+        .feedbackFrameSerial   = control->frameSchedule.feedbackFrameSerial,
+        .feedbackScheduleEpoch =
+          control->frameSchedule.feedbackScheduleEpoch,
+        .lease                 = control->frameSchedule.lease,
       };
       memcpy(buffer, &message, sizeof(message));
       size = sizeof(message);

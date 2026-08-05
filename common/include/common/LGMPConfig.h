@@ -23,8 +23,13 @@
 
 #define LGMP_Q_POINTER     1
 #define LGMP_Q_FRAME       2
+// Base ID for LGMP_Q_FRAME_LEN independent owner-delivery queues.
+#define LGMP_Q_FRAME_OWNER 3
 
-#define LGMP_Q_FRAME_LEN   2
-#define LGMP_Q_POINTER_LEN 32
+// Two delivery lanes plus a spare buffer let the timing owner continue to
+// alternate buffers while a secondary client holds the shared delivery.
+#define LGMP_Q_FRAME_LEN        2
+#define LGMP_Q_FRAME_BUFFER_LEN 3
+#define LGMP_Q_POINTER_LEN      32
 
 #endif

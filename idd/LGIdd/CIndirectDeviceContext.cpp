@@ -44,6 +44,22 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
   1000                //subTimeout
 };
 
+static uint64_t FrameScheduleToken(
+  const CFrameScheduler::Schedule& schedule)
+{
+  return static_cast<uint64_t>(schedule.generation) << 32 |
+    schedule.epoch;
+}
+
+static bool FrameScheduleMatches(
+  const CFrameScheduler::Schedule& a,
+  const CFrameScheduler::Schedule& b)
+{
+  return a.clientID   == b.clientID   &&
+         a.generation == b.generation &&
+         a.epoch      == b.epoch;
+}
+
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
 static const UINT64 FRAME_BYTES_PER_PIXEL = 4;
@@ -879,7 +895,7 @@ bool CIndirectDeviceContext::GetResolutionMemoryRequirements(
     return false;
 
   ivshmemSize = frameMemoryStart +
-    frameAllocationSize * LGMP_Q_FRAME_LEN;
+    frameAllocationSize * LGMP_Q_FRAME_BUFFER_LEN;
   return true;
 }
 
@@ -1026,6 +1042,23 @@ bool CIndirectDeviceContext::InitializeLGMP()
     return false;
   }
 
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    const struct LGMPQueueConfig config =
+    {
+      LGMP_Q_FRAME_OWNER + i, //queueID
+      LGMP_Q_FRAME_LEN,       //numMessages
+      1000                    //subTimeout
+    };
+    if ((status = lgmpHostQueueNew(
+        m_lgmp, config, &m_frameOwnerQueue[i])) != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostQueueCreate Failed (Frame Owner %u): %s",
+        i, lgmpStatusString(status));
+      return false;
+    }
+  }
+
   if ((status = lgmpHostQueueNew(m_lgmp, POINTER_QUEUE_CONFIG, &m_pointerQueue)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostQueueCreate Failed (Pointer): %s", lgmpStatusString(status));
@@ -1110,7 +1143,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
   const size_t alignmentMask = m_alignSize - 1;
   size_t frameAllocationSize =
-    (available - alignmentPadding) / LGMP_Q_FRAME_LEN;
+    (available - alignmentPadding) / LGMP_Q_FRAME_BUFFER_LEN;
   frameAllocationSize &= ~alignmentMask;
   if (frameAllocationSize <= m_alignSize ||
       frameAllocationSize > UINT32_MAX)
@@ -1127,7 +1160,7 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
     (unsigned int)(maxFrameSize / 1048576));
 
   LGMP_STATUS status;
-  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (int i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
   {
     if ((status = lgmpHostMemAllocAligned(m_lgmp,
         (uint32_t)frameAllocationSize,
@@ -1150,7 +1183,14 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
 
   m_maxFrameSize = maxFrameSize;
   m_publishedFrameIndex.store(-1, std::memory_order_release);
-  m_frameResendPending = false;
+  m_frameResendPending   = false;
+  m_framePublishSequence = 0;
+  memset(m_frameLastPublishSequence, 0,
+    sizeof(m_frameLastPublishSequence));
+  for (FrameDelivery& delivery : m_frameDelivery)
+    delivery = {};
+  for (OwnerDelivery& delivery : m_ownerDelivery)
+    delivery = {};
 
   WDF_TIMER_CONFIG config;
   WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
@@ -1198,7 +1238,14 @@ void CIndirectDeviceContext::DeInitLGMP()
   {
     m_frameScheduler.Reset();
     m_publishedFrameIndex.store(-1, std::memory_order_release);
-    m_frameResendPending = false;
+    m_frameResendPending   = false;
+    m_framePublishSequence = 0;
+    memset(m_frameLastPublishSequence, 0,
+      sizeof(m_frameLastPublishSequence));
+    for (FrameDelivery& delivery : m_frameDelivery)
+      delivery = {};
+    for (OwnerDelivery& delivery : m_ownerDelivery)
+      delivery = {};
     return;
   }
 
@@ -1212,13 +1259,20 @@ void CIndirectDeviceContext::DeInitLGMP()
 
   AcquireSRWLockExclusive(&m_framePublishLock);
   m_publishedFrameIndex.store(-1, std::memory_order_release);
-  m_frameResendPending = false;
+  m_frameResendPending   = false;
+  m_framePublishSequence = 0;
+  memset(m_frameLastPublishSequence, 0,
+    sizeof(m_frameLastPublishSequence));
+  for (FrameDelivery& delivery : m_frameDelivery)
+    delivery = {};
+  for (OwnerDelivery& delivery : m_ownerDelivery)
+    delivery = {};
   ReleaseSRWLockExclusive(&m_framePublishLock);
 
-  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (int i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     m_frameInFlight[i].store(false, std::memory_order_release);
 
-  for (int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  for (int i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     lgmpHostMemFree(&m_frameMemory[i]);
   for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
     lgmpHostMemFree(&m_pointerMemory[i]);
@@ -1264,18 +1318,37 @@ void CIndirectDeviceContext::LGMPTimer()
   }
 
   const uint64_t now = CFrameScheduler::Nanotime();
-  uint32_t clientIDs[LGMP_MAX_CLIENTS] = {};
-  unsigned clientCount                = 0;
-  status = lgmpHostGetClientIDs(m_frameQueue, clientIDs, &clientCount);
-  if (status == LGMP_OK)
-    m_frameScheduler.UpdateSubscribers(clientIDs, clientCount, now);
-  else
-    DEBUG_WARN("Failed to query LGMP frame subscribers: %s",
-      lgmpStatusString(status));
+  uint32_t    clientIDs[LGMP_MAX_CLIENTS] = {};
+  unsigned    clientCount                = 0;
+  LGMP_STATUS subscriberStatus = lgmpHostGetClientIDs(
+    m_frameQueue, clientIDs, &clientCount);
+  for (unsigned queueIndex = 0;
+       subscriberStatus == LGMP_OK && queueIndex < LGMP_Q_FRAME_LEN;
+       ++queueIndex)
+  {
+    uint32_t queueClientIDs[LGMP_MAX_CLIENTS] = {};
+    unsigned queueClientCount                = 0;
+    subscriberStatus = lgmpHostGetClientIDs(
+      m_frameOwnerQueue[queueIndex], queueClientIDs, &queueClientCount);
+
+    unsigned commonCount = 0;
+    for (unsigned i = 0;
+         subscriberStatus == LGMP_OK && i < clientCount;
+         ++i)
+      for (unsigned candidate = 0; candidate < queueClientCount; ++candidate)
+        if (clientIDs[i] == queueClientIDs[candidate])
+        {
+          clientIDs[commonCount++] = clientIDs[i];
+          break;
+        }
+    clientCount = commonCount;
+  }
 
   uint8_t data[LGMP_MSGS_SIZE];
   size_t  size;
-  while ((status = lgmpHostReadData(m_pointerQueue, &data, &size)) == LGMP_OK)
+  uint32_t sourceClientID;
+  while ((status = lgmpHostReadDataWithSource(
+      m_pointerQueue, &data, &size, &sourceClientID)) == LGMP_OK)
   {
     KVMFRMessage * msg = (KVMFRMessage *)data;
     switch (msg->type)
@@ -1296,10 +1369,28 @@ void CIndirectDeviceContext::LGMPTimer()
 
       case KVMFR_MESSAGE_FRAME_SCHEDULE:
       {
-        if (size != sizeof(KVMFRFrameSchedule) ||
-            !m_frameScheduler.UpdateSchedule(
-              *reinterpret_cast<KVMFRFrameSchedule *>(msg), now))
+        const KVMFRFrameSchedule * frameSchedule =
+          reinterpret_cast<KVMFRFrameSchedule *>(msg);
+        const bool valid = size == sizeof(*frameSchedule) &&
+          m_frameScheduler.UpdateSchedule(
+            sourceClientID, *frameSchedule, now);
+        if (!valid)
           DEBUG_WARN("Ignoring invalid KVMFR frame schedule");
+        else if ((frameSchedule->flags &
+              (KVMFR_FRAME_SCHEDULE_ACTIVE |
+               KVMFR_FRAME_SCHEDULE_IMMEDIATE)) ==
+            (KVMFR_FRAME_SCHEDULE_ACTIVE |
+             KVMFR_FRAME_SCHEDULE_IMMEDIATE))
+        {
+          CFrameScheduler::Schedule owner = {};
+          if (!m_frameScheduler.GetSchedule(owner) ||
+              owner.clientID != sourceClientID)
+          {
+            AcquireSRWLockExclusive(&m_framePublishLock);
+            m_frameResendPending = true;
+            ReleaseSRWLockExclusive(&m_framePublishLock);
+          }
+        }
         break;
       }
     }
@@ -1307,28 +1398,22 @@ void CIndirectDeviceContext::LGMPTimer()
     lgmpHostAckData(m_pointerQueue);
   }
 
+  if (subscriberStatus == LGMP_OK)
+    m_frameScheduler.UpdateSubscribers(clientIDs, clientCount, now);
+  else
+    DEBUG_WARN("Failed to query LGMP frame subscribers: %s",
+      lgmpStatusString(subscriberStatus));
+
   m_frameScheduler.LogStatistics(now);
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
   if (lgmpHostQueueNewSubs(m_frameQueue))
-    m_frameResendPending = true;
-
-  if (m_frameResendPending && m_monitor &&
-      lgmpHostQueuePending(m_frameQueue) == 0)
   {
-    const LONG frameIndex =
-      m_publishedFrameIndex.load(std::memory_order_acquire);
-    if (frameIndex >= 0)
-    {
-      status = lgmpHostQueuePost(
-        m_frameQueue, 0, m_frameMemory[frameIndex]);
-      if (status == LGMP_OK)
-        m_frameResendPending = false;
-      else if (status != LGMP_ERR_QUEUE_FULL)
-        DEBUG_ERROR("Failed to resend frame: %s", lgmpStatusString(status));
-    }
+    AcquireSRWLockExclusive(&m_framePublishLock);
+    m_frameResendPending = true;
+    ReleaseSRWLockExclusive(&m_framePublishLock);
   }
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+
+  ProcessFrameDeliveries();
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
   {
@@ -1337,18 +1422,347 @@ void CIndirectDeviceContext::LGMPTimer()
   }
 }
 
-bool CIndirectDeviceContext::FrameBufferAvailable() const
+bool CIndirectDeviceContext::PostSharedFrame(unsigned frameIndex,
+  uint32_t excludeClientID)
 {
-  if (!m_lgmp || !m_frameQueue ||
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN ||
+      lgmpHostQueuePending(m_frameQueue) != 0)
+    return false;
+
+  uint32_t clientIDs[LGMP_MAX_CLIENTS] = {};
+  unsigned clientCount                = 0;
+  LGMP_STATUS status =
+    lgmpHostGetClientIDs(m_frameQueue, clientIDs, &clientCount);
+  if (status != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to query shared frame subscribers: %s",
+      lgmpStatusString(status));
+    return false;
+  }
+
+  unsigned targetCount = 0;
+  for (unsigned i = 0; i < clientCount; ++i)
+  {
+    bool excluded = clientIDs[i] == excludeClientID;
+    for (const OwnerDelivery& delivery : m_ownerDelivery)
+      if (delivery.active && delivery.clientID == clientIDs[i])
+      {
+        excluded = true;
+        break;
+      }
+
+    if (!excluded)
+      clientIDs[targetCount++] = clientIDs[i];
+  }
+
+  if (!targetCount)
+  {
+    m_frameDelivery[frameIndex].sharedOwnerToken    = 0;
+    m_frameDelivery[frameIndex].sharedOwnerClientID = 0;
+    m_frameDelivery[frameIndex].sharedOwnerPending  = false;
+    m_frameDelivery[frameIndex].sharedPending       = false;
+    m_frameDelivery[frameIndex].sharedDelivered     = true;
+    m_frameResendPending                             = false;
+    return true;
+  }
+
+  unsigned recipientCount = 0;
+  status = lgmpHostQueuePostForClients(
+    m_frameQueue, 0, m_frameMemory[frameIndex],
+    clientIDs, targetCount, &recipientCount);
+  if (status != LGMP_OK)
+  {
+    if (status != LGMP_ERR_QUEUE_FULL)
+      DEBUG_ERROR("Failed to publish shared frame: %s",
+        lgmpStatusString(status));
+    return false;
+  }
+
+  if (!recipientCount)
+  {
+    m_frameDelivery[frameIndex].sharedOwnerToken    = 0;
+    m_frameDelivery[frameIndex].sharedOwnerClientID = 0;
+    m_frameDelivery[frameIndex].sharedOwnerPending  = false;
+    m_frameDelivery[frameIndex].sharedPending       = false;
+    m_frameDelivery[frameIndex].sharedDelivered     = true;
+    m_frameResendPending                             = false;
+    return true;
+  }
+
+  m_frameDelivery[frameIndex].sharedOwnerToken    = 0;
+  m_frameDelivery[frameIndex].sharedOwnerClientID = 0;
+  m_frameDelivery[frameIndex].sharedOwnerPending  = false;
+  m_frameDelivery[frameIndex].sharedPending       = true;
+  m_frameDelivery[frameIndex].sharedDelivered     = true;
+  m_frameResendPending                             = false;
+  m_frameScheduler.FrameDelivered(clientIDs, targetCount);
+  return true;
+}
+
+bool CIndirectDeviceContext::PostSharedOwnerFrame(unsigned frameIndex,
+  const CFrameScheduler::Schedule& schedule)
+{
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN || !schedule.clientID ||
       lgmpHostQueuePending(m_frameQueue) >= LGMP_Q_FRAME_LEN)
     return false;
 
+  unsigned recipientCount = 0;
+  const LGMP_STATUS status = lgmpHostQueuePostForClients(
+    m_frameQueue, FrameScheduleToken(schedule), m_frameMemory[frameIndex],
+    &schedule.clientID, 1, &recipientCount);
+  if (status != LGMP_OK || !recipientCount)
+  {
+    if (status != LGMP_OK && status != LGMP_ERR_QUEUE_FULL)
+      DEBUG_ERROR("Failed to publish shared owner frame: %s",
+        lgmpStatusString(status));
+    return false;
+  }
+
+  FrameDelivery& delivery       = m_frameDelivery[frameIndex];
+  delivery.sharedOwnerToken     = FrameScheduleToken(schedule);
+  delivery.sharedOwnerClientID  = schedule.clientID;
+  delivery.sharedOwnerPending   = true;
+  delivery.sharedPending        = true;
+  if (!delivery.sharedDelivered)
+    m_frameResendPending = true;
+  return true;
+}
+
+void CIndirectDeviceContext::ProcessFrameDeliveries()
+{
+  if (!m_frameQueue)
+    return;
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (!m_frameOwnerQueue[i])
+      return;
+
+  AcquireSRWLockExclusive(&m_framePublishLock);
+
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
+  {
+    if (m_frameDelivery[i].sharedOwnerPending &&
+        !lgmpHostQueueMessagePending(
+          m_frameQueue, m_frameMemory[i],
+          m_frameDelivery[i].sharedOwnerToken))
+      m_frameDelivery[i].sharedOwnerPending = false;
+
+    if (m_frameDelivery[i].sharedPending &&
+        !lgmpHostQueuePayloadPending(m_frameQueue, m_frameMemory[i]))
+      m_frameDelivery[i].sharedPending = false;
+  }
+
+  CFrameScheduler::Schedule schedule = {};
+  const bool scheduled = m_frameScheduler.GetSchedule(schedule);
+  const uint64_t scheduleToken = scheduled ?
+    FrameScheduleToken(schedule) : 0;
   const LONG publishedFrameIndex =
     m_publishedFrameIndex.load(std::memory_order_acquire);
-  const unsigned frameIndex =
-    static_cast<unsigned>(publishedFrameIndex + 1) % LGMP_Q_FRAME_LEN;
 
-  return !m_frameInFlight[frameIndex].load(std::memory_order_acquire);
+  int      newestAcked       = -1;
+  uint32_t newestAckedClient = 0;
+  for (unsigned queueIndex = 0;
+       queueIndex < LGMP_Q_FRAME_LEN;
+       ++queueIndex)
+  {
+    OwnerDelivery& owner = m_ownerDelivery[queueIndex];
+    if (!owner.active ||
+        lgmpHostQueuePayloadPending(
+          m_frameOwnerQueue[queueIndex],
+          m_frameMemory[owner.frameIndex]))
+      continue;
+
+    const unsigned frameIndex = owner.frameIndex;
+    const bool latestDelivery =
+      static_cast<LONG>(frameIndex) == publishedFrameIndex &&
+      m_frameLastPublishSequence[frameIndex] == m_framePublishSequence;
+    const bool authoritative = (!scheduled && latestDelivery) ||
+      (scheduled && owner.clientID == schedule.clientID &&
+       owner.token == scheduleToken);
+    if (authoritative &&
+        (newestAcked < 0 ||
+          m_frameLastPublishSequence[frameIndex] >
+            m_frameLastPublishSequence[newestAcked]))
+    {
+      newestAcked       = static_cast<int>(frameIndex);
+      newestAckedClient = owner.clientID;
+    }
+    else if (!authoritative && !latestDelivery)
+      m_frameResendPending = true;
+
+    m_frameDelivery[frameIndex].ownerQueueMask &=
+      ~(1U << queueIndex);
+    owner = {};
+  }
+
+  if (newestAcked >= 0)
+  {
+    FrameDelivery& delivery = m_frameDelivery[newestAcked];
+    const bool needsShared = !delivery.sharedDelivered;
+
+    const bool latest = newestAcked == publishedFrameIndex &&
+      m_frameLastPublishSequence[newestAcked] == m_framePublishSequence;
+    if (needsShared &&
+        (!latest ||
+          m_frameInFlight[newestAcked].load(std::memory_order_acquire) ||
+          lgmpHostQueuePending(m_frameQueue) != 0))
+    {
+      m_frameResendPending = true;
+    }
+    else if (needsShared &&
+        !PostSharedFrame(
+          static_cast<unsigned>(newestAcked), newestAckedClient))
+    {
+      m_frameResendPending = true;
+    }
+  }
+
+  if (m_frameResendPending &&
+      lgmpHostQueuePending(m_frameQueue) == 0)
+  {
+    const LONG frameIndex =
+      m_publishedFrameIndex.load(std::memory_order_acquire);
+    if (frameIndex >= 0 &&
+        !m_frameDelivery[frameIndex].sharedPending &&
+        !m_frameInFlight[frameIndex].load(std::memory_order_acquire))
+    {
+      FrameDelivery& delivery = m_frameDelivery[frameIndex];
+      bool ownerDelivered     = !scheduled;
+      if (scheduled)
+      {
+        ownerDelivered =
+          delivery.sharedOwnerClientID == schedule.clientID &&
+          delivery.sharedOwnerToken == scheduleToken;
+        for (const OwnerDelivery& owner : m_ownerDelivery)
+          if (owner.active &&
+              owner.clientID == schedule.clientID &&
+              owner.token == scheduleToken &&
+              owner.frameIndex == static_cast<unsigned>(frameIndex))
+          {
+            ownerDelivered = true;
+            break;
+          }
+      }
+
+      const bool reserveSharedOwner = scheduled &&
+        delivery.sharedOwnerClientID == schedule.clientID &&
+        delivery.sharedOwnerToken == scheduleToken &&
+        FindAvailableOwnerQueue(static_cast<unsigned>(frameIndex)) < 0;
+      if (ownerDelivered && !reserveSharedOwner)
+      {
+        const uint32_t excludeClientID = scheduled ?
+          schedule.clientID : delivery.sharedOwnerClientID;
+        PostSharedFrame(
+          static_cast<unsigned>(frameIndex), excludeClientID);
+      }
+    }
+  }
+  ReleaseSRWLockExclusive(&m_framePublishLock);
+}
+
+int CIndirectDeviceContext::FindAvailableOwnerQueue(
+  unsigned preferredIndex) const
+{
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    const unsigned queueIndex =
+      (preferredIndex + i) % LGMP_Q_FRAME_LEN;
+    if (!m_ownerDelivery[queueIndex].active &&
+        m_frameOwnerQueue[queueIndex] &&
+        lgmpHostQueuePending(m_frameOwnerQueue[queueIndex]) == 0)
+      return static_cast<int>(queueIndex);
+  }
+
+  return -1;
+}
+
+int CIndirectDeviceContext::FindOwnerDelivery(uint32_t clientID) const
+{
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (m_ownerDelivery[i].active &&
+        m_ownerDelivery[i].clientID == clientID)
+      return static_cast<int>(i);
+
+  return -1;
+}
+
+int CIndirectDeviceContext::FindSharedOwnerDelivery(
+  uint32_t clientID) const
+{
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
+    if (m_frameDelivery[i].sharedOwnerPending &&
+        m_frameDelivery[i].sharedOwnerClientID == clientID)
+      return static_cast<int>(i);
+
+  return -1;
+}
+
+bool CIndirectDeviceContext::HasOwnerDelivery(uint32_t clientID) const
+{
+  return FindOwnerDelivery(clientID) >= 0 ||
+    FindSharedOwnerDelivery(clientID) >= 0;
+}
+
+int CIndirectDeviceContext::FindAvailableFrameBuffer() const
+{
+  const LONG publishedFrameIndex =
+    m_publishedFrameIndex.load(std::memory_order_acquire);
+  int      available     = -1;
+  uint64_t newestPublish = 0;
+  for (unsigned frameIndex = 0;
+       frameIndex < LGMP_Q_FRAME_BUFFER_LEN;
+       ++frameIndex)
+  {
+    if (static_cast<LONG>(frameIndex) == publishedFrameIndex ||
+        m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
+        m_frameDelivery[frameIndex].ownerQueueMask ||
+        m_frameDelivery[frameIndex].sharedPending ||
+        lgmpHostQueuePayloadPending(
+          m_frameQueue, m_frameMemory[frameIndex]))
+      continue;
+
+    bool ownerPending = false;
+    for (unsigned queueIndex = 0;
+         !ownerPending && queueIndex < LGMP_Q_FRAME_LEN;
+         ++queueIndex)
+      ownerPending = lgmpHostQueuePayloadPending(
+        m_frameOwnerQueue[queueIndex], m_frameMemory[frameIndex]);
+
+    if (ownerPending)
+      continue;
+
+    if (available < 0 ||
+        m_frameLastPublishSequence[frameIndex] > newestPublish)
+    {
+      available     = static_cast<int>(frameIndex);
+      newestPublish = m_frameLastPublishSequence[frameIndex];
+    }
+  }
+
+  return available;
+}
+
+bool CIndirectDeviceContext::FrameBufferAvailable(
+  const CFrameScheduler::Schedule& schedule)
+{
+  if (!m_lgmp || !m_frameQueue)
+    return false;
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    if (!m_frameOwnerQueue[i])
+      return false;
+
+  AcquireSRWLockShared(&m_framePublishLock);
+  bool deliveryAvailable;
+  if (schedule.clientID)
+    deliveryAvailable = !HasOwnerDelivery(schedule.clientID) &&
+      (FindAvailableOwnerQueue(0) >= 0 ||
+       lgmpHostQueuePending(m_frameQueue) < LGMP_Q_FRAME_LEN);
+  else
+    deliveryAvailable = lgmpHostQueuePending(m_frameQueue) == 0;
+
+  const bool available = deliveryAvailable &&
+    FindAvailableFrameBuffer() >= 0;
+  ReleaseSRWLockShared(&m_framePublishLock);
+  return available;
 }
 
 void CIndirectDeviceContext::ProcessFrameQueue()
@@ -1362,6 +1776,9 @@ void CIndirectDeviceContext::ProcessFrameQueue()
 
   if (status != LGMP_OK && status != LGMP_ERR_CORRUPTED)
     DEBUG_ERROR("lgmpHostProcess Failed: %s", lgmpStatusString(status));
+
+  if (status == LGMP_OK)
+    ProcessFrameDeliveries();
 }
 
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
@@ -1375,24 +1792,28 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   const unsigned dataHeight = dstFormat.dataHeight ?
     dstFormat.dataHeight : dstFormat.desc.Height;
 
-  if (!FrameBufferAvailable())
-    return result;
-
   if (dstFormat.format == FRAME_TYPE_INVALID)
   {
     DEBUG_ERROR("Unsupported frame format, skipping frame");
     return result;
   }
 
-  const LONG publishedFrameIndex =
-    m_publishedFrameIndex.load(std::memory_order_acquire);
-  const unsigned frameIndex =
-    static_cast<unsigned>(publishedFrameIndex + 1) % LGMP_Q_FRAME_LEN;
-
+  AcquireSRWLockExclusive(&m_framePublishLock);
+  const int availableFrameIndex = FindAvailableFrameBuffer();
   bool expected = false;
-  if (!m_frameInFlight[frameIndex].compare_exchange_strong(
-      expected, true, std::memory_order_acq_rel))
+  const bool acquired = availableFrameIndex >= 0 &&
+    m_frameInFlight[availableFrameIndex].compare_exchange_strong(
+      expected, true, std::memory_order_acq_rel);
+  if (acquired)
+    m_frameDelivery[availableFrameIndex] = {};
+  const bool fullCopy = acquired &&
+    (!m_frameLastPublishSequence[availableFrameIndex] ||
+      m_framePublishSequence >
+        m_frameLastPublishSequence[availableFrameIndex] + 1);
+  ReleaseSRWLockExclusive(&m_framePublishLock);
+  if (!acquired)
     return result;
+  const unsigned frameIndex = static_cast<unsigned>(availableFrameIndex);
 
   if (m_width       != dataWidth             ||
       m_height      != dataHeight            ||
@@ -1518,45 +1939,198 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
 
   result.frameIndex = frameIndex;
   result.mem        = fb->data;
+  result.fullCopy   = fullCopy;
 
   return result;
 }
 
 bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
-  uint32_t scheduleGeneration)
+  const CFrameScheduler::Schedule& schedule)
 {
-  if (!m_frameQueue || frameIndex >= LGMP_Q_FRAME_LEN)
+  if (!m_frameQueue || frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return false;
 
   AcquireSRWLockExclusive(&m_framePublishLock);
-  const LGMP_STATUS status =
-    lgmpHostQueuePost(
-      m_frameQueue, scheduleGeneration, m_frameMemory[frameIndex]);
-  if (status == LGMP_OK)
+  CFrameScheduler::Schedule currentSchedule = {};
+  const bool scheduling =
+    m_frameScheduler.GetSchedule(currentSchedule);
+  if (scheduling != (schedule.clientID != 0) ||
+      (scheduling && !FrameScheduleMatches(schedule, currentSchedule)))
   {
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    return false;
+  }
+
+  LGMP_STATUS status = LGMP_OK;
+  bool published     = false;
+  if (schedule.clientID)
+  {
+    if (HasOwnerDelivery(schedule.clientID))
+      status = LGMP_ERR_QUEUE_FULL;
+    else
+    {
+      const int ownerQueueIndex = FindAvailableOwnerQueue(frameIndex);
+      if (ownerQueueIndex < 0)
+        published = PostSharedOwnerFrame(frameIndex, schedule);
+      else
+      {
+        unsigned recipientCount = 0;
+        status = lgmpHostQueuePostForClients(
+          m_frameOwnerQueue[ownerQueueIndex], FrameScheduleToken(schedule),
+          m_frameMemory[frameIndex],
+          &schedule.clientID, 1, &recipientCount);
+        if (status == LGMP_OK && recipientCount)
+        {
+          const unsigned queueIndex =
+            static_cast<unsigned>(ownerQueueIndex);
+          OwnerDelivery& owner = m_ownerDelivery[queueIndex];
+          owner.token           = FrameScheduleToken(schedule);
+          owner.clientID        = schedule.clientID;
+          owner.frameIndex      = frameIndex;
+          owner.active          = true;
+
+          FrameDelivery& delivery = m_frameDelivery[frameIndex];
+          delivery.ownerQueueMask |= 1U << queueIndex;
+          delivery.sharedDelivered = false;
+          published                = true;
+
+          if (!PostSharedFrame(frameIndex, schedule.clientID))
+            m_frameResendPending = true;
+        }
+      }
+    }
+  }
+  else
+    published = PostSharedFrame(frameIndex, 0);
+
+  if (published)
+  {
+    m_frameLastPublishSequence[frameIndex] = ++m_framePublishSequence;
     m_publishedFrameIndex.store(
       static_cast<LONG>(frameIndex), std::memory_order_release);
-    m_frameResendPending = false;
   }
   ReleaseSRWLockExclusive(&m_framePublishLock);
 
-  if (status != LGMP_OK)
+  if (!published)
   {
-    DEBUG_ERROR("Failed to publish frame: %s", lgmpStatusString(status));
+    if (status != LGMP_OK && status != LGMP_ERR_QUEUE_FULL)
+      DEBUG_ERROR("Failed to publish frame: %s",
+        lgmpStatusString(status));
     return false;
   }
 
   return true;
 }
 
-void CIndirectDeviceContext::CommitFrameBuffer(unsigned frameIndex,
-  uint32_t scheduleGeneration, bool periodic)
+bool CIndirectDeviceContext::RepublishFrameBuffer(
+  const CFrameScheduler::Schedule& schedule)
 {
-  if (frameIndex >= LGMP_Q_FRAME_LEN)
+  if (!schedule.clientID)
+    return false;
+
+  AcquireSRWLockExclusive(&m_framePublishLock);
+  CFrameScheduler::Schedule currentSchedule = {};
+  if (!m_frameScheduler.GetSchedule(currentSchedule) ||
+      !FrameScheduleMatches(schedule, currentSchedule))
+  {
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    return false;
+  }
+
+  const LONG frameIndex =
+    m_publishedFrameIndex.load(std::memory_order_acquire);
+  if (frameIndex < 0 ||
+      m_frameInFlight[frameIndex].load(std::memory_order_acquire))
+  {
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    return false;
+  }
+
+  const uint64_t scheduleToken = FrameScheduleToken(schedule);
+  const int existingSharedDelivery =
+    FindSharedOwnerDelivery(schedule.clientID);
+  if (existingSharedDelivery >= 0)
+  {
+    const FrameDelivery& delivery =
+      m_frameDelivery[existingSharedDelivery];
+    const bool delivered = existingSharedDelivery == frameIndex &&
+      delivery.sharedOwnerToken == scheduleToken;
+    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    if (delivered)
+      m_frameScheduler.FrameRepublished(schedule, frameSerial);
+    return delivered;
+  }
+
+  const int existingDelivery =
+    FindOwnerDelivery(schedule.clientID);
+  if (existingDelivery >= 0)
+  {
+    const OwnerDelivery& owner = m_ownerDelivery[existingDelivery];
+    const bool delivered = owner.frameIndex ==
+        static_cast<unsigned>(frameIndex) &&
+      owner.token == scheduleToken;
+    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    if (delivered)
+      m_frameScheduler.FrameRepublished(schedule, frameSerial);
+    return delivered;
+  }
+
+  const int ownerQueueIndex =
+    FindAvailableOwnerQueue(static_cast<unsigned>(frameIndex));
+  if (ownerQueueIndex < 0)
+  {
+    const bool published = PostSharedOwnerFrame(
+      static_cast<unsigned>(frameIndex), schedule);
+    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
+    ReleaseSRWLockExclusive(&m_framePublishLock);
+    if (published)
+      m_frameScheduler.FrameRepublished(schedule, frameSerial);
+    return published;
+  }
+
+  const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
+
+  unsigned recipientCount = 0;
+  const LGMP_STATUS status = lgmpHostQueuePostForClients(
+    m_frameOwnerQueue[ownerQueueIndex], scheduleToken,
+    m_frameMemory[frameIndex],
+    &schedule.clientID, 1, &recipientCount);
+  if (status == LGMP_OK && recipientCount)
+  {
+    const unsigned queueIndex = static_cast<unsigned>(ownerQueueIndex);
+    OwnerDelivery& owner = m_ownerDelivery[queueIndex];
+    owner.token           = scheduleToken;
+    owner.clientID        = schedule.clientID;
+    owner.frameIndex      = static_cast<unsigned>(frameIndex);
+    owner.active          = true;
+
+    FrameDelivery& delivery = m_frameDelivery[frameIndex];
+    delivery.ownerQueueMask |= 1U << queueIndex;
+  }
+  ReleaseSRWLockExclusive(&m_framePublishLock);
+
+  if (status != LGMP_OK || !recipientCount)
+  {
+    if (status != LGMP_OK && status != LGMP_ERR_QUEUE_FULL)
+      DEBUG_ERROR("Failed to republish frame: %s",
+        lgmpStatusString(status));
+    return false;
+  }
+
+  m_frameScheduler.FrameRepublished(schedule, frameSerial);
+  return true;
+}
+
+void CIndirectDeviceContext::CommitFrameBuffer(unsigned frameIndex,
+  const CFrameScheduler::Schedule& schedule, bool periodic)
+{
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
   m_frameScheduler.FramePublished(
-    scheduleGeneration, m_frame[frameIndex]->frameSerial,
+    schedule, m_frame[frameIndex]->frameSerial,
     CFrameScheduler::Nanotime(), periodic);
 }
 
@@ -1571,10 +2145,11 @@ void CIndirectDeviceContext::ForceFrame()
 }
 
 bool CIndirectDeviceContext::GetPublishTarget(uint64_t now,
-  uint64_t& target, uint32_t& generation, bool& periodic)
+  uint64_t& target, CFrameScheduler::Schedule& schedule, bool& periodic,
+  bool& republish)
 {
   return m_frameScheduler.GetPublishTarget(
-    now, target, generation, periodic);
+    now, target, schedule, periodic, republish);
 }
 
 void CIndirectDeviceContext::FrameSuperseded()
@@ -1589,17 +2164,20 @@ void CIndirectDeviceContext::RecordFrameTiming(uint64_t duration)
 
 void CIndirectDeviceContext::AbortFrameBuffer(unsigned frameIndex)
 {
-  if (frameIndex >= LGMP_Q_FRAME_LEN)
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
+  AcquireSRWLockExclusive(&m_framePublishLock);
   m_frameBuffer[frameIndex]->wp = 0;
-  InterlockedExchange((volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
+  InterlockedExchange(
+    (volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
   m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
 void CIndirectDeviceContext::FailFrameBuffer(unsigned frameIndex)
 {
-  if (frameIndex >= LGMP_Q_FRAME_LEN)
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
   InterlockedExchange((volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
@@ -1609,7 +2187,7 @@ void CIndirectDeviceContext::FailFrameBuffer(unsigned frameIndex)
 
 void CIndirectDeviceContext::CompleteFrameBuffer(unsigned frameIndex)
 {
-  if (frameIndex < LGMP_Q_FRAME_LEN)
+  if (frameIndex < LGMP_Q_FRAME_BUFFER_LEN)
     m_frameInFlight[frameIndex].store(false, std::memory_order_release);
 }
 
@@ -1617,7 +2195,7 @@ void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
   uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
   uint64_t readyTime)
 {
-  if (frameIndex >= LGMP_Q_FRAME_LEN)
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
   KVMFRFrame * frame      = m_frame[frameIndex];

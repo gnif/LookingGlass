@@ -30,7 +30,7 @@ class CFrameBufferPool
 {
   CSwapChainProcessor * m_swapChain;
 
-  CFrameBufferResource m_buffers[LGMP_Q_FRAME_LEN];
+  CFrameBufferResource m_buffers[LGMP_Q_FRAME_BUFFER_LEN];
 
   public:
     void Init(CSwapChainProcessor * swapChain);

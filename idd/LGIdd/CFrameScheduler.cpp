@@ -90,8 +90,7 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
     if (!client.active || client.expiry <= now)
     {
       client.active = false;
-      fastest       = nullptr;
-      break;
+      continue;
     }
 
     if (!fastest || client.period < fastest->period)
@@ -108,6 +107,7 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
 
   const uint32_t oldClientID   = m_schedule.clientID;
   const uint32_t oldGeneration = m_schedule.generation;
+  const uint32_t oldEpoch      = m_schedule.epoch;
   const uint64_t oldPeriod     = m_schedule.period;
   const uint64_t oldSlack      = m_schedule.targetSlack;
   if (!fastest)
@@ -119,16 +119,27 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
   {
     m_schedule.clientID    = fastest->clientID;
     m_schedule.generation  = fastest->generation;
+    m_schedule.epoch       = oldEpoch;
     m_schedule.period      = fastest->period;
     m_schedule.targetSlack = fastest->targetSlack;
-    m_scheduling = true;
+    m_scheduling           = true;
   }
 
   const bool ownerChanged = oldClientID != m_schedule.clientID;
   if (ownerChanged || oldGeneration != m_schedule.generation)
   {
-    m_nextDeadline = m_scheduling ? now + m_schedule.period : 0;
-    m_forceNext    = m_scheduling;
+    if (m_scheduling)
+    {
+      if (!++m_epoch)
+        ++m_epoch;
+      m_schedule.epoch = m_epoch;
+    }
+    m_nextDeadline  = m_scheduling ? now + m_schedule.period : 0;
+    m_forceNext     = m_scheduling;
+    m_republishNext = m_scheduling;
+
+    if (fastest)
+      fastest->lastFeedbackFrameSerial = 0;
 
     m_lastPublishedFrameSerial = 0;
     m_lastPhaseError            = 0;
@@ -138,8 +149,8 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
     m_lastLogPublished          = m_publishedFrames;
 
     if (ownerChanged && m_scheduling)
-      DEBUG_INFO("Frame timing owner %u generation %u at %.3f Hz",
-        m_schedule.clientID, m_schedule.generation,
+      DEBUG_INFO("Frame timing owner %u generation %u epoch %u at %.3f Hz",
+        m_schedule.clientID, m_schedule.generation, m_schedule.epoch,
         1000000000.0 / m_schedule.period);
     else if (ownerChanged && oldClientID)
       DEBUG_INFO("Frame timing owner released; using push delivery");
@@ -154,9 +165,11 @@ void CFrameScheduler::Reset()
   AcquireSRWLockExclusive(&m_lock);
   for (Client& client : m_clients)
     client = {};
-  m_schedule   = {};
-  m_scheduling = false;
-  m_forceNext  = false;
+  m_schedule      = {};
+  m_scheduling    = false;
+  m_forceNext     = false;
+  m_republishNext = false;
+  m_epoch         = 0;
 
   m_lastArrival    = 0;
   m_guestPeriod    = 0;
@@ -198,11 +211,15 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
         }
 
     if (client)
-      client->subscribed = true;
+    {
+      client->subscribed       = true;
+      client->subscriptionSeen = true;
+    }
   }
 
   for (Client& client : m_clients)
-    if (client.clientID && !client.subscribed)
+    if (client.clientID && !client.subscribed &&
+        (client.subscriptionSeen || !client.active || client.expiry <= now))
       client = {};
 
   const bool changed = ElectOwner(now);
@@ -211,8 +228,8 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
     WakePublisher();
 }
 
-bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
-  uint64_t now)
+bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
+  const KVMFRFrameSchedule& schedule, uint64_t now)
 {
   static const KVMFRFrameScheduleFlags validFlags =
     KVMFR_FRAME_SCHEDULE_ACTIVE    |
@@ -220,31 +237,26 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
     KVMFR_FRAME_SCHEDULE_RESET     |
     KVMFR_FRAME_SCHEDULE_IMMEDIATE;
 
-  if (!schedule.clientID || schedule.flags & ~validFlags)
+  if (!sourceClientID || schedule.clientID != sourceClientID ||
+      schedule.flags & ~validFlags)
     return false;
-
-  AcquireSRWLockExclusive(&m_lock);
-  Client * client = FindClient(schedule.clientID);
-  bool wake = false;
 
   if (schedule.flags & KVMFR_FRAME_SCHEDULE_RELEASE)
   {
-    if (client && client->subscribed)
+    AcquireSRWLockExclusive(&m_lock);
+    Client * client = FindClient(schedule.clientID);
+    bool wake = false;
+    if (client)
     {
-      client->active = false;
-      client->expiry = 0;
+      client->active    = false;
+      client->expiry    = 0;
+      client->immediate = false;
       wake = ElectOwner(now);
     }
     ReleaseSRWLockExclusive(&m_lock);
     if (wake)
       WakePublisher();
     return true;
-  }
-
-  if (!client || !client->subscribed)
-  {
-    ReleaseSRWLockExclusive(&m_lock);
-    return false;
   }
 
   if (!(schedule.flags & KVMFR_FRAME_SCHEDULE_ACTIVE) ||
@@ -254,24 +266,47 @@ bool CFrameScheduler::UpdateSchedule(const KVMFRFrameSchedule& schedule,
       schedule.phaseError > static_cast<int64_t>(schedule.period) ||
       schedule.phaseError < -static_cast<int64_t>(schedule.period) ||
       schedule.lease < MIN_LEASE_MS || schedule.lease > MAX_LEASE_MS)
+    return false;
+
+  AcquireSRWLockExclusive(&m_lock);
+  Client * client = FindClient(schedule.clientID);
+  if (!client)
+    for (Client& candidate : m_clients)
+      if (!candidate.clientID)
+      {
+        candidate.clientID = schedule.clientID;
+        client = &candidate;
+        break;
+      }
+
+  if (!client)
   {
     ReleaseSRWLockExclusive(&m_lock);
     return false;
   }
 
+  bool wake = false;
+
   if (client->generation != schedule.generation)
+  {
     client->lastFeedbackFrameSerial = 0;
+    client->immediate               = false;
+  }
   client->generation  = schedule.generation;
   client->period      = schedule.period;
   client->targetSlack = schedule.targetSlack;
   client->expiry      = now + static_cast<uint64_t>(schedule.lease) * 1000000;
   client->active      = true;
   if (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE)
-  {
-    m_forceNext = true;
-    wake        = true;
-  }
+    client->immediate = true;
   wake |= ElectOwner(now);
+  if (m_scheduling && client->clientID == m_schedule.clientID &&
+      client->generation == m_schedule.generation && client->immediate)
+  {
+    m_forceNext     = true;
+    m_republishNext = true;
+    wake            = true;
+  }
   wake |= ApplyFeedback(*client, schedule);
   ReleaseSRWLockExclusive(&m_lock);
   if (wake)
@@ -284,6 +319,7 @@ bool CFrameScheduler::ApplyFeedback(Client& client,
 {
   if (!m_scheduling || client.clientID != m_schedule.clientID ||
       schedule.generation != m_schedule.generation ||
+      schedule.feedbackScheduleEpoch != m_schedule.epoch ||
       !schedule.feedbackFrameSerial ||
       (client.lastFeedbackFrameSerial &&
         static_cast<int32_t>(schedule.feedbackFrameSerial -
@@ -366,11 +402,12 @@ void CFrameScheduler::ForceFrame()
 }
 
 bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
-  uint32_t& generation, bool& periodic)
+  Schedule& schedule, bool& periodic, bool& republish)
 {
-  target     = now;
-  generation = 0;
-  periodic   = false;
+  target    = now;
+  schedule  = {};
+  periodic  = false;
+  republish = false;
   AcquireSRWLockExclusive(&m_lock);
   if (!m_scheduling)
   {
@@ -378,7 +415,8 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
     return true;
   }
 
-  generation = m_schedule.generation;
+  schedule  = m_schedule;
+  republish = m_republishNext;
 
   if (m_forceNext)
   {
@@ -412,13 +450,20 @@ void CFrameScheduler::FrameSuperseded()
   ReleaseSRWLockExclusive(&m_lock);
 }
 
-void CFrameScheduler::FramePublished(uint32_t generation,
+void CFrameScheduler::FramePublished(const Schedule& schedule,
   uint32_t frameSerial, uint64_t now, bool periodic)
 {
   AcquireSRWLockExclusive(&m_lock);
-  if (m_scheduling && generation == m_schedule.generation)
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch)
   {
-    m_forceNext = false;
+    m_forceNext     = false;
+    m_republishNext = false;
+
+    Client * client = FindClient(m_schedule.clientID);
+    if (client)
+      client->immediate = false;
     m_lastPublishedFrameSerial = frameSerial;
     ++m_publishedFrames;
     if (periodic)
@@ -426,6 +471,38 @@ void CFrameScheduler::FramePublished(uint32_t generation,
       m_nextDeadline += m_schedule.period;
       AdvanceDeadline(now);
     }
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+}
+
+void CFrameScheduler::FrameRepublished(const Schedule& schedule,
+  uint32_t frameSerial)
+{
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch)
+  {
+    m_republishNext = false;
+
+    Client * client = FindClient(m_schedule.clientID);
+    if (client)
+      client->immediate = false;
+    m_lastPublishedFrameSerial = frameSerial;
+    ++m_publishedFrames;
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+}
+
+void CFrameScheduler::FrameDelivered(const uint32_t * clientIDs,
+  unsigned count)
+{
+  AcquireSRWLockExclusive(&m_lock);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Client * client = FindClient(clientIDs[i]);
+    if (client)
+      client->immediate = false;
   }
   ReleaseSRWLockExclusive(&m_lock);
 }
