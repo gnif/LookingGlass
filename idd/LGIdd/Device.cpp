@@ -234,7 +234,6 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
   if (IsIdentityColorTransform(*transform))
   {
     ctx->SetColorTransform(nullptr);
-    DEBUG_INFO("Ignoring identity display color transform");
     return STATUS_SUCCESS;
   }
 

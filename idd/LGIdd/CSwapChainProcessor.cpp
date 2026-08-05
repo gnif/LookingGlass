@@ -427,8 +427,6 @@ void CSwapChainProcessor::SwapChainThread()
   DWORD  avTask       = 0;
   HANDLE avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
 
-  DEBUG_INFO("Start Thread");
-
   SwapChainThreadCore();
 
   // Returning success from EvtIddCxMonitorAssignSwapChain transfers ownership
