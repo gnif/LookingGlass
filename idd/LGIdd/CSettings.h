@@ -30,7 +30,7 @@ class CSettings
     {
       unsigned width;
       unsigned height;
-      unsigned refresh;
+      unsigned refreshMilliHz;
       bool     preferred;
       bool     extraMode;
     };
@@ -41,7 +41,7 @@ class CSettings
     DisplayModes LoadModes();
     bool SetExtraMode(const DisplayMode & mode);
     bool GetExtraMode(DisplayMode & mode);
-    unsigned GetDefaultRefresh() const;
+    unsigned GetDefaultRefreshMilliHz() const;
 
     std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue = nullptr);
     bool ReadBoolValue(const wchar_t* name, bool defaultValue = false);

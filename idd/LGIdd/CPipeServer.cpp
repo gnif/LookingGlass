@@ -287,14 +287,15 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
   WriteMsg(msg);
 }
 
-void CPipeServer::SetDisplayMode(uint32_t width, uint32_t height, uint32_t refresh)
+void CPipeServer::SetDisplayMode(
+  uint32_t width, uint32_t height, uint32_t refreshMilliHz)
 {
   LGPipeMsg msg = {};
   msg.size                = sizeof(msg);
   msg.type                = LGPipeMsg::SETDISPLAYMODE;
-  msg.displayMode.width   = width;
-  msg.displayMode.height  = height;
-  msg.displayMode.refresh = refresh;
+  msg.displayMode.width          = width;
+  msg.displayMode.height         = height;
+  msg.displayMode.refreshMilliHz = refreshMilliHz;
   WriteMsg(msg);
 }
 

@@ -514,8 +514,10 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
   DEVMODE dm = displays[lgIndex].mode;
   dm.dmPelsWidth        = msg.displayMode.width;
   dm.dmPelsHeight       = msg.displayMode.height;
-  dm.dmDisplayFrequency = msg.displayMode.refresh;
-  dm.dmFields = DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+  dm.dmDisplayFrequency =
+    (msg.displayMode.refreshMilliHz + 500) / 1000;
+  dm.dmFields           =
+    DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 
   LONG result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
     &dm, NULL, CDS_UPDATEREGISTRY, NULL);

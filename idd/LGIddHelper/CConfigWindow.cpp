@@ -19,6 +19,7 @@
  */
 
 #include "CConfigWindow.h"
+#include "RefreshRate.h"
 #include "CListBox.h"
 #include "CGroupBox.h"
 #include "CEditWidget.h"
@@ -160,7 +161,7 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeWidth.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
   m_modeHeight.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeRefresh.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
+  m_modeRefresh.reset(new CEditWidget(WS_TABSTOP | ES_LEFT, m_hwnd));
   m_modePreferred.reset(new CCheckbox(L"prefer", 0, m_hwnd));
 
   m_modeUpdate.reset(new CButton(L"Update", WS_TABSTOP, m_hwnd));
@@ -173,11 +174,11 @@ LRESULT CConfigWindow::onCreate()
   m_modeRevert.reset(new CButton(L"Revert", WS_TABSTOP, m_hwnd));
 
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", SS_CENTERIMAGE, m_hwnd));
-  m_defRefresh.reset(new CEditWidget(ES_LEFT | ES_NUMBER | WS_TABSTOP, m_hwnd));
+  m_defRefresh.reset(new CEditWidget(ES_LEFT | WS_TABSTOP, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", SS_CENTERIMAGE, m_hwnd));
 
   if (m_defaultRefresh)
-    m_defRefresh->setNumericValue(*m_defaultRefresh);
+    m_defRefresh->setValue(LGFormatRefreshRate(*m_defaultRefresh));
   else
     m_defRefresh->disable();
 
@@ -253,7 +254,7 @@ void CConfigWindow::onModeListSelectChange()
     auto &mode = (*m_modes)[index];
     m_modeWidth->setNumericValue(mode.width);
     m_modeHeight->setNumericValue(mode.height);
-    m_modeRefresh->setNumericValue(mode.refresh);
+    m_modeRefresh->setValue(LGFormatRefreshRate(mode.refreshMilliHz));
     m_modePreferred->setChecked(mode.preferred);
   }
   EnableWindow(*m_modeUpdate, TRUE);
@@ -286,13 +287,18 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     {
       mode.width = m_modeWidth->getNumericValue();
       mode.height = m_modeHeight->getNumericValue();
-      mode.refresh = m_modeRefresh->getNumericValue();
       mode.preferred = m_modePreferred->isChecked();
     }
     catch (std::logic_error&)
     {
       return 0;
     }
+
+    unsigned refreshMilliHz;
+    if (!LGParseRefreshRate(
+        m_modeRefresh->getValue(), refreshMilliHz))
+      return 0;
+    mode.refreshMilliHz = refreshMilliHz;
 
     m_modeBox->clear();
     m_modeBox->setSel(updateModeList(index));
@@ -319,14 +325,10 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
   }
   else if (m_defRefresh && hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
   {
-    try
-    {
-      m_defaultRefresh = m_defRefresh->getNumericValue();
-    }
-    catch (std::logic_error &)
-    {
+    unsigned refreshMilliHz;
+    if (!LGParseRefreshRate(m_defRefresh->getValue(), refreshMilliHz))
       return 0;
-    }
+    m_defaultRefresh = refreshMilliHz;
   }
   else if (m_prefNoGPU && hwnd == *m_prefNoGPU && code == BN_CLICKED && m_noGPU)
   {
@@ -377,7 +379,7 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
     }
 
     if (m_defaultRefresh)
-      m_defRefresh->setNumericValue(*m_defaultRefresh);
+      m_defRefresh->setValue(LGFormatRefreshRate(*m_defaultRefresh));
     else
       m_defRefresh->disable();
   }

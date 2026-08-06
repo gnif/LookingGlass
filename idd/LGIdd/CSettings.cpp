@@ -21,6 +21,7 @@
 #include "CSettings.h"
 #include "CDebug.h"
 #include "DefaultDisplayModes.h"
+#include "RefreshRate.h"
 
 #include <wdf.h>
 
@@ -34,14 +35,16 @@ CSettings::CSettings()
 
 CSettings::DisplayModes CSettings::LoadModes()
 {
-  const unsigned defaultRefresh = GetDefaultRefresh();
+  const unsigned defaultRefreshMilliHz = GetDefaultRefreshMilliHz();
   DisplayModes displayModes;
 
   bool hasPreferred = false;
   DisplayMode m;
   if (GetExtraMode(m))
   {
-    DEBUG_INFO("ExtraMode: %ux%u@%u%s", m.width, m.height, m.refresh, m.preferred ? "*" : "");
+    const std::wstring refresh = LGFormatRefreshRate(m.refreshMilliHz);
+    DEBUG_INFO("ExtraMode: %ux%u@%ls%s", m.width, m.height,
+      refresh.c_str(), m.preferred ? "*" : "");
     displayModes.push_back(m);
     hasPreferred = m.preferred;
   }
@@ -54,11 +57,12 @@ CSettings::DisplayModes CSettings::LoadModes()
 
     for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
     {
-      m.width     = DefaultDisplayModes[i][0];
-      m.height    = DefaultDisplayModes[i][1];
-      m.refresh   = defaultRefresh;
-      m.preferred = !hasPreferred && (i == DefaultPreferredDisplayMode);
-      m.extraMode = false;
+      m.width          = DefaultDisplayModes[i][0];
+      m.height         = DefaultDisplayModes[i][1];
+      m.refreshMilliHz = defaultRefreshMilliHz;
+      m.preferred      = !hasPreferred &&
+        (i == DefaultPreferredDisplayMode);
+      m.extraMode      = false;
       displayModes.push_back(m);
     }
     return displayModes;
@@ -79,8 +83,9 @@ CSettings::DisplayModes CSettings::LoadModes()
 bool CSettings::SetExtraMode(const DisplayMode& mode)
 {
   WCHAR buf[64];
-  _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"%ux%u@%u%s",
-    mode.width, mode.height, mode.refresh,
+  const std::wstring refresh = LGFormatRefreshRate(mode.refreshMilliHz);
+  _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"%ux%u@%ls%s",
+    mode.width, mode.height, refresh.c_str(),
     mode.preferred ? L"*" : L"");
 
   HKEY  hKey = NULL;
@@ -226,24 +231,45 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   return true;
 }
 
-unsigned CSettings::GetDefaultRefresh() const
+unsigned CSettings::GetDefaultRefreshMilliHz() const
 {
-  DWORD refresh = 60;
-  DWORD cb      = sizeof(refresh);
-  HKEY  hKey    = nullptr;
+  HKEY hKey = nullptr;
+  LONG status = RegOpenKeyExW(
+    HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
+  if (status != ERROR_SUCCESS)
+    return 60000;
 
-  LONG st = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
-  if (st == ERROR_SUCCESS)
+  DWORD type = 0;
+  DWORD size = 0;
+  status = RegQueryValueExW(
+    hKey, L"DefaultRefresh", nullptr, &type, nullptr, &size);
+  if (status != ERROR_SUCCESS)
   {
-    DWORD type = 0;
-    st = RegGetValueW(hKey, nullptr, L"DefaultRefresh", RRF_RT_REG_DWORD, &type, &refresh, &cb);
     RegCloseKey(hKey);
+    return 60000;
   }
 
-  if (st != ERROR_SUCCESS || refresh < 30 || refresh > 1000)
-    return 60;
+  unsigned refreshMilliHz = 0;
+  if (type == REG_DWORD && size == sizeof(DWORD))
+  {
+    DWORD refresh = 0;
+    status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
+      (LPBYTE)&refresh, &size);
+    if (status == ERROR_SUCCESS && refresh >= 24 && refresh <= 1000)
+      refreshMilliHz = refresh * 1000;
+  }
+  else if ((type == REG_SZ || type == REG_EXPAND_SZ) && size &&
+      size % sizeof(wchar_t) == 0)
+  {
+    std::vector<wchar_t> value(size / sizeof(wchar_t) + 1, L'\0');
+    status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
+      (LPBYTE)value.data(), &size);
+    if (status == ERROR_SUCCESS)
+      LGParseRefreshRate(value.data(), refreshMilliHz);
+  }
 
-  return refresh;
+  RegCloseKey(hKey);
+  return refreshMilliHz ? refreshMilliHz : 60000;
 }
 
 bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
@@ -320,16 +346,14 @@ bool CSettings::ParseModeString(const std::wstring& in, DisplayMode& out)
 
   if (!toUnsigned(s.substr(0, xPos), out.width) ||
       !toUnsigned(s.substr(xPos + 1, atPos - (xPos + 1)), out.height) ||
-      !toUnsigned(s.substr(atPos + 1), out.refresh))
+      !LGParseRefreshRate(s.substr(atPos + 1), out.refreshMilliHz))
       return false;
 
   // sanity check
   if (out.width   < 640   ||
       out.height  < 480   ||
       out.width   > 16384 ||
-      out.height  > 16384 ||
-      out.refresh < 30    ||
-      out.refresh > 1000)
+      out.height  > 16384)
     return false;
 
   out.extraMode = false;

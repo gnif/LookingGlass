@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -20,40 +20,7 @@
 
 #pragma once
 
-#include <optional>
-#include <vector>
 #include <string>
-#include <windows.h>
 
-struct DisplayMode {
-  unsigned width;
-  unsigned height;
-  unsigned refreshMilliHz;
-  bool     preferred;
-
-  std::wstring toString();
-};
-
-class CRegistrySettings {
-  HKEY hKey;
-
-public:
-  CRegistrySettings();
-  ~CRegistrySettings();
-
-  LSTATUS open();
-  bool isOpen() { return !!hKey; }
-
-  std::vector<DisplayMode> getDefaultModes();
-  std::optional<std::vector<DisplayMode>> getModes();
-  LSTATUS setModes(const std::vector<DisplayMode> &modes);
-
-  std::optional<DWORD> getDefaultRefresh();
-  LSTATUS setDefaultRefresh(DWORD refreshMilliHz);
-
-  std::optional<bool> getNoGPU();
-  LSTATUS setNoGPU(bool noGPU);
-
-  std::optional<bool> getExclusiveMonitor();
-  LSTATUS setExclusiveMonitor(bool exclusive);
-};
+bool LGParseRefreshRate(const std::wstring& text, unsigned& refreshMilliHz);
+std::wstring LGFormatRefreshRate(unsigned refreshMilliHz);

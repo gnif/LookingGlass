@@ -25,10 +25,11 @@
 #include <CDebug.h>
 
 #include "DefaultDisplayModes.h"
+#include "RefreshRate.h"
 
 #define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
 
-const DWORD DEFAULT_REFRESH = 120;
+const DWORD DEFAULT_REFRESH = 120000;
 
 CRegistrySettings::CRegistrySettings() : hKey(nullptr) {}
 
@@ -60,7 +61,8 @@ static std::basic_string<T> trim(const std::basic_string<T> &s)
   return s.substr(b, e - b);
 }
 
-static std::wregex displayMode(L"(\\d+)x(\\d+)@(\\d+)(\\*)?");
+static std::wregex displayMode(
+  L"(\\d+)x(\\d+)@(\\d+(?:\\.\\d{1,3})?)(\\*)?");
 
 static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
 {
@@ -71,9 +73,10 @@ static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
     return {};
 
   DisplayMode mode;
-  mode.width = std::stoul(match[1]);
+  mode.width  = std::stoul(match[1]);
   mode.height = std::stoul(match[2]);
-  mode.refresh = std::stoul(match[3]);
+  if (!LGParseRefreshRate(match[3], mode.refreshMilliHz))
+    return {};
   mode.preferred = match[4] == L"*";
   return mode;
 }
@@ -81,16 +84,17 @@ static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
 std::vector<DisplayMode> CRegistrySettings::getDefaultModes()
 {
   auto defaultRefresh = getDefaultRefresh();
-  int refresh = defaultRefresh ? *defaultRefresh : DEFAULT_REFRESH;
+  const unsigned refreshMilliHz =
+    defaultRefresh ? *defaultRefresh : DEFAULT_REFRESH;
 
   std::vector<DisplayMode> result;
   for (int i = 0; i < ARRAYSIZE(DefaultDisplayModes); ++i)
   {
     DisplayMode mode;
-    mode.width = DefaultDisplayModes[i][0];
-    mode.height = DefaultDisplayModes[i][1];
-    mode.refresh = refresh;
-    mode.preferred = i == DefaultPreferredDisplayMode;
+    mode.width          = DefaultDisplayModes[i][0];
+    mode.height         = DefaultDisplayModes[i][1];
+    mode.refreshMilliHz = refreshMilliHz;
+    mode.preferred      = i == DefaultPreferredDisplayMode;
     result.emplace_back(mode);
   }
   return result;
@@ -159,7 +163,7 @@ std::wstring DisplayMode::toString()
   serialized.push_back('x');
   serialized.append(std::to_wstring(height));
   serialized.push_back('@');
-  serialized.append(std::to_wstring(refresh));
+  serialized.append(LGFormatRefreshRate(refreshMilliHz));
   if (preferred)
     serialized.push_back('*');
   return serialized;
@@ -167,24 +171,50 @@ std::wstring DisplayMode::toString()
 
 std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
 {
-  DWORD result, cbData = sizeof result;
-
-  LSTATUS status = RegGetValue(hKey, nullptr, L"DefaultRefresh", RRF_RT_REG_DWORD, nullptr, &result, &cbData);
-  switch (status)
-  {
-  case ERROR_SUCCESS:
-    return result;
-  case ERROR_FILE_NOT_FOUND:
+  DWORD type = 0;
+  DWORD size = 0;
+  LSTATUS status = RegQueryValueExW(
+    hKey, L"DefaultRefresh", nullptr, &type, nullptr, &size);
+  if (status == ERROR_FILE_NOT_FOUND)
     return DEFAULT_REFRESH;
-  default:
-    DEBUG_ERROR_HR(status, "RegGetValue(Modes)");
+  if (status != ERROR_SUCCESS)
+  {
+    DEBUG_ERROR_HR(status, "RegQueryValueEx(DefaultRefresh)");
     return {};
   }
+
+  if (type == REG_DWORD && size == sizeof(DWORD))
+  {
+    DWORD refresh = 0;
+    status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
+      (LPBYTE)&refresh, &size);
+    if (status == ERROR_SUCCESS && refresh >= 24 && refresh <= 1000)
+      return refresh * 1000;
+  }
+  else if ((type == REG_SZ || type == REG_EXPAND_SZ) && size &&
+      size % sizeof(wchar_t) == 0)
+  {
+    std::vector<wchar_t> value(size / sizeof(wchar_t) + 1, L'\0');
+    status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
+      (LPBYTE)value.data(), &size);
+    if (status == ERROR_SUCCESS)
+    {
+      unsigned refreshMilliHz;
+      if (LGParseRefreshRate(value.data(), refreshMilliHz))
+        return refreshMilliHz;
+    }
+  }
+
+  DEBUG_ERROR("Invalid DefaultRefresh value");
+  return {};
 }
 
-LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refresh)
+LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refreshMilliHz)
 {
-  return RegSetValueEx(hKey, L"DefaultRefresh", 0, REG_DWORD, (LPBYTE) &refresh, sizeof(DWORD));
+  const std::wstring value = LGFormatRefreshRate(refreshMilliHz);
+  return RegSetValueExW(hKey, L"DefaultRefresh", 0, REG_SZ,
+    (const BYTE *)value.c_str(),
+    (DWORD)((value.size() + 1) * sizeof(wchar_t)));
 }
 
 std::optional<bool> CRegistrySettings::getNoGPU()

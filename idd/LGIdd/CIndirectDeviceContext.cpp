@@ -185,20 +185,20 @@ bool CIndirectDeviceContext::PopulateDefaultModes()
     if (!GetResolutionMemoryRequirements(configuredMode.width,
         configuredMode.height, alignment, frameSize, requiredIVSHMEMSize))
     {
-      DEBUG_WARN("Filtering invalid %s mode %ux%u@%u",
+      DEBUG_WARN("Filtering invalid %s mode %ux%u@%.3f",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
-        configuredMode.refresh);
+        configuredMode.refreshMilliHz / 1000.0);
       continue;
     }
 
     if (requiredIVSHMEMSize > m_ivshmem.GetSize())
     {
       DEBUG_WARN(
-        "Filtering %s mode %ux%u@%u: requires %llu bytes of IVSHMEM, only %llu bytes are available",
+        "Filtering %s mode %ux%u@%.3f: requires %llu bytes of IVSHMEM, only %llu bytes are available",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
-        configuredMode.refresh,
+        configuredMode.refreshMilliHz / 1000.0,
         (unsigned long long)requiredIVSHMEMSize,
         (unsigned long long)m_ivshmem.GetSize());
       continue;
@@ -644,10 +644,11 @@ void CIndirectDeviceContext::ReloadSettings()
   CSettings::DisplayMode extraMode;
   if (g_settings.GetExtraMode(extraMode))
   {
-    const unsigned refresh = g_settings.GetDefaultRefresh();
-    if (extraMode.refresh != refresh)
+    const unsigned refreshMilliHz =
+      g_settings.GetDefaultRefreshMilliHz();
+    if (extraMode.refreshMilliHz != refreshMilliHz)
     {
-      extraMode.refresh = refresh;
+      extraMode.refreshMilliHz = refreshMilliHz;
       if (!g_settings.SetExtraMode(extraMode))
       {
         ReleaseSRWLockExclusive(&m_modeReloadLock);
@@ -743,7 +744,38 @@ void CIndirectDeviceContext::OnSwapChainReady()
   if (replug)
     m_replugQueued.store(1);
   else if (doSetMode)
-    g_pipe.SetDisplayMode(mode.width, mode.height, mode.refresh);
+    g_pipe.SetDisplayMode(
+      mode.width, mode.height, mode.refreshMilliHz);
+}
+
+static UINT64 GreatestCommonDivisor(UINT64 a, UINT64 b)
+{
+  while (b)
+  {
+    const UINT64 remainder = a % b;
+    a = b;
+    b = remainder;
+  }
+  return a;
+}
+
+static void SetSignalRate(DISPLAYCONFIG_RATIONAL& rate,
+  UINT64 numerator, UINT32 denominator)
+{
+  const UINT64 divisor = GreatestCommonDivisor(numerator, denominator);
+  numerator   /= divisor;
+  denominator /= (UINT32)divisor;
+
+  if (numerator <= UINT32_MAX)
+  {
+    rate.Numerator   = (UINT32)numerator;
+    rate.Denominator = denominator;
+    return;
+  }
+
+  rate.Numerator   =
+    (UINT32)((numerator + denominator / 2) / denominator);
+  rate.Denominator = 1;
 }
 
 static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO& signal,
@@ -761,10 +793,9 @@ static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO& signal,
   signal.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
   signal.AdditionalSignalInfo.videoStandard    = 255;
 
-  signal.vSyncFreq.Numerator   = mode.refresh;
-  signal.vSyncFreq.Denominator = 1;
-  signal.hSyncFreq.Numerator   = mode.refresh * signal.totalSize.cy;
-  signal.hSyncFreq.Denominator = 1;
+  SetSignalRate(signal.vSyncFreq, mode.refreshMilliHz, 1000);
+  SetSignalRate(signal.hSyncFreq,
+    (UINT64)mode.refreshMilliHz * signal.totalSize.cy, 1000);
 
   signal.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
   signal.pixelRate        = timing.pixelClock;
@@ -964,10 +995,10 @@ void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
   }
 
   CSettings::DisplayMode mode = {};
-  mode.width     = width;
-  mode.height    = height;
-  mode.refresh   = g_settings.GetDefaultRefresh();
-  mode.preferred = true;
+  mode.width          = width;
+  mode.height         = height;
+  mode.refreshMilliHz = g_settings.GetDefaultRefreshMilliHz();
+  mode.preferred      = true;
 
   bool modesLoaded = false;
   AcquireSRWLockExclusive(&m_modeReloadLock);

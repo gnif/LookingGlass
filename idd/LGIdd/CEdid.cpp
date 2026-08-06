@@ -86,8 +86,8 @@ static const BYTE CTA_COLORIMETRY_BT2020_RGB = (BYTE)(1 << 7);
 // changing these timings at runtime can make it treat the IDD as a new monitor.
 static const CSettings::DisplayMode EDID_DISPLAY_MODES[] =
 {
-  { 1024, 768, 60, true , false },
-  {  800, 600, 60, false, false }
+  { 1024, 768, 60000, true , false },
+  {  800, 600, 60000, false, false }
 };
 
 #pragma pack(push, 1)
@@ -366,7 +366,8 @@ bool CEdid::GetTiming(Timing& timing, const CSettings::DisplayMode& mode)
   timing.hActive = mode.width;
   timing.vActive = mode.height;
 
-  if (timing.hActive == 0 || timing.vActive == 0 || mode.refresh == 0)
+  if (timing.hActive == 0 || timing.vActive == 0 ||
+      mode.refreshMilliHz == 0)
     return false;
 
   timing.hBlank = std::max<DWORD>(160,
@@ -390,12 +391,11 @@ bool CEdid::GetTiming(Timing& timing, const CSettings::DisplayMode& mode)
   if (timing.vFront + timing.vSync >= timing.vBlank)
     return false;
 
-  const UINT64 pixelClock =
+  const UINT64 pixelClockMilliHz =
     (UINT64)(timing.hActive + timing.hBlank) *
     (UINT64)(timing.vActive + timing.vBlank) *
-    (UINT64)mode.refresh;
-  const UINT64 pixelClock10KHz = (pixelClock + 5000) / 10000;
-  timing.pixelClock = pixelClock10KHz * 10000;
+    (UINT64)mode.refreshMilliHz;
+  timing.pixelClock = (pixelClockMilliHz + 500) / 1000;
   return timing.pixelClock != 0;
 }
 
@@ -411,7 +411,7 @@ static bool MakeDetailedTiming(
       timing.hBlank  > 4095 || timing.vBlank  > 4095)
     return false;
 
-  const UINT64 pixelClock10KHz = timing.pixelClock / 10000;
+  const UINT64 pixelClock10KHz = (timing.pixelClock + 5000) / 10000;
   if (pixelClock10KHz == 0 || pixelClock10KHz > 0xffff)
     return false;
 
