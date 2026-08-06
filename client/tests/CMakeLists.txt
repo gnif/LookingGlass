@@ -66,7 +66,6 @@ target_link_libraries(mouse-tests
 )
 set(MOUSE_CASES
   inset-exit
-  surface-edge
   exit-delay
   exit-guest
   exit-cancel

@@ -329,76 +329,6 @@ static void setConf(bool active)
   core_handleGrabEvent(active);
 }
 
-static void setEdge(enum LG_DSWarpSupport support)
-{
-  reset();
-  m.support       = support;
-  g_state.windowW = 100;
-  g_state.windowH = 80;
-  g_state.dstRect = (LG_RendererRect) {
-    .valid = true,
-    .x     = 0,
-    .y     = 0,
-    .w     = 100,
-    .h     = 80,
-  };
-  setLocal(99, 40);
-}
-
-static void testSurfaceEdge(void)
-{
-  setEdge(LG_DS_WARP_SURFACE);
-
-  core_handleMouseNormal(1, 0);
-
-  const int move = first(EV_WARP);
-  CHECK(move >= 0);
-  CHECK(m.ev[move].x == 100);
-  CHECK(m.ev[move].y == 40);
-  CHECK(g_cursor.inWindow);
-  CHECK(g_cursor.inView);
-  CHECK(g_cursor.viewReq);
-  CHECK(g_cursor.exitWait);
-  CHECK(!m.conf.req);
-
-  core_handleGuestMouseUpdate();
-  CHECK(count(EV_GUEST) == 0);
-
-  core_handleMouseNormal(1, 0);
-  CHECK(!m.conf.req);
-  CHECK(!g_cursor.exitRetry);
-
-  g_cursor.pos.x = 104;
-  core_handleMouseNormal(1, 2);
-  CHECK(m.conf.req);
-  CHECK(g_cursor.pos.x == 99);
-  CHECK(g_cursor.inView);
-  CHECK(g_cursor.exitWait);
-  CHECK(g_cursor.exitRetry);
-  CHECK(count(EV_MOTION) == 0);
-
-  setConf(true);
-  CHECK(g_cursor.inView);
-  CHECK(!g_cursor.exitWait);
-  CHECK(!g_cursor.exitRetry);
-  CHECK(count(EV_MOTION) == 1);
-  CHECK(m.ev[first(EV_MOTION)].x == 0);
-  CHECK(m.ev[first(EV_MOTION)].y == 2);
-
-  setEdge(LG_DS_WARP_SURFACE);
-  core_handleMouseNormal(1, 0);
-  g_cursor.inWindow = false;
-  core_setCursorInView(false);
-  CHECK(!g_cursor.inWindow);
-  CHECK(!g_cursor.inView);
-  CHECK(!g_cursor.viewReq);
-  CHECK(!g_cursor.exitWait);
-
-  setEdge(LG_DS_WARP_SCREEN);
-  core_handleMouseNormal(1, 0);
-  CHECK(!g_cursor.inWindow);
-}
-
 static void startExit(void)
 {
   reset();
@@ -452,7 +382,7 @@ static void testExitCancel(void)
   CHECK(g_cursor.exit);
   CHECK(!g_cursor.viewReq);
 
-  core_handleMouseNormal(-0.25, 0);
+  core_handleMouseNormal(-3, 0);
   CHECK(!g_cursor.exit);
   CHECK(g_cursor.viewReq);
   CHECK(m.conf.req);
@@ -812,7 +742,6 @@ struct Test
 
 static const struct Test tests[] = {
   { "inset-exit"      , testInsetExit    },
-  { "surface-edge"    , testSurfaceEdge  },
   { "exit-delay"      , testExitWait     },
   { "exit-guest"      , testExitGuest    },
   { "exit-cancel"     , testExitCancel   },

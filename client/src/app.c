@@ -469,8 +469,7 @@ void app_handleButtonPress(int button)
     return;
   }
 
-  if (!core_inputEnabled() || g_cursor.exitWait ||
-      !g_cursor.inView || !g_cursor.viewReq)
+  if (!core_inputEnabled() || !g_cursor.inView || !g_cursor.viewReq)
     return;
 
   if (!purespice_mousePress(button))
@@ -493,7 +492,7 @@ void app_handleButtonRelease(int button)
     return;
   }
 
-  if (!core_inputEnabled() || g_cursor.exitWait)
+  if (!core_inputEnabled())
     return;
 
   if (!purespice_mouseRelease(button))

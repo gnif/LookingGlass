@@ -133,9 +133,6 @@ static void lgInit(void)
   g_cursor.inView        = false;
   g_cursor.viewReq       = false;
   g_cursor.exit          = false;
-  g_cursor.exitWait      = false;
-  g_cursor.exitRetry     = false;
-  g_cursor.exitDelta     = (struct DoublePoint) { 0 };
   g_cursor.guest.valid   = false;
 
   // if spice is not in use, hide the local cursor
