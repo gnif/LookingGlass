@@ -404,6 +404,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "mouseTrace",
+    .description    = "Enable mouse input diagnostics",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false,
+  },
+  {
+    .module         = "input",
     .name           = "autoCapture",
     .description    = "Try to keep the mouse captured when needed",
     .type           = OPTION_TYPE_BOOL,
@@ -727,6 +734,7 @@ bool config_load(int argc, char * argv[])
   g_params.mouseSmoothing         = option_get_bool("input", "mouseSmoothing"        );
   g_params.rawMouse               = option_get_bool("input", "rawMouse"              );
   g_params.mouseRedraw            = option_get_bool("input", "mouseRedraw"           );
+  g_params.mouseTrace             = option_get_bool("input", "mouseTrace"            );
   g_params.autoCapture            = option_get_bool("input", "autoCapture"           );
   g_params.captureInputOnly       = option_get_bool("input", "captureOnly"           );
 

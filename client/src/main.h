@@ -227,6 +227,7 @@ struct AppParams
   const char *         windowTitle;
   const char *         appId;
   bool                 mouseRedraw;
+  bool                 mouseTrace;
   int                  mouseSens;
   bool                 mouseSmoothing;
   bool                 rawMouse;

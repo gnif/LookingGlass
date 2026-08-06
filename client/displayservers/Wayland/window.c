@@ -29,15 +29,30 @@
 #include "common/debug.h"
 #include "common/event.h"
 
+#define MTRACE(fmt, ...) \
+  do \
+  { \
+    const uint64_t seq = app_mouseSeq(); \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "wl.window." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
+
 // Surface-handling listeners.
 
 static void setScale(struct WaylandScale newScale)
 {
+  const struct WaylandScale oldScale = wlWm.scale;
   wlWm.scale = newScale;
   wlWm.fractionalScale = waylandScaleIsFractional(newScale);
   wlWm.needsResize = true;
 
-  if (wlWm.desktop->configured())
+  const bool configured = wlWm.desktop->configured();
+  MTRACE("scale old=%d/%d new=%d/%d configured=%d",
+      oldScale.num, oldScale.den, newScale.num, newScale.den, configured);
+
+  if (configured)
   {
     waylandCursorScaleChange();
     app_invalidateWindow(true);

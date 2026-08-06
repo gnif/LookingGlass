@@ -31,6 +31,16 @@
 
 #include "common/debug.h"
 
+#define MTRACE(fmt, ...) \
+  do \
+  { \
+    const uint64_t seq = app_mouseSeq(); \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "wl.cursor." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
+
 static const uint32_t cursorBitmap[] = {
   0x000000, 0x000000, 0x000000, 0x000000,
   0x000000, 0xFFFFFF, 0xFFFFFF, 0x000000,
@@ -184,6 +194,9 @@ void waylandCursorFree(void)
 void waylandCursorScaleChange(void)
 {
   int newScale = waylandScaleCeil(wlWm.scale);
+  MTRACE("scale old=%d new=%d ratio=%d/%d pointer=%d",
+      wlWm.cursorScale, newScale, wlWm.scale.num, wlWm.scale.den,
+      wlWm.cursorId);
   if (newScale == wlWm.cursorScale)
     return;
 
@@ -191,7 +204,10 @@ void waylandCursorScaleChange(void)
       wlWm.cursorSize * newScale, wlWm.shm);
 
   if (!new)
+  {
+    MTRACE("scale drop=theme new=%d", newScale);
     return;
+  }
 
   struct wl_surface * old[LG_POINTER_COUNT];
   memcpy(old, wlWm.cursors, sizeof(old));
@@ -217,6 +233,9 @@ void waylandSetPointer(LG_DSPointer pointer)
   wlWm.cursor     = wlWm.cursors[pointer];
   wlWm.cursorHotX = wlWm.cursorHot[pointer].x;
   wlWm.cursorHotY = wlWm.cursorHot[pointer].y;
+  MTRACE("set id=%d surface=%p hot=%d,%d scale=%d entered=%d",
+      pointer, (void *)wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY,
+      wlWm.cursorScale, wlWm.pointerInSurface);
   if (wlWm.pointer)
     wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
 }

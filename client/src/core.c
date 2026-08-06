@@ -36,6 +36,16 @@
 
 #define RESIZE_TIMEOUT (10 * 1000) // 10ms
 
+#define MTRACE(fmt, ...) \
+  do \
+  { \
+    const uint64_t seq = app_mouseSeq(); \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "core." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
+
 static bool isInView(void)
 {
   return
@@ -57,6 +67,10 @@ void core_invalidatePointer(bool detectInView)
    * always relative mode and we should not grab the pointer */
   enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
   app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
+  MTRACE("invalidate detect=%d inWin=%d inView=%d grab=%d warp=%d "
+      "support=%d", detectInView, g_cursor.inWindow, g_cursor.inView,
+      g_cursor.grab, g_cursor.warpState, warpSupport);
 
   if (detectInView)
   {
@@ -101,12 +115,22 @@ void core_invalidatePointer(bool detectInView)
 
 void core_setCursorInView(bool enable)
 {
+  MTRACE("view req=%d old=%d focus=%d inWin=%d grab=%d",
+      enable, g_cursor.inView, g_state.focused, g_cursor.inWindow,
+      g_cursor.grab);
+
   // if the state has not changed, don't do anything else
   if (g_cursor.inView == enable)
+  {
+    MTRACE("view skip=same value=%d", enable);
     return;
+  }
 
   if (enable && !g_state.focused)
+  {
+    MTRACE("view skip=focus");
     return;
+  }
 
   g_cursor.inView = enable;
   core_invalidatePointer(false);
@@ -124,6 +148,10 @@ void core_setGrab(bool enable)
 
 void core_setGrabQuiet(bool enable)
 {
+  MTRACE("grab req=%d old=%d inWin=%d inView=%d focus=%d",
+      enable, g_cursor.grab, g_cursor.inWindow, g_cursor.inView,
+      g_state.focused);
+
   /* we always do this so that at init the cursor is in the right state */
   if (g_params.captureInputOnly && g_params.hideMouse)
     g_state.ds->setPointer(enable ? LG_POINTER_NONE : LG_POINTER_SQUARE);
@@ -149,7 +177,8 @@ void core_setGrabQuiet(bool enable)
      * odd UI behaviour if the user is using focus follows mouse and the window
      * was focused without the cursor being in window already */
     struct DoublePoint local;
-    util_guestCurToLocal(&local);
+    const bool valid = util_guestCurToLocal(&local);
+    MTRACE("grab align valid=%d", valid);
     core_warpPointer(local.x, local.y, true);
 
     if (g_params.grabKeyboard)
@@ -177,17 +206,35 @@ void core_setGrabQuiet(bool enable)
 
 bool core_warpPointer(int x, int y, bool exiting)
 {
-  if ((!g_cursor.inWindow && !exiting) ||
-      app_isOverlayMode() ||
-      g_cursor.warpState == WARP_STATE_OFF)
+  if (!g_cursor.inWindow && !exiting)
+  {
+    MTRACE("warp drop=window target=%d,%d exit=%d", x, y, exiting);
     return false;
+  }
+
+  if (app_isOverlayMode())
+  {
+    MTRACE("warp drop=overlay target=%d,%d exit=%d", x, y, exiting);
+    return false;
+  }
+
+  if (g_cursor.warpState == WARP_STATE_OFF)
+  {
+    MTRACE("warp drop=state target=%d,%d exit=%d", x, y, exiting);
+    return false;
+  }
 
   if (exiting)
     g_cursor.warpState = WARP_STATE_OFF;
 
   if (g_cursor.pos.x == x && g_cursor.pos.y == y)
+  {
+    MTRACE("warp same target=%d,%d exit=%d", x, y, exiting);
     return true;
+  }
 
+  MTRACE("warp send target=%d,%d exit=%d pos=%.3f,%.3f",
+      x, y, exiting, g_cursor.pos.x, g_cursor.pos.y);
   g_state.ds->warpPointer(x, y, exiting);
   return true;
 }
@@ -366,6 +413,15 @@ void core_updatePositionInfo(void)
   }
 
 done:
+  MTRACE("geometry src=%dx%d dst=%d,%d,%d,%d win=%dx%d "
+      "scale=%.4f,%.4f uiScale=%.4f rot=%d/%d border=%d,%d,%d,%d "
+      "valid=%d", g_state.srcSize.x, g_state.srcSize.y,
+      g_state.dstRect.x, g_state.dstRect.y, g_state.dstRect.w,
+      g_state.dstRect.h, g_state.windowW, g_state.windowH,
+      g_cursor.scale.x, g_cursor.scale.y, g_state.windowScale,
+      g_state.rotate, g_params.winRotate, g_state.border.left,
+      g_state.border.top, g_state.border.right, g_state.border.bottom,
+      g_state.posInfoValid);
   app_updateMouseState();
   atomic_fetch_add(&g_state.lgrResize, 1);
 }
@@ -438,11 +494,26 @@ void core_handleGuestMouseUpdate(void)
 {
   struct DoublePoint localPos;
   if (!util_guestCurToLocal(&localPos))
+  {
+    MTRACE("guest drop=geometry guest=%d,%d hot=%d,%d valid=%d",
+        g_cursor.guest.x, g_cursor.guest.y, g_cursor.guest.hx,
+        g_cursor.guest.hy, g_cursor.guest.valid);
     return;
+  }
 
-  if (app_isOverlayMode() || !g_cursor.inView)
+  const bool overlay = app_isOverlayMode();
+  if (overlay || !g_cursor.inView)
+  {
+    MTRACE("guest drop=%s guest=%d,%d local=%.3f,%.3f inWin=%d "
+        "inView=%d", overlay ? "overlay" : "view", g_cursor.guest.x,
+        g_cursor.guest.y, localPos.x, localPos.y, g_cursor.inWindow,
+        g_cursor.inView);
     return;
+  }
 
+  MTRACE("guest send guest=%d,%d local=%.3f,%.3f inWin=%d inView=%d",
+      g_cursor.guest.x, g_cursor.guest.y, localPos.x, localPos.y,
+      g_cursor.inWindow, g_cursor.inView);
   g_state.ds->guestPointerUpdated(
     g_cursor.guest.x, g_cursor.guest.y,
     util_clamp(localPos.x, g_state.dstRect.x,
@@ -454,7 +525,11 @@ void core_handleGuestMouseUpdate(void)
 
 void core_handleMouseGrabbed(double ex, double ey)
 {
-  if (!core_inputEnabled())
+  const bool enabled = core_inputEnabled();
+  MTRACE("captured delta=%.3f,%.3f enabled=%d", ex, ey,
+      enabled);
+
+  if (!enabled)
     return;
 
   int x, y;
@@ -481,6 +556,10 @@ void core_handleMouseGrabbed(double ex, double ey)
 
 void core_handleMouseNormal(double ex, double ey)
 {
+  MTRACE("normal delta=%.3f,%.3f guest=%d,%d valid=%d inWin=%d "
+      "inView=%d", ex, ey, g_cursor.guest.x, g_cursor.guest.y,
+      g_cursor.guest.valid, g_cursor.inWindow, g_cursor.inView);
+
   // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
   {
@@ -511,6 +590,7 @@ void core_handleMouseNormal(double ex, double ey)
   }
 
   bool testExit = true;
+  bool didExit = false;
   const bool inView = isInView();
   if (!g_cursor.inView)
   {
@@ -643,10 +723,17 @@ fallback:
         local.x + move.x >= g_state.dstRect.x + g_state.dstRect.w ||
         local.y + move.y >= g_state.dstRect.y + g_state.dstRect.h)
     {
+      didExit = true;
       local.x += move.x;
       local.y += move.y;
       const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
       const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
+
+      MTRACE("exit local=%.3f,%.3f move=%.3f,%.3f target=%d,%d "
+          "dst=%d,%d,%d,%d support=%d", local.x - move.x,
+          local.y - move.y, move.x, move.y, tx, ty, g_state.dstRect.x,
+          g_state.dstRect.y, g_state.dstRect.w, g_state.dstRect.h,
+          warpSupport);
 
       switch (warpSupport)
       {
@@ -684,6 +771,7 @@ fallback:
     else if (warpSupport == LG_DS_WARP_SURFACE && isInView())
     {
       /* regrab the pointer in case the user did not move off the surface */
+      MTRACE("regrab pos=%.3f,%.3f", g_cursor.pos.x, g_cursor.pos.y);
       g_state.ds->grabPointer();
       g_cursor.warpState = WARP_STATE_ON;
     }
@@ -714,6 +802,10 @@ fallback:
     g_cursor.guest.x += x;
     g_cursor.guest.y += y;
   }
+
+  MTRACE("motion delta=%d,%d guest=%d,%d exit=%d test=%d warp=%d",
+      x, y, g_cursor.guest.x, g_cursor.guest.y, didExit, testExit,
+      g_cursor.warpState);
 
   if (!purespice_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");

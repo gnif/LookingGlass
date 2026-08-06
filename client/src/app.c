@@ -37,11 +37,24 @@
 
 #include "cimgui.h"
 
-#include <stdarg.h>
+#include <inttypes.h>
 #include <math.h>
+#include <stdarg.h>
+#include <stdatomic.h>
+#include <stdio.h>
 #include <string.h>
 
 #define SHADER_MOUSE_VALID (UINT32_C(1) << 31)
+
+#define MTRACE(fmt, ...) \
+  do \
+  { \
+    const uint64_t seq = app_mouseSeq(); \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "app." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
 
 bool app_isRunning(void)
 {
@@ -54,6 +67,33 @@ bool app_isRunning(void)
 bool app_isCaptureMode(void)
 {
   return g_cursor.grab;
+}
+
+uint64_t app_mouseSeq(void)
+{
+  static atomic_uint_fast64_t seq;
+
+  if (!g_params.mouseTrace)
+    return 0;
+
+  return atomic_fetch_add_explicit(&seq, 1, memory_order_relaxed) + 1;
+}
+
+void app_mouseTrace(const char * file, unsigned int line,
+    const char * function, uint64_t seq, const char * format, ...)
+{
+  char message[1024];
+  va_list ap;
+  va_start(ap, format);
+  const int result = vsnprintf(message, sizeof(message), format, ap);
+  va_end(ap);
+  if (result < 0)
+    return;
+
+  flockfile(stderr);
+  debug_info(file, line, function, "Mouse %06" PRIu64 ": %s", seq,
+      message);
+  funlockfile(stderr);
 }
 
 bool app_isCaptureOnlyMode(void)
@@ -92,6 +132,9 @@ void app_updateCursorPos(double x, double y)
   g_cursor.pos.x = x;
   g_cursor.pos.y = y;
   g_cursor.valid = true;
+
+  MTRACE("pos pos=%.3f,%.3f inWin=%d inView=%d grab=%d",
+      x, y, g_cursor.inWindow, g_cursor.inView, g_cursor.grab);
 
   if (app_isOverlayMode())
     g_state.io->MousePos = (ImVec2) { x, y };
@@ -167,6 +210,10 @@ void app_getMouseState(LG_MouseState * state)
 
 void app_handleFocusEvent(bool focused)
 {
+  MTRACE("focus set=%d old=%d inWin=%d inView=%d grab=%d",
+      focused, g_state.focused, g_cursor.inWindow, g_cursor.inView,
+      g_cursor.grab);
+
   if (g_state.focused == focused)
     return;
 
@@ -211,6 +258,9 @@ void app_handleFocusEvent(bool focused)
 
 void app_handleEnterEvent(bool entered)
 {
+  MTRACE("enter set=%d inWin=%d inView=%d grab=%d",
+      entered, g_cursor.inWindow, g_cursor.inView, g_cursor.grab);
+
   if (entered)
   {
     g_cursor.inWindow = true;
@@ -408,6 +458,9 @@ void app_handleButtonPress(int button)
   g_cursor.buttons |= (1U << button);
   app_updateMouseButtons();
 
+  MTRACE("button down=%d buttons=%u inView=%d grab=%d",
+      button, g_cursor.buttons, g_cursor.inView, g_cursor.grab);
+
   if (app_isOverlayMode())
   {
     int igButton = mapSpiceToImGuiButton(button);
@@ -427,6 +480,9 @@ void app_handleButtonRelease(int button)
 {
   g_cursor.buttons &= ~(1U << button);
   app_updateMouseButtons();
+
+  MTRACE("button up=%d buttons=%u inView=%d grab=%d",
+      button, g_cursor.buttons, g_cursor.inView, g_cursor.grab);
 
   if (app_isOverlayMode())
   {
@@ -599,6 +655,10 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
+  MTRACE("rel delta=%.3f,%.3f raw=%.3f,%.3f inWin=%d inView=%d "
+      "grab=%d", normx, normy, rawx, rawy, g_cursor.inWindow,
+      g_cursor.inView, g_cursor.grab);
+
   if (app_isOverlayMode())
     return;
 
@@ -671,6 +731,9 @@ void app_updateWindowPos(int x, int y)
 
 void app_handleResizeEvent(int w, int h, double scale, const struct Border border)
 {
+  MTRACE("resize win=%dx%d scale=%.3f border=%d,%d,%d,%d",
+      w, h, scale, border.left, border.top, border.right, border.bottom);
+
   memcpy(&g_state.border, &border, sizeof(border));
 
   /* don't do anything else if the window dimensions have not changed */

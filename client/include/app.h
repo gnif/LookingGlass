@@ -58,6 +58,10 @@ bool app_isCaptureMode(void);
 bool app_isCaptureOnlyMode(void);
 bool app_isFormatValid(void);
 bool app_isOverlayMode(void);
+uint64_t app_mouseSeq(void);
+void app_mouseTrace(const char * file, unsigned int line,
+    const char * function, uint64_t seq, const char * format, ...)
+  __attribute__((format (printf, 5, 6)));
 void app_updateCursorPos(double x, double y);
 void app_updateMouseState(void);
 void app_getMouseState(LG_MouseState * state);

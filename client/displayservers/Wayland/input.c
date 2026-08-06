@@ -35,13 +35,39 @@
 const double WL_SCROLL_STEP = 15.0;
 const double WL_HALF_SCROLL_STEP = WL_SCROLL_STEP / 2.0;
 
+#define MTRACE(fmt, ...) \
+  do \
+  { \
+    const uint64_t seq = app_mouseSeq(); \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "wl." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
+
+#define MLOG(seq, fmt, ...) \
+  do \
+  { \
+    if (seq) \
+      app_mouseTrace(__FILE__, __LINE__, __FUNCTION__, seq, \
+          "wl." fmt, ##__VA_ARGS__); \
+  } \
+  while (0)
+
+static uint32_t proxyId(void * proxy)
+{
+  return proxy ? wl_proxy_get_id(proxy) : 0;
+}
+
 // Mouse-handling listeners.
 
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
-    uint32_t serial, wl_fixed_t sxW, wl_fixed_t syW)
+    uint32_t time, wl_fixed_t sxW, wl_fixed_t syW)
 {
   wlWm.cursorX = wl_fixed_to_double(sxW);
   wlWm.cursorY = wl_fixed_to_double(syW);
+  MTRACE("abs time=%u pos=%.3f,%.3f", time, wlWm.cursorX,
+      wlWm.cursorY);
   app_updateCursorPos(wlWm.cursorX, wlWm.cursorY);
 
   if (!wlWm.warpSupport && !wlWm.relativePointer)
@@ -52,6 +78,10 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface, wl_fixed_t sxW,
     wl_fixed_t syW)
 {
+  MTRACE("enter main=%d surface=%p serial=%u pos=%.3f,%.3f",
+      surface == wlWm.surface, (void *)surface, serial,
+      wl_fixed_to_double(sxW), wl_fixed_to_double(syW));
+
   if (surface != wlWm.surface)
     return;
 
@@ -81,6 +111,9 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
     uint32_t serial, struct wl_surface * surface)
 {
+  MTRACE("leave main=%d surface=%p serial=%u",
+      surface == wlWm.surface, (void *)surface, serial);
+
   if (surface != wlWm.surface)
     return;
 
@@ -153,18 +186,79 @@ static const struct wl_pointer_listener pointerListener = {
   .axis = pointerAxisHandler,
 };
 
+static void confinedHandler(void * data,
+    struct zwp_confined_pointer_v1 * pointer)
+{
+  MTRACE("conf active=1 id=%u", proxyId(pointer));
+}
+
+static void unconfinedHandler(void * data,
+    struct zwp_confined_pointer_v1 * pointer)
+{
+  MTRACE("conf active=0 id=%u", proxyId(pointer));
+}
+
+static const struct zwp_confined_pointer_v1_listener confinedListener = {
+  .confined   = confinedHandler,
+  .unconfined = unconfinedHandler,
+};
+
+static void lockedHandler(void * data,
+    struct zwp_locked_pointer_v1 * pointer)
+{
+  MTRACE("lock active=1 id=%u", proxyId(pointer));
+}
+
+static void unlockedHandler(void * data,
+    struct zwp_locked_pointer_v1 * pointer)
+{
+  MTRACE("lock active=0 id=%u", proxyId(pointer));
+}
+
+static const struct zwp_locked_pointer_v1_listener lockedListener = {
+  .locked   = lockedHandler,
+  .unlocked = unlockedHandler,
+};
+
+static struct zwp_confined_pointer_v1 * createConfine(
+    struct wl_region * region)
+{
+  struct zwp_confined_pointer_v1 * pointer =
+    zwp_pointer_constraints_v1_confine_pointer(
+        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  zwp_confined_pointer_v1_add_listener(pointer, &confinedListener, NULL);
+  return pointer;
+}
+
+static struct zwp_locked_pointer_v1 * createLock(void)
+{
+  struct zwp_locked_pointer_v1 * pointer =
+    zwp_pointer_constraints_v1_lock_pointer(
+        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
+        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  zwp_locked_pointer_v1_add_listener(pointer, &lockedListener, NULL);
+  return pointer;
+}
+
 static void relativePointerMotionHandler(void * data,
     struct zwp_relative_pointer_v1 *pointer, uint32_t timeHi, uint32_t timeLo,
     wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
     wl_fixed_t dyUnaccelW)
 {
-  wlWm.cursorX += wl_fixed_to_double(dxW);
-  wlWm.cursorY += wl_fixed_to_double(dyW);
+  const double dx = wl_fixed_to_double(dxW);
+  const double dy = wl_fixed_to_double(dyW);
+  wlWm.cursorX += dx;
+  wlWm.cursorY += dy;
+  MTRACE("rel time=%u:%u delta=%.3f,%.3f raw=%.3f,%.3f "
+      "pos=%.3f,%.3f", timeHi, timeLo, dx, dy,
+      wl_fixed_to_double(dxUnaccelW), wl_fixed_to_double(dyUnaccelW),
+      wlWm.cursorX, wlWm.cursorY);
   app_updateCursorPos(wlWm.cursorX, wlWm.cursorY);
 
   app_handleMouseRelative(
-      wl_fixed_to_double(dxW),
-      wl_fixed_to_double(dyW),
+      dx,
+      dy,
       wl_fixed_to_double(dxUnaccelW),
       wl_fixed_to_double(dyUnaccelW));
 }
@@ -322,20 +416,31 @@ static const struct wl_keyboard_listener keyboardListener = {
 
 static void waylandCleanUpPointer(void)
 {
+  uint32_t lockId = 0;
+  uint32_t confId = 0;
+  uint64_t lockSeq = 0;
+  uint64_t confSeq = 0;
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.lockedPointer)
     {
+      lockId = proxyId(wlWm.lockedPointer);
       zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
       wlWm.lockedPointer = NULL;
+      lockSeq = app_mouseSeq();
     }
 
     if (wlWm.confinedPointer)
     {
+      confId = proxyId(wlWm.confinedPointer);
       zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
       wlWm.confinedPointer = NULL;
+      confSeq = app_mouseSeq();
     }
   });
+
+  MLOG(lockSeq, "lock destroy id=%u why=pointer", lockId);
+  MLOG(confSeq, "conf destroy id=%u why=pointer", confId);
 
   if (wlWm.relativePointer)
   {
@@ -409,6 +514,7 @@ bool waylandInputInit(bool allowNoInput)
 {
   if (!wlWm.seat)
   {
+    MTRACE("input seat=0 allowNone=%d", allowNoInput);
     if (allowNoInput)
     {
       DEBUG_WARN("Compositor missing wl_seat, input will be disabled");
@@ -438,6 +544,10 @@ bool waylandInputInit(bool allowNoInput)
   if (!wlWm.keyboardInhibitManager)
     DEBUG_WARN("zwp_keyboard_shortcuts_inhibit_manager_v1 not exported by "
                "compositor, keyboard will not be grabbed");
+
+  MTRACE("input seat=1 warp=%d relMgr=%d constraints=%d",
+      wlWm.warpSupport, !!wlWm.relativePointerManager,
+      !!wlWm.pointerConstraints);
 
   wlWm.xkb = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
   if (!wlWm.xkb)
@@ -480,40 +590,63 @@ void waylandGrabPointer(void)
 {
   if (!wlWm.pointer ||
       !wlWm.relativePointerManager || !wlWm.pointerConstraints)
+  {
+    MTRACE("grab drop pointer=%d relMgr=%d constraints=%d",
+        !!wlWm.pointer, !!wlWm.relativePointerManager,
+        !!wlWm.pointerConstraints);
     return;
+  }
 
   if (!wlWm.warpSupport && !wlWm.relativePointer)
   {
-    wlWm.relativePointer =
+    struct zwp_relative_pointer_v1 * relative =
       zwp_relative_pointer_manager_v1_get_relative_pointer(
         wlWm.relativePointerManager, wlWm.pointer);
-    zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
+    zwp_relative_pointer_v1_add_listener(relative,
       &relativePointerListener, NULL);
+    const uint32_t relativeId = proxyId(relative);
+    wlWm.relativePointer = relative;
+    MTRACE("rel req id=%u why=grab", relativeId);
   }
 
+  uint32_t confId = 0;
+  uint64_t confSeq = 0;
+  bool haveConf = false;
+  bool haveLock = false;
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (!wlWm.confinedPointer && !wlWm.lockedPointer)
     {
-      wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
-          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+      wlWm.confinedPointer = createConfine(NULL);
+      confId = proxyId(wlWm.confinedPointer);
+      confSeq = app_mouseSeq();
     }
+    haveConf = !!wlWm.confinedPointer;
+    haveLock = !!wlWm.lockedPointer;
   });
+
+  if (confId)
+    MLOG(confSeq, "conf req id=%u why=grab", confId);
+  else
+    MTRACE("conf skip conf=%d lock=%d", haveConf, haveLock);
 }
 
-inline static void internalUngrabPointer(bool lock)
+inline static uint32_t internalUngrabPointer(bool lock, uint64_t * traceSeq)
 {
+  *traceSeq = 0;
   if (!wlWm.pointer)
-    return;
+    return 0;
 
   if (lock)
     LG_LOCK(wlWm.surfaceLock);
 
+  uint32_t confId = 0;
   if (wlWm.confinedPointer)
   {
+    confId = proxyId(wlWm.confinedPointer);
     zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
     wlWm.confinedPointer = NULL;
+    *traceSeq = app_mouseSeq();
   }
 
   if (lock)
@@ -533,43 +666,65 @@ inline static void internalUngrabPointer(bool lock)
     app_resyncMouseBasic();
     app_handleMouseBasic();
   }
+
+  return confId;
 }
 
 void waylandUngrabPointer(void)
 {
-  internalUngrabPointer(true);
+  uint64_t confSeq;
+  const uint32_t confId = internalUngrabPointer(true, &confSeq);
+  MLOG(confSeq, "conf destroy id=%u why=ungrab", confId);
 }
 
 void waylandCapturePointer(void)
 {
   if (!wlWm.warpSupport)
   {
+    MTRACE("capture fallback=confine");
     waylandGrabPointer();
     return;
   }
 
+  uint32_t confId = 0;
+  uint32_t lockId = 0;
+  uint64_t confSeq = 0;
+  uint64_t lockSeq = 0;
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.confinedPointer)
     {
+      confId = proxyId(wlWm.confinedPointer);
       zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
       wlWm.confinedPointer = NULL;
+      confSeq = app_mouseSeq();
     }
 
-    wlWm.lockedPointer = zwp_pointer_constraints_v1_lock_pointer(
-        wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-        ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    wlWm.lockedPointer = createLock();
+    lockId = proxyId(wlWm.lockedPointer);
+    lockSeq = app_mouseSeq();
   });
+
+  MLOG(confSeq, "conf destroy id=%u why=capture", confId);
+  MLOG(lockSeq, "lock req id=%u why=capture", lockId);
 }
 
 void waylandUncapturePointer(void)
 {
+  uint32_t lockId = 0;
+  uint32_t confDropId = 0;
+  uint32_t confReqId = 0;
+  uint64_t lockSeq = 0;
+  uint64_t confDropSeq = 0;
+  uint64_t confReqSeq = 0;
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
     if (wlWm.lockedPointer)
     {
+      lockId = proxyId(wlWm.lockedPointer);
       zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
       wlWm.lockedPointer = NULL;
+      lockSeq = app_mouseSeq();
     }
 
     /* we need to ungrab the pointer on the following conditions when exiting capture mode:
@@ -580,14 +735,18 @@ void waylandUncapturePointer(void)
      *   - if the user has opted to use captureInputOnly mode.
      */
     if (!wlWm.warpSupport || !app_isFormatValid() || app_isCaptureOnlyMode())
-      internalUngrabPointer(false);
+      confDropId = internalUngrabPointer(false, &confDropSeq);
     else if (wlWm.pointer)
     {
-      wlWm.confinedPointer = zwp_pointer_constraints_v1_confine_pointer(
-          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, NULL,
-          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+      wlWm.confinedPointer = createConfine(NULL);
+      confReqId = proxyId(wlWm.confinedPointer);
+      confReqSeq = app_mouseSeq();
     }
   });
+
+  MLOG(lockSeq, "lock destroy id=%u why=uncapture", lockId);
+  MLOG(confDropSeq, "conf destroy id=%u why=uncapture", confDropId);
+  MLOG(confReqSeq, "conf req id=%u why=uncapture", confReqId);
 }
 
 void waylandGrabKeyboard(void)
@@ -611,13 +770,25 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  if (!wlWm.pointerInSurface || wlWm.lockedPointer)
+  const int reqX = x;
+  const int reqY = y;
+  if (!wlWm.pointerInSurface)
+  {
+    MTRACE("warp drop=surface target=%d,%d exit=%d", x, y, exiting);
     return;
+  }
+
+  if (wlWm.lockedPointer)
+  {
+    MTRACE("warp drop=lock target=%d,%d exit=%d", x, y, exiting);
+    return;
+  }
 
   LG_LOCK(wlWm.surfaceLock);
   if (wlWm.lockedPointer)
   {
     LG_UNLOCK(wlWm.surfaceLock);
+    MTRACE("warp drop=lock-race target=%d,%d exit=%d", x, y, exiting);
     return;
   }
 
@@ -632,6 +803,9 @@ void waylandWarpPointer(int x, int y, bool exiting)
   struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
   wl_region_add(region, x, y, 1, 1);
 
+  const uint32_t confId = proxyId(wlWm.confinedPointer);
+  uint32_t tempId = 0;
+  uint64_t warpSeq = 0;
   if (wlWm.confinedPointer)
   {
     zwp_confined_pointer_v1_set_region(wlWm.confinedPointer, region);
@@ -640,17 +814,19 @@ void waylandWarpPointer(int x, int y, bool exiting)
   }
   else
   {
-    struct zwp_confined_pointer_v1 * confine;
-    confine = zwp_pointer_constraints_v1_confine_pointer(
-          wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
-          ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    struct zwp_confined_pointer_v1 * confine = createConfine(region);
+    tempId = proxyId(confine);
     wl_surface_commit(wlWm.surface);
     zwp_confined_pointer_v1_destroy(confine);
   }
 
   wl_surface_commit(wlWm.surface);
   wl_region_destroy(region);
+  warpSeq = app_mouseSeq();
   LG_UNLOCK(wlWm.surfaceLock);
+
+  MLOG(warpSeq, "warp req=%d,%d target=%d,%d exit=%d conf=%u temp=%u",
+      reqX, reqY, x, y, exiting, confId, tempId);
 }
 
 void waylandRealignPointer(void)
@@ -661,11 +837,24 @@ void waylandRealignPointer(void)
 
 void waylandGuestPointerUpdated(double x, double y, double localX, double localY)
 {
-  if ( !wlWm.pointer          ||
-       !wlWm.warpSupport      ||
-       !wlWm.pointerInSurface ||
-        wlWm.lockedPointer    )
-    return;
+  const char * drop = NULL;
+  if (!wlWm.pointer)
+    drop = "pointer";
+  else if (!wlWm.warpSupport)
+    drop = "support";
+  else if (!wlWm.pointerInSurface)
+    drop = "surface";
+  else if (wlWm.lockedPointer)
+    drop = "lock";
 
+  if (drop)
+  {
+    MTRACE("guest drop=%s guest=%.3f,%.3f local=%.3f,%.3f",
+        drop, x, y, localX, localY);
+    return;
+  }
+
+  MTRACE("guest warp guest=%.3f,%.3f local=%.3f,%.3f",
+      x, y, localX, localY);
   waylandWarpPointer((int) localX, (int) localY, false);
 }
