@@ -341,6 +341,7 @@ static bool x11Init(const LG_DSInitParams params)
   XSetIOErrorHandler(x11IOErrorHandler);
 
   memset(&x11, 0, sizeof(x11));
+  LG_LOCK_INIT(x11.pointerLock);
   atomic_init(&x11.captureActive, false);
   atomic_init(&x11.pointerGrabbed, false);
   x11.xValuator = -1;
@@ -869,6 +870,7 @@ static void x11Free(void)
     if (x11.cursors[i])
       XFreeCursor(x11.display, x11.cursors[i]);
 
+  LG_LOCK_FREE(x11.pointerLock);
   x11.wm->deinit();
   XCloseDisplay(x11.display);
 }
@@ -1886,10 +1888,10 @@ static void x11PrintGrabError(const char * type, int dev, Status ret)
 
 }
 
-static void x11GrabPointer(void)
+static bool x11GrabPointerLocked(void)
 {
   if (atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
-    return;
+    return true;
 
   unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)] = { 0 };
   XIEventMask mask = {
@@ -1934,16 +1936,22 @@ static void x11GrabPointer(void)
   if (ret != Success)
   {
     x11PrintGrabError("pointer", x11.pointerDev, ret);
-    return;
+    return false;
   }
 
   atomic_store_explicit(&x11.pointerGrabbed, true, memory_order_release);
+  return true;
 }
 
-static void x11UngrabPointer(void)
+static void x11GrabPointer(void)
 {
-  atomic_store_explicit(&x11.captureActive, false, memory_order_release);
+  LG_LOCK(x11.pointerLock);
+  x11GrabPointerLocked();
+  LG_UNLOCK(x11.pointerLock);
+}
 
+static void x11UngrabPointerLocked(void)
+{
   if (!atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
   {
     app_handleGrabEvent(false);
@@ -1957,6 +1965,14 @@ static void x11UngrabPointer(void)
   app_handleGrabEvent(false);
 }
 
+static void x11UngrabPointer(void)
+{
+  LG_LOCK(x11.pointerLock);
+  atomic_store_explicit(&x11.captureActive, false, memory_order_release);
+  x11UngrabPointerLocked();
+  LG_UNLOCK(x11.pointerLock);
+}
+
 static bool x11IsPointerGrabbed(void)
 {
   return atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire);
@@ -1964,14 +1980,17 @@ static bool x11IsPointerGrabbed(void)
 
 static void x11CapturePointer(void)
 {
-  x11GrabPointer();
-  atomic_store_explicit(&x11.captureActive,
-      atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire),
-      memory_order_release);
+  LG_LOCK(x11.pointerLock);
+  const bool active = x11GrabPointerLocked();
+  atomic_store_explicit(&x11.captureActive, active, memory_order_release);
+  LG_UNLOCK(x11.pointerLock);
 }
 
 static void x11UncapturePointer(void)
 {
+  const bool ungrab = !app_isFormatValid() || app_isCaptureOnlyMode();
+
+  LG_LOCK(x11.pointerLock);
   atomic_store_explicit(&x11.captureActive, false, memory_order_release);
 
   /* we need to ungrab the pointer on the following conditions when exiting capture mode:
@@ -1980,8 +1999,9 @@ static void x11UncapturePointer(void)
    *     window when we release it.
    *   - if the user has opted to use captureInputOnly mode.
    */
-  if (!app_isFormatValid() || app_isCaptureOnlyMode())
-    x11UngrabPointer();
+  if (ungrab)
+    x11UngrabPointerLocked();
+  LG_UNLOCK(x11.pointerLock);
 }
 
 static bool x11IsPointerCaptured(void)

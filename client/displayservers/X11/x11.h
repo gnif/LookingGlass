@@ -31,6 +31,7 @@
 #include <GL/glx.h>
 
 #include "interface/displayserver.h"
+#include "common/locking.h"
 #include "common/thread.h"
 #include "common/types.h"
 #include "wm.h"
@@ -93,6 +94,7 @@ struct X11DSState
   int xValuator;
   int yValuator;
 
+  LG_Lock       pointerLock;
   _Atomic(bool) captureActive;
   _Atomic(bool) pointerGrabbed;
   bool          keyboardGrabbed;
