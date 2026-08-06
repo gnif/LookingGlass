@@ -65,6 +65,7 @@ class CD3D12CommandSlot
     std::atomic<State>        m_state       = STATE_FREE;
     std::atomic<bool>         m_submitted   = false;
     HandleT<HANDLENullTraits> m_event;
+    HandleT<HANDLENullTraits> m_availableEvent;
     HANDLE                    m_waitHandle  = INVALID_HANDLE_VALUE;
     bool                      m_needsReset  = false;
     UINT64                    m_fenceTarget = 0;

@@ -99,6 +99,14 @@ bool CD3D12CommandSlot::Init(ID3D12Device3 * device,
     return false;
   }
 
+  m_availableEvent.Attach(CreateEvent(NULL, FALSE, FALSE, NULL));
+  if (!m_availableEvent.Get())
+  {
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to create the availability event (%ls)", name);
+    return false;
+  }
+
   if (!RegisterWaitForSingleObject(
     &m_waitHandle,
     m_event.Get(),
@@ -130,6 +138,7 @@ void CD3D12CommandSlot::DeInit()
   }
 
   m_event.Close();
+  m_availableEvent.Close();
   m_cmdList.Reset();
   m_gfxList.Reset();
   m_allocator.Reset();
@@ -224,6 +233,7 @@ void CD3D12CommandSlot::Cancel()
   m_completionParams[1] = nullptr;
   m_submitted.store(false, std::memory_order_release);
   m_state.store(STATE_FREE, std::memory_order_release);
+  SetEvent(m_availableEvent.Get());
 }
 
 bool CD3D12CommandSlot::Execute()
@@ -250,7 +260,10 @@ bool CD3D12CommandSlot::Execute()
     return true;
 
   if (!m_submitted.load(std::memory_order_acquire))
+  {
     m_state.store(STATE_FREE, std::memory_order_release);
+    SetEvent(m_availableEvent.Get());
+  }
   return false;
 }
 
@@ -343,6 +356,7 @@ void CD3D12CommandSlot::OnCompletion(bool timeout)
   m_completionParams[1] = nullptr;
   m_submitted.store(false, std::memory_order_release);
   m_state.store(STATE_FREE, std::memory_order_release);
+  SetEvent(m_availableEvent.Get());
 }
 
 bool CD3D12CommandQueue::InitTiming(ID3D12Device3 * device, UINT slotCount)
@@ -493,13 +507,23 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
   if (slotIndex >= m_slotCount)
     return nullptr;
 
-  for (int i = 0; i < 100; ++i)
+  const ULONGLONG deadline = GetTickCount64() + 100;
+  for (;;)
   {
     if (m_slots[slotIndex].Acquire())
       return &m_slots[slotIndex];
     if (m_failed.load(std::memory_order_acquire))
       break;
-    Sleep(1);
+
+    const ULONGLONG now = GetTickCount64();
+    if (now >= deadline)
+      break;
+
+    const DWORD result =
+      WaitForSingleObject(m_slots[slotIndex].m_availableEvent.Get(),
+        static_cast<DWORD>(deadline - now));
+    if (result != WAIT_OBJECT_0)
+      break;
   }
 
   DEBUG_ERROR("Failed to acquire CommandSlot(%ls:%u)", m_name, slotIndex);
