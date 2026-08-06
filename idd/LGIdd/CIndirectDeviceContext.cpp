@@ -1745,25 +1745,27 @@ bool CIndirectDeviceContext::FrameBufferAvailable(
       return false;
 
   AcquireSRWLockShared(&m_framePublishLock);
-  bool deliveryAvailable;
-  bool ownerBlocked = false;
+  bool allowReady = false;
   // Pipeline one frame through each independent owner lane. Count the shared
   // fallback against the same limit so it cannot become a third delivery for
   // the same owner. Once both are occupied, a fully unreferenced buffer can
   // still retain a newer frame for secondary delivery and later republish.
   if (schedule.clientID)
   {
-    ownerBlocked =
+    const bool ownerBlocked =
       CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN;
-    deliveryAvailable = ownerBlocked ||
-      FindAvailableOwnerQueue(0) >= 0 ||
-      lgmpHostQueuePending(m_frameQueue) < LGMP_Q_FRAME_LEN;
+    const bool ownerQueuesBlocked = FindAvailableOwnerQueue(0) < 0;
+    allowReady = ownerBlocked || ownerQueuesBlocked;
   }
-  else
-    deliveryAvailable = lgmpHostQueuePending(m_frameQueue) == 0;
+  else if (lgmpHostQueuePending(m_frameQueue) != 0)
+  {
+    ReleaseSRWLockShared(&m_framePublishLock);
+    return false;
+  }
 
-  const bool available = deliveryAvailable &&
-    FindAvailableFrameBuffer(ownerBlocked) >= 0;
+  // With no owner delivery lane available, a copy can still replace an
+  // unreferenced retained frame and be republished when a lane clears.
+  const bool available = FindAvailableFrameBuffer(allowReady) >= 0;
   ReleaseSRWLockShared(&m_framePublishLock);
   return available;
 }
@@ -1859,8 +1861,10 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   AcquireSRWLockExclusive(&m_framePublishLock);
   const bool ownerBlocked = schedule.clientID &&
     CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN;
+  const bool allowReady = ownerBlocked ||
+    (schedule.clientID && FindAvailableOwnerQueue(0) < 0);
   const int availableFrameIndex =
-    FindAvailableFrameBuffer(ownerBlocked);
+    FindAvailableFrameBuffer(allowReady);
   bool expected = false;
   const bool acquired = availableFrameIndex >= 0 &&
     m_frameInFlight[availableFrameIndex].compare_exchange_strong(
@@ -2062,8 +2066,13 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
       const int ownerQueueIndex = FindAvailableOwnerQueue(frameIndex);
       if (ownerQueueIndex < 0)
       {
-        published = PostSharedOwnerFrame(frameIndex, schedule);
+        published        = PostSharedOwnerFrame(frameIndex, schedule);
         deliveredToOwner = published;
+        if (!published)
+        {
+          PostSharedFrame(frameIndex, schedule.clientID, now);
+          published = true;
+        }
       }
       else
       {
