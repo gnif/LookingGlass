@@ -33,6 +33,19 @@ set_tests_properties(lgmp-transport-tests PROPERTIES
   TIMEOUT 10
 )
 
+add_executable(wayland-motion-tests
+  motion_test.c
+)
+target_include_directories(wayland-motion-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/Wayland"
+)
+add_test(NAME wayland-motion-tests
+  COMMAND wayland-motion-tests
+)
+set_tests_properties(wayland-motion-tests PROPERTIES
+  TIMEOUT 10
+)
+
 find_package(GTest REQUIRED)
 find_program(WESTON_EXECUTABLE NAMES weston)
 if(NOT WESTON_EXECUTABLE)

@@ -64,11 +64,11 @@ static uint32_t proxyId(void * proxy)
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
     uint32_t time, wl_fixed_t sxW, wl_fixed_t syW)
 {
-  wlWm.cursorX = wl_fixed_to_double(sxW);
-  wlWm.cursorY = wl_fixed_to_double(syW);
-  MTRACE("abs time=%u pos=%.3f,%.3f", time, wlWm.cursorX,
-      wlWm.cursorY);
-  app_updateCursorPos(wlWm.cursorX, wlWm.cursorY);
+  wlMotionAbs(&wlWm.motion, wl_fixed_to_double(sxW),
+      wl_fixed_to_double(syW));
+  MTRACE("abs time=%u pos=%.3f,%.3f", time, wlWm.motion.x,
+      wlWm.motion.y);
+  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
 
   if (!wlWm.warpSupport && !wlWm.relativePointer)
     app_handleMouseBasic();
@@ -91,9 +91,9 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
   wl_pointer_set_cursor(pointer, serial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
   wlWm.pointerEnterSerial = serial;
 
-  wlWm.cursorX = wl_fixed_to_double(sxW);
-  wlWm.cursorY = wl_fixed_to_double(syW);
-  app_updateCursorPos(wlWm.cursorX, wlWm.cursorY);
+  wlMotionAbs(&wlWm.motion, wl_fixed_to_double(sxW),
+      wl_fixed_to_double(syW));
+  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
 
   if (wlWm.warpSupport)
   {
@@ -248,13 +248,12 @@ static void relativePointerMotionHandler(void * data,
 {
   const double dx = wl_fixed_to_double(dxW);
   const double dy = wl_fixed_to_double(dyW);
-  wlWm.cursorX += dx;
-  wlWm.cursorY += dy;
+  wlMotionRel(&wlWm.motion, dx, dy);
   MTRACE("rel time=%u:%u delta=%.3f,%.3f raw=%.3f,%.3f "
       "pos=%.3f,%.3f", timeHi, timeLo, dx, dy,
       wl_fixed_to_double(dxUnaccelW), wl_fixed_to_double(dyUnaccelW),
-      wlWm.cursorX, wlWm.cursorY);
-  app_updateCursorPos(wlWm.cursorX, wlWm.cursorY);
+      wlWm.motion.x, wlWm.motion.y);
+  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
 
   app_handleMouseRelative(
       dx,

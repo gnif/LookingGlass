@@ -55,6 +55,7 @@
 #include "wayland-xdg-toplevel-icon-v1-client-protocol.h"
 
 #include "scale.h"
+#include "motion.h"
 
 typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
 
@@ -142,7 +143,7 @@ struct WaylandDSState
   bool needsResize;
   bool configured;
   bool warpSupport;
-  double cursorX, cursorY;
+  struct WlMotion motion;
   double scrollState;
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
