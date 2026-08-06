@@ -122,6 +122,7 @@ typedef enum LG_UserStatus
 LGUserStatus;
 
 void overlaySplash_show(bool show);
+bool overlaySplash_isFading(void);
 void overlayStatus_set(LGUserStatus, bool value);
 
 #endif

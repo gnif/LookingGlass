@@ -916,7 +916,9 @@ int main_cursorThread(void * unused)
               (g_cursor.draw || !g_params.useSpiceInput),
             g_cursor.guest.x, g_cursor.guest.y,
             g_cursor.guest.hx, g_cursor.guest.hy);
-          if (!g_state.stopVideo)
+          /* The active fade already schedules a render. Coalesce pointer
+           * changes into it instead of exposing rapid single-buffer redraws. */
+          if (!g_state.stopVideo && !overlaySplash_isFading())
             lgSignalEvent(g_state.frameEvent);
         }
         continue;
@@ -990,7 +992,8 @@ int main_cursorThread(void * unused)
 
     if ((g_params.mouseRedraw ||
          (pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) &&
-        g_cursor.guest.visible && !g_state.stopVideo)
+        g_cursor.guest.visible && !g_state.stopVideo &&
+        !overlaySplash_isFading())
       lgSignalEvent(g_state.frameEvent);
 
     g_state.transportOps->releasePointer(g_state.transport, &pointer);

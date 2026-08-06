@@ -49,6 +49,7 @@ enum SplashState
 };
 
 static _Atomic(bool)    l_requestedShow;
+static _Atomic(bool)    l_fading;
 static bool             l_appliedShow;
 static enum SplashState l_state;
 static uint64_t         l_fadeStart;
@@ -99,6 +100,7 @@ static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
 static bool splash_init(void ** udata, const void * params)
 {
   atomic_store_explicit(&l_requestedShow, true, memory_order_relaxed);
+  atomic_store_explicit(&l_fading, false, memory_order_relaxed);
   l_appliedShow = true;
   l_state       = SPLASH_VISIBLE;
   l_fadeStart   = 0;
@@ -176,6 +178,7 @@ static int splash_render(void * udata, bool interactive, struct Rect * windowRec
     if (elapsed >= FADE_TIME_NS)
     {
       l_state = SPLASH_HIDDEN;
+      atomic_store_explicit(&l_fading, false, memory_order_release);
       return 0;
     }
     alpha -= (float)elapsed / (float)FADE_TIME_NS;
@@ -267,13 +270,18 @@ static bool splash_needsFullRender(void * udata)
     {
       l_state     = SPLASH_VISIBLE;
       l_fadeStart = 0;
+      atomic_store_explicit(&l_fading, false, memory_order_release);
     }
     else if (g_params.quickSplash)
+    {
       l_state = SPLASH_HIDDEN;
+      atomic_store_explicit(&l_fading, false, memory_order_release);
+    }
     else
     {
       l_state     = SPLASH_FADING;
       l_fadeStart = nanotime();
+      atomic_store_explicit(&l_fading, true, memory_order_release);
     }
   }
 
@@ -297,4 +305,9 @@ void overlaySplash_show(bool show)
     return;
 
   app_invalidateWindow(true);
+}
+
+bool overlaySplash_isFading(void)
+{
+  return atomic_load_explicit(&l_fading, memory_order_acquire);
 }
