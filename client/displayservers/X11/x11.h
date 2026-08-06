@@ -78,6 +78,7 @@ struct X11DSState
   _Atomic(uint64_t) presentMsc, presentUst;
   _Atomic(uint64_t) presentPeriod;
   _Atomic(uint64_t) nominalPeriod;
+  _Atomic(bool)     presentDiscontinuity;
   uint32_t          presentSerial;
   Pixmap            presentPixmap;
   XserverRegion     presentRegion;

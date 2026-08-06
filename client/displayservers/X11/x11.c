@@ -163,7 +163,7 @@ static void x11UpdateFramePeriod(void)
   atomic_store(&x11.nominalPeriod, fastest);
 }
 
-static void x11DoPresent(uint64_t msc)
+static bool x11DoPresent(uint64_t msc)
 {
   static bool startup = true;
   if (startup)
@@ -188,23 +188,27 @@ static void x11DoPresent(uint64_t msc)
       0                  // nnotifies
     );
     startup = false;
-    return;
+    return false;
   }
 
-  static bool first   = true;
+  static bool     first   = true;
   static uint64_t lastMsc = 0;
 
+  bool     discontinuity = false;
   uint64_t refill;
   if (!first)
   {
-    const uint64_t delta = (lastMsc >= msc) ?
-      lastMsc - msc :
-      ~0ULL - msc + lastMsc;
-
-    if (delta > 50)
-      return;
-
-    refill = 50 - delta;
+    const int64_t queued = (int64_t)(lastMsc - msc);
+    if (queued < 0 || queued > 50)
+    {
+      // The compositor advanced beyond the synthetic queue or reset its MSC.
+      // Reseed from the observed value or cadence callbacks stop permanently.
+      lastMsc       = msc;
+      refill        = 50;
+      discontinuity = true;
+    }
+    else
+      refill = 50 - (uint64_t)queued;
   }
   else
   {
@@ -214,9 +218,9 @@ static void x11DoPresent(uint64_t msc)
   }
 
   if (refill < 25)
-    return;
+    return discontinuity;
 
-  for(int i = 0; i < refill; ++i)
+  for (uint64_t i = 0; i < refill; ++i)
   {
     XPresentPixmap(
       x11.display,
@@ -238,6 +242,8 @@ static void x11DoPresent(uint64_t msc)
       0                  // nnotifies
     );
   }
+
+  return discontinuity;
 }
 
 static void x11Setup(void)
@@ -1599,7 +1605,9 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
         if (period)
           atomic_store(&x11.presentPeriod, period);
       }
-      x11DoPresent(e->msc);
+      if (x11DoPresent(e->msc))
+        atomic_store_explicit(
+            &x11.presentDiscontinuity, true, memory_order_release);
       atomic_store(&x11.presentMsc, e->msc);
       atomic_store(&x11.presentUst, e->ust);
       x11SignalFrame(LG_DS_WAIT_FRAME_CADENCE);
@@ -1715,11 +1723,13 @@ static LG_DSWaitFrameResult x11WaitFrame(void)
 #define CALIBRATION_COUNT 400
   const uint64_t ust = atomic_load(&x11.presentUst);
   const uint64_t msc = atomic_load(&x11.presentMsc);
+  const bool discontinuity = atomic_exchange_explicit(
+      &x11.presentDiscontinuity, false, memory_order_acquire);
 
-  static bool warmup = true;
+  static bool     warmup = true;
+  static uint64_t expire = 0;
   if (warmup)
   {
-    static uint64_t expire = 0;
     if (!expire)
     {
       DEBUG_INFO("Warming up...");
@@ -1739,6 +1749,20 @@ static LG_DSWaitFrameResult x11WaitFrame(void)
   static uint64_t lastts    = 0;
   static uint64_t lastmsc   = 0;
   static uint64_t delay     = 0;
+  static int      skipCount    = 0;
+  static uint64_t lastSkipTime = 0;
+
+  if (discontinuity)
+  {
+    // Do not turn a compositor recovery jump into a render-skip sample.
+    lastts       = ust;
+    lastmsc      = msc;
+    skipCount    = 0;
+    lastSkipTime = 0;
+    if (calibrate < CALIBRATION_COUNT)
+      result |= LG_DS_WAIT_FRAME_FORCE_RENDER;
+    return result;
+  }
 
   uint64_t deltamsc = 0;
   if (lastts)
@@ -1807,9 +1831,6 @@ static LG_DSWaitFrameResult x11WaitFrame(void)
   /* adjustments if we are still seeing odd skips */
   const uint64_t lastWMEvent = atomic_load(&x11.lastWMEvent);
   const uint64_t eventDelta = ust > lastWMEvent ? ust - lastWMEvent : 0;
-
-  static int      skipCount = 0;
-  static uint64_t lastSkipTime = 0;
 
   if (skipCount > 0 && ust - lastSkipTime > 1000000UL)
     skipCount = 0;
