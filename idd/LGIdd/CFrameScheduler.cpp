@@ -31,6 +31,12 @@ static const uint64_t MIN_SAFETY_NS          = 250000ULL;
 static const uint64_t LOG_INTERVAL_NS        = 5000000000ULL;
 static const uint64_t CADENCE_BREAK          = 4;
 
+static uint64_t PublicationLead(uint64_t targetSlack, uint64_t workEstimate)
+{
+  const uint64_t safety = max(MIN_SAFETY_NS, workEstimate / 8);
+  return targetSlack + workEstimate + safety;
+}
+
 CFrameScheduler::CFrameScheduler()
 {
   m_wakeEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -420,11 +426,14 @@ bool CFrameScheduler::ApplyFeedback(Client& client,
 
 void CFrameScheduler::AdvanceDeadline(uint64_t now)
 {
-  if (m_nextDeadline > now)
+  const uint64_t lead =
+    PublicationLead(m_schedule.targetSlack, m_workEstimate);
+  const uint64_t target = now + lead;
+  if (m_nextDeadline > target)
     return;
 
   const uint64_t periods =
-    (now - m_nextDeadline) / m_schedule.period + 1;
+    (target - m_nextDeadline) / m_schedule.period + 1;
   m_nextDeadline += periods * m_schedule.period;
 }
 
@@ -511,10 +520,8 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
   schedule.republishTicket = m_republishRequestTicket;
   republish = schedule.republishTicket != m_republishAckTicket;
 
-  const uint64_t safety =
-    max(MIN_SAFETY_NS, m_workEstimate / 8);
   const uint64_t lead =
-    m_schedule.targetSlack + m_workEstimate + safety;
+    PublicationLead(m_schedule.targetSlack, m_workEstimate);
   const uint64_t periodicTarget = m_nextDeadline > lead ?
     m_nextDeadline - lead : now;
 
