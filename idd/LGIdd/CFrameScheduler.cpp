@@ -979,29 +979,34 @@ void CFrameScheduler::LogStatistics(uint64_t now)
     return;
   }
 
-  const uint64_t elapsed   = now               - m_lastLog;
-  const uint64_t acquired  = m_acquiredFrames  - m_lastLogAcquired;
-  const uint64_t skipped   = m_skippedFrames   - m_lastLogSkipped;
-  const uint64_t published = m_publishedFrames - m_lastLogPublished;
-  const double   acquiredRate =
-    static_cast<double>(acquired) * 1000000000.0 / elapsed;
-  DEBUG_TRACE("Frame schedule owner %u: %.3f Hz client, %.3f Hz acquired, "
-    "%.3f ms work, %.3f ms phase; %llu acquired, %llu skipped, "
-    "%llu published",
-    m_schedule.clientID,
-    1000000000.0 / m_schedule.period,
-    acquiredRate,
-    m_workEstimate / 1000000.0,
-    m_lastPhaseError / 1000000.0,
-    static_cast<unsigned long long>(acquired),
-    static_cast<unsigned long long>(skipped),
-    static_cast<unsigned long long>(published));
+  const uint32_t clientID     = m_schedule.clientID;
+  const uint64_t period       = m_schedule.period;
+  const uint64_t workEstimate = m_workEstimate;
+  const int64_t  phaseError   = m_lastPhaseError;
+  const uint64_t elapsed      = now - m_lastLog;
+  const uint64_t acquired     = m_acquiredFrames - m_lastLogAcquired;
+  const uint64_t skipped      = m_skippedFrames - m_lastLogSkipped;
+  const uint64_t published    = m_publishedFrames - m_lastLogPublished;
 
   m_lastLog          = now;
   m_lastLogAcquired  = m_acquiredFrames;
   m_lastLogSkipped   = m_skippedFrames;
   m_lastLogPublished = m_publishedFrames;
   ReleaseSRWLockExclusive(&m_lock);
+
+  const double acquiredRate =
+    static_cast<double>(acquired) * 1000000000.0 / elapsed;
+  DEBUG_TRACE("Frame schedule owner %u: %.3f Hz client, %.3f Hz acquired, "
+    "%.3f ms work, %.3f ms phase; %llu acquired, %llu skipped, "
+    "%llu published",
+    clientID,
+    1000000000.0 / period,
+    acquiredRate,
+    workEstimate / 1000000.0,
+    phaseError / 1000000.0,
+    static_cast<unsigned long long>(acquired),
+    static_cast<unsigned long long>(skipped),
+    static_cast<unsigned long long>(published));
 }
 
 void CFrameScheduler::TryRecordFrameTiming(uint64_t duration)

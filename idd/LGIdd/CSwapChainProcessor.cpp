@@ -280,6 +280,10 @@ void CSwapChainProcessor::PublisherThread()
 {
   DWORD  avTask       = 0;
   HANDLE avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
+  if (avTaskHandle &&
+      !AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH))
+    DEBUG_WARN("Failed to raise publisher MMCSS priority: %lu",
+      GetLastError());
 
   const HANDLE scheduleEvent = m_devContext->GetFrameScheduleEvent();
   HANDLE idleHandles[] =
@@ -490,7 +494,8 @@ void CSwapChainProcessor::PublisherThread()
     }
   }
 
-  AvRevertMmThreadCharacteristics(avTaskHandle);
+  if (avTaskHandle)
+    AvRevertMmThreadCharacteristics(avTaskHandle);
 }
 
 void CSwapChainProcessor::SwapChainThread()
