@@ -135,6 +135,12 @@ static void ungrab(void)
 
 static void capture(void)
 {
+  if (m.support == LG_DS_WARP_NONE)
+  {
+    grab();
+    return;
+  }
+
   m.conf.req = false;
   if (!m.conf.hold)
     m.conf.on = false;
@@ -144,10 +150,21 @@ static void capture(void)
 
 static void uncapture(void)
 {
+  if (m.support == LG_DS_WARP_NONE)
+  {
+    ungrab();
+    return;
+  }
+
   push(EV_UNCAPTURE, 0, 0, false);
   m.lock.req = false;
   if (!m.lock.hold)
     m.lock.on = false;
+}
+
+static bool captured(void)
+{
+  return m.support == LG_DS_WARP_NONE ? m.conf.on : m.lock.on;
 }
 
 static void warp(int x, int y, bool exiting)
@@ -171,6 +188,7 @@ static struct LG_DisplayServerOps ds = {
   .ungrabPointer       = ungrab,
   .capturePointer      = capture,
   .uncapturePointer    = uncapture,
+  .isPointerCaptured   = captured,
   .warpPointer         = warp,
   .isValidPointerPos   = valid,
 };
@@ -407,6 +425,23 @@ static void testCapRelease(void)
   CHECK(count(EV_MOTION) == 1);
 }
 
+static void testCapFallback(void)
+{
+  reset();
+  setLocal(50, 50);
+  m.support = LG_DS_WARP_NONE;
+  g_params.captureInputOnly = true;
+  core_setGrabQuiet(true);
+
+  m.conf.on = true;
+  core_handleMouseGrabbed(1, 0);
+  CHECK(count(EV_MOTION) == 1);
+
+  m.conf.on = false;
+  core_handleMouseGrabbed(1, 0);
+  CHECK(count(EV_MOTION) == 1);
+}
+
 static void testRotateScale(void)
 {
   reset();
@@ -634,19 +669,20 @@ struct Test
 };
 
 static const struct Test tests[] = {
-  { "inset-exit"     , testInsetExit    },
-  { "exit-delay"     , testExitWait     },
-  { "exit-guest"     , testExitGuest    },
-  { "confine-pending", testConfWait     },
-  { "confine-guest"  , testConfGuest    },
-  { "capture-pending", testCapWait      },
-  { "capture-revoked", testCapRevoke    },
-  { "capture-release", testCapRelease   },
-  { "rotate-scale"   , testRotateScale  },
-  { "geometry"       , testGeometry     },
-  { "edges"          , testEdges        },
-  { "scales"         , testScales       },
-  { "border-exit"    , testBorderExit   },
+  { "inset-exit"      , testInsetExit    },
+  { "exit-delay"      , testExitWait     },
+  { "exit-guest"      , testExitGuest    },
+  { "confine-pending" , testConfWait     },
+  { "confine-guest"   , testConfGuest    },
+  { "capture-pending" , testCapWait      },
+  { "capture-revoked" , testCapRevoke    },
+  { "capture-release" , testCapRelease   },
+  { "capture-fallback", testCapFallback  },
+  { "rotate-scale"    , testRotateScale  },
+  { "geometry"        , testGeometry     },
+  { "edges"           , testEdges        },
+  { "scales"          , testScales       },
+  { "border-exit"     , testBorderExit   },
 };
 
 int main(int argc, char ** argv)

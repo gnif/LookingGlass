@@ -210,6 +210,7 @@ struct LG_DisplayServerOps
   /* (un)capturePointer is used do toggle special cursor tracking in capture mode */
   void (*capturePointer)(void);
   void (*uncapturePointer)(void);
+  bool (*isPointerCaptured)(void);
 
   /* get the active keymap's display label for the provided Linux keycode */
   bool (*getKeyLabel)(int sc, char * label, size_t size);
@@ -291,6 +292,7 @@ struct LG_DisplayServerOps
   DEBUG_ASSERT((x)->ungrabPointer      ); \
   DEBUG_ASSERT((x)->capturePointer     ); \
   DEBUG_ASSERT((x)->uncapturePointer   ); \
+  DEBUG_ASSERT((x)->isPointerCaptured ); \
   DEBUG_ASSERT((x)->getKeyLabel        ); \
   DEBUG_ASSERT((x)->warpPointer        ); \
   DEBUG_ASSERT((x)->realignPointer     ); \

@@ -530,9 +530,10 @@ void core_handleGuestMouseUpdate(void)
 
 void core_handleMouseGrabbed(double ex, double ey)
 {
-  const bool enabled = core_inputEnabled();
-  MTRACE("captured delta=%.3f,%.3f enabled=%d", ex, ey,
-      enabled);
+  const bool active  = g_cursor.grab && g_state.ds->isPointerCaptured();
+  const bool enabled = active && core_inputEnabled();
+  MTRACE("captured delta=%.3f,%.3f active=%d enabled=%d", ex, ey,
+      active, enabled);
 
   if (!enabled)
     return;

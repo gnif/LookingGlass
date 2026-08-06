@@ -123,10 +123,11 @@ struct WaylandHDRParameters
 
 struct WaylandDSState
 {
-  bool pointerGrabbed;
-  bool keyboardGrabbed;
-  bool pointerInSurface;
-  bool focusedOnSurface;
+  _Atomic(bool) confActive;
+  _Atomic(bool) lockActive;
+  bool          keyboardGrabbed;
+  bool          pointerInSurface;
+  bool          focusedOnSurface;
 
   WL_DesktopOps * desktop;
 
@@ -378,6 +379,7 @@ void waylandUngrabKeyboard(void);
 void waylandUngrabPointer(void);
 void waylandCapturePointer(void);
 void waylandUncapturePointer(void);
+bool waylandIsPointerCaptured(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
 void waylandGuestPointerUpdated(double x, double y, double localX, double localY);

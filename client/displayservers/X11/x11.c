@@ -1940,6 +1940,8 @@ static void x11GrabPointer(void)
 
 static void x11UngrabPointer(void)
 {
+  atomic_store_explicit(&x11.captureActive, false, memory_order_release);
+
   if (!x11.pointerGrabbed)
     return;
 
@@ -1952,10 +1954,14 @@ static void x11UngrabPointer(void)
 static void x11CapturePointer(void)
 {
   x11GrabPointer();
+  atomic_store_explicit(&x11.captureActive, x11.pointerGrabbed,
+      memory_order_release);
 }
 
 static void x11UncapturePointer(void)
 {
+  atomic_store_explicit(&x11.captureActive, false, memory_order_release);
+
   /* we need to ungrab the pointer on the following conditions when exiting capture mode:
    *   - if the format is invalid as we do not know where the guest cursor is,
    *     which breaks edge detection as the cursor can not be warped out of the
@@ -1964,6 +1970,11 @@ static void x11UncapturePointer(void)
    */
   if (!app_isFormatValid() || app_isCaptureOnlyMode())
     x11UngrabPointer();
+}
+
+static bool x11IsPointerCaptured(void)
+{
+  return atomic_load_explicit(&x11.captureActive, memory_order_acquire);
 }
 
 static void x11GrabKeyboard(void)
@@ -2143,6 +2154,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .ungrabPointer       = x11UngrabPointer,
   .capturePointer      = x11CapturePointer,
   .uncapturePointer    = x11UncapturePointer,
+  .isPointerCaptured   = x11IsPointerCaptured,
   .getKeyLabel         = x11GetKeyLabel,
   .grabKeyboard        = x11GrabKeyboard,
   .ungrabKeyboard      = x11UngrabKeyboard,

@@ -73,6 +73,7 @@ set(MOUSE_CASES
   capture-pending
   capture-revoked
   capture-release
+  capture-fallback
   rotate-scale
   geometry
   edges

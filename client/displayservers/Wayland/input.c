@@ -189,13 +189,25 @@ static const struct wl_pointer_listener pointerListener = {
 static void confinedHandler(void * data,
     struct zwp_confined_pointer_v1 * pointer)
 {
-  MTRACE("conf active=1 id=%u", proxyId(pointer));
+  bool valid;
+  LG_LOCK(wlWm.surfaceLock);
+  valid = pointer == wlWm.confinedPointer;
+  if (valid)
+    atomic_store_explicit(&wlWm.confActive, true, memory_order_release);
+  LG_UNLOCK(wlWm.surfaceLock);
+  MTRACE("conf active=1 id=%u valid=%d", proxyId(pointer), valid);
 }
 
 static void unconfinedHandler(void * data,
     struct zwp_confined_pointer_v1 * pointer)
 {
-  MTRACE("conf active=0 id=%u", proxyId(pointer));
+  bool valid;
+  LG_LOCK(wlWm.surfaceLock);
+  valid = pointer == wlWm.confinedPointer;
+  if (valid)
+    atomic_store_explicit(&wlWm.confActive, false, memory_order_release);
+  LG_UNLOCK(wlWm.surfaceLock);
+  MTRACE("conf active=0 id=%u valid=%d", proxyId(pointer), valid);
 }
 
 static const struct zwp_confined_pointer_v1_listener confinedListener = {
@@ -206,13 +218,25 @@ static const struct zwp_confined_pointer_v1_listener confinedListener = {
 static void lockedHandler(void * data,
     struct zwp_locked_pointer_v1 * pointer)
 {
-  MTRACE("lock active=1 id=%u", proxyId(pointer));
+  bool valid;
+  LG_LOCK(wlWm.surfaceLock);
+  valid = pointer == wlWm.lockedPointer;
+  if (valid)
+    atomic_store_explicit(&wlWm.lockActive, true, memory_order_release);
+  LG_UNLOCK(wlWm.surfaceLock);
+  MTRACE("lock active=1 id=%u valid=%d", proxyId(pointer), valid);
 }
 
 static void unlockedHandler(void * data,
     struct zwp_locked_pointer_v1 * pointer)
 {
-  MTRACE("lock active=0 id=%u", proxyId(pointer));
+  bool valid;
+  LG_LOCK(wlWm.surfaceLock);
+  valid = pointer == wlWm.lockedPointer;
+  if (valid)
+    atomic_store_explicit(&wlWm.lockActive, false, memory_order_release);
+  LG_UNLOCK(wlWm.surfaceLock);
+  MTRACE("lock active=0 id=%u valid=%d", proxyId(pointer), valid);
 }
 
 static const struct zwp_locked_pointer_v1_listener lockedListener = {
@@ -421,6 +445,9 @@ static void waylandCleanUpPointer(void)
   uint64_t confSeq = 0;
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
+    atomic_store_explicit(&wlWm.lockActive, false, memory_order_release);
+    atomic_store_explicit(&wlWm.confActive, false, memory_order_release);
+
     if (wlWm.lockedPointer)
     {
       lockId = proxyId(wlWm.lockedPointer);
@@ -472,6 +499,9 @@ static void handlePointerCapability(uint32_t capabilities)
       zwp_relative_pointer_v1_add_listener(wlWm.relativePointer,
         &relativePointerListener, NULL);
     }
+
+    if (app_isCaptureMode())
+      waylandCapturePointer();
   }
 }
 
@@ -616,6 +646,8 @@ void waylandGrabPointer(void)
   {
     if (!wlWm.confinedPointer && !wlWm.lockedPointer)
     {
+      atomic_store_explicit(&wlWm.confActive, false,
+          memory_order_release);
       wlWm.confinedPointer = createConfine(NULL);
       confId = proxyId(wlWm.confinedPointer);
       confSeq = app_mouseSeq();
@@ -645,6 +677,7 @@ inline static uint32_t internalUngrabPointer(bool lock, uint64_t * traceSeq)
     confId = proxyId(wlWm.confinedPointer);
     zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
     wlWm.confinedPointer = NULL;
+    atomic_store_explicit(&wlWm.confActive, false, memory_order_release);
     *traceSeq = app_mouseSeq();
   }
 
@@ -696,9 +729,12 @@ void waylandCapturePointer(void)
       confId = proxyId(wlWm.confinedPointer);
       zwp_confined_pointer_v1_destroy(wlWm.confinedPointer);
       wlWm.confinedPointer = NULL;
+      atomic_store_explicit(&wlWm.confActive, false,
+          memory_order_release);
       confSeq = app_mouseSeq();
     }
 
+    atomic_store_explicit(&wlWm.lockActive, false, memory_order_release);
     wlWm.lockedPointer = createLock();
     lockId = proxyId(wlWm.lockedPointer);
     lockSeq = app_mouseSeq();
@@ -723,6 +759,8 @@ void waylandUncapturePointer(void)
       lockId = proxyId(wlWm.lockedPointer);
       zwp_locked_pointer_v1_destroy(wlWm.lockedPointer);
       wlWm.lockedPointer = NULL;
+      atomic_store_explicit(&wlWm.lockActive, false,
+          memory_order_release);
       lockSeq = app_mouseSeq();
     }
 
@@ -737,6 +775,8 @@ void waylandUncapturePointer(void)
       confDropId = internalUngrabPointer(false, &confDropSeq);
     else if (wlWm.pointer)
     {
+      atomic_store_explicit(&wlWm.confActive, false,
+          memory_order_release);
       wlWm.confinedPointer = createConfine(NULL);
       confReqId = proxyId(wlWm.confinedPointer);
       confReqSeq = app_mouseSeq();
@@ -746,6 +786,13 @@ void waylandUncapturePointer(void)
   MLOG(lockSeq, "lock destroy id=%u why=uncapture", lockId);
   MLOG(confDropSeq, "conf destroy id=%u why=uncapture", confDropId);
   MLOG(confReqSeq, "conf req id=%u why=uncapture", confReqId);
+}
+
+bool waylandIsPointerCaptured(void)
+{
+  const atomic_bool * active = wlWm.warpSupport ?
+    &wlWm.lockActive : &wlWm.confActive;
+  return atomic_load_explicit(active, memory_order_acquire);
 }
 
 void waylandGrabKeyboard(void)

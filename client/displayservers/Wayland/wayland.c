@@ -112,6 +112,8 @@ static bool waylandInit(const LG_DSInitParams params)
   LG_LOCK_INIT(wlWm.pendingHDRLock);
   LG_LOCK_INIT(wlWm.hdrLock);
   wlWm.desktop        = WL_Desktops[0];
+  atomic_init(&wlWm.confActive, false);
+  atomic_init(&wlWm.lockActive, false);
   atomic_init(&wlWm.cmFeaturesDone, false);
   atomic_init(&wlWm.cmCanDoHDR, false);
   atomic_init(&wlWm.hdrPQWhiteLevel, 203);
@@ -321,6 +323,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .ungrabPointer       = waylandUngrabPointer,
   .capturePointer      = waylandCapturePointer,
   .uncapturePointer    = waylandUncapturePointer,
+  .isPointerCaptured   = waylandIsPointerCaptured,
   .grabKeyboard        = waylandGrabKeyboard,
   .ungrabKeyboard      = waylandUngrabKeyboard,
   .getKeyLabel         = waylandGetKeyLabel,

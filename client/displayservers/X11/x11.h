@@ -93,8 +93,9 @@ struct X11DSState
   int xValuator;
   int yValuator;
 
-  bool pointerGrabbed;
-  bool keyboardGrabbed;
+  _Atomic(bool) captureActive;
+  bool          pointerGrabbed;
+  bool          keyboardGrabbed;
   bool entered;
   bool focused;
   bool fullscreen;
