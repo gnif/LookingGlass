@@ -157,6 +157,7 @@ public:
     uint64_t& target) const;
   void FrameDelivered(const uint32_t * clientIDs, unsigned count,
     uint32_t frameSerial, uint64_t now);
+  void RequestRepublish();
   void NotifyPublisher() const { WakePublisher(); }
   void TryRecordFrameTiming(uint64_t duration);
   void LogStatistics(uint64_t now);

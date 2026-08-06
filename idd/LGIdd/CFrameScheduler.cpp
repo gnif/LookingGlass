@@ -779,6 +779,21 @@ void CFrameScheduler::FrameRepublished(const Schedule& schedule,
   ReleaseSRWLockExclusive(&m_lock);
 }
 
+void CFrameScheduler::RequestRepublish()
+{
+  bool wake = false;
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_scheduling)
+  {
+    ++m_republishRequestTicket;
+    wake = true;
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+
+  if (wake)
+    WakePublisher();
+}
+
 unsigned CFrameScheduler::GetSecondaryRecipients(
   const uint32_t * clientIDs, unsigned count, uint32_t frameSerial,
   uint64_t now, uint32_t * recipients) const

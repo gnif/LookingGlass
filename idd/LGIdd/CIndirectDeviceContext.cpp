@@ -1410,6 +1410,15 @@ void CIndirectDeviceContext::LGMPTimer()
   if (lgmpHostQueueNewSubs(m_frameQueue))
     m_frameScheduler.NotifyPublisher();
 
+  bool ownerSubscribed = false;
+  for (unsigned queueIndex = 0;
+       queueIndex < LGMP_Q_FRAME_LEN;
+       ++queueIndex)
+    ownerSubscribed |=
+      lgmpHostQueueNewSubs(m_frameOwnerQueue[queueIndex]) != 0;
+  if (ownerSubscribed)
+    m_frameScheduler.RequestRepublish();
+
   ProcessFrameDeliveries();
 
   if (lgmpHostQueueNewSubs(m_pointerQueue))
