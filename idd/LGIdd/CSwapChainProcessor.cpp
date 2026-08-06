@@ -55,6 +55,61 @@ public:
   }
 };
 
+class CSRWSharedLock
+{
+private:
+  SRWLOCK * m_lock;
+
+public:
+  explicit CSRWSharedLock(SRWLOCK * lock) : m_lock(lock)
+  {
+    AcquireSRWLockShared(m_lock);
+  }
+
+  ~CSRWSharedLock()
+  {
+    ReleaseSRWLockShared(m_lock);
+  }
+};
+
+class CPublishPending
+{
+private:
+  SRWLOCK * m_lock;
+  bool    * m_pending;
+  HANDLE    m_event;
+  bool      m_active = true;
+
+public:
+  CPublishPending(SRWLOCK * lock, bool * pending, HANDLE event) :
+    m_lock(lock),
+    m_pending(pending),
+    m_event(event)
+  {
+    AcquireSRWLockExclusive(m_lock);
+    *m_pending = true;
+    ResetEvent(m_event);
+    ReleaseSRWLockExclusive(m_lock);
+  }
+
+  ~CPublishPending()
+  {
+    Clear();
+  }
+
+  void Clear()
+  {
+    if (!m_active)
+      return;
+
+    AcquireSRWLockExclusive(m_lock);
+    *m_pending = false;
+    SetEvent(m_event);
+    ReleaseSRWLockExclusive(m_lock);
+    m_active = false;
+  }
+};
+
 static bool FrameMetadataChanged(const D12FrameFormat& previous,
   const D12FrameFormat& current)
 {
@@ -92,6 +147,7 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
   m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_candidateAvailableEvent.Attach(
     CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_copySubmitEvent.Attach(CreateEvent(nullptr, TRUE, TRUE, nullptr));
   m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
   if (!m_publishTimer.Get())
@@ -104,8 +160,8 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 bool CSwapChainProcessor::Start()
 {
   if (!m_terminateEvent.Get() || !m_candidateEvent.Get() ||
-      !m_candidateAvailableEvent.Get() || !m_publishTimer.Get() ||
-      !m_cursorDataEvent.Get() || !m_shapeBuffer)
+      !m_candidateAvailableEvent.Get() || !m_copySubmitEvent.Get() ||
+      !m_publishTimer.Get() || !m_cursorDataEvent.Get() || !m_shapeBuffer)
   {
     DEBUG_ERROR("Failed to initialize swap chain worker resources");
     return false;
@@ -1203,13 +1259,49 @@ void CSwapChainProcessor::SignalCandidateState()
   SetEvent(m_candidateAvailableEvent.Get());
 }
 
+bool CSwapChainProcessor::ExecuteCandidateCopy(
+  CD3D12CommandSlot * copySlot)
+{
+  HANDLE waitHandles[] =
+  {
+    m_terminateEvent.Get(),
+    m_copySubmitEvent.Get(),
+  };
+
+  for (;;)
+  {
+    AcquireSRWLockExclusive(&m_copySubmitLock);
+    if (!m_publishPending)
+    {
+      const bool result = copySlot->Execute();
+      ReleaseSRWLockExclusive(&m_copySubmitLock);
+      return result;
+    }
+    ReleaseSRWLockExclusive(&m_copySubmitLock);
+
+    const DWORD result = WaitForMultipleObjects(
+      ARRAYSIZE(waitHandles), waitHandles, FALSE, INFINITE);
+    if (result == WAIT_OBJECT_0 + 1)
+      continue;
+
+    copySlot->Cancel();
+    if (result != WAIT_OBJECT_0)
+      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
+        "Failed while waiting to submit a frame candidate");
+    return false;
+  }
+}
+
 bool CSwapChainProcessor::PublishNewestCandidate(
   const CFrameScheduler::Schedule& schedule, bool periodic,
   uint64_t publishStart)
 {
-  // Once a deadline is due, submit transport work before allowing another
-  // preparation to enqueue on the same physical copy queue.
-  CSRWExclusiveLock pipelineLock(&m_pipelineLock);
+  // Once a deadline is due, prevent newly recorded preparation work from
+  // being submitted ahead of the transport copy. The short submission gate
+  // allows a preparation which is already submitting to finish first.
+  CPublishPending publishPending(
+    &m_copySubmitLock, &m_publishPending, m_copySubmitEvent.Get());
+  CSRWSharedLock pipelineLock(&m_pipelineLock);
 
   int      selectedCandidate = -1;
   uint64_t newestSequence    = 0;
@@ -1394,7 +1486,9 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   }
   ReleaseSRWLockExclusive(&m_damageLock);
 
-  if (!copySlot->Execute())
+  const bool submitted = copySlot->Execute();
+  publishPending.Clear();
+  if (!submitted)
   {
     // The logical damage state was advanced before submission. Force a full
     // repair whether submission failed or its callback reported the failure.
@@ -1778,7 +1872,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   FrameCandidate& candidate = m_candidates[candidateIndex];
 
-  CSRWExclusiveLock pipelineLock(&m_pipelineLock);
+  CSRWSharedLock pipelineLock(&m_pipelineLock);
   CPostProcessor& postProcessor = m_postProcessors[candidateIndex];
   const D12FrameFormat& dstFormat = postProcessor.GetOutputFormat();
 
@@ -1935,7 +2029,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     copySrcResource.Get());
   copySlot->EndTiming();
 
-  if (!copySlot->Execute())
+  if (!ExecuteCandidateCopy(copySlot))
   {
     if (!copySlot->HasSubmittedWork())
     {

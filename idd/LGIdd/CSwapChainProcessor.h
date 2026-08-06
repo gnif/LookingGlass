@@ -99,15 +99,21 @@ private:
   // An active tail records only damage received after its candidate snapshot.
   FrameCandidate      m_candidates[LGMP_Q_FRAME_LEN];
   CandidateDamageTail m_candidateDamageTail[LGMP_Q_FRAME_LEN];
-  SRWLOCK             m_candidateLock     = SRWLOCK_INIT;
-  SRWLOCK             m_damageLock        = SRWLOCK_INIT;
-  SRWLOCK             m_pipelineLock      = SRWLOCK_INIT;
-  uint64_t            m_candidateSequence = 0;
+  SRWLOCK             m_candidateLock       = SRWLOCK_INIT;
+  SRWLOCK             m_damageLock          = SRWLOCK_INIT;
+  // Reconfiguration is exclusive while per-candidate recording is shared.
+  SRWLOCK             m_pipelineLock        = SRWLOCK_INIT;
+  // Capture holds this only across submission; the publisher uses it to
+  // close the gate before recording deadline work.
+  SRWLOCK             m_copySubmitLock      = SRWLOCK_INIT;
+  uint64_t            m_candidateSequence   = 0;
+  bool                m_publishPending      = false;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
   Wrappers::Event m_candidateEvent;
   Wrappers::Event m_candidateAvailableEvent;
+  Wrappers::Event m_copySubmitEvent;
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_publishTimer;
 
   Wrappers::Event m_cursorDataEvent;
@@ -154,6 +160,7 @@ private:
     unsigned candidateIndex, size_t frameSize);
   void ResetCandidates();
   void SignalCandidateState();
+  bool ExecuteCandidateCopy(CD3D12CommandSlot * copySlot);
 
   static DWORD CALLBACK _CursorThread(LPVOID arg);
   bool QueryHWCursor();
