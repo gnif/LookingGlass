@@ -221,11 +221,14 @@ struct FrameTimingRecord
   unsigned              readyMask;
   bool                  producerValid;
   bool                  phaseValid;
+  bool                  transportValid;
 
   uint64_t captureTime;
   uint64_t postProcessTime;
   uint64_t copyTime;
   uint64_t readyTime;
+  uint64_t holdTime;
+  uint64_t readyLeadTime;
   uint64_t importTime;
   uint64_t importWaitTime;
   uint64_t dispatchTime;
@@ -385,6 +388,8 @@ static void frameTimingFinishFrame(LG_RendererFrameToken token,
         record->postProcessTime = timing->postProcessTime;
         record->copyTime        = timing->copyTime;
         record->readyTime       = timing->readyTime;
+        record->holdTime        = timing->holdTime;
+        record->readyLeadTime   = timing->readyLeadTime;
         if (record->timestamp < timestamp)
           record->timestamp = timestamp;
         record->readyMask      |= FRAME_TIMING_FRAME_READY;
@@ -422,12 +427,14 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
     record->swapTime    = timing->swapTime;
     record->readyMask  |= FRAME_TIMING_RENDER_READY;
 
+    record->transportValid = record->phaseValid &&
+      timing->frameToken == cadenceToken;
+
     feedbackFrameSerial = record->frameSerial;
     feedbackGeneration  = record->scheduleGeneration;
     feedbackEpoch       = record->scheduleEpoch;
     feedbackDeadline    = record->scheduleDeadlineSerial;
-    feedbackValid       = record->phaseValid &&
-      timing->frameToken == cadenceToken;
+    feedbackValid       = record->transportValid;
     feedbackQueueStart  = record->queueStart;
 
     if (unlikely(
@@ -500,10 +507,19 @@ static void frameTimingPublishReady(void)
     const uint64_t                   queueTime =
       record->prepareStart > record->queueStart ?
       record->prepareStart - record->queueStart : 0;
-    const uint32_t                   validMask =
+    const uint64_t                   transportAccounted =
+      record->importTime + record->dispatchTime + queueTime;
+    const uint64_t                   transportTime =
+      record->readyLeadTime > transportAccounted ?
+      record->readyLeadTime - transportAccounted : 0;
+    uint32_t                         validMask =
       OVERLAY_FRAME_TIMING_VALID_ALL &
-      (record->producerValid ? UINT32_MAX :
-        ~OVERLAY_FRAME_TIMING_VALID_PRODUCER);
+      ~OVERLAY_FRAME_TIMING_VALID_PRESENT;
+    if (!record->producerValid)
+      validMask &= ~OVERLAY_FRAME_TIMING_VALID_PRODUCER;
+    if (!record->producerValid || !record->transportValid)
+      validMask &= ~OVERLAY_FRAME_TIMING_VALID_TRANSPORT;
+
     const OverlayFrameTiming         timing = {
       .timestamp   = record->timestamp,
       .validMask   = validMask,
@@ -511,6 +527,8 @@ static void frameTimingPublishReady(void)
       .postProcess = record->postProcessTime * 1e-6f,
       .copy        = record->copyTime        * 1e-6f,
       .ready       = record->readyTime       * 1e-6f,
+      .hold        = record->holdTime        * 1e-6f,
+      .transport   = transportTime           * 1e-6f,
       .import      = (record->importTime +
         (record->producerValid ? 0 : record->importWaitTime)) * 1e-6f,
       .dispatch    = record->dispatchTime    * 1e-6f,
@@ -521,6 +539,7 @@ static void frameTimingPublishReady(void)
       .desktop     = record->desktopTime     * 1e-6f,
       .compose     = record->composeTime     * 1e-6f,
       .swap        = record->swapTime        * 1e-6f,
+      .present     = 0.0f,
     };
     ringbuffer_push(g_state.frameLatency, &timing);
   }

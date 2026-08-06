@@ -52,6 +52,8 @@ typedef struct OverlayFrameTiming
   float    postProcess;
   float    copy;
   float    ready;
+  float    hold;
+  float    transport;
   float    import;
   float    dispatch;
   float    queue;
@@ -61,6 +63,7 @@ typedef struct OverlayFrameTiming
   float    desktop;
   float    compose;
   float    swap;
+  float    present;
 }
 OverlayFrameTiming;
 
@@ -70,6 +73,8 @@ enum OverlayFrameTimingStage
   OVERLAY_FRAME_TIMING_POST_PROCESS,
   OVERLAY_FRAME_TIMING_COPY,
   OVERLAY_FRAME_TIMING_READY,
+  OVERLAY_FRAME_TIMING_HOLD,
+  OVERLAY_FRAME_TIMING_TRANSPORT,
   OVERLAY_FRAME_TIMING_IMPORT,
   OVERLAY_FRAME_TIMING_DISPATCH,
   OVERLAY_FRAME_TIMING_QUEUE,
@@ -79,13 +84,18 @@ enum OverlayFrameTimingStage
   OVERLAY_FRAME_TIMING_DESKTOP,
   OVERLAY_FRAME_TIMING_COMPOSE,
   OVERLAY_FRAME_TIMING_SWAP,
+  OVERLAY_FRAME_TIMING_PRESENT,
   OVERLAY_FRAME_TIMING_COUNT,
 };
 
 #define OVERLAY_FRAME_TIMING_VALID_ALL \
   ((1U << OVERLAY_FRAME_TIMING_COUNT) - 1U)
 #define OVERLAY_FRAME_TIMING_VALID_PRODUCER \
-  ((1U << OVERLAY_FRAME_TIMING_IMPORT) - 1U)
+  ((1U << OVERLAY_FRAME_TIMING_TRANSPORT) - 1U)
+#define OVERLAY_FRAME_TIMING_VALID_TRANSPORT \
+  (1U << OVERLAY_FRAME_TIMING_TRANSPORT)
+#define OVERLAY_FRAME_TIMING_VALID_PRESENT \
+  (1U << OVERLAY_FRAME_TIMING_PRESENT)
 
 GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
     float min, float max, GraphFormatFn formatFn);

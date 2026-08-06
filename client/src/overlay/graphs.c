@@ -226,6 +226,8 @@ static const char * const frameTimingLabels[FRAME_TIMING_STAGE_COUNT] = {
   "Post",
   "Copy",
   "Ready",
+  "Hold",
+  "Transport",
   "Import",
   "Dispatch",
   "Queue",
@@ -235,6 +237,7 @@ static const char * const frameTimingLabels[FRAME_TIMING_STAGE_COUNT] = {
   "Desktop",
   "Compose",
   "Swap",
+  "Present",
 };
 
 struct TimingPlotData
@@ -296,6 +299,8 @@ static bool accumulateFrameTimingSample(int index, void * value_, void * udata_)
     timing->postProcess,
     timing->copy,
     timing->ready,
+    timing->hold,
+    timing->transport,
     timing->import,
     timing->dispatch,
     timing->queue,
@@ -305,6 +310,7 @@ static bool accumulateFrameTimingSample(int index, void * value_, void * udata_)
     timing->desktop,
     timing->compose,
     timing->swap,
+    timing->present,
   };
 
   const uint64_t offset = timing->timestamp - data->windowStart;
