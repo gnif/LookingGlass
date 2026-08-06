@@ -651,20 +651,30 @@ static LG_TransportStatus lgmp_doneFrameMessage(
   return LG_TRANSPORT_ERROR;
 }
 
-static LG_TransportStatus lgmp_donePointerMessage(LG_Transport * this)
+static void lgmp_clearPointerQueue(LG_Transport * this,
+    PLGMPClientQueue expected)
 {
-  const LGMP_STATUS status = lgmpClientMessageDone(this->pointerQueue);
+  LG_LOCK(this->pointerLock);
+  if (this->pointerQueue == expected)
+    this->pointerQueue = NULL;
+  LG_UNLOCK(this->pointerLock);
+}
+
+static LG_TransportStatus lgmp_donePointerMessage(LG_Transport * this,
+    PLGMPClientQueue queue)
+{
+  const LGMP_STATUS status = lgmpClientMessageDone(queue);
   if (status == LGMP_OK)
     return LG_TRANSPORT_OK;
   if (status == LGMP_ERR_INVALID_SESSION)
   {
-    this->pointerQueue = NULL;
+    lgmp_clearPointerQueue(this, queue);
     return LG_TRANSPORT_DISCONNECTED;
   }
   if (status == LGMP_ERR_QUEUE_TIMEOUT ||
       status == LGMP_ERR_QUEUE_UNSUBSCRIBED)
   {
-    this->pointerQueue = NULL;
+    lgmp_clearPointerQueue(this, queue);
     return LG_TRANSPORT_OK;
   }
 
@@ -1090,29 +1100,35 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   if (!this->connected)
     return LG_TRANSPORT_DISCONNECTED;
 
-  uint32_t pointerFlags  = 0;
-  size_t   shapeSize     = 0;
-  size_t   transformSize = 0;
-  LG_TransportStatus status = LG_TRANSPORT_OK;
+  uint32_t           pointerFlags  = 0;
+  size_t             shapeSize     = 0;
+  size_t             transformSize = 0;
+  LG_TransportStatus status        = LG_TRANSPORT_OK;
+  PLGMPClientQueue   pointerQueue;
+  LG_LOCK(this->pointerLock);
   if (!this->pointerQueue)
   {
-    LG_LOCK(this->pointerLock);
     status = lgmp_subscribe(this->client, LGMP_Q_POINTER,
         &this->pointerQueue);
-    LG_UNLOCK(this->pointerLock);
-    if (status == LG_TRANSPORT_TIMEOUT)
-      usleep(1000);
   }
+  pointerQueue = this->pointerQueue;
+  LG_UNLOCK(this->pointerLock);
+  if (status == LG_TRANSPORT_TIMEOUT)
+    usleep(1000);
   if (status == LG_TRANSPORT_OK)
   {
     LGMPMessage message;
-    status = lgmp_process(&this->pointerQueue, this->cursorPollInterval,
+    PLGMPClientQueue processedQueue = pointerQueue;
+    status = lgmp_process(&processedQueue, this->cursorPollInterval,
         &message);
+    if (!processedQueue)
+      lgmp_clearPointerQueue(this, pointerQueue);
     if (status == LG_TRANSPORT_OK)
     {
       if (message.size < sizeof(KVMFRCursor))
       {
-        const LG_TransportStatus done = lgmp_donePointerMessage(this);
+        const LG_TransportStatus done =
+          lgmp_donePointerMessage(this, pointerQueue);
         status = done == LG_TRANSPORT_DISCONNECTED ?
           done : LG_TRANSPORT_ERROR;
       }
@@ -1127,7 +1143,8 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
         if (shapeSize > message.size - sizeof(*cursor) ||
             transformSize > message.size - sizeof(*cursor) - shapeSize)
         {
-          const LG_TransportStatus done = lgmp_donePointerMessage(this);
+          const LG_TransportStatus done =
+            lgmp_donePointerMessage(this, pointerQueue);
           status = done == LG_TRANSPORT_DISCONNECTED ?
             done : LG_TRANSPORT_ERROR;
         }
@@ -1150,7 +1167,8 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
             memcpy(this->pointerData, message.mem, needed);
             pointerFlags = (uint32_t)message.udata;
           }
-          const LG_TransportStatus done = lgmp_donePointerMessage(this);
+          const LG_TransportStatus done =
+            lgmp_donePointerMessage(this, pointerQueue);
           if (status == LG_TRANSPORT_OK)
             status = done;
         }
