@@ -323,6 +323,12 @@ static void testInsetExit(void)
   CHECK(count(EV_GUEST) == 0);
 }
 
+static void setConf(bool active)
+{
+  m.conf.on = active;
+  core_handleGrabEvent(active);
+}
+
 static void startExit(void)
 {
   reset();
@@ -339,6 +345,24 @@ static void testExitWait(void)
   CHECK(drop >= 0);
   CHECK(count(EV_WARP) == 0);
   CHECK(g_cursor.inView);
+  CHECK(!g_cursor.viewReq);
+  CHECK(g_cursor.exit);
+
+  g_cursor.pos       = (struct DoublePoint) { 111, 50 };
+  g_cursor.warpState = WARP_STATE_OFF;
+  setConf(false);
+  const int move = first(EV_WARP);
+  CHECK(move > drop);
+  CHECK(count(EV_WARP) == 1);
+  CHECK(m.ev[move].x == 111);
+  CHECK(m.ev[move].y == 50);
+  CHECK(m.ev[move].exit);
+  CHECK(!m.ev[move].conf);
+  CHECK(!g_cursor.inView);
+  CHECK(!g_cursor.exit);
+
+  setConf(false);
+  CHECK(count(EV_WARP) == 1);
 }
 
 static void testExitGuest(void)
@@ -347,6 +371,34 @@ static void testExitGuest(void)
   g_cursor.guest.x = 99;
   core_handleGuestMouseUpdate();
   CHECK(count(EV_GUEST) == 0);
+}
+
+static void testExitCancel(void)
+{
+  startExit();
+  CHECK(g_cursor.exit);
+
+  core_handleMouseNormal(1, 0);
+  CHECK(g_cursor.exit);
+  CHECK(!g_cursor.viewReq);
+
+  core_handleMouseNormal(-3, 0);
+  CHECK(!g_cursor.exit);
+  CHECK(g_cursor.viewReq);
+  CHECK(m.conf.req);
+  CHECK(count(EV_WARP) == 0);
+
+  setConf(false);
+  CHECK(count(EV_WARP) == 0);
+  setConf(true);
+  CHECK(g_cursor.inView);
+
+  startExit();
+  g_state.focused = false;
+  core_setCursorInView(false);
+  CHECK(!g_cursor.exit);
+  setConf(false);
+  CHECK(count(EV_WARP) == 0);
 }
 
 static void startConf(void)
@@ -359,12 +411,6 @@ static void startConf(void)
   g_cursor.viewReq = false;
 
   core_handleMouseNormal(0, 0);
-}
-
-static void setConf(bool active)
-{
-  m.conf.on = active;
-  core_handleGrabEvent(active);
 }
 
 static void testConfWait(void)
@@ -698,6 +744,7 @@ static const struct Test tests[] = {
   { "inset-exit"      , testInsetExit    },
   { "exit-delay"      , testExitWait     },
   { "exit-guest"      , testExitGuest    },
+  { "exit-cancel"     , testExitCancel   },
   { "confine-pending" , testConfWait     },
   { "confine-guest"   , testConfGuest    },
   { "capture-pending" , testCapWait      },

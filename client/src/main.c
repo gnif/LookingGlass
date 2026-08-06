@@ -132,6 +132,7 @@ static void lgInit(void)
   g_cursor.draw          = false;
   g_cursor.inView        = false;
   g_cursor.viewReq       = false;
+  g_cursor.exit          = false;
   g_cursor.guest.valid   = false;
 
   // if spice is not in use, hide the local cursor

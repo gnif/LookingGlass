@@ -60,6 +60,66 @@ static int exitPos(double pos, int edge)
   return pos < edge ? floor(pos) : ceil(pos);
 }
 
+static void cancelExit(const char * why)
+{
+  if (!g_cursor.exit)
+    return;
+
+  MTRACE("exit cancel=%s target=%.3f,%.3f", why,
+      g_cursor.exitPos.x, g_cursor.exitPos.y);
+  g_cursor.exit = false;
+}
+
+static void finishExit(void)
+{
+  if (!g_cursor.exit || g_cursor.viewReq)
+    return;
+
+  const int x = exitPos(g_cursor.exitPos.x, g_state.dstRect.x);
+  const int y = exitPos(g_cursor.exitPos.y, g_state.dstRect.y);
+  g_cursor.exit = false;
+
+  MTRACE("exit warp target=%d,%d projected=%.3f,%.3f inWin=%d",
+      x, y, g_cursor.exitPos.x, g_cursor.exitPos.y, g_cursor.inWindow);
+
+  if (x < 0 || x >= g_state.windowW ||
+      y < 0 || y >= g_state.windowH)
+    g_cursor.inWindow = false;
+
+  core_warpPointer(x, y, true);
+}
+
+static void startExit(double x, double y)
+{
+  g_cursor.exit    = true;
+  g_cursor.exitPos = (struct DoublePoint) { x, y };
+  core_setCursorInView(false);
+}
+
+static bool moveExit(double ex, double ey)
+{
+  if (g_cursor.useScale && g_params.scaleMouseInput)
+  {
+    ex *= g_cursor.scale.x;
+    ey *= g_cursor.scale.y;
+  }
+
+  struct DoublePoint move = {.x = ex, .y = ey};
+  util_rotatePoint(&move);
+  g_cursor.exitPos.x += move.x;
+  g_cursor.exitPos.y += move.y;
+
+  const bool inside =
+    g_cursor.exitPos.x >= g_state.dstRect.x &&
+    g_cursor.exitPos.x <  g_state.dstRect.x + g_state.dstRect.w &&
+    g_cursor.exitPos.y >= g_state.dstRect.y &&
+    g_cursor.exitPos.y <  g_state.dstRect.y + g_state.dstRect.h;
+
+  MTRACE("exit move=%.3f,%.3f target=%.3f,%.3f inside=%d",
+      move.x, move.y, g_cursor.exitPos.x, g_cursor.exitPos.y, inside);
+  return inside;
+}
+
 bool core_inputEnabled(void)
 {
   return g_params.useSpiceInput && !g_state.ignoreInput &&
@@ -133,6 +193,11 @@ void core_setCursorInView(bool enable)
       enable, g_cursor.viewReq, g_cursor.inView, g_state.focused,
       g_cursor.inWindow, g_cursor.grab);
 
+  if (g_cursor.exit &&
+      (enable || !g_state.focused || !g_cursor.inWindow ||
+       g_state.ignoreInput || !g_state.posInfoValid || app_isOverlayMode()))
+    cancelExit(enable ? "view" : "state");
+
   if (enable && !g_state.focused)
   {
     MTRACE("view skip=focus");
@@ -187,6 +252,9 @@ void core_handleGrabEvent(bool active)
   if (g_cursor.grab || g_params.captureInputOnly ||
       warpSupport == LG_DS_WARP_NONE)
     return;
+
+  if (!active)
+    finishExit();
 
   applyView(active, false);
 }
@@ -276,7 +344,7 @@ bool core_warpPointer(int x, int y, bool exiting)
     return false;
   }
 
-  if (g_cursor.warpState == WARP_STATE_OFF)
+  if (!exiting && g_cursor.warpState == WARP_STATE_OFF)
   {
     MTRACE("warp drop=state target=%d,%d exit=%d", x, y, exiting);
     return false;
@@ -285,7 +353,7 @@ bool core_warpPointer(int x, int y, bool exiting)
   if (exiting)
     g_cursor.warpState = WARP_STATE_OFF;
 
-  if (g_cursor.pos.x == x && g_cursor.pos.y == y)
+  if (!exiting && g_cursor.pos.x == x && g_cursor.pos.y == y)
   {
     MTRACE("warp same target=%d,%d exit=%d", x, y, exiting);
     return true;
@@ -321,6 +389,8 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
 
 void core_updatePositionInfo(void)
 {
+  cancelExit("geometry");
+
   if (g_params.setGuestRes &&
       g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE)
   {
@@ -646,6 +716,8 @@ void core_handleMouseNormal(double ex, double ey)
   {
     if (g_cursor.viewReq)
       core_setCursorInView(true);
+    else if (g_cursor.exit && moveExit(ex, ey))
+      core_setCursorInView(true);
     return;
   }
 
@@ -813,29 +885,15 @@ fallback:
           break;
 
         case LG_DS_WARP_SURFACE:
-          g_state.ds->ungrabPointer();
-          core_warpPointer(tx, ty, true);
-
-          if (!isInView() &&
-              tx >= 0 && tx < g_state.windowW &&
-              ty >= 0 && ty < g_state.windowH)
-            core_setCursorInView(false);
-          break;
+          startExit(local.x, local.y);
+          return;
 
         case LG_DS_WARP_SCREEN:
           if (core_isValidPointerPos(
                 g_state.windowPos.x + g_state.border.left + tx,
                 g_state.windowPos.y + g_state.border.top  + ty))
           {
-            core_setCursorInView(false);
-
-            /* preempt the window leave flag if the warp will leave our window */
-            if (tx < 0 || ty < 0 || tx > g_state.windowW || ty > g_state.windowH)
-              g_cursor.inWindow = false;
-
-            /* ungrab the pointer and move the local cursor to the exit point */
-            g_state.ds->ungrabPointer();
-            core_warpPointer(tx, ty, true);
+            startExit(local.x, local.y);
             return;
           }
       }

@@ -68,6 +68,7 @@ set(MOUSE_CASES
   inset-exit
   exit-delay
   exit-guest
+  exit-cancel
   confine-pending
   confine-guest
   capture-pending

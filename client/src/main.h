@@ -298,6 +298,12 @@ struct CursorState
   /* true if the cursor should be confined to the guest view area */
   bool viewReq;
 
+  /* true if a pointer exit is waiting for confinement to release */
+  bool exit;
+
+  /* the local pointer exit target */
+  struct DoublePoint exitPos;
+
   /* true if the guest should be realigned to the host when next drawn */
   bool realign;
 
