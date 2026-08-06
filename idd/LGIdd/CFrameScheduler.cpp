@@ -84,6 +84,40 @@ CFrameScheduler::Client * CFrameScheduler::FindClient(uint32_t clientID)
   return nullptr;
 }
 
+CFrameScheduler::Client * CFrameScheduler::FindOrAllocateClient(
+  uint32_t clientID)
+{
+  Client * client = FindClient(clientID);
+  if (client || !clientID)
+    return client;
+
+  Client * replacement = nullptr;
+  for (Client& candidate : m_clients)
+  {
+    if (!candidate.clientID)
+    {
+      replacement = &candidate;
+      break;
+    }
+
+    // A schedule can arrive before its frame subscriptions are visible.
+    // Such provisional entries must not prevent a real subscriber from
+    // obtaining one of the bounded scheduler slots.
+    if (candidate.subscribed || candidate.subscriptionSeen)
+      continue;
+
+    if (!replacement || candidate.expiry < replacement->expiry)
+      replacement = &candidate;
+  }
+
+  if (replacement)
+  {
+    *replacement          = {};
+    replacement->clientID = clientID;
+  }
+  return replacement;
+}
+
 CFrameScheduler::Publication * CFrameScheduler::FindPublication(
   const Schedule& schedule, uint32_t frameSerial)
 {
@@ -272,15 +306,7 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
 
   for (unsigned i = 0; i < count; ++i)
   {
-    Client * client = FindClient(clientIDs[i]);
-    if (!client)
-      for (Client& candidate : m_clients)
-        if (!candidate.clientID)
-        {
-          candidate.clientID = clientIDs[i];
-          client = &candidate;
-          break;
-        }
+    Client * client = FindOrAllocateClient(clientIDs[i]);
 
     if (client)
     {
@@ -362,15 +388,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
     return false;
 
   AcquireSRWLockExclusive(&m_lock);
-  Client * client = FindClient(schedule.clientID);
-  if (!client)
-    for (Client& candidate : m_clients)
-      if (!candidate.clientID)
-      {
-        candidate.clientID = schedule.clientID;
-        client = &candidate;
-        break;
-      }
+  Client * client = FindOrAllocateClient(schedule.clientID);
 
   if (!client)
   {

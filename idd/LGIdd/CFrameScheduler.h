@@ -114,6 +114,7 @@ private:
   uint64_t m_lastLogPublished = 0;
 
   Client * FindClient(uint32_t clientID);
+  Client * FindOrAllocateClient(uint32_t clientID);
   Publication * FindPublication(const Schedule& schedule,
     uint32_t frameSerial);
   bool ElectOwner(uint64_t now, uint32_t resetClientID = 0);
