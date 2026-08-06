@@ -1689,12 +1689,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   const uint64_t composeEnd = nanotime();
   timing->composeTime += composeEnd - postOverlayStart;
 
-  const uint64_t swapStart  = nanotime();
   const bool     swapResult = app_eglSwapBuffers(
       this->display, this->surface, damage,
-      this->noSwapDamage ? 0 : damageIdx);
-  const uint64_t swapEnd    = nanotime();
-  timing->swapTime = swapEnd - swapStart;
+      this->noSwapDamage ? 0 : damageIdx, timing->frameToken,
+      &timing->swapTime, &timing->presentTracked);
 
   if (!swapResult)
     DEBUG_ERROR("Failed to swap EGL buffers (eglError: 0x%x)", eglGetError());

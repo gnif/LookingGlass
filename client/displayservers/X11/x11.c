@@ -1661,13 +1661,20 @@ static EGLNativeWindowType x11GetEGLNativeWindow(void)
 }
 
 static bool x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface,
-    const struct Rect * damage, int count)
+    const struct Rect * damage, int count, uint64_t frameToken,
+    uint64_t * swapTime, bool * presentTracked)
 {
   static struct SwapWithDamageData data = {0};
   if (!data.init)
     swapWithDamageInit(&data, display);
 
-  return swapWithDamage(&data, display, surface, damage, count);
+  (void)frameToken;
+  *presentTracked       = false;
+  const uint64_t start  = nanotime();
+  const bool     result =
+    swapWithDamage(&data, display, surface, damage, count);
+  *swapTime = nanotime() - start;
+  return result;
 }
 #endif
 

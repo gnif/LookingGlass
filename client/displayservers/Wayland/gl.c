@@ -28,6 +28,7 @@
 
 #include "app.h"
 #include "common/debug.h"
+#include "common/time.h"
 #include "util.h"
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
@@ -229,9 +230,12 @@ static const struct wp_image_description_v1_listener hdrImageDescListener =
 };
 
 bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
-    const struct Rect * damage, int count)
+    const struct Rect * damage, int count, uint64_t frameToken,
+    uint64_t * swapTime, bool * presentTracked)
 {
-  bool result = false;
+  bool result     = false;
+  *swapTime       = 0;
+  *presentTracked = false;
 
   // EGL presentation sends a batch of Wayland requests ending in a surface
   // commit. A concurrent commit would apply a partial batch and, when explicit
@@ -249,10 +253,15 @@ bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
         swapWithDamageInit(&wlWm.swapWithDamage, display);
     }
 
-    waylandPresentationFrame();
+    struct WaylandPresentationFrame * presentationFrame =
+      waylandPresentationFrame(frameToken);
     applyHDRPending();
+    const uint64_t swapStart  = nanotime();
     result = swapWithDamage(
         &wlWm.swapWithDamage, display, surface, damage, count);
+    *swapTime = nanotime() - swapStart;
+    waylandPresentationSwapDone(
+        presentationFrame, result, presentTracked);
     if (result)
       activateReadyHDRImageDesc();
   });
@@ -756,6 +765,9 @@ void waylandGLSetSwapInterval(int interval)
 
 void waylandGLSwapBuffers(void)
 {
-  (void)waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface, NULL, 0);
+  uint64_t swapTime       = 0;
+  bool     presentTracked = false;
+  (void)waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface, NULL, 0, 0,
+      &swapTime, &presentTracked);
 }
 #endif

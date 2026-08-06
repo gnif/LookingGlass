@@ -160,11 +160,13 @@ struct WaylandDSState
 #endif
 
   struct wp_presentation * presentation;
-  clockid_t clkId;
-  _Atomic(bool) presentationClockValid;
-  _Atomic(uint64_t) nominalPeriod;
-  RingBuffer photonTimings;
-  GraphHandle photonGraph;
+  clockid_t                clkId;
+  _Atomic(bool)            presentationClockValid;
+  LG_Lock                  presentationLock;
+  struct wl_list           presentationFrames;
+  _Atomic(uint64_t)        nominalPeriod;
+  RingBuffer               photonTimings;
+  GraphHandle              photonGraph;
 
   const char             * cursorThemeName;
   int                      cursorSize;
@@ -336,7 +338,8 @@ void waylandCursorScaleChange(void);
 bool waylandEGLInit(int w, int h);
 EGLDisplay waylandGetEGLDisplay(void);
 bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
-    const struct Rect * damage, int count);
+    const struct Rect * damage, int count, uint64_t frameToken,
+    uint64_t * swapTime, bool * presentTracked);
 #endif
 
 #ifdef ENABLE_EGL
@@ -410,8 +413,12 @@ bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, ui
 bool waylandPollUnregister(int fd);
 
 // presentation module
+struct WaylandPresentationFrame;
 bool waylandPresentationInit(void);
-void waylandPresentationFrame(void);
+struct WaylandPresentationFrame * waylandPresentationFrame(
+    uint64_t frameToken);
+void waylandPresentationSwapDone(struct WaylandPresentationFrame * frame,
+    bool result, bool * presentTracked);
 void waylandPresentationFree(void);
 bool waylandGetFramePeriod(uint64_t * period);
 

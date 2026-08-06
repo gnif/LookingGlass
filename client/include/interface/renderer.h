@@ -148,7 +148,8 @@ typedef struct LG_RendererFrameTiming
   uint64_t              effectsTime; /* post-processing work */
   uint64_t              desktopTime; /* desktop work, excluding effects */
   uint64_t              composeTime; /* composition, excluding UI overlay */
-  uint64_t              swapTime;    /* display-server buffer swap */
+  uint64_t              swapTime;    /* actual EGL buffer swap */
+  bool                  presentTracked; /* presentation feedback expected */
 }
 LG_RendererFrameTiming;
 

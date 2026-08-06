@@ -207,8 +207,8 @@ static void waylandShutdown(void)
 static void waylandFree(void)
 {
   waylandIdleFree();
-  waylandWindowFree();
   waylandPresentationFree();
+  waylandWindowFree();
   waylandInputFree();
   waylandOutputFree();
   waylandColorMgmtFree();

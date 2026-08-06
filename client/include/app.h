@@ -88,6 +88,8 @@ void app_handleGrabEvent(bool active);
 void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
 void app_handleRenderEvent(const uint64_t timeUs);
+void app_handleFramePresented(uint64_t frameToken, uint64_t presentTime,
+    bool valid);
 
 void app_setFullscreen(bool fs);
 bool app_getFullscreen(void);
@@ -104,7 +106,8 @@ bool app_getHDRDescFailed(void);
 EGLDisplay app_getEGLDisplay(void);
 EGLNativeWindowType app_getEGLNativeWindow(void);
 bool app_eglSwapBuffers(EGLDisplay display, EGLSurface surface,
-    const struct Rect * damage, int count);
+    const struct Rect * damage, int count, uint64_t frameToken,
+    uint64_t * swapTime, bool * presentTracked);
 #endif
 
 #ifdef ENABLE_OPENGL

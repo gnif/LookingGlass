@@ -181,7 +181,8 @@ struct LG_DisplayServerOps
   EGLDisplay (*getEGLDisplay)(void);
   EGLNativeWindowType (*getEGLNativeWindow)(void);
   bool (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface,
-      const struct Rect * damage, int count);
+      const struct Rect * damage, int count, uint64_t frameToken,
+      uint64_t * swapTime, bool * presentTracked);
 #endif
 
 #ifdef ENABLE_OPENGL

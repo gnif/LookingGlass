@@ -204,11 +204,13 @@ static bool tickTimerFn(void * unused)
 
 #define FRAME_TIMING_RECORD_COUNT       1024
 #define FRAME_TIMING_PUBLISH_BATCH_SIZE 32
+#define FRAME_TIMING_PRESENT_TIMEOUT_NS 500000000ULL
 
 enum FrameTimingReady
 {
-  FRAME_TIMING_FRAME_READY  = 1 << 0,
-  FRAME_TIMING_RENDER_READY = 1 << 1,
+  FRAME_TIMING_FRAME_READY   = 1 << 0,
+  FRAME_TIMING_RENDER_READY  = 1 << 1,
+  FRAME_TIMING_PRESENT_READY = 1 << 2,
 };
 
 struct FrameTimingRecord
@@ -222,6 +224,7 @@ struct FrameTimingRecord
   bool                  producerValid;
   bool                  phaseValid;
   bool                  transportValid;
+  bool                  presentValid;
 
   uint64_t captureTime;
   uint64_t postProcessTime;
@@ -242,6 +245,8 @@ struct FrameTimingRecord
   uint64_t desktopTime;
   uint64_t composeTime;
   uint64_t swapTime;
+  uint64_t presentTime;
+  uint64_t presentDeadline;
 };
 
 static struct
@@ -298,6 +303,23 @@ static struct FrameTimingRecord * frameTimingRecord(
 {
   return &l_frameTiming.record[
     (token - 1) % FRAME_TIMING_RECORD_COUNT];
+}
+
+void app_handleFramePresented(uint64_t frameToken, uint64_t presentTime,
+    bool valid)
+{
+  if (!frameToken)
+    return;
+
+  INTERLOCKED_SECTION(l_frameTiming.lock, {
+    struct FrameTimingRecord * record = frameTimingRecord(frameToken);
+    if (record->token == frameToken)
+    {
+      record->presentTime  = presentTime;
+      record->presentValid = valid;
+      record->readyMask   |= FRAME_TIMING_PRESENT_READY;
+    }
+  });
 }
 
 static LG_RendererFrameToken frameTimingReserve(void)
@@ -420,12 +442,20 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
     record->prepareTime  = prepareTime;
     if (record->timestamp < timestamp)
       record->timestamp = timestamp;
-    record->setupTime   = timing->setupTime;
-    record->effectsTime = timing->effectsTime;
-    record->desktopTime = timing->desktopTime;
-    record->composeTime = timing->composeTime;
-    record->swapTime    = timing->swapTime;
-    record->readyMask  |= FRAME_TIMING_RENDER_READY;
+    record->setupTime       = timing->setupTime;
+    record->effectsTime     = timing->effectsTime;
+    record->desktopTime     = timing->desktopTime;
+    record->composeTime     = timing->composeTime;
+    record->swapTime        = timing->swapTime;
+    record->presentDeadline = timestamp + FRAME_TIMING_PRESENT_TIMEOUT_NS;
+    if (!timing->presentTracked &&
+        !(record->readyMask & FRAME_TIMING_PRESENT_READY))
+    {
+      record->presentTime  = 0;
+      record->presentValid = false;
+      record->readyMask   |= FRAME_TIMING_PRESENT_READY;
+    }
+    record->readyMask |= FRAME_TIMING_RENDER_READY;
 
     record->transportValid = record->phaseValid &&
       timing->frameToken == cadenceToken;
@@ -474,6 +504,7 @@ static void frameTimingPublishReady(void)
   unsigned                 readyCount = 0;
 
   LG_LOCK(l_frameTiming.lock);
+  const uint64_t now = nanotime();
   while (readyCount < FRAME_TIMING_PUBLISH_BATCH_SIZE &&
       l_frameTiming.publishCount)
   {
@@ -492,6 +523,16 @@ static void frameTimingPublishReady(void)
 
     if (!(record->readyMask & FRAME_TIMING_FRAME_READY))
       break;
+
+    if (!(record->readyMask & FRAME_TIMING_PRESENT_READY))
+    {
+      if (!record->presentDeadline || now < record->presentDeadline)
+        break;
+
+      record->presentTime  = 0;
+      record->presentValid = false;
+      record->readyMask   |= FRAME_TIMING_PRESENT_READY;
+    }
 
     ready[readyCount++] = *record;
     *record = (struct FrameTimingRecord) {};
@@ -513,12 +554,13 @@ static void frameTimingPublishReady(void)
       record->readyLeadTime > transportAccounted ?
       record->readyLeadTime - transportAccounted : 0;
     uint32_t                         validMask =
-      OVERLAY_FRAME_TIMING_VALID_ALL &
-      ~OVERLAY_FRAME_TIMING_VALID_PRESENT;
+      OVERLAY_FRAME_TIMING_VALID_ALL;
     if (!record->producerValid)
       validMask &= ~OVERLAY_FRAME_TIMING_VALID_PRODUCER;
     if (!record->producerValid || !record->transportValid)
       validMask &= ~OVERLAY_FRAME_TIMING_VALID_TRANSPORT;
+    if (!record->presentValid)
+      validMask &= ~OVERLAY_FRAME_TIMING_VALID_PRESENT;
 
     const OverlayFrameTiming         timing = {
       .timestamp   = record->timestamp,
@@ -539,7 +581,7 @@ static void frameTimingPublishReady(void)
       .desktop     = record->desktopTime     * 1e-6f,
       .compose     = record->composeTime     * 1e-6f,
       .swap        = record->swapTime        * 1e-6f,
-      .present     = 0.0f,
+      .present     = record->presentTime     * 1e-6f,
     };
     ringbuffer_push(g_state.frameLatency, &timing);
   }
