@@ -113,6 +113,13 @@ static const struct wl_surface_listener wlSurfaceListener = {
   .leave = wlSurfaceLeaveHandler,
 };
 
+static void waylandSignalFrame(LG_DSWaitFrameResult result)
+{
+  atomic_fetch_or_explicit(
+      &wlWm.frameEventFlags, result, memory_order_release);
+  lgSignalEvent(wlWm.frameEvent);
+}
+
 static void fractionalScalePreferredScale(void * data,
     struct wp_fractional_scale_v1 * fractionalScale, uint32_t scale)
 {
@@ -133,7 +140,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     DEBUG_ERROR("Failed to initialize event for waitFrame");
     return false;
   }
-  lgSignalEvent(wlWm.frameEvent);
+  waylandSignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
 
   if (!wlWm.compositor)
   {
@@ -220,7 +227,7 @@ bool waylandIsValidPointerPos(int x, int y)
 
 static void frameHandler(void * opaque, struct wl_callback * callback, unsigned int data)
 {
-  lgSignalEvent(wlWm.frameEvent);
+  waylandSignalFrame(LG_DS_WAIT_FRAME_CADENCE);
   wl_callback_destroy(callback);
 }
 
@@ -228,9 +235,11 @@ static const struct wl_callback_listener frame_listener = {
    .done = frameHandler,
 };
 
-bool waylandWaitFrame(void)
+LG_DSWaitFrameResult waylandWaitFrame(void)
 {
   lgWaitEvent(wlWm.frameEvent, TIMEOUT_INFINITE);
+  const LG_DSWaitFrameResult result = atomic_exchange_explicit(
+      &wlWm.frameEventFlags, LG_DS_WAIT_FRAME_NONE, memory_order_acquire);
 
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
@@ -239,7 +248,7 @@ bool waylandWaitFrame(void)
       wl_callback_add_listener(callback, &frame_listener, NULL);
   });
 
-  return false;
+  return result;
 }
 
 void waylandSkipFrame(void)
@@ -253,5 +262,5 @@ void waylandSkipFrame(void)
 
 void waylandStopWaitFrame(void)
 {
-  lgSignalEvent(wlWm.frameEvent);
+  waylandSignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
 }

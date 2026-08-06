@@ -228,8 +228,11 @@ static const struct wp_image_description_v1_listener hdrImageDescListener =
   .ready2 = hdrImageDescReadyV2,
 };
 
-void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count)
+bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
+    const struct Rect * damage, int count)
 {
+  bool result = false;
+
   // EGL presentation sends a batch of Wayland requests ending in a surface
   // commit. A concurrent commit would apply a partial batch and, when explicit
   // sync is active, omit one of the required acquire/release timeline points.
@@ -248,8 +251,10 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
 
     waylandPresentationFrame();
     applyHDRPending();
-    swapWithDamage(&wlWm.swapWithDamage, display, surface, damage, count);
-    activateReadyHDRImageDesc();
+    result = swapWithDamage(
+        &wlWm.swapWithDamage, display, surface, damage, count);
+    if (result)
+      activateReadyHDRImageDesc();
   });
 
   if (wlWm.needsResize)
@@ -305,6 +310,7 @@ void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct 
   }
 
   wlWm.desktop->shellAckConfigureIfNeeded();
+  return result;
 }
 #endif
 
@@ -750,6 +756,6 @@ void waylandGLSetSwapInterval(int interval)
 
 void waylandGLSwapBuffers(void)
 {
-  waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface, NULL, 0);
+  (void)waylandEGLSwapBuffers(wlWm.glDisplay, wlWm.glSurface, NULL, 0);
 }
 #endif

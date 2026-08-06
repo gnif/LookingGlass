@@ -103,7 +103,8 @@ bool app_getHDRDescFailed(void);
 #ifdef ENABLE_EGL
 EGLDisplay app_getEGLDisplay(void);
 EGLNativeWindowType app_getEGLNativeWindow(void);
-void app_eglSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
+bool app_eglSwapBuffers(EGLDisplay display, EGLSurface surface,
+    const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_OPENGL

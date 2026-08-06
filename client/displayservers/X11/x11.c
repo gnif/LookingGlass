@@ -95,6 +95,13 @@ static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11UpdateKeyboardGroup(void);
 static void x11GrabPointer(void);
 
+static void x11SignalFrame(LG_DSWaitFrameResult result)
+{
+  atomic_fetch_or_explicit(
+      &x11.frameEventFlags, result, memory_order_release);
+  lgSignalEvent(x11.frameEvent);
+}
+
 static uint64_t x11ModePeriod(
     const XRRScreenResources * resources, RRMode modeID)
 {
@@ -849,7 +856,7 @@ static void x11Startup(void)
 static void x11Shutdown(void)
 {
   if (x11.jitRender)
-    lgSignalEvent(x11.frameEvent);
+    x11SignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
 }
 
 static void x11Free(void)
@@ -1595,7 +1602,7 @@ static void x11XPresentEvent(XGenericEventCookie *cookie)
       x11DoPresent(e->msc);
       atomic_store(&x11.presentMsc, e->msc);
       atomic_store(&x11.presentUst, e->ust);
-      lgSignalEvent(x11.frameEvent);
+      x11SignalFrame(LG_DS_WAIT_FRAME_CADENCE);
       break;
     }
   }
@@ -1645,14 +1652,14 @@ static EGLNativeWindowType x11GetEGLNativeWindow(void)
   return (EGLNativeWindowType)x11.window;
 }
 
-static void x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface,
+static bool x11EGLSwapBuffers(EGLDisplay display, EGLSurface surface,
     const struct Rect * damage, int count)
 {
   static struct SwapWithDamageData data = {0};
   if (!data.init)
     swapWithDamageInit(&data, display);
 
-  swapWithDamage(&data, display, surface, damage, count);
+  return swapWithDamage(&data, display, surface, damage, count);
 }
 #endif
 
@@ -1692,10 +1699,17 @@ static void x11GLSwapBuffers(void)
 }
 #endif
 
-static bool x11WaitFrame(void)
+static LG_DSWaitFrameResult x11WaitFrame(void)
 {
   /* wait until we are woken up by the present event */
   lgWaitEvent(x11.frameEvent, TIMEOUT_INFINITE);
+  LG_DSWaitFrameResult result = atomic_exchange_explicit(
+      &x11.frameEventFlags, LG_DS_WAIT_FRAME_NONE, memory_order_acquire);
+
+  /* Interrupts carry no new presentation timestamp and must not perturb the
+   * calibration state. */
+  if (!(result & LG_DS_WAIT_FRAME_CADENCE))
+    return result;
 
 #define WARMUP_TIME 3000000 //2s
 #define CALIBRATION_COUNT 400
@@ -1713,7 +1727,7 @@ static bool x11WaitFrame(void)
     }
 
     if (ust < expire)
-      return false;
+      return result;
 
     warmup = false;
     DEBUG_INFO("Warmup done, doing calibration...");
@@ -1831,14 +1845,14 @@ static bool x11WaitFrame(void)
   /* force rendering until we have finished calibration so we can take into
    * account how long it takes for the scene to render */
   if (calibrate < CALIBRATION_COUNT)
-    return true;
+    result |= LG_DS_WAIT_FRAME_FORCE_RENDER;
 
-  return false;
+  return result;
 }
 
 static void x11StopWaitFrame(void)
 {
-  lgSignalEvent(x11.frameEvent);
+  x11SignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
 }
 
 static void x11GuestPointerUpdated(double x, double y, double localX, double localY)

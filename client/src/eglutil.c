@@ -52,14 +52,11 @@ void swapWithDamageDisable(struct SwapWithDamageData * data)
   data->func = NULL;
 }
 
-void swapWithDamage(struct SwapWithDamageData * data, EGLDisplay display, EGLSurface surface,
-    const struct Rect * damage, int count)
+bool swapWithDamage(struct SwapWithDamageData * data, EGLDisplay display,
+    EGLSurface surface, const struct Rect * damage, int count)
 {
   if (!data->func || !count)
-  {
-    eglSwapBuffers(display, surface);
-    return;
-  }
+    return eglSwapBuffers(display, surface) == EGL_TRUE;
 
   EGLint rects[count * 4];
   for (int i = 0; i < count; ++i)
@@ -69,5 +66,5 @@ void swapWithDamage(struct SwapWithDamageData * data, EGLDisplay display, EGLSur
     rects[i * 4 + 2] = damage[i].w;
     rects[i * 4 + 3] = damage[i].h;
   }
-  data->func(display, surface, rects, count);
+  return data->func(display, surface, rects, count) == EGL_TRUE;
 }

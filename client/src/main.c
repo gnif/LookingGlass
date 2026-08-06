@@ -394,7 +394,8 @@ static void frameTimingFinishFrame(LG_RendererFrameToken token,
 }
 
 static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
-    uint64_t prepareStart, uint64_t prepareTime, uint64_t timestamp)
+    uint64_t prepareStart, uint64_t prepareTime, uint64_t timestamp,
+    LG_RendererFrameToken cadenceToken)
 {
   uint64_t feedbackFrameSerial = 0;
   uint64_t feedbackQueueStart  = 0;
@@ -425,7 +426,8 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
     feedbackGeneration  = record->scheduleGeneration;
     feedbackEpoch       = record->scheduleEpoch;
     feedbackDeadline    = record->scheduleDeadlineSerial;
-    feedbackValid       = record->phaseValid;
+    feedbackValid       = record->phaseValid &&
+      timing->frameToken == cadenceToken;
     feedbackQueueStart  = record->queueStart;
 
     if (unlikely(
@@ -640,9 +642,16 @@ static int renderThread(void * unused)
 
   while(likely(app_getState() != APP_STATE_SHUTDOWN))
   {
+    LG_RendererFrameToken cadenceToken = LG_RENDERER_FRAME_TOKEN_NONE;
+
     if (g_state.jitRender)
     {
-      const bool forceRender = g_state.ds->waitFrame();
+      const LG_DSWaitFrameResult  waitResult = g_state.ds->waitFrame();
+      const LG_RendererFrameToken queuedAtWake =
+        waitResult == LG_DS_WAIT_FRAME_CADENCE ?
+          frameTimingQueuedToken() : LG_RENDERER_FRAME_TOKEN_NONE;
+      const bool                  forceRender =
+        waitResult & LG_DS_WAIT_FRAME_FORCE_RENDER;
       app_handleRenderEvent(microtime());
 
       const uint64_t pending       =
@@ -657,11 +666,9 @@ static int renderThread(void * unused)
       const bool     overlayRender = overlayNeeded &&
         (!g_state.lastRenderTimeValid || !periodKnown ||
          elapsed + outputPeriod >= g_state.overlayFrameTime);
+      const bool     clientWake    = lgResetEvent(g_state.frameEvent);
 
-      if (!lgResetEvent(g_state.frameEvent)
-          && !forceRender
-          && !pending
-          && !overlayRender)
+      if (!clientWake && !forceRender && !pending && !overlayRender)
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
@@ -669,7 +676,11 @@ static int renderThread(void * unused)
       }
 
       if (pending > 0)
+      {
         atomic_fetch_sub(&g_state.pendingCount, 1);
+        if (!clientWake)
+          cadenceToken = queuedAtWake;
+      }
     }
     else if (g_params.fpsMin != 0)
     {
@@ -693,8 +704,10 @@ static int renderThread(void * unused)
       igGetStyle()->FontScaleMain = 1.0f / g_state.windowScale;
     }
 
-    const bool fontDirty = atomic_exchange(&g_state.fontDirty, false);
-    if (unlikely(fontDirty || g_state.fontScale != g_state.windowScale))
+    const bool fontDirty  = atomic_exchange(&g_state.fontDirty, false);
+    const bool fontUpdate = fontDirty ||
+      g_state.fontScale != g_state.windowScale;
+    if (unlikely(fontUpdate))
     {
       if (!util_buildUIFontAtlas(g_state.io->Fonts,
             g_params.uiSize * g_state.windowScale, &g_state.fontLarge))
@@ -705,6 +718,9 @@ static int renderThread(void * unused)
 
       g_state.fontScale = g_state.windowScale;
     }
+
+    if (unlikely(resize || fontUpdate))
+      cadenceToken = LG_RENDERER_FRAME_TOKEN_NONE;
 
     if (unlikely(resize))
     {
@@ -721,11 +737,14 @@ static int renderThread(void * unused)
 
     renderQueue_process();
 
-    const bool windowInvalid =
+    const bool     windowInvalid =
       atomic_exchange(&g_state.invalidateWindow, false);
-    const bool overlayFull   = app_overlayNeedsFullRender();
-    const bool invalidate    = windowInvalid || overlayFull;
-    const uint64_t prepareTime = nanotime() - prepareStart;
+    const bool     overlayFull   = app_overlayNeedsFullRender();
+    const bool     invalidate    = windowInvalid || overlayFull;
+    const uint64_t prepareTime   = nanotime() - prepareStart;
+
+    if (unlikely(invalidate))
+      cadenceToken = LG_RENDERER_FRAME_TOKEN_NONE;
 
     LG_RendererFrameTiming rendererTiming = {};
     if (unlikely(!RENDERER(render, g_params.winRotate, frameTokenLimit,
@@ -739,7 +758,8 @@ static int renderThread(void * unused)
 
     if (rendererTiming.frameToken != LG_RENDERER_FRAME_TOKEN_NONE)
       frameTimingFinishRender(
-          &rendererTiming, prepareStart, prepareTime, renderEnd);
+          &rendererTiming, prepareStart, prepareTime, renderEnd,
+          cadenceToken);
     frameTimingPublishReady();
 
     const uint64_t t     = nanotime();

@@ -267,7 +267,8 @@ struct WaylandDSState
   enum WaylandHDRPendingAction pendingHDRAction;
   struct WaylandHDRParameters  pendingHDR;
 
-  LGEvent * frameEvent;
+  _Atomic(unsigned) frameEventFlags;
+  LGEvent *         frameEvent;
 
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
@@ -333,7 +334,8 @@ void waylandCursorScaleChange(void);
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
 bool waylandEGLInit(int w, int h);
 EGLDisplay waylandGetEGLDisplay(void);
-void waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
+bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
+    const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_EGL
@@ -421,7 +423,7 @@ void waylandWindowFree(void);
 void waylandWindowUpdateScale(void);
 void waylandSetWindowSize(int x, int y);
 bool waylandIsValidPointerPos(int x, int y);
-bool waylandWaitFrame(void);
+LG_DSWaitFrameResult waylandWaitFrame(void);
 void waylandSkipFrame(void);
 void waylandStopWaitFrame(void);
 void waylandNeedsResize(void);

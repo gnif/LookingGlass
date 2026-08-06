@@ -81,6 +81,7 @@ struct X11DSState
   uint32_t          presentSerial;
   Pixmap            presentPixmap;
   XserverRegion     presentRegion;
+  _Atomic(unsigned) frameEventFlags;
   LGEvent *         frameEvent;
 
   bool xrandrSupported;

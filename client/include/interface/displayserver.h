@@ -103,6 +103,15 @@ typedef enum LG_DSPointer
 }
 LG_DSPointer;
 
+typedef enum LG_DSWaitFrameResult
+{
+  LG_DS_WAIT_FRAME_NONE         = 0,
+  LG_DS_WAIT_FRAME_CADENCE      = 1 << 0,
+  LG_DS_WAIT_FRAME_INTERRUPTED  = 1 << 1,
+  LG_DS_WAIT_FRAME_FORCE_RENDER = 1 << 2,
+}
+LG_DSWaitFrameResult;
+
 #define LG_POINTER_COUNT (LG_POINTER_NOT_ALLOWED + 1)
 
 typedef struct LG_DSInitParams
@@ -171,7 +180,8 @@ struct LG_DisplayServerOps
   /* EGL support */
   EGLDisplay (*getEGLDisplay)(void);
   EGLNativeWindowType (*getEGLNativeWindow)(void);
-  void (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface, const struct Rect * damage, int count);
+  bool (*eglSwapBuffers)(EGLDisplay display, EGLSurface surface,
+      const struct Rect * damage, int count);
 #endif
 
 #ifdef ENABLE_OPENGL
@@ -184,11 +194,8 @@ struct LG_DisplayServerOps
 #endif
 
   /* Waits for a good time to render the next frame in time for the next vblank.
-   * This is optional and a display server may choose to not implement it.
-   *
-   * return true to force the frame to be rendered, this is used by X11 for
-   * calibration */
-  bool (*waitFrame)(void);
+   * This is optional and a display server may choose to not implement it. */
+  LG_DSWaitFrameResult (*waitFrame)(void);
 
   /* This must be called when waitFrame returns, but no frame is actually rendered. */
   void (*skipFrame)(void);
