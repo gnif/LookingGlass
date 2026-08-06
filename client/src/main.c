@@ -83,10 +83,24 @@ _Static_assert((int)LG_CAPTURE_RGBA32F == (int)LG_TEST_CAPTURE_RGBA32F,
 // forwards
 static int renderThread(void * unused);
 
-static LGEvent  *e_startup = NULL;
-static LGEvent  *e_spice   = NULL;
-static LGThread *t_spice   = NULL;
-static LGThread *t_render  = NULL;
+static LGEvent  *e_startup       = NULL;
+static LGEvent  *e_spice         = NULL;
+static LGEvent  *e_cursorRepaint = NULL;
+static LGThread *t_spice         = NULL;
+static LGThread *t_render        = NULL;
+static LGThread *t_cursorRepaint = NULL;
+
+static struct
+{
+  LG_Lock  lock;
+  uint64_t requestedSerial;
+  uint64_t presentedSerial;
+  uint64_t lastRenderTime;
+  bool     rendering;
+  bool     wakeArmed;
+  bool     lastRenderCursorOnly;
+}
+l_cursorRepaint;
 
 _Atomic(enum RunState) p_appState = APP_STATE_RUNNING;
 
@@ -660,6 +674,125 @@ static void preSwapCallback(void * udata)
 #endif
 }
 
+static uint64_t cursorRepaintPeriod(void)
+{
+  uint64_t period = g_state.overlayFrameTime;
+  uint64_t outputPeriod;
+  if (g_state.ds->getFramePeriod &&
+      g_state.ds->getFramePeriod(&outputPeriod) && outputPeriod)
+    period = outputPeriod;
+
+  if (overlaySplash_isFading())
+    period = max(period, g_state.overlayFrameTime);
+
+  return period;
+}
+
+static bool cursorRepaintNeeded(void)
+{
+  LG_LOCK(l_cursorRepaint.lock);
+  const bool result =
+    l_cursorRepaint.requestedSerial != l_cursorRepaint.presentedSerial &&
+    !overlaySplash_isFading();
+  LG_UNLOCK(l_cursorRepaint.lock);
+  return result;
+}
+
+static void cursorRepaintRequest(void)
+{
+  LG_LOCK(l_cursorRepaint.lock);
+  const bool wasDirty =
+    l_cursorRepaint.requestedSerial != l_cursorRepaint.presentedSerial;
+  ++l_cursorRepaint.requestedSerial;
+  LG_UNLOCK(l_cursorRepaint.lock);
+
+  if (!g_state.jitRender && !wasDirty)
+    lgSignalEvent(e_cursorRepaint);
+}
+
+static uint64_t cursorRepaintRenderBegin(bool * cursorWake)
+{
+  LG_LOCK(l_cursorRepaint.lock);
+  const uint64_t serial = l_cursorRepaint.requestedSerial;
+  l_cursorRepaint.rendering = true;
+
+  *cursorWake = l_cursorRepaint.wakeArmed;
+  if (l_cursorRepaint.wakeArmed)
+    l_cursorRepaint.wakeArmed = false;
+
+  LG_UNLOCK(l_cursorRepaint.lock);
+  return serial;
+}
+
+static void cursorRepaintRenderEnd(
+    uint64_t serial, uint64_t renderTime, bool success, bool cursorOnly)
+{
+  LG_LOCK(l_cursorRepaint.lock);
+  if (success)
+  {
+    l_cursorRepaint.presentedSerial      = serial;
+    l_cursorRepaint.lastRenderTime       = renderTime;
+    l_cursorRepaint.lastRenderCursorOnly = cursorOnly;
+  }
+  l_cursorRepaint.rendering = false;
+
+  const bool wake = success && !g_state.jitRender &&
+    l_cursorRepaint.requestedSerial != l_cursorRepaint.presentedSerial;
+  LG_UNLOCK(l_cursorRepaint.lock);
+
+  if (wake)
+    lgSignalEvent(e_cursorRepaint);
+}
+
+static int cursorRepaintThread(void * unused)
+{
+  while (app_getState() != APP_STATE_SHUTDOWN)
+  {
+    lgWaitEvent(e_cursorRepaint, TIMEOUT_INFINITE);
+
+    while (app_getState() != APP_STATE_SHUTDOWN)
+    {
+      uint64_t waitTime = 0;
+
+      LG_LOCK(l_cursorRepaint.lock);
+      if (l_cursorRepaint.requestedSerial ==
+            l_cursorRepaint.presentedSerial ||
+          l_cursorRepaint.rendering || l_cursorRepaint.wakeArmed)
+      {
+        LG_UNLOCK(l_cursorRepaint.lock);
+        break;
+      }
+
+      const uint64_t now    = nanotime();
+      const uint64_t period = cursorRepaintPeriod();
+      /* Give an on-rate source frame enough time to absorb this cursor update.
+       * Cursor-only rendering retains the full output cadence once needed. */
+      const uint64_t grace =
+        l_cursorRepaint.lastRenderCursorOnly ? 0 : period / 4;
+      const uint64_t deadline =
+        l_cursorRepaint.lastRenderTime + period + grace;
+      if (l_cursorRepaint.lastRenderTime && now < deadline)
+        waitTime = deadline - now;
+      else
+      {
+        l_cursorRepaint.wakeArmed = true;
+        app_invalidateWindow(false);
+      }
+      LG_UNLOCK(l_cursorRepaint.lock);
+
+      if (!waitTime)
+        break;
+
+      struct timespec deadlineTime;
+      clock_gettime(CLOCK_MONOTONIC, &deadlineTime);
+      tsAdd(&deadlineTime, waitTime);
+      lgWaitEventAbs(e_cursorRepaint, &deadlineTime);
+    }
+  }
+
+  return 0;
+}
+
 static int renderThread(void * unused)
 {
   if (!RENDERER(renderStartup, g_state.useDMA))
@@ -731,8 +864,10 @@ static int renderThread(void * unused)
         (!g_state.lastRenderTimeValid || !periodKnown ||
          elapsed + outputPeriod >= g_state.overlayFrameTime);
       const bool     clientWake    = lgResetEvent(g_state.frameEvent);
+      const bool     cursorRender  = cursorRepaintNeeded();
 
-      if (!clientWake && !forceRender && !pending && !overlayRender)
+      if (!clientWake && !forceRender && !pending && !overlayRender &&
+          !cursorRender)
       {
         if (g_state.ds->skipFrame)
           g_state.ds->skipFrame();
@@ -751,6 +886,10 @@ static int renderThread(void * unused)
       app_handleRenderEvent(microtime());
       lgWaitEventAbs(g_state.frameEvent, &time);
     }
+
+    bool           cursorWake;
+    const uint64_t cursorSerial = cursorRepaintRenderBegin(&cursorWake);
+    const uint64_t renderStart  = nanotime();
 
     frameTimingPublishReady();
 
@@ -815,10 +954,14 @@ static int renderThread(void * unused)
           invalidate, preSwapCallback, NULL, &rendererTiming)))
     {
       LG_UNLOCK(g_state.lgrLock);
+      cursorRepaintRenderEnd(cursorSerial, renderStart, false, false);
       break;
     }
     const uint64_t renderEnd = nanotime();
     LG_UNLOCK(g_state.lgrLock);
+    cursorRepaintRenderEnd(cursorSerial, renderStart, true,
+        cursorWake &&
+        rendererTiming.frameToken == LG_RENDERER_FRAME_TOKEN_NONE);
 
     if (!g_state.jitRender)
       frameScheduler_observeCadence();
@@ -894,7 +1037,8 @@ static int renderThread(void * unused)
 
 int main_cursorThread(void * unused)
 {
-  LG_RendererCursor cursorType = LG_CURSOR_COLOR;
+  LG_RendererCursor cursorType       = LG_CURSOR_COLOR;
+  uint32_t          cursorWhiteLevel = 0;
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
@@ -916,10 +1060,8 @@ int main_cursorThread(void * unused)
               (g_cursor.draw || !g_params.useSpiceInput),
             g_cursor.guest.x, g_cursor.guest.y,
             g_cursor.guest.hx, g_cursor.guest.hy);
-          /* The active fade already schedules a render. Coalesce pointer
-           * changes into it instead of exposing rapid single-buffer redraws. */
-          if (!g_state.stopVideo && !overlaySplash_isFading())
-            lgSignalEvent(g_state.frameEvent);
+          if (!g_state.stopVideo)
+            cursorRepaintRequest();
         }
         continue;
       }
@@ -930,6 +1072,9 @@ int main_cursorThread(void * unused)
         DEBUG_ERROR("Pointer transport failed with status %d", status);
       break;
     }
+
+    const bool wasRendered = g_cursor.guest.visible &&
+      (g_cursor.draw || !g_params.useSpiceInput);
 
     if (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
       g_cursor.guest.visible =
@@ -964,10 +1109,16 @@ int main_cursorThread(void * unused)
       g_state.lgr->ops.onMouseColorTransform(g_state.lgr,
           pointer.colorTransform);
 
-    if ((pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID) &&
-        pointer.sdrWhiteLevel && g_state.lgr->ops.onMouseWhiteLevel)
+    const bool whiteLevelChanged =
+      (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID) &&
+      pointer.sdrWhiteLevel && pointer.sdrWhiteLevel != cursorWhiteLevel &&
+      g_state.lgr->ops.onMouseWhiteLevel;
+    if (whiteLevelChanged)
+    {
       g_state.lgr->ops.onMouseWhiteLevel(g_state.lgr,
           pointer.sdrWhiteLevel);
+      cursorWhiteLevel = pointer.sdrWhiteLevel;
+    }
 
     if (pointer.flags & LG_TRANSPORT_POINTER_POSITION)
     {
@@ -990,11 +1141,16 @@ int main_cursorThread(void * unused)
       g_cursor.guest.x, g_cursor.guest.y,
       g_cursor.guest.hx, g_cursor.guest.hy);
 
-    if ((g_params.mouseRedraw ||
-         (pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) &&
-        g_cursor.guest.visible && !g_state.stopVideo &&
-        !overlaySplash_isFading())
-      lgSignalEvent(g_state.frameEvent);
+    const bool isRendered = g_cursor.guest.visible &&
+      (g_cursor.draw || !g_params.useSpiceInput);
+    const bool contentChanged =
+      (pointer.flags & (LG_TRANSPORT_POINTER_SHAPE |
+        LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) || whiteLevelChanged;
+    if (!g_state.stopVideo &&
+        (wasRendered != isRendered ||
+         ((wasRendered || isRendered) &&
+          (g_params.mouseRedraw || contentChanged))))
+      cursorRepaintRequest();
 
     g_state.transportOps->releasePointer(g_state.transport, &pointer);
   }
@@ -1713,6 +1869,7 @@ static int transportSessionProbe(void * opaque)
 
 static int lg_run(void)
 {
+  LG_LOCK_INIT(l_cursorRepaint.lock);
   frameTimingInit();
 
 #ifdef ENABLE_TESTS
@@ -1967,6 +2124,22 @@ static int lg_run(void)
   // interactivity.
   g_state.overlayFrameTime = min(g_state.frameTime, 1000000000ULL / 60ULL);
 
+  if (!g_state.jitRender)
+  {
+    if (!(e_cursorRepaint = lgCreateEvent(true, 0)))
+    {
+      DEBUG_ERROR("failed to create the cursor repaint event");
+      return -1;
+    }
+
+    if (!lgCreateThread("cursorRepaint", cursorRepaintThread, NULL,
+          &t_cursorRepaint))
+    {
+      DEBUG_ERROR("cursor repaint thread creation failed");
+      return -1;
+    }
+  }
+
   keybind_commonRegister();
 
   if (g_state.jitRender)
@@ -2214,6 +2387,9 @@ static void lg_shutdown(void)
   app_setState(APP_STATE_SHUTDOWN);
   frameScheduler_stop();
 
+  if (e_cursorRepaint)
+    lgSignalEvent(e_cursorRepaint);
+
   if (t_spice)
     lgJoinThread(t_spice, NULL);
 
@@ -2225,6 +2401,19 @@ static void lg_shutdown(void)
     lgSignalEvent(g_state.frameEvent);
     lgJoinThread(t_render, NULL);
   }
+
+  if (t_cursorRepaint)
+  {
+    lgJoinThread(t_cursorRepaint, NULL);
+    t_cursorRepaint = NULL;
+  }
+
+  if (e_cursorRepaint)
+  {
+    lgFreeEvent(e_cursorRepaint);
+    e_cursorRepaint = NULL;
+  }
+  LG_LOCK_FREE(l_cursorRepaint.lock);
 
   if (g_state.transportOps)
     g_state.transportOps->destroy(&g_state.transport);

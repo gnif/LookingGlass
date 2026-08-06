@@ -398,7 +398,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "mouseRedraw",
-    .description    = "Mouse movements trigger redraws (ignores FPS minimum)",
+    .description    = "Mouse movements trigger display-rate redraws",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
