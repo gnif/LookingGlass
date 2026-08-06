@@ -414,9 +414,9 @@ void util_localCurToGuest(struct DoublePoint *guest)
       break;
 
     case LG_ROTATE_90:
-      guest->x = (point.y - g_state.dstRect.y) * g_cursor.scale.y;
+      guest->x = (point.y - g_state.dstRect.y) * g_cursor.scale.x;
       guest->y = (g_state.dstRect.w - point.x + g_state.dstRect.x)
-        * g_cursor.scale.x;
+        * g_cursor.scale.y;
       break;
 
     case LG_ROTATE_180:
@@ -428,8 +428,8 @@ void util_localCurToGuest(struct DoublePoint *guest)
 
     case LG_ROTATE_270:
       guest->x = (g_state.dstRect.h - point.y + g_state.dstRect.y)
-        * g_cursor.scale.y;
-      guest->y = (point.x - g_state.dstRect.x) * g_cursor.scale.x;
+        * g_cursor.scale.x;
+      guest->y = (point.x - g_state.dstRect.x) * g_cursor.scale.y;
       break;
 
     default:
