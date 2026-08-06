@@ -189,9 +189,9 @@ private:
   void ProcessFrameDeliveries();
   int FindAvailableFrameBuffer() const;
   int FindAvailableOwnerQueue(unsigned preferredIndex) const;
-  int FindOwnerDelivery(uint32_t clientID) const;
-  int FindSharedOwnerDelivery(uint32_t clientID) const;
-  bool HasOwnerDelivery(uint32_t clientID) const;
+  unsigned CountOwnerDeliveries(uint32_t clientID) const;
+  bool HasMatchingOwnerDelivery(uint32_t clientID, unsigned frameIndex,
+    uint64_t token) const;
   SharedFramePostResult PostSharedFrame(unsigned frameIndex,
     uint32_t excludeClientID, uint64_t now);
   bool PostSharedOwnerFrame(unsigned frameIndex,

@@ -1499,6 +1499,7 @@ bool CIndirectDeviceContext::PostSharedOwnerFrame(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN || !schedule.clientID ||
+      m_frameDelivery[frameIndex].sharedOwnerPending ||
       lgmpHostQueuePending(m_frameQueue) >= LGMP_Q_FRAME_LEN)
     return false;
 
@@ -1591,31 +1592,43 @@ int CIndirectDeviceContext::FindAvailableOwnerQueue(
   return -1;
 }
 
-int CIndirectDeviceContext::FindOwnerDelivery(uint32_t clientID) const
-{
-  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
-    if (m_ownerDelivery[i].active &&
-        m_ownerDelivery[i].clientID == clientID)
-      return static_cast<int>(i);
-
-  return -1;
-}
-
-int CIndirectDeviceContext::FindSharedOwnerDelivery(
+unsigned CIndirectDeviceContext::CountOwnerDeliveries(
   uint32_t clientID) const
 {
-  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
-    if (m_frameDelivery[i].sharedOwnerPending &&
-        m_frameDelivery[i].sharedOwnerClientID == clientID)
-      return static_cast<int>(i);
+  unsigned count = 0;
+  for (const OwnerDelivery& delivery : m_ownerDelivery)
+    if (delivery.active && delivery.clientID == clientID)
+      ++count;
 
-  return -1;
+  for (const FrameDelivery& delivery : m_frameDelivery)
+    if (delivery.sharedOwnerPending &&
+        delivery.sharedOwnerClientID == clientID)
+      ++count;
+
+  return count;
 }
 
-bool CIndirectDeviceContext::HasOwnerDelivery(uint32_t clientID) const
+bool CIndirectDeviceContext::HasMatchingOwnerDelivery(
+  uint32_t clientID, unsigned frameIndex, uint64_t token) const
 {
-  return FindOwnerDelivery(clientID) >= 0 ||
-    FindSharedOwnerDelivery(clientID) >= 0;
+  for (const OwnerDelivery& delivery : m_ownerDelivery)
+    if (delivery.active                    &&
+        delivery.clientID   == clientID    &&
+        delivery.frameIndex == frameIndex  &&
+        delivery.token      == token)
+      return true;
+
+  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
+  {
+    const FrameDelivery& delivery = m_frameDelivery[i];
+    if (i == frameIndex                              &&
+        delivery.sharedOwnerPending                 &&
+        delivery.sharedOwnerClientID == clientID    &&
+        delivery.sharedOwnerToken    == token)
+      return true;
+  }
+
+  return false;
 }
 
 int CIndirectDeviceContext::FindAvailableFrameBuffer() const
@@ -1668,8 +1681,12 @@ bool CIndirectDeviceContext::FrameBufferAvailable(
 
   AcquireSRWLockShared(&m_framePublishLock);
   bool deliveryAvailable;
+  // Pipeline one frame through each independent owner lane. Count the shared
+  // fallback against the same limit so it cannot become a third delivery for
+  // the same owner.
   if (schedule.clientID)
-    deliveryAvailable = !HasOwnerDelivery(schedule.clientID) &&
+    deliveryAvailable =
+      CountOwnerDeliveries(schedule.clientID) < LGMP_Q_FRAME_LEN &&
       (FindAvailableOwnerQueue(0) >= 0 ||
        lgmpHostQueuePending(m_frameQueue) < LGMP_Q_FRAME_LEN);
   else
@@ -1936,7 +1953,7 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
   bool published     = false;
   if (schedule.clientID)
   {
-    if (HasOwnerDelivery(schedule.clientID))
+    if (CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN)
       status = LGMP_ERR_QUEUE_FULL;
     else
     {
@@ -2016,34 +2033,19 @@ bool CIndirectDeviceContext::RepublishFrameBuffer(
   }
 
   const uint64_t scheduleToken = FrameScheduleToken(schedule);
-  const int existingSharedDelivery =
-    FindSharedOwnerDelivery(schedule.clientID);
-  if (existingSharedDelivery >= 0)
+  const uint32_t frameSerial   = m_frame[frameIndex]->frameSerial;
+  if (HasMatchingOwnerDelivery(schedule.clientID,
+      static_cast<unsigned>(frameIndex), scheduleToken))
   {
-    const FrameDelivery& delivery =
-      m_frameDelivery[existingSharedDelivery];
-    const bool delivered = existingSharedDelivery == frameIndex &&
-      delivery.sharedOwnerToken == scheduleToken;
-    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
     ReleaseSRWLockExclusive(&m_framePublishLock);
-    if (delivered)
-      m_frameScheduler.FrameRepublished(schedule, frameSerial);
-    return delivered;
+    m_frameScheduler.FrameRepublished(schedule, frameSerial);
+    return true;
   }
 
-  const int existingDelivery =
-    FindOwnerDelivery(schedule.clientID);
-  if (existingDelivery >= 0)
+  if (CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN)
   {
-    const OwnerDelivery& owner = m_ownerDelivery[existingDelivery];
-    const bool delivered = owner.frameIndex ==
-        static_cast<unsigned>(frameIndex) &&
-      owner.token == scheduleToken;
-    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
     ReleaseSRWLockExclusive(&m_framePublishLock);
-    if (delivered)
-      m_frameScheduler.FrameRepublished(schedule, frameSerial);
-    return delivered;
+    return false;
   }
 
   const int ownerQueueIndex =
@@ -2052,14 +2054,11 @@ bool CIndirectDeviceContext::RepublishFrameBuffer(
   {
     const bool published = PostSharedOwnerFrame(
       static_cast<unsigned>(frameIndex), schedule);
-    const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
     ReleaseSRWLockExclusive(&m_framePublishLock);
     if (published)
       m_frameScheduler.FrameRepublished(schedule, frameSerial);
     return published;
   }
-
-  const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
 
   unsigned recipientCount = 0;
   const LGMP_STATUS status = lgmpHostQueuePostForClients(
