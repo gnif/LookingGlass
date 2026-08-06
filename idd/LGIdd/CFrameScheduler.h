@@ -39,6 +39,8 @@ public:
     uint32_t epoch;
     uint64_t period;
     uint64_t targetSlack;
+    uint64_t forceTicket;
+    uint64_t republishTicket;
   };
 
 private:
@@ -65,9 +67,13 @@ private:
   Client          m_clients[LGMP_MAX_CLIENTS] = {};
   Schedule        m_schedule                  = {};
   bool            m_scheduling                = false;
-  bool            m_forceNext                 = false;
-  bool            m_republishNext             = false;
   uint32_t        m_epoch                     = 0;
+
+  // A result acknowledges only the request tickets captured by its attempt.
+  uint64_t m_forceRequestTicket     = 0;
+  uint64_t m_forceAckTicket         = 0;
+  uint64_t m_republishRequestTicket = 0;
+  uint64_t m_republishAckTicket     = 0;
 
   uint64_t m_lastArrival    = 0;
   uint64_t m_guestPeriod    = 0;

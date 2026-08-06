@@ -147,8 +147,16 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
     m_nextDeadline  = m_scheduling ? fastest->nextDelivery : 0;
     if (m_scheduling && !m_nextDeadline)
       m_nextDeadline = now + m_schedule.period;
-    m_forceNext     = m_scheduling;
-    m_republishNext = m_scheduling;
+    if (m_scheduling)
+    {
+      ++m_forceRequestTicket;
+      ++m_republishRequestTicket;
+    }
+    else
+    {
+      m_forceAckTicket     = m_forceRequestTicket;
+      m_republishAckTicket = m_republishRequestTicket;
+    }
 
     if (fastest)
       fastest->lastFeedbackFrameSerial = 0;
@@ -178,11 +186,12 @@ void CFrameScheduler::Reset()
   AcquireSRWLockExclusive(&m_lock);
   for (Client& client : m_clients)
     client = {};
-  m_schedule      = {};
-  m_scheduling    = false;
-  m_forceNext     = false;
-  m_republishNext = false;
-  m_epoch         = 0;
+  m_schedule   = {};
+  m_scheduling = false;
+  m_epoch      = 0;
+
+  m_forceAckTicket     = m_forceRequestTicket;
+  m_republishAckTicket = m_republishRequestTicket;
 
   m_lastArrival    = 0;
   m_guestPeriod    = 0;
@@ -359,11 +368,12 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
   }
   wake |= ElectOwner(now);
   if (m_scheduling && client->clientID == m_schedule.clientID &&
-      client->generation == m_schedule.generation && client->immediate)
+      client->generation == m_schedule.generation &&
+      (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE))
   {
-    m_forceNext     = true;
-    m_republishNext = true;
-    wake            = true;
+    ++m_forceRequestTicket;
+    ++m_republishRequestTicket;
+    wake = true;
   }
   wake |= ApplyFeedback(*client, schedule);
   ReleaseSRWLockExclusive(&m_lock);
@@ -447,6 +457,7 @@ bool CFrameScheduler::GetSchedule(Schedule& schedule) const
 
 void CFrameScheduler::ObserveFrame(uint64_t now)
 {
+  bool wake = false;
   AcquireSRWLockExclusive(&m_lock);
   ++m_acquiredFrames;
   if (m_lastArrival && now > m_lastArrival)
@@ -455,7 +466,8 @@ void CFrameScheduler::ObserveFrame(uint64_t now)
     if (m_guestPeriod && interval > m_guestPeriod * CADENCE_BREAK)
     {
       m_guestPeriod = 0;
-      m_forceNext   = true;
+      ++m_forceRequestTicket;
+      wake = true;
     }
     else if (interval >= MIN_SOURCE_PERIOD_NS &&
              interval <= MAX_PERIOD_NS)
@@ -468,12 +480,14 @@ void CFrameScheduler::ObserveFrame(uint64_t now)
   }
   m_lastArrival = now;
   ReleaseSRWLockExclusive(&m_lock);
+  if (wake)
+    WakePublisher();
 }
 
 void CFrameScheduler::ForceFrame()
 {
   AcquireSRWLockExclusive(&m_lock);
-  m_forceNext = true;
+  ++m_forceRequestTicket;
   ReleaseSRWLockExclusive(&m_lock);
   WakePublisher();
 }
@@ -492,8 +506,10 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
     return true;
   }
 
-  schedule  = m_schedule;
-  republish = m_republishNext;
+  schedule                 = m_schedule;
+  schedule.forceTicket     = m_forceRequestTicket;
+  schedule.republishTicket = m_republishRequestTicket;
+  republish = schedule.republishTicket != m_republishAckTicket;
 
   const uint64_t safety =
     max(MIN_SAFETY_NS, m_workEstimate / 8);
@@ -502,7 +518,7 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
   const uint64_t periodicTarget = m_nextDeadline > lead ?
     m_nextDeadline - lead : now;
 
-  if (m_forceNext)
+  if (schedule.forceTicket != m_forceAckTicket)
   {
     periodic = periodicTarget <= now;
     ReleaseSRWLockExclusive(&m_lock);
@@ -536,13 +552,16 @@ void CFrameScheduler::FramePublished(const Schedule& schedule,
       schedule.generation == m_schedule.generation &&
       schedule.epoch == m_schedule.epoch)
   {
-    m_forceNext     = false;
-    m_republishNext = false;
+    if (schedule.forceTicket > m_forceAckTicket)
+      m_forceAckTicket = schedule.forceTicket;
+    if (schedule.republishTicket > m_republishAckTicket)
+      m_republishAckTicket = schedule.republishTicket;
 
     Client * client = FindClient(m_schedule.clientID);
     if (client)
     {
-      client->immediate                = false;
+      if (m_republishAckTicket == m_republishRequestTicket)
+        client->immediate = false;
       client->lastDeliveredFrameSerial = frameSerial;
       client->deliveredFrameValid      = true;
     }
@@ -567,12 +586,14 @@ void CFrameScheduler::FrameRepublished(const Schedule& schedule,
       schedule.generation == m_schedule.generation &&
       schedule.epoch == m_schedule.epoch)
   {
-    m_republishNext = false;
+    if (schedule.republishTicket > m_republishAckTicket)
+      m_republishAckTicket = schedule.republishTicket;
 
     Client * client = FindClient(m_schedule.clientID);
     if (client)
     {
-      client->immediate                = false;
+      if (m_republishAckTicket == m_republishRequestTicket)
+        client->immediate = false;
       client->lastDeliveredFrameSerial = frameSerial;
       client->deliveredFrameValid      = true;
       client->nextDelivery             = m_nextDeadline;
