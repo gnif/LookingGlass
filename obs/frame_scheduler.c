@@ -27,9 +27,25 @@
 #define FRAME_SCHEDULER_LEASE_MS        1000U
 #define FRAME_SCHEDULER_RENEW_NS        250000000ULL
 #define FRAME_SCHEDULER_FEEDBACK_NS     50000000ULL
+#define FRAME_SCHEDULER_TICK_GRACE_NS   500000000ULL
 #define FRAME_SCHEDULER_TARGET_SLACK_NS 1000000ULL
 #define FRAME_SCHEDULER_MIN_PERIOD_NS   2000000ULL
 #define FRAME_SCHEDULER_MAX_PERIOD_NS   1000000000ULL
+
+static void lgFrameSchedulerResetFeedback(LGFrameScheduler * scheduler)
+{
+  scheduler->phaseError             = 0;
+  scheduler->feedbackFrameSerial    = 0;
+  scheduler->feedbackScheduleEpoch  = 0;
+  scheduler->feedbackDeadlineSerial = 0;
+  scheduler->feedbackSamples        = 0;
+  scheduler->feedbackDirty          = false;
+  scheduler->readyFrameSerial       = 0;
+  scheduler->readyGeneration        = 0;
+  scheduler->readyScheduleEpoch     = 0;
+  scheduler->readyDeadlineSerial    = 0;
+  scheduler->readyTime              = 0;
+}
 
 void lgFrameSchedulerInit(LGFrameScheduler * scheduler, bool supported,
     uint32_t clientID)
@@ -40,13 +56,29 @@ void lgFrameSchedulerInit(LGFrameScheduler * scheduler, bool supported,
   scheduler->clientID         = clientID;
 }
 
-void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
-    uint64_t period)
+void lgFrameSchedulerSetActive(LGFrameScheduler * scheduler, bool active)
 {
-  if (!scheduler->supported ||
-      period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
-      period > FRAME_SCHEDULER_MAX_PERIOD_NS)
+  if (!scheduler->supported || scheduler->sourceActive == active)
     return;
+
+  scheduler->sourceActive = active;
+  if (!active)
+    scheduler->lastTick = 0;
+}
+
+void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
+    uint64_t period, uint64_t tickTime)
+{
+  if (!scheduler->supported)
+    return;
+
+  scheduler->lastTick = tickTime;
+  if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
+      period > FRAME_SCHEDULER_MAX_PERIOD_NS)
+  {
+    scheduler->period = 0;
+    return;
+  }
 
   bool reset = !scheduler->period;
   if (!reset)
@@ -63,12 +95,7 @@ void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
   ++scheduler->generation;
   scheduler->resetPending           = true;
   scheduler->immediatePending       = true;
-  scheduler->phaseError             = 0;
-  scheduler->feedbackFrameSerial    = 0;
-  scheduler->feedbackScheduleEpoch  = 0;
-  scheduler->feedbackDeadlineSerial = 0;
-  scheduler->feedbackSamples        = 0;
-  scheduler->feedbackDirty          = false;
+  lgFrameSchedulerResetFeedback(scheduler);
 }
 
 void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler)
@@ -145,8 +172,34 @@ void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
 void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
     PLGMPClientQueue queue, uint64_t now)
 {
-  if (!scheduler->supported || !scheduler->period || !queue)
+  if (!scheduler->supported || !queue)
     return;
+
+  const bool tickStale = !scheduler->lastTick ||
+    now - scheduler->lastTick > FRAME_SCHEDULER_TICK_GRACE_NS;
+  if (!scheduler->sourceActive || tickStale || !scheduler->period)
+  {
+    if (!scheduler->active)
+      return;
+
+    const KVMFRFrameSchedule message = {
+      .msg.type   = KVMFR_MESSAGE_FRAME_SCHEDULE,
+      .clientID   = scheduler->clientID,
+      .generation = scheduler->generation,
+      .flags      = KVMFR_FRAME_SCHEDULE_RELEASE,
+    };
+
+    if (lgmpClientSendData(queue, &message, sizeof(message), NULL) != LGMP_OK)
+      return;
+
+    scheduler->active           = false;
+    scheduler->resetPending     = false;
+    scheduler->immediatePending = true;
+    scheduler->period           = 0;
+    scheduler->lastSend         = now;
+    lgFrameSchedulerResetFeedback(scheduler);
+    return;
+  }
 
   const uint64_t interval = scheduler->feedbackDirty ?
     FRAME_SCHEDULER_FEEDBACK_NS : FRAME_SCHEDULER_RENEW_NS;

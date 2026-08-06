@@ -29,6 +29,7 @@
 typedef struct LGFrameScheduler
 {
   bool     supported;
+  bool     sourceActive;
   bool     active;
   bool     resetPending;
   bool     immediatePending;
@@ -37,6 +38,7 @@ typedef struct LGFrameScheduler
   uint32_t generation;
   uint64_t period;
   uint64_t lastSend;
+  uint64_t lastTick;
 
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
@@ -54,8 +56,9 @@ LGFrameScheduler;
 
 void lgFrameSchedulerInit(LGFrameScheduler * scheduler, bool supported,
     uint32_t clientID);
+void lgFrameSchedulerSetActive(LGFrameScheduler * scheduler, bool active);
 void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
-    uint64_t period);
+    uint64_t period, uint64_t tickTime);
 void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler);
 void lgFrameSchedulerObserveFrame(LGFrameScheduler * scheduler,
     uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,

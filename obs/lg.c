@@ -135,6 +135,7 @@ typedef struct
   bool                 frameSerialValid;
   pthread_mutex_t      pointerLock;
   LGFrameScheduler     frameScheduler;
+  _Atomic(bool)        sourceActive;
 
   bool                 cursorMono;
   gs_texture_t       * cursorTex;
@@ -437,6 +438,7 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
   atomic_store(&this->cursorVer, 0);
   atomic_store(&this->cursorTransformVer, 0);
   atomic_store(&this->sdrWhiteLevel, KVMFR_SDR_WHITE_LEVEL_DEFAULT);
+  atomic_store(&this->sourceActive, obs_source_active(context));
   lgUpdate(this, settings);
   return this;
 }
@@ -723,6 +725,8 @@ static void * frameThread(void * data)
     }
 
     pthread_mutex_lock(&this->pointerLock);
+    lgFrameSchedulerSetActive(&this->frameScheduler,
+      atomic_load_explicit(&this->sourceActive, memory_order_acquire));
     lgFrameSchedulerUpdate(&this->frameScheduler,
       this->pointerQueue, now);
     pthread_mutex_unlock(&this->pointerLock);
@@ -970,7 +974,6 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   lgFrameSchedulerInit(&this->frameScheduler,
     udata->features & KVMFR_FEATURE_FRAME_SCHEDULE, clientID);
-  lgFrameSchedulerSetPeriod(&this->frameScheduler, lgFramePeriod());
 
   this->state = STATE_STARTING;
   createThreads(this);
@@ -1443,7 +1446,12 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  lgFrameSchedulerSetPeriod(&this->frameScheduler, framePeriod);
+  const bool sourceActive = atomic_load_explicit(
+    &this->sourceActive, memory_order_acquire);
+  lgFrameSchedulerSetActive(&this->frameScheduler, sourceActive);
+  if (sourceActive)
+    lgFrameSchedulerSetPeriod(
+      &this->frameScheduler, framePeriod, tickTime);
 
   this->cursorRect.x = this->cursor.x;
   this->cursorRect.y = this->cursor.y;
@@ -1724,6 +1732,20 @@ static void lgVideoTick(void * data, float seconds)
   obs_leave_graphics();
 }
 
+static void lgActivate(void * data)
+{
+  LGPlugin * this = (LGPlugin *)data;
+  atomic_store_explicit(
+    &this->sourceActive, true, memory_order_release);
+}
+
+static void lgDeactivate(void * data)
+{
+  LGPlugin * this = (LGPlugin *)data;
+  atomic_store_explicit(
+    &this->sourceActive, false, memory_order_release);
+}
+
 static void lgSetupCursorEffect(LGPlugin * this, int outputTransfer)
 {
   const KVMFRColorTransform * transform = &this->activeCursorTransform;
@@ -1916,6 +1938,8 @@ struct obs_source_info lg_source =
   .update                = lgUpdate,
   .get_defaults          = lgGetDefaults,
   .get_properties        = lgGetProperties,
+  .activate              = lgActivate,
+  .deactivate            = lgDeactivate,
   .video_tick            = lgVideoTick,
   .video_render          = lgVideoRender,
 #if LIBOBS_API_MAJOR_VER >= 28
