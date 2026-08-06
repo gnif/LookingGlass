@@ -845,8 +845,8 @@ void core_handleMouseNormal(double ex, double ey)
         }
         while(app_isRunning());
 
-        g_cursor.guest.x    = control.cursorPos.x;
-        g_cursor.guest.y    = control.cursorPos.y;
+        g_cursor.guest.x    = control.cursorPos.x - g_cursor.guest.hx;
+        g_cursor.guest.y    = control.cursorPos.y - g_cursor.guest.hy;
         g_cursor.realign    = false;
         g_cursor.realigning = false;
         g_cursor.redraw     = true;

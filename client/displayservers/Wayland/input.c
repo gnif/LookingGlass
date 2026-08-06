@@ -338,12 +338,10 @@ static void relativePointerMotionHandler(void * data,
 {
   const double dx = wl_fixed_to_double(dxW);
   const double dy = wl_fixed_to_double(dyW);
-  wlMotionRel(&wlWm.motion, dx, dy);
   MTRACE("rel time=%u:%u delta=%.3f,%.3f raw=%.3f,%.3f "
       "pos=%.3f,%.3f", timeHi, timeLo, dx, dy,
       wl_fixed_to_double(dxUnaccelW), wl_fixed_to_double(dyUnaccelW),
       wlWm.motion.x, wlWm.motion.y);
-  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
 
   app_handleMouseRelative(
       dx,

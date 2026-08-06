@@ -1084,6 +1084,9 @@ int main_cursorThread(void * unused)
 
     if (pointer.flags & LG_TRANSPORT_POINTER_SHAPE)
     {
+      const int oldHX = g_cursor.guest.hx;
+      const int oldHY = g_cursor.guest.hy;
+
       switch (pointer.type)
       {
         case CURSOR_TYPE_COLOR       : cursorType = LG_CURSOR_COLOR       ; break;
@@ -1106,6 +1109,13 @@ int main_cursorThread(void * unused)
       }
       g_cursor.guest.hx = pointer.hx;
       g_cursor.guest.hy = pointer.hy;
+
+      if (hotspotChanged && g_cursor.guest.valid &&
+          !(pointer.flags & LG_TRANSPORT_POINTER_POSITION))
+      {
+        g_cursor.guest.x += oldHX - pointer.hx;
+        g_cursor.guest.y += oldHY - pointer.hy;
+      }
     }
 
     if ((pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM) &&
