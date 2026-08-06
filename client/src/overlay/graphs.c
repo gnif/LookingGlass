@@ -219,7 +219,7 @@ static bool rbCalcMetrics(int index, void * value_, void * udata_)
 #define TIMING_PLOT_WINDOW_NS      20000000000ULL
 #define TIMING_PLOT_BUCKET_NS      \
   (TIMING_PLOT_WINDOW_NS / TIMING_PLOT_BUCKETS)
-#define FRAME_TIMING_STAGE_COUNT   OVERLAY_FRAME_TIMING_COUNT
+#define FRAME_TIMING_STAGE_COUNT   OVERLAY_FRAME_TIMING_PRESENT
 
 static const char * const frameTimingLabels[FRAME_TIMING_STAGE_COUNT] = {
   "Capture",
@@ -237,7 +237,6 @@ static const char * const frameTimingLabels[FRAME_TIMING_STAGE_COUNT] = {
   "Desktop",
   "Compose",
   "Swap",
-  "Present",
 };
 
 struct TimingPlotData
@@ -310,7 +309,6 @@ static bool accumulateFrameTimingSample(int index, void * value_, void * udata_)
     timing->desktop,
     timing->compose,
     timing->swap,
-    timing->present,
   };
 
   const uint64_t offset = timing->timestamp - data->windowStart;
