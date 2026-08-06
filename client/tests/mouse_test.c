@@ -266,6 +266,11 @@ static void setLocal(double x, double y)
   g_cursor.guest.y = lround(guest.y);
 }
 
+static bool near(double a, double b)
+{
+  return fabs(a - b) < 0.000001;
+}
+
 static void testInsetExit(void)
 {
   reset();
@@ -402,6 +407,226 @@ static void testCapRelease(void)
   CHECK(count(EV_MOTION) == 1);
 }
 
+static void testRotateScale(void)
+{
+  reset();
+  g_state.dstRect = (LG_RendererRect) {
+    .valid = true,
+    .x     = 10,
+    .y     = 20,
+    .w     = 200,
+    .h     = 100,
+  };
+  g_cursor.scale   = (struct DoublePoint) { 2, 4 };
+  g_cursor.guest.x = 40;
+  g_cursor.guest.y = 20;
+
+  for (int rot = 0; rot < LG_ROTATE_MAX; ++rot)
+  {
+    g_state.rotate = rot;
+
+    struct DoublePoint local;
+    CHECK(util_guestCurToLocal(&local));
+    g_cursor.pos = local;
+
+    struct DoublePoint guest;
+    util_localCurToGuest(&guest);
+    CHECK(near(guest.x, 40));
+    CHECK(near(guest.y, 20));
+  }
+}
+
+static void testGeometry(void)
+{
+  static const struct DoublePoint expected[] = {
+    {  30,  25 },
+    { 205,  40 },
+    { 190, 115 },
+    {  15, 100 },
+  };
+  static const struct DoublePoint rotated[] = {
+    {  1,  2 },
+    {  2, -1 },
+    { -1, -2 },
+    { -2,  1 },
+  };
+
+  reset();
+  g_state.dstRect = (LG_RendererRect) {
+    .valid = true,
+    .x     = 10,
+    .y     = 20,
+    .w     = 200,
+    .h     = 100,
+  };
+  g_cursor.scale   = (struct DoublePoint) { 2, 4 };
+  g_cursor.guest.x = 40;
+  g_cursor.guest.y = 20;
+
+  for (int rot = 0; rot < LG_ROTATE_MAX; ++rot)
+  {
+    g_state.rotate = rot;
+
+    struct DoublePoint local;
+    CHECK(util_guestCurToLocal(&local));
+    CHECK(near(local.x, expected[rot].x));
+    CHECK(near(local.y, expected[rot].y));
+
+    struct DoublePoint delta = { 1, 2 };
+    util_rotatePoint(&delta);
+    CHECK(near(delta.x, rotated[rot].x));
+    CHECK(near(delta.y, rotated[rot].y));
+  }
+
+  static const double scales[] = { 0.5, 1.0, 2.0 };
+  for (unsigned int i = 0; i < sizeof(scales) / sizeof(scales[0]); ++i)
+    for (int rot = 0; rot < LG_ROTATE_MAX; ++rot)
+    {
+      g_state.rotate    = rot;
+      g_cursor.scale.x = scales[i];
+      g_cursor.scale.y = scales[i];
+      g_cursor.guest.x = 40;
+      g_cursor.guest.y = 20;
+
+      struct DoublePoint local;
+      CHECK(util_guestCurToLocal(&local));
+      g_cursor.pos = local;
+
+      struct DoublePoint round;
+      util_localCurToGuest(&round);
+      CHECK(near(round.x, 40));
+      CHECK(near(round.y, 20));
+    }
+
+  g_cursor.guest.valid = false;
+  struct DoublePoint local = { -1, -2 };
+  CHECK(!util_guestCurToLocal(&local));
+  CHECK(near(local.x, -1));
+  CHECK(near(local.y, -2));
+}
+
+static struct DoublePoint inputFor(int rot, double x, double y)
+{
+  switch (rot)
+  {
+    case LG_ROTATE_0:
+      return (struct DoublePoint) { x, y };
+    case LG_ROTATE_90:
+      return (struct DoublePoint) { -y, x };
+    case LG_ROTATE_180:
+      return (struct DoublePoint) { -x, -y };
+    case LG_ROTATE_270:
+      return (struct DoublePoint) { y, -x };
+  }
+
+  CHECK(false);
+  return (struct DoublePoint) { 0, 0 };
+}
+
+static void testEdges(void)
+{
+  static const struct
+  {
+    struct Point pos;
+    struct Point delta;
+    struct Point target;
+  }
+  cases[] = {
+    { {  10, 60 }, { -1,  0 }, {   9,  60 } },
+    { { 109, 60 }, {  1,  0 }, { 110,  60 } },
+    { {  60, 20 }, {  0, -1 }, {  60,  19 } },
+    { {  60, 99 }, {  0,  1 }, {  60, 100 } },
+    { {  10, 20 }, { -1, -1 }, {   9,  19 } },
+    { { 109, 20 }, {  1, -1 }, { 110,  19 } },
+    { {  10, 99 }, { -1,  1 }, {   9, 100 } },
+    { { 109, 99 }, {  1,  1 }, { 110, 100 } },
+  };
+
+  for (int rot = 0; rot < LG_ROTATE_MAX; ++rot)
+    for (unsigned int i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+    {
+      reset();
+      g_state.rotate = rot;
+      setLocal(cases[i].pos.x, cases[i].pos.y);
+      const struct DoublePoint input = inputFor(rot,
+          cases[i].delta.x, cases[i].delta.y);
+
+      core_handleMouseNormal(input.x, input.y);
+
+      const int index = first(EV_WARP);
+      CHECK(index >= 0);
+      CHECK(m.ev[index].x == cases[i].target.x);
+      CHECK(m.ev[index].y == cases[i].target.y);
+      CHECK(m.ev[index].exit);
+    }
+}
+
+static void testScales(void)
+{
+  static const struct
+  {
+    double scale;
+    double pos;
+    double delta;
+    int    target;
+  }
+  cases[] = {
+    { 0.5, 108, 4, 110 },
+    { 1.0, 109, 1, 110 },
+    { 2.0, 109, 1, 111 },
+  };
+
+  for (unsigned int i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+  {
+    reset();
+    g_cursor.useScale = true;
+    g_cursor.scale.x  = cases[i].scale;
+    g_cursor.scale.y  = cases[i].scale;
+    setLocal(cases[i].pos, 50);
+
+    core_handleMouseNormal(cases[i].delta, 0);
+
+    const int index = first(EV_WARP);
+    CHECK(index >= 0);
+    CHECK(m.ev[index].x == cases[i].target);
+    CHECK(m.ev[index].y == 50);
+  }
+}
+
+static void testBorderExit(void)
+{
+  static const struct
+  {
+    struct Border border;
+    struct Point  valid;
+  }
+  cases[] = {
+    { { 8, 24, 8, 8 }, { 219, 274 } },
+    { { 0,  0, 0, 0 }, { 211, 250 } },
+  };
+
+  for (unsigned int i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
+  {
+    reset();
+    m.support         = LG_DS_WARP_SCREEN;
+    g_state.windowPos = (struct Point) { 100, 200 };
+    g_state.border    = cases[i].border;
+    setLocal(109, 50);
+
+    core_handleMouseNormal(2, 0);
+
+    const int check = first(EV_VALID);
+    const int move  = first(EV_WARP);
+    CHECK(check >= 0);
+    CHECK(move > check);
+    CHECK(m.ev[check].x == cases[i].valid.x);
+    CHECK(m.ev[check].y == cases[i].valid.y);
+    CHECK(m.ev[move].x == 111);
+    CHECK(m.ev[move].y == 50);
+    CHECK(m.ev[move].exit);
+  }
+}
+
 struct Test
 {
   const char * name;
@@ -409,14 +634,19 @@ struct Test
 };
 
 static const struct Test tests[] = {
-  { "inset-exit"     , testInsetExit   },
-  { "exit-delay"     , testExitWait    },
-  { "exit-guest"     , testExitGuest   },
-  { "confine-pending", testConfWait    },
-  { "confine-guest"  , testConfGuest   },
-  { "capture-pending", testCapWait     },
-  { "capture-revoked", testCapRevoke   },
-  { "capture-release", testCapRelease  },
+  { "inset-exit"     , testInsetExit    },
+  { "exit-delay"     , testExitWait     },
+  { "exit-guest"     , testExitGuest    },
+  { "confine-pending", testConfWait     },
+  { "confine-guest"  , testConfGuest    },
+  { "capture-pending", testCapWait      },
+  { "capture-revoked", testCapRevoke    },
+  { "capture-release", testCapRelease   },
+  { "rotate-scale"   , testRotateScale  },
+  { "geometry"       , testGeometry     },
+  { "edges"          , testEdges        },
+  { "scales"         , testScales       },
+  { "border-exit"    , testBorderExit   },
 };
 
 int main(int argc, char ** argv)

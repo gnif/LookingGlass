@@ -73,6 +73,11 @@ set(MOUSE_CASES
   capture-pending
   capture-revoked
   capture-release
+  rotate-scale
+  geometry
+  edges
+  scales
+  border-exit
 )
 foreach(name IN LISTS MOUSE_CASES)
   add_test(NAME mouse-${name}
