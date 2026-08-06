@@ -62,7 +62,6 @@ private:
     CANDIDATE_PREPARING,
     CANDIDATE_READY,
     CANDIDATE_PUBLISHING,
-    CANDIDATE_HELD,
   };
 
   struct FrameCandidate

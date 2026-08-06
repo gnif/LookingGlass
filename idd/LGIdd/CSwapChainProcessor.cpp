@@ -950,13 +950,20 @@ int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
   uint64_t oldest     = UINT64_MAX;
   bool     superseded = false;
   bool     idle       = true;
+  bool     publishing = false;
 
   AcquireSRWLockExclusive(&m_candidateLock);
   for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+  {
     if (m_candidates[i].state != CANDIDATE_FREE)
+    {
       idle = false;
+      if (m_candidates[i].state == CANDIDATE_PUBLISHING)
+        publishing = true;
+    }
     else if (selected < 0)
       selected = static_cast<int>(i);
+  }
 
   // Effect timing samples must not queue behind work which can later be
   // superseded, otherwise that discarded work contaminates the sample.
@@ -968,7 +975,11 @@ int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
     if (candidate.state == CANDIDATE_READY)
       ++readyCount;
 
-  if (!exclusiveSample && selected < 0 && readyCount > 1)
+  // Preserve one completed fallback unless another candidate is already
+  // publishing. In that case its peer must remain available for new source
+  // frames instead of being frozen for the duration of the transport copy.
+  if (!exclusiveSample && selected < 0 &&
+      readyCount > (publishing ? 0U : 1U))
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
       if (m_candidates[i].state == CANDIDATE_READY &&
           m_candidates[i].sequence < oldest)
@@ -1094,6 +1105,10 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   const CFrameScheduler::Schedule& schedule, bool periodic,
   uint64_t publishStart)
 {
+  // Once a deadline is due, submit transport work before allowing another
+  // preparation to enqueue on the same physical copy queue.
+  CSRWExclusiveLock pipelineLock(&m_pipelineLock);
+
   int      selectedCandidate = -1;
   uint64_t newestSequence    = 0;
 
@@ -1108,11 +1123,8 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     }
 
   if (selectedCandidate >= 0)
-    for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-      if (static_cast<int>(i) == selectedCandidate)
-        m_candidates[i].state = CANDIDATE_PUBLISHING;
-      else if (m_candidates[i].state == CANDIDATE_READY)
-        m_candidates[i].state = CANDIDATE_HELD;
+    m_candidates[static_cast<unsigned>(selectedCandidate)].state =
+      CANDIDATE_PUBLISHING;
   ReleaseSRWLockExclusive(&m_candidateLock);
 
   if (selectedCandidate < 0)
@@ -1125,14 +1137,10 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     AcquireSRWLockExclusive(&m_candidateLock);
     if (m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING)
       m_candidates[candidateIndex].state = CANDIDATE_READY;
-    for (FrameCandidate& candidate : m_candidates)
-      if (candidate.state == CANDIDATE_HELD)
-        candidate.state = CANDIDATE_READY;
     ReleaseSRWLockExclusive(&m_candidateLock);
     SignalCandidateState();
   };
 
-  CSRWExclusiveLock pipelineLock(&m_pipelineLock);
   AcquireSRWLockShared(&m_candidateLock);
   const bool candidateValid =
     m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING &&
@@ -1290,11 +1298,6 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     }
     m_devContext->ForceFrame();
 
-    AcquireSRWLockExclusive(&m_candidateLock);
-    for (FrameCandidate& held : m_candidates)
-      if (held.state == CANDIDATE_HELD)
-        held.state = CANDIDATE_READY;
-    ReleaseSRWLockExclusive(&m_candidateLock);
     SignalCandidateState();
     return false;
   }
@@ -1304,10 +1307,11 @@ bool CSwapChainProcessor::PublishNewestCandidate(
 
   unsigned superseded = 0;
   AcquireSRWLockExclusive(&m_candidateLock);
-  for (FrameCandidate& held : m_candidates)
-    if (held.state == CANDIDATE_HELD)
+  for (FrameCandidate& ready : m_candidates)
+    if (ready.state == CANDIDATE_READY &&
+        ready.sequence < candidateSequence)
     {
-      held.state = CANDIDATE_FREE;
+      ready.state = CANDIDATE_FREE;
       ++superseded;
     }
   ReleaseSRWLockExclusive(&m_candidateLock);
