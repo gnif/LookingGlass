@@ -301,8 +301,17 @@ struct CursorState
   /* true if a pointer exit is waiting for confinement to release */
   bool exit;
 
+  /* true if a surface exit is waiting for a pointer leave */
+  bool exitWait;
+
+  /* true if confinement is being restored after a failed exit */
+  bool exitRetry;
+
   /* the local pointer exit target */
   struct DoublePoint exitPos;
+
+  /* input retained while confinement is restored */
+  struct DoublePoint exitDelta;
 
   /* true if the guest should be realigned to the host when next drawn */
   bool realign;

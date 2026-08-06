@@ -24,13 +24,79 @@
 
 #include <string.h>
 
-#define FRAME_SCHEDULER_LEASE_MS        1000U
-#define FRAME_SCHEDULER_RENEW_NS        250000000ULL
-#define FRAME_SCHEDULER_FEEDBACK_NS     50000000ULL
-#define FRAME_SCHEDULER_TICK_GRACE_NS   500000000ULL
-#define FRAME_SCHEDULER_TARGET_SLACK_NS 1000000ULL
-#define FRAME_SCHEDULER_MIN_PERIOD_NS   2000000ULL
-#define FRAME_SCHEDULER_MAX_PERIOD_NS   1000000000ULL
+#define FRAME_SCHEDULER_LEASE_MS          1000U
+#define FRAME_SCHEDULER_RENEW_NS          250000000ULL
+#define FRAME_SCHEDULER_FEEDBACK_NS       50000000ULL
+#define FRAME_SCHEDULER_TICK_GRACE_NS     500000000ULL
+#define FRAME_SCHEDULER_TARGET_SLACK_NS   1000000ULL
+#define FRAME_SCHEDULER_MIN_PERIOD_NS     2000000ULL
+#define FRAME_SCHEDULER_MAX_PERIOD_NS     1000000000ULL
+#define FRAME_SCHEDULER_CONTROL_RETRY_NS  10000000ULL
+#define FRAME_SCHEDULER_CONTROL_RETRY_MAX 250000000ULL
+
+static void lgFrameSchedulerControlBackoff(
+    LGFrameScheduler * scheduler, uint64_t now)
+{
+  uint64_t delay = scheduler->controlRetryDelay;
+  if (!delay)
+    delay = FRAME_SCHEDULER_CONTROL_RETRY_NS;
+
+  scheduler->nextControlCheck = now + delay;
+  scheduler->controlRetryDelay =
+    delay < FRAME_SCHEDULER_CONTROL_RETRY_MAX / 2 ?
+      delay * 2 : FRAME_SCHEDULER_CONTROL_RETRY_MAX;
+}
+
+static bool lgFrameSchedulerControlReady(LGFrameScheduler * scheduler,
+    PLGMPClientQueue queue, uint64_t now)
+{
+  if (!scheduler->controlPending)
+    return now >= scheduler->nextControlCheck;
+
+  if (now < scheduler->nextControlCheck)
+    return false;
+
+  uint32_t serial;
+  const LGMP_STATUS status = lgmpClientGetSerial(queue, &serial);
+  if (status != LGMP_OK ||
+      (int32_t)(serial - scheduler->controlSerial) < 0)
+  {
+    if (status != LGMP_OK)
+      scheduler->controlFaulted = true;
+    lgFrameSchedulerControlBackoff(scheduler, now);
+    return false;
+  }
+
+  scheduler->controlPending    = false;
+  scheduler->nextControlCheck  = 0;
+  scheduler->controlRetryDelay = FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  if (scheduler->controlFaulted)
+  {
+    scheduler->controlFaulted   = false;
+    scheduler->immediatePending = true;
+  }
+  return true;
+}
+
+static bool lgFrameSchedulerSend(LGFrameScheduler * scheduler,
+    PLGMPClientQueue queue, const KVMFRFrameSchedule * message,
+    uint64_t now)
+{
+  uint32_t serial;
+  if (lgmpClientSendData(
+        queue, message, sizeof(*message), &serial) != LGMP_OK)
+  {
+    lgFrameSchedulerControlBackoff(scheduler, now);
+    return false;
+  }
+
+  scheduler->controlPending    = true;
+  scheduler->controlSerial     = serial;
+  scheduler->nextControlCheck  =
+    now + FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  scheduler->controlRetryDelay = FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  return true;
+}
 
 static void lgFrameSchedulerResetFeedback(LGFrameScheduler * scheduler)
 {
@@ -51,9 +117,10 @@ void lgFrameSchedulerInit(LGFrameScheduler * scheduler, bool supported,
     uint32_t clientID)
 {
   memset(scheduler, 0, sizeof(*scheduler));
-  scheduler->supported        = supported;
-  scheduler->immediatePending = supported;
-  scheduler->clientID         = clientID;
+  scheduler->supported         = supported;
+  scheduler->immediatePending  = supported;
+  scheduler->clientID          = clientID;
+  scheduler->controlRetryDelay = FRAME_SCHEDULER_CONTROL_RETRY_NS;
 }
 
 void lgFrameSchedulerSetActive(LGFrameScheduler * scheduler, bool active)
@@ -175,6 +242,9 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
   if (!scheduler->supported || !queue)
     return;
 
+  if (!lgFrameSchedulerControlReady(scheduler, queue, now))
+    return;
+
   const bool tickStale = !scheduler->lastTick ||
     now - scheduler->lastTick > FRAME_SCHEDULER_TICK_GRACE_NS;
   if (!scheduler->sourceActive || tickStale || !scheduler->period)
@@ -189,7 +259,7 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
       .flags      = KVMFR_FRAME_SCHEDULE_RELEASE,
     };
 
-    if (lgmpClientSendData(queue, &message, sizeof(message), NULL) != LGMP_OK)
+    if (!lgFrameSchedulerSend(scheduler, queue, &message, now))
       return;
 
     scheduler->active           = false;
@@ -234,7 +304,7 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
     .lease                  = FRAME_SCHEDULER_LEASE_MS,
   };
 
-  if (lgmpClientSendData(queue, &message, sizeof(message), NULL) != LGMP_OK)
+  if (!lgFrameSchedulerSend(scheduler, queue, &message, now))
     return;
 
   scheduler->active           = true;

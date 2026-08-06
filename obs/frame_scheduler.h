@@ -34,11 +34,16 @@ typedef struct LGFrameScheduler
   bool     resetPending;
   bool     immediatePending;
   bool     feedbackDirty;
+  bool     controlPending;
+  bool     controlFaulted;
   uint32_t clientID;
   uint32_t generation;
+  uint32_t controlSerial;
   uint64_t period;
   uint64_t lastSend;
   uint64_t lastTick;
+  uint64_t nextControlCheck;
+  uint64_t controlRetryDelay;
 
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;

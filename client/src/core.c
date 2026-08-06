@@ -62,18 +62,21 @@ static int exitPos(double pos, int edge)
 
 static void cancelExit(const char * why)
 {
-  if (!g_cursor.exit)
+  if (!g_cursor.exit && !g_cursor.exitWait)
     return;
 
   MTRACE("exit cancel=%s target=%.3f,%.3f", why,
       g_cursor.exitPos.x, g_cursor.exitPos.y);
-  g_cursor.exit = false;
+  g_cursor.exit      = false;
+  g_cursor.exitWait  = false;
+  g_cursor.exitRetry = false;
+  g_cursor.exitDelta = (struct DoublePoint) { 0 };
 }
 
-static void finishExit(void)
+static bool finishExit(void)
 {
   if (!g_cursor.exit || g_cursor.viewReq)
-    return;
+    return false;
 
   const int x = exitPos(g_cursor.exitPos.x, g_state.dstRect.x);
   const int y = exitPos(g_cursor.exitPos.y, g_state.dstRect.y);
@@ -82,21 +85,27 @@ static void finishExit(void)
   MTRACE("exit warp target=%d,%d projected=%.3f,%.3f inWin=%d",
       x, y, g_cursor.exitPos.x, g_cursor.exitPos.y, g_cursor.inWindow);
 
-  if (x < 0 || x >= g_state.windowW ||
-      y < 0 || y >= g_state.windowH)
+  if (g_cursor.exitWait)
+    g_cursor.viewReq = true;
+  else if (x < 0 || x >= g_state.windowW ||
+           y < 0 || y >= g_state.windowH)
     g_cursor.inWindow = false;
 
   core_warpPointer(x, y, true);
+  return g_cursor.exitWait;
 }
 
-static void startExit(double x, double y)
+static void startExit(double x, double y, bool wait)
 {
-  g_cursor.exit    = true;
-  g_cursor.exitPos = (struct DoublePoint) { x, y };
+  g_cursor.exit      = true;
+  g_cursor.exitWait  = wait;
+  g_cursor.exitRetry = false;
+  g_cursor.exitPos   = (struct DoublePoint) { x, y };
+  g_cursor.exitDelta = (struct DoublePoint) { 0 };
   core_setCursorInView(false);
 }
 
-static bool moveExit(double ex, double ey)
+static struct DoublePoint exitMove(double ex, double ey)
 {
   if (g_cursor.useScale && g_params.scaleMouseInput)
   {
@@ -106,18 +115,115 @@ static bool moveExit(double ex, double ey)
 
   struct DoublePoint move = {.x = ex, .y = ey};
   util_rotatePoint(&move);
-  g_cursor.exitPos.x += move.x;
-  g_cursor.exitPos.y += move.y;
+  return move;
+}
 
-  const bool inside =
-    g_cursor.exitPos.x >= g_state.dstRect.x &&
-    g_cursor.exitPos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-    g_cursor.exitPos.y >= g_state.dstRect.y &&
-    g_cursor.exitPos.y <  g_state.dstRect.y + g_state.dstRect.h;
+static struct Point exitDir(void)
+{
+  return (struct Point) {
+    .x = g_cursor.exitPos.x < g_state.dstRect.x ? -1 :
+      g_cursor.exitPos.x >= g_state.dstRect.x + g_state.dstRect.w ? 1 : 0,
+    .y = g_cursor.exitPos.y < g_state.dstRect.y ? -1 :
+      g_cursor.exitPos.y >= g_state.dstRect.y + g_state.dstRect.h ? 1 : 0,
+  };
+}
 
-  MTRACE("exit move=%.3f,%.3f target=%.3f,%.3f inside=%d",
-      move.x, move.y, g_cursor.exitPos.x, g_cursor.exitPos.y, inside);
-  return inside;
+static bool exitInward(struct DoublePoint move)
+{
+  const struct Point dir = exitDir();
+  return move.x * dir.x < 0 || move.y * dir.y < 0;
+}
+
+static struct DoublePoint exitInput(struct DoublePoint move)
+{
+  double temp;
+  switch((g_state.rotate + g_params.winRotate) % LG_ROTATE_MAX)
+  {
+    case LG_ROTATE_0:
+      break;
+
+    case LG_ROTATE_90:
+      temp   = move.x;
+      move.x = -move.y;
+      move.y = temp;
+      break;
+
+    case LG_ROTATE_180:
+      move.x = -move.x;
+      move.y = -move.y;
+      break;
+
+    case LG_ROTATE_270:
+      temp   = move.x;
+      move.x = move.y;
+      move.y = -temp;
+      break;
+  }
+
+  if (g_cursor.useScale && g_params.scaleMouseInput)
+  {
+    move.x /= g_cursor.scale.x;
+    move.y /= g_cursor.scale.y;
+  }
+
+  return move;
+}
+
+static struct DoublePoint clampExit(double ex, double ey)
+{
+  struct DoublePoint move = exitMove(ex, ey);
+  const struct Point dir = exitDir();
+  if (move.x * dir.x > 0)
+    move.x = 0;
+  if (move.y * dir.y > 0)
+    move.y = 0;
+
+  const struct DoublePoint input = exitInput(move);
+  MTRACE("exit clamp input=%.3f,%.3f move=%.3f,%.3f dir=%d,%d",
+      input.x, input.y, move.x, move.y, dir.x, dir.y);
+  return input;
+}
+
+static bool moveExit(double ex, double ey)
+{
+  const struct DoublePoint move = exitMove(ex, ey);
+  const bool inward = exitInward(move);
+
+  if (!inward)
+  {
+    g_cursor.exitPos.x += move.x;
+    g_cursor.exitPos.y += move.y;
+  }
+
+  MTRACE("exit move=%.3f,%.3f target=%.3f,%.3f inward=%d",
+      move.x, move.y, g_cursor.exitPos.x, g_cursor.exitPos.y, inward);
+  return inward;
+}
+
+static void startRetry(void)
+{
+  if (!g_cursor.exitWait || g_cursor.exit || g_cursor.exitRetry)
+    return;
+
+  MTRACE("exit retry target=%.3f,%.3f", g_cursor.exitPos.x,
+      g_cursor.exitPos.y);
+  g_cursor.pos.x     = util_clamp(g_cursor.exitPos.x, 0,
+      g_state.windowW - 1);
+  g_cursor.pos.y     = util_clamp(g_cursor.exitPos.y, 0,
+      g_state.windowH - 1);
+  g_cursor.exitRetry = true;
+  g_cursor.realign   = true;
+  g_state.ds->grabPointer();
+}
+
+static void retryExit(double ex, double ey)
+{
+  const struct DoublePoint input = clampExit(ex, ey);
+  g_cursor.exitDelta.x += input.x;
+  g_cursor.exitDelta.y += input.y;
+
+  if (input.x != 0 || input.y != 0)
+    startRetry();
 }
 
 bool core_inputEnabled(void)
@@ -193,9 +299,17 @@ void core_setCursorInView(bool enable)
       enable, g_cursor.viewReq, g_cursor.inView, g_state.focused,
       g_cursor.inWindow, g_cursor.grab);
 
-  if (g_cursor.exit &&
-      (enable || !g_state.focused || !g_cursor.inWindow ||
-       g_state.ignoreInput || !g_state.posInfoValid || app_isOverlayMode()))
+  if (enable && g_cursor.exitWait && !g_cursor.exit)
+  {
+    startRetry();
+    return;
+  }
+
+  if ((g_cursor.exit && enable) ||
+      ((g_cursor.exit || g_cursor.exitWait) &&
+       (!g_state.focused || !g_cursor.inWindow || g_state.ignoreInput ||
+        !g_state.posInfoValid || app_isOverlayMode())) ||
+      (g_cursor.exitWait && !g_cursor.exit && !enable))
     cancelExit(enable ? "view" : "state");
 
   if (enable && !g_state.focused)
@@ -253,10 +367,25 @@ void core_handleGrabEvent(bool active)
       warpSupport == LG_DS_WARP_NONE)
     return;
 
+  struct DoublePoint replay = { 0 };
   if (!active)
-    finishExit();
+  {
+    if (finishExit() || g_cursor.exitWait)
+      return;
+  }
+  else if (g_cursor.exitRetry)
+  {
+    replay             = g_cursor.exitDelta;
+    g_cursor.exitWait  = false;
+    g_cursor.exitRetry = false;
+    g_cursor.exitDelta = (struct DoublePoint) { 0 };
+    g_cursor.warpState = WARP_STATE_ON;
+  }
 
   applyView(active, false);
+
+  if (replay.x != 0 || replay.y != 0)
+    core_handleMouseNormal(replay.x, replay.y);
 }
 
 void core_setGrab(bool enable)
@@ -282,6 +411,7 @@ void core_setGrabQuiet(bool enable)
   if (g_cursor.grab == enable)
     return;
 
+  cancelExit("capture");
   g_cursor.grab = enable;
   g_cursor.acc.x = 0.0;
   g_cursor.acc.y = 0.0;
@@ -389,7 +519,10 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
 
 void core_updatePositionInfo(void)
 {
-  cancelExit("geometry");
+  if (g_cursor.exitWait && !g_cursor.exit)
+    startRetry();
+  else
+    cancelExit("geometry");
 
   if (g_params.setGuestRes &&
       g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE)
@@ -630,7 +763,8 @@ void core_handleGuestMouseUpdate(void)
   }
 
   const bool overlay = app_isOverlayMode();
-  if (overlay || !g_cursor.inView || !g_cursor.viewReq)
+  if (overlay || g_cursor.exitWait ||
+      !g_cursor.inView || !g_cursor.viewReq)
   {
     MTRACE("guest drop=%s guest=%d,%d local=%.3f,%.3f inWin=%d "
         "inView=%d req=%d", overlay ? "overlay" : "view",
@@ -711,6 +845,12 @@ void core_handleMouseNormal(double ex, double ey)
 
   if (!core_inputEnabled())
     return;
+
+  if (g_cursor.exitWait && !g_cursor.exit)
+  {
+    retryExit(ex, ey);
+    return;
+  }
 
   if (g_cursor.viewReq != g_cursor.inView)
   {
@@ -885,7 +1025,9 @@ fallback:
           break;
 
         case LG_DS_WARP_SURFACE:
-          startExit(local.x, local.y);
+          startExit(local.x, local.y,
+              tx < 0 || tx >= g_state.windowW ||
+              ty < 0 || ty >= g_state.windowH);
           return;
 
         case LG_DS_WARP_SCREEN:
@@ -893,7 +1035,7 @@ fallback:
                 g_state.windowPos.x + g_state.border.left + tx,
                 g_state.windowPos.y + g_state.border.top  + ty))
           {
-            startExit(local.x, local.y);
+            startExit(local.x, local.y, false);
             return;
           }
       }
