@@ -107,6 +107,7 @@ private:
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
   Wrappers::Event m_candidateEvent;
+  Wrappers::Event m_candidateAvailableEvent;
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_publishTimer;
 
   Wrappers::Event m_cursorDataEvent;
@@ -147,7 +148,7 @@ private:
     const CFrameScheduler::Schedule& schedule, bool periodic,
     uint64_t publishStart);
   bool HasReadyCandidate();
-  int AcquireCandidate(bool exclusiveSample);
+  int AcquireCandidate(bool exclusiveSample, bool allowSupersede);
   void ReleaseCandidate(unsigned candidateIndex);
   bool EnsureCandidateResource(
     unsigned candidateIndex, size_t frameSize);
@@ -171,7 +172,7 @@ private:
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
     unsigned dirtyRectCount, unsigned moveRegionCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
-    uint64_t captureStart);
+    uint64_t captureStart, bool duplicateFrame);
 
 public:
   CSwapChainProcessor(CIndirectMonitorContext * monitorContext, UINT64 assignmentGeneration,

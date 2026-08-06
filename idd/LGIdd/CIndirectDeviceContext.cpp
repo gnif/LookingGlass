@@ -412,7 +412,8 @@ void CIndirectDeviceContext::InitAdapter()
     caps.Flags |= IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16;
 #endif
 
-  caps.MaxMonitorsSupported = 1;
+  caps.MaxMonitorsSupported            = 1;
+  caps.StaticDesktopReencodeFrameCount = 1;
 
   caps.EndPointDiagnostics.Size             = sizeof(caps.EndPointDiagnostics);
   caps.EndPointDiagnostics.GammaSupport     = IDDCX_FEATURE_IMPLEMENTATION_NONE;

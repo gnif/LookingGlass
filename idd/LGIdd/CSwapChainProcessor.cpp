@@ -90,6 +90,8 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
   // once set or only one thread would ever observe termination.
   m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
   m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
+  m_candidateAvailableEvent.Attach(
+    CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
   if (!m_publishTimer.Get())
@@ -102,7 +104,8 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 bool CSwapChainProcessor::Start()
 {
   if (!m_terminateEvent.Get() || !m_candidateEvent.Get() ||
-      !m_publishTimer.Get() || !m_cursorDataEvent.Get() || !m_shapeBuffer)
+      !m_candidateAvailableEvent.Get() || !m_publishTimer.Get() ||
+      !m_cursorDataEvent.Get() || !m_shapeBuffer)
   {
     DEBUG_ERROR("Failed to initialize swap chain worker resources");
     return false;
@@ -516,7 +519,8 @@ void CSwapChainProcessor::SwapChainThreadCore()
   // restart loop while waiting for a valid configuration
   g_pipe.SetGPUStatus(m_dx11Device->IsSoftware());
 
-  UINT lastFrameNumber = 0;
+  UINT lastFrameNumber    = 0;
+  bool hasLastFrameNumber = false;
   for (;;)
   {
     if (WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
@@ -591,13 +595,16 @@ void CSwapChainProcessor::SwapChainThreadCore()
     }
     else if (SUCCEEDED(hr))
     {
-      if (frameNumber != lastFrameNumber)
+      const bool duplicateFrame =
+        hasLastFrameNumber && frameNumber == lastFrameNumber;
+      if (!duplicateFrame)
       {
-        lastFrameNumber = frameNumber;
-        if (!SwapChainNewFrame(surface, dirtyRectCount, moveRegionCount,
-              colorSpace, sdrWhiteLevel, captureStart))
-          DEBUG_WARN("Failed to submit frame");
+        lastFrameNumber    = frameNumber;
+        hasLastFrameNumber = true;
       }
+      if (!SwapChainNewFrame(surface, dirtyRectCount, moveRegionCount,
+            colorSpace, sdrWhiteLevel, captureStart, duplicateFrame))
+        DEBUG_WARN("Failed to submit frame");
 
       // Every acquired frame must be finished before the next acquire, even if
       // its presentation number was a duplicate and no work was submitted.
@@ -944,7 +951,8 @@ void CSwapChainProcessor::AccumulateFrameDamage(
   ReleaseSRWLockExclusive(&m_damageLock);
 }
 
-int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
+int CSwapChainProcessor::AcquireCandidate(
+  bool exclusiveSample, bool allowSupersede)
 {
   int      selected   = -1;
   uint64_t oldest     = UINT64_MAX;
@@ -978,7 +986,7 @@ int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
   // Preserve one completed fallback unless another candidate is already
   // publishing. In that case its peer must remain available for new source
   // frames instead of being frozen for the duration of the transport copy.
-  if (!exclusiveSample && selected < 0 &&
+  if (allowSupersede && !exclusiveSample && selected < 0 &&
       readyCount > (publishing ? 0U : 1U))
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
       if (m_candidates[i].state == CANDIDATE_READY &&
@@ -1099,6 +1107,7 @@ void CSwapChainProcessor::ResetCandidates()
 void CSwapChainProcessor::SignalCandidateState()
 {
   SetEvent(m_candidateEvent.Get());
+  SetEvent(m_candidateAvailableEvent.Get());
 }
 
 bool CSwapChainProcessor::PublishNewestCandidate(
@@ -1389,35 +1398,21 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
   unsigned dirtyRectCount, unsigned moveRegionCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
-  uint64_t captureStart)
+  uint64_t captureStart, bool duplicateFrame)
 {
   const uint64_t postProcessStart = CFrameScheduler::Nanotime();
   const uint64_t captureTime      = postProcessStart - captureStart;
 
-  ComPtr<ID3D11Texture2D> texture;
-  HRESULT hr = acquiredBuffer.As(&texture);
-  if (FAILED(hr))
-  {
-    DEBUG_ERROR_HR(hr, "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  CInteropResource * srcRes = m_resPool.Get(texture);
-  if (!srcRes)
-  {
-    DEBUG_ERROR("Failed to get a CInteropResource from the pool");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  RECT dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
-  bool noImageUpdate = false;
+  RECT     dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
+  unsigned resolvedDirtyRectCount         = 0;
+  bool     fullDamage                     = false;
+  bool     noImageUpdate                  = false;
+  HRESULT  hr;
   if (moveRegionCount || dirtyRectCount > ARRAYSIZE(dirtyRects))
   {
     // Move regions are not represented by the dirty rectangle list. Copy the
     // full surface so the alternating destinations remain coherent.
-    srcRes->SetFullDamage();
+    fullDamage = true;
   }
   else
   {
@@ -1430,7 +1425,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     if (FAILED(hr))
     {
       DEBUG_ERROR_HR(hr, "IddCxSwapChainGetDirtyRects Failed");
-      srcRes->SetFullDamage();
+      fullDamage = true;
     }
     else if (dirtyOut.DirtyRectOutCount == 1 &&
         dirtyRects[0].left   == 0 && dirtyRects[0].top    == 0 &&
@@ -1439,11 +1434,38 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       // One empty rectangle is IddCx's static-desktop re-encode marker. It
       // does not describe an image update and must not become full damage.
       noImageUpdate = true;
-      srcRes->SetDirtyRects(nullptr, 0);
     }
     else
-      srcRes->SetDirtyRects(dirtyRects, dirtyOut.DirtyRectOutCount);
+      resolvedDirtyRectCount = dirtyOut.DirtyRectOutCount;
   }
+
+  // Reencode frames reuse the preceding presentation number. Inspect their
+  // empty dirty rectangle above, but suppress every ordinary duplicate.
+  if (duplicateFrame && !noImageUpdate)
+    return true;
+
+  ComPtr<ID3D11Texture2D> texture;
+  hr = acquiredBuffer.As(&texture);
+  if (FAILED(hr))
+  {
+    DEBUG_ERROR_HR(hr,
+      "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
+    SetFullPendingDamage();
+    return false;
+  }
+
+  CInteropResource * srcRes = m_resPool.Get(texture);
+  if (!srcRes)
+  {
+    DEBUG_ERROR("Failed to get a CInteropResource from the pool");
+    SetFullPendingDamage();
+    return false;
+  }
+
+  if (fullDamage)
+    srcRes->SetFullDamage();
+  else
+    srcRes->SetDirtyRects(dirtyRects, resolvedDirtyRectCount);
 
   D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
   if (!noImageUpdate)
@@ -1619,16 +1641,30 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)
     m_devContext->ForceFrame();
 
-  if (noImageUpdate)
+  // Always prepare the requested static-desktop re-encode. An older
+  // publication can still fail after this frame is acquired, so deciding
+  // solely from the current pending-damage state can lose the final update.
+  int selectedCandidate = AcquireCandidate(timingToken != 0, !noImageUpdate);
+  while (selectedCandidate < 0 && noImageUpdate)
   {
-    AcquireSRWLockShared(&m_damageLock);
-    const bool hasPendingDamage = m_hasPendingDamage;
-    ReleaseSRWLockShared(&m_damageLock);
-    if (!hasPendingDamage)
+    HANDLE waitHandles[] =
+    {
+      m_terminateEvent.Get(),
+      m_candidateAvailableEvent.Get(),
+    };
+    const DWORD waitResult = WaitForMultipleObjects(
+      ARRAYSIZE(waitHandles), waitHandles, FALSE, INFINITE);
+    if (waitResult == WAIT_OBJECT_0)
       return true;
-  }
+    if (waitResult != WAIT_OBJECT_0 + 1)
+    {
+      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
+        "Failed while waiting for a frame candidate");
+      return false;
+    }
 
-  const int selectedCandidate = AcquireCandidate(timingToken != 0);
+    selectedCandidate = AcquireCandidate(timingToken != 0, false);
+  }
   if (selectedCandidate < 0)
   {
     m_devContext->FrameSuperseded();
@@ -1636,6 +1672,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   }
   const unsigned candidateIndex =
     static_cast<unsigned>(selectedCandidate);
+
   FrameCandidate& candidate = m_candidates[candidateIndex];
 
   CSRWExclusiveLock pipelineLock(&m_pipelineLock);
