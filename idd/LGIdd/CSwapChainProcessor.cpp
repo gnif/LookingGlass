@@ -1403,17 +1403,6 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     return false;
   }
 
-  /**
-   * Even though we have not performed any copy/draw operations we still need to
-   * use a fence. Because we share this texture with DirectX12 it is able to
-   * read from it before the desktop duplication API has finished updating it.
-   */
-  if (!srcRes->Signal())
-  {
-    SetFullPendingDamage();
-    return false;
-  }
-
   RECT dirtyRects[LG_MAX_DIRTY_RECTS] = {0};
   bool noImageUpdate = false;
   if (moveRegionCount || dirtyRectCount > ARRAYSIZE(dirtyRects))
@@ -1688,7 +1677,25 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       SetFullPendingDamage();
       return false;
     }
+  }
 
+  /**
+   * Even though we have not performed any copy/draw operations we still need
+   * to use a fence. Because we share this texture with DirectX12 it is able to
+   * read from it before IddCx has finished updating it.
+   */
+  if (!srcRes->Signal())
+  {
+    if (computeSlot)
+      computeSlot->Cancel();
+    copySlot->Cancel();
+    ReleaseCandidate(candidateIndex);
+    SetFullPendingDamage();
+    return false;
+  }
+
+  if (computeSlot)
+  {
     if (!srcRes->Sync(*computeSlot))
     {
       computeSlot->Cancel();
