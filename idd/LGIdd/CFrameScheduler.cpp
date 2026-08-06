@@ -842,7 +842,9 @@ void CFrameScheduler::RequestRepublish()
 {
   bool wake = false;
   AcquireSRWLockExclusive(&m_lock);
-  if (m_scheduling)
+  Client * client = FindClient(m_schedule.clientID);
+  if (m_scheduling && client && !client->deliveredFrameValid &&
+      m_republishRequestTicket == m_republishAckTicket)
   {
     ++m_republishRequestTicket;
     wake = true;
