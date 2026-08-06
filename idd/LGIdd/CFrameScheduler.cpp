@@ -22,13 +22,14 @@
 
 #include "CDebug.h"
 
-static const uint64_t MIN_PERIOD_NS   = 2000000ULL;
-static const uint64_t MAX_PERIOD_NS   = 1000000000ULL;
-static const uint32_t MIN_LEASE_MS    = 100;
-static const uint32_t MAX_LEASE_MS    = 5000;
-static const uint64_t MIN_SAFETY_NS   = 250000ULL;
-static const uint64_t LOG_INTERVAL_NS = 5000000000ULL;
-static const uint64_t CADENCE_BREAK   = 4;
+static const uint64_t MIN_SOURCE_PERIOD_NS   = 100000ULL;
+static const uint64_t MIN_SCHEDULE_PERIOD_NS = 2000000ULL;
+static const uint64_t MAX_PERIOD_NS          = 1000000000ULL;
+static const uint32_t MIN_LEASE_MS           = 100;
+static const uint32_t MAX_LEASE_MS           = 5000;
+static const uint64_t MIN_SAFETY_NS          = 250000ULL;
+static const uint64_t LOG_INTERVAL_NS        = 5000000000ULL;
+static const uint64_t CADENCE_BREAK          = 4;
 
 CFrameScheduler::CFrameScheduler()
 {
@@ -310,7 +311,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
   }
 
   if (!(schedule.flags & KVMFR_FRAME_SCHEDULE_ACTIVE) ||
-      schedule.period < MIN_PERIOD_NS ||
+      schedule.period < MIN_SCHEDULE_PERIOD_NS ||
       schedule.period > MAX_PERIOD_NS ||
       schedule.targetSlack >= schedule.period ||
       schedule.phaseError > static_cast<int64_t>(schedule.period) ||
@@ -456,7 +457,8 @@ void CFrameScheduler::ObserveFrame(uint64_t now)
       m_guestPeriod = 0;
       m_forceNext   = true;
     }
-    else if (interval >= MIN_PERIOD_NS && interval <= MAX_PERIOD_NS)
+    else if (interval >= MIN_SOURCE_PERIOD_NS &&
+             interval <= MAX_PERIOD_NS)
     {
       if (!m_guestPeriod)
         m_guestPeriod = interval;
