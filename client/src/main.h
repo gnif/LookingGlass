@@ -301,6 +301,9 @@ struct CursorState
   /* true if a pointer exit is waiting for confinement to release */
   bool exit;
 
+  /* true if a Wayland surface exit is waiting for a real leave */
+  bool surfaceExit;
+
   /* the local pointer exit target */
   struct DoublePoint exitPos;
 

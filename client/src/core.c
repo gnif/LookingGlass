@@ -70,6 +70,16 @@ static void cancelExit(const char * why)
   g_cursor.exit = false;
 }
 
+static void cancelSurfaceExit(const char * why)
+{
+  if (!g_cursor.surfaceExit)
+    return;
+
+  MTRACE("surface exit cancel=%s", why);
+  g_cursor.surfaceExit = false;
+  g_cursor.warpState   = WARP_STATE_ON;
+}
+
 static void finishExit(void)
 {
   if (!g_cursor.exit || g_cursor.viewReq)
@@ -193,6 +203,9 @@ void core_setCursorInView(bool enable)
       enable, g_cursor.viewReq, g_cursor.inView, g_state.focused,
       g_cursor.inWindow, g_cursor.grab);
 
+  if (!enable)
+    cancelSurfaceExit("view");
+
   if (g_cursor.exit &&
       (enable || !g_state.focused || !g_cursor.inWindow ||
        g_state.ignoreInput || !g_state.posInfoValid || app_isOverlayMode()))
@@ -253,6 +266,17 @@ void core_handleGrabEvent(bool active)
       warpSupport == LG_DS_WARP_NONE)
     return;
 
+  if (g_cursor.surfaceExit)
+  {
+    if (!active && g_cursor.viewReq && g_cursor.inWindow)
+    {
+      MTRACE("surface exit release pending");
+      return;
+    }
+
+    cancelSurfaceExit(active ? "confined" : "state");
+  }
+
   if (!active)
     finishExit();
 
@@ -282,6 +306,7 @@ void core_setGrabQuiet(bool enable)
   if (g_cursor.grab == enable)
     return;
 
+  cancelSurfaceExit("capture");
   g_cursor.grab = enable;
   g_cursor.acc.x = 0.0;
   g_cursor.acc.y = 0.0;
@@ -541,6 +566,20 @@ void core_updatePositionInfo(void)
   }
 
 done:
+  if (g_cursor.surfaceExit)
+  {
+    if (g_cursor.viewReq && g_cursor.inWindow && g_state.focused &&
+        !g_state.ignoreInput && g_state.posInfoValid &&
+        !app_isOverlayMode())
+    {
+      MTRACE("surface exit regrab=geometry");
+      g_cursor.warpState = WARP_STATE_ON;
+      g_state.ds->grabPointer();
+    }
+    else
+      core_setCursorInView(false);
+  }
+
   MTRACE("geometry src=%dx%d dst=%d,%d,%d,%d win=%dx%d "
       "scale=%.4f,%.4f uiScale=%.4f rot=%d/%d border=%d,%d,%d,%d "
       "valid=%d", g_state.srcSize.x, g_state.srcSize.y,
@@ -885,6 +924,15 @@ fallback:
           break;
 
         case LG_DS_WARP_SURFACE:
+          if (tx < 0 || tx >= g_state.windowW ||
+              ty < 0 || ty >= g_state.windowH)
+          {
+            g_cursor.surfaceExit = true;
+            g_state.ds->ungrabPointer();
+            core_warpPointer(tx, ty, true);
+            break;
+          }
+
           startExit(local.x, local.y);
           return;
 

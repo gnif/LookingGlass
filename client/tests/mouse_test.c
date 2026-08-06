@@ -329,6 +329,83 @@ static void setConf(bool active)
   core_handleGrabEvent(active);
 }
 
+static void setSurfaceEdge(double x, double y)
+{
+  reset();
+  g_state.windowW = 100;
+  g_state.windowH = 80;
+  g_state.dstRect = (LG_RendererRect) {
+    .valid = true,
+    .x     = 0,
+    .y     = 0,
+    .w     = 100,
+    .h     = 80,
+  };
+  setLocal(x, y);
+}
+
+static void testSurfaceExit(void)
+{
+  setSurfaceEdge(99, 40);
+
+  core_handleMouseNormal(1, 0);
+
+  const int drop = first(EV_UNGRAB);
+  const int warp = first(EV_WARP);
+  const int move = first(EV_MOTION);
+  CHECK(drop >= 0);
+  CHECK(warp > drop);
+  CHECK(move > warp);
+  CHECK(m.ev[warp].x == 100);
+  CHECK(m.ev[warp].y == 40);
+  CHECK(m.ev[move].x == 1);
+  CHECK(m.ev[move].y == 0);
+  CHECK(g_cursor.surfaceExit);
+  CHECK(g_cursor.inWindow);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.viewReq);
+
+  core_handleMouseNormal(1, 0);
+  CHECK(count(EV_MOTION) == 2);
+  CHECK(g_cursor.surfaceExit);
+  CHECK(g_cursor.inWindow);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.viewReq);
+
+  core_handleGuestMouseUpdate();
+  CHECK(count(EV_GUEST) == 1);
+
+  setLocal(99, 40);
+  core_handleMouseNormal(-1, 0);
+  CHECK(m.conf.req);
+  CHECK(g_cursor.surfaceExit);
+
+  setConf(false);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.surfaceExit);
+
+  setConf(true);
+  CHECK(g_cursor.inView);
+  CHECK(!g_cursor.surfaceExit);
+
+  setSurfaceEdge(0, 79);
+  core_handleMouseNormal(-1, 1);
+  CHECK(g_cursor.surfaceExit);
+  CHECK(g_cursor.inWindow);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.viewReq);
+  CHECK(count(EV_MOTION) == 1);
+
+  core_handleGuestMouseUpdate();
+  CHECK(count(EV_GUEST) == 1);
+
+  g_cursor.inWindow = false;
+  core_setCursorInView(false);
+  CHECK(!g_cursor.surfaceExit);
+  CHECK(!g_cursor.inView);
+  CHECK(!g_cursor.viewReq);
+}
+
 static void startExit(void)
 {
   reset();
@@ -742,6 +819,7 @@ struct Test
 
 static const struct Test tests[] = {
   { "inset-exit"      , testInsetExit    },
+  { "surface-exit"    , testSurfaceExit  },
   { "exit-delay"      , testExitWait     },
   { "exit-guest"      , testExitGuest    },
   { "exit-cancel"     , testExitCancel   },

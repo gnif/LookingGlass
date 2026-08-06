@@ -553,7 +553,10 @@ static void waylandCleanUpPointer(bool notify)
   MLOG(confSeq, "conf destroy id=%u why=pointer", confId);
 
   if (event)
+  {
+    app_handleEnterEvent(false);
     app_handleGrabEvent(false);
+  }
 }
 
 // Seat-handling listeners.
