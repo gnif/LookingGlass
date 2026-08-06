@@ -110,7 +110,10 @@ private:
   size_t            m_alignSize           = 0;
   size_t            m_frameMemoryOffset   = 0;
   size_t            m_maxFrameSize        = 0;
-  std::atomic<LONG> m_publishedFrameIndex = -1;
+  // LGMP publication precedes copy completion, so only the ready index is safe
+  // to retain and replay.
+  std::atomic<LONG> m_submittedFrameIndex = -1;
+  std::atomic<LONG> m_readyFrameIndex     = -1;
   std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_BUFFER_LEN] = {};
   SRWLOCK           m_framePublishLock     = SRWLOCK_INIT;
   uint64_t          m_framePublishSequence = 0;
@@ -270,7 +273,7 @@ public:
   bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule);
   bool HasPublishedFrame() const
   {
-    return m_publishedFrameIndex.load(std::memory_order_acquire) >= 0;
+    return m_readyFrameIndex.load(std::memory_order_acquire) >= 0;
   }
   void ProcessFrameQueue();
   bool GetSharedFrameTarget(uint64_t now, uint64_t& target);
@@ -283,7 +286,7 @@ public:
     const CFrameScheduler::Schedule& schedule, bool periodic);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
-  void CompleteFrameBuffer(unsigned frameIndex);
+  void CompleteFrameBuffer(unsigned frameIndex, bool succeeded);
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;

@@ -1187,7 +1187,8 @@ bool CIndirectDeviceContext::SetupLGMP(size_t alignSize)
   }
 
   m_maxFrameSize = maxFrameSize;
-  m_publishedFrameIndex.store(-1, std::memory_order_release);
+  m_submittedFrameIndex.store(-1, std::memory_order_release);
+  m_readyFrameIndex.store(-1, std::memory_order_release);
   m_framePublishSequence = 0;
   memset(m_frameLastPublishSequence, 0,
     sizeof(m_frameLastPublishSequence));
@@ -1241,7 +1242,8 @@ void CIndirectDeviceContext::DeInitLGMP()
   if (m_lgmp == nullptr)
   {
     m_frameScheduler.Reset();
-    m_publishedFrameIndex.store(-1, std::memory_order_release);
+    m_submittedFrameIndex.store(-1, std::memory_order_release);
+    m_readyFrameIndex.store(-1, std::memory_order_release);
     m_framePublishSequence = 0;
     memset(m_frameLastPublishSequence, 0,
       sizeof(m_frameLastPublishSequence));
@@ -1261,7 +1263,8 @@ void CIndirectDeviceContext::DeInitLGMP()
   m_frameScheduler.Reset();
 
   AcquireSRWLockExclusive(&m_framePublishLock);
-  m_publishedFrameIndex.store(-1, std::memory_order_release);
+  m_submittedFrameIndex.store(-1, std::memory_order_release);
+  m_readyFrameIndex.store(-1, std::memory_order_release);
   m_framePublishSequence = 0;
   memset(m_frameLastPublishSequence, 0,
     sizeof(m_frameLastPublishSequence));
@@ -1633,15 +1636,15 @@ bool CIndirectDeviceContext::HasMatchingOwnerDelivery(
 
 int CIndirectDeviceContext::FindAvailableFrameBuffer() const
 {
-  const LONG publishedFrameIndex =
-    m_publishedFrameIndex.load(std::memory_order_acquire);
+  const LONG readyFrameIndex =
+    m_readyFrameIndex.load(std::memory_order_acquire);
   int      available     = -1;
   uint64_t newestPublish = 0;
   for (unsigned frameIndex = 0;
        frameIndex < LGMP_Q_FRAME_BUFFER_LEN;
        ++frameIndex)
   {
-    if (static_cast<LONG>(frameIndex) == publishedFrameIndex ||
+    if (static_cast<LONG>(frameIndex) == readyFrameIndex ||
         m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
         m_frameDelivery[frameIndex].ownerQueueMask ||
         m_frameDelivery[frameIndex].sharedPending ||
@@ -1722,7 +1725,7 @@ bool CIndirectDeviceContext::GetSharedFrameTarget(uint64_t now,
 
   AcquireSRWLockShared(&m_framePublishLock);
   const LONG frameIndex =
-    m_publishedFrameIndex.load(std::memory_order_acquire);
+    m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
@@ -1752,7 +1755,7 @@ bool CIndirectDeviceContext::ReplaySharedFrame(uint64_t now, bool& retry)
 
   AcquireSRWLockExclusive(&m_framePublishLock);
   const LONG frameIndex =
-    m_publishedFrameIndex.load(std::memory_order_acquire);
+    m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
@@ -1992,7 +1995,7 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
   if (published)
   {
     m_frameLastPublishSequence[frameIndex] = ++m_framePublishSequence;
-    m_publishedFrameIndex.store(
+    m_submittedFrameIndex.store(
       static_cast<LONG>(frameIndex), std::memory_order_release);
   }
   ReleaseSRWLockExclusive(&m_framePublishLock);
@@ -2024,7 +2027,7 @@ bool CIndirectDeviceContext::RepublishFrameBuffer(
   }
 
   const LONG frameIndex =
-    m_publishedFrameIndex.load(std::memory_order_acquire);
+    m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire))
   {
@@ -2150,13 +2153,31 @@ void CIndirectDeviceContext::FailFrameBuffer(unsigned frameIndex)
 
   InterlockedExchange((volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
   FinalizeFrameBuffer(frameIndex);
-  CompleteFrameBuffer(frameIndex);
+  CompleteFrameBuffer(frameIndex, false);
 }
 
-void CIndirectDeviceContext::CompleteFrameBuffer(unsigned frameIndex)
+void CIndirectDeviceContext::CompleteFrameBuffer(
+  unsigned frameIndex, bool succeeded)
 {
-  if (frameIndex < LGMP_Q_FRAME_BUFFER_LEN)
-    m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
+    return;
+
+  AcquireSRWLockExclusive(&m_framePublishLock);
+  if (succeeded)
+  {
+    // Completion callbacks may run out of order. Never replace a newer ready
+    // frame with an older submission.
+    const uint64_t sequence = m_frameLastPublishSequence[frameIndex];
+    const LONG readyFrameIndex =
+      m_readyFrameIndex.load(std::memory_order_acquire);
+    if (sequence &&
+        (readyFrameIndex < 0 ||
+          sequence > m_frameLastPublishSequence[readyFrameIndex]))
+      m_readyFrameIndex.store(
+        static_cast<LONG>(frameIndex), std::memory_order_release);
+  }
+  m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
 void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,

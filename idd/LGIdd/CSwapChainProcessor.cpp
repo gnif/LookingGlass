@@ -744,7 +744,7 @@ void CSwapChainProcessor::CompletionFunction(
   sc->m_devContext->RecordFrameTiming(readyEnd - publishStart);
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
-  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex());
+  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
   sc->ReleaseCandidate(candidateIndex);
 }
 
