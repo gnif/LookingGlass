@@ -55,6 +55,11 @@ static bool isInView(void)
     g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
 }
 
+static int exitPos(double pos, int edge)
+{
+  return pos < edge ? floor(pos) : ceil(pos);
+}
+
 bool core_inputEnabled(void)
 {
   return g_params.useSpiceInput && !g_state.ignoreInput &&
@@ -726,8 +731,8 @@ fallback:
       didExit = true;
       local.x += move.x;
       local.y += move.y;
-      const int tx = (local.x <= 0.0) ? floor(local.x) : ceil(local.x);
-      const int ty = (local.y <= 0.0) ? floor(local.y) : ceil(local.y);
+      const int tx = exitPos(local.x, g_state.dstRect.x);
+      const int ty = exitPos(local.y, g_state.dstRect.y);
 
       MTRACE("exit local=%.3f,%.3f move=%.3f,%.3f target=%d,%d "
           "dst=%d,%d,%d,%d support=%d", local.x - move.x,
