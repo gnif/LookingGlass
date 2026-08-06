@@ -709,15 +709,18 @@ void CFrameScheduler::LogStatistics(uint64_t now)
     return;
   }
 
+  const uint64_t elapsed   = now               - m_lastLog;
   const uint64_t acquired  = m_acquiredFrames  - m_lastLogAcquired;
   const uint64_t skipped   = m_skippedFrames   - m_lastLogSkipped;
   const uint64_t published = m_publishedFrames - m_lastLogPublished;
-  DEBUG_TRACE("Frame schedule owner %u: %.3f Hz client, %.3f Hz guest, "
+  const double   acquiredRate =
+    static_cast<double>(acquired) * 1000000000.0 / elapsed;
+  DEBUG_TRACE("Frame schedule owner %u: %.3f Hz client, %.3f Hz acquired, "
     "%.3f ms work, %.3f ms phase; %llu acquired, %llu skipped, "
     "%llu published",
     m_schedule.clientID,
     1000000000.0 / m_schedule.period,
-    m_guestPeriod ? 1000000000.0 / m_guestPeriod : 0.0,
+    acquiredRate,
     m_workEstimate / 1000000.0,
     m_lastPhaseError / 1000000.0,
     static_cast<unsigned long long>(acquired),
