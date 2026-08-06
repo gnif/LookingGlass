@@ -495,27 +495,28 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
   schedule  = m_schedule;
   republish = m_republishNext;
 
+  const uint64_t safety =
+    max(MIN_SAFETY_NS, m_workEstimate / 8);
+  const uint64_t lead =
+    m_schedule.targetSlack + m_workEstimate + safety;
+  const uint64_t periodicTarget = m_nextDeadline > lead ?
+    m_nextDeadline - lead : now;
+
   if (m_forceNext)
   {
-    periodic = m_nextDeadline <= now;
+    periodic = periodicTarget <= now;
     ReleaseSRWLockExclusive(&m_lock);
     return true;
   }
 
   periodic = true;
-  if (m_nextDeadline <= now)
+  if (periodicTarget <= now)
   {
     ReleaseSRWLockExclusive(&m_lock);
     return true;
   }
 
-  const uint64_t safety =
-    max(MIN_SAFETY_NS, m_workEstimate / 8);
-  const uint64_t lead =
-    m_schedule.targetSlack + m_workEstimate + safety;
-  target = m_nextDeadline > lead ? m_nextDeadline - lead : now;
-  if (target < now)
-    target = now;
+  target = periodicTarget;
   ReleaseSRWLockExclusive(&m_lock);
   return true;
 }
