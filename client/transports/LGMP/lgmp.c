@@ -1321,7 +1321,8 @@ static LG_TransportStatus lgmp_controlStatus(LG_Transport * this,
   if (status != LGMP_OK)
     return status == LGMP_ERR_INVALID_SESSION ? LG_TRANSPORT_DISCONNECTED :
       LG_TRANSPORT_ERROR;
-  return serial >= token ? LG_TRANSPORT_OK : LG_TRANSPORT_UNAVAILABLE;
+  return (int32_t)(serial - (uint32_t)token) >= 0 ?
+    LG_TRANSPORT_OK : LG_TRANSPORT_UNAVAILABLE;
 }
 
 const LG_TransportOps LGT_LGMP =

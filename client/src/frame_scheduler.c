@@ -35,6 +35,8 @@
 #define FRAME_SCHEDULER_TARGET_SLACK_NS   500000ULL
 #define FRAME_SCHEDULER_MIN_PERIOD_NS     2000000ULL
 #define FRAME_SCHEDULER_MAX_PERIOD_NS     1000000000ULL
+#define FRAME_SCHEDULER_CONTROL_RETRY_NS  10000000ULL
+#define FRAME_SCHEDULER_CONTROL_RETRY_MAX 250000000ULL
 
 static struct
 {
@@ -43,10 +45,14 @@ static struct
   _Atomic(bool)     supported;
   _Atomic(bool)     active;
   bool              controlPending;
+  bool              controlFaulted;
+  bool              enqueueFaulted;
   bool              immediatePending;
   _Atomic(uint32_t) generation;
   _Atomic(uint64_t) period;
   uint64_t          lastSend;
+  uint64_t          nextControlCheck;
+  uint64_t          controlRetryDelay;
   _Atomic(uint64_t) lastCadence;
 
   int64_t  phaseError;
@@ -70,24 +76,57 @@ static uint64_t presentationPeriod(void)
   return 0;
 }
 
-static bool controlReady(void)
+static void controlBackoff(uint64_t now)
+{
+  uint64_t delay = l_frameScheduler.controlRetryDelay;
+  if (!delay)
+    delay = FRAME_SCHEDULER_CONTROL_RETRY_NS;
+
+  l_frameScheduler.nextControlCheck = now + delay;
+  l_frameScheduler.controlRetryDelay =
+    delay < FRAME_SCHEDULER_CONTROL_RETRY_MAX / 2 ?
+      delay * 2 : FRAME_SCHEDULER_CONTROL_RETRY_MAX;
+}
+
+static bool controlReady(uint64_t now)
 {
   if (!l_frameScheduler.controlPending)
-    return true;
+    return now >= l_frameScheduler.nextControlCheck;
+
+  if (now < l_frameScheduler.nextControlCheck)
+    return false;
 
   const LG_TransportStatus status = g_state.transportOps->controlStatus(
       g_state.transport, l_frameScheduler.controlToken);
-  if (status == LG_TRANSPORT_UNAVAILABLE)
+  if (status != LG_TRANSPORT_OK)
+  {
+    if (status != LG_TRANSPORT_UNAVAILABLE &&
+        !l_frameScheduler.controlFaulted)
+    {
+      DEBUG_WARN(
+          "Frame-schedule acknowledgement failed with status %d", status);
+      l_frameScheduler.controlFaulted = true;
+    }
+    controlBackoff(now);
     return false;
+  }
 
-  l_frameScheduler.controlPending = false;
-  return status == LG_TRANSPORT_OK;
+  l_frameScheduler.controlPending   = false;
+  l_frameScheduler.nextControlCheck = 0;
+  l_frameScheduler.controlRetryDelay =
+    FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  if (l_frameScheduler.controlFaulted)
+  {
+    l_frameScheduler.controlFaulted   = false;
+    l_frameScheduler.immediatePending = true;
+  }
+  return true;
 }
 
 static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
-    uint64_t period)
+    uint64_t period, uint64_t now)
 {
-  if (!controlReady())
+  if (!controlReady(now))
     return false;
 
   int64_t  phaseError;
@@ -118,15 +157,24 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
 
   const LG_TransportStatus status = g_state.transportOps->sendControl(
       g_state.transport, &control, &l_frameScheduler.controlToken);
-  if (status == LG_TRANSPORT_UNAVAILABLE)
-    return false;
   if (status != LG_TRANSPORT_OK)
   {
-    DEBUG_WARN("Frame-schedule control failed with status %d", status);
+    if (status != LG_TRANSPORT_UNAVAILABLE &&
+        !l_frameScheduler.enqueueFaulted)
+    {
+      DEBUG_WARN("Frame-schedule control failed with status %d", status);
+      l_frameScheduler.enqueueFaulted = true;
+    }
+    controlBackoff(now);
     return false;
   }
 
-  l_frameScheduler.controlPending = true;
+  l_frameScheduler.controlPending    = true;
+  l_frameScheduler.enqueueFaulted    = false;
+  l_frameScheduler.nextControlCheck  =
+    now + FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  l_frameScheduler.controlRetryDelay =
+    FRAME_SCHEDULER_CONTROL_RETRY_NS;
   if (flags & LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE)
     l_frameScheduler.immediatePending = false;
   LG_LOCK(l_frameScheduler.lock);
@@ -155,8 +203,13 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
     features & LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
   l_frameScheduler.active           = false;
   l_frameScheduler.controlPending   = false;
+  l_frameScheduler.controlFaulted   = false;
+  l_frameScheduler.enqueueFaulted   = false;
   l_frameScheduler.immediatePending = true;
   l_frameScheduler.lastSend         = 0;
+  l_frameScheduler.nextControlCheck = 0;
+  l_frameScheduler.controlRetryDelay =
+    FRAME_SCHEDULER_CONTROL_RETRY_NS;
   l_frameScheduler.lastCadence      = 0;
   ++l_frameScheduler.generation;
 
@@ -173,12 +226,21 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
 void frameScheduler_stop(void)
 {
   if (l_frameScheduler.supported && l_frameScheduler.active)
-    sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0);
+  {
+    // Poll an accepted message once more before abandoning it with the
+    // session. A definite enqueue failure is safe to retry immediately.
+    l_frameScheduler.nextControlCheck = 0;
+    sendSchedule(
+        LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0, nanotime());
+  }
 
   l_frameScheduler.supported        = false;
   l_frameScheduler.active           = false;
   l_frameScheduler.controlPending   = false;
+  l_frameScheduler.controlFaulted   = false;
+  l_frameScheduler.enqueueFaulted   = false;
   l_frameScheduler.immediatePending = false;
+  l_frameScheduler.nextControlCheck = 0;
 }
 
 void frameScheduler_observeCadence(void)
@@ -199,7 +261,8 @@ void frameScheduler_update(void)
       now - lastCadence > FRAME_SCHEDULER_CADENCE_GRACE_NS)
   {
     if (l_frameScheduler.active &&
-        sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0))
+        sendSchedule(
+          LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0, now))
     {
       l_frameScheduler.active           = false;
       l_frameScheduler.period           = 0;
@@ -266,7 +329,7 @@ void frameScheduler_update(void)
   if (l_frameScheduler.immediatePending)
     flags |= LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE;
 
-  if (sendSchedule(flags, l_frameScheduler.period))
+  if (sendSchedule(flags, l_frameScheduler.period, now))
   {
     l_frameScheduler.active   = true;
     l_frameScheduler.lastSend = now;
