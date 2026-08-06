@@ -512,6 +512,12 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
   {
     if (m_slots[slotIndex].Acquire())
       return &m_slots[slotIndex];
+
+    // The GPU may already be finished while its thread-pool callback is
+    // still pending. Complete it here before sleeping on callback dispatch.
+    m_slots[slotIndex].OnCompletion(false);
+    if (m_slots[slotIndex].Acquire())
+      return &m_slots[slotIndex];
     if (m_failed.load(std::memory_order_acquire))
       break;
 
