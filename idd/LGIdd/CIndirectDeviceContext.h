@@ -215,6 +215,11 @@ private:
   // Never held across an IddCx API call - snapshot then call.
   mutable SRWLOCK m_modeLock = SRWLOCK_INIT;
 
+  // Serializes registry-backed mode changes with rebuilding m_displayModes.
+  // Reload requests arrive on the pipe thread while dynamic resolution
+  // requests arrive on the LGMP timer thread.
+  SRWLOCK m_modeReloadLock = SRWLOCK_INIT;
+
   CSettings::DisplayModes m_displayModes;
   CEdid                   m_edid;
 
@@ -238,6 +243,7 @@ public:
   void InitAdapter();
   void FinishAdapterInit(UINT connectorIndex);
   void FinishInit(UINT connectorIndex);
+  void ReloadSettings();
   void ReplugMonitor();
 
   void OnMonitorDestroyed(IDDCX_MONITOR monitor);

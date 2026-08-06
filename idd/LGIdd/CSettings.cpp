@@ -76,7 +76,7 @@ CSettings::DisplayModes CSettings::LoadModes()
   return displayModes;
 }
 
-void CSettings::SetExtraMode(const DisplayMode& mode)
+bool CSettings::SetExtraMode(const DisplayMode& mode)
 {
   WCHAR buf[64];
   _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"%ux%u@%u%s",
@@ -94,15 +94,24 @@ void CSettings::SetExtraMode(const DisplayMode& mode)
 
   if (ec != ERROR_SUCCESS)
   {
-    DEBUG_INFO("Failed to write key");
-    return;
+    DEBUG_ERROR_HR(ec, "Failed to open settings key for ExtraMode");
+    return false;
   }
 
   const WCHAR* valueName = L"ExtraMode";
   const DWORD  cb = (DWORD)((wcslen(buf) + 1) * sizeof(WCHAR));
 
-  RegSetValueExW(hKey, valueName, 0, REG_SZ, (const BYTE*)buf, cb);
+  ec = RegSetValueExW(hKey, valueName, 0, REG_SZ,
+    (const BYTE*)buf, cb);
   RegCloseKey(hKey);
+
+  if (ec != ERROR_SUCCESS)
+  {
+    DEBUG_ERROR_HR(ec, "Failed to write ExtraMode");
+    return false;
+  }
+
+  return true;
 }
 
 std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defaultValue)

@@ -39,7 +39,7 @@ class CSettings
     CSettings();
 
     DisplayModes LoadModes();
-    void SetExtraMode(const DisplayMode & mode);
+    bool SetExtraMode(const DisplayMode & mode);
     bool GetExtraMode(DisplayMode & mode);
     unsigned GetDefaultRefresh() const;
 

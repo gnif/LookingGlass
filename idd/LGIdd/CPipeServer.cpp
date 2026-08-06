@@ -262,7 +262,7 @@ void CPipeServer::HandleReloadSettings()
 
   AcquireSRWLockShared(&m_deviceContextLock);
   if (m_deviceContext)
-    m_deviceContext->ReplugMonitor();
+    m_deviceContext->ReloadSettings();
   ReleaseSRWLockShared(&m_deviceContextLock);
 }
 

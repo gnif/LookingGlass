@@ -635,6 +635,39 @@ void CIndirectDeviceContext::ReplugMonitor()
     m_finishInitQueued.store(1);
 }
 
+void CIndirectDeviceContext::ReloadSettings()
+{
+  bool modesLoaded = false;
+
+  AcquireSRWLockExclusive(&m_modeReloadLock);
+
+  CSettings::DisplayMode extraMode;
+  if (g_settings.GetExtraMode(extraMode))
+  {
+    const unsigned refresh = g_settings.GetDefaultRefresh();
+    if (extraMode.refresh != refresh)
+    {
+      extraMode.refresh = refresh;
+      if (!g_settings.SetExtraMode(extraMode))
+      {
+        ReleaseSRWLockExclusive(&m_modeReloadLock);
+        return;
+      }
+    }
+  }
+
+  modesLoaded = PopulateDefaultModes();
+  ReleaseSRWLockExclusive(&m_modeReloadLock);
+
+  if (!modesLoaded)
+  {
+    DEBUG_ERROR("Failed to reload the display mode list");
+    return;
+  }
+
+  ReplugMonitor();
+}
+
 void CIndirectDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
 {
   AcquireSRWLockExclusive(&m_stateLock);
@@ -936,18 +969,22 @@ void CIndirectDeviceContext::SetResolution(uint32_t width, uint32_t height)
   mode.refresh   = g_settings.GetDefaultRefresh();
   mode.preferred = true;
 
-  AcquireSRWLockExclusive(&m_stateLock);
-  m_setMode   = mode;
-  m_doSetMode = true;
-  ReleaseSRWLockExclusive(&m_stateLock);
+  bool modesLoaded = false;
+  AcquireSRWLockExclusive(&m_modeReloadLock);
+  if (g_settings.SetExtraMode(mode))
+    modesLoaded = PopulateDefaultModes();
+  ReleaseSRWLockExclusive(&m_modeReloadLock);
 
-  g_settings.SetExtraMode(mode);
-
-  if (!PopulateDefaultModes())
+  if (!modesLoaded)
   {
     DEBUG_ERROR("Failed to rebuild the display mode list");
     return;
   }
+
+  AcquireSRWLockExclusive(&m_stateLock);
+  m_setMode   = mode;
+  m_doSetMode = true;
+  ReleaseSRWLockExclusive(&m_stateLock);
 
   // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode list,
   // so the only reliable way to apply a new mode is to depart and re-arrive the
