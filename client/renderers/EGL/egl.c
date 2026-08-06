@@ -374,8 +374,13 @@ static void egl_onRestart(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
-  eglDestroyContext(this->display, this->frameContext);
-  this->frameContext = NULL;
+  if (this->frameContext)
+  {
+    egl_stateCheckShared();
+    egl_desktopRestart(this->desktop);
+    eglDestroyContext(this->display, this->frameContext);
+    this->frameContext = NULL;
+  }
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     this->desktopDamage[this->desktopDamageIdx].frameToken =
@@ -746,7 +751,8 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 
 static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
     int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount,
-    LG_RendererFrameToken frameToken)
+    LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
@@ -755,7 +761,8 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
   uint64_t       waitTimeNs = 0;
   if (unlikely(!egl_desktopUpdate(
           this->desktop, frame, frameToken, dmaFd,
-          damageRects, damageRectsCount, &waitTimeNs)))
+          damageRects, damageRectsCount, &waitTimeNs,
+          releaseFn, releaseOpaque, releaseHandle)))
   {
     DEBUG_INFO("Failed to to update the desktop");
     return false;
@@ -788,6 +795,16 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
   });
 
   return true;
+}
+
+static void egl_onFramePoll(LG_Renderer * renderer)
+{
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  if (!this->frameContext)
+    return;
+
+  egl_stateCheckShared();
+  egl_desktopPoll(this->desktop);
 }
 
 static void debugCallback(GLenum source, GLenum type, GLuint id,
@@ -1835,6 +1852,7 @@ struct LG_RendererOps LGR_EGL =
   .onMouseEvent          = egl_onMouseEvent,
   .onFrameFormat         = egl_onFrameFormat,
   .onFrame               = egl_onFrame,
+  .onFramePoll           = egl_onFramePoll,
   .renderStartup         = egl_renderStartup,
   .render                = egl_render,
   .capture               = egl_capture,

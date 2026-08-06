@@ -51,7 +51,10 @@ bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
     LG_RendererFrameToken frameToken, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount,
-    uint64_t * waitTimeNs);
+    uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle);
+void egl_desktopRestart(EGL_Desktop * desktop);
+void egl_desktopPoll(EGL_Desktop * desktop);
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height);
 bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     unsigned int outputHeight, const float x, const float y,

@@ -145,6 +145,12 @@ typedef struct LG_TransportFrame
   int dmaFD;
   const FrameDamageRect * damageRects;
   uint32_t damageRectsCount;
+
+  /* A transport may keep the frame payload alive asynchronously after
+   * onFrame returns. The callback is idempotent and releases that ownership. */
+  LG_FrameReleaseFn releaseFn;
+  void            * releaseOpaque;
+  uint64_t          releaseHandle;
 }
 LG_TransportFrame;
 

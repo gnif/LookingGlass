@@ -605,7 +605,8 @@ static int renderThread(void * unused)
     return 1;
   }
 
-  if (g_state.lgr->ops.supports && !RENDERER(supports, LG_SUPPORTS_DMABUF))
+  if (!g_state.lgr->ops.supports ||
+      !RENDERER(supports, LG_SUPPORTS_DMABUF))
     g_state.useDMA = false;
 
   /* start up the fps timer */
@@ -935,7 +936,11 @@ int main_frameThread(void * unused)
     if (status != LG_TRANSPORT_OK)
     {
       if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
+      {
+        if (g_state.lgr->ops.onFramePoll)
+          RENDERER(onFramePoll);
         continue;
+      }
       if (status == LG_TRANSPORT_DISCONNECTED)
         app_setState(APP_STATE_RESTART);
       else if (status == LG_TRANSPORT_END)
@@ -1109,8 +1114,13 @@ int main_frameThread(void * unused)
     const LG_RendererFrameToken frameToken = frameTimingReserve();
     g_state.frameImportTime     = 0;
     g_state.frameImportWaitTime = 0;
+
+    const bool rendererOwnsFrame = frame.dmaFD >= 0 && frame.releaseFn;
     if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
-          frame.damageRects, damageCount, frameToken))
+          frame.damageRects, damageCount, frameToken,
+          rendererOwnsFrame ? frame.releaseFn     : NULL,
+          rendererOwnsFrame ? frame.releaseOpaque : NULL,
+          rendererOwnsFrame ? frame.releaseHandle : 0))
     {
       frameTimingCancel(frameToken);
       g_state.transportOps->releaseFrame(g_state.transport, &frame);
@@ -1118,6 +1128,14 @@ int main_frameThread(void * unused)
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
+
+    /* A DMA snapshot can complete on the render thread immediately after it
+     * is signalled below, so sample producer timing while this lease is still
+     * unambiguously owned by the frame thread. */
+    LG_TransportFrameTiming timing = {};
+    if (g_state.transportOps->getFrameTiming)
+      g_state.transportOps->getFrameTiming(
+          g_state.transport, &frame, &timing);
 
     const uint64_t queueStart = nanotime();
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
@@ -1142,11 +1160,6 @@ int main_frameThread(void * unused)
       lgSignalEvent(g_state.frameEvent);
     }
 
-    LG_TransportFrameTiming timing = {};
-    if (g_state.transportOps->getFrameTiming)
-      g_state.transportOps->getFrameTiming(
-          g_state.transport, &frame, &timing);
-
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
         g_params.requestActivation)
       g_state.ds->requestActivation();
@@ -1165,18 +1178,27 @@ int main_frameThread(void * unused)
 
     frameTimingFinishFrame(frameToken, &timing);
 
-    g_state.transportOps->releaseFrame(g_state.transport, &frame);
+    if (!rendererOwnsFrame)
+      g_state.transportOps->releaseFrame(g_state.transport, &frame);
     app_useSpiceDisplay(false);
   }
-
-  if (g_state.transportOps->stopFrame)
-    g_state.transportOps->stopFrame(g_state.transport);
-
-  RENDERER(onRestart);
 
   if (app_getState() != APP_STATE_SHUTDOWN)
     if (!app_useSpiceDisplay(true))
       overlaySplash_show(true);
+
+  /* Queue the fallback source before clearing desktop snapshots. The render
+   * thread processes this transition under lgrLock before its next render, so
+   * restart cannot expose an empty desktop frame between the two operations. */
+  LG_LOCK(g_state.lgrLock);
+  RENDERER(onRestart);
+  LG_UNLOCK(g_state.lgrLock);
+
+  /* Renderer reset requests release for every asynchronous DMA snapshot.
+   * Drain those requests before the transport unsubscribes or reconnects. */
+  if (g_state.transportOps->stopFrame)
+    g_state.transportOps->stopFrame(g_state.transport);
+
   return 0;
 }
 

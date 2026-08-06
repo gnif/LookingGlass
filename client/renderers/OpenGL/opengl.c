@@ -396,9 +396,18 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
 
 bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
     const FrameDamageRect * damage, int damageCount,
-    LG_RendererFrameToken frameToken)
+    LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
+
+  /* The legacy renderer retains the shared framebuffer until render. It does
+   * not support asynchronous DMA ownership. */
+  if (releaseFn)
+    return false;
+
+  (void)releaseOpaque;
+  (void)releaseHandle;
 
   LG_LOCK(this->frameLock);
   this->frame             = frame;

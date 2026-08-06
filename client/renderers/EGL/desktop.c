@@ -72,7 +72,7 @@ struct EGL_Desktop
   EGLDisplay * display;
 
   EGL_Texture          * texture;
-  struct DesktopShader dmaShader, shader;
+  struct DesktopShader   shader;
   EGL_DesktopRects     * mesh;
   GLfloat                matrix[6];
 
@@ -194,17 +194,6 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  if (useDMA)
-    if (!egl_initDesktopShader(
-      &desktop->dmaShader,
-      b_shader_desktop_vert    , b_shader_desktop_vert_size,
-      b_shader_desktop_rgb_frag, b_shader_desktop_rgb_frag_size,
-      true))
-    {
-      DEBUG_ERROR("Failed to initialize the desktop DMA shader");
-      return false;
-    }
-
   app_registerKeybind(KEY_N, toggleNV, desktop,
       "Toggle night vision mode");
 
@@ -264,7 +253,6 @@ void egl_desktopFree(EGL_Desktop ** desktop)
   egl_textureFree    (&(*desktop)->texture         );
   egl_textureFree    (&(*desktop)->spiceTexture    );
   egl_shaderFree     (&(*desktop)->shader   .shader);
-  egl_shaderFree     (&(*desktop)->dmaShader.shader);
   egl_desktopRectsFree(&(*desktop)->mesh           );
   egl_postProcessFree(&(*desktop)->pp);
 
@@ -394,12 +382,14 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
     LG_RendererFrameToken frameToken, int dmaFd,
     const FrameDamageRect * damageRects, int damageRectsCount,
-    uint64_t * waitTimeNs)
+    uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle)
 {
   if (likely(desktop->useDMA && dmaFd >= 0))
   {
     if (likely(egl_textureUpdateFromDMA(
-            desktop->texture, frame, frameToken, dmaFd, waitTimeNs)))
+            desktop->texture, frame, frameToken, dmaFd, waitTimeNs,
+            releaseFn, releaseOpaque, releaseHandle)))
     {
       atomic_store(&desktop->processFrame, true);
       return true;
@@ -442,9 +432,24 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
    */
   if (likely(egl_textureUpdateFromFrame(desktop->texture, frame, frameToken,
         damageRects, damageRectsCount, waitTimeNs)))
+  {
+    if (releaseFn)
+      releaseFn(releaseOpaque, releaseHandle);
     return true;
+  }
 
   return false;
+}
+
+void egl_desktopRestart(EGL_Desktop * desktop)
+{
+  egl_textureReset(desktop->texture);
+  atomic_store(&desktop->processFrame, false);
+}
+
+void egl_desktopPoll(EGL_Desktop * desktop)
+{
+  egl_texturePoll(desktop->texture);
 }
 
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height)
@@ -464,21 +469,21 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
 {
   EGL_Texture * tex;
   int width, height;
-  bool dma;
+
+  /* This also retires completed snapshots while the SPICE display is shown. */
+  egl_texturePoll(desktop->texture);
 
   if (unlikely(desktop->useSpice))
   {
     tex    = desktop->spiceTexture;
     width  = desktop->spiceWidth;
     height = desktop->spiceHeight;
-    dma    = false;
   }
   else
   {
     tex    = desktop->texture;
     width  = desktop->width;
     height = desktop->height;
-    dma    = desktop->useDMA;
   }
 
   if (unlikely(outputWidth == 0 || outputHeight == 0))
@@ -535,7 +540,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     const uint64_t effectsStart  = nanotime();
     const bool     postProcessed = egl_postProcessRun(
         desktop->pp, tex, desktop->mesh,
-        width, height, outputWidth, outputHeight, dma,
+        width, height, outputWidth, outputHeight, false,
         hdr && desktop->hdrPQ, (float)hdrPeak);
     *effectsTime = nanotime() - effectsStart;
 
@@ -574,6 +579,8 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   {
     if (bindStatus != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to bind the desktop texture");
+    if (!desktop->useSpice && desktop->useDMA && processFrame)
+      egl_textureMarkUsed(desktop->texture);
     return false;
   }
   *renderedFrameToken = tex->frameToken;
@@ -601,9 +608,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       scaleAlgo = desktop->scaleAlgo;
   }
 
-  const struct DesktopShader * shader =
-    desktop->useDMA && texture == desktop->texture ?
-      &desktop->dmaShader : &desktop->shader;
+  const struct DesktopShader * shader = &desktop->shader;
 
   /* PQ is normalized to 10000 nits, while scRGB defines 1.0 as 80 nits.
    * Convert either encoding into values relative to the selected SDR peak. */
@@ -628,6 +633,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       desktop->linearComposition);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
+  if (!desktop->useSpice && desktop->useDMA &&
+      (processFrame || texture == tex))
+    egl_textureMarkUsed(desktop->texture);
   return true;
 }
 

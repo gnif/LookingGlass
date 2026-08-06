@@ -23,6 +23,8 @@
 
 #include <stdint.h>
 
+typedef void (*LG_FrameReleaseFn)(void * opaque, uint64_t handle);
+
 struct Point
 {
   int x, y;

@@ -185,19 +185,23 @@ bool egl_textureUpdateFromFrame(EGL_Texture * this,
 
 bool egl_textureUpdateFromDMA(EGL_Texture * this,
     const FrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const int dmaFd, uint64_t * waitTimeNs)
+    const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle)
 {
   const struct EGL_TexUpdate update =
   {
-    .type       = EGL_TEXTYPE_DMABUF,
-    .frameToken = frameToken,
-    .x          = 0,
-    .y          = 0,
-    .width      = this->format.width,
-    .height     = this->format.height,
-    .pitch      = this->format.pitch,
-    .stride     = this->format.stride,
-    .dmaFD      = dmaFd
+    .type          = EGL_TEXTYPE_DMABUF,
+    .frameToken    = frameToken,
+    .x             = 0,
+    .y             = 0,
+    .width         = this->format.width,
+    .height        = this->format.height,
+    .pitch         = this->format.pitch,
+    .stride        = this->format.stride,
+    .dmaFD         = dmaFd,
+    .releaseFn     = releaseFn,
+    .releaseOpaque = releaseOpaque,
+    .releaseHandle = releaseHandle,
   };
 
   /* wait for completion */
@@ -206,6 +210,24 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
     return false;
 
   return this->ops.update(this, &update);
+}
+
+void egl_textureReset(EGL_Texture * this)
+{
+  if (this->ops.reset)
+    this->ops.reset(this);
+}
+
+void egl_texturePoll(EGL_Texture * this)
+{
+  if (this->ops.poll)
+    this->ops.poll(this);
+}
+
+void egl_textureMarkUsed(EGL_Texture * this)
+{
+  if (this->ops.markUsed)
+    this->ops.markUsed(this);
 }
 
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * this,

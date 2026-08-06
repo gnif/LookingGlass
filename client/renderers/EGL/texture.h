@@ -41,9 +41,12 @@ typedef struct EGL_Model EGL_Model;
 typedef struct EGL_TexUpdate
 {
   /* the type of this update */
-  EGL_TexType           type;
-  LG_RendererFrameToken frameToken;
-  uint64_t            * waitTimeNs;
+  EGL_TexType            type;
+  LG_RendererFrameToken  frameToken;
+  uint64_t             * waitTimeNs;
+  LG_FrameReleaseFn      releaseFn;
+  void                 * releaseOpaque;
+  uint64_t               releaseHandle;
 
   int x, y, width, height;
 
@@ -101,6 +104,15 @@ typedef struct EGL_TextureOps
 
   /* bind the texture for use */
   enum EGL_TexStatus (*bind)(EGL_Texture * texture, GLuint unit);
+
+  /* release queued updates and reset stream state */
+  void (*reset)(EGL_Texture * texture);
+
+  /* poll asynchronous work without changing the selected frame */
+  void (*poll)(EGL_Texture * texture);
+
+  /* record that the selected texture has been sampled */
+  void (*markUsed)(EGL_Texture * texture);
 }
 EGL_TextureOps;
 
@@ -135,7 +147,12 @@ bool egl_textureUpdateFromFrame(EGL_Texture * texture,
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     const FrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const int dmaFd, uint64_t * waitTimeNs);
+    const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
+    void * releaseOpaque, uint64_t releaseHandle);
+
+void egl_textureReset(EGL_Texture * texture);
+void egl_texturePoll(EGL_Texture * texture);
+void egl_textureMarkUsed(EGL_Texture * texture);
 
 enum EGL_TexStatus egl_textureProcess(EGL_Texture * texture,
     LG_RendererFrameToken frameTokenLimit,

@@ -258,10 +258,18 @@ typedef struct LG_RendererOps
 
   /* called when there is a new frame. frameToken must remain attached to the
    * update if the renderer coalesces it, and must be reported by render only
-   * when that update is consumed. Context: frameThread */
+   * when that update is consumed. A non-NULL releaseFn transfers ownership to
+   * the renderer on success and must be called exactly once when the imported
+   * frame can no longer be sampled. Context: frameThread */
   bool (*onFrame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
       const FrameDamageRect * damage, int damageCount,
-      LG_RendererFrameToken frameToken);
+      LG_RendererFrameToken frameToken,
+      LG_FrameReleaseFn releaseFn,
+      void * releaseOpaque, uint64_t releaseHandle);
+
+  /* optional frame-thread pump for asynchronous imports while no frame is
+   * available from the transport */
+  void (*onFramePoll)(LG_Renderer * renderer);
 
   /* called when the rederer is to startup
    * Context: renderThread */
