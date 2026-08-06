@@ -47,7 +47,7 @@ static struct
   _Atomic(uint32_t) generation;
   _Atomic(uint64_t) period;
   uint64_t          lastSend;
-  uint64_t          lastCadence;
+  _Atomic(uint64_t) lastCadence;
 
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
@@ -181,19 +181,24 @@ void frameScheduler_stop(void)
   l_frameScheduler.immediatePending = false;
 }
 
+void frameScheduler_observeCadence(void)
+{
+  atomic_store_explicit(
+      &l_frameScheduler.lastCadence, nanotime(), memory_order_release);
+}
+
 void frameScheduler_update(void)
 {
   if (!l_frameScheduler.supported)
     return;
 
+  const uint64_t lastCadence = atomic_load_explicit(
+      &l_frameScheduler.lastCadence, memory_order_acquire);
   const uint64_t now = nanotime();
-  const uint64_t period = presentationPeriod();
-  if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
-      period > FRAME_SCHEDULER_MAX_PERIOD_NS)
+  if (!lastCadence ||
+      now - lastCadence > FRAME_SCHEDULER_CADENCE_GRACE_NS)
   {
-    if (l_frameScheduler.active && l_frameScheduler.lastCadence &&
-        now - l_frameScheduler.lastCadence >
-          FRAME_SCHEDULER_CADENCE_GRACE_NS &&
+    if (l_frameScheduler.active &&
         sendSchedule(LG_TRANSPORT_FRAME_SCHEDULE_RELEASE, 0))
     {
       l_frameScheduler.active           = false;
@@ -210,7 +215,11 @@ void frameScheduler_update(void)
     }
     return;
   }
-  l_frameScheduler.lastCadence = now;
+
+  const uint64_t period = presentationPeriod();
+  if (period < FRAME_SCHEDULER_MIN_PERIOD_NS ||
+      period > FRAME_SCHEDULER_MAX_PERIOD_NS)
+    return;
 
   bool reset = !l_frameScheduler.period;
   if (!reset)

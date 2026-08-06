@@ -29,6 +29,7 @@ void frameScheduler_init(void);
 void frameScheduler_free(void);
 void frameScheduler_start(LG_TransportFeatureFlags features);
 void frameScheduler_stop(void);
+void frameScheduler_observeCadence(void);
 void frameScheduler_update(void);
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
     uint32_t scheduleEpoch, uint32_t deadlineSerial,

@@ -647,6 +647,9 @@ static int renderThread(void * unused)
     if (g_state.jitRender)
     {
       const LG_DSWaitFrameResult  waitResult = g_state.ds->waitFrame();
+      if (waitResult & LG_DS_WAIT_FRAME_CADENCE)
+        frameScheduler_observeCadence();
+
       const LG_RendererFrameToken queuedAtWake =
         waitResult == LG_DS_WAIT_FRAME_CADENCE ?
           frameTimingQueuedToken() : LG_RENDERER_FRAME_TOKEN_NONE;
@@ -755,6 +758,9 @@ static int renderThread(void * unused)
     }
     const uint64_t renderEnd = nanotime();
     LG_UNLOCK(g_state.lgrLock);
+
+    if (!g_state.jitRender)
+      frameScheduler_observeCadence();
 
     if (rendererTiming.frameToken != LG_RENDERER_FRAME_TOKEN_NONE)
       frameTimingFinishRender(
