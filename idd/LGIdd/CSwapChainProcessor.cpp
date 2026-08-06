@@ -34,7 +34,6 @@
 static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
 static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
 static const uint64_t PUBLISH_RETRY_NS      = 1000000ULL;
-static const DWORD    CANDIDATE_WAIT_MS     = 2;
 
 static_assert(LGMP_Q_FRAME_LEN == 2,
   "IDD candidate pipeline assumes two slots");
@@ -91,8 +90,6 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
   // once set or only one thread would ever observe termination.
   m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
   m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_candidateAvailableEvent.Attach(
-    CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
   if (!m_publishTimer.Get())
@@ -105,8 +102,7 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 bool CSwapChainProcessor::Start()
 {
   if (!m_terminateEvent.Get() || !m_candidateEvent.Get() ||
-      !m_candidateAvailableEvent.Get() || !m_publishTimer.Get() ||
-      !m_cursorDataEvent.Get() || !m_shapeBuffer)
+      !m_publishTimer.Get() || !m_cursorDataEvent.Get() || !m_shapeBuffer)
   {
     DEBUG_ERROR("Failed to initialize swap chain worker resources");
     return false;
@@ -950,73 +946,50 @@ void CSwapChainProcessor::AccumulateFrameDamage(
 
 int CSwapChainProcessor::AcquireCandidate(bool exclusiveSample)
 {
-  HANDLE waitHandles[] =
-  {
-    m_candidateAvailableEvent.Get(),
-    m_terminateEvent.Get(),
-  };
+  int      selected   = -1;
+  uint64_t oldest     = UINT64_MAX;
+  bool     superseded = false;
+  bool     idle       = true;
 
-  for (;;)
-  {
-    int      selected   = -1;
-    uint64_t oldest     = UINT64_MAX;
-    bool     superseded = false;
-    bool     idle       = true;
+  AcquireSRWLockExclusive(&m_candidateLock);
+  for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+    if (m_candidates[i].state != CANDIDATE_FREE)
+      idle = false;
+    else if (selected < 0)
+      selected = static_cast<int>(i);
 
-    AcquireSRWLockExclusive(&m_candidateLock);
+  // Effect timing samples must not queue behind work which can later be
+  // superseded, otherwise that discarded work contaminates the sample.
+  if (exclusiveSample && !idle)
+    selected = -1;
+
+  unsigned readyCount = 0;
+  for (const FrameCandidate& candidate : m_candidates)
+    if (candidate.state == CANDIDATE_READY)
+      ++readyCount;
+
+  if (!exclusiveSample && selected < 0 && readyCount > 1)
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-      if (m_candidates[i].state != CANDIDATE_FREE)
-        idle = false;
-      else if (selected < 0)
+      if (m_candidates[i].state == CANDIDATE_READY &&
+          m_candidates[i].sequence < oldest)
       {
         selected = static_cast<int>(i);
+        oldest   = m_candidates[i].sequence;
       }
 
-    // Effect timing samples must not queue behind work which can later be
-    // superseded, otherwise that discarded work contaminates the sample.
-    if (exclusiveSample && !idle)
-      selected = -1;
-
-    unsigned readyCount = 0;
-    for (const FrameCandidate& candidate : m_candidates)
-      if (candidate.state == CANDIDATE_READY)
-        ++readyCount;
-
-    if (!exclusiveSample && selected < 0 && readyCount > 1)
-      for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-        if (m_candidates[i].state == CANDIDATE_READY &&
-            m_candidates[i].sequence < oldest)
-        {
-          selected = static_cast<int>(i);
-          oldest   = m_candidates[i].sequence;
-        }
-
-    if (selected >= 0)
-    {
-      FrameCandidate& candidate =
-        m_candidates[static_cast<unsigned>(selected)];
-      superseded      = candidate.state == CANDIDATE_READY;
-      candidate.state = CANDIDATE_PREPARING;
-      candidate.sequence = ++m_candidateSequence;
-    }
-    ReleaseSRWLockExclusive(&m_candidateLock);
-
-    if (selected >= 0)
-    {
-      if (superseded)
-        m_devContext->FrameSuperseded();
-      return selected;
-    }
-
-    const DWORD result = WaitForMultipleObjects(
-      ARRAYSIZE(waitHandles), waitHandles, FALSE, CANDIDATE_WAIT_MS);
-    if (result == WAIT_OBJECT_0 + 1)
-      return -1;
-    if (result == WAIT_TIMEOUT)
-      return -1;
-    if (result != WAIT_OBJECT_0)
-      return -1;
+  if (selected >= 0)
+  {
+    FrameCandidate& candidate =
+      m_candidates[static_cast<unsigned>(selected)];
+    superseded         = candidate.state == CANDIDATE_READY;
+    candidate.state    = CANDIDATE_PREPARING;
+    candidate.sequence = ++m_candidateSequence;
   }
+  ReleaseSRWLockExclusive(&m_candidateLock);
+
+  if (superseded)
+    m_devContext->FrameSuperseded();
+  return selected;
 }
 
 void CSwapChainProcessor::ReleaseCandidate(unsigned candidateIndex)
@@ -1115,7 +1088,6 @@ void CSwapChainProcessor::ResetCandidates()
 void CSwapChainProcessor::SignalCandidateState()
 {
   SetEvent(m_candidateEvent.Get());
-  SetEvent(m_candidateAvailableEvent.Get());
 }
 
 bool CSwapChainProcessor::PublishNewestCandidate(

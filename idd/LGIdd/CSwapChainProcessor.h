@@ -108,7 +108,6 @@ private:
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
   Wrappers::Event m_candidateEvent;
-  Wrappers::Event m_candidateAvailableEvent;
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_publishTimer;
 
   Wrappers::Event m_cursorDataEvent;
