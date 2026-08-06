@@ -157,7 +157,8 @@ bool waylandCursorInit(void)
   wlWm.cursorSquareBuffer = createSquareCursorBuffer();
   if (wlWm.cursorSquareBuffer)
   {
-    wlWm.cursors[LG_POINTER_SQUARE] = wl_compositor_create_surface(wlWm.compositor);
+    wlWm.cursors[LG_POINTER_SQUARE]   = wl_compositor_create_surface(wlWm.compositor);
+    wlWm.cursorHot[LG_POINTER_SQUARE] = (struct Point) { 2, 2 };
     wl_surface_attach(wlWm.cursors[LG_POINTER_SQUARE], wlWm.cursorSquareBuffer, 0, 0);
     wl_surface_commit(wlWm.cursors[LG_POINTER_SQUARE]);
   }
@@ -212,6 +213,10 @@ void waylandCursorScaleChange(void)
   struct wl_surface * old[LG_POINTER_COUNT];
   memcpy(old, wlWm.cursors, sizeof(old));
   memset(wlWm.cursors, 0, sizeof(wlWm.cursors));
+
+  /* the diagnostic cursor is not part of the cursor theme */
+  wlWm.cursors[LG_POINTER_SQUARE] = old[LG_POINTER_SQUARE];
+  old[LG_POINTER_SQUARE]          = NULL;
 
   if (wlWm.cursorTheme)
     wl_cursor_theme_destroy(wlWm.cursorTheme);

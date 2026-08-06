@@ -21,6 +21,7 @@
 #include "wayland.h"
 
 #include <errno.h>
+#include <math.h>
 #include <stdbool.h>
 #include <string.h>
 #include <sys/mman.h>
@@ -1027,5 +1028,5 @@ void waylandGuestPointerUpdated(double x, double y, double localX, double localY
 
   MTRACE("guest warp guest=%.3f,%.3f local=%.3f,%.3f",
       x, y, localX, localY);
-  waylandWarpPointer((int) localX, (int) localY, false);
+  waylandWarpPointer((int) round(localX), (int) round(localY), false);
 }

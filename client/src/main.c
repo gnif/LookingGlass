@@ -1076,6 +1076,7 @@ int main_cursorThread(void * unused)
 
     const bool wasRendered = g_cursor.guest.visible &&
       (g_cursor.draw || !g_params.useSpiceInput);
+    bool hotspotChanged = false;
 
     if (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
       g_cursor.guest.visible =
@@ -1094,8 +1095,8 @@ int main_cursorThread(void * unused)
           continue;
       }
 
-      g_cursor.guest.hx = pointer.hx;
-      g_cursor.guest.hy = pointer.hy;
+      hotspotChanged =
+        g_cursor.guest.hx != pointer.hx || g_cursor.guest.hy != pointer.hy;
       if (!RENDERER(onMouseShape, cursorType, pointer.width, pointer.height,
             pointer.pitch, pointer.shape))
       {
@@ -1103,6 +1104,8 @@ int main_cursorThread(void * unused)
         g_state.transportOps->releasePointer(g_state.transport, &pointer);
         continue;
       }
+      g_cursor.guest.hx = pointer.hx;
+      g_cursor.guest.hy = pointer.hy;
     }
 
     if ((pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM) &&
@@ -1132,8 +1135,13 @@ int main_cursorThread(void * unused)
         core_alignToGuest();
         app_resyncMouseBasic();
       }
-      core_handleGuestMouseUpdate();
     }
+
+    if (hotspotChanged)
+      app_resyncMouseBasic();
+
+    if ((pointer.flags & LG_TRANSPORT_POINTER_POSITION) || hotspotChanged)
+      core_handleGuestMouseUpdate();
 
     app_updateMouseState();
     g_cursor.redraw = false;
