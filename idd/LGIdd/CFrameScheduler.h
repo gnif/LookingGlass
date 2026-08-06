@@ -80,6 +80,7 @@ private:
   };
 
   static const unsigned PUBLICATION_HISTORY_SIZE = 128;
+  static const unsigned WORK_TIMING_HISTORY_SIZE  = 32;
 
   mutable SRWLOCK m_lock = SRWLOCK_INIT;
   HANDLE          m_wakeEvent = nullptr;
@@ -94,12 +95,15 @@ private:
   uint64_t m_republishRequestTicket = 0;
   uint64_t m_republishAckTicket     = 0;
 
-  uint64_t m_lastArrival             = 0;
-  uint64_t m_guestPeriod             = 0;
-  uint64_t m_workEstimate            = 0;
-  uint64_t m_nextDeadline            = 0;
-  uint32_t m_deadlineSerial          = 0;
-  int64_t  m_pendingCorrection       = 0;
+  uint64_t m_lastArrival                          = 0;
+  uint64_t m_guestPeriod                          = 0;
+  uint64_t m_workEstimate                         = 0;
+  uint64_t m_workTiming[WORK_TIMING_HISTORY_SIZE] = {};
+  unsigned m_workTimingCount                      = 0;
+  unsigned m_workTimingIndex                      = 0;
+  uint64_t m_nextDeadline                         = 0;
+  uint32_t m_deadlineSerial                       = 0;
+  int64_t  m_pendingCorrection                    = 0;
 
   Publication m_publications[PUBLICATION_HISTORY_SIZE] = {};
   unsigned    m_publicationIndex                       = 0;

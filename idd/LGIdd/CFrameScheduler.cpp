@@ -260,6 +260,9 @@ void CFrameScheduler::Reset()
   m_lastArrival       = 0;
   m_guestPeriod       = 0;
   m_workEstimate      = 0;
+  memset(m_workTiming, 0, sizeof(m_workTiming));
+  m_workTimingCount   = 0;
+  m_workTimingIndex   = 0;
   m_nextDeadline      = 0;
   m_deadlineSerial    = 0;
   m_pendingCorrection = 0;
@@ -1017,10 +1020,35 @@ void CFrameScheduler::TryRecordFrameTiming(uint64_t duration)
   if (!TryAcquireSRWLockExclusive(&m_lock))
     return;
 
-  if (!m_workEstimate || duration > m_workEstimate)
-    m_workEstimate = duration;
+  m_workTiming[m_workTimingIndex] = duration;
+  m_workTimingIndex =
+    (m_workTimingIndex + 1) % WORK_TIMING_HISTORY_SIZE;
+  if (m_workTimingCount < WORK_TIMING_HISTORY_SIZE)
+    ++m_workTimingCount;
+
+  uint64_t sorted[WORK_TIMING_HISTORY_SIZE];
+  memcpy(sorted, m_workTiming,
+    m_workTimingCount * sizeof(*sorted));
+  for (unsigned i = 1; i < m_workTimingCount; ++i)
+  {
+    const uint64_t sample = sorted[i];
+    unsigned       j      = i;
+    while (j && sorted[j - 1] > sample)
+    {
+      sorted[j] = sorted[j - 1];
+      --j;
+    }
+    sorted[j] = sample;
+  }
+
+  if (m_workTimingCount == 1)
+    m_workEstimate = sorted[0];
   else
-    m_workEstimate = (m_workEstimate * 31 + duration) / 32;
+  {
+    const unsigned discarded = min(m_workTimingCount - 1,
+      max(1U, m_workTimingCount / 10));
+    m_workEstimate = sorted[m_workTimingCount - discarded - 1];
+  }
 
   ReleaseSRWLockExclusive(&m_lock);
 }
