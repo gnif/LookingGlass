@@ -536,8 +536,8 @@ void CSwapChainProcessor::PublisherThread()
       continue;
     }
 
-    m_devContext->ProcessFrameQueue();
     const uint64_t publishStart = CFrameScheduler::Nanotime();
+    m_devContext->ProcessFrameQueue();
     if (!m_devContext->FrameBufferAvailable(schedule) ||
         !PublishNewestCandidate(
           schedule, periodic, publishStart))
