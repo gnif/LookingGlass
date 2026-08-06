@@ -282,13 +282,16 @@ public:
   bool PublishFrameBuffer(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule);
   bool RepublishFrameBuffer(const CFrameScheduler::Schedule& schedule);
+  bool TryFrameSubmitted(unsigned frameIndex,
+    const CFrameScheduler::Schedule& schedule);
   void CommitFrameBuffer(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule, bool periodic);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
   void CompleteFrameBuffer(unsigned frameIndex, bool succeeded);
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
-    uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime);
+    uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
+    const CFrameScheduler::Schedule& schedule, uint64_t completedAt);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 
@@ -296,12 +299,14 @@ public:
   void ForceFrame();
   bool GetPublishTarget(uint64_t now, uint64_t& target,
     CFrameScheduler::Schedule& schedule, bool& periodic, bool& republish);
+  void FrameMissed(const CFrameScheduler::Schedule& schedule,
+    uint64_t now, bool periodic);
   void FrameSuperseded();
   HANDLE GetFrameScheduleEvent() const
   {
     return m_frameScheduler.GetWakeEvent();
   }
-  void RecordFrameTiming(uint64_t duration);
+  void TryRecordFrameTiming(uint64_t duration);
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR & info, const BYTE * data,
     UINT sdrWhiteLevel);

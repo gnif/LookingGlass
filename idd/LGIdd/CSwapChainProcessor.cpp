@@ -327,6 +327,16 @@ void CSwapChainProcessor::PublisherThread()
       }
 
       const uint64_t replayNow = CFrameScheduler::Nanotime();
+      uint64_t       cadenceTarget = 0;
+      if (schedule.deliveryDeadlineSerial && periodic &&
+          schedule.deadline <= replayNow)
+      {
+        m_devContext->FrameMissed(schedule, replayNow, periodic);
+        continue;
+      }
+      if (schedule.deliveryDeadlineSerial && periodic)
+        cadenceTarget = schedule.deadline;
+
       uint64_t       replayTarget;
       if (m_devContext->GetSharedFrameTarget(replayNow, replayTarget))
       {
@@ -335,21 +345,42 @@ void CSwapChainProcessor::PublisherThread()
         {
           if (m_devContext->ReplaySharedFrame(replayNow, retry))
             continue;
-          if (!retry)
+          if (retry)
+            replayTarget = replayNow + PUBLISH_RETRY_NS;
+          else
           {
-            if (m_publishTimer.Get())
-              CancelWaitableTimer(m_publishTimer.Get());
-            if (WaitForMultipleObjects(
-                  ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
-                WAIT_OBJECT_0)
-              break;
-            continue;
+            if (cadenceTarget)
+              replayTarget = cadenceTarget;
+            else
+            {
+              if (m_publishTimer.Get())
+                CancelWaitableTimer(m_publishTimer.Get());
+              if (WaitForMultipleObjects(
+                    ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+                  WAIT_OBJECT_0)
+                break;
+              continue;
+            }
           }
         }
+
+        if (cadenceTarget && cadenceTarget < replayTarget)
+          replayTarget = cadenceTarget;
 
         const uint64_t delay = replayTarget > replayNow ?
           replayTarget - replayNow : PUBLISH_RETRY_NS;
         ArmPublishTimer(m_publishTimer.Get(), delay);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
+      if (cadenceTarget)
+      {
+        ArmPublishTimer(
+          m_publishTimer.Get(), cadenceTarget - replayNow);
         if (WaitForMultipleObjects(
               ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
             WAIT_OBJECT_0)
@@ -711,10 +742,7 @@ void CSwapChainProcessor::CompletionFunction(
   const bool gpuTimingValid =
     slot->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
 
-  // Publish readiness before sampling the endpoint. Timing has its own valid
-  // flag and is published immediately afterwards.
-  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-  const uint64_t readyEnd = CFrameScheduler::Nanotime();
+  const uint64_t copyReady = CFrameScheduler::Nanotime();
 
   const uint64_t postProcessStart = fbRes->GetPostProcessStart();
   uint64_t postProcessTime = prepareCopyStart - postProcessStart;
@@ -726,31 +754,41 @@ void CSwapChainProcessor::CompletionFunction(
     prepareCopyTime = prepareGPUEnd - prepareGPUStart;
   }
 
-  uint64_t publishCopyTime = readyEnd - publishStart;
+  uint64_t publishCopyTime = copyReady - publishStart;
   if (gpuTimingValid && gpuCopyStart >= publishStart &&
-      gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= readyEnd)
+      gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= copyReady)
     publishCopyTime = gpuCopyEnd - gpuCopyStart + indirectCopyTime;
 
   const uint64_t copyTime = prepareCopyTime + publishCopyTime;
-  const uint64_t elapsed  = readyEnd - postProcessStart;
-  const uint64_t measured = postProcessTime + copyTime;
-  const uint64_t readyTime = elapsed > measured ? elapsed - measured : 0;
+
+  // Make the framebuffer readable before phase bookkeeping. If the scheduler
+  // lock is busy, the frame is still delivered and only this phase sample is
+  // discarded.
+  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+  const uint64_t publishedAt = CFrameScheduler::Nanotime();
+  const uint64_t elapsed     = publishedAt - postProcessStart;
+  const uint64_t measured    = postProcessTime + copyTime;
+  const uint64_t readyTime   = elapsed > measured ? elapsed - measured : 0;
+
+  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
+    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime,
+    fbRes->GetSchedule(), publishedAt);
+  sc->m_devContext->TryRecordFrameTiming(
+    publishedAt - publishStart);
 
   // Use matching wall-clock boundaries for both modes. The split excludes the
   // cadence hold while including the indirect CPU copy only when it occurs.
   const uint64_t timingToken = fbRes->GetTimingToken();
   if (timingToken && timingStart && prepareReady >= timingStart &&
-      readyEnd >= publishStart)
+      copyReady >= publishStart)
   {
     const uint64_t totalTime =
-      (prepareReady - timingStart) + (readyEnd - publishStart);
+      (prepareReady - timingStart) + (copyReady - publishStart);
     sc->m_postProcessors[candidateIndex].RecordTiming(
       fbRes->GetTimingEffectIndex(), timingToken,
       fbRes->IsFullCopy(), totalTime);
   }
-  sc->m_devContext->RecordFrameTiming(readyEnd - publishStart);
-  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime);
+
   sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
   sc->ReleaseCandidate(candidateIndex);
 }
@@ -1270,6 +1308,12 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     restoreCandidates();
     return false;
   }
+  CFrameScheduler::Schedule frameSchedule = schedule;
+  // Phase accounting must never hold up D3D submission. Keep the immutable
+  // delivery identity and discard only this feedback sample on contention.
+  if (!m_devContext->TryFrameSubmitted(buffer.frameIndex, schedule))
+    frameSchedule.phaseEligible = false;
+  fbRes->SetSchedule(frameSchedule);
 
   // Retire the candidate damage before submission. The completion callback
   // may run before Execute returns and make this candidate reusable.

@@ -217,9 +217,10 @@ struct FrameTimingRecord
   uint64_t              frameSerial;
   uint32_t              scheduleGeneration;
   uint32_t              scheduleEpoch;
+  uint32_t              scheduleDeadlineSerial;
   unsigned              readyMask;
   bool                  producerValid;
-  bool                  scheduleOwner;
+  bool                  phaseValid;
 
   uint64_t captureTime;
   uint64_t postProcessTime;
@@ -330,9 +331,8 @@ static void frameTimingCancel(LG_RendererFrameToken token)
 }
 
 static void frameTimingQueue(LG_RendererFrameToken token, uint64_t frameSerial,
-    uint32_t scheduleGeneration, uint32_t scheduleEpoch, bool scheduleOwner,
-    uint64_t importTime, uint64_t importWaitTime, uint64_t dispatchStart,
-    uint64_t queueStart)
+    const LG_TransportFrameTiming * timing, uint64_t importTime,
+    uint64_t importWaitTime, uint64_t dispatchStart, uint64_t queueStart)
 {
   INTERLOCKED_SECTION(l_frameTiming.lock, {
     struct FrameTimingRecord * record = frameTimingRecord(token);
@@ -341,14 +341,16 @@ static void frameTimingQueue(LG_RendererFrameToken token, uint64_t frameSerial,
       const uint64_t elapsed   = queueStart > dispatchStart ?
         queueStart - dispatchStart : 0;
       const uint64_t accounted = importTime + importWaitTime;
-      record->importTime         = importTime;
-      record->importWaitTime     = importWaitTime;
-      record->dispatchTime       = elapsed > accounted ? elapsed - accounted : 0;
-      record->queueStart         = queueStart;
-      record->frameSerial        = frameSerial;
-      record->scheduleGeneration = scheduleGeneration;
-      record->scheduleEpoch      = scheduleEpoch;
-      record->scheduleOwner      = scheduleOwner;
+      record->importTime             = importTime;
+      record->importWaitTime         = importWaitTime;
+      record->dispatchTime           = elapsed > accounted ?
+        elapsed - accounted : 0;
+      record->queueStart             = queueStart;
+      record->frameSerial            = frameSerial;
+      record->scheduleGeneration     = timing->scheduleGeneration;
+      record->scheduleEpoch          = timing->scheduleEpoch;
+      record->scheduleDeadlineSerial = timing->scheduleDeadlineSerial;
+      record->phaseValid             = timing->phaseValid;
       if (record->timestamp < queueStart)
         record->timestamp = queueStart;
     }
@@ -398,7 +400,8 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
   uint64_t feedbackQueueStart  = 0;
   uint32_t feedbackGeneration  = 0;
   uint32_t feedbackEpoch       = 0;
-  bool     feedbackOwner       = false;
+  uint32_t feedbackDeadline    = 0;
+  bool     feedbackValid       = false;
 
   LG_LOCK(l_frameTiming.lock);
   if (l_frameTiming.retireToken <= timing->frameToken)
@@ -421,7 +424,8 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
     feedbackFrameSerial = record->frameSerial;
     feedbackGeneration  = record->scheduleGeneration;
     feedbackEpoch       = record->scheduleEpoch;
-    feedbackOwner       = record->scheduleOwner;
+    feedbackDeadline    = record->scheduleDeadlineSerial;
+    feedbackValid       = record->phaseValid;
     feedbackQueueStart  = record->queueStart;
 
     if (unlikely(
@@ -445,13 +449,13 @@ static void frameTimingFinishRender(const LG_RendererFrameTiming * timing,
   }
   LG_UNLOCK(l_frameTiming.lock);
 
-  if (g_state.jitRender && feedbackOwner && feedbackFrameSerial &&
-      feedbackGeneration && feedbackEpoch && feedbackQueueStart &&
-      prepareStart >= feedbackQueueStart)
+  if (g_state.jitRender && feedbackValid && feedbackFrameSerial &&
+      feedbackGeneration && feedbackEpoch && feedbackDeadline &&
+      feedbackQueueStart && prepareStart >= feedbackQueueStart)
   {
     frameScheduler_feedback(
         feedbackFrameSerial, feedbackGeneration, feedbackEpoch,
-        prepareStart - feedbackQueueStart);
+        feedbackDeadline, prepareStart - feedbackQueueStart);
   }
 }
 
@@ -1143,9 +1147,9 @@ int main_frameThread(void * unused)
     atomic_store_explicit(&l_testFrameSerial, frame.serial,
         memory_order_release);
 #endif
-    frameTimingQueue(frameToken, frame.serial, frame.scheduleGeneration,
-        frame.scheduleEpoch, frame.scheduleOwner, g_state.frameImportTime,
-        g_state.frameImportWaitTime, dispatchStart, queueStart);
+    frameTimingQueue(frameToken, frame.serial, &timing,
+        g_state.frameImportTime, g_state.frameImportWaitTime,
+        dispatchStart, queueStart);
 
     if (g_state.jitRender)
     {

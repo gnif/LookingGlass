@@ -30,7 +30,7 @@
 #include "LGMPConfig.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 27
+#define KVMFR_VERSION 28
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -166,6 +166,13 @@ enum
 
 typedef uint32_t KVMFRFrameFlags;
 
+enum
+{
+  KVMFR_FRAME_TIMING_PHASE_VALID = 0x1
+};
+
+typedef uint32_t KVMFRFrameTimingFlags;
+
 typedef struct KVMFRFrame
 {
   /*
@@ -211,9 +218,16 @@ typedef struct KVMFRFrame
   uint32_t        timingSerial;
   uint32_t        timingValid;
 
+  // Producer cadence identity. Phase feedback is permitted only when the
+  // matching frame has KVMFR_FRAME_TIMING_PHASE_VALID set.
+  KVMFRFrameTimingFlags timingFlags;
+  uint32_t              scheduleGeneration;
+  uint32_t              scheduleEpoch;
+  uint32_t              scheduleDeadlineSerial;
+
   // Keep the conditional HDR block and damage rectangles on separate cache
   // lines from the producer timing fields.
-  uint8_t         timingReserved[24];
+  uint8_t         timingReserved[8];
 
   // HDR static metadata (valid when FRAME_FLAG_HDR_METADATA is set)
   // Display color primaries in 0.00002 units (SMPTE ST 2086 format)
@@ -237,6 +251,10 @@ KVMFRFrame;
 #if defined(__cplusplus)
 static_assert(offsetof(KVMFRFrame, captureTime) == 64,
     "KVMFRFrame hot fields must fit in one cache line");
+static_assert(offsetof(KVMFRFrame, timingFlags) == 104,
+    "KVMFRFrame timing flags layout changed");
+static_assert(offsetof(KVMFRFrame, scheduleDeadlineSerial) == 116,
+    "KVMFRFrame schedule identity layout changed");
 static_assert(offsetof(KVMFRFrame, hdrDisplayPrimary) == 128,
     "KVMFRFrame HDR metadata must be cache-line aligned");
 static_assert(offsetof(KVMFRFrame, damageRects) == 192,
@@ -244,6 +262,10 @@ static_assert(offsetof(KVMFRFrame, damageRects) == 192,
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(offsetof(KVMFRFrame, captureTime) == 64,
     "KVMFRFrame hot fields must fit in one cache line");
+_Static_assert(offsetof(KVMFRFrame, timingFlags) == 104,
+    "KVMFRFrame timing flags layout changed");
+_Static_assert(offsetof(KVMFRFrame, scheduleDeadlineSerial) == 116,
+    "KVMFRFrame schedule identity layout changed");
 _Static_assert(offsetof(KVMFRFrame, hdrDisplayPrimary) == 128,
     "KVMFRFrame HDR metadata must be cache-line aligned");
 _Static_assert(offsetof(KVMFRFrame, damageRects) == 192,
@@ -297,15 +319,25 @@ typedef struct KVMFRFrameSchedule
   int64_t                 phaseError;   // ready-to-render phase error (ns)
   uint32_t                feedbackFrameSerial;
   uint32_t                feedbackScheduleEpoch;
+  // Identifies the exact producer deadline paired with feedbackFrameSerial.
+  uint32_t                feedbackDeadlineSerial;
   uint32_t                lease;        // lease duration (ms)
-  uint8_t                 reserved[12];
+  uint8_t                 reserved[8];
 }
 KVMFRFrameSchedule;
 
 #if defined(__cplusplus)
+static_assert(offsetof(KVMFRFrameSchedule, feedbackDeadlineSerial) == 48,
+    "KVMFR frame schedule feedback identity layout changed");
+static_assert(offsetof(KVMFRFrameSchedule, lease) == 52,
+    "KVMFR frame schedule lease layout changed");
 static_assert(sizeof(KVMFRFrameSchedule) == 64,
     "KVMFR frame schedule must fit in one LGMP control message");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
+_Static_assert(offsetof(KVMFRFrameSchedule, feedbackDeadlineSerial) == 48,
+    "KVMFR frame schedule feedback identity layout changed");
+_Static_assert(offsetof(KVMFRFrameSchedule, lease) == 52,
+    "KVMFR frame schedule lease layout changed");
 _Static_assert(sizeof(KVMFRFrameSchedule) == 64,
     "KVMFR frame schedule must fit in one LGMP control message");
 #endif

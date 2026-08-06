@@ -96,6 +96,10 @@ typedef uint32_t LG_TransportFrameFlags;
 typedef struct LG_TransportFrameTiming
 {
   bool     valid; /* producer fields below are available and coherent */
+  bool     phaseValid;
+  uint32_t scheduleGeneration;
+  uint32_t scheduleEpoch;
+  uint32_t scheduleDeadlineSerial;
   uint64_t captureTime;
   uint64_t postProcessTime;
   uint64_t copyTime;
@@ -134,8 +138,8 @@ typedef struct LG_TransportFrame
 {
   uint64_t serial;
   uint64_t timestamp;
-  uint32_t scheduleGeneration;
   uint32_t scheduleEpoch;
+  uint32_t scheduleDeadlineSerial;
   LG_TransportFrameFlags flags;
   bool scheduleOwner;
   // Backend-owned immutable metadata, valid until releaseFrame.
@@ -216,6 +220,7 @@ typedef struct LG_TransportControl
       int64_t                        phaseError;
       uint32_t                       feedbackFrameSerial;
       uint32_t                       feedbackScheduleEpoch;
+      uint32_t                       feedbackDeadlineSerial;
       uint32_t                       lease;
     }
     frameSchedule;

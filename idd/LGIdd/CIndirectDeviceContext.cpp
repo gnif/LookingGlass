@@ -47,8 +47,8 @@ static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 static uint64_t FrameScheduleToken(
   const CFrameScheduler::Schedule& schedule)
 {
-  return static_cast<uint64_t>(schedule.generation) << 32 |
-    schedule.epoch;
+  return static_cast<uint64_t>(schedule.epoch) << 32 |
+    schedule.deliveryDeadlineSerial;
 }
 
 static bool FrameScheduleMatches(
@@ -1884,11 +1884,16 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   // fi->offset is initialized at startup
   fi->flags            = flags;
   fi->sdrWhiteLevel    = dstFormat.sdrWhiteLevel;
-  fi->captureTime      = 0;
-  fi->postProcessTime  = 0;
-  fi->copyTime         = 0;
-  fi->readyTime        = 0;
-  fi->timingSerial     = 0;
+
+  fi->captureTime             = 0;
+  fi->postProcessTime         = 0;
+  fi->copyTime                = 0;
+  fi->readyTime               = 0;
+  fi->timingSerial            = 0;
+  fi->timingFlags             = 0;
+  fi->scheduleGeneration      = 0;
+  fi->scheduleEpoch           = 0;
+  fi->scheduleDeadlineSerial  = 0;
   InterlockedExchange((volatile LONG *)&fi->timingValid, 0);
   fi->rotation         = FRAME_ROT_0;
   fi->type             = dstFormat.format;
@@ -1952,6 +1957,12 @@ bool CIndirectDeviceContext::PublishFrameBuffer(unsigned frameIndex,
     ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
   }
+
+  KVMFRFrame * frame            = m_frame[frameIndex];
+  frame->timingFlags            = 0;
+  frame->scheduleGeneration     = schedule.generation;
+  frame->scheduleEpoch          = schedule.epoch;
+  frame->scheduleDeadlineSerial = schedule.deliveryDeadlineSerial;
 
   LGMP_STATUS status = LGMP_OK;
   bool published     = false;
@@ -2036,7 +2047,10 @@ bool CIndirectDeviceContext::RepublishFrameBuffer(
     return false;
   }
 
-  const uint64_t scheduleToken = FrameScheduleToken(schedule);
+  CFrameScheduler::Schedule deliverySchedule = schedule;
+  deliverySchedule.deliveryDeadlineSerial = 0;
+  deliverySchedule.phaseEligible          = false;
+  const uint64_t scheduleToken = FrameScheduleToken(deliverySchedule);
   const uint32_t frameSerial   = m_frame[frameIndex]->frameSerial;
   if (HasMatchingOwnerDelivery(schedule.clientID,
       static_cast<unsigned>(frameIndex), scheduleToken))
@@ -2057,7 +2071,7 @@ bool CIndirectDeviceContext::RepublishFrameBuffer(
   if (ownerQueueIndex < 0)
   {
     const bool published = PostSharedOwnerFrame(
-      static_cast<unsigned>(frameIndex), schedule);
+      static_cast<unsigned>(frameIndex), deliverySchedule);
     ReleaseSRWLockExclusive(&m_framePublishLock);
     if (published)
       m_frameScheduler.FrameRepublished(schedule, frameSerial);
@@ -2106,6 +2120,16 @@ void CIndirectDeviceContext::CommitFrameBuffer(unsigned frameIndex,
     CFrameScheduler::Nanotime(), periodic);
 }
 
+bool CIndirectDeviceContext::TryFrameSubmitted(unsigned frameIndex,
+  const CFrameScheduler::Schedule& schedule)
+{
+  if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
+    return false;
+
+  return m_frameScheduler.TryFrameSubmitted(
+    schedule, m_frame[frameIndex]->frameSerial);
+}
+
 void CIndirectDeviceContext::ObserveFrame(uint64_t now)
 {
   m_frameScheduler.ObserveFrame(now);
@@ -2124,14 +2148,20 @@ bool CIndirectDeviceContext::GetPublishTarget(uint64_t now,
     now, target, schedule, periodic, republish);
 }
 
+void CIndirectDeviceContext::FrameMissed(
+  const CFrameScheduler::Schedule& schedule, uint64_t now, bool periodic)
+{
+  m_frameScheduler.FrameMissed(schedule, now, periodic);
+}
+
 void CIndirectDeviceContext::FrameSuperseded()
 {
   m_frameScheduler.FrameSuperseded();
 }
 
-void CIndirectDeviceContext::RecordFrameTiming(uint64_t duration)
+void CIndirectDeviceContext::TryRecordFrameTiming(uint64_t duration)
 {
-  m_frameScheduler.RecordFrameTiming(duration);
+  m_frameScheduler.TryRecordFrameTiming(duration);
 }
 
 void CIndirectDeviceContext::AbortFrameBuffer(unsigned frameIndex)
@@ -2183,17 +2213,23 @@ void CIndirectDeviceContext::CompleteFrameBuffer(
 
 void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
   uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
-  uint64_t readyTime)
+  uint64_t readyTime, const CFrameScheduler::Schedule& schedule,
+  uint64_t completedAt)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
-  KVMFRFrame * frame      = m_frame[frameIndex];
-  frame->captureTime      = captureTime;
-  frame->postProcessTime  = postProcessTime;
-  frame->copyTime         = copyTime;
-  frame->readyTime        = readyTime;
-  frame->timingSerial     = frame->frameSerial;
+  KVMFRFrame * frame = m_frame[frameIndex];
+  const bool phaseValid = m_frameScheduler.TryFrameCompleted(
+    schedule, frame->frameSerial, completedAt);
+
+  frame->captureTime             = captureTime;
+  frame->postProcessTime         = postProcessTime;
+  frame->copyTime                = copyTime;
+  frame->readyTime               = readyTime;
+  frame->timingFlags             = phaseValid ?
+    KVMFR_FRAME_TIMING_PHASE_VALID : 0;
+  frame->timingSerial            = frame->frameSerial;
   InterlockedExchange((volatile LONG *)&frame->timingValid, 1);
 }
 

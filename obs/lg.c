@@ -43,6 +43,8 @@
 #include "cursor.effect.h"
 #include "frame_scheduler.h"
 
+#define LG_FRAME_TIMING_SPIN_COUNT 4096
+
 /* scRGB reference white in cd/m² (OBS GS_CS_709_SCRGB is defined as
  * 1.0 = 80 cd/m²). PQ encodes an absolute 0..10000 cd/m² range, so linear
  * PQ output is scaled by 10000 / 80 to reach the scRGB convention. */
@@ -180,8 +182,8 @@ typedef struct
 {
   LGMPMessage      msg;
   PLGMPClientQueue queue;
-  uint32_t         generation;
   uint32_t         scheduleEpoch;
+  uint32_t         scheduleDeadlineSerial;
   bool             owner;
 }
 LGFrameMessage;
@@ -208,6 +210,18 @@ static const char * lgGetName(void * unused)
 static bool lgFrameSerialNewer(uint32_t lhs, uint32_t rhs)
 {
   return (int32_t)(lhs - rhs) > 0;
+}
+
+static bool lgFrameMessageHasMatchingDeadline(
+    bool owner, const LGMPMessage * message, const KVMFRFrame * frame)
+{
+  if (!owner)
+    return false;
+
+  const uint32_t epoch = (uint32_t)(message->udata >> 32);
+  const uint32_t deadlineSerial = (uint32_t)message->udata;
+  return deadlineSerial && epoch == frame->scheduleEpoch &&
+    deadlineSerial == frame->scheduleDeadlineSerial;
 }
 
 static LGMP_STATUS lgFrameProcessNewest(LGPlugin * this,
@@ -260,7 +274,10 @@ static LGMP_STATUS lgFrameProcessNewest(LGPlugin * this,
     const bool replace = lgFrameSerialNewer(
       frame->frameSerial, selected->frameSerial) ||
       (frame->frameSerial == selected->frameSerial &&
-        owner && !result->owner);
+        ((owner && !result->owner) ||
+         (lgFrameMessageHasMatchingDeadline(owner, &msg, frame) &&
+          !lgFrameMessageHasMatchingDeadline(
+            result->owner, &result->msg, selected))));
     PLGMPClientQueue discard = queues[i].queue;
     if (replace)
     {
@@ -277,11 +294,41 @@ static LGMP_STATUS lgFrameProcessNewest(LGPlugin * this,
 
   if (result->owner)
   {
-    result->generation    = (uint32_t)(result->msg.udata >> 32);
-    result->scheduleEpoch = (uint32_t)result->msg.udata;
+    result->scheduleEpoch          = (uint32_t)(result->msg.udata >> 32);
+    result->scheduleDeadlineSerial = (uint32_t)result->msg.udata;
   }
 
   return result->queue ? LGMP_OK : LGMP_ERR_QUEUE_EMPTY;
+}
+
+static bool lgFrameTimingReady(const KVMFRFrame * frame)
+{
+  return __atomic_load_n(&frame->timingValid, __ATOMIC_ACQUIRE) &&
+    frame->timingSerial == frame->frameSerial;
+}
+
+static bool lgFramePhaseIdentity(const LGFrameMessage * message,
+    const KVMFRFrame * frame, uint32_t * generation)
+{
+  if (!message->owner || !message->scheduleEpoch ||
+      !message->scheduleDeadlineSerial)
+    return false;
+
+  for (unsigned i = 0;
+       !lgFrameTimingReady(frame) && i < LG_FRAME_TIMING_SPIN_COUNT;
+       ++i)
+  {
+  }
+
+  if (!lgFrameTimingReady(frame) ||
+      !(frame->timingFlags & KVMFR_FRAME_TIMING_PHASE_VALID) ||
+      !frame->scheduleGeneration ||
+      frame->scheduleEpoch != message->scheduleEpoch ||
+      frame->scheduleDeadlineSerial != message->scheduleDeadlineSerial)
+    return false;
+
+  *generation = frame->scheduleGeneration;
+  return true;
 }
 
 static void lgFrameUnsubscribeOwnerQueues(LGPlugin * this)
@@ -666,9 +713,11 @@ static void * frameThread(void * data)
               fb, (size_t)frame->dataHeight * frame->pitch))
         {
           now = os_gettime_ns();
-          lgFrameSchedulerObserveFrame(&this->frameScheduler,
-            frame->frameSerial, frameMessage.generation,
-            frameMessage.scheduleEpoch, now);
+          uint32_t generation;
+          if (lgFramePhaseIdentity(&frameMessage, frame, &generation))
+            lgFrameSchedulerObserveFrame(&this->frameScheduler,
+              frame->frameSerial, generation, frameMessage.scheduleEpoch,
+              frameMessage.scheduleDeadlineSerial, now);
         }
       }
     }
@@ -1557,12 +1606,16 @@ static void lgVideoTick(void * data, float seconds)
     }
 
     const uint64_t readyTime = os_gettime_ns();
-    lgFrameSchedulerObserveFrame(&this->frameScheduler,
-      frame->frameSerial, frameMessage.generation,
-      frameMessage.scheduleEpoch, readyTime);
-    lgFrameSchedulerFeedback(&this->frameScheduler,
-      frame->frameSerial, frameMessage.generation,
-      frameMessage.scheduleEpoch, tickTime);
+    uint32_t generation;
+    if (lgFramePhaseIdentity(&frameMessage, frame, &generation))
+    {
+      lgFrameSchedulerObserveFrame(&this->frameScheduler,
+        frame->frameSerial, generation, frameMessage.scheduleEpoch,
+        frameMessage.scheduleDeadlineSerial, readyTime);
+      lgFrameSchedulerFeedback(&this->frameScheduler,
+        frame->frameSerial, generation, frameMessage.scheduleEpoch,
+        frameMessage.scheduleDeadlineSerial, tickTime);
+    }
   }
 
   this->frameSerial      = frame->frameSerial;

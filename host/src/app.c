@@ -398,11 +398,16 @@ static bool sendFrame(CaptureResult result, bool * restart)
   // fi->offset is initialized at startup
   fi->flags             = flags;
   fi->sdrWhiteLevel     = sdrWhiteLevel;
-  fi->captureTime       = frame.captureTime;
-  fi->postProcessTime   = 0;
-  fi->copyTime          = 0;
-  fi->readyTime         = 0;
-  fi->timingSerial      = 0;
+
+  fi->captureTime             = frame.captureTime;
+  fi->postProcessTime         = 0;
+  fi->copyTime                = 0;
+  fi->readyTime               = 0;
+  fi->timingSerial            = 0;
+  fi->timingFlags             = 0;
+  fi->scheduleGeneration      = 0;
+  fi->scheduleEpoch           = 0;
+  fi->scheduleDeadlineSerial  = 0;
   __atomic_store_n(&fi->timingValid, 0, __ATOMIC_RELAXED);
   if (frame.hdrMetadata)
   {

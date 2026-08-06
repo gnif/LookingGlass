@@ -41,11 +41,13 @@ typedef struct LGFrameScheduler
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
   uint32_t feedbackScheduleEpoch;
+  uint32_t feedbackDeadlineSerial;
   unsigned feedbackSamples;
 
   uint32_t readyFrameSerial;
   uint32_t readyGeneration;
   uint32_t readyScheduleEpoch;
+  uint32_t readyDeadlineSerial;
   uint64_t readyTime;
 }
 LGFrameScheduler;
@@ -57,10 +59,10 @@ void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
 void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler);
 void lgFrameSchedulerObserveFrame(LGFrameScheduler * scheduler,
     uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
-    uint64_t readyTime);
+    uint32_t deadlineSerial, uint64_t readyTime);
 void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
     uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
-    uint64_t tickTime);
+    uint32_t deadlineSerial, uint64_t tickTime);
 void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
     PLGMPClientQueue queue, uint64_t now);
 

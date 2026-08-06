@@ -39,8 +39,12 @@ public:
     uint32_t epoch;
     uint64_t period;
     uint64_t targetSlack;
+    uint64_t deadline;
     uint64_t forceTicket;
     uint64_t republishTicket;
+    uint32_t deadlineSerial;
+    uint32_t deliveryDeadlineSerial;
+    bool     phaseEligible;
   };
 
 private:
@@ -52,7 +56,7 @@ private:
     uint64_t targetSlack;
     uint64_t expiry;
     uint64_t nextDelivery;
-    uint32_t lastFeedbackFrameSerial;
+    uint32_t lastFeedbackDeadlineSerial;
     uint32_t lastDeliveredFrameSerial;
     bool     subscribed;
     bool     ownerCapable;
@@ -61,6 +65,21 @@ private:
     bool     immediate;
     bool     deliveredFrameValid;
   };
+
+  struct Publication
+  {
+    uint32_t generation;
+    uint32_t epoch;
+    uint32_t deadlineSerial;
+    uint32_t frameSerial;
+    uint64_t deadline;
+    bool     committed;
+    bool     completed;
+    bool     phaseValid;
+    bool     accepted;
+  };
+
+  static const unsigned PUBLICATION_HISTORY_SIZE = 128;
 
   mutable SRWLOCK m_lock = SRWLOCK_INIT;
   HANDLE          m_wakeEvent = nullptr;
@@ -75,12 +94,15 @@ private:
   uint64_t m_republishRequestTicket = 0;
   uint64_t m_republishAckTicket     = 0;
 
-  uint64_t m_lastArrival    = 0;
-  uint64_t m_guestPeriod    = 0;
-  uint64_t m_workEstimate   = 0;
-  uint64_t m_nextDeadline   = 0;
+  uint64_t m_lastArrival             = 0;
+  uint64_t m_guestPeriod             = 0;
+  uint64_t m_workEstimate            = 0;
+  uint64_t m_nextDeadline            = 0;
+  uint32_t m_deadlineSerial          = 0;
+  int64_t  m_pendingCorrection       = 0;
 
-  uint32_t m_lastPublishedFrameSerial = 0;
+  Publication m_publications[PUBLICATION_HISTORY_SIZE] = {};
+  unsigned    m_publicationIndex                       = 0;
 
   int64_t  m_lastPhaseError   = 0;
   uint64_t m_acquiredFrames   = 0;
@@ -92,8 +114,12 @@ private:
   uint64_t m_lastLogPublished = 0;
 
   Client * FindClient(uint32_t clientID);
-  bool ElectOwner(uint64_t now);
+  Publication * FindPublication(const Schedule& schedule,
+    uint32_t frameSerial);
+  bool ElectOwner(uint64_t now, uint32_t resetClientID = 0);
   bool ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
+  void AdvanceCurrentDeadline();
+  void AdvanceDeadlineSerial(uint64_t count);
   void AdvanceDeadline(uint64_t now);
   static void AdvanceDelivery(Client& client, uint64_t now);
   void WakePublisher() const;
@@ -115,10 +141,14 @@ public:
   void ForceFrame();
   bool GetPublishTarget(uint64_t now, uint64_t& target,
     Schedule& schedule, bool& periodic, bool& republish);
+  void FrameMissed(const Schedule& schedule, uint64_t now, bool periodic);
   void FrameSuperseded();
+  bool TryFrameSubmitted(const Schedule& schedule, uint32_t frameSerial);
   void FramePublished(const Schedule& schedule, uint32_t frameSerial,
     uint64_t now, bool periodic);
   void FrameRepublished(const Schedule& schedule, uint32_t frameSerial);
+  bool TryFrameCompleted(const Schedule& schedule, uint32_t frameSerial,
+    uint64_t completedAt);
   unsigned GetSecondaryRecipients(const uint32_t * clientIDs,
     unsigned count, uint32_t frameSerial, uint64_t now,
     uint32_t * recipients) const;
@@ -128,6 +158,6 @@ public:
   void FrameDelivered(const uint32_t * clientIDs, unsigned count,
     uint32_t frameSerial, uint64_t now);
   void NotifyPublisher() const { WakePublisher(); }
-  void RecordFrameTiming(uint64_t duration);
+  void TryRecordFrameTiming(uint64_t duration);
   void LogStatistics(uint64_t now);
 };

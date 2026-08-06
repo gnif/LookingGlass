@@ -22,6 +22,8 @@
 
 #include "CDebug.h"
 
+#include <string.h>
+
 static const uint64_t MIN_SOURCE_PERIOD_NS   = 100000ULL;
 static const uint64_t MIN_SCHEDULE_PERIOD_NS = 2000000ULL;
 static const uint64_t MAX_PERIOD_NS          = 1000000000ULL;
@@ -82,7 +84,21 @@ CFrameScheduler::Client * CFrameScheduler::FindClient(uint32_t clientID)
   return nullptr;
 }
 
-bool CFrameScheduler::ElectOwner(uint64_t now)
+CFrameScheduler::Publication * CFrameScheduler::FindPublication(
+  const Schedule& schedule, uint32_t frameSerial)
+{
+  for (Publication& publication : m_publications)
+    if (publication.generation     == schedule.generation     &&
+        publication.epoch          == schedule.epoch          &&
+        publication.deadlineSerial == schedule.deadlineSerial &&
+        publication.frameSerial    == frameSerial              &&
+        publication.deadline       == schedule.deadline)
+      return &publication;
+
+  return nullptr;
+}
+
+bool CFrameScheduler::ElectOwner(uint64_t now, uint32_t resetClientID)
 {
   Client * fastest       = nullptr;
   Client * incumbent     = FindClient(m_schedule.clientID);
@@ -122,7 +138,8 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
   const uint32_t oldEpoch      = m_schedule.epoch;
   const uint64_t oldPeriod     = m_schedule.period;
   const uint64_t oldSlack      = m_schedule.targetSlack;
-  if (incumbent && incumbent->active &&
+  if (incumbent && incumbent->clientID != resetClientID &&
+      incumbent->active &&
       incumbent->generation == oldGeneration)
     incumbent->nextDelivery = m_nextDeadline;
 
@@ -142,7 +159,11 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
   }
 
   const bool ownerChanged = oldClientID != m_schedule.clientID;
-  if (ownerChanged || oldGeneration != m_schedule.generation)
+  const bool ownerReset = resetClientID &&
+    resetClientID == m_schedule.clientID;
+  const bool identityChanged = ownerChanged || ownerReset ||
+    oldGeneration != m_schedule.generation;
+  if (identityChanged)
   {
     if (m_scheduling)
     {
@@ -153,6 +174,8 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
     m_nextDeadline  = m_scheduling ? fastest->nextDelivery : 0;
     if (m_scheduling && !m_nextDeadline)
       m_nextDeadline = now + m_schedule.period;
+    m_deadlineSerial    = m_scheduling ? 1 : 0;
+    m_pendingCorrection = 0;
     if (m_scheduling)
     {
       ++m_forceRequestTicket;
@@ -165,9 +188,10 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
     }
 
     if (fastest)
-      fastest->lastFeedbackFrameSerial = 0;
+      fastest->lastFeedbackDeadlineSerial = 0;
 
-    m_lastPublishedFrameSerial = 0;
+    memset(m_publications, 0, sizeof(m_publications));
+    m_publicationIndex          = 0;
     m_lastPhaseError            = 0;
     m_lastLog                   = now;
     m_lastLogAcquired           = m_acquiredFrames;
@@ -182,7 +206,7 @@ bool CFrameScheduler::ElectOwner(uint64_t now)
       DEBUG_INFO("Frame timing owner released; using push delivery");
   }
 
-  return ownerChanged || oldGeneration != m_schedule.generation ||
+  return identityChanged ||
     oldPeriod != m_schedule.period || oldSlack != m_schedule.targetSlack ||
     clientExpired;
 }
@@ -199,12 +223,15 @@ void CFrameScheduler::Reset()
   m_forceAckTicket     = m_forceRequestTicket;
   m_republishAckTicket = m_republishRequestTicket;
 
-  m_lastArrival    = 0;
-  m_guestPeriod    = 0;
-  m_workEstimate   = 0;
-  m_nextDeadline   = 0;
+  m_lastArrival       = 0;
+  m_guestPeriod       = 0;
+  m_workEstimate      = 0;
+  m_nextDeadline      = 0;
+  m_deadlineSerial    = 0;
+  m_pendingCorrection = 0;
 
-  m_lastPublishedFrameSerial = 0;
+  memset(m_publications, 0, sizeof(m_publications));
+  m_publicationIndex          = 0;
 
   m_lastPhaseError   = 0;
   m_acquiredFrames   = 0;
@@ -351,16 +378,18 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
     return false;
   }
 
+  const bool explicitReset =
+    (schedule.flags & KVMFR_FRAME_SCHEDULE_RESET) != 0;
   const bool reset = client->generation != schedule.generation ||
-    (schedule.flags & KVMFR_FRAME_SCHEDULE_RESET);
+    explicitReset;
   bool wake = reset || !client->active ||
     client->period != schedule.period ||
     client->targetSlack != schedule.targetSlack;
   if (reset)
   {
-    client->lastFeedbackFrameSerial = 0;
-    client->immediate               = false;
-    client->nextDelivery            = now + schedule.period;
+    client->lastFeedbackDeadlineSerial = 0;
+    client->immediate                  = false;
+    client->nextDelivery               = now + schedule.period;
   }
   client->generation  = schedule.generation;
   client->period      = schedule.period;
@@ -372,7 +401,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
     client->immediate = true;
     wake              = true;
   }
-  wake |= ElectOwner(now);
+  wake |= ElectOwner(now, explicitReset ? schedule.clientID : 0);
   if (m_scheduling && client->clientID == m_schedule.clientID &&
       client->generation == m_schedule.generation &&
       (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE))
@@ -395,13 +424,29 @@ bool CFrameScheduler::ApplyFeedback(Client& client,
       schedule.generation != m_schedule.generation ||
       schedule.feedbackScheduleEpoch != m_schedule.epoch ||
       !schedule.feedbackFrameSerial ||
-      (client.lastFeedbackFrameSerial &&
-        static_cast<int32_t>(schedule.feedbackFrameSerial -
-          client.lastFeedbackFrameSerial) <= 0) ||
-      !m_lastPublishedFrameSerial ||
-      static_cast<int32_t>(schedule.feedbackFrameSerial -
-        m_lastPublishedFrameSerial) > 0)
+      !schedule.feedbackDeadlineSerial ||
+      (client.lastFeedbackDeadlineSerial &&
+        static_cast<int32_t>(schedule.feedbackDeadlineSerial -
+          client.lastFeedbackDeadlineSerial) <= 0))
     return false;
+
+  Publication * publication = nullptr;
+  for (Publication& candidate : m_publications)
+    if (candidate.generation     == schedule.generation             &&
+        candidate.epoch          == schedule.feedbackScheduleEpoch  &&
+        candidate.deadlineSerial == schedule.feedbackDeadlineSerial &&
+        candidate.frameSerial    == schedule.feedbackFrameSerial)
+    {
+      publication = &candidate;
+      break;
+    }
+
+  if (!publication || !publication->committed ||
+      !publication->completed || !publication->phaseValid ||
+      publication->accepted)
+    return false;
+
+  publication->accepted = true;
 
   int64_t correction = schedule.phaseError / 4;
   const int64_t limit = static_cast<int64_t>(m_schedule.period / 4);
@@ -410,18 +455,50 @@ bool CFrameScheduler::ApplyFeedback(Client& client,
   else if (correction < -limit)
     correction = -limit;
 
-  if (correction >= 0)
-    m_nextDeadline += static_cast<uint64_t>(correction);
+  m_pendingCorrection += correction;
+  m_lastPhaseError = schedule.phaseError;
+  client.lastFeedbackDeadlineSerial = schedule.feedbackDeadlineSerial;
+  return false;
+}
+
+void CFrameScheduler::AdvanceCurrentDeadline()
+{
+  m_nextDeadline += m_schedule.period;
+  if (m_pendingCorrection >= 0)
+    m_nextDeadline += static_cast<uint64_t>(m_pendingCorrection);
   else
   {
-    const uint64_t advance = static_cast<uint64_t>(-correction);
-    m_nextDeadline = m_nextDeadline > advance ?
-      m_nextDeadline - advance : 0;
+    const uint64_t correction =
+      static_cast<uint64_t>(-m_pendingCorrection);
+    m_nextDeadline = m_nextDeadline > correction ?
+      m_nextDeadline - correction : 0;
   }
-  m_lastPhaseError = schedule.phaseError;
-  client.lastFeedbackFrameSerial = schedule.feedbackFrameSerial;
-  client.nextDelivery = m_nextDeadline;
-  return correction != 0;
+  m_pendingCorrection = 0;
+  AdvanceDeadlineSerial(1);
+}
+
+void CFrameScheduler::AdvanceDeadlineSerial(uint64_t count)
+{
+  if (!count || !m_deadlineSerial)
+    return;
+
+  const uint64_t position =
+    static_cast<uint64_t>(m_deadlineSerial - 1) + count;
+  uint64_t epochAdvances = position / UINT32_MAX;
+  m_deadlineSerial = static_cast<uint32_t>(position % UINT32_MAX) + 1;
+  if (!epochAdvances)
+    return;
+
+  for (; epochAdvances; --epochAdvances)
+    if (!++m_epoch)
+      ++m_epoch;
+  m_schedule.epoch = m_epoch;
+
+  Client * client = FindClient(m_schedule.clientID);
+  if (client)
+    client->lastFeedbackDeadlineSerial = 0;
+  memset(m_publications, 0, sizeof(m_publications));
+  m_publicationIndex = 0;
 }
 
 void CFrameScheduler::AdvanceDeadline(uint64_t now)
@@ -435,6 +512,7 @@ void CFrameScheduler::AdvanceDeadline(uint64_t now)
   const uint64_t periods =
     (target - m_nextDeadline) / m_schedule.period + 1;
   m_nextDeadline += periods * m_schedule.period;
+  AdvanceDeadlineSerial(periods);
 }
 
 void CFrameScheduler::AdvanceDelivery(Client& client, uint64_t now)
@@ -520,6 +598,9 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
   schedule.republishTicket = m_republishRequestTicket;
   republish = schedule.republishTicket != m_republishAckTicket;
 
+  schedule.deadline       = m_nextDeadline;
+  schedule.deadlineSerial = m_deadlineSerial;
+
   const uint64_t lead =
     PublicationLead(m_schedule.targetSlack, m_workEstimate);
   const uint64_t periodicTarget = m_nextDeadline > lead ?
@@ -528,20 +609,43 @@ bool CFrameScheduler::GetPublishTarget(uint64_t now, uint64_t& target,
   if (schedule.forceTicket != m_forceAckTicket)
   {
     periodic = periodicTarget <= now;
+    if (periodic)
+      target = periodicTarget;
+    schedule.deliveryDeadlineSerial = periodic ? m_deadlineSerial : 0;
+    schedule.phaseEligible          = periodic;
     ReleaseSRWLockExclusive(&m_lock);
     return true;
   }
 
-  periodic = true;
-  if (periodicTarget <= now)
-  {
-    ReleaseSRWLockExclusive(&m_lock);
-    return true;
-  }
-
-  target = periodicTarget;
+  periodic                        = true;
+  schedule.deliveryDeadlineSerial = m_deadlineSerial;
+  schedule.phaseEligible          = true;
+  target                          = periodicTarget;
   ReleaseSRWLockExclusive(&m_lock);
   return true;
+}
+
+void CFrameScheduler::FrameMissed(const Schedule& schedule, uint64_t now,
+  bool periodic)
+{
+  if (!periodic)
+    return;
+
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch &&
+      schedule.deadlineSerial == m_deadlineSerial &&
+      schedule.deadline == m_nextDeadline)
+  {
+    AdvanceCurrentDeadline();
+    AdvanceDeadline(now);
+
+    Client * client = FindClient(m_schedule.clientID);
+    if (client)
+      client->nextDelivery = m_nextDeadline;
+  }
+  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CFrameScheduler::FrameSuperseded()
@@ -551,14 +655,52 @@ void CFrameScheduler::FrameSuperseded()
   ReleaseSRWLockExclusive(&m_lock);
 }
 
+bool CFrameScheduler::TryFrameSubmitted(const Schedule& schedule,
+  uint32_t frameSerial)
+{
+  if (!schedule.phaseEligible || !schedule.deliveryDeadlineSerial ||
+      schedule.deliveryDeadlineSerial != schedule.deadlineSerial)
+    return false;
+
+  if (!TryAcquireSRWLockExclusive(&m_lock))
+    return false;
+
+  bool registered = false;
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch &&
+      schedule.deadlineSerial == m_deadlineSerial &&
+      schedule.deadline == m_nextDeadline)
+  {
+    Publication& publication =
+      m_publications[m_publicationIndex++ % PUBLICATION_HISTORY_SIZE];
+    publication                = {};
+    publication.generation     = schedule.generation;
+    publication.epoch          = schedule.epoch;
+    publication.deadlineSerial = schedule.deadlineSerial;
+    publication.frameSerial    = frameSerial;
+    publication.deadline       = schedule.deadline;
+    publication.committed      = true;
+    registered                 = true;
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+  return registered;
+}
+
 void CFrameScheduler::FramePublished(const Schedule& schedule,
   uint32_t frameSerial, uint64_t now, bool periodic)
 {
   AcquireSRWLockExclusive(&m_lock);
   if (m_scheduling && schedule.clientID == m_schedule.clientID &&
       schedule.generation == m_schedule.generation &&
-      schedule.epoch == m_schedule.epoch)
+      schedule.epoch == m_schedule.epoch &&
+      schedule.deadlineSerial == m_deadlineSerial &&
+      schedule.deadline == m_nextDeadline)
   {
+    Publication * publication = FindPublication(schedule, frameSerial);
+    if (publication)
+      publication->committed = true;
+
     if (schedule.forceTicket > m_forceAckTicket)
       m_forceAckTicket = schedule.forceTicket;
     if (schedule.republishTicket > m_republishAckTicket)
@@ -572,17 +714,44 @@ void CFrameScheduler::FramePublished(const Schedule& schedule,
       client->lastDeliveredFrameSerial = frameSerial;
       client->deliveredFrameValid      = true;
     }
-    m_lastPublishedFrameSerial = frameSerial;
     ++m_publishedFrames;
     if (periodic)
     {
-      m_nextDeadline += m_schedule.period;
+      AdvanceCurrentDeadline();
       AdvanceDeadline(now);
     }
     if (client)
       client->nextDelivery = m_nextDeadline;
   }
   ReleaseSRWLockExclusive(&m_lock);
+}
+
+bool CFrameScheduler::TryFrameCompleted(const Schedule& schedule,
+  uint32_t frameSerial, uint64_t completedAt)
+{
+  if (!schedule.phaseEligible || !schedule.deliveryDeadlineSerial ||
+      schedule.deliveryDeadlineSerial != schedule.deadlineSerial ||
+      !schedule.deadline)
+    return false;
+
+  if (!TryAcquireSRWLockExclusive(&m_lock))
+    return false;
+
+  bool phaseValid = false;
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch)
+  {
+    Publication * publication = FindPublication(schedule, frameSerial);
+    if (publication && publication->committed)
+    {
+      publication->completed  = true;
+      publication->phaseValid = completedAt <= publication->deadline;
+      phaseValid = publication->phaseValid;
+    }
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+  return phaseValid;
 }
 
 void CFrameScheduler::FrameRepublished(const Schedule& schedule,
@@ -605,7 +774,6 @@ void CFrameScheduler::FrameRepublished(const Schedule& schedule,
       client->deliveredFrameValid      = true;
       client->nextDelivery             = m_nextDeadline;
     }
-    m_lastPublishedFrameSerial = frameSerial;
     ++m_publishedFrames;
   }
   ReleaseSRWLockExclusive(&m_lock);
@@ -765,12 +933,14 @@ void CFrameScheduler::LogStatistics(uint64_t now)
   ReleaseSRWLockExclusive(&m_lock);
 }
 
-void CFrameScheduler::RecordFrameTiming(uint64_t duration)
+void CFrameScheduler::TryRecordFrameTiming(uint64_t duration)
 {
   if (!duration)
     return;
 
-  AcquireSRWLockExclusive(&m_lock);
+  if (!TryAcquireSRWLockExclusive(&m_lock))
+    return;
+
   if (!m_workEstimate || duration > m_workEstimate)
     m_workEstimate = duration;
   else

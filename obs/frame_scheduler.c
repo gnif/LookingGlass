@@ -61,13 +61,14 @@ void lgFrameSchedulerSetPeriod(LGFrameScheduler * scheduler,
     return;
 
   ++scheduler->generation;
-  scheduler->resetPending          = true;
-  scheduler->immediatePending      = true;
-  scheduler->phaseError            = 0;
-  scheduler->feedbackFrameSerial   = 0;
-  scheduler->feedbackScheduleEpoch = 0;
-  scheduler->feedbackSamples       = 0;
-  scheduler->feedbackDirty         = false;
+  scheduler->resetPending           = true;
+  scheduler->immediatePending       = true;
+  scheduler->phaseError             = 0;
+  scheduler->feedbackFrameSerial    = 0;
+  scheduler->feedbackScheduleEpoch  = 0;
+  scheduler->feedbackDeadlineSerial = 0;
+  scheduler->feedbackSamples        = 0;
+  scheduler->feedbackDirty          = false;
 }
 
 void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler)
@@ -78,31 +79,35 @@ void lgFrameSchedulerRequestImmediate(LGFrameScheduler * scheduler)
 
 void lgFrameSchedulerObserveFrame(LGFrameScheduler * scheduler,
     uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
-    uint64_t readyTime)
+    uint32_t deadlineSerial, uint64_t readyTime)
 {
-  if (!generation || !scheduleEpoch ||
+  if (!generation || !scheduleEpoch || !deadlineSerial ||
       (scheduler->readyFrameSerial == frameSerial &&
         scheduler->readyGeneration == generation &&
-        scheduler->readyScheduleEpoch == scheduleEpoch))
+        scheduler->readyScheduleEpoch == scheduleEpoch &&
+        scheduler->readyDeadlineSerial == deadlineSerial))
     return;
 
-  scheduler->readyFrameSerial   = frameSerial;
-  scheduler->readyGeneration    = generation;
-  scheduler->readyScheduleEpoch = scheduleEpoch;
-  scheduler->readyTime          = readyTime;
+  scheduler->readyFrameSerial    = frameSerial;
+  scheduler->readyGeneration     = generation;
+  scheduler->readyScheduleEpoch  = scheduleEpoch;
+  scheduler->readyDeadlineSerial = deadlineSerial;
+  scheduler->readyTime           = readyTime;
 }
 
 void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
     uint32_t frameSerial, uint32_t generation, uint32_t scheduleEpoch,
-    uint64_t tickTime)
+    uint32_t deadlineSerial, uint64_t tickTime)
 {
   if (!scheduler->active || generation != scheduler->generation ||
-      !scheduleEpoch ||
+      !scheduleEpoch || !deadlineSerial ||
       (frameSerial == scheduler->feedbackFrameSerial &&
-        scheduleEpoch == scheduler->feedbackScheduleEpoch) ||
+        scheduleEpoch == scheduler->feedbackScheduleEpoch &&
+        deadlineSerial == scheduler->feedbackDeadlineSerial) ||
       scheduler->readyFrameSerial != frameSerial ||
       scheduler->readyGeneration != generation ||
-      scheduler->readyScheduleEpoch != scheduleEpoch)
+      scheduler->readyScheduleEpoch != scheduleEpoch ||
+      scheduler->readyDeadlineSerial != deadlineSerial)
     return;
 
   if (scheduler->feedbackScheduleEpoch &&
@@ -132,7 +137,8 @@ void lgFrameSchedulerFeedback(LGFrameScheduler * scheduler,
     ++scheduler->feedbackSamples;
 
   scheduler->feedbackFrameSerial    = frameSerial;
-  scheduler->feedbackScheduleEpoch = scheduleEpoch;
+  scheduler->feedbackScheduleEpoch  = scheduleEpoch;
+  scheduler->feedbackDeadlineSerial = deadlineSerial;
   scheduler->feedbackDirty          = true;
 }
 
@@ -159,17 +165,20 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
     scheduler->feedbackFrameSerial;
   const uint32_t feedbackScheduleEpoch =
     scheduler->feedbackScheduleEpoch;
+  const uint32_t feedbackDeadlineSerial =
+    scheduler->feedbackDeadlineSerial;
   const KVMFRFrameSchedule message = {
-    .msg.type              = KVMFR_MESSAGE_FRAME_SCHEDULE,
-    .clientID              = scheduler->clientID,
-    .generation            = scheduler->generation,
-    .flags                 = flags,
-    .period                = scheduler->period,
-    .targetSlack           = FRAME_SCHEDULER_TARGET_SLACK_NS,
-    .phaseError            = scheduler->phaseError,
-    .feedbackFrameSerial   = feedbackFrameSerial,
-    .feedbackScheduleEpoch = feedbackScheduleEpoch,
-    .lease                 = FRAME_SCHEDULER_LEASE_MS,
+    .msg.type               = KVMFR_MESSAGE_FRAME_SCHEDULE,
+    .clientID               = scheduler->clientID,
+    .generation             = scheduler->generation,
+    .flags                  = flags,
+    .period                 = scheduler->period,
+    .targetSlack            = FRAME_SCHEDULER_TARGET_SLACK_NS,
+    .phaseError             = scheduler->phaseError,
+    .feedbackFrameSerial    = feedbackFrameSerial,
+    .feedbackScheduleEpoch  = feedbackScheduleEpoch,
+    .feedbackDeadlineSerial = feedbackDeadlineSerial,
+    .lease                  = FRAME_SCHEDULER_LEASE_MS,
   };
 
   if (lgmpClientSendData(queue, &message, sizeof(message), NULL) != LGMP_OK)
@@ -180,6 +189,7 @@ void lgFrameSchedulerUpdate(LGFrameScheduler * scheduler,
   scheduler->immediatePending = false;
   scheduler->lastSend         = now;
   if (scheduler->feedbackFrameSerial == feedbackFrameSerial &&
-      scheduler->feedbackScheduleEpoch == feedbackScheduleEpoch)
+      scheduler->feedbackScheduleEpoch == feedbackScheduleEpoch &&
+      scheduler->feedbackDeadlineSerial == feedbackDeadlineSerial)
     scheduler->feedbackDirty = false;
 }

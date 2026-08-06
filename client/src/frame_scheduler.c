@@ -52,6 +52,7 @@ static struct
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
   uint32_t feedbackScheduleEpoch;
+  uint32_t feedbackDeadlineSerial;
   unsigned feedbackSamples;
   bool     feedbackDirty;
 
@@ -92,23 +93,26 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
   uint32_t feedbackScheduleEpoch;
+  uint32_t feedbackDeadlineSerial;
   LG_LOCK(l_frameScheduler.lock);
-  phaseError                = l_frameScheduler.phaseError;
-  feedbackFrameSerial       = l_frameScheduler.feedbackFrameSerial;
-  feedbackScheduleEpoch     = l_frameScheduler.feedbackScheduleEpoch;
+  phaseError                   = l_frameScheduler.phaseError;
+  feedbackFrameSerial          = l_frameScheduler.feedbackFrameSerial;
+  feedbackScheduleEpoch        = l_frameScheduler.feedbackScheduleEpoch;
+  feedbackDeadlineSerial       = l_frameScheduler.feedbackDeadlineSerial;
   LG_UNLOCK(l_frameScheduler.lock);
 
   const LG_TransportControl control = {
     .type = LG_TRANSPORT_CONTROL_FRAME_SCHEDULE,
     .frameSchedule = {
-      .generation            = l_frameScheduler.generation,
-      .flags                 = flags,
-      .period                = period,
-      .targetSlack           = FRAME_SCHEDULER_TARGET_SLACK_NS,
-      .phaseError            = phaseError,
-      .feedbackFrameSerial   = feedbackFrameSerial,
-      .feedbackScheduleEpoch = feedbackScheduleEpoch,
-      .lease                 = FRAME_SCHEDULER_LEASE_MS,
+      .generation             = l_frameScheduler.generation,
+      .flags                  = flags,
+      .period                 = period,
+      .targetSlack            = FRAME_SCHEDULER_TARGET_SLACK_NS,
+      .phaseError             = phaseError,
+      .feedbackFrameSerial    = feedbackFrameSerial,
+      .feedbackScheduleEpoch  = feedbackScheduleEpoch,
+      .feedbackDeadlineSerial = feedbackDeadlineSerial,
+      .lease                  = FRAME_SCHEDULER_LEASE_MS,
     },
   };
 
@@ -127,7 +131,8 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
     l_frameScheduler.immediatePending = false;
   LG_LOCK(l_frameScheduler.lock);
   if (l_frameScheduler.feedbackFrameSerial == feedbackFrameSerial &&
-      l_frameScheduler.feedbackScheduleEpoch == feedbackScheduleEpoch)
+      l_frameScheduler.feedbackScheduleEpoch == feedbackScheduleEpoch &&
+      l_frameScheduler.feedbackDeadlineSerial == feedbackDeadlineSerial)
     l_frameScheduler.feedbackDirty = false;
   LG_UNLOCK(l_frameScheduler.lock);
   return true;
@@ -156,11 +161,12 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
   ++l_frameScheduler.generation;
 
   LG_LOCK(l_frameScheduler.lock);
-  l_frameScheduler.phaseError            = 0;
-  l_frameScheduler.feedbackFrameSerial   = 0;
-  l_frameScheduler.feedbackScheduleEpoch = 0;
-  l_frameScheduler.feedbackSamples       = 0;
-  l_frameScheduler.feedbackDirty         = false;
+  l_frameScheduler.phaseError             = 0;
+  l_frameScheduler.feedbackFrameSerial    = 0;
+  l_frameScheduler.feedbackScheduleEpoch  = 0;
+  l_frameScheduler.feedbackDeadlineSerial = 0;
+  l_frameScheduler.feedbackSamples        = 0;
+  l_frameScheduler.feedbackDirty          = false;
   LG_UNLOCK(l_frameScheduler.lock);
 }
 
@@ -194,11 +200,12 @@ void frameScheduler_update(void)
       l_frameScheduler.period           = 0;
       l_frameScheduler.immediatePending = true;
       LG_LOCK(l_frameScheduler.lock);
-      l_frameScheduler.phaseError            = 0;
-      l_frameScheduler.feedbackFrameSerial   = 0;
-      l_frameScheduler.feedbackScheduleEpoch = 0;
-      l_frameScheduler.feedbackSamples       = 0;
-      l_frameScheduler.feedbackDirty         = false;
+      l_frameScheduler.phaseError             = 0;
+      l_frameScheduler.feedbackFrameSerial    = 0;
+      l_frameScheduler.feedbackScheduleEpoch  = 0;
+      l_frameScheduler.feedbackDeadlineSerial = 0;
+      l_frameScheduler.feedbackSamples        = 0;
+      l_frameScheduler.feedbackDirty          = false;
       LG_UNLOCK(l_frameScheduler.lock);
     }
     return;
@@ -219,11 +226,12 @@ void frameScheduler_update(void)
     ++l_frameScheduler.generation;
     l_frameScheduler.immediatePending = true;
     LG_LOCK(l_frameScheduler.lock);
-    l_frameScheduler.phaseError            = 0;
-    l_frameScheduler.feedbackFrameSerial   = 0;
-    l_frameScheduler.feedbackScheduleEpoch = 0;
-    l_frameScheduler.feedbackSamples       = 0;
-    l_frameScheduler.feedbackDirty         = false;
+    l_frameScheduler.phaseError             = 0;
+    l_frameScheduler.feedbackFrameSerial    = 0;
+    l_frameScheduler.feedbackScheduleEpoch  = 0;
+    l_frameScheduler.feedbackDeadlineSerial = 0;
+    l_frameScheduler.feedbackSamples        = 0;
+    l_frameScheduler.feedbackDirty          = false;
     LG_UNLOCK(l_frameScheduler.lock);
   }
   else
@@ -257,14 +265,23 @@ void frameScheduler_update(void)
 }
 
 void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
-    uint32_t scheduleEpoch, uint64_t measuredPhase)
+    uint32_t scheduleEpoch, uint32_t deadlineSerial,
+    uint64_t measuredPhase)
 {
-  if (!generation || !scheduleEpoch)
+  if (!generation || !scheduleEpoch || !deadlineSerial)
     return;
 
   LG_LOCK(l_frameScheduler.lock);
   if (!l_frameScheduler.supported || !l_frameScheduler.active ||
       generation != l_frameScheduler.generation)
+  {
+    LG_UNLOCK(l_frameScheduler.lock);
+    return;
+  }
+
+  if (l_frameScheduler.feedbackFrameSerial == (uint32_t)frameSerial &&
+      l_frameScheduler.feedbackScheduleEpoch == scheduleEpoch &&
+      l_frameScheduler.feedbackDeadlineSerial == deadlineSerial)
   {
     LG_UNLOCK(l_frameScheduler.lock);
     return;
@@ -301,8 +318,9 @@ void frameScheduler_feedback(uint64_t frameSerial, uint32_t generation,
   if (l_frameScheduler.feedbackSamples < 32)
     ++l_frameScheduler.feedbackSamples;
 
-  l_frameScheduler.feedbackFrameSerial   = (uint32_t)frameSerial;
-  l_frameScheduler.feedbackScheduleEpoch = scheduleEpoch;
-  l_frameScheduler.feedbackDirty         = true;
+  l_frameScheduler.feedbackFrameSerial    = (uint32_t)frameSerial;
+  l_frameScheduler.feedbackScheduleEpoch  = scheduleEpoch;
+  l_frameScheduler.feedbackDeadlineSerial = deadlineSerial;
+  l_frameScheduler.feedbackDirty          = true;
   LG_UNLOCK(l_frameScheduler.lock);
 }

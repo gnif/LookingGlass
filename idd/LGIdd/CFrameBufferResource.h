@@ -26,6 +26,8 @@
 #include <d3d12.h>
 #include <stdint.h>
 
+#include "CFrameScheduler.h"
+
 class CSwapChainProcessor;
 
 using namespace Microsoft::WRL;
@@ -33,19 +35,22 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    unsigned               m_frameIndex        = 0;
-    uint8_t              * m_base              = nullptr;
-    size_t                 m_size              = 0;
-    size_t                 m_frameSize         = 0;
-    uint64_t               m_captureTime       = 0;
-    uint64_t               m_postProcessStart  = 0;
-    uint64_t               m_copyStart         = 0;
-    unsigned               m_timingEffectIndex = 0;
-    uint64_t               m_timingToken       = 0;
-    bool                   m_fullCopy          = false;
-    unsigned               m_candidateIndex    = 0;
-    ComPtr<ID3D12Resource> m_res;
-    void                 * m_map               = nullptr;
+    unsigned                  m_frameIndex        = 0;
+    uint8_t                 * m_base              = nullptr;
+    size_t                    m_size              = 0;
+    size_t                    m_frameSize         = 0;
+    uint64_t                  m_captureTime       = 0;
+    uint64_t                  m_postProcessStart  = 0;
+    uint64_t                  m_copyStart         = 0;
+
+    CFrameScheduler::Schedule m_schedule          = {};
+
+    unsigned                  m_timingEffectIndex = 0;
+    uint64_t                  m_timingToken       = 0;
+    bool                      m_fullCopy          = false;
+    unsigned                  m_candidateIndex    = 0;
+    ComPtr<ID3D12Resource>    m_res;
+    void                    * m_map               = nullptr;
 
   public:
     bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size);
@@ -65,6 +70,14 @@ class CFrameBufferResource
     uint64_t GetCaptureTime     () const { return m_captureTime;      }
     uint64_t GetPostProcessStart() const { return m_postProcessStart; }
     uint64_t GetCopyStart       () const { return m_copyStart;        }
+    void SetSchedule(const CFrameScheduler::Schedule& schedule)
+    {
+      m_schedule = schedule;
+    }
+    const CFrameScheduler::Schedule& GetSchedule() const
+    {
+      return m_schedule;
+    }
 
     void SetPostProcessSample(
       unsigned effectIndex, uint64_t token, bool fullCopy)

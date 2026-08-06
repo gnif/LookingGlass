@@ -721,6 +721,18 @@ static bool lgmp_frameSerialNewer(uint32_t lhs, uint32_t rhs)
     (uint32_t)(lhs - rhs) < UINT32_C(0x80000000);
 }
 
+static bool lgmp_frameMessageHasMatchingDeadline(
+    const struct LGMPFrameMessage * message)
+{
+  if (!message->owner)
+    return false;
+
+  const uint32_t epoch = (uint32_t)(message->message.udata >> 32);
+  const uint32_t deadlineSerial = (uint32_t)message->message.udata;
+  return deadlineSerial && epoch == message->frame->scheduleEpoch &&
+    deadlineSerial == message->frame->scheduleDeadlineSerial;
+}
+
 static void lgmp_selectNewestFrameMessage(
     struct LGMPFrameMessage * candidate,
     struct LGMPFrameMessage ** selected)
@@ -732,7 +744,9 @@ static void lgmp_selectNewestFrameMessage(
       lgmp_frameSerialNewer(candidate->frame->frameSerial,
         (*selected)->frame->frameSerial) ||
       (candidate->frame->frameSerial == (*selected)->frame->frameSerial &&
-       candidate->owner && !(*selected)->owner))
+       ((candidate->owner && !(*selected)->owner) ||
+        (lgmp_frameMessageHasMatchingDeadline(candidate) &&
+         !lgmp_frameMessageHasMatchingDeadline(*selected)))))
     *selected = candidate;
 }
 
@@ -917,9 +931,9 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
   if (selected->owner)
   {
     const uint64_t scheduleToken = selected->message.udata;
-    result->scheduleGeneration   = (uint32_t)(scheduleToken >> 32);
-    result->scheduleEpoch        = (uint32_t)scheduleToken;
-    result->scheduleOwner        = true;
+    result->scheduleEpoch          = (uint32_t)(scheduleToken >> 32);
+    result->scheduleDeadlineSerial = (uint32_t)scheduleToken;
+    result->scheduleOwner          = true;
   }
   if (frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER)
     result->flags |= LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
@@ -1057,11 +1071,20 @@ static void lgmp_getFrameTiming(LG_Transport * this,
     return;
   }
 
-  timing->valid           = true;
-  timing->captureTime     = lease->frame->captureTime;
-  timing->postProcessTime = lease->frame->postProcessTime;
-  timing->copyTime        = lease->frame->copyTime;
-  timing->readyTime       = lease->frame->readyTime;
+  timing->valid                  = true;
+  timing->scheduleGeneration     = lease->frame->scheduleGeneration;
+  timing->scheduleEpoch          = lease->frame->scheduleEpoch;
+  timing->scheduleDeadlineSerial = lease->frame->scheduleDeadlineSerial;
+  timing->phaseValid             = frame->scheduleOwner &&
+    timing->scheduleGeneration && timing->scheduleEpoch &&
+    timing->scheduleDeadlineSerial &&
+    timing->scheduleEpoch == frame->scheduleEpoch &&
+    timing->scheduleDeadlineSerial == frame->scheduleDeadlineSerial &&
+    (lease->frame->timingFlags & KVMFR_FRAME_TIMING_PHASE_VALID);
+  timing->captureTime            = lease->frame->captureTime;
+  timing->postProcessTime        = lease->frame->postProcessTime;
+  timing->copyTime               = lease->frame->copyTime;
+  timing->readyTime              = lease->frame->readyTime;
   LG_UNLOCK(this->frameLock);
 }
 
@@ -1244,17 +1267,19 @@ static LG_TransportStatus lgmp_sendControl(LG_Transport * this,
     case LG_TRANSPORT_CONTROL_FRAME_SCHEDULE:
     {
       const KVMFRFrameSchedule message = {
-        .msg.type              = KVMFR_MESSAGE_FRAME_SCHEDULE,
-        .clientID              = this->clientID,
-        .generation            = control->frameSchedule.generation,
-        .flags                 = control->frameSchedule.flags,
-        .period                = control->frameSchedule.period,
-        .targetSlack           = control->frameSchedule.targetSlack,
-        .phaseError            = control->frameSchedule.phaseError,
-        .feedbackFrameSerial   = control->frameSchedule.feedbackFrameSerial,
-        .feedbackScheduleEpoch =
+        .msg.type               = KVMFR_MESSAGE_FRAME_SCHEDULE,
+        .clientID               = this->clientID,
+        .generation             = control->frameSchedule.generation,
+        .flags                  = control->frameSchedule.flags,
+        .period                 = control->frameSchedule.period,
+        .targetSlack            = control->frameSchedule.targetSlack,
+        .phaseError             = control->frameSchedule.phaseError,
+        .feedbackFrameSerial    = control->frameSchedule.feedbackFrameSerial,
+        .feedbackScheduleEpoch  =
           control->frameSchedule.feedbackScheduleEpoch,
-        .lease                 = control->frameSchedule.lease,
+        .feedbackDeadlineSerial =
+          control->frameSchedule.feedbackDeadlineSerial,
+        .lease                  = control->frameSchedule.lease,
       };
       memcpy(buffer, &message, sizeof(message));
       size = sizeof(message);
