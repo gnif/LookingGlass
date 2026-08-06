@@ -325,6 +325,7 @@ static void outputDoneHandler(void * opaque, struct wl_output * output)
 {
   struct WaylandOutput * node = opaque;
   outputUpdateScale(node);
+  waylandOutputUpdateFramePeriod();
 }
 
 static void outputScaleHandler(void * opaque, struct wl_output * output, int32_t scale)
@@ -401,6 +402,7 @@ void waylandOutputFree(void)
     wl_list_remove(&node->link);
     free(node);
   }
+  atomic_store_explicit(&wlWm.nominalPeriod, 0, memory_order_release);
 }
 
 void waylandOutputBind(uint32_t name, uint32_t version)
@@ -470,6 +472,7 @@ void waylandOutputTryUnbind(uint32_t name)
       free(node);
       waylandWindowUpdateScale();
       waylandOutputUpdateHDRWhiteLevel();
+      waylandOutputUpdateFramePeriod();
       break;
     }
   }
@@ -485,7 +488,7 @@ struct WaylandScale waylandOutputGetScale(struct wl_output * output)
   return waylandScaleFromInt(0);
 }
 
-bool waylandOutputGetFramePeriod(uint64_t * period)
+void waylandOutputUpdateFramePeriod(void)
 {
   uint64_t fastest = 0;
   struct SurfaceOutput * surfaceOutput;
@@ -501,6 +504,15 @@ bool waylandOutputGetFramePeriod(uint64_t * period)
     if (!fastest || candidate < fastest)
       fastest = candidate;
   }
+
+  atomic_store_explicit(
+      &wlWm.nominalPeriod, fastest, memory_order_release);
+}
+
+bool waylandOutputGetFramePeriod(uint64_t * period)
+{
+  const uint64_t fastest = atomic_load_explicit(
+      &wlWm.nominalPeriod, memory_order_acquire);
 
   if (!fastest)
     return false;

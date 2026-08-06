@@ -161,7 +161,8 @@ struct WaylandDSState
 
   struct wp_presentation * presentation;
   clockid_t clkId;
-  _Atomic(uint64_t) presentationPeriod;
+  _Atomic(bool) presentationClockValid;
+  _Atomic(uint64_t) nominalPeriod;
   RingBuffer photonTimings;
   GraphHandle photonGraph;
 
@@ -397,6 +398,7 @@ void waylandOutputBind(uint32_t name, uint32_t version);
 void waylandOutputTryUnbind(uint32_t name);
 struct WaylandScale waylandOutputGetScale(struct wl_output * output);
 bool waylandOutputGetFramePeriod(uint64_t * period);
+void waylandOutputUpdateFramePeriod(void);
 void waylandOutputColorMgmtInit(struct WaylandOutput * output);
 void waylandOutputColorMgmtInitAll(void);
 void waylandOutputUpdateHDRWhiteLevel(void);

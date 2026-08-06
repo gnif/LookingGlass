@@ -92,6 +92,7 @@ static void wlSurfaceEnterHandler(void * data, struct wl_surface * surface, stru
   wl_list_insert(&wlWm.surfaceOutputs, &node->link);
   waylandWindowUpdateScale();
   waylandOutputUpdateHDRWhiteLevel();
+  waylandOutputUpdateFramePeriod();
 }
 
 static void wlSurfaceLeaveHandler(void * data, struct wl_surface * surface, struct wl_output * output)
@@ -106,6 +107,7 @@ static void wlSurfaceLeaveHandler(void * data, struct wl_surface * surface, stru
     }
   waylandWindowUpdateScale();
   waylandOutputUpdateHDRWhiteLevel();
+  waylandOutputUpdateFramePeriod();
 }
 
 static const struct wl_surface_listener wlSurfaceListener = {

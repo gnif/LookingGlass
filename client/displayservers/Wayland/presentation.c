@@ -39,6 +39,8 @@ static void presentationClockId(void * data,
     struct wp_presentation * presentation, uint32_t clkId)
 {
   wlWm.clkId = clkId;
+  atomic_store_explicit(
+      &wlWm.presentationClockValid, true, memory_order_release);
 }
 
 static const struct wp_presentation_listener presentationListener = {
@@ -56,8 +58,6 @@ static void presentationFeedbackPresented(void * opaque,
     uint32_t tvNsec, uint32_t refresh, uint32_t seqHi, uint32_t seqLo, uint32_t flags)
 {
   struct FrameData * data = opaque;
-  if (refresh)
-    atomic_store(&wlWm.presentationPeriod, refresh);
   struct timespec present = {
     .tv_sec = (uint64_t) tvSecHi << 32 | tvSecLo,
     .tv_nsec = tvNsec,
@@ -96,6 +96,8 @@ bool waylandPresentationInit(void)
 {
   if (wlWm.presentation)
   {
+    atomic_store_explicit(
+        &wlWm.presentationClockValid, false, memory_order_release);
     wlWm.photonTimings = ringbuffer_new(256, sizeof(float));
     wlWm.photonGraph   = app_registerGraph("PHOTON", wlWm.photonTimings,
         0.0f, 30.0f, NULL);
@@ -110,6 +112,8 @@ void waylandPresentationFree(void)
   if (!wlWm.presentation)
     return;
 
+  atomic_store_explicit(
+      &wlWm.presentationClockValid, false, memory_order_release);
   wp_presentation_destroy(wlWm.presentation);
   app_unregisterGraph(wlWm.photonGraph);
   ringbuffer_free(&wlWm.photonTimings);
@@ -117,7 +121,8 @@ void waylandPresentationFree(void)
 
 void waylandPresentationFrame(void)
 {
-  if (!wlWm.presentation)
+  if (!wlWm.presentation || !atomic_load_explicit(
+        &wlWm.presentationClockValid, memory_order_acquire))
     return;
 
   struct FrameData * data = malloc(sizeof(*data));
