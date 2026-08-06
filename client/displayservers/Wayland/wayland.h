@@ -195,6 +195,9 @@ struct WaylandDSState
   struct zwp_relative_pointer_v1 * relativePointer;
   struct zwp_confined_pointer_v1 * confinedPointer;
   struct zwp_locked_pointer_v1 * lockedPointer;
+  struct wl_callback * confSync;
+  bool confReq;
+  bool inputLive;
   bool showPointer;
   uint32_t pointerEnterSerial;
 
@@ -379,6 +382,7 @@ void waylandUngrabKeyboard(void);
 void waylandUngrabPointer(void);
 void waylandCapturePointer(void);
 void waylandUncapturePointer(void);
+bool waylandIsPointerGrabbed(void);
 bool waylandIsPointerCaptured(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);

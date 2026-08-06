@@ -130,7 +130,15 @@ static void ungrab(void)
   push(EV_UNGRAB, 0, 0, false);
   m.conf.req = false;
   if (!m.conf.hold)
+  {
     m.conf.on = false;
+    core_handleGrabEvent(false);
+  }
+}
+
+static bool grabbed(void)
+{
+  return m.conf.on;
 }
 
 static void capture(void)
@@ -186,6 +194,7 @@ static struct LG_DisplayServerOps ds = {
   .ungrabKeyboard      = keyNoop,
   .grabPointer         = grab,
   .ungrabPointer       = ungrab,
+  .isPointerGrabbed    = grabbed,
   .capturePointer      = capture,
   .uncapturePointer    = uncapture,
   .isPointerCaptured   = captured,
@@ -245,8 +254,10 @@ static void reset(void)
   memset(&g_cursor, 0, sizeof(g_cursor));
   memset(&g_params, 0, sizeof(g_params));
 
-  m.support = LG_DS_WARP_SURFACE;
-  m.valid   = true;
+  m.support  = LG_DS_WARP_SURFACE;
+  m.valid    = true;
+  m.conf.req = true;
+  m.conf.on  = true;
 
   g_state.ds           = &ds;
   g_state.focused      = true;
@@ -269,6 +280,7 @@ static void reset(void)
 
   g_cursor.inWindow    = true;
   g_cursor.inView      = true;
+  g_cursor.viewReq     = true;
   g_cursor.warpState   = WARP_STATE_ON;
   g_cursor.guest.valid = true;
   g_cursor.scale       = (struct DoublePoint) { 1.0, 1.0 };
@@ -315,8 +327,6 @@ static void startExit(void)
 {
   reset();
   setLocal(109, 50);
-  m.conf.req  = true;
-  m.conf.on   = true;
   m.conf.hold = true;
 
   core_handleMouseNormal(2, 0);
@@ -343,9 +353,18 @@ static void startConf(void)
 {
   reset();
   setLocal(50, 50);
-  g_cursor.inView = false;
+  m.conf.req       = false;
+  m.conf.on        = false;
+  g_cursor.inView  = false;
+  g_cursor.viewReq = false;
 
   core_handleMouseNormal(0, 0);
+}
+
+static void setConf(bool active)
+{
+  m.conf.on = active;
+  core_handleGrabEvent(active);
 }
 
 static void testConfWait(void)
@@ -354,6 +373,9 @@ static void testConfWait(void)
   CHECK(m.conf.req);
   CHECK(!m.conf.on);
   CHECK(!g_cursor.inView);
+
+  setConf(true);
+  CHECK(g_cursor.inView);
 }
 
 static void testConfGuest(void)
@@ -362,6 +384,10 @@ static void testConfGuest(void)
   core_handleGuestMouseUpdate();
   CHECK(m.conf.req);
   CHECK(count(EV_GUEST) == 0);
+
+  setConf(true);
+  core_handleGuestMouseUpdate();
+  CHECK(count(EV_GUEST) == 1);
 }
 
 static void testCapWait(void)

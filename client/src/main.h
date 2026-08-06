@@ -295,6 +295,9 @@ struct CursorState
   /* true if the cursor is currently in the guest view area */
   bool inView;
 
+  /* true if the cursor should be confined to the guest view area */
+  bool viewReq;
+
   /* true if the guest should be realigned to the host when next drawn */
   bool realign;
 

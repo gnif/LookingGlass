@@ -469,7 +469,7 @@ void app_handleButtonPress(int button)
     return;
   }
 
-  if (!core_inputEnabled() || !g_cursor.inView)
+  if (!core_inputEnabled() || !g_cursor.inView || !g_cursor.viewReq)
     return;
 
   if (!purespice_mousePress(button))
@@ -672,6 +672,11 @@ void app_handleMouseRelative(double normx, double normy,
   else
     if (g_cursor.inWindow)
       core_handleMouseNormal(normx, normy);
+}
+
+void app_handleGrabEvent(bool active)
+{
+  core_handleGrabEvent(active);
 }
 
 // On some display servers normal cursor logic does not work due to the lack of

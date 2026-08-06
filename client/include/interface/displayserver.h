@@ -207,6 +207,7 @@ struct LG_DisplayServerOps
   /* (un)grabPointer is used to toggle cursor tracking/confine in normal mode */
   void (*grabPointer)(void);
   void (*ungrabPointer)(void);
+  bool (*isPointerGrabbed)(void);
   /* (un)capturePointer is used do toggle special cursor tracking in capture mode */
   void (*capturePointer)(void);
   void (*uncapturePointer)(void);
@@ -290,6 +291,7 @@ struct LG_DisplayServerOps
   DEBUG_ASSERT((x)->setPointer         ); \
   DEBUG_ASSERT((x)->grabPointer        ); \
   DEBUG_ASSERT((x)->ungrabPointer      ); \
+  DEBUG_ASSERT((x)->isPointerGrabbed  ); \
   DEBUG_ASSERT((x)->capturePointer     ); \
   DEBUG_ASSERT((x)->uncapturePointer   ); \
   DEBUG_ASSERT((x)->isPointerCaptured ); \

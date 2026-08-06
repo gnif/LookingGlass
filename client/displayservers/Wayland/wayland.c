@@ -321,6 +321,7 @@ struct LG_DisplayServerOps LGDS_Wayland =
   .setPointer          = waylandSetPointer,
   .grabPointer         = waylandGrabPointer,
   .ungrabPointer       = waylandUngrabPointer,
+  .isPointerGrabbed    = waylandIsPointerGrabbed,
   .capturePointer      = waylandCapturePointer,
   .uncapturePointer    = waylandUncapturePointer,
   .isPointerCaptured   = waylandIsPointerCaptured,

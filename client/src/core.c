@@ -66,28 +66,21 @@ bool core_inputEnabled(void)
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
-void core_invalidatePointer(bool detectInView)
+static void applyView(bool active, bool force)
 {
-  /* if the display server does not support warp, then we can not operate in
-   * always relative mode and we should not grab the pointer */
-  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
-  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
-
-  MTRACE("invalidate detect=%d inWin=%d inView=%d grab=%d warp=%d "
-      "support=%d", detectInView, g_cursor.inWindow, g_cursor.inView,
-      g_cursor.grab, g_cursor.warpState, warpSupport);
-
-  if (detectInView)
+  if (active && !g_cursor.viewReq)
   {
-    bool inView = isInView();
-    // do not allow the view to become active if any mouse buttons are being held,
-    // this fixes issues with meta window resizing.
-    if (inView && g_cursor.buttons)
-      return;
-
-    g_cursor.inView = inView;
+    MTRACE("view active skip=req");
+    return;
   }
 
+  if (!force && g_cursor.inView == active)
+    return;
+
+  MTRACE("view active=%d old=%d req=%d force=%d", active,
+      g_cursor.inView, g_cursor.viewReq, force);
+
+  g_cursor.inView = active;
   g_cursor.draw = (g_params.alwaysShowCursor || g_params.captureInputOnly)
     ? true : g_cursor.inView;
   g_cursor.redraw = true;
@@ -98,9 +91,6 @@ void core_invalidatePointer(bool detectInView)
     if (g_params.hideMouse)
       g_state.ds->setPointer(LG_POINTER_NONE);
 
-    if (warpSupport != LG_DS_WARP_NONE && !g_params.captureInputOnly)
-      g_state.ds->grabPointer();
-
     if (g_params.grabKeyboardOnFocus)
       g_state.ds->grabKeyboard();
   }
@@ -109,27 +99,39 @@ void core_invalidatePointer(bool detectInView)
     if (g_params.hideMouse)
       g_state.ds->setPointer(LG_POINTER_SQUARE);
 
-    if (warpSupport != LG_DS_WARP_NONE)
-      g_state.ds->ungrabPointer();
-
     g_state.ds->ungrabKeyboard();
   }
 
   g_cursor.warpState = WARP_STATE_ON;
 }
 
-void core_setCursorInView(bool enable)
+void core_invalidatePointer(bool detectInView)
 {
-  MTRACE("view req=%d old=%d focus=%d inWin=%d grab=%d",
-      enable, g_cursor.inView, g_state.focused, g_cursor.inWindow,
-      g_cursor.grab);
+  MTRACE("invalidate detect=%d inWin=%d req=%d active=%d grab=%d "
+      "warp=%d", detectInView, g_cursor.inWindow, g_cursor.viewReq,
+      g_cursor.inView, g_cursor.grab, g_cursor.warpState);
 
-  // if the state has not changed, don't do anything else
-  if (g_cursor.inView == enable)
+  if (!detectInView)
   {
-    MTRACE("view skip=same value=%d", enable);
+    applyView(g_cursor.inView, true);
     return;
   }
+
+  const bool inView = isInView();
+
+  /* do not allow the view to become active if any mouse buttons are being
+   * held, this fixes issues with meta window resizing. */
+  if (inView && g_cursor.buttons)
+    return;
+
+  core_setCursorInView(inView);
+}
+
+void core_setCursorInView(bool enable)
+{
+  MTRACE("view req=%d oldReq=%d active=%d focus=%d inWin=%d grab=%d",
+      enable, g_cursor.viewReq, g_cursor.inView, g_state.focused,
+      g_cursor.inWindow, g_cursor.grab);
 
   if (enable && !g_state.focused)
   {
@@ -137,8 +139,56 @@ void core_setCursorInView(bool enable)
     return;
   }
 
-  g_cursor.inView = enable;
-  core_invalidatePointer(false);
+  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
+  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
+  const bool immediate = g_cursor.grab || g_params.captureInputOnly ||
+    warpSupport == LG_DS_WARP_NONE;
+
+  if (g_cursor.viewReq == enable)
+  {
+    if (immediate)
+      applyView(enable, false);
+    else if (enable && !g_cursor.inView)
+    {
+      g_state.ds->grabPointer();
+      applyView(g_state.ds->isPointerGrabbed(), false);
+    }
+    else
+      MTRACE("view skip=same value=%d", enable);
+    return;
+  }
+
+  g_cursor.viewReq = enable;
+
+  if (immediate)
+  {
+    applyView(enable, false);
+    return;
+  }
+
+  if (enable)
+  {
+    g_state.ds->grabPointer();
+    applyView(g_state.ds->isPointerGrabbed(), false);
+  }
+  else
+    g_state.ds->ungrabPointer();
+}
+
+void core_handleGrabEvent(bool active)
+{
+  MTRACE("conf active=%d req=%d old=%d grab=%d", active,
+      g_cursor.viewReq, g_cursor.inView, g_cursor.grab);
+
+  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
+  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+
+  if (g_cursor.grab || g_params.captureInputOnly ||
+      warpSupport == LG_DS_WARP_NONE)
+    return;
+
+  applyView(active, false);
 }
 
 void core_setGrab(bool enable)
@@ -201,6 +251,9 @@ void core_setGrabQuiet(bool enable)
     }
 
     g_state.ds->uncapturePointer();
+
+    if (!g_params.captureInputOnly && warpSupport != LG_DS_WARP_NONE)
+      applyView(g_state.ds->isPointerGrabbed(), false);
 
     /* if exiting capture when input on capture only we need to align the local
      * cursor to the guest's location before it is shown. */
@@ -507,12 +560,13 @@ void core_handleGuestMouseUpdate(void)
   }
 
   const bool overlay = app_isOverlayMode();
-  if (overlay || !g_cursor.inView)
+  if (overlay || !g_cursor.inView || !g_cursor.viewReq)
   {
     MTRACE("guest drop=%s guest=%d,%d local=%.3f,%.3f inWin=%d "
-        "inView=%d", overlay ? "overlay" : "view", g_cursor.guest.x,
+        "inView=%d req=%d", overlay ? "overlay" : "view",
+        g_cursor.guest.x,
         g_cursor.guest.y, localPos.x, localPos.y, g_cursor.inWindow,
-        g_cursor.inView);
+        g_cursor.inView, g_cursor.viewReq);
     return;
   }
 
@@ -588,6 +642,13 @@ void core_handleMouseNormal(double ex, double ey)
   if (!core_inputEnabled())
     return;
 
+  if (g_cursor.viewReq != g_cursor.inView)
+  {
+    if (g_cursor.viewReq)
+      core_setCursorInView(true);
+    return;
+  }
+
   /* scale the movement to the guest */
   if (g_cursor.useScale && g_params.scaleMouseInput)
   {
@@ -600,7 +661,9 @@ void core_handleMouseNormal(double ex, double ey)
   const bool inView = isInView();
   if (!g_cursor.inView)
   {
-    if (inView)
+    if (g_cursor.viewReq)
+      return;
+    else if (inView)
       g_cursor.realign = true;
     else /* nothing to do if we are outside the viewport */
       return;
@@ -691,6 +754,9 @@ fallback:
       ex += guest.x - (g_cursor.guest.x + g_cursor.guest.hx);
       ey += guest.y - (g_cursor.guest.y + g_cursor.guest.hy);
       core_setCursorInView(true);
+
+      if (!g_cursor.inView)
+        return;
     }
 
     g_cursor.realign = false;

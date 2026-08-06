@@ -341,6 +341,8 @@ static bool x11Init(const LG_DSInitParams params)
   XSetIOErrorHandler(x11IOErrorHandler);
 
   memset(&x11, 0, sizeof(x11));
+  atomic_init(&x11.captureActive, false);
+  atomic_init(&x11.pointerGrabbed, false);
   x11.xValuator = -1;
   x11.yValuator = -1;
   x11.display   = XOpenDisplay(NULL);
@@ -1508,7 +1510,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       XIDeviceEvent *device = cookie->data;
       app_updateCursorPos(device->event_x, device->event_y);
 
-      if (!x11.pointerGrabbed)
+      if (!atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
         app_handleMouseRelative(0.0, 0.0, 0.0, 0.0);
       return;
     }
@@ -1886,7 +1888,7 @@ static void x11PrintGrabError(const char * type, int dev, Status ret)
 
 static void x11GrabPointer(void)
 {
-  if (x11.pointerGrabbed)
+  if (atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
     return;
 
   unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)] = { 0 };
@@ -1935,26 +1937,36 @@ static void x11GrabPointer(void)
     return;
   }
 
-  x11.pointerGrabbed = true;
+  atomic_store_explicit(&x11.pointerGrabbed, true, memory_order_release);
 }
 
 static void x11UngrabPointer(void)
 {
   atomic_store_explicit(&x11.captureActive, false, memory_order_release);
 
-  if (!x11.pointerGrabbed)
+  if (!atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+  {
+    app_handleGrabEvent(false);
     return;
+  }
 
   XIUngrabDevice(x11.display, x11.pointerDev, CurrentTime);
   XSync(x11.display, False);
 
-  x11.pointerGrabbed = false;
+  atomic_store_explicit(&x11.pointerGrabbed, false, memory_order_release);
+  app_handleGrabEvent(false);
+}
+
+static bool x11IsPointerGrabbed(void)
+{
+  return atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire);
 }
 
 static void x11CapturePointer(void)
 {
   x11GrabPointer();
-  atomic_store_explicit(&x11.captureActive, x11.pointerGrabbed,
+  atomic_store_explicit(&x11.captureActive,
+      atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire),
       memory_order_release);
 }
 
@@ -2152,6 +2164,7 @@ struct LG_DisplayServerOps LGDS_X11 =
   .setPointer          = x11SetPointer,
   .grabPointer         = x11GrabPointer,
   .ungrabPointer       = x11UngrabPointer,
+  .isPointerGrabbed    = x11IsPointerGrabbed,
   .capturePointer      = x11CapturePointer,
   .uncapturePointer    = x11UncapturePointer,
   .isPointerCaptured   = x11IsPointerCaptured,
