@@ -146,6 +146,8 @@ public:
   bool TryFrameSubmitted(const Schedule& schedule, uint32_t frameSerial);
   void FramePublished(const Schedule& schedule, uint32_t frameSerial,
     uint64_t now, bool periodic);
+  void FrameRetained(const Schedule& schedule, uint64_t now,
+    bool periodic);
   void FrameRepublished(const Schedule& schedule, uint32_t frameSerial);
   bool TryFrameCompleted(const Schedule& schedule, uint32_t frameSerial,
     uint64_t completedAt);

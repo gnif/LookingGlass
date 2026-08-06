@@ -726,6 +726,44 @@ void CFrameScheduler::FramePublished(const Schedule& schedule,
   ReleaseSRWLockExclusive(&m_lock);
 }
 
+void CFrameScheduler::FrameRetained(const Schedule& schedule,
+  uint64_t now, bool periodic)
+{
+  bool wake = false;
+  AcquireSRWLockExclusive(&m_lock);
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch &&
+      schedule.deadlineSerial == m_deadlineSerial &&
+      schedule.deadline == m_nextDeadline)
+  {
+    if (schedule.forceTicket > m_forceAckTicket)
+      m_forceAckTicket = schedule.forceTicket;
+
+    // The submission is retained locally, but the owner has not seen it.
+    // Keep one republish request pending until an owner lane is released.
+    if (m_republishRequestTicket == m_republishAckTicket)
+    {
+      ++m_republishRequestTicket;
+      wake = true;
+    }
+
+    if (periodic)
+    {
+      AdvanceCurrentDeadline();
+      AdvanceDeadline(now);
+    }
+
+    Client * client = FindClient(m_schedule.clientID);
+    if (client)
+      client->nextDelivery = m_nextDeadline;
+  }
+  ReleaseSRWLockExclusive(&m_lock);
+
+  if (wake)
+    WakePublisher();
+}
+
 bool CFrameScheduler::TryFrameCompleted(const Schedule& schedule,
   uint32_t frameSerial, uint64_t completedAt)
 {

@@ -110,11 +110,13 @@ private:
   size_t            m_alignSize           = 0;
   size_t            m_frameMemoryOffset   = 0;
   size_t            m_maxFrameSize        = 0;
-  // LGMP publication precedes copy completion, so only the ready index is safe
-  // to retain and replay.
-  std::atomic<LONG> m_submittedFrameIndex = -1;
-  std::atomic<LONG> m_readyFrameIndex     = -1;
+  // LGMP publication precedes copy completion. Replay only completed frames;
+  // the deferred index tracks the newest frame still owed to the owner.
+  std::atomic<LONG> m_submittedFrameIndex     = -1;
+  std::atomic<LONG> m_readyFrameIndex         = -1;
+  LONG              m_deferredOwnerFrameIndex = -1;
   std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  bool              m_frameCompleted[LGMP_Q_FRAME_BUFFER_LEN] = {};
   SRWLOCK           m_framePublishLock     = SRWLOCK_INIT;
   uint64_t          m_framePublishSequence = 0;
   uint64_t          m_frameLastPublishSequence[LGMP_Q_FRAME_BUFFER_LEN] = {};
@@ -190,7 +192,9 @@ private:
   void DeInitLGMP();
   void LGMPTimer();
   void ProcessFrameDeliveries();
-  int FindAvailableFrameBuffer() const;
+  bool FrameBufferReferenced(unsigned frameIndex) const;
+  int FindAvailableFrameBuffer(bool allowReady) const;
+  int FindNewestCompletedFrame(unsigned excludeFrameIndex) const;
   int FindAvailableOwnerQueue(unsigned preferredIndex) const;
   unsigned CountOwnerDeliveries(uint32_t clientID) const;
   bool HasMatchingOwnerDelivery(uint32_t clientID, unsigned frameIndex,
@@ -278,14 +282,18 @@ public:
   void ProcessFrameQueue();
   bool GetSharedFrameTarget(uint64_t now, uint64_t& target);
   bool ReplaySharedFrame(uint64_t now, bool& retry);
-  PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch, const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat, const RECT * dirtyRects, unsigned nbDirtyRects);
-  bool PublishFrameBuffer(unsigned frameIndex,
+  PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch,
+    const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
+    const RECT * dirtyRects, unsigned nbDirtyRects,
     const CFrameScheduler::Schedule& schedule);
+  bool PublishFrameBuffer(unsigned frameIndex,
+    const CFrameScheduler::Schedule& schedule, bool& deliveredToOwner);
   bool RepublishFrameBuffer(const CFrameScheduler::Schedule& schedule);
   bool TryFrameSubmitted(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule);
   void CommitFrameBuffer(unsigned frameIndex,
-    const CFrameScheduler::Schedule& schedule, bool periodic);
+    const CFrameScheduler::Schedule& schedule, bool periodic,
+    bool deliveredToOwner);
   void AbortFrameBuffer(unsigned frameIndex);
   void FailFrameBuffer(unsigned frameIndex);
   void CompleteFrameBuffer(unsigned frameIndex, bool succeeded);

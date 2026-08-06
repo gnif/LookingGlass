@@ -1208,7 +1208,8 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     candidate.srcFormat,
     candidate.dstFormat,
     candidate.dirtyRects,
-    candidate.nbDirtyRects);
+    candidate.nbDirtyRects,
+    schedule);
   if (!buffer.mem)
   {
     restoreCandidates();
@@ -1298,10 +1299,12 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     copyDirtyRects, nbCopyDirtyRects, fullCopy);
   copySlot->EndTiming();
 
-  // Reserve the LGMP message before submitting the copy. This makes post
-  // failure recoverable without racing a very fast GPU completion callback.
+  // Reserve the LGMP delivery or retained-frame slot before submitting the
+  // copy. This makes failure recoverable without racing a very fast GPU
+  // completion callback.
+  bool deliveredToOwner;
   if (!m_devContext->PublishFrameBuffer(
-        buffer.frameIndex, schedule))
+        buffer.frameIndex, schedule, deliveredToOwner))
   {
     copySlot->Cancel();
     m_devContext->AbortFrameBuffer(buffer.frameIndex);
@@ -1311,7 +1314,8 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   CFrameScheduler::Schedule frameSchedule = schedule;
   // Phase accounting must never hold up D3D submission. Keep the immutable
   // delivery identity and discard only this feedback sample on contention.
-  if (!m_devContext->TryFrameSubmitted(buffer.frameIndex, schedule))
+  if (!deliveredToOwner ||
+      !m_devContext->TryFrameSubmitted(buffer.frameIndex, schedule))
     frameSchedule.phaseEligible = false;
   fbRes->SetSchedule(frameSchedule);
 
@@ -1356,7 +1360,7 @@ bool CSwapChainProcessor::PublishNewestCandidate(
   }
 
   m_devContext->CommitFrameBuffer(
-    buffer.frameIndex, schedule, periodic);
+    buffer.frameIndex, schedule, periodic, deliveredToOwner);
 
   unsigned superseded = 0;
   AcquireSRWLockExclusive(&m_candidateLock);
