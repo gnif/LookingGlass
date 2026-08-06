@@ -46,6 +46,43 @@ set_tests_properties(wayland-motion-tests PROPERTIES
   TIMEOUT 10
 )
 
+add_executable(mouse-tests
+  mouse_test.c
+  ../src/core.c
+  ../src/util.c
+)
+target_compile_definitions(mouse-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(mouse-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/PureSpice/include"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(mouse-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(MOUSE_CASES
+  inset-exit
+  exit-delay
+  exit-guest
+  confine-pending
+  confine-guest
+  capture-pending
+  capture-revoked
+  capture-release
+)
+foreach(name IN LISTS MOUSE_CASES)
+  add_test(NAME mouse-${name}
+    COMMAND mouse-tests ${name}
+  )
+  set_tests_properties(mouse-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 find_package(GTest REQUIRED)
 find_program(WESTON_EXECUTABLE NAMES weston)
 if(NOT WESTON_EXECUTABLE)
