@@ -1254,29 +1254,8 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     return false;
   }
 
-  if (!copySlot->Execute())
-  {
-    AcquireSRWLockShared(&m_candidateLock);
-    const bool callbackPending =
-      candidate.state == CANDIDATE_PUBLISHING;
-    ReleaseSRWLockShared(&m_candidateLock);
-    if (callbackPending && !copySlot->HasSubmittedWork())
-    {
-      m_devContext->FailFrameBuffer(buffer.frameIndex);
-      SetFullPendingDamage();
-      ReleaseCandidate(candidateIndex);
-    }
-    m_devContext->ForceFrame();
-
-    AcquireSRWLockExclusive(&m_candidateLock);
-    for (FrameCandidate& held : m_candidates)
-      if (held.state == CANDIDATE_HELD)
-        held.state = CANDIDATE_READY;
-    ReleaseSRWLockExclusive(&m_candidateLock);
-    SignalCandidateState();
-    return false;
-  }
-
+  // Retire the candidate damage before submission. The completion callback
+  // may run before Execute returns and make this candidate reusable.
   AcquireSRWLockExclusive(&m_damageLock);
   if (candidate.nbDirtyRects)
     memcpy(m_dirtyRects, candidate.dirtyRects,
@@ -1294,6 +1273,31 @@ bool CSwapChainProcessor::PublishNewestCandidate(
     tail.active        = false;
   }
   ReleaseSRWLockExclusive(&m_damageLock);
+
+  if (!copySlot->Execute())
+  {
+    // The logical damage state was advanced before submission. Force a full
+    // repair whether submission failed or its callback reported the failure.
+    SetFullPendingDamage();
+    AcquireSRWLockShared(&m_candidateLock);
+    const bool callbackPending =
+      candidate.state == CANDIDATE_PUBLISHING;
+    ReleaseSRWLockShared(&m_candidateLock);
+    if (callbackPending && !copySlot->HasSubmittedWork())
+    {
+      m_devContext->FailFrameBuffer(buffer.frameIndex);
+      ReleaseCandidate(candidateIndex);
+    }
+    m_devContext->ForceFrame();
+
+    AcquireSRWLockExclusive(&m_candidateLock);
+    for (FrameCandidate& held : m_candidates)
+      if (held.state == CANDIDATE_HELD)
+        held.state = CANDIDATE_READY;
+    ReleaseSRWLockExclusive(&m_candidateLock);
+    SignalCandidateState();
+    return false;
+  }
 
   m_devContext->CommitFrameBuffer(
     buffer.frameIndex, schedule, periodic);
