@@ -299,7 +299,8 @@ public:
   void CompleteFrameBuffer(unsigned frameIndex, bool succeeded);
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
-    const CFrameScheduler::Schedule& schedule, uint64_t completedAt);
+    uint64_t holdTime, const CFrameScheduler::Schedule& schedule,
+    uint64_t completedAt);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 

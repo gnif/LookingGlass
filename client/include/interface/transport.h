@@ -104,6 +104,8 @@ typedef struct LG_TransportFrameTiming
   uint64_t postProcessTime;
   uint64_t copyTime;
   uint64_t readyTime;
+  uint64_t holdTime;
+  uint64_t readyLeadTime;
 }
 LG_TransportFrameTiming;
 

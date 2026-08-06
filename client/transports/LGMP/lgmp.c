@@ -1085,6 +1085,8 @@ static void lgmp_getFrameTiming(LG_Transport * this,
   timing->postProcessTime        = lease->frame->postProcessTime;
   timing->copyTime               = lease->frame->copyTime;
   timing->readyTime              = lease->frame->readyTime;
+  timing->holdTime               = lease->frame->holdTime;
+  timing->readyLeadTime          = lease->frame->readyLeadTime;
   LG_UNLOCK(this->frameLock);
 }
 

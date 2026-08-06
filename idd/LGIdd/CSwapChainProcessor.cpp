@@ -766,12 +766,21 @@ void CSwapChainProcessor::CompletionFunction(
   // discarded.
   sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
   const uint64_t publishedAt = CFrameScheduler::Nanotime();
-  const uint64_t elapsed     = publishedAt - postProcessStart;
-  const uint64_t measured    = postProcessTime + copyTime;
-  const uint64_t readyTime   = elapsed > measured ? elapsed - measured : 0;
+  const uint64_t prepareElapsed     = prepareReady >= postProcessStart ?
+    prepareReady - postProcessStart : 0;
+  const uint64_t prepareMeasured    = postProcessTime + prepareCopyTime;
+  const uint64_t prepareReadyTime   = prepareElapsed > prepareMeasured ?
+    prepareElapsed - prepareMeasured : 0;
+  const uint64_t publishElapsed     = publishedAt >= publishStart ?
+    publishedAt - publishStart : 0;
+  const uint64_t publishReadyTime   = publishElapsed > publishCopyTime ?
+    publishElapsed - publishCopyTime : 0;
+  const uint64_t readyTime          = prepareReadyTime + publishReadyTime;
+  const uint64_t holdTime           = publishStart >= prepareReady ?
+    publishStart - prepareReady : 0;
 
   sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime,
+    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, holdTime,
     fbRes->GetSchedule(), publishedAt);
   sc->m_devContext->TryRecordFrameTiming(
     publishedAt - publishStart);

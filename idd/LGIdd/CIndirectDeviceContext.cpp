@@ -1973,6 +1973,8 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   fi->postProcessTime         = 0;
   fi->copyTime                = 0;
   fi->readyTime               = 0;
+  fi->holdTime                = 0;
+  fi->readyLeadTime           = 0;
   fi->timingSerial            = 0;
   fi->timingFlags             = 0;
   fi->scheduleGeneration      = 0;
@@ -2343,8 +2345,8 @@ void CIndirectDeviceContext::CompleteFrameBuffer(
 
 void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
   uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
-  uint64_t readyTime, const CFrameScheduler::Schedule& schedule,
-  uint64_t completedAt)
+  uint64_t readyTime, uint64_t holdTime,
+  const CFrameScheduler::Schedule& schedule, uint64_t completedAt)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
@@ -2357,6 +2359,10 @@ void CIndirectDeviceContext::SetFrameTiming(unsigned frameIndex,
   frame->postProcessTime         = postProcessTime;
   frame->copyTime                = copyTime;
   frame->readyTime               = readyTime;
+  frame->holdTime                = holdTime;
+  frame->readyLeadTime           = phaseValid &&
+    schedule.deadline >= completedAt ?
+      schedule.deadline - completedAt : 0;
   frame->timingFlags             = phaseValid ?
     KVMFR_FRAME_TIMING_PHASE_VALID : 0;
   frame->timingSerial            = frame->frameSerial;

@@ -403,6 +403,8 @@ static bool sendFrame(CaptureResult result, bool * restart)
   fi->postProcessTime         = 0;
   fi->copyTime                = 0;
   fi->readyTime               = 0;
+  fi->holdTime                = 0;
+  fi->readyLeadTime           = 0;
   fi->timingSerial            = 0;
   fi->timingFlags             = 0;
   fi->scheduleGeneration      = 0;
