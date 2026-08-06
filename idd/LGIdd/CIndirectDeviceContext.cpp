@@ -1502,9 +1502,11 @@ CIndirectDeviceContext::PostSharedFrame(unsigned frameIndex,
   m_frameDelivery[frameIndex].sharedOwnerClientID = 0;
   m_frameDelivery[frameIndex].sharedOwnerPending  = false;
   m_frameDelivery[frameIndex].sharedPending       = true;
-  if (postedCount == targetCount)
-    m_frameScheduler.FrameDelivered(
-      recipients, targetCount, frameSerial, now);
+  // LGMP returns only the number of matching subscribers. Account the full
+  // snapshot: disappeared client IDs are harmless, while every surviving
+  // target received this post.
+  m_frameScheduler.FrameDelivered(
+    recipients, targetCount, frameSerial, now);
   return SHARED_FRAME_POSTED;
 }
 
