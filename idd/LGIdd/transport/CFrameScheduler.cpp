@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "capture/CFrameScheduler.h"
+#include "transport/CFrameScheduler.h"
 
 #include "CDebug.h"
 
@@ -288,10 +288,10 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
 {
   AcquireSRWLockExclusive(&m_lock);
 
-  uint32_t oldClientIDs   [LGMP_MAX_CLIENTS] = {};
-  bool     wasSubscribed  [LGMP_MAX_CLIENTS] = {};
-  bool     wasOwnerCapable[LGMP_MAX_CLIENTS] = {};
-  unsigned clientIndex                           = 0;
+  uint32_t oldClientIDs   [TRANSPORT_MAX_CLIENTS] = {};
+  bool     wasSubscribed  [TRANSPORT_MAX_CLIENTS] = {};
+  bool     wasOwnerCapable[TRANSPORT_MAX_CLIENTS] = {};
+  unsigned clientIndex                            = 0;
   for (const Client& client : m_clients)
   {
     oldClientIDs[clientIndex]    = client.clientID;
@@ -349,19 +349,19 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
 }
 
 bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
-  const KVMFRFrameSchedule& schedule, uint64_t now)
+  const FrameScheduleUpdate& schedule, uint64_t now)
 {
-  static const KVMFRFrameScheduleFlags validFlags =
-    KVMFR_FRAME_SCHEDULE_ACTIVE    |
-    KVMFR_FRAME_SCHEDULE_RELEASE   |
-    KVMFR_FRAME_SCHEDULE_RESET     |
-    KVMFR_FRAME_SCHEDULE_IMMEDIATE;
+  static const uint32_t validFlags =
+    FRAME_SCHEDULE_ACTIVE    |
+    FRAME_SCHEDULE_RELEASE   |
+    FRAME_SCHEDULE_RESET     |
+    FRAME_SCHEDULE_IMMEDIATE;
 
   if (!sourceClientID || schedule.clientID != sourceClientID ||
       schedule.flags & ~validFlags)
     return false;
 
-  if (schedule.flags & KVMFR_FRAME_SCHEDULE_RELEASE)
+  if (schedule.flags & FRAME_SCHEDULE_RELEASE)
   {
     AcquireSRWLockExclusive(&m_lock);
     Client * client = FindClient(schedule.clientID);
@@ -381,7 +381,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
     return true;
   }
 
-  if (!(schedule.flags & KVMFR_FRAME_SCHEDULE_ACTIVE) ||
+  if (!(schedule.flags & FRAME_SCHEDULE_ACTIVE) ||
       schedule.period < MIN_SCHEDULE_PERIOD_NS ||
       schedule.period > MAX_PERIOD_NS ||
       schedule.targetSlack >= schedule.period ||
@@ -400,7 +400,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
   }
 
   const bool explicitReset =
-    (schedule.flags & KVMFR_FRAME_SCHEDULE_RESET) != 0;
+    (schedule.flags & FRAME_SCHEDULE_RESET) != 0;
   const bool reset = client->generation != schedule.generation ||
     explicitReset;
   bool wake = reset || !client->active ||
@@ -417,7 +417,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
   client->targetSlack = schedule.targetSlack;
   client->expiry      = now + static_cast<uint64_t>(schedule.lease) * 1000000;
   client->active      = true;
-  if (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE)
+  if (schedule.flags & FRAME_SCHEDULE_IMMEDIATE)
   {
     client->immediate = true;
     wake              = true;
@@ -425,7 +425,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
   wake |= ElectOwner(now, explicitReset ? schedule.clientID : 0);
   if (m_scheduling && client->clientID == m_schedule.clientID &&
       client->generation == m_schedule.generation &&
-      (schedule.flags & KVMFR_FRAME_SCHEDULE_IMMEDIATE))
+      (schedule.flags & FRAME_SCHEDULE_IMMEDIATE))
   {
     ++m_forceRequestTicket;
     ++m_republishRequestTicket;
@@ -439,7 +439,7 @@ bool CFrameScheduler::UpdateSchedule(uint32_t sourceClientID,
 }
 
 bool CFrameScheduler::ApplyFeedback(Client& client,
-  const KVMFRFrameSchedule& schedule)
+  const FrameScheduleUpdate& schedule)
 {
   if (!m_scheduling || client.clientID != m_schedule.clientID ||
       schedule.generation != m_schedule.generation ||

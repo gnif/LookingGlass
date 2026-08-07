@@ -24,8 +24,8 @@
 #include "display/device/CDeviceContext.h"
 #include "display/monitor/Context.h"
 #include "platform/CPlatformInfo.h"
-#include "transport/CFrameTransport.h"
-#include "transport/CLGMPControl.h"
+#include "transport/IFrameTransport.h"
+#include "transport/IControlTransport.h"
 #include "util/CSRWLock.h"
 
 #include <avrt.h>
@@ -49,8 +49,8 @@ CSwapChainProcessor::CSwapChainProcessor(CMonitorContext * monitorContext,
   m_assignmentGeneration(assignmentGeneration),
   m_monitor(monitor),
   m_devContext(devContext),
-  m_transport(devContext->GetFrameTransport()),
-  m_control(devContext->GetLGMPControl()),
+  m_transport(devContext->GetTransport().Frames()),
+  m_control(devContext->GetTransport().Control()),
   m_hSwapChain(hSwapChain),
   m_renderAdapter(renderAdapter),
   m_dx11Device(dx11Device),
@@ -99,7 +99,8 @@ bool CSwapChainProcessor::InitializePipeline()
     UINT64 alignSize = CPlatformInfo::GetPageSize();
     auto dx12Device = std::make_shared<CD3D12Device>(m_renderAdapter);
     const CD3D12Device::InitResult result = dx12Device->Init(
-      m_transport.GetIVSHMEM(), alignSize, !m_dx11Device->IsSoftware());
+      m_devContext->GetTransport().GetDirectMemory(), alignSize,
+      !m_dx11Device->IsSoftware());
     if (result == CD3D12Device::RETRY)
     {
       const HRESULT deviceStatus =
@@ -115,9 +116,9 @@ bool CSwapChainProcessor::InitializePipeline()
     if (result == CD3D12Device::FAILURE)
       return false;
 
-    if (!m_devContext->SetupLGMP(alignSize))
+    if (!m_devContext->SetupTransport(alignSize))
     {
-      DEBUG_ERROR("SetupLGMP failed");
+      DEBUG_ERROR("Transport setup failed");
       return false;
     }
 
@@ -333,7 +334,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
     // Only the buffer2 acquisition path (IddCx 1.10+) reports it; on the legacy
     // path HDR is not available, so default to SDR.
     DXGI_COLOR_SPACE_TYPE colorSpace = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
-    UINT sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
+    UINT sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT;
     const uint64_t captureStart = CFrameScheduler::Nanotime();
 
 #ifdef HAS_IDDCX_110

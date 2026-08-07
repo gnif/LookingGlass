@@ -24,13 +24,15 @@
 #include "capture/CFrameBufferPool.h"
 #include "d3d/CInteropResource.h"
 #include "postprocess/CPostProcessor.h"
+#include "transport/CFrameScheduler.h"
+#include "transport/TransportTypes.h"
 
 #include <Windows.h>
 #include <memory>
 
 using namespace Microsoft::WRL;
 
-class CFrameTransport;
+class IFrameTransport;
 
 struct FrameSubmission
 {
@@ -46,7 +48,7 @@ struct FrameSubmission
 class CFrameProcessor
 {
 protected:
-  CFrameTransport               * m_transport;
+  IFrameTransport               * m_transport;
   std::shared_ptr<CD3D12Device>   m_dx12;
   CPostProcessor                * m_postProcessors;
   SRWLOCK                       * m_pipelineLock;
@@ -72,9 +74,9 @@ protected:
   virtual void SetFullDamageLocked();
 
 public:
-  CFrameProcessor(CFrameTransport * transport,
+  CFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[LGMP_Q_FRAME_LEN],
+    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
     SRWLOCK * pipelineLock, HANDLE terminateEvent);
   virtual ~CFrameProcessor() = default;
 
@@ -94,7 +96,7 @@ public:
 };
 
 std::unique_ptr<CFrameProcessor> CreateFrameProcessor(
-  bool software, CFrameTransport * transport,
+  bool software, IFrameTransport * transport,
   std::shared_ptr<CD3D12Device> dx12,
-  CPostProcessor postProcessors[LGMP_Q_FRAME_LEN],
+  CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
   SRWLOCK * pipelineLock, HANDLE terminateEvent);

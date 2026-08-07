@@ -74,8 +74,8 @@ private:
     UINT64& frameSize);
   static bool GetResolutionMemoryRequirements(uint32_t width,
     uint32_t height, UINT64 alignment, const FrameMemoryLimits& limits,
-    UINT64& frameSize, UINT64& sharedSize);
-  static uint32_t RecommendedIVSHMEMSizeMiB(UINT64 requiredSize);
+    UINT64& frameSize, UINT64& requiredSize);
+  static uint32_t RecommendedMemorySizeMiB(UINT64 requiredSize);
 
 public:
   explicit CDisplayConfiguration(CSettings& settings);

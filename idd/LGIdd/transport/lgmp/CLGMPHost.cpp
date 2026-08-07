@@ -18,9 +18,9 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "transport/CLGMPHost.h"
+#include "transport/lgmp/CLGMPHost.h"
 
-#include "transport/CIVSHMEM.h"
+#include "transport/lgmp/CIVSHMEM.h"
 #include "platform/CPlatformInfo.h"
 #include "CDebug.h"
 #include "VersionInfo.h"

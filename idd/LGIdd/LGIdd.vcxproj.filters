@@ -29,6 +29,9 @@
     <Filter Include="Transport">
       <UniqueIdentifier>{22FDF1F6-0A8C-4B96-9E74-53D74733CC0A}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Transport\LGMP">
+      <UniqueIdentifier>{530EE339-4AD6-4AE7-9A74-09420E73D04B}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Configuration">
       <UniqueIdentifier>{82810F1C-E51C-4DBD-86B2-1CDE8C16A2A9}</UniqueIdentifier>
     </Filter>
@@ -91,16 +94,10 @@
     <ClInclude Include="capture\CFrameBufferResource.h">
       <Filter>Capture</Filter>
     </ClInclude>
-    <ClInclude Include="capture\FrameBufferTypes.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
     <ClInclude Include="capture\CFrameProcessor.h">
       <Filter>Capture</Filter>
     </ClInclude>
     <ClInclude Include="capture\CFrameProcessorUtil.h">
-      <Filter>Capture</Filter>
-    </ClInclude>
-    <ClInclude Include="capture\CFrameScheduler.h">
       <Filter>Capture</Filter>
     </ClInclude>
     <ClInclude Include="capture\CHardwareFrameProcessor.h">
@@ -148,23 +145,47 @@
     <ClInclude Include="postprocess\effect\CRGB24Effect.h">
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
-    <ClInclude Include="transport\CFrameTransport.h">
-      <Filter>Transport</Filter>
-    </ClInclude>
-    <ClInclude Include="transport\CIVSHMEM.h">
-      <Filter>Transport</Filter>
-    </ClInclude>
-    <ClInclude Include="transport\CLGMPControl.h">
-      <Filter>Transport</Filter>
-    </ClInclude>
-    <ClInclude Include="transport\CLGMPHost.h">
+    <ClInclude Include="transport\CFrameScheduler.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\CPipeServer.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\FrameBufferTypes.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\FrameMemoryLimits.h">
       <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IControlTransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IFrameTransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\ITransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\TransportFactory.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\TransportTypes.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CIVSHMEM.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPControl.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPHost.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPTransport.h">
+      <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="config\CSettings.h">
       <Filter>Configuration</Filter>
@@ -211,9 +232,6 @@
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameProcessorUtil.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
-    <ClCompile Include="capture\CFrameScheduler.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CHardwareFrameProcessor.cpp">
@@ -264,20 +282,29 @@
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp">
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>
-    <ClCompile Include="transport\CFrameTransport.cpp">
-      <Filter>Transport</Filter>
-    </ClCompile>
-    <ClCompile Include="transport\CIVSHMEM.cpp">
-      <Filter>Transport</Filter>
-    </ClCompile>
-    <ClCompile Include="transport\CLGMPControl.cpp">
-      <Filter>Transport</Filter>
-    </ClCompile>
-    <ClCompile Include="transport\CLGMPHost.cpp">
+    <ClCompile Include="transport\CFrameScheduler.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CPipeServer.cpp">
       <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\TransportFactory.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CIVSHMEM.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPControl.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPHost.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPTransport.cpp">
+      <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="config\CSettings.cpp">
       <Filter>Configuration</Filter>

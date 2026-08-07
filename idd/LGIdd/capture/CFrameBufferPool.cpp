@@ -19,11 +19,12 @@
  */
 
 #include "capture/CFrameBufferPool.h"
+#include "transport/IFrameTransport.h"
 
 #include <stdint.h>
 
 void CFrameBufferPool::Init(
-  CFrameTransport * transport, CD3D12Device * dx12)
+  IFrameTransport * transport, CD3D12Device * dx12)
 {
   m_transport = transport;
   m_dx12      = dx12;
@@ -43,8 +44,9 @@ CFrameBufferResource * CFrameBufferPool::Get(
     return nullptr;
 
   CFrameBufferResource * fbr = &m_buffers[buffer.frameIndex];
-  if (!fbr->Init(m_transport, m_dx12, buffer.frameIndex, buffer.mem,
-      minSize, textureDesc))
+  if (!fbr->Init(m_dx12, buffer.frameIndex, buffer.mem,
+      buffer.heapOffset, minSize, m_transport->GetMaxFrameSize(),
+      textureDesc))
     return nullptr;
 
   return fbr;

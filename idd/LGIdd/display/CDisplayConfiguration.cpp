@@ -21,7 +21,6 @@
 #include "display/CDisplayConfiguration.h"
 
 #include "CDebug.h"
-#include "common/LGMPConfig.h"
 #include "util/CSRWLock.h"
 
 #include <d3d12.h>
@@ -59,12 +58,12 @@ bool CDisplayConfiguration::CalculateFrameSize(
 
 bool CDisplayConfiguration::GetResolutionMemoryRequirements(
   uint32_t width, uint32_t height, UINT64 alignment,
-  const FrameMemoryLimits& limits, UINT64& frameSize, UINT64& sharedSize)
+  const FrameMemoryLimits& limits, UINT64& frameSize, UINT64& requiredSize)
 {
-  frameSize  = 0;
-  sharedSize = 0;
+  frameSize    = 0;
+  requiredSize = 0;
 
-  if (!alignment || !limits.frameMemoryOffset ||
+  if (!alignment || !limits.frameMemoryOffset || !limits.bufferCount ||
       !CalculateFrameSize(width, height, frameSize))
     return false;
 
@@ -76,12 +75,12 @@ bool CDisplayConfiguration::GetResolutionMemoryRequirements(
   if (!AlignUp(limits.frameMemoryOffset, alignment, frameMemoryStart))
     return false;
 
-  sharedSize = frameMemoryStart +
-    frameAllocationSize * LGMP_Q_FRAME_BUFFER_LEN;
+  requiredSize = frameMemoryStart +
+    frameAllocationSize * limits.bufferCount;
   return true;
 }
 
-uint32_t CDisplayConfiguration::RecommendedIVSHMEMSizeMiB(
+uint32_t CDisplayConfiguration::RecommendedMemorySizeMiB(
   UINT64 requiredSize)
 {
   UINT64 sizeMiB = requiredSize / 1048576;
@@ -135,10 +134,10 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
   for (const auto& configuredMode : configuredModes)
   {
     UINT64 frameSize;
-    UINT64 requiredIVSHMEMSize;
+    UINT64 requiredMemorySize;
     if (!GetResolutionMemoryRequirements(configuredMode.width,
         configuredMode.height, alignment, limits, frameSize,
-        requiredIVSHMEMSize))
+        requiredMemorySize))
     {
       DEBUG_WARN("Filtering invalid %s mode %ux%u@%.3f",
         configuredMode.extraMode ? "extra" : "configured",
@@ -147,15 +146,15 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
       continue;
     }
 
-    if (requiredIVSHMEMSize > limits.sharedSize)
+    if (requiredMemorySize > limits.capacity)
     {
       DEBUG_WARN(
-        "Filtering %s mode %ux%u@%.3f: requires %llu bytes of IVSHMEM, only %llu bytes are available",
+        "Filtering %s mode %ux%u@%.3f: requires %llu bytes of transport memory, only %llu bytes are available",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
         configuredMode.refreshMilliHz / 1000.0,
-        (unsigned long long)requiredIVSHMEMSize,
-        (unsigned long long)limits.sharedSize);
+        (unsigned long long)requiredMemorySize,
+        (unsigned long long)limits.capacity);
       continue;
     }
 
@@ -170,7 +169,7 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
 
   if (newModes.empty())
   {
-    DEBUG_ERROR("No configured display modes fit in IVSHMEM");
+    DEBUG_ERROR("No configured display modes fit in transport memory");
     return false;
   }
 
@@ -225,20 +224,20 @@ CDisplayConfiguration::SetResolution(
   ResolutionResult result;
 
   UINT64 frameSize;
-  UINT64 requiredIVSHMEMSize;
+  UINT64 requiredMemorySize;
   if (!GetResolutionMemoryRequirements(width, height, limits.alignment,
-      limits, frameSize, requiredIVSHMEMSize))
+      limits, frameSize, requiredMemorySize))
   {
     DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
     return result;
   }
 
-  if (requiredIVSHMEMSize > limits.sharedSize)
+  if (requiredMemorySize > limits.capacity)
   {
     result.status      = ResolutionStatus::TOO_LARGE;
-    result.requiredMiB = RecommendedIVSHMEMSizeMiB(requiredIVSHMEMSize);
+    result.requiredMiB = RecommendedMemorySizeMiB(requiredMemorySize);
     DEBUG_WARN(
-      "Refusing resolution %ux%u: frame requires %llu bytes, only %llu bytes are available; IVSHMEM must be at least %u MiB",
+      "Refusing resolution %ux%u: frame requires %llu bytes, only %llu bytes are available; transport memory must be at least %u MiB",
       width, height,
       (unsigned long long)frameSize,
       (unsigned long long)limits.maxFrameSize,

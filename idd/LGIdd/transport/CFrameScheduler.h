@@ -23,11 +23,7 @@
 #include <Windows.h>
 #include <stdint.h>
 
-extern "C" {
-  #include <lgmp/lgmp.h>
-}
-
-#include "common/KVMFR.h"
+#include "transport/TransportTypes.h"
 
 class CFrameScheduler
 {
@@ -79,15 +75,15 @@ private:
     bool     accepted;
   };
 
-  static const unsigned PUBLICATION_HISTORY_SIZE = 128;
+  static const unsigned PUBLICATION_HISTORY_SIZE  = 128;
   static const unsigned WORK_TIMING_HISTORY_SIZE  = 32;
 
   mutable SRWLOCK m_lock = SRWLOCK_INIT;
   HANDLE          m_wakeEvent = nullptr;
-  Client          m_clients[LGMP_MAX_CLIENTS] = {};
-  Schedule        m_schedule                  = {};
-  bool            m_scheduling                = false;
-  uint32_t        m_epoch                     = 0;
+  Client          m_clients[TRANSPORT_MAX_CLIENTS] = {};
+  Schedule        m_schedule                       = {};
+  bool            m_scheduling                     = false;
+  uint32_t        m_epoch                          = 0;
 
   // A result acknowledges only the request tickets captured by its attempt.
   uint64_t m_forceRequestTicket     = 0;
@@ -122,7 +118,7 @@ private:
   Publication * FindPublication(const Schedule& schedule,
     uint32_t frameSerial);
   bool ElectOwner(uint64_t now, uint32_t resetClientID = 0);
-  bool ApplyFeedback(Client& client, const KVMFRFrameSchedule& schedule);
+  bool ApplyFeedback(Client& client, const FrameScheduleUpdate& schedule);
   void AdvanceCurrentDeadline();
   void AdvanceDeadlineSerial(uint64_t count);
   void AdvanceDeadline(uint64_t now);
@@ -139,7 +135,7 @@ public:
   void UpdateSubscribers(const uint32_t * clientIDs, unsigned count,
     const uint32_t * ownerClientIDs, unsigned ownerCount, uint64_t now);
   bool UpdateSchedule(uint32_t sourceClientID,
-    const KVMFRFrameSchedule& schedule, uint64_t now);
+    const FrameScheduleUpdate& schedule, uint64_t now);
   bool GetSchedule(Schedule& schedule) const;
   HANDLE GetWakeEvent() const { return m_wakeEvent; }
   void ObserveFrame(uint64_t now);

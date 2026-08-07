@@ -20,32 +20,45 @@
 
 #pragma once
 
-#include <Windows.h>
-#include <SetupAPI.h>
-#include <vector>
+#include <stddef.h>
+#include <stdint.h>
 
-class CIVSHMEM
+enum : unsigned
 {
-private:
-  struct IVSHMEMData
+  TRANSPORT_FRAME_QUEUE_LENGTH = 2,
+  TRANSPORT_FRAME_BUFFER_COUNT = 3,
+  TRANSPORT_MAX_CLIENTS        = 8,
+};
+
+enum : uint32_t
+{
+  FRAME_SCHEDULE_ACTIVE    = 0x1,
+  FRAME_SCHEDULE_RELEASE   = 0x2,
+  FRAME_SCHEDULE_RESET     = 0x4,
+  FRAME_SCHEDULE_IMMEDIATE = 0x8,
+};
+
+struct FrameScheduleUpdate
+{
+  uint32_t clientID;
+  uint32_t generation;
+  uint32_t flags;
+  uint64_t period;
+  uint64_t targetSlack;
+  int64_t  phaseError;
+  uint32_t feedbackFrameSerial;
+  uint32_t feedbackScheduleEpoch;
+  uint32_t feedbackDeadlineSerial;
+  uint32_t lease;
+};
+
+struct DirectFrameBufferMemory
+{
+  void   * address = nullptr;
+  size_t   size    = 0;
+
+  explicit operator bool() const
   {
-    SP_DEVINFO_DATA devInfoData;
-    DWORD64         busAddr;
-  };
-
-  std::vector<struct IVSHMEMData> m_devices;
-  HANDLE m_handle = INVALID_HANDLE_VALUE;
-  size_t m_size   = 0;
-  void * m_mem    = nullptr;
-
-public:
-  CIVSHMEM();
-  ~CIVSHMEM();
-
-  bool Init();
-  bool Open();
-  void Close();
-
-  size_t GetSize() const { return m_size; }
-  void * GetMem ()       { return m_mem;  }
+    return address && size;
+  }
 };

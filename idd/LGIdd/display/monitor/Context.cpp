@@ -53,7 +53,7 @@ NTSTATUS CMonitorContext::AssignSwapChain(
 
   // Build the D3D11 device into a local so the member is never observed
   // half-constructed. The worker binds it before performing the expensive
-  // D3D12, LGMP and post-processing initialization.
+  // D3D12, transport and post-processing initialization.
   auto dx11Device = std::make_shared<CD3D11Device>(renderAdapter);
   const HRESULT initStatus = dx11Device->Init();
   if (FAILED(initStatus))

@@ -20,21 +20,23 @@
 
 #pragma once
 
-#include <stdint.h>
+#include "postprocess/D12FrameFormat.h"
 
-// FrameBuffer overlays LGMP shared memory and has a variable-length payload.
-#pragma warning(push)
-#pragma warning(disable: 4200)
-struct FrameBuffer
-{
-  volatile uint32_t wp;
-  uint8_t data[0];
-};
-#pragma warning(pop)
+#include <Windows.h>
+#include <wdf.h>
+#include <IddCx.h>
 
-struct PreparedFrameBuffer
+#include <memory>
+
+class IControlTransport
 {
-  unsigned  frameIndex;
-  uint8_t * mem;
-  bool      fullCopy;
+public:
+  virtual ~IControlTransport() = default;
+
+  virtual void SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
+    const BYTE * data, UINT sdrWhiteLevel) = 0;
+  virtual void SetColorTransform(
+    std::shared_ptr<const D12ColorTransform> transform) = 0;
+  virtual std::shared_ptr<const D12ColorTransform>
+    GetColorTransform() const = 0;
 };

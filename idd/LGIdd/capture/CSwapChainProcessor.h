@@ -25,7 +25,7 @@
 #include "display/IddCxCompat.h"
 #include "d3d/CInteropResourcePool.h"
 #include "capture/CFrameProcessor.h"
-#include "common/KVMFR.h"
+#include "postprocess/D12FrameFormat.h"
 #include "postprocess/CPostProcessor.h"
 
 #include <Windows.h>
@@ -37,8 +37,8 @@ using namespace Microsoft::WRL;
 
 class CMonitorContext;
 class CDeviceContext;
-class CFrameTransport;
-class CLGMPControl;
+class IFrameTransport;
+class IControlTransport;
 
 class CSwapChainProcessor
 {
@@ -47,8 +47,8 @@ private:
   UINT64                           m_assignmentGeneration;
   IDDCX_MONITOR                    m_monitor;
   CDeviceContext                 * m_devContext;
-  CFrameTransport                & m_transport;
-  CLGMPControl                   & m_control;
+  IFrameTransport                & m_transport;
+  IControlTransport              & m_control;
   IDDCX_SWAPCHAIN                  m_hSwapChain;
   LUID                             m_renderAdapter;
   std::shared_ptr<CD3D11Device>    m_dx11Device;
@@ -56,7 +56,7 @@ private:
   HANDLE                           m_newFrameEvent;
 
   CInteropResourcePool             m_resPool;
-  CPostProcessor                   m_postProcessors[LGMP_Q_FRAME_LEN];
+  CPostProcessor                   m_postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH];
   std::unique_ptr<CFrameProcessor> m_frameProcessor;
   // Reconfiguration is exclusive while per-candidate recording is shared.
   SRWLOCK                          m_pipelineLock = SRWLOCK_INIT;
@@ -68,7 +68,7 @@ private:
   Wrappers::Event m_cursorDataEvent;
   BYTE*           m_shapeBuffer;
   DWORD           m_lastShapeId = 0;
-  std::atomic<UINT> m_sdrWhiteLevel { KVMFR_SDR_WHITE_LEVEL_DEFAULT };
+  std::atomic<UINT> m_sdrWhiteLevel { LG_SDR_WHITE_LEVEL_DEFAULT };
 
 #ifdef HAS_IDDCX_110
   // The per-frame metadata stream can select the monitor default, provide a

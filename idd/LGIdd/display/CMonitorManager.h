@@ -57,7 +57,7 @@ private:
   IDDCX_MONITOR m_monitor = nullptr;
 
   // Guards the monitor/replug/swap-chain state. These values are touched by
-  // IddCx callback threads, the swap-chain thread, and the LGMP timer.
+  // IddCx callback threads, the swap-chain thread, and the transport timer.
   SRWLOCK m_lock = SRWLOCK_INIT;
 
   bool m_replugMonitor           = false;

@@ -28,18 +28,21 @@ extern "C" {
   #include "lgmp/host.h"
 }
 
-#include "capture/CFrameScheduler.h"
-#include "capture/FrameBufferTypes.h"
 #include "common/KVMFR.h"
-#include "postprocess/D12FrameFormat.h"
+#include "transport/CFrameScheduler.h"
 #include "transport/FrameMemoryLimits.h"
+#include "transport/IFrameTransport.h"
 
 class CIVSHMEM;
 class CLGMPHost;
+class CLGMPTransport;
+struct LGMPBuffer;
 
-class CFrameTransport
+class CLGMPFrameTransport final : public IFrameTransport
 {
-public:
+private:
+  friend class CLGMPTransport;
+
   struct SubscriberSnapshot
   {
     uint32_t    clientIDs     [LGMP_MAX_CLIENTS] = {};
@@ -103,7 +106,7 @@ private:
   uint32_t      m_frameSerial                            = 0;
   PLGMPMemory   m_frameMemory[LGMP_Q_FRAME_BUFFER_LEN]   = {};
   KVMFRFrame  * m_frame      [LGMP_Q_FRAME_BUFFER_LEN]   = {};
-  FrameBuffer * m_frameBuffer[LGMP_Q_FRAME_BUFFER_LEN]   = {};
+  LGMPBuffer  * m_frameBuffer[LGMP_Q_FRAME_BUFFER_LEN]   = {};
 
   unsigned    m_width       = 0;
   unsigned    m_height      = 0;
@@ -136,74 +139,77 @@ private:
     uint32_t excludeClientID, uint64_t now);
   bool PostSharedOwnerFrame(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule);
-
-public:
-  CFrameTransport(CLGMPHost& host, CIVSHMEM& ivshmem);
-  ~CFrameTransport();
-
-  CFrameTransport(const CFrameTransport&) = delete;
-  CFrameTransport& operator=(const CFrameTransport&) = delete;
-
+  CLGMPFrameTransport(CLGMPHost& host, CIVSHMEM& ivshmem);
   bool Initialize();
   void SealMemoryLayout();
   bool Setup(size_t alignSize);
   void DeInit();
-
   FrameMemoryLimits GetMemoryLimits() const;
-  size_t GetMaxFrameSize() const { return m_maxFrameSize; }
-  CIVSHMEM& GetIVSHMEM() { return m_ivshmem; }
-
   SubscriberSnapshot SnapshotSubscribers() const;
   void FinalizeSubscribers(
     const SubscriberSnapshot& snapshot, uint64_t now);
   bool UpdateSchedule(uint32_t sourceClientID,
-    const KVMFRFrameSchedule& schedule, uint64_t now);
+    const FrameScheduleUpdate& schedule, uint64_t now);
+
+public:
+  ~CLGMPFrameTransport() override;
+
+  CLGMPFrameTransport(const CLGMPFrameTransport&) = delete;
+  CLGMPFrameTransport& operator=(const CLGMPFrameTransport&) = delete;
+
+  size_t GetMaxFrameSize() const override { return m_maxFrameSize; }
 
   bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule,
-    bool allowReadyReplacement = true);
-  bool HasPublishedFrame() const
+    bool allowReadyReplacement = true) override;
+  bool HasPublishedFrame() const override
   {
     return m_readyFrameIndex.load(std::memory_order_acquire) >= 0;
   }
-  void ProcessFrameQueue();
-  bool GetSharedFrameTarget(uint64_t now, uint64_t& target);
-  bool ReplaySharedFrame(uint64_t now, bool& retry);
+  void ProcessDeliveries() override;
+  bool GetPendingDeliveryTarget(
+    uint64_t now, uint64_t& target) override;
+  bool RetryPendingDelivery(uint64_t now, bool& retry) override;
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch,
     const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
     const RECT * dirtyRects, unsigned nbDirtyRects,
     const CFrameScheduler::Schedule& schedule,
-    bool allowReadyReplacement = true);
+    bool allowReadyReplacement = true) override;
   bool PublishFrameBuffer(unsigned frameIndex,
-    const CFrameScheduler::Schedule& schedule, bool& deliveredToOwner);
-  bool RepublishFrameBuffer(const CFrameScheduler::Schedule& schedule);
+    const CFrameScheduler::Schedule& schedule,
+    bool& deliveredToOwner) override;
+  bool RepublishFrameBuffer(
+    const CFrameScheduler::Schedule& schedule) override;
   bool TryFrameSubmitted(unsigned frameIndex,
-    const CFrameScheduler::Schedule& schedule);
+    const CFrameScheduler::Schedule& schedule) override;
   void CommitFrameBuffer(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule, bool periodic,
-    bool deliveredToOwner);
-  void AbortFrameBuffer(unsigned frameIndex);
-  void FailFrameBuffer(unsigned frameIndex);
-  void CompleteFrameBuffer(unsigned frameIndex, bool succeeded);
+    bool deliveredToOwner) override;
+  void AbortFrameBuffer(unsigned frameIndex) override;
+  void FailFrameBuffer(unsigned frameIndex) override;
+  void CompleteFrameBuffer(
+    unsigned frameIndex, bool succeeded) override;
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
     uint64_t holdTime, const CFrameScheduler::Schedule& schedule,
-    uint64_t completedAt);
+    uint64_t completedAt) override;
   void WriteFrameBuffer(unsigned frameIndex, void * src, size_t offset,
-    size_t len, bool setWritePos) const;
+    size_t len, bool setWritePos) const override;
   void WriteFrameBufferRows(unsigned frameIndex, void * src,
-    size_t offset, size_t rowBytes, size_t pitch, unsigned rows) const;
-  void FinalizeFrameBuffer(unsigned frameIndex) const;
+    size_t offset, size_t rowBytes, size_t pitch,
+    unsigned rows) const override;
+  void FinalizeFrameBuffer(unsigned frameIndex) const override;
 
-  void ObserveFrame(uint64_t now);
-  void ForceFrame();
+  void ObserveFrame(uint64_t now) override;
+  void ForceFrame() override;
   bool GetPublishTarget(uint64_t now, uint64_t& target,
-    CFrameScheduler::Schedule& schedule, bool& periodic, bool& republish);
+    CFrameScheduler::Schedule& schedule, bool& periodic,
+    bool& republish) override;
   void FrameMissed(const CFrameScheduler::Schedule& schedule,
-    uint64_t now, bool periodic);
-  void FrameSuperseded();
-  HANDLE GetFrameScheduleEvent() const
+    uint64_t now, bool periodic) override;
+  void FrameSuperseded() override;
+  HANDLE GetFrameScheduleEvent() const override
   {
     return m_frameScheduler.GetWakeEvent();
   }
-  void TryRecordFrameTiming(uint64_t duration);
+  void TryRecordFrameTiming(uint64_t duration) override;
 };

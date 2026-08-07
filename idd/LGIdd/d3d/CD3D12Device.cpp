@@ -21,7 +21,7 @@
 #include "d3d/CD3D12Device.h"
 #include "CDebug.h"
 
-bool CD3D12Device::m_indirectCopy = false;
+bool CD3D12Device::s_directHeapFailed = false;
 
 CD3D12Device::CD3D12Device(LUID adapterLuid) :
   m_adapterLuid(adapterLuid),
@@ -60,12 +60,14 @@ static void CALLBACK _D3D12DebugCallback(
     description);
 }
 
-CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
-  UINT64 &alignSize, bool enableCompute)
+CD3D12Device::InitResult CD3D12Device::Init(
+  const DirectFrameBufferMemory& directMemory,
+  UINT64& alignSize, bool enableCompute)
 {
   HRESULT hr;
 
   m_computeEnabled = enableCompute;
+  m_indirectCopy   = !directMemory || s_directHeapFailed;
 
   hr = CreateDXGIFactory2(m_debug ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&m_factory));  
   if (FAILED(hr))
@@ -105,34 +107,37 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
 
   if (!m_indirectCopy)
   {
-    hr = m_device->OpenExistingHeapFromAddress(ivshmem.GetMem(), IID_PPV_ARGS(&m_ivshmemHeap));
+    hr = m_device->OpenExistingHeapFromAddress(
+      directMemory.address, IID_PPV_ARGS(&m_transportHeap));
     if (FAILED(hr))
     {
-      DEBUG_ERROR_HR(hr, "Failed to open IVSHMEM as a D3D12Heap");
-      m_indirectCopy = true;
+      DEBUG_ERROR_HR(hr,
+        "Failed to open transport memory as a D3D12 heap");
+      s_directHeapFailed = true;
       return InitResult::RETRY;
     }
-    m_ivshmemHeap->SetName(L"IVSHMEM");
+    m_transportHeap->SetName(L"Transport Memory");
   
-    D3D12_HEAP_DESC heapDesc = m_ivshmemHeap->GetDesc();
+    D3D12_HEAP_DESC heapDesc = m_transportHeap->GetDesc();
     alignSize = heapDesc.Alignment;
-    m_ivshmemTextureSupported =
+    m_directTextureSupported =
       (heapDesc.Flags & D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER) &&
       !(heapDesc.Flags & D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES);
 
     // test that the heap is usable
     if (!HeapTest())
     {
-      DEBUG_WARN("Unable to create resources in the IVSHMEM heap, falling back to indirect copy");
+      DEBUG_WARN("Unable to create resources in transport memory, "
+        "falling back to indirect copy");
 
       // failure often results in the device being removed and we need to completely reinit when this occurs
-      m_indirectCopy = true;
+      s_directHeapFailed = true;
       return InitResult::RETRY;
     }
 
-    DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
-    if (!m_ivshmemTextureSupported)
-      DEBUG_WARN("IVSHMEM heap does not support placed textures");
+    DEBUG_INFO("Using transport memory as a D3D12 heap");
+    if (!m_directTextureSupported)
+      DEBUG_WARN("Transport memory does not support placed textures");
   }
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,
@@ -182,7 +187,7 @@ bool CD3D12Device::HeapTest()
 
   ComPtr<ID3D12Resource> resource;
   hr = m_device->CreatePlacedResource(
-    m_ivshmemHeap.Get(),
+    m_transportHeap.Get(),
     0,
     &desc,
     D3D12_RESOURCE_STATE_COPY_DEST,
@@ -190,7 +195,8 @@ bool CD3D12Device::HeapTest()
     IID_PPV_ARGS(&resource));
   if (FAILED(hr))
   {
-    DEBUG_ERROR_HR(hr, "Failed to create the ivshmem ID3D12Resource");
+    DEBUG_ERROR_HR(hr,
+      "Failed to create the transport-memory ID3D12Resource");
     return false;
   }
   resource->SetName(L"HeapTest");

@@ -21,21 +21,19 @@
 #include "capture/CFrameBufferResource.h"
 #include "capture/CFrameProcessorUtil.h"
 #include "d3d/CD3D12Device.h"
-#include "transport/CFrameTransport.h"
-#include "transport/CIVSHMEM.h"
 #include "CDebug.h"
 
 #include <cstring>
 
-bool CFrameBufferResource::Init(CFrameTransport * transport,
-  CD3D12Device * dx12, unsigned frameIndex, uint8_t * base, size_t size,
-  const D3D12_RESOURCE_DESC * textureDesc)
+bool CFrameBufferResource::Init(CD3D12Device * dx12,
+  unsigned frameIndex, uint8_t * base, uint64_t heapOffset, size_t size,
+  size_t maxFrameSize, const D3D12_RESOURCE_DESC * textureDesc)
 {
   m_frameIndex = frameIndex;
 
-  if (size > transport->GetMaxFrameSize())
+  if (size > maxFrameSize)
   {
-    DEBUG_ERROR("Frame size of %llu is too large to fit in shared ram",
+    DEBUG_ERROR("Frame size of %llu is too large for transport memory",
       (unsigned long long)size);
     return false;
   }
@@ -47,7 +45,7 @@ bool CFrameBufferResource::Init(CFrameTransport * transport,
   D3D12_RESOURCE_DESC desc = {};
   if (textureDesc)
   {
-    if (indirect || !dx12->CanUseIVSHMEMTexture())
+    if (indirect || !dx12->CanUseDirectTexture())
       return false;
     desc = *textureDesc;
     if (desc.Dimension        != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
@@ -130,20 +128,19 @@ bool CFrameBufferResource::Init(CFrameTransport * transport,
   }
   else
   {
-    const UINT64 heapOffset =
-      (uintptr_t)base -
-      (uintptr_t)transport->GetIVSHMEM().GetMem();
     const D3D12_RESOURCE_ALLOCATION_INFO allocation =
       dx12->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
     allocationSize = allocation.SizeInBytes;
-    const D3D12_HEAP_DESC heapDesc = dx12->GetHeap()->GetDesc();
+    const D3D12_HEAP_DESC heapDesc =
+      dx12->GetTransportHeap()->GetDesc();
     if (!allocation.Alignment ||
         heapOffset % allocation.Alignment ||
-        allocation.SizeInBytes > transport->GetMaxFrameSize() ||
+        allocation.SizeInBytes > maxFrameSize ||
         heapOffset > heapDesc.SizeInBytes ||
         allocation.SizeInBytes > heapDesc.SizeInBytes - heapOffset)
     {
-      DEBUG_ERROR("IVSHMEM resource does not fit its framebuffer allocation");
+      DEBUG_ERROR(
+        "Transport resource does not fit its framebuffer allocation");
       return false;
     }
 
@@ -156,20 +153,20 @@ bool CFrameBufferResource::Init(CFrameTransport * transport,
       if (FAILED(hr) ||
           !(support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D))
       {
-        DEBUG_ERROR("IVSHMEM texture format is unsupported");
+        DEBUG_ERROR("Transport texture format is unsupported");
         return false;
       }
-      DEBUG_TRACE("Creating IVSHMEM texture for %p", base);
-      resName = L"IVSHMEM Texture";
+      DEBUG_TRACE("Creating transport texture for %p", base);
+      resName = L"Transport Texture";
     }
     else
     {
-      DEBUG_TRACE("Creating IVSHMEM buffer for %p", base);
-      resName = L"IVSHMEM";
+      DEBUG_TRACE("Creating transport buffer for %p", base);
+      resName = L"Transport Buffer";
     }
 
     hr = dx12->GetDevice()->CreatePlacedResource(
-      dx12->GetHeap().Get(),
+      dx12->GetTransportHeap().Get(),
       heapOffset,
       &desc,
       D3D12_RESOURCE_STATE_COMMON,

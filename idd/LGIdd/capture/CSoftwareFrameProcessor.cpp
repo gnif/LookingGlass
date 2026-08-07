@@ -20,21 +20,21 @@
 
 #include "capture/CSoftwareFrameProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
-#include "capture/FrameBufferTypes.h"
-#include "transport/CFrameTransport.h"
+#include "transport/TransportTypes.h"
+#include "transport/IFrameTransport.h"
 #include "util/CSRWLock.h"
 #include "CDebug.h"
 
 #include <utility>
 
 CSoftwareFrameProcessor::CSoftwareFrameProcessor(
-    CFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[LGMP_Q_FRAME_LEN],
+    IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
+    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
     SRWLOCK * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent),
   m_directTexture(
-    !m_dx12->IsIndirectCopy() && m_dx12->CanUseIVSHMEMTexture())
+    !m_dx12->IsIndirectCopy() && m_dx12->CanUseDirectTexture())
 {
 }
 
@@ -152,18 +152,18 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
     else
     {
       m_directTexture = false;
-      DEBUG_WARN("IVSHMEM texture layout does not fit the framebuffer");
+      DEBUG_WARN("Transport texture layout does not fit the framebuffer");
     }
   }
   else if (m_directTexture)
   {
     m_directTexture = false;
-    DEBUG_WARN("Post-processor output cannot use an IVSHMEM texture");
+    DEBUG_WARN("Post-processor output cannot use a transport texture");
   }
 
   if (!pitch || !frameSize || frameSize > m_transport->GetMaxFrameSize())
   {
-    DEBUG_ERROR("Software frame does not fit in shared memory");
+    DEBUG_ERROR("Software frame does not fit in transport memory");
     SetFullDamage();
     return false;
   }
@@ -190,7 +190,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
     deliverySchedule.deliveryDeadlineSerial = 0;
     deliverySchedule.phaseEligible          = false;
 
-    m_transport->ProcessFrameQueue();
+    m_transport->ProcessDeliveries();
     if (!m_transport->FrameBufferAvailable(
           deliverySchedule, submission.noImageUpdate))
     {
@@ -258,7 +258,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
           RestorePendingDamage(
             currentDirtyRects, nbDirtyRects, hasDamage);
           DEBUG_ERROR_HR(deviceStatus,
-            "D3D12 device removed while creating an IVSHMEM texture");
+            "D3D12 device removed while creating a transport texture");
           SetFullDamage();
           return false;
         }
@@ -266,7 +266,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
         m_directTexture = false;
         textureDescPtr  = nullptr;
         DEBUG_WARN(
-          "IVSHMEM textures unavailable; using a direct buffer copy");
+          "Transport textures unavailable; using a direct buffer copy");
       }
     }
 

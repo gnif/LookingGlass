@@ -20,27 +20,12 @@
 
 #pragma once
 
-#include "capture/CFrameProcessor.h"
+#include <stdint.h>
 
-class CSoftwareFrameProcessor final : public CFrameProcessor
+struct PreparedFrameBuffer
 {
-private:
-  bool m_directTexture;
-
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-
-public:
-  CSoftwareFrameProcessor(IFrameTransport * transport,
-    std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
-
-  bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override { return false; }
-  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
-  {
-    return false;
-  }
-  bool UsesCadence() const override { return false; }
+  unsigned  frameIndex;
+  uint8_t * mem;
+  uint64_t  heapOffset;
+  bool      fullCopy;
 };

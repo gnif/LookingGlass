@@ -22,6 +22,8 @@
 
 #include "display/IddCxCompat.h"
 #include "transport/CPipeServer.h"
+#include "transport/IFrameTransport.h"
+#include "transport/TransportFactory.h"
 #include "CDebug.h"
 
 #include <dxgi1_2.h>
@@ -33,8 +35,7 @@ static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
 CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
   m_wdfDevice(wdfDevice),
-  m_lgmpControl(m_lgmpHost),
-  m_frameTransport(m_lgmpHost, m_ivshmem),
+  m_transport(CreateTransport()),
   m_displayConfiguration(g_settings)
 {
 }
@@ -49,10 +50,10 @@ CDeviceContext::~CDeviceContext()
     m_initTimer = nullptr;
   }
 
-  if (m_lgmpTimer)
+  if (m_transportTimer)
   {
-    WdfTimerStop(m_lgmpTimer, TRUE);
-    m_lgmpTimer = nullptr;
+    WdfTimerStop(m_transportTimer, TRUE);
+    m_transportTimer = nullptr;
   }
 }
 
@@ -156,19 +157,32 @@ void CDeviceContext::InitAdapter()
     return;
   }
 
-  // At boot the IVSHMEM PCI device may not have enumerated yet. Rather than
+  // At boot the selected transport may not be available yet. Rather than
   // silently abandoning the adapter (leaving the device loaded but with no
-  // monitor), retry from a timer until the shared memory becomes available.
-  if (!m_ivshmemOpened)
+  // monitor), retry from a timer until it can be opened.
+  if (!m_transportOpened)
   {
-    if (!m_ivshmem.Init() || !m_ivshmem.Open())
+    if (!m_transport)
     {
-      DEBUG_WARN("IVSHMEM not available yet, scheduling init retry");
-      ScheduleInitRetry();
+      DEBUG_ERROR("Failed to create the frame transport");
       m_initInProgress.store(0);
       return;
     }
-    m_ivshmemOpened = true;
+
+    const ITransport::OpenResult result = m_transport->Open();
+    if (result != ITransport::OpenResult::SUCCESS)
+    {
+      if (result == ITransport::OpenResult::RETRY)
+      {
+        DEBUG_WARN("Frame transport not available yet, scheduling init retry");
+        ScheduleInitRetry();
+      }
+      else
+        DEBUG_ERROR("Failed to open the frame transport");
+      m_initInProgress.store(0);
+      return;
+    }
+    m_transportOpened = true;
   }
 
   // Select the render adapter before advertising capabilities. If no hardware
@@ -234,14 +248,14 @@ void CDeviceContext::InitAdapter()
     DEBUG_INFO("No hardware render adapter available; using SDR software mode");
 
   QueryIddCxCapabilities();
-  DEBUG_TRACE("Initializing LGMP metadata");
-  if (!InitializeLGMP())
+  DEBUG_TRACE("Initializing frame transport metadata");
+  if (!InitializeTransport())
   {
     m_initInProgress.store(0);
     return;
   }
   DEBUG_TRACE("Loading configured display modes");
-  if (!m_displayConfiguration.Load(m_frameTransport.GetMemoryLimits()))
+  if (!m_displayConfiguration.Load(m_transport->GetMemoryLimits()))
   {
     m_initInProgress.store(0);
     return;
@@ -374,7 +388,7 @@ void CDeviceContext::ReplugMonitor()
 void CDeviceContext::ReloadSettings()
 {
   if (!m_displayConfiguration.ReloadSettings(
-      m_frameTransport.GetMemoryLimits()))
+      m_transport->GetMemoryLimits()))
     return;
 
   ReplugMonitor();
@@ -417,7 +431,7 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
 {
   const CDisplayConfiguration::ResolutionResult result =
     m_displayConfiguration.SetResolution(
-      width, height, m_frameTransport.GetMemoryLimits());
+      width, height, m_transport->GetMemoryLimits());
 
   switch (result.status)
   {
@@ -437,33 +451,21 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
   }
 }
 
-// LGMP transport
+// Frame transport
 
-bool CDeviceContext::InitializeLGMP()
+bool CDeviceContext::InitializeTransport()
 {
-  if (m_lgmpHost.IsInitialized())
-    return true;
-
-  if (!m_lgmpHost.Initialize(m_ivshmem))
-    return false;
-
-  // Preserve the shared-memory layout: frame queues precede the pointer queue
-  // and its retained cursor and color-transform allocations.
-  if (!m_frameTransport.Initialize() || !m_lgmpControl.Initialize())
-    return false;
-
-  m_frameTransport.SealMemoryLayout();
-  return true;
+  return m_transport && m_transport->Initialize();
 }
 
-bool CDeviceContext::SetupLGMP(size_t alignSize)
+bool CDeviceContext::SetupTransport(size_t alignSize)
 {
   // Frame buffers cannot be allocated until the GPU-specific alignment is
   // known. The swap-chain path may call this again after setup completed.
-  if (m_frameTransport.GetMaxFrameSize())
+  if (m_transport->Frames().GetMaxFrameSize())
     return true;
 
-  if (!InitializeLGMP() || !m_frameTransport.Setup(alignSize))
+  if (!InitializeTransport() || !m_transport->Setup(alignSize))
     return false;
 
   WDF_TIMER_CONFIG config;
@@ -472,7 +474,7 @@ bool CDeviceContext::SetupLGMP(size_t alignSize)
     {
       WDFOBJECT parent = WdfTimerGetParentObject(timer);
       auto wrapper = WdfObjectGet_CDeviceContextWrapper(parent);
-      wrapper->context->LGMPTimer();
+      wrapper->context->TransportTimer();
     },
     10);
   config.AutomaticSerialization = FALSE;
@@ -487,18 +489,18 @@ bool CDeviceContext::SetupLGMP(size_t alignSize)
   attribs.ExecutionLevel = WdfExecutionLevelDispatch;
 
   NTSTATUS status = WdfTimerCreate(
-    &config, &attribs, &m_lgmpTimer);
+    &config, &attribs, &m_transportTimer);
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "Timer creation failed");
     return false;
   }
 
-  WdfTimerStart(m_lgmpTimer, WDF_REL_TIMEOUT_IN_MS(10));
+  WdfTimerStart(m_transportTimer, WDF_REL_TIMEOUT_IN_MS(10));
   return true;
 }
 
-void CDeviceContext::LGMPTimer()
+void CDeviceContext::TransportTimer()
 {
   // Monitor work is deferred off IddCx callback threads.
   switch (m_monitorManager.TakeDeferredAction())
@@ -515,74 +517,15 @@ void CDeviceContext::LGMPTimer()
       break;
   }
 
-  const LGMP_STATUS processStatus = m_lgmpHost.Process();
-  if (processStatus != LGMP_OK)
-  {
-    if (processStatus == LGMP_ERR_CORRUPTED)
-    {
-      DEBUG_WARN(
-        "LGMP reported the shared memory has been corrupted, attempting to recover\n");
-      // TODO: reinitialize LGMP.
-      return;
-    }
+  m_transport->Process(*this);
+}
 
-    DEBUG_ERROR("lgmpHostProcess Failed: %s",
-      lgmpStatusString(processStatus));
-    // TODO: shut down LGMP.
-    return;
-  }
+void CDeviceContext::OnSetCursorPos(int32_t x, int32_t y)
+{
+  g_pipe.SetCursorPos(x, y);
+}
 
-  const uint64_t now = CFrameScheduler::Nanotime();
-
-  // Take the frame subscriber snapshot before processing scheduling messages,
-  // then publish both updates together just as the original timer did.
-  const CFrameTransport::SubscriberSnapshot subscribers =
-    m_frameTransport.SnapshotSubscribers();
-
-  uint8_t  data[LGMP_MSGS_SIZE];
-  size_t   size;
-  uint32_t sourceClientID;
-  LGMP_STATUS status;
-  while ((status = m_lgmpControl.ReadDataWithSource(
-      data, &size, &sourceClientID)) == LGMP_OK)
-  {
-    KVMFRMessage * msg = reinterpret_cast<KVMFRMessage *>(data);
-    switch (msg->type)
-    {
-      case KVMFR_MESSAGE_SETCURSORPOS:
-      {
-        KVMFRSetCursorPos * position =
-          reinterpret_cast<KVMFRSetCursorPos *>(msg);
-        g_pipe.SetCursorPos(position->x, position->y);
-        break;
-      }
-
-      case KVMFR_MESSAGE_WINDOWSIZE:
-      {
-        KVMFRWindowSize * window =
-          reinterpret_cast<KVMFRWindowSize *>(msg);
-        SetResolution(window->w, window->h);
-        break;
-      }
-
-      case KVMFR_MESSAGE_FRAME_SCHEDULE:
-      {
-        const KVMFRFrameSchedule * schedule =
-          reinterpret_cast<KVMFRFrameSchedule *>(msg);
-        const bool valid = size == sizeof(*schedule) &&
-          m_frameTransport.UpdateSchedule(
-            sourceClientID, *schedule, now);
-        if (!valid)
-          DEBUG_WARN("Ignoring invalid KVMFR frame schedule");
-        break;
-      }
-    }
-
-    m_lgmpControl.AckData();
-  }
-
-  m_frameTransport.FinalizeSubscribers(subscribers, now);
-
-  if (m_lgmpControl.HasNewSubscribers())
-    m_lgmpControl.ResendState();
+void CDeviceContext::OnSetResolution(uint32_t width, uint32_t height)
+{
+  SetResolution(width, height);
 }

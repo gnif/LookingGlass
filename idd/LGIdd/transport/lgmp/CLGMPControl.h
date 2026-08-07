@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include "transport/CLGMPHost.h"
-#include "postprocess/D12FrameFormat.h"
+#include "transport/lgmp/CLGMPHost.h"
+#include "transport/IControlTransport.h"
 
 #include "common/KVMFR.h"
 
@@ -31,9 +31,13 @@
 
 #include <memory>
 
-class CLGMPControl
+class CLGMPTransport;
+
+class CLGMPControl final : public IControlTransport
 {
 private:
+  friend class CLGMPTransport;
+
   static constexpr int POINTER_SHAPE_BUFFERS   = 3;
   static constexpr int COLOR_TRANSFORM_BUFFERS = 3;
 
@@ -56,27 +60,26 @@ private:
 
   void SendColorTransform();
   void ResendCursor();
-
-public:
-  explicit CLGMPControl(CLGMPHost& host) :
-    m_host(host) {}
-  ~CLGMPControl();
-
-  CLGMPControl(const CLGMPControl&) = delete;
-  CLGMPControl& operator=(const CLGMPControl&) = delete;
-
   bool Initialize();
   void DeInit();
-
   LGMP_STATUS ReadDataWithSource(void * data, size_t * size,
     uint32_t * sourceClientID);
   LGMP_STATUS AckData();
   bool HasNewSubscribers();
+  void ResendState();
+
+public:
+  explicit CLGMPControl(CLGMPHost& host) :
+    m_host(host) {}
+  ~CLGMPControl() override;
+
+  CLGMPControl(const CLGMPControl&) = delete;
+  CLGMPControl& operator=(const CLGMPControl&) = delete;
 
   void SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data,
-    UINT sdrWhiteLevel);
+    UINT sdrWhiteLevel) override;
   void SetColorTransform(
-    std::shared_ptr<const D12ColorTransform> transform);
-  std::shared_ptr<const D12ColorTransform> GetColorTransform() const;
-  void ResendState();
+    std::shared_ptr<const D12ColorTransform> transform) override;
+  std::shared_ptr<const D12ColorTransform>
+    GetColorTransform() const override;
 };

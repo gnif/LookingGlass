@@ -65,8 +65,8 @@ private:
     bool     active        = false;
   };
 
-  FrameCandidate      m_candidates[LGMP_Q_FRAME_LEN];
-  CandidateDamageTail m_candidateDamageTail[LGMP_Q_FRAME_LEN];
+  FrameCandidate      m_candidates[TRANSPORT_FRAME_QUEUE_LENGTH];
+  CandidateDamageTail m_candidateDamageTail[TRANSPORT_FRAME_QUEUE_LENGTH];
   mutable SRWLOCK     m_candidateLock      = SRWLOCK_INIT;
   SRWLOCK             m_copySubmitLock     = SRWLOCK_INIT;
   uint64_t            m_candidateSequence  = 0;
@@ -89,9 +89,9 @@ private:
   void SetFullDamageLocked() override;
 
 public:
-  CHardwareFrameProcessor(CFrameTransport * transport,
+  CHardwareFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[LGMP_Q_FRAME_LEN],
+    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
     SRWLOCK * pipelineLock, HANDLE terminateEvent);
 
   bool IsValid() const override;

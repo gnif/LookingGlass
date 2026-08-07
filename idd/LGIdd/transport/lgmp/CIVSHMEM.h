@@ -20,27 +20,32 @@
 
 #pragma once
 
-#include "capture/CFrameProcessor.h"
+#include <Windows.h>
+#include <SetupAPI.h>
+#include <vector>
 
-class CSoftwareFrameProcessor final : public CFrameProcessor
+class CIVSHMEM
 {
 private:
-  bool m_directTexture;
+  struct IVSHMEMData
+  {
+    SP_DEVINFO_DATA devInfoData;
+    DWORD64         busAddr;
+  };
 
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
+  std::vector<struct IVSHMEMData> m_devices;
+  HANDLE m_handle = INVALID_HANDLE_VALUE;
+  size_t m_size   = 0;
+  void * m_mem    = nullptr;
 
 public:
-  CSoftwareFrameProcessor(IFrameTransport * transport,
-    std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
+  CIVSHMEM();
+  ~CIVSHMEM();
 
-  bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override { return false; }
-  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
-  {
-    return false;
-  }
-  bool UsesCadence() const override { return false; }
+  bool Init();
+  bool Open();
+  void Close();
+
+  size_t GetSize() const { return m_size; }
+  void * GetMem () const { return m_mem;  }
 };

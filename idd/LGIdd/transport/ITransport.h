@@ -20,13 +20,44 @@
 
 #pragma once
 
+#include "transport/FrameMemoryLimits.h"
+#include "transport/TransportTypes.h"
+
+#include <stddef.h>
 #include <stdint.h>
 
-struct FrameMemoryLimits
+class IControlTransport;
+class IFrameTransport;
+
+class ITransportEvents
 {
-  uint64_t capacity          = 0;
-  uint64_t frameMemoryOffset = 0;
-  uint64_t alignment         = 0;
-  uint64_t maxFrameSize      = 0;
-  unsigned bufferCount       = 0;
+public:
+  virtual ~ITransportEvents() = default;
+
+  virtual void OnSetCursorPos(int32_t x, int32_t y) = 0;
+  virtual void OnSetResolution(uint32_t width, uint32_t height) = 0;
+};
+
+class ITransport
+{
+public:
+  enum class OpenResult
+  {
+    SUCCESS,
+    RETRY,
+    FAILURE,
+  };
+
+  virtual ~ITransport() = default;
+
+  virtual OpenResult Open() = 0;
+  virtual bool Initialize() = 0;
+  virtual bool Setup(size_t alignment) = 0;
+  virtual void Process(ITransportEvents& events) = 0;
+
+  virtual FrameMemoryLimits GetMemoryLimits() const = 0;
+  virtual DirectFrameBufferMemory GetDirectMemory() const = 0;
+
+  virtual IFrameTransport& Frames() = 0;
+  virtual IControlTransport& Control() = 0;
 };

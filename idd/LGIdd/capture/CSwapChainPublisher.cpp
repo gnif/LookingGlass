@@ -20,7 +20,7 @@
 
 #include "capture/CSwapChainProcessor.h"
 
-#include "transport/CFrameTransport.h"
+#include "transport/IFrameTransport.h"
 
 #include <avrt.h>
 #include "CDebug.h"
@@ -83,7 +83,7 @@ void CSwapChainProcessor::PublisherThread()
     const bool ready = m_frameProcessor->HasReadyFrame();
     if (!ready)
     {
-      m_transport.ProcessFrameQueue();
+      m_transport.ProcessDeliveries();
       if (m_frameProcessor->HasReadyFrame())
         continue;
 
@@ -123,12 +123,12 @@ void CSwapChainProcessor::PublisherThread()
       }
 
       uint64_t replayTarget;
-      if (m_transport.GetSharedFrameTarget(current, replayTarget))
+      if (m_transport.GetPendingDeliveryTarget(current, replayTarget))
       {
         bool retry = false;
         if (replayTarget <= current)
         {
-          if (m_transport.ReplaySharedFrame(current, retry))
+          if (m_transport.RetryPendingDelivery(current, retry))
             continue;
 
           current = CFrameScheduler::Nanotime();
@@ -205,15 +205,15 @@ void CSwapChainProcessor::PublisherThread()
 
     uint64_t current = CFrameScheduler::Nanotime();
     uint64_t replayTarget;
-    if (m_transport.GetSharedFrameTarget(current, replayTarget) &&
+    if (m_transport.GetPendingDeliveryTarget(current, replayTarget) &&
         replayTarget < target)
     {
       if (replayTarget <= current)
       {
-        m_transport.ProcessFrameQueue();
+        m_transport.ProcessDeliveries();
         current = CFrameScheduler::Nanotime();
         bool retry = false;
-        if (m_transport.ReplaySharedFrame(current, retry))
+        if (m_transport.RetryPendingDelivery(current, retry))
           continue;
 
         current = CFrameScheduler::Nanotime();
@@ -251,7 +251,7 @@ void CSwapChainProcessor::PublisherThread()
     }
 
     const uint64_t publishStart = CFrameScheduler::Nanotime();
-    m_transport.ProcessFrameQueue();
+    m_transport.ProcessDeliveries();
     if (!m_transport.FrameBufferAvailable(schedule) ||
         !m_frameProcessor->Publish(schedule, periodic, publishStart))
     {

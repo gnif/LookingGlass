@@ -25,17 +25,15 @@
 #include <IddCx.h>
 
 #include <atomic>
+#include <memory>
 #include <stddef.h>
 #include <stdint.h>
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
-#include "transport/CFrameTransport.h"
-#include "transport/CIVSHMEM.h"
-#include "transport/CLGMPControl.h"
-#include "transport/CLGMPHost.h"
+#include "transport/ITransport.h"
 
-class CDeviceContext
+class CDeviceContext : private ITransportEvents
 {
 private:
   WDFDEVICE     m_wdfDevice;
@@ -43,20 +41,17 @@ private:
   LUID          m_preferredRenderAdapter     = {};
   bool          m_havePreferredRenderAdapter = false;
 
-  // At boot IVSHMEM may not have enumerated yet. The retry timer and atomic
-  // gate keep adapter creation single-threaded until it becomes available.
-  WDFTIMER          m_initTimer      = nullptr;
-  bool              m_ivshmemOpened  = false;
-  std::atomic<LONG> m_initInProgress = 0;
+  // At boot the selected transport may not be available yet. The retry timer
+  // and atomic gate keep adapter creation single-threaded until it is ready.
+  WDFTIMER          m_initTimer       = nullptr;
+  bool              m_transportOpened = false;
+  std::atomic<LONG> m_initInProgress  = 0;
 
-  CIVSHMEM              m_ivshmem;
-  CLGMPHost             m_lgmpHost;
-  CLGMPControl          m_lgmpControl;
-  CFrameTransport       m_frameTransport;
-  CDisplayConfiguration m_displayConfiguration;
-  CMonitorManager       m_monitorManager;
+  std::unique_ptr<ITransport> m_transport;
+  CDisplayConfiguration       m_displayConfiguration;
+  CMonitorManager             m_monitorManager;
 
-  WDFTIMER m_lgmpTimer = nullptr;
+  WDFTIMER m_transportTimer = nullptr;
 
   UINT m_iddCxVersion    = 0;
   bool m_hasIddCx110DDIs = false;
@@ -68,8 +63,10 @@ private:
   void ScheduleInitRetry();
   void StopInitRetry();
 
-  bool InitializeLGMP();
-  void LGMPTimer();
+  bool InitializeTransport();
+  void TransportTimer();
+  void OnSetCursorPos(int32_t x, int32_t y) override;
+  void OnSetResolution(uint32_t width, uint32_t height) override;
   void SetResolution(uint32_t width, uint32_t height);
 
 public:
@@ -79,7 +76,7 @@ public:
   CDeviceContext(const CDeviceContext&) = delete;
   CDeviceContext& operator=(const CDeviceContext&) = delete;
 
-  bool SetupLGMP(size_t alignSize);
+  bool SetupTransport(size_t alignSize);
 
   void InitAdapter();
   void FinishAdapterInit(UINT connectorIndex);
@@ -96,14 +93,9 @@ public:
   bool CanProcessFP16 () const { return m_canProcessFP16;  }
   bool IsSoftwareMode () const { return m_softwareMode;    }
 
-  CFrameTransport& GetFrameTransport()
+  ITransport& GetTransport()
   {
-    return m_frameTransport;
-  }
-
-  CLGMPControl& GetLGMPControl()
-  {
-    return m_lgmpControl;
+    return *m_transport;
   }
 
   CDisplayConfiguration& GetDisplayConfiguration()

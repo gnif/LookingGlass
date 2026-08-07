@@ -18,29 +18,13 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#pragma once
+#include "transport/TransportFactory.h"
 
-#include "capture/CFrameProcessor.h"
+#include "transport/lgmp/CLGMPTransport.h"
 
-class CSoftwareFrameProcessor final : public CFrameProcessor
+#include <new>
+
+std::unique_ptr<ITransport> CreateTransport()
 {
-private:
-  bool m_directTexture;
-
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-
-public:
-  CSoftwareFrameProcessor(IFrameTransport * transport,
-    std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
-
-  bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override { return false; }
-  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
-  {
-    return false;
-  }
-  bool UsesCadence() const override { return false; }
-};
+  return std::unique_ptr<ITransport>(new (std::nothrow) CLGMPTransport());
+}

@@ -20,27 +20,8 @@
 
 #pragma once
 
-#include "capture/CFrameProcessor.h"
+#include "transport/ITransport.h"
 
-class CSoftwareFrameProcessor final : public CFrameProcessor
-{
-private:
-  bool m_directTexture;
+#include <memory>
 
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-
-public:
-  CSoftwareFrameProcessor(IFrameTransport * transport,
-    std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
-
-  bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override { return false; }
-  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
-  {
-    return false;
-  }
-  bool UsesCadence() const override { return false; }
-};
+std::unique_ptr<ITransport> CreateTransport();

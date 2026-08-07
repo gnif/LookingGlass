@@ -1,0 +1,183 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2026 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "transport/lgmp/CLGMPTransport.h"
+
+#include "CDebug.h"
+#include "common/KVMFR.h"
+
+static bool TranslateFrameScheduleFlags(
+  uint32_t source, uint32_t& destination)
+{
+  static const uint32_t validFlags =
+    KVMFR_FRAME_SCHEDULE_ACTIVE    |
+    KVMFR_FRAME_SCHEDULE_RELEASE   |
+    KVMFR_FRAME_SCHEDULE_RESET     |
+    KVMFR_FRAME_SCHEDULE_IMMEDIATE;
+
+  if (source & ~validFlags)
+    return false;
+
+  destination = 0;
+  if (source & KVMFR_FRAME_SCHEDULE_ACTIVE)
+    destination |= FRAME_SCHEDULE_ACTIVE;
+  if (source & KVMFR_FRAME_SCHEDULE_RELEASE)
+    destination |= FRAME_SCHEDULE_RELEASE;
+  if (source & KVMFR_FRAME_SCHEDULE_RESET)
+    destination |= FRAME_SCHEDULE_RESET;
+  if (source & KVMFR_FRAME_SCHEDULE_IMMEDIATE)
+    destination |= FRAME_SCHEDULE_IMMEDIATE;
+  return true;
+}
+
+CLGMPTransport::CLGMPTransport() :
+  m_control(m_host),
+  m_frames(m_host, m_ivshmem)
+{
+}
+
+ITransport::OpenResult CLGMPTransport::Open()
+{
+  if (m_ivshmem.GetMem())
+    return OpenResult::SUCCESS;
+
+  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+    return OpenResult::RETRY;
+
+  return OpenResult::SUCCESS;
+}
+
+bool CLGMPTransport::Initialize()
+{
+  if (!m_host.Initialize(m_ivshmem))
+    return false;
+
+  // Preserve the shared-memory layout: frame queues precede the pointer queue
+  // and its retained cursor and color-transform allocations.
+  if (!m_frames.Initialize() || !m_control.Initialize())
+    return false;
+
+  m_frames.SealMemoryLayout();
+  return true;
+}
+
+bool CLGMPTransport::Setup(size_t alignment)
+{
+  return m_frames.Setup(alignment);
+}
+
+void CLGMPTransport::Process(ITransportEvents& events)
+{
+  const LGMP_STATUS processStatus = m_host.Process();
+  if (processStatus != LGMP_OK)
+  {
+    if (processStatus == LGMP_ERR_CORRUPTED)
+    {
+      DEBUG_WARN(
+        "LGMP reported the shared memory has been corrupted, attempting to recover\n");
+      // TODO: reinitialize LGMP.
+      return;
+    }
+
+    DEBUG_ERROR("lgmpHostProcess Failed: %s",
+      lgmpStatusString(processStatus));
+    // TODO: shut down LGMP.
+    return;
+  }
+
+  const uint64_t now = CFrameScheduler::Nanotime();
+
+  // Take the frame subscriber snapshot before processing scheduling messages,
+  // then publish both updates together just as the original timer did.
+  const CLGMPFrameTransport::SubscriberSnapshot subscribers =
+    m_frames.SnapshotSubscribers();
+
+  uint8_t  data[LGMP_MSGS_SIZE];
+  size_t   size;
+  uint32_t sourceClientID;
+  LGMP_STATUS status;
+  while ((status = m_control.ReadDataWithSource(
+      data, &size, &sourceClientID)) == LGMP_OK)
+  {
+    KVMFRMessage * msg = reinterpret_cast<KVMFRMessage *>(data);
+    switch (msg->type)
+    {
+      case KVMFR_MESSAGE_SETCURSORPOS:
+      {
+        KVMFRSetCursorPos * position =
+          reinterpret_cast<KVMFRSetCursorPos *>(msg);
+        events.OnSetCursorPos(position->x, position->y);
+        break;
+      }
+
+      case KVMFR_MESSAGE_WINDOWSIZE:
+      {
+        KVMFRWindowSize * window =
+          reinterpret_cast<KVMFRWindowSize *>(msg);
+        events.OnSetResolution(window->w, window->h);
+        break;
+      }
+
+      case KVMFR_MESSAGE_FRAME_SCHEDULE:
+      {
+        const KVMFRFrameSchedule * schedule =
+          reinterpret_cast<KVMFRFrameSchedule *>(msg);
+        uint32_t translatedFlags = 0;
+        bool valid = size == sizeof(*schedule) &&
+          TranslateFrameScheduleFlags(schedule->flags, translatedFlags);
+        if (valid)
+        {
+          FrameScheduleUpdate update = {};
+          update.clientID               = schedule->clientID;
+          update.generation             = schedule->generation;
+          update.flags                  = translatedFlags;
+          update.period                 = schedule->period;
+          update.targetSlack            = schedule->targetSlack;
+          update.phaseError             = schedule->phaseError;
+          update.feedbackFrameSerial    = schedule->feedbackFrameSerial;
+          update.feedbackScheduleEpoch  = schedule->feedbackScheduleEpoch;
+          update.feedbackDeadlineSerial = schedule->feedbackDeadlineSerial;
+          update.lease                  = schedule->lease;
+          valid = m_frames.UpdateSchedule(sourceClientID, update, now);
+        }
+        if (!valid)
+          DEBUG_WARN("Ignoring invalid KVMFR frame schedule");
+        break;
+      }
+    }
+
+    m_control.AckData();
+  }
+
+  m_frames.FinalizeSubscribers(subscribers, now);
+
+  if (m_control.HasNewSubscribers())
+    m_control.ResendState();
+}
+
+FrameMemoryLimits CLGMPTransport::GetMemoryLimits() const
+{
+  return m_frames.GetMemoryLimits();
+}
+
+DirectFrameBufferMemory CLGMPTransport::GetDirectMemory() const
+{
+  return {m_ivshmem.GetMem(), m_ivshmem.GetSize()};
+}

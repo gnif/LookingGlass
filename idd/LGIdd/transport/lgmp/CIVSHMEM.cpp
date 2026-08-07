@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "transport/CIVSHMEM.h"
+#include "transport/lgmp/CIVSHMEM.h"
 
 #include <Windows.h>
 #include <SetupAPI.h>

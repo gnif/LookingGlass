@@ -27,11 +27,10 @@
 #include <atomic>
 #include <stdint.h>
 
-#include "capture/CFrameScheduler.h"
+#include "transport/CFrameScheduler.h"
 #include "d3d/CInteropResource.h"
 
 struct CD3D12Device;
-class CFrameTransport;
 
 using namespace Microsoft::WRL;
 
@@ -70,8 +69,8 @@ class CFrameBufferResource
     void                    * m_map               = nullptr;
 
   public:
-    bool Init(CFrameTransport * transport, CD3D12Device * dx12,
-      unsigned frameIndex, uint8_t * base, size_t size,
+    bool Init(CD3D12Device * dx12, unsigned frameIndex, uint8_t * base,
+      uint64_t heapOffset, size_t size, size_t maxFrameSize,
       const D3D12_RESOURCE_DESC * textureDesc = nullptr);
     void Reset();
 

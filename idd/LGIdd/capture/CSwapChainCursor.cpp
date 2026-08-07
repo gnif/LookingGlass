@@ -22,7 +22,7 @@
 
 #include "display/IddCxCompat.h"
 #include "display/device/CDeviceContext.h"
-#include "transport/CLGMPControl.h"
+#include "transport/IControlTransport.h"
 
 #include "CDebug.h"
 

@@ -21,22 +21,22 @@
 #pragma once
 
 #include "capture/CFrameBufferResource.h"
-#include "capture/FrameBufferTypes.h"
-#include "common/KVMFR.h"
+#include "transport/FrameBufferTypes.h"
+#include "transport/TransportTypes.h"
 
 struct CD3D12Device;
-class CFrameTransport;
+class IFrameTransport;
 
 class CFrameBufferPool
 {
 private:
-  CFrameTransport * m_transport = nullptr;
+  IFrameTransport * m_transport = nullptr;
   CD3D12Device    * m_dx12      = nullptr;
 
-  CFrameBufferResource m_buffers[LGMP_Q_FRAME_BUFFER_LEN];
+  CFrameBufferResource m_buffers[TRANSPORT_FRAME_BUFFER_COUNT];
 
 public:
-  void Init(CFrameTransport * transport, CD3D12Device * dx12);
+  void Init(IFrameTransport * transport, CD3D12Device * dx12);
   void Reset();
 
   CFrameBufferResource * Get(const PreparedFrameBuffer& buffer,

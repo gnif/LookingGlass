@@ -26,8 +26,8 @@
 #include <dxgi1_5.h>
 #include <d3d12.h>
 
-#include "transport/CIVSHMEM.h"
 #include "d3d/CD3D12CommandQueue.h"
+#include "transport/TransportTypes.h"
 
 using namespace Microsoft::WRL;
 
@@ -37,8 +37,9 @@ struct CD3D12Device
     LUID m_adapterLuid;
     bool m_debug;
 
-    // static as this needs to persist if set
-    static bool m_indirectCopy;
+    // A failed direct heap can remove the device. Preserve the fallback for
+    // the replacement device so initialization does not retry forever.
+    static bool s_directHeapFailed;
 
     ComPtr<ID3D12Debug6    > m_dxDebug;
     ComPtr<ID3D12InfoQueue1> m_infoQueue;
@@ -47,12 +48,13 @@ struct CD3D12Device
     ComPtr<IDXGIFactory5> m_factory;
     ComPtr<IDXGIAdapter1> m_adapter;
     ComPtr<ID3D12Device3> m_device;
-    ComPtr<ID3D12Heap   > m_ivshmemHeap;
+    ComPtr<ID3D12Heap   > m_transportHeap;
 
     CD3D12CommandQueue m_copyQueue;
     CD3D12CommandQueue m_computeQueue;
-    bool                m_computeEnabled           = false;
-    bool                m_ivshmemTextureSupported  = false;
+    bool                m_computeEnabled         = false;
+    bool                m_indirectCopy           = true;
+    bool                m_directTextureSupported = false;
 
     bool HeapTest();
 
@@ -67,8 +69,8 @@ struct CD3D12Device
       SUCCESS
     };
 
-    InitResult Init(CIVSHMEM &ivshmem, UINT64 &alignSize,
-      bool enableCompute);
+    InitResult Init(const DirectFrameBufferMemory& directMemory,
+      UINT64& alignSize, bool enableCompute);
     void DeInit();
 
     // Wait for all command queues to finish in-flight GPU work and run their
@@ -77,9 +79,9 @@ struct CD3D12Device
     void WaitForIdle();
 
     ComPtr<ID3D12Device3> GetDevice() { return m_device; }
-    ComPtr<ID3D12Heap   > GetHeap() { return m_ivshmemHeap; }
-    bool IsIndirectCopy() { return m_indirectCopy; }
-    bool CanUseIVSHMEMTexture() { return m_ivshmemTextureSupported; }
+    ComPtr<ID3D12Heap   > GetTransportHeap() { return m_transportHeap; }
+    bool IsIndirectCopy() const { return m_indirectCopy; }
+    bool CanUseDirectTexture() const { return m_directTextureSupported; }
 
     CD3D12CommandSlot * GetCopySlot   ();
     CD3D12CommandSlot * GetCopySlot   (unsigned frameIndex);

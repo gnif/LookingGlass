@@ -36,7 +36,7 @@
 #include "display/IddCxCompat.h"
 #include "display/device/CDeviceContext.h"
 #include "display/monitor/Context.h"
-#include "transport/CLGMPControl.h"
+#include "transport/IControlTransport.h"
 #include "transport/CPipeServer.h"
 #include "config/CSettings.h"
 
@@ -193,7 +193,7 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
 {
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   auto * ctx     = wrapper->context->GetDeviceContext();
-  auto & control = ctx->GetLGMPControl();
+  auto & control = ctx->GetTransport().Control();
 
   if (ctx->IsSoftwareMode())
   {

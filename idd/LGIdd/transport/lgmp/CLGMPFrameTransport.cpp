@@ -18,13 +18,29 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "transport/CFrameTransport.h"
+#include "transport/lgmp/CLGMPFrameTransport.h"
 
-#include "transport/CIVSHMEM.h"
-#include "transport/CLGMPHost.h"
+#include "transport/lgmp/CIVSHMEM.h"
+#include "transport/lgmp/CLGMPHost.h"
 #include "CDebug.h"
 
 #include <cstring>
+
+#pragma warning(push)
+#pragma warning(disable: 4200)
+struct LGMPBuffer
+{
+  volatile uint32_t wp;
+  uint8_t data[0];
+};
+#pragma warning(pop)
+
+static_assert(TRANSPORT_FRAME_QUEUE_LENGTH == LGMP_Q_FRAME_LEN,
+  "The capture pipeline must match the LGMP frame queue");
+static_assert(TRANSPORT_FRAME_BUFFER_COUNT == LGMP_Q_FRAME_BUFFER_LEN,
+  "The capture buffer pool must match the LGMP frame buffers");
+static_assert(TRANSPORT_MAX_CLIENTS == LGMP_MAX_CLIENTS,
+  "The scheduler must support every LGMP client");
 
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =
 {
@@ -49,19 +65,19 @@ static bool FrameScheduleMatches(
          a.epoch      == b.epoch;
 }
 
-CFrameTransport::CFrameTransport(
+CLGMPFrameTransport::CLGMPFrameTransport(
     CLGMPHost& host, CIVSHMEM& ivshmem) :
   m_host(host),
   m_ivshmem(ivshmem)
 {
 }
 
-CFrameTransport::~CFrameTransport()
+CLGMPFrameTransport::~CLGMPFrameTransport()
 {
   DeInit();
 }
 
-bool CFrameTransport::Initialize()
+bool CLGMPFrameTransport::Initialize()
 {
   if (m_frameQueue)
   {
@@ -100,13 +116,13 @@ bool CFrameTransport::Initialize()
   return true;
 }
 
-void CFrameTransport::SealMemoryLayout()
+void CLGMPFrameTransport::SealMemoryLayout()
 {
   m_frameMemoryOffset =
     m_ivshmem.GetSize() - m_host.Available();
 }
 
-bool CFrameTransport::Setup(size_t alignSize)
+bool CLGMPFrameTransport::Setup(size_t alignSize)
 {
   // This may get called multiple times as frame buffers cannot be allocated
   // until the GPU-specific alignment is known.
@@ -116,7 +132,7 @@ bool CFrameTransport::Setup(size_t alignSize)
   m_alignSize = alignSize;
 
   if (!m_alignSize || (m_alignSize & (m_alignSize - 1)) ||
-      m_alignSize < sizeof(KVMFRFrame) + sizeof(FrameBuffer))
+      m_alignSize < sizeof(KVMFRFrame) + sizeof(LGMPBuffer))
   {
     DEBUG_ERROR("Invalid frame buffer alignment: %llu",
       (unsigned long long)m_alignSize);
@@ -147,7 +163,7 @@ bool CFrameTransport::Setup(size_t alignSize)
     return false;
   }
 
-  // The KVMFR frame header and FrameBuffer write position occupy the first
+  // The KVMFR frame header and frame-buffer write position occupy the first
   // alignment unit. Only the bytes after it are usable for pixel data.
   const size_t maxFrameSize = frameAllocationSize - m_alignSize;
   DEBUG_INFO("Max Frame Data Size: %u MiB",
@@ -173,9 +189,9 @@ bool CFrameTransport::Setup(size_t alignSize)
      * Put the framebuffer on the border of the next page, this is to allow
      * for aligned DMA transfers by the receiver.
      */
-    const size_t alignOffset = alignSize - sizeof(FrameBuffer);
+    const size_t alignOffset = alignSize - sizeof(LGMPBuffer);
     m_frame[i]->offset = (uint32_t)alignOffset;
-    m_frameBuffer[i] = reinterpret_cast<FrameBuffer *>(
+    m_frameBuffer[i] = reinterpret_cast<LGMPBuffer *>(
       reinterpret_cast<uint8_t *>(m_frame[i]) + alignOffset);
     m_frameInFlight[i].store(false, std::memory_order_release);
     m_frameCompleted[i] = false;
@@ -196,7 +212,7 @@ bool CFrameTransport::Setup(size_t alignSize)
   return true;
 }
 
-void CFrameTransport::DeInit()
+void CLGMPFrameTransport::DeInit()
 {
   m_frameScheduler.Reset();
 
@@ -226,18 +242,19 @@ void CFrameTransport::DeInit()
   memset(m_frameOwnerQueue, 0, sizeof(m_frameOwnerQueue));
 }
 
-FrameMemoryLimits CFrameTransport::GetMemoryLimits() const
+FrameMemoryLimits CLGMPFrameTransport::GetMemoryLimits() const
 {
   FrameMemoryLimits limits;
-  limits.sharedSize        = m_ivshmem.GetSize();
+  limits.capacity          = m_ivshmem.GetSize();
   limits.frameMemoryOffset = m_frameMemoryOffset;
   limits.alignment         = m_alignSize;
   limits.maxFrameSize      = m_maxFrameSize;
+  limits.bufferCount       = LGMP_Q_FRAME_BUFFER_LEN;
   return limits;
 }
 
-CFrameTransport::SubscriberSnapshot
-CFrameTransport::SnapshotSubscribers() const
+CLGMPFrameTransport::SubscriberSnapshot
+CLGMPFrameTransport::SnapshotSubscribers() const
 {
   SubscriberSnapshot snapshot;
   snapshot.status = lgmpHostGetClientIDs(
@@ -276,7 +293,7 @@ CFrameTransport::SnapshotSubscribers() const
   return snapshot;
 }
 
-void CFrameTransport::FinalizeSubscribers(
+void CLGMPFrameTransport::FinalizeSubscribers(
   const SubscriberSnapshot& snapshot, uint64_t now)
 {
   if (snapshot.status == LGMP_OK)
@@ -303,14 +320,14 @@ void CFrameTransport::FinalizeSubscribers(
   ProcessFrameDeliveries();
 }
 
-bool CFrameTransport::UpdateSchedule(uint32_t sourceClientID,
-  const KVMFRFrameSchedule& schedule, uint64_t now)
+bool CLGMPFrameTransport::UpdateSchedule(uint32_t sourceClientID,
+  const FrameScheduleUpdate& schedule, uint64_t now)
 {
   return m_frameScheduler.UpdateSchedule(sourceClientID, schedule, now);
 }
 
-CFrameTransport::SharedFramePostResult
-CFrameTransport::PostSharedFrame(unsigned frameIndex,
+CLGMPFrameTransport::SharedFramePostResult
+CLGMPFrameTransport::PostSharedFrame(unsigned frameIndex,
   uint32_t excludeClientID, uint64_t now)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN ||
@@ -391,7 +408,7 @@ CFrameTransport::PostSharedFrame(unsigned frameIndex,
   return SHARED_FRAME_POSTED;
 }
 
-bool CFrameTransport::PostSharedOwnerFrame(unsigned frameIndex,
+bool CLGMPFrameTransport::PostSharedOwnerFrame(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN || !schedule.clientID ||
@@ -419,7 +436,7 @@ bool CFrameTransport::PostSharedOwnerFrame(unsigned frameIndex,
   return true;
 }
 
-void CFrameTransport::ProcessFrameDeliveries()
+void CLGMPFrameTransport::ProcessFrameDeliveries()
 {
   if (!m_frameQueue)
     return;
@@ -471,7 +488,7 @@ void CFrameTransport::ProcessFrameDeliveries()
     m_frameScheduler.NotifyPublisher();
 }
 
-int CFrameTransport::FindAvailableOwnerQueue(
+int CLGMPFrameTransport::FindAvailableOwnerQueue(
   unsigned preferredIndex) const
 {
   for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
@@ -487,7 +504,7 @@ int CFrameTransport::FindAvailableOwnerQueue(
   return -1;
 }
 
-unsigned CFrameTransport::CountOwnerDeliveries(
+unsigned CLGMPFrameTransport::CountOwnerDeliveries(
   uint32_t clientID) const
 {
   unsigned count = 0;
@@ -503,7 +520,7 @@ unsigned CFrameTransport::CountOwnerDeliveries(
   return count;
 }
 
-bool CFrameTransport::HasMatchingOwnerDelivery(
+bool CLGMPFrameTransport::HasMatchingOwnerDelivery(
   uint32_t clientID, unsigned frameIndex, uint64_t token) const
 {
   for (const OwnerDelivery& delivery : m_ownerDelivery)
@@ -526,7 +543,7 @@ bool CFrameTransport::HasMatchingOwnerDelivery(
   return false;
 }
 
-bool CFrameTransport::FrameBufferReferenced(
+bool CLGMPFrameTransport::FrameBufferReferenced(
   unsigned frameIndex) const
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
@@ -548,7 +565,7 @@ bool CFrameTransport::FrameBufferReferenced(
   return false;
 }
 
-int CFrameTransport::FindAvailableFrameBuffer(
+int CLGMPFrameTransport::FindAvailableFrameBuffer(
   bool allowReady) const
 {
   const LONG readyFrameIndex =
@@ -582,7 +599,7 @@ int CFrameTransport::FindAvailableFrameBuffer(
   return static_cast<int>(readyFrameIndex);
 }
 
-int CFrameTransport::FindNewestCompletedFrame(
+int CLGMPFrameTransport::FindNewestCompletedFrame(
   unsigned excludeFrameIndex) const
 {
   int      newestFrame    = -1;
@@ -605,7 +622,7 @@ int CFrameTransport::FindNewestCompletedFrame(
   return newestFrame;
 }
 
-bool CFrameTransport::FrameBufferAvailable(
+bool CLGMPFrameTransport::FrameBufferAvailable(
   const CFrameScheduler::Schedule& schedule,
   bool allowReadyReplacement)
 {
@@ -642,7 +659,7 @@ bool CFrameTransport::FrameBufferAvailable(
   return available;
 }
 
-void CFrameTransport::ProcessFrameQueue()
+void CLGMPFrameTransport::ProcessDeliveries()
 {
   if (!m_host.IsInitialized())
     return;
@@ -656,7 +673,7 @@ void CFrameTransport::ProcessFrameQueue()
     ProcessFrameDeliveries();
 }
 
-bool CFrameTransport::GetSharedFrameTarget(uint64_t now,
+bool CLGMPFrameTransport::GetPendingDeliveryTarget(uint64_t now,
   uint64_t& target)
 {
   if (!m_frameQueue)
@@ -686,7 +703,7 @@ bool CFrameTransport::GetSharedFrameTarget(uint64_t now,
   return result;
 }
 
-bool CFrameTransport::ReplaySharedFrame(uint64_t now, bool& retry)
+bool CLGMPFrameTransport::RetryPendingDelivery(uint64_t now, bool& retry)
 {
   retry = false;
   if (!m_frameQueue)
@@ -710,7 +727,7 @@ bool CFrameTransport::ReplaySharedFrame(uint64_t now, bool& retry)
   return result == SHARED_FRAME_POSTED;
 }
 
-PreparedFrameBuffer CFrameTransport::PrepareFrameBuffer(
+PreparedFrameBuffer CLGMPFrameTransport::PrepareFrameBuffer(
   unsigned pitch, const D12FrameFormat& srcFormat,
   const D12FrameFormat& dstFormat, const RECT * dirtyRects,
   unsigned nbDirtyRects, const CFrameScheduler::Schedule& schedule,
@@ -903,16 +920,18 @@ PreparedFrameBuffer CFrameTransport::PrepareFrameBuffer(
     }
   }
 
-  FrameBuffer * fb = m_frameBuffer[frameIndex];
+  LGMPBuffer * fb = m_frameBuffer[frameIndex];
   fb->wp = 0;
 
   result.frameIndex = frameIndex;
   result.mem        = fb->data;
+  result.heapOffset = reinterpret_cast<uintptr_t>(fb->data) -
+    reinterpret_cast<uintptr_t>(m_ivshmem.GetMem());
   result.fullCopy   = fullCopy;
   return result;
 }
 
-bool CFrameTransport::PublishFrameBuffer(unsigned frameIndex,
+bool CLGMPFrameTransport::PublishFrameBuffer(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule, bool& deliveredToOwner)
 {
   deliveredToOwner = false;
@@ -1017,7 +1036,7 @@ bool CFrameTransport::PublishFrameBuffer(unsigned frameIndex,
   return true;
 }
 
-bool CFrameTransport::RepublishFrameBuffer(
+bool CLGMPFrameTransport::RepublishFrameBuffer(
   const CFrameScheduler::Schedule& schedule)
 {
   if (!schedule.clientID)
@@ -1118,7 +1137,7 @@ bool CFrameTransport::RepublishFrameBuffer(
   return true;
 }
 
-void CFrameTransport::CommitFrameBuffer(unsigned frameIndex,
+void CLGMPFrameTransport::CommitFrameBuffer(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule, bool periodic,
   bool deliveredToOwner)
 {
@@ -1133,7 +1152,7 @@ void CFrameTransport::CommitFrameBuffer(unsigned frameIndex,
     m_frameScheduler.FrameRetained(schedule, now, periodic);
 }
 
-bool CFrameTransport::TryFrameSubmitted(unsigned frameIndex,
+bool CLGMPFrameTransport::TryFrameSubmitted(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
@@ -1143,17 +1162,17 @@ bool CFrameTransport::TryFrameSubmitted(unsigned frameIndex,
     schedule, m_frame[frameIndex]->frameSerial);
 }
 
-void CFrameTransport::ObserveFrame(uint64_t now)
+void CLGMPFrameTransport::ObserveFrame(uint64_t now)
 {
   m_frameScheduler.ObserveFrame(now);
 }
 
-void CFrameTransport::ForceFrame()
+void CLGMPFrameTransport::ForceFrame()
 {
   m_frameScheduler.ForceFrame();
 }
 
-bool CFrameTransport::GetPublishTarget(uint64_t now,
+bool CLGMPFrameTransport::GetPublishTarget(uint64_t now,
   uint64_t& target, CFrameScheduler::Schedule& schedule, bool& periodic,
   bool& republish)
 {
@@ -1161,23 +1180,23 @@ bool CFrameTransport::GetPublishTarget(uint64_t now,
     now, target, schedule, periodic, republish);
 }
 
-void CFrameTransport::FrameMissed(
+void CLGMPFrameTransport::FrameMissed(
   const CFrameScheduler::Schedule& schedule, uint64_t now, bool periodic)
 {
   m_frameScheduler.FrameMissed(schedule, now, periodic);
 }
 
-void CFrameTransport::FrameSuperseded()
+void CLGMPFrameTransport::FrameSuperseded()
 {
   m_frameScheduler.FrameSuperseded();
 }
 
-void CFrameTransport::TryRecordFrameTiming(uint64_t duration)
+void CLGMPFrameTransport::TryRecordFrameTiming(uint64_t duration)
 {
   m_frameScheduler.TryRecordFrameTiming(duration);
 }
 
-void CFrameTransport::AbortFrameBuffer(unsigned frameIndex)
+void CLGMPFrameTransport::AbortFrameBuffer(unsigned frameIndex)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
@@ -1193,7 +1212,7 @@ void CFrameTransport::AbortFrameBuffer(unsigned frameIndex)
   ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
-void CFrameTransport::FailFrameBuffer(unsigned frameIndex)
+void CLGMPFrameTransport::FailFrameBuffer(unsigned frameIndex)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
@@ -1204,7 +1223,7 @@ void CFrameTransport::FailFrameBuffer(unsigned frameIndex)
   CompleteFrameBuffer(frameIndex, false);
 }
 
-void CFrameTransport::CompleteFrameBuffer(
+void CLGMPFrameTransport::CompleteFrameBuffer(
   unsigned frameIndex, bool succeeded)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
@@ -1232,7 +1251,7 @@ void CFrameTransport::CompleteFrameBuffer(
   ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
-void CFrameTransport::SetFrameTiming(unsigned frameIndex,
+void CLGMPFrameTransport::SetFrameTiming(unsigned frameIndex,
   uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
   uint64_t readyTime, uint64_t holdTime,
   const CFrameScheduler::Schedule& schedule, uint64_t completedAt)
@@ -1257,10 +1276,10 @@ void CFrameTransport::SetFrameTiming(unsigned frameIndex,
   InterlockedExchange((volatile LONG *)&frame->timingValid, 1);
 }
 
-void CFrameTransport::WriteFrameBuffer(unsigned frameIndex, void * src,
+void CLGMPFrameTransport::WriteFrameBuffer(unsigned frameIndex, void * src,
   size_t offset, size_t len, bool setWritePos) const
 {
-  FrameBuffer * fb = m_frameBuffer[frameIndex];
+  LGMPBuffer * fb = m_frameBuffer[frameIndex];
 
   memcpy(
     reinterpret_cast<void *>(
@@ -1273,11 +1292,11 @@ void CFrameTransport::WriteFrameBuffer(unsigned frameIndex, void * src,
     fb->wp = (uint32_t)(offset + len);
 }
 
-void CFrameTransport::WriteFrameBufferRows(unsigned frameIndex,
+void CLGMPFrameTransport::WriteFrameBufferRows(unsigned frameIndex,
   void * src, size_t offset, size_t rowBytes, size_t pitch,
   unsigned rows) const
 {
-  FrameBuffer * fb = m_frameBuffer[frameIndex];
+  LGMPBuffer * fb = m_frameBuffer[frameIndex];
   uint8_t * dst    = fb->data + offset;
   uint8_t * source = static_cast<uint8_t *>(src) + offset;
   for (unsigned row = 0; row < rows; ++row)
@@ -1288,9 +1307,9 @@ void CFrameTransport::WriteFrameBufferRows(unsigned frameIndex,
   }
 }
 
-void CFrameTransport::FinalizeFrameBuffer(unsigned frameIndex) const
+void CLGMPFrameTransport::FinalizeFrameBuffer(unsigned frameIndex) const
 {
   const KVMFRFrame * frame = m_frame[frameIndex];
-  FrameBuffer      * fb    = m_frameBuffer[frameIndex];
+  LGMPBuffer       * fb    = m_frameBuffer[frameIndex];
   fb->wp = frame->dataHeight * frame->pitch;
 }
