@@ -24,68 +24,85 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
-    <ClCompile Include="CD3D12CommandQueue.cpp" />
-    <ClCompile Include="CEdid.cpp" />
-    <ClCompile Include="CFrameBufferPool.cpp" />
-    <ClCompile Include="CFrameBufferResource.cpp" />
-    <ClCompile Include="CFrameProcessor.cpp" />
-    <ClCompile Include="CFrameProcessorUtil.cpp" />
-    <ClCompile Include="CFrameScheduler.cpp" />
-    <ClCompile Include="CHardwareFrameProcessor.cpp" />
-    <ClCompile Include="CIndirectDeviceContext.cpp" />
-    <ClCompile Include="CIndirectMonitorContext.cpp" />
-    <ClCompile Include="CInteropResourcePool.cpp" />
-    <ClCompile Include="CInteropResource.cpp" />
-    <ClCompile Include="CIVSHMEM.cpp" />
-    <ClCompile Include="CPipeServer.cpp" />
-    <ClCompile Include="CPlatformInfo.cpp" />
-    <ClCompile Include="CPostProcessor.cpp" />
-    <ClCompile Include="effect\CColorTransformEffect.cpp" />
-    <ClCompile Include="effect\CComputeEffect.cpp" />
-    <ClCompile Include="effect\CDownsampleEffect.cpp" />
-    <ClCompile Include="effect\CHDR16to10Effect.cpp" />
-    <ClCompile Include="effect\CRGB24Effect.cpp" />
-    <ClCompile Include="CSettings.cpp" />
-    <ClCompile Include="CSoftwareFrameProcessor.cpp" />
-    <ClCompile Include="CSwapChainProcessor.cpp" />
-    <ClCompile Include="CD3D12Device.cpp" />
+    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="Device.cpp" />
-    <ClCompile Include="CD3D11Device.cpp" />
     <ClCompile Include="Driver.cpp" />
+    <ClCompile Include="display\CDisplayConfiguration.cpp" />
+    <ClCompile Include="display\CEdid.cpp" />
+    <ClCompile Include="display\CMonitorManager.cpp" />
+    <ClCompile Include="display\device\CDeviceContext.cpp" />
+    <ClCompile Include="display\monitor\Context.cpp" />
+    <ClCompile Include="capture\CFrameBufferPool.cpp" />
+    <ClCompile Include="capture\CFrameBufferResource.cpp" />
+    <ClCompile Include="capture\CFrameProcessor.cpp" />
+    <ClCompile Include="capture\CFrameProcessorUtil.cpp" />
+    <ClCompile Include="capture\CFrameScheduler.cpp" />
+    <ClCompile Include="capture\CHardwareFrameProcessor.cpp" />
+    <ClCompile Include="capture\CSoftwareFrameProcessor.cpp" />
+    <ClCompile Include="capture\CSwapChainCursor.cpp" />
+    <ClCompile Include="capture\CSwapChainProcessor.cpp" />
+    <ClCompile Include="capture\CSwapChainPublisher.cpp" />
+    <ClCompile Include="d3d\CD3D11Device.cpp" />
+    <ClCompile Include="d3d\CD3D12CommandQueue.cpp" />
+    <ClCompile Include="d3d\CD3D12Device.cpp" />
+    <ClCompile Include="d3d\CInteropResource.cpp" />
+    <ClCompile Include="d3d\CInteropResourcePool.cpp" />
+    <ClCompile Include="postprocess\CPostProcessor.cpp" />
+    <ClCompile Include="postprocess\effect\CColorTransformEffect.cpp" />
+    <ClCompile Include="postprocess\effect\CComputeEffect.cpp" />
+    <ClCompile Include="postprocess\effect\CDownsampleEffect.cpp" />
+    <ClCompile Include="postprocess\effect\CHDR16to10Effect.cpp" />
+    <ClCompile Include="postprocess\effect\CRGB24Effect.cpp" />
+    <ClCompile Include="transport\CFrameTransport.cpp" />
+    <ClCompile Include="transport\CIVSHMEM.cpp" />
+    <ClCompile Include="transport\CLGMPControl.cpp" />
+    <ClCompile Include="transport\CLGMPHost.cpp" />
+    <ClCompile Include="transport\CPipeServer.cpp" />
+    <ClCompile Include="config\CSettings.cpp" />
+    <ClCompile Include="platform\CPlatformInfo.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(SolutionDir)/LGCommon/*.h" />
-    <ClInclude Include="CD3D12CommandQueue.h" />
-    <ClInclude Include="CEdid.h" />
-    <ClInclude Include="CFrameBufferPool.h" />
-    <ClInclude Include="CFrameBufferResource.h" />
-    <ClInclude Include="CFrameProcessor.h" />
-    <ClInclude Include="CFrameProcessorUtil.h" />
-    <ClInclude Include="CFrameScheduler.h" />
-    <ClInclude Include="CHardwareFrameProcessor.h" />
-    <ClInclude Include="CIndirectMonitorContext.h" />
-    <ClInclude Include="CInteropResourcePool.h" />
-    <ClInclude Include="CInteropResource.h" />
-    <ClInclude Include="CIVSHMEM.h" />
-    <ClInclude Include="CPipeServer.h" />
-    <ClInclude Include="CPlatformInfo.h" />
-    <ClInclude Include="CPostProcessor.h" />
-    <ClInclude Include="effect\CColorTransformEffect.h" />
-    <ClInclude Include="effect\CComputeEffect.h" />
-    <ClInclude Include="effect\CDownsampleEffect.h" />
-    <ClInclude Include="effect\CHDR16to10Effect.h" />
-    <ClInclude Include="effect\CRGB24Effect.h" />
-    <ClInclude Include="CSettings.h" />
-    <ClInclude Include="CSoftwareFrameProcessor.h" />
-    <ClInclude Include="CSwapChainProcessor.h" />
-    <ClInclude Include="CD3D12Device.h" />
+    <ClInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="Device.h" />
-    <ClInclude Include="CD3D11Device.h" />
     <ClInclude Include="Driver.h" />
-    <ClInclude Include="CIndirectDeviceContext.h" />
     <ClInclude Include="Public.h" />
     <ClInclude Include="Trace.h" />
+    <ClInclude Include="display\CDisplayConfiguration.h" />
+    <ClInclude Include="display\CEdid.h" />
+    <ClInclude Include="display\CMonitorManager.h" />
+    <ClInclude Include="display\IddCxCompat.h" />
+    <ClInclude Include="display\device\CDeviceContext.h" />
+    <ClInclude Include="display\monitor\Context.h" />
+    <ClInclude Include="capture\CFrameBufferPool.h" />
+    <ClInclude Include="capture\CFrameBufferResource.h" />
+    <ClInclude Include="capture\FrameBufferTypes.h" />
+    <ClInclude Include="capture\CFrameProcessor.h" />
+    <ClInclude Include="capture\CFrameProcessorUtil.h" />
+    <ClInclude Include="capture\CFrameScheduler.h" />
+    <ClInclude Include="capture\CHardwareFrameProcessor.h" />
+    <ClInclude Include="capture\CSoftwareFrameProcessor.h" />
+    <ClInclude Include="capture\CSwapChainProcessor.h" />
+    <ClInclude Include="d3d\CD3D11Device.h" />
+    <ClInclude Include="d3d\CD3D12CommandQueue.h" />
+    <ClInclude Include="d3d\CD3D12Device.h" />
+    <ClInclude Include="d3d\CInteropResource.h" />
+    <ClInclude Include="d3d\CInteropResourcePool.h" />
+    <ClInclude Include="postprocess\CPostProcessor.h" />
+    <ClInclude Include="postprocess\D12FrameFormat.h" />
+    <ClInclude Include="postprocess\effect\CColorTransformEffect.h" />
+    <ClInclude Include="postprocess\effect\CComputeEffect.h" />
+    <ClInclude Include="postprocess\effect\CDownsampleEffect.h" />
+    <ClInclude Include="postprocess\effect\CHDR16to10Effect.h" />
+    <ClInclude Include="postprocess\effect\CRGB24Effect.h" />
+    <ClInclude Include="transport\CFrameTransport.h" />
+    <ClInclude Include="transport\CIVSHMEM.h" />
+    <ClInclude Include="transport\CLGMPControl.h" />
+    <ClInclude Include="transport\CLGMPHost.h" />
+    <ClInclude Include="transport\CPipeServer.h" />
+    <ClInclude Include="transport\FrameMemoryLimits.h" />
+    <ClInclude Include="config\CSettings.h" />
+    <ClInclude Include="platform\CPlatformInfo.h" />
+    <ClInclude Include="util\CSRWLock.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="LGIdd.inf" />
@@ -198,7 +215,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=10 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
@@ -213,7 +230,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=10 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
@@ -228,7 +245,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=10 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
@@ -243,7 +260,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT /DIDDCX_VERSION_MAJOR=1 /DIDDCX_VERSION_MINOR=10 /DIDDCX_MINIMUM_VERSION_REQUIRED=4 %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(SolutionDir)LGCommon;$(SolutionDir)..\repos\LGMP\lgmp\include;$(SolutionDir)..\vendor;$(SolutionDir)..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>

@@ -22,9 +22,9 @@
 #include "driver.tmh"
 
 #include "CDebug.h"
-#include "CPlatformInfo.h"
+#include "platform/CPlatformInfo.h"
 #include "VersionInfo.h"
-#include "CPipeServer.h"
+#include "transport/CPipeServer.h"
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {

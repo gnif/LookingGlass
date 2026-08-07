@@ -32,10 +32,13 @@
 #include <utility>
 
 #include "CDebug.h"
-#include "CIndirectDeviceContext.h"
-#include "CIndirectMonitorContext.h"
-#include "CPipeServer.h"
-#include "CSettings.h"
+#include "display/CDisplayConfiguration.h"
+#include "display/IddCxCompat.h"
+#include "display/device/CDeviceContext.h"
+#include "display/monitor/Context.h"
+#include "transport/CLGMPControl.h"
+#include "transport/CPipeServer.h"
+#include "config/CSettings.h"
 
 WDFDEVICE l_wdfDevice = nullptr;
 
@@ -65,7 +68,7 @@ NTSTATUS LGIddDeviceD0Entry(WDFDEVICE device, WDF_POWER_DEVICE_STATE previousSta
   UNREFERENCED_PARAMETER(previousState);
 
   DEBUG_INFO("Device entered D0, starting adapter initialization");
-  auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
+  auto * wrapper = WdfObjectGet_CDeviceContextWrapper(device);
   wrapper->context->InitAdapter();
 
   DEBUG_INFO("Device D0 entry completed");
@@ -77,7 +80,7 @@ NTSTATUS LGIddAdapterInitFinished(IDDCX_ADAPTER adapter, const IDARG_IN_ADAPTER_
   DEBUG_INFO("Adapter initialization callback completed with status 0x%08x",
     args->AdapterInitStatus);
 
-  auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(adapter);
+  auto * wrapper = WdfObjectGet_CDeviceContextWrapper(adapter);
   if (!NT_SUCCESS(args->AdapterInitStatus))
   {
     DEBUG_ERROR_HR(args->AdapterInitStatus,
@@ -110,22 +113,27 @@ NTSTATUS LGIddParseMonitorDescription(const IDARG_IN_PARSEMONITORDESCRIPTION* in
   if (!l_wdfDevice)
     return STATUS_INVALID_PARAMETER;
 
-  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->ParseMonitorDescription(inArgs, outArgs);
+  auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
+  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription(
+    inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorGetDefaultModes(IDDCX_MONITOR monitor, const IDARG_IN_GETDEFAULTDESCRIPTIONMODES * inArgs,
   IDARG_OUT_GETDEFAULTDESCRIPTIONMODES * outArgs)
 {
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  return wrapper->context->GetDeviceContext()->MonitorGetDefaultModes(inArgs, outArgs);
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
+  auto * context = wrapper->context->GetDeviceContext();
+  return context->GetDisplayConfiguration().MonitorGetDefaultModes(
+    inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUERYTARGETMODES * inArgs,
   IDARG_OUT_QUERYTARGETMODES * outArgs)
 {
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  return wrapper->context->GetDeviceContext()->MonitorQueryTargetModes(inArgs, outArgs);
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
+  auto * context = wrapper->context->GetDeviceContext();
+  return context->GetDisplayConfiguration().MonitorQueryTargetModes(
+    inArgs, outArgs);
 }
 
 
@@ -136,8 +144,9 @@ NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* 
   if (!l_wdfDevice)
     return STATUS_INVALID_PARAMETER;
 
-  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->ParseMonitorDescription2(inArgs, outArgs);
+  auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
+  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription2(
+    inArgs, outArgs);
 }
 
 NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
@@ -145,7 +154,7 @@ NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
 {
   UNREFERENCED_PARAMETER(inArgs);
 
-  auto* wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(adapter);
+  auto * wrapper = WdfObjectGet_CDeviceContextWrapper(adapter);
   const bool hdr = wrapper && wrapper->context &&
     wrapper->context->CanProcessFP16();
 
@@ -182,19 +191,20 @@ NTSTATUS LGIddMonitorSetDefaultHdrMetadata(IDDCX_MONITOR monitor,
 
 NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMMARAMP* inArgs)
 {
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  auto* ctx     = wrapper->context->GetDeviceContext();
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
+  auto * ctx     = wrapper->context->GetDeviceContext();
+  auto & control = ctx->GetLGMPControl();
 
   if (ctx->IsSoftwareMode())
   {
-    ctx->SetColorTransform(nullptr);
+    control.SetColorTransform(nullptr);
     DEBUG_INFO("Ignoring display color transform in software mode");
     return STATUS_SUCCESS;
   }
 
   if (inArgs->Type == IDDCX_GAMMARAMP_TYPE_DEFAULT)
   {
-    ctx->SetColorTransform(nullptr);
+    control.SetColorTransform(nullptr);
     DEBUG_INFO("Display color transform reset to default");
     return STATUS_SUCCESS;
   }
@@ -214,7 +224,7 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
     return STATUS_INVALID_PARAMETER;
   }
 
-  const auto* input = static_cast<
+  const auto * input = static_cast<
     const IDDCX_GAMMARAMP_3X4_COLORSPACE_TRANSFORM*>(
       inArgs->pGammaRampData);
   auto transform = std::make_shared<D12ColorTransform>();
@@ -233,11 +243,11 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
 
   if (IsIdentityColorTransform(*transform))
   {
-    ctx->SetColorTransform(nullptr);
+    control.SetColorTransform(nullptr);
     return STATUS_SUCCESS;
   }
 
-  ctx->SetColorTransform(std::move(transform));
+  control.SetColorTransform(std::move(transform));
   DEBUG_INFO("Display color transform updated (matrix:%d lut:%d)",
     input->MatrixEnabled, input->LutEnabled);
   return STATUS_SUCCESS;
@@ -246,15 +256,17 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
 NTSTATUS LGIddMonitorQueryTargetModes2(IDDCX_MONITOR monitor, const IDARG_IN_QUERYTARGETMODES2* inArgs,
   IDARG_OUT_QUERYTARGETMODES* outArgs)
 {
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
-  return wrapper->context->GetDeviceContext()->MonitorQueryTargetModes2(inArgs, outArgs);
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
+  auto * context = wrapper->context->GetDeviceContext();
+  return context->GetDisplayConfiguration().MonitorQueryTargetModes2(
+    inArgs, outArgs);
 }
 #endif
 
 NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSWAPCHAIN* inArgs)
 {
   DEBUG_INFO("Swap chain assigned to monitor %p", monitor);
-  auto * wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   return wrapper->context->AssignSwapChain(
     inArgs->hSwapChain, inArgs->RenderAdapterLuid, inArgs->hNextSurfaceAvailable);
 }
@@ -262,7 +274,7 @@ NTSTATUS LGIddMonitorAssignSwapChain(IDDCX_MONITOR monitor, const IDARG_IN_SETSW
 NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 {
   DEBUG_INFO("Swap chain unassigned from monitor %p", monitor);
-  auto* wrapper = WdfObjectGet_CIndirectMonitorContextWrapper(monitor);
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   wrapper->context->UnassignSwapChain();
   return STATUS_SUCCESS;
 }
@@ -316,10 +328,10 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     return status;
 
   WDF_OBJECT_ATTRIBUTES deviceAttributes;
-  WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, CIndirectDeviceContextWrapper);
+  WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, CDeviceContextWrapper);
   deviceAttributes.EvtCleanupCallback = [](WDFOBJECT object)
   {
-    auto * wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(object);
+    auto * wrapper = WdfObjectGet_CDeviceContextWrapper(object);
     if (wrapper)
     {
       g_pipe.SetDeviceContext(nullptr);
@@ -339,8 +351,8 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
    * callbacks that resolve the context via l_wdfDevice (down-level IddCx that
    * provides no adapter/monitor context) must never observe a null context.
    */
-  auto wrapper = WdfObjectGet_CIndirectDeviceContextWrapper(device);
-  wrapper->context = new CIndirectDeviceContext(device);
+  auto wrapper = WdfObjectGet_CDeviceContextWrapper(device);
+  wrapper->context = new CDeviceContext(device);
 
   l_wdfDevice = device;
 
