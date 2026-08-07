@@ -120,9 +120,6 @@ CD3D12Device::InitResult CD3D12Device::Init(
   
     D3D12_HEAP_DESC heapDesc = m_transportHeap->GetDesc();
     alignSize = heapDesc.Alignment;
-    m_directTextureSupported =
-      (heapDesc.Flags & D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER) &&
-      !(heapDesc.Flags & D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES);
 
     // test that the heap is usable
     if (!HeapTest())
@@ -136,8 +133,6 @@ CD3D12Device::InitResult CD3D12Device::Init(
     }
 
     DEBUG_INFO("Using transport memory as a D3D12 heap");
-    if (!m_directTextureSupported)
-      DEBUG_WARN("Transport memory does not support placed textures");
   }
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,

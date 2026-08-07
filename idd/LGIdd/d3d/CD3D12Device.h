@@ -52,9 +52,8 @@ struct CD3D12Device
 
     CD3D12CommandQueue m_copyQueue;
     CD3D12CommandQueue m_computeQueue;
-    bool                m_computeEnabled         = false;
-    bool                m_indirectCopy           = true;
-    bool                m_directTextureSupported = false;
+    bool                m_computeEnabled = false;
+    bool                m_indirectCopy   = true;
 
     bool HeapTest();
 
@@ -81,7 +80,6 @@ struct CD3D12Device
     ComPtr<ID3D12Device3> GetDevice() { return m_device; }
     ComPtr<ID3D12Heap   > GetTransportHeap() { return m_transportHeap; }
     bool IsIndirectCopy() const { return m_indirectCopy; }
-    bool CanUseDirectTexture() const { return m_directTextureSupported; }
 
     CD3D12CommandSlot * GetCopySlot   ();
     CD3D12CommandSlot * GetCopySlot   (unsigned frameIndex);

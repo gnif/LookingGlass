@@ -37,16 +37,14 @@ void CFrameBufferPool::Reset()
 }
 
 CFrameBufferResource * CFrameBufferPool::Get(
-  const PreparedFrameBuffer& buffer,
-  size_t minSize, const D3D12_RESOURCE_DESC * textureDesc)
+  const PreparedFrameBuffer& buffer, size_t minSize)
 {
   if (buffer.frameIndex > ARRAYSIZE(m_buffers) - 1)
     return nullptr;
 
   CFrameBufferResource * fbr = &m_buffers[buffer.frameIndex];
   if (!fbr->Init(m_dx12, buffer.frameIndex, buffer.mem,
-      buffer.heapOffset, minSize, m_transport->GetMaxFrameSize(),
-      textureDesc))
+      buffer.heapOffset, minSize, m_transport->GetMaxFrameSize()))
     return nullptr;
 
   return fbr;

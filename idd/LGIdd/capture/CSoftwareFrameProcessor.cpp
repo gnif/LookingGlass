@@ -32,9 +32,7 @@ CSoftwareFrameProcessor::CSoftwareFrameProcessor(
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
-    pipelineLock, terminateEvent),
-  m_directTexture(
-    !m_dx12->IsIndirectCopy() && m_dx12->CanUseDirectTexture())
+    pipelineLock, terminateEvent)
 {
 }
 
@@ -118,48 +116,11 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
   CPostProcessor&       postProcessor = m_postProcessors[0];
   const D12FrameFormat& dstFormat     = postProcessor.GetOutputFormat();
 
-  D3D12_RESOURCE_DESC         textureDesc    = {};
-  const D3D12_RESOURCE_DESC * textureDescPtr = nullptr;
-  unsigned                    pitch          = postProcessor.GetOutputPitch();
-  size_t                      frameSize      = postProcessor.GetOutputSize();
-  if (m_directTexture &&
-      dstFormat.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
-      dstFormat.desc.Width && dstFormat.desc.Height &&
-      dstFormat.desc.Format != DXGI_FORMAT_UNKNOWN)
-  {
-    textureDesc                    = dstFormat.desc;
-    textureDesc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    textureDesc.Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    textureDesc.DepthOrArraySize   = 1;
-    textureDesc.MipLevels          = 1;
-    textureDesc.SampleDesc.Count   = 1;
-    textureDesc.SampleDesc.Quality = 0;
-    textureDesc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    textureDesc.Flags              =
-      D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
-
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout = {};
-    m_dx12->GetDevice()->GetCopyableFootprints(
-      &textureDesc, 0, 1, 0, &layout, nullptr, nullptr, nullptr);
-    const unsigned texturePitch = layout.Footprint.RowPitch;
-    if (texturePitch && textureDesc.Height <=
-        m_transport->GetMaxFrameSize() / texturePitch)
-    {
-      pitch          = texturePitch;
-      frameSize      = (size_t)pitch * textureDesc.Height;
-      textureDescPtr = &textureDesc;
-    }
-    else
-    {
-      m_directTexture = false;
-      DEBUG_WARN("Transport texture layout does not fit the framebuffer");
-    }
-  }
-  else if (m_directTexture)
-  {
-    m_directTexture = false;
-    DEBUG_WARN("Post-processor output cannot use a transport texture");
-  }
+  // A copyable footprint describes a buffer layout, not the physical layout
+  // of a row-major texture. Use that explicit buffer layout so the pitch sent
+  // through KVMFR always matches the bytes written into transport memory.
+  const unsigned pitch     = postProcessor.GetOutputPitch();
+  const size_t   frameSize = postProcessor.GetOutputSize();
 
   if (!pitch || !frameSize || frameSize > m_transport->GetMaxFrameSize())
   {
@@ -243,35 +204,8 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
       continue;
     }
 
-    CFrameBufferResource * fbRes = nullptr;
-    if (textureDescPtr)
-    {
-      fbRes = m_frameBuffers.Get(buffer, frameSize, textureDescPtr);
-      if (!fbRes)
-      {
-        const HRESULT deviceStatus =
-          m_dx12->GetDevice()->GetDeviceRemovedReason();
-        if (FAILED(deviceStatus))
-        {
-          copySlot->Cancel();
-          m_transport->AbortFrameBuffer(buffer.frameIndex);
-          RestorePendingDamage(
-            currentDirtyRects, nbDirtyRects, hasDamage);
-          DEBUG_ERROR_HR(deviceStatus,
-            "D3D12 device removed while creating a transport texture");
-          SetFullDamage();
-          return false;
-        }
-
-        m_directTexture = false;
-        textureDescPtr  = nullptr;
-        DEBUG_WARN(
-          "Transport textures unavailable; using a direct buffer copy");
-      }
-    }
-
-    if (!fbRes)
-      fbRes = m_frameBuffers.Get(buffer, frameSize);
+    CFrameBufferResource * fbRes =
+      m_frameBuffers.Get(buffer, frameSize);
     if (!fbRes)
     {
       copySlot->Cancel();

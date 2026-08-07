@@ -37,13 +37,6 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    enum ResourceType
-    {
-      RESOURCE_NONE,
-      RESOURCE_BUFFER,
-      RESOURCE_TEXTURE,
-    };
-
     unsigned                  m_frameIndex        = 0;
     uint8_t                 * m_base              = nullptr;
     size_t                    m_size              = 0;
@@ -62,16 +55,13 @@ class CFrameBufferResource
     unsigned                  m_copyPitch         = 0;
     unsigned                  m_copyBytesPerPixel = 0;
     unsigned                  m_candidateIndex    = 0;
-    ResourceType              m_type              = RESOURCE_NONE;
-    D3D12_RESOURCE_DESC       m_desc              = {};
     std::atomic<bool>         m_completionHandled = false;
     ComPtr<ID3D12Resource>    m_res;
     void                    * m_map               = nullptr;
 
   public:
     bool Init(CD3D12Device * dx12, unsigned frameIndex, uint8_t * base,
-      uint64_t heapOffset, size_t size, size_t maxFrameSize,
-      const D3D12_RESOURCE_DESC * textureDesc = nullptr);
+      uint64_t heapOffset, size_t size, size_t maxFrameSize);
     void Reset();
 
     unsigned  GetFrameIndex() { return m_frameIndex; }

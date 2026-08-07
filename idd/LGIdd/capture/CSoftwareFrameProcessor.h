@@ -25,8 +25,6 @@
 class CSoftwareFrameProcessor final : public CFrameProcessor
 {
 private:
-  bool m_directTexture;
-
   static void CompletionFunction(
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
 

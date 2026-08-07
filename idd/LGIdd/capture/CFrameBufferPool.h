@@ -39,7 +39,6 @@ public:
   void Init(IFrameTransport * transport, CD3D12Device * dx12);
   void Reset();
 
-  CFrameBufferResource * Get(const PreparedFrameBuffer& buffer,
-    size_t minSize,
-    const D3D12_RESOURCE_DESC * textureDesc = nullptr);
+  CFrameBufferResource * Get(
+    const PreparedFrameBuffer& buffer, size_t minSize);
 };

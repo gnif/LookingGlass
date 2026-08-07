@@ -19,7 +19,6 @@
  */
 
 #include "capture/CFrameBufferResource.h"
-#include "capture/CFrameProcessorUtil.h"
 #include "d3d/CD3D12Device.h"
 #include "CDebug.h"
 
@@ -27,7 +26,7 @@
 
 bool CFrameBufferResource::Init(CD3D12Device * dx12,
   unsigned frameIndex, uint8_t * base, uint64_t heapOffset, size_t size,
-  size_t maxFrameSize, const D3D12_RESOURCE_DESC * textureDesc)
+  size_t maxFrameSize)
 {
   m_frameIndex = frameIndex;
 
@@ -38,52 +37,27 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
     return false;
   }
 
-  const bool         indirect = dx12->IsIndirectCopy();
-  const ResourceType type     = textureDesc ?
-    RESOURCE_TEXTURE : RESOURCE_BUFFER;
+  const bool indirect = dx12->IsIndirectCopy();
 
   D3D12_RESOURCE_DESC desc = {};
-  if (textureDesc)
+  desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
+  desc.Width              = size;
+  desc.Height             = 1;
+  desc.DepthOrArraySize   = 1;
+  desc.MipLevels          = 1;
+  desc.Format             = DXGI_FORMAT_UNKNOWN;
+  desc.SampleDesc.Count   = 1;
+  desc.SampleDesc.Quality = 0;
+  desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+  desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
+  if (!indirect)
   {
-    if (indirect || !dx12->CanUseDirectTexture())
-      return false;
-    desc = *textureDesc;
-    if (desc.Dimension        != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
-        !desc.Width                                                ||
-        !desc.Height                                               ||
-        desc.DepthOrArraySize != 1                                  ||
-        desc.MipLevels        != 1                                  ||
-        desc.SampleDesc.Count != 1                                  ||
-        desc.SampleDesc.Quality                                     ||
-        desc.Format           == DXGI_FORMAT_UNKNOWN                ||
-        desc.Layout           != D3D12_TEXTURE_LAYOUT_ROW_MAJOR     ||
-        desc.Flags            != D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER)
-      return false;
-  }
-  else
-  {
-    desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-    desc.Width              = size;
-    desc.Height             = 1;
-    desc.DepthOrArraySize   = 1;
-    desc.MipLevels          = 1;
-    desc.Format             = DXGI_FORMAT_UNKNOWN;
-    desc.SampleDesc.Count   = 1;
-    desc.SampleDesc.Quality = 0;
-    desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
-    if (!indirect)
-    {
-      desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-      desc.Flags     = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
-    }
+    desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    desc.Flags     = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
   }
 
   // Nothing to do if the resource already represents this allocation.
-  if (m_base == base && m_type == type &&
-      ((type == RESOURCE_BUFFER && m_size >= size) ||
-       (type == RESOURCE_TEXTURE &&
-        CFrameProcessorUtil::ResourceDescMatches(m_desc, desc))))
+  if (m_base == base && m_size >= size)
   {
     m_frameSize = size;
     return true;
@@ -93,7 +67,6 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
 
   HRESULT       hr;
   const WCHAR * resName;
-  UINT64        allocationSize = size;
 
   if (indirect)
   {
@@ -130,7 +103,6 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
   {
     const D3D12_RESOURCE_ALLOCATION_INFO allocation =
       dx12->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
-    allocationSize = allocation.SizeInBytes;
     const D3D12_HEAP_DESC heapDesc =
       dx12->GetTransportHeap()->GetDesc();
     if (!allocation.Alignment ||
@@ -144,26 +116,8 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
       return false;
     }
 
-    if (type == RESOURCE_TEXTURE)
-    {
-      D3D12_FEATURE_DATA_FORMAT_SUPPORT support = {};
-      support.Format = desc.Format;
-      hr = dx12->GetDevice()->CheckFeatureSupport(
-        D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support));
-      if (FAILED(hr) ||
-          !(support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D))
-      {
-        DEBUG_ERROR("Transport texture format is unsupported");
-        return false;
-      }
-      DEBUG_TRACE("Creating transport texture for %p", base);
-      resName = L"Transport Texture";
-    }
-    else
-    {
-      DEBUG_TRACE("Creating transport buffer for %p", base);
-      resName = L"Transport Buffer";
-    }
+    DEBUG_TRACE("Creating transport buffer for %p", base);
+    resName = L"Transport Buffer";
 
     hr = dx12->GetDevice()->CreatePlacedResource(
       dx12->GetTransportHeap().Get(),
@@ -184,11 +138,8 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
   m_res->SetName(resName);
 
   m_base      = base;
-  m_size      = type == RESOURCE_TEXTURE ?
-    (size_t)allocationSize : size;
+  m_size      = size;
   m_frameSize = size;
-  m_type      = type;
-  m_desc      = desc;
   return true;
 }
 
@@ -203,8 +154,6 @@ void CFrameBufferResource::Reset()
   m_base              = nullptr;
   m_size              = 0;
   m_frameSize         = 0;
-  m_type              = RESOURCE_NONE;
-  m_desc              = {};
   m_fullCopy          = false;
   m_nbCopyDirtyRects  = 0;
   m_copyPitch         = 0;
