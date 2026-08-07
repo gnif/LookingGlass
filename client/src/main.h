@@ -182,6 +182,7 @@ struct AppParams
   bool                 fullscreen;
   bool                 maximize;
   bool                 minimizeOnFocusLoss;
+  bool                 minimizeOnCaptureRelease;
   bool                 center;
   int                  x, y;
   unsigned int         w, h;
