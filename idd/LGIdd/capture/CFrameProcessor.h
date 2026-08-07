@@ -24,8 +24,8 @@
 #include "capture/CFrameBufferPool.h"
 #include "d3d/CInteropResource.h"
 #include "postprocess/CPostProcessor.h"
-#include "transport/CFrameScheduler.h"
-#include "transport/TransportTypes.h"
+#include "capture/CFrameScheduler.h"
+#include "capture/FramePipeline.h"
 
 #include <Windows.h>
 #include <memory>
@@ -76,7 +76,7 @@ protected:
 public:
   CFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent);
   virtual ~CFrameProcessor() = default;
 
@@ -98,5 +98,5 @@ public:
 std::unique_ptr<CFrameProcessor> CreateFrameProcessor(
   bool software, IFrameTransport * transport,
   std::shared_ptr<CD3D12Device> dx12,
-  CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+  CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
   SRWLOCK * pipelineLock, HANDLE terminateEvent);

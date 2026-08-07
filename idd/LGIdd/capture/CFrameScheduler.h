@@ -23,11 +23,33 @@
 #include <Windows.h>
 #include <stdint.h>
 
-#include "transport/TransportTypes.h"
+enum : uint32_t
+{
+  FRAME_SCHEDULE_ACTIVE    = 0x1,
+  FRAME_SCHEDULE_RELEASE   = 0x2,
+  FRAME_SCHEDULE_RESET     = 0x4,
+  FRAME_SCHEDULE_IMMEDIATE = 0x8,
+};
+
+struct FrameScheduleUpdate
+{
+  uint32_t clientID;
+  uint32_t generation;
+  uint32_t flags;
+  uint64_t period;
+  uint64_t targetSlack;
+  int64_t  phaseError;
+  uint32_t feedbackFrameSerial;
+  uint32_t feedbackScheduleEpoch;
+  uint32_t feedbackDeadlineSerial;
+  uint32_t lease;
+};
 
 class CFrameScheduler
 {
 public:
+  static const unsigned MAX_CLIENTS = 8;
+
   struct Schedule
   {
     uint32_t clientID;
@@ -78,12 +100,12 @@ private:
   static const unsigned PUBLICATION_HISTORY_SIZE  = 128;
   static const unsigned WORK_TIMING_HISTORY_SIZE  = 32;
 
-  mutable SRWLOCK m_lock = SRWLOCK_INIT;
-  HANDLE          m_wakeEvent = nullptr;
-  Client          m_clients[TRANSPORT_MAX_CLIENTS] = {};
-  Schedule        m_schedule                       = {};
-  bool            m_scheduling                     = false;
-  uint32_t        m_epoch                          = 0;
+  mutable SRWLOCK m_lock                 = SRWLOCK_INIT;
+  HANDLE          m_wakeEvent            = nullptr;
+  Client          m_clients[MAX_CLIENTS] = {};
+  Schedule        m_schedule             = {};
+  bool            m_scheduling           = false;
+  uint32_t        m_epoch                = 0;
 
   // A result acknowledges only the request tickets captured by its attempt.
   uint64_t m_forceRequestTicket     = 0;

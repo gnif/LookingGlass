@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "transport/CFrameScheduler.h"
+#include "capture/CFrameScheduler.h"
 
 #include "CDebug.h"
 
@@ -288,10 +288,10 @@ void CFrameScheduler::UpdateSubscribers(const uint32_t * clientIDs,
 {
   AcquireSRWLockExclusive(&m_lock);
 
-  uint32_t oldClientIDs   [TRANSPORT_MAX_CLIENTS] = {};
-  bool     wasSubscribed  [TRANSPORT_MAX_CLIENTS] = {};
-  bool     wasOwnerCapable[TRANSPORT_MAX_CLIENTS] = {};
-  unsigned clientIndex                            = 0;
+  uint32_t oldClientIDs   [MAX_CLIENTS] = {};
+  bool     wasSubscribed  [MAX_CLIENTS] = {};
+  bool     wasOwnerCapable[MAX_CLIENTS] = {};
+  unsigned clientIndex                  = 0;
   for (const Client& client : m_clients)
   {
     oldClientIDs[clientIndex]    = client.clientID;

@@ -20,27 +20,8 @@
 
 #pragma once
 
-#include "capture/CFrameProcessor.h"
-
-class CSoftwareFrameProcessor final : public CFrameProcessor
+enum : unsigned
 {
-private:
-  bool m_directTexture;
-
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-
-public:
-  CSoftwareFrameProcessor(IFrameTransport * transport,
-    std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
-
-  bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override { return false; }
-  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
-  {
-    return false;
-  }
-  bool UsesCadence() const override { return false; }
+  CAPTURE_PIPELINE_SLOTS = 2,
+  CAPTURE_FRAME_BUFFERS  = 3,
 };

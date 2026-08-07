@@ -29,7 +29,8 @@ extern "C" {
 }
 
 #include "common/KVMFR.h"
-#include "transport/CFrameScheduler.h"
+#include "capture/CFrameScheduler.h"
+#include "capture/FramePipeline.h"
 #include "transport/FrameMemoryLimits.h"
 #include "transport/IFrameTransport.h"
 

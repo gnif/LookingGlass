@@ -22,7 +22,7 @@
 
 #include "CDebug.h"
 #include "config/CSettings.h"
-#include "transport/TransportTypes.h"
+#include "capture/FramePipeline.h"
 
 #include <algorithm>
 #include <climits>
@@ -61,7 +61,7 @@ struct CRGB24Effect::State
     std::shared_ptr<const D12ColorTransform>  colorTransform;
   };
 
-  static const unsigned WarmupCount = TRANSPORT_FRAME_QUEUE_LENGTH;
+  static const unsigned WarmupCount = CAPTURE_PIPELINE_SLOTS;
   static const unsigned SampleCount = 64;
   static const unsigned TrimCount   = SampleCount / 8;
 

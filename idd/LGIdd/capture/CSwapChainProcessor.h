@@ -56,7 +56,7 @@ private:
   HANDLE                           m_newFrameEvent;
 
   CInteropResourcePool             m_resPool;
-  CPostProcessor                   m_postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH];
+  CPostProcessor                   m_postProcessors[CAPTURE_PIPELINE_SLOTS];
   std::unique_ptr<CFrameProcessor> m_frameProcessor;
   // Reconfiguration is exclusive while per-candidate recording is shared.
   SRWLOCK                          m_pipelineLock = SRWLOCK_INIT;

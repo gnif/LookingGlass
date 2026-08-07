@@ -20,7 +20,7 @@
 
 #include "display/CMonitorManager.h"
 
-#include "display/monitor/Context.h"
+#include "display/CMonitorContext.h"
 #include "CDebug.h"
 
 void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,

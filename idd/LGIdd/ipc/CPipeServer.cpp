@@ -18,9 +18,9 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "transport/CPipeServer.h"
+#include "ipc/CPipeServer.h"
 #include "CDebug.h"
-#include "display/device/CDeviceContext.h"
+#include "display/CDeviceContext.h"
 
 CPipeServer g_pipe;
 

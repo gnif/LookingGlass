@@ -21,8 +21,8 @@
 #pragma once
 
 #include "capture/CFrameBufferResource.h"
-#include "transport/FrameBufferTypes.h"
-#include "transport/TransportTypes.h"
+#include "capture/FramePipeline.h"
+#include "transport/PreparedFrameBuffer.h"
 
 struct CD3D12Device;
 class IFrameTransport;
@@ -33,7 +33,7 @@ private:
   IFrameTransport * m_transport = nullptr;
   CD3D12Device    * m_dx12      = nullptr;
 
-  CFrameBufferResource m_buffers[TRANSPORT_FRAME_BUFFER_COUNT];
+  CFrameBufferResource m_buffers[CAPTURE_FRAME_BUFFERS];
 
 public:
   void Init(IFrameTransport * transport, CD3D12Device * dx12);

@@ -35,11 +35,11 @@ struct LGMPBuffer
 };
 #pragma warning(pop)
 
-static_assert(TRANSPORT_FRAME_QUEUE_LENGTH == LGMP_Q_FRAME_LEN,
+static_assert(CAPTURE_PIPELINE_SLOTS == LGMP_Q_FRAME_LEN,
   "The capture pipeline must match the LGMP frame queue");
-static_assert(TRANSPORT_FRAME_BUFFER_COUNT == LGMP_Q_FRAME_BUFFER_LEN,
+static_assert(CAPTURE_FRAME_BUFFERS == LGMP_Q_FRAME_BUFFER_LEN,
   "The capture buffer pool must match the LGMP frame buffers");
-static_assert(TRANSPORT_MAX_CLIENTS == LGMP_MAX_CLIENTS,
+static_assert(CFrameScheduler::MAX_CLIENTS == LGMP_MAX_CLIENTS,
   "The scheduler must support every LGMP client");
 
 static const struct LGMPQueueConfig FRAME_QUEUE_CONFIG =

@@ -29,7 +29,7 @@
 
 using namespace Microsoft::WRL;
 
-static_assert(TRANSPORT_FRAME_QUEUE_LENGTH == 2,
+static_assert(CAPTURE_PIPELINE_SLOTS == 2,
   "IDD candidate pipeline assumes two slots");
 
 class CPublishPending
@@ -72,7 +72,7 @@ public:
 
 CHardwareFrameProcessor::CHardwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent)

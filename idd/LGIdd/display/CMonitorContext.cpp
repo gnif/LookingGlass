@@ -18,8 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "display/monitor/Context.h"
-#include "display/device/CDeviceContext.h"
+#include "display/CMonitorContext.h"
+#include "display/CDeviceContext.h"
 #include "capture/CSwapChainProcessor.h"
 #include "d3d/CD3D11Device.h"
 #include "CDebug.h"

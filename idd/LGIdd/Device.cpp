@@ -34,10 +34,10 @@
 #include "CDebug.h"
 #include "display/CDisplayConfiguration.h"
 #include "display/IddCxCompat.h"
-#include "display/device/CDeviceContext.h"
-#include "display/monitor/Context.h"
+#include "display/CDeviceContext.h"
+#include "display/CMonitorContext.h"
 #include "transport/IControlTransport.h"
-#include "transport/CPipeServer.h"
+#include "ipc/CPipeServer.h"
 #include "config/CSettings.h"
 
 WDFDEVICE l_wdfDevice = nullptr;

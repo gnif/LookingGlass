@@ -21,9 +21,8 @@
 #pragma once
 
 #include "postprocess/D12FrameFormat.h"
-#include "transport/CFrameScheduler.h"
-#include "transport/FrameBufferTypes.h"
-#include "transport/TransportTypes.h"
+#include "capture/CFrameScheduler.h"
+#include "transport/PreparedFrameBuffer.h"
 
 #include <Windows.h>
 #include <stddef.h>

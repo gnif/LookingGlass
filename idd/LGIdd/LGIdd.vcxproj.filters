@@ -5,14 +5,11 @@
     <Filter Include="Driver">
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
     </Filter>
+    <Filter Include="IPC">
+      <UniqueIdentifier>{6A9D97A5-1A6C-4A95-A2D0-A7C2D6BE459D}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Display">
       <UniqueIdentifier>{D2C16E51-6087-4E08-8DA4-5AD1A60EF58E}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Display\Device">
-      <UniqueIdentifier>{83AAC4D0-9E4C-4B25-BD54-9186713B2010}</UniqueIdentifier>
-    </Filter>
-    <Filter Include="Display\Monitor">
-      <UniqueIdentifier>{3AF4227D-EBC0-45FB-9670-192E371313D5}</UniqueIdentifier>
     </Filter>
     <Filter Include="Capture">
       <UniqueIdentifier>{202B79B2-5CCF-4AD4-B4C5-F5602419683D}</UniqueIdentifier>
@@ -70,6 +67,9 @@
     <ClInclude Include="Trace.h">
       <Filter>Driver</Filter>
     </ClInclude>
+    <ClInclude Include="ipc\CPipeServer.h">
+      <Filter>IPC</Filter>
+    </ClInclude>
     <ClInclude Include="display\CDisplayConfiguration.h">
       <Filter>Display</Filter>
     </ClInclude>
@@ -82,11 +82,11 @@
     <ClInclude Include="display\IddCxCompat.h">
       <Filter>Display</Filter>
     </ClInclude>
-    <ClInclude Include="display\device\CDeviceContext.h">
-      <Filter>Display\Device</Filter>
+    <ClInclude Include="display\CDeviceContext.h">
+      <Filter>Display</Filter>
     </ClInclude>
-    <ClInclude Include="display\monitor\Context.h">
-      <Filter>Display\Monitor</Filter>
+    <ClInclude Include="display\CMonitorContext.h">
+      <Filter>Display</Filter>
     </ClInclude>
     <ClInclude Include="capture\CFrameBufferPool.h">
       <Filter>Capture</Filter>
@@ -98,6 +98,12 @@
       <Filter>Capture</Filter>
     </ClInclude>
     <ClInclude Include="capture\CFrameProcessorUtil.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="capture\CFrameScheduler.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
+    <ClInclude Include="capture\FramePipeline.h">
       <Filter>Capture</Filter>
     </ClInclude>
     <ClInclude Include="capture\CHardwareFrameProcessor.h">
@@ -145,13 +151,7 @@
     <ClInclude Include="postprocess\effect\CRGB24Effect.h">
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
-    <ClInclude Include="transport\CFrameScheduler.h">
-      <Filter>Transport</Filter>
-    </ClInclude>
-    <ClInclude Include="transport\CPipeServer.h">
-      <Filter>Transport</Filter>
-    </ClInclude>
-    <ClInclude Include="transport\FrameBufferTypes.h">
+    <ClInclude Include="transport\DirectFrameBufferMemory.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\FrameMemoryLimits.h">
@@ -166,10 +166,10 @@
     <ClInclude Include="transport\ITransport.h">
       <Filter>Transport</Filter>
     </ClInclude>
-    <ClInclude Include="transport\TransportFactory.h">
+    <ClInclude Include="transport\PreparedFrameBuffer.h">
       <Filter>Transport</Filter>
     </ClInclude>
-    <ClInclude Include="transport\TransportTypes.h">
+    <ClInclude Include="transport\TransportFactory.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CIVSHMEM.h">
@@ -207,6 +207,9 @@
     <ClCompile Include="Device.cpp">
       <Filter>Driver</Filter>
     </ClCompile>
+    <ClCompile Include="ipc\CPipeServer.cpp">
+      <Filter>IPC</Filter>
+    </ClCompile>
     <ClCompile Include="display\CDisplayConfiguration.cpp">
       <Filter>Display</Filter>
     </ClCompile>
@@ -216,11 +219,11 @@
     <ClCompile Include="display\CMonitorManager.cpp">
       <Filter>Display</Filter>
     </ClCompile>
-    <ClCompile Include="display\device\CDeviceContext.cpp">
-      <Filter>Display\Device</Filter>
+    <ClCompile Include="display\CDeviceContext.cpp">
+      <Filter>Display</Filter>
     </ClCompile>
-    <ClCompile Include="display\monitor\Context.cpp">
-      <Filter>Display\Monitor</Filter>
+    <ClCompile Include="display\CMonitorContext.cpp">
+      <Filter>Display</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameBufferPool.cpp">
       <Filter>Capture</Filter>
@@ -234,19 +237,16 @@
     <ClCompile Include="capture\CFrameProcessorUtil.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
+    <ClCompile Include="capture\CFrameScheduler.cpp">
+      <Filter>Capture</Filter>
+    </ClCompile>
     <ClCompile Include="capture\CHardwareFrameProcessor.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CSoftwareFrameProcessor.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
-    <ClCompile Include="capture\CSwapChainCursor.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
     <ClCompile Include="capture\CSwapChainProcessor.cpp">
-      <Filter>Capture</Filter>
-    </ClCompile>
-    <ClCompile Include="capture\CSwapChainPublisher.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="d3d\CD3D11Device.cpp">
@@ -281,12 +281,6 @@
     </ClCompile>
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp">
       <Filter>Post-processing\Effects</Filter>
-    </ClCompile>
-    <ClCompile Include="transport\CFrameScheduler.cpp">
-      <Filter>Transport</Filter>
-    </ClCompile>
-    <ClCompile Include="transport\CPipeServer.cpp">
-      <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\TransportFactory.cpp">
       <Filter>Transport</Filter>

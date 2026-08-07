@@ -27,7 +27,7 @@
 #include <d3d12.h>
 
 #include "d3d/CD3D12CommandQueue.h"
-#include "transport/TransportTypes.h"
+#include "transport/DirectFrameBufferMemory.h"
 
 using namespace Microsoft::WRL;
 

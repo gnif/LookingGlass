@@ -20,8 +20,8 @@
 
 #pragma once
 
+#include "transport/DirectFrameBufferMemory.h"
 #include "transport/FrameMemoryLimits.h"
-#include "transport/TransportTypes.h"
 
 #include <stddef.h>
 #include <stdint.h>

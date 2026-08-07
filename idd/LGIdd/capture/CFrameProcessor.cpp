@@ -29,7 +29,7 @@
 
 CFrameProcessor::CFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent) :
   m_transport(transport),
   m_dx12(std::move(dx12)),
@@ -156,7 +156,7 @@ void CFrameProcessor::GetPreviousDamage(
 std::unique_ptr<CFrameProcessor> CreateFrameProcessor(
   bool software, IFrameTransport * transport,
   std::shared_ptr<CD3D12Device> dx12,
-  CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+  CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
   SRWLOCK * pipelineLock, HANDLE terminateEvent)
 {
   std::unique_ptr<CFrameProcessor> processor;

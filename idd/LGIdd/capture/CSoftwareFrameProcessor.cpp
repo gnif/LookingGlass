@@ -20,7 +20,7 @@
 
 #include "capture/CSoftwareFrameProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
-#include "transport/TransportTypes.h"
+#include "capture/FramePipeline.h"
 #include "transport/IFrameTransport.h"
 #include "util/CSRWLock.h"
 #include "CDebug.h"
@@ -29,7 +29,7 @@
 
 CSoftwareFrameProcessor::CSoftwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent),

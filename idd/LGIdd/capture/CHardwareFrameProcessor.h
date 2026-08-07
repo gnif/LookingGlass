@@ -65,8 +65,8 @@ private:
     bool     active        = false;
   };
 
-  FrameCandidate      m_candidates[TRANSPORT_FRAME_QUEUE_LENGTH];
-  CandidateDamageTail m_candidateDamageTail[TRANSPORT_FRAME_QUEUE_LENGTH];
+  FrameCandidate      m_candidates[CAPTURE_PIPELINE_SLOTS];
+  CandidateDamageTail m_candidateDamageTail[CAPTURE_PIPELINE_SLOTS];
   mutable SRWLOCK     m_candidateLock      = SRWLOCK_INIT;
   SRWLOCK             m_copySubmitLock     = SRWLOCK_INIT;
   uint64_t            m_candidateSequence  = 0;
@@ -91,7 +91,7 @@ private:
 public:
   CHardwareFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
-    CPostProcessor postProcessors[TRANSPORT_FRAME_QUEUE_LENGTH],
+    CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
     SRWLOCK * pipelineLock, HANDLE terminateEvent);
 
   bool IsValid() const override;

@@ -21,36 +21,6 @@
 #pragma once
 
 #include <stddef.h>
-#include <stdint.h>
-
-enum : unsigned
-{
-  TRANSPORT_FRAME_QUEUE_LENGTH = 2,
-  TRANSPORT_FRAME_BUFFER_COUNT = 3,
-  TRANSPORT_MAX_CLIENTS        = 8,
-};
-
-enum : uint32_t
-{
-  FRAME_SCHEDULE_ACTIVE    = 0x1,
-  FRAME_SCHEDULE_RELEASE   = 0x2,
-  FRAME_SCHEDULE_RESET     = 0x4,
-  FRAME_SCHEDULE_IMMEDIATE = 0x8,
-};
-
-struct FrameScheduleUpdate
-{
-  uint32_t clientID;
-  uint32_t generation;
-  uint32_t flags;
-  uint64_t period;
-  uint64_t targetSlack;
-  int64_t  phaseError;
-  uint32_t feedbackFrameSerial;
-  uint32_t feedbackScheduleEpoch;
-  uint32_t feedbackDeadlineSerial;
-  uint32_t lease;
-};
 
 struct DirectFrameBufferMemory
 {

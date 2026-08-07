@@ -21,8 +21,8 @@
 #include "capture/CSwapChainProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
 #include "display/IddCxCompat.h"
-#include "display/device/CDeviceContext.h"
-#include "display/monitor/Context.h"
+#include "display/CDeviceContext.h"
+#include "display/CMonitorContext.h"
 #include "platform/CPlatformInfo.h"
 #include "transport/IFrameTransport.h"
 #include "transport/IControlTransport.h"
@@ -31,7 +31,7 @@
 #include <avrt.h>
 #include <new>
 #include "CDebug.h"
-#include "transport/CPipeServer.h"
+#include "ipc/CPipeServer.h"
 
 #ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
   #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
@@ -736,4 +736,341 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     noImageUpdate,
   };
   return m_frameProcessor->Submit(submission);
+}
+
+static const uint64_t PUBLISH_RETRY_NS = 1000000ULL;
+
+static bool ArmPublishTimer(HANDLE timer, uint64_t delay)
+{
+  if (!timer)
+    return false;
+
+  LARGE_INTEGER due = {};
+  due.QuadPart = -static_cast<LONGLONG>((delay + 99) / 100);
+  if (!due.QuadPart)
+    due.QuadPart = -1;
+  return SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) != FALSE;
+}
+
+DWORD CALLBACK CSwapChainProcessor::_PublisherThread(LPVOID arg)
+{
+  reinterpret_cast<CSwapChainProcessor *>(arg)->PublisherThread();
+  return 0;
+}
+
+void CSwapChainProcessor::PublisherThread()
+{
+  DWORD  avTask       = 0;
+  HANDLE avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
+  if (avTaskHandle &&
+      !AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH))
+    DEBUG_WARN("Failed to raise publisher MMCSS priority: %lu",
+      GetLastError());
+
+  const HANDLE scheduleEvent = m_transport.GetFrameScheduleEvent();
+  HANDLE idleHandles[] =
+  {
+    m_terminateEvent.Get(),
+    m_frameProcessor->GetReadyEvent(),
+    scheduleEvent,
+  };
+  HANDLE timerHandles[] =
+  {
+    m_terminateEvent.Get(),
+    m_frameProcessor->GetReadyEvent(),
+    scheduleEvent,
+    m_publishTimer.Get(),
+  };
+  const bool cadenceEnabled = m_frameProcessor->UsesCadence();
+
+  for (;;)
+  {
+    const uint64_t            now = CFrameScheduler::Nanotime();
+    uint64_t                  target;
+    CFrameScheduler::Schedule schedule;
+    bool                      periodic;
+    bool                      republish;
+    m_transport.GetPublishTarget(
+      now, target, schedule, periodic, republish);
+
+    const bool ready = m_frameProcessor->HasReadyFrame();
+    if (!ready)
+    {
+      m_transport.ProcessDeliveries();
+      if (m_frameProcessor->HasReadyFrame())
+        continue;
+
+      uint64_t current       = CFrameScheduler::Nanotime();
+      uint64_t cadenceTarget = 0;
+      if (cadenceEnabled && schedule.deliveryDeadlineSerial && periodic)
+      {
+        if (schedule.deadline <= current)
+        {
+          m_transport.FrameMissed(schedule, current, periodic);
+          continue;
+        }
+        cadenceTarget = schedule.deadline;
+      }
+
+      if (republish && m_transport.HasPublishedFrame())
+      {
+        if (m_transport.RepublishFrameBuffer(schedule))
+          continue;
+
+        current = CFrameScheduler::Nanotime();
+        if (cadenceTarget && cadenceTarget <= current)
+        {
+          m_transport.FrameMissed(schedule, current, periodic);
+          continue;
+        }
+
+        uint64_t retryTarget = current + PUBLISH_RETRY_NS;
+        if (cadenceTarget)
+          retryTarget = min(retryTarget, cadenceTarget);
+        ArmPublishTimer(m_publishTimer.Get(), retryTarget - current);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
+      uint64_t replayTarget;
+      if (m_transport.GetPendingDeliveryTarget(current, replayTarget))
+      {
+        bool retry = false;
+        if (replayTarget <= current)
+        {
+          if (m_transport.RetryPendingDelivery(current, retry))
+            continue;
+
+          current = CFrameScheduler::Nanotime();
+          if (cadenceTarget && cadenceTarget <= current)
+          {
+            m_transport.FrameMissed(schedule, current, periodic);
+            continue;
+          }
+
+          if (retry)
+            replayTarget = current + PUBLISH_RETRY_NS;
+          else
+          {
+            if (cadenceTarget)
+              replayTarget = cadenceTarget;
+            else
+            {
+              if (m_publishTimer.Get())
+                CancelWaitableTimer(m_publishTimer.Get());
+              if (WaitForMultipleObjects(
+                    ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+                  WAIT_OBJECT_0)
+                break;
+              continue;
+            }
+          }
+        }
+
+        if (cadenceTarget)
+          replayTarget = min(replayTarget, cadenceTarget);
+
+        current = CFrameScheduler::Nanotime();
+        if (cadenceTarget && cadenceTarget <= current)
+        {
+          m_transport.FrameMissed(schedule, current, periodic);
+          continue;
+        }
+        if (replayTarget <= current)
+          continue;
+
+        ArmPublishTimer(m_publishTimer.Get(), replayTarget - current);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
+      if (cadenceTarget)
+      {
+        current = CFrameScheduler::Nanotime();
+        if (cadenceTarget <= current)
+        {
+          m_transport.FrameMissed(schedule, current, periodic);
+          continue;
+        }
+
+        ArmPublishTimer(m_publishTimer.Get(), cadenceTarget - current);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+
+      if (m_publishTimer.Get())
+        CancelWaitableTimer(m_publishTimer.Get());
+      if (WaitForMultipleObjects(
+            ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+          WAIT_OBJECT_0)
+        break;
+      continue;
+    }
+
+    uint64_t current = CFrameScheduler::Nanotime();
+    uint64_t replayTarget;
+    if (m_transport.GetPendingDeliveryTarget(current, replayTarget) &&
+        replayTarget < target)
+    {
+      if (replayTarget <= current)
+      {
+        m_transport.ProcessDeliveries();
+        current = CFrameScheduler::Nanotime();
+        bool retry = false;
+        if (m_transport.RetryPendingDelivery(current, retry))
+          continue;
+
+        current = CFrameScheduler::Nanotime();
+        if (retry)
+          replayTarget = current + PUBLISH_RETRY_NS;
+        else
+          replayTarget = target;
+      }
+
+      replayTarget = min(replayTarget, target);
+      current      = CFrameScheduler::Nanotime();
+      if (target > current)
+      {
+        if (replayTarget <= current)
+          continue;
+
+        ArmPublishTimer(m_publishTimer.Get(), replayTarget - current);
+        if (WaitForMultipleObjects(
+              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+            WAIT_OBJECT_0)
+          break;
+        continue;
+      }
+    }
+
+    current = CFrameScheduler::Nanotime();
+    if (target > current)
+    {
+      ArmPublishTimer(m_publishTimer.Get(), target - current);
+      if (WaitForMultipleObjects(
+            ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+          WAIT_OBJECT_0)
+        break;
+      continue;
+    }
+
+    const uint64_t publishStart = CFrameScheduler::Nanotime();
+    m_transport.ProcessDeliveries();
+    if (!m_transport.FrameBufferAvailable(schedule) ||
+        !m_frameProcessor->Publish(schedule, periodic, publishStart))
+    {
+      ArmPublishTimer(m_publishTimer.Get(), PUBLISH_RETRY_NS);
+      if (WaitForMultipleObjects(
+            ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
+          WAIT_OBJECT_0)
+        break;
+    }
+  }
+
+  if (avTaskHandle)
+    AvRevertMmThreadCharacteristics(avTaskHandle);
+}
+
+DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)
+{
+  reinterpret_cast<CSwapChainProcessor*>(arg)->CursorThread();
+  return 0;
+}
+
+bool CSwapChainProcessor::QueryHWCursor()
+{
+  IDARG_IN_QUERY_HWCURSOR in = {};
+  in.LastShapeId            = m_lastShapeId;
+  in.pShapeBuffer           = m_shapeBuffer;
+  in.ShapeBufferSizeInBytes = 512 * 512 * 4;
+
+  IDARG_OUT_QUERY_HWCURSOR out = {};
+  UINT cursorWhiteLevel = m_sdrWhiteLevel.load(std::memory_order_relaxed);
+  NTSTATUS status;
+#ifdef HAS_IDDCX_110
+  if (m_devContext->HasIddCx110DDIs())
+  {
+    IDARG_OUT_QUERY_HWCURSOR3 out3 = {};
+    status = IddCxMonitorQueryHardwareCursor3(m_monitor, &in, &out3);
+    out.IsCursorVisible      = out3.IsCursorVisible;
+    out.X                    = out3.X;
+    out.Y                    = out3.Y;
+    out.IsCursorShapeUpdated = out3.IsCursorShapeUpdated;
+    out.CursorShapeInfo      = out3.CursorShapeInfo;
+    if (out3.SdrWhiteLevel)
+      cursorWhiteLevel = out3.SdrWhiteLevel;
+  }
+  else
+#endif
+  {
+    status = IddCxMonitorQueryHardwareCursor(m_monitor, &in, &out);
+  }
+
+  if (FAILED(status))
+  {
+    // this occurs if the display went away (ie, screen blanking or disabled)
+    if (status == STATUS_GRAPHICS_PATH_NOT_IN_TOPOLOGY)
+    {
+      SetEvent(m_terminateEvent.Get());
+      return false;
+    }
+
+    DEBUG_ERROR("IddCxMonitorQueryHardwareCursor failed (0x%08x)", status);
+    return false;
+  }
+
+  if (out.IsCursorShapeUpdated)
+    m_lastShapeId = out.CursorShapeInfo.ShapeId;
+
+  m_control.SendCursor(out, m_shapeBuffer, cursorWhiteLevel);
+  return true;
+}
+
+void CSwapChainProcessor::CursorThread()
+{
+  HRESULT hr = 0;
+  bool running = true;
+
+  while (running)
+  {
+    HANDLE waitHandles[] =
+    {
+      m_cursorDataEvent.Get(),
+      m_terminateEvent.Get()
+    };
+
+    DWORD waitResult = WaitForMultipleObjects(
+      ARRAYSIZE(waitHandles), waitHandles, FALSE, 100);
+
+    switch (waitResult)
+    {
+    case WAIT_TIMEOUT:
+      continue;
+
+      // cursorDataEvent
+    case WAIT_OBJECT_0:
+      if (!QueryHWCursor())
+        return;
+      continue;
+
+      // terminateEvent
+    case WAIT_OBJECT_0 + 1:
+      running = false;
+      continue;
+
+    default:
+      hr = HRESULT_FROM_WIN32(waitResult);
+      DEBUG_ERROR_HR(hr, "WaitForMultipleObjects");
+      return;
+    }
+  }
 }

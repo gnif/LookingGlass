@@ -27,7 +27,7 @@
 #include <atomic>
 #include <stdint.h>
 
-#include "transport/CFrameScheduler.h"
+#include "capture/CFrameScheduler.h"
 #include "d3d/CInteropResource.h"
 
 struct CD3D12Device;
