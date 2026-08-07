@@ -73,6 +73,7 @@ struct LG_Transport
 {
   unsigned                width;
   unsigned                height;
+  unsigned                stride;
   unsigned                frameRate;
   unsigned                frameCount;
   bool                    realtime;
@@ -109,6 +110,14 @@ static void test_setup(void)
       .description = "Generated frame height",
       .type        = OPTION_TYPE_INT,
       .value.x_int = 1080,
+    },
+    {
+      .module      = "test",
+      .name        = "stride",
+      .description =
+        "Generated frame stride in storage elements, or zero for packed",
+      .type        = OPTION_TYPE_INT,
+      .value.x_int = 0,
     },
     {
       .module      = "test",
@@ -276,13 +285,18 @@ static bool test_setFormat(struct LG_Transport * this, unsigned index)
   if (this->format.version && this->formatIndex == index)
     return false;
 
-  const struct TestFormat * testFormat = &testFormats[index];
-  const uint32_t            version    = this->format.version + 1;
-  const bool                packedBGR  =
+  const struct TestFormat * testFormat  = &testFormats[index];
+  const uint32_t            version     = this->format.version + 1;
+  const bool                packedBGR   =
     testFormat->type == FRAME_TYPE_BGR_32;
-  const unsigned            pitch      = packedBGR ?
+  const unsigned            packedPitch = packedBGR ?
     ALIGN_PAD(this->width * 3, 4) :
     this->width * testFormat->bytesPerPixel;
+  const unsigned            stride      = this->stride ? this->stride :
+    packedBGR ? packedPitch / 4 : this->width;
+  const unsigned            pitch       = this->stride ?
+    stride * testFormat->bytesPerPixel :
+    packedPitch;
 
   this->formatIndex = index;
   this->format      = (LG_TransportFrameFormat) {
@@ -295,7 +309,7 @@ static bool test_setFormat(struct LG_Transport * this, unsigned index)
     .frameWidth    = this->width,
     .frameHeight   = this->height,
     .rotation      = FRAME_ROT_0,
-    .stride        = packedBGR ? pitch / 4 : this->width,
+    .stride        = stride,
     .pitch         = pitch,
     .hdr           = testFormat->hdr,
     .hdrPQ         = testFormat->hdrPQ,
@@ -317,6 +331,7 @@ static bool test_create(LG_Transport ** result)
 
   const int      width        = option_get_int("test", "width");
   const int      height       = option_get_int("test", "height");
+  const int      stride       = option_get_int("test", "stride");
   const int      frameRate    = option_get_int("test", "frameRate");
   const int      frameCount   = option_get_int("test", "frameCount");
   const char *   format       = option_get_string("test", "format");
@@ -324,12 +339,15 @@ static bool test_create(LG_Transport ** result)
   const int      damageMode   = damage ? test_findDamageMode(damage) : -1;
   const bool     cycleFormats = strcmp(format, "cycle") == 0;
   const int      formatIndex  = cycleFormats ? 0 : test_findFormat(format);
-  const unsigned maxBytesPerPixel = formatIndex < 0 ? 0 :
+  const unsigned maxBytesPerPixel  = formatIndex < 0 ? 0 :
     cycleFormats ? 8 : testFormats[formatIndex].bytesPerPixel;
+  const size_t   bufferStride      = stride > 0 ? (size_t)stride :
+    width > 0 ? (size_t)width : 0;
   if (width < 1 || height < 1 || !maxBytesPerPixel || damageMode < 0 ||
-      width > (int)(UINT32_MAX / maxBytesPerPixel) ||
+      stride < 0 || (stride && stride < width) ||
+      bufferStride > UINT32_MAX / maxBytesPerPixel ||
       frameRate < 1 || frameRate > 1000000000 || frameCount < 0 ||
-      (size_t)width > (SIZE_MAX - sizeof(FrameBuffer)) /
+      bufferStride > (SIZE_MAX - sizeof(FrameBuffer)) /
         maxBytesPerPixel / (size_t)height)
   {
     DEBUG_ERROR(
@@ -340,6 +358,7 @@ static bool test_create(LG_Transport ** result)
 
   this->width        = width;
   this->height       = height;
+  this->stride       = stride;
   this->frameRate    = frameRate;
   this->frameCount   = frameCount;
   this->realtime     = option_get_bool("test", "realtime");
@@ -350,7 +369,7 @@ static bool test_create(LG_Transport ** result)
   test_initPQLUT(this);
 
   const size_t dataSize =
-    (size_t)this->width * this->height * maxBytesPerPixel;
+    bufferStride * this->height * maxBytesPerPixel;
   for (unsigned i = 0; i < TEST_BUFFER_COUNT; ++i)
   {
     this->buffers[i].framebuffer = malloc(sizeof(FrameBuffer) + dataSize);
@@ -481,25 +500,29 @@ static void test_getColor(const struct LG_Transport * this,
 static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
 {
   uint8_t * data = framebuffer_get_data(fb);
-  if (this->format.type == FRAME_TYPE_BGR_32)
+  if (this->stride)
+    memset(data, 0xa5 ^ (uint8_t)this->serial,
+      (size_t)this->format.pitch * this->height);
+  else if (this->format.type == FRAME_TYPE_BGR_32)
     memset(data, 0, (size_t)this->format.pitch * this->height);
 
   for (unsigned y = 0; y < this->height; ++y)
+  {
+    uint8_t * row = data + (size_t)y * this->format.pitch;
     for (unsigned x = 0; x < this->width; ++x)
     {
       uint8_t r, g, b;
       test_getColor(this, x, y, &r, &g, &b);
-      const size_t pixel = (size_t)y * this->width + x;
       switch (this->format.type)
       {
         case FRAME_TYPE_BGRA:
-          ((uint32_t *)data)[pixel] =
+          ((uint32_t *)row)[x] =
             0xff000000U | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
           break;
 
         case FRAME_TYPE_BGR_32:
         {
-          uint8_t * bgr = data + (size_t)y * this->format.pitch + x * 3;
+          uint8_t * bgr = row + x * 3;
           bgr[0] = b;
           bgr[1] = g;
           bgr[2] = r;
@@ -507,14 +530,14 @@ static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
         }
 
         case FRAME_TYPE_RGBA:
-          ((uint32_t *)data)[pixel] =
+          ((uint32_t *)row)[x] =
             0xff000000U | ((uint32_t)b << 16) | ((uint32_t)g << 8) | r;
           break;
 
         case FRAME_TYPE_RGB_24:
-          data[pixel * 3    ] = r;
-          data[pixel * 3 + 1] = g;
-          data[pixel * 3 + 2] = b;
+          row[x * 3    ] = r;
+          row[x * 3 + 1] = g;
+          row[x * 3 + 2] = b;
           break;
 
         case FRAME_TYPE_RGBA10:
@@ -528,7 +551,7 @@ static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
             r709 * 0.0690973f + g709 * 0.9195404f + b709 * 0.0113623f;
           const float b2020 =
             r709 * 0.0163914f + g709 * 0.0880133f + b709 * 0.8955953f;
-          ((uint32_t *)data)[pixel] =
+          ((uint32_t *)row)[x] =
             ((uint32_t)test_scRGBToPQ(this, r2020)      ) |
             ((uint32_t)test_scRGBToPQ(this, g2020) << 10) |
             ((uint32_t)test_scRGBToPQ(this, b2020) << 20) |
@@ -538,7 +561,7 @@ static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
 
         case FRAME_TYPE_RGBA16F:
         {
-          uint16_t * rgba = (uint16_t *)data + pixel * 4;
+          uint16_t * rgba = (uint16_t *)row + x * 4;
           rgba[0] = test_floatToHalf((float)r * 4.0f / 255.0f);
           rgba[1] = test_floatToHalf((float)g * 4.0f / 255.0f);
           rgba[2] = test_floatToHalf((float)b * 4.0f / 255.0f);
@@ -550,6 +573,7 @@ static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
           DEBUG_UNREACHABLE();
       }
     }
+  }
 
   framebuffer_set_write_ptr(fb, (size_t)this->format.pitch * this->height);
 }

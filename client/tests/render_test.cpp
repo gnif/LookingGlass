@@ -68,6 +68,12 @@ struct DamageCase
   const char * name;
 };
 
+struct StrideCase
+{
+  const char * name;
+  unsigned stride;
+};
+
 struct Capture
 {
   LG_TestCaptureHeader header {};
@@ -104,12 +110,13 @@ std::filesystem::path makeTempDirectory()
 
 int runClient(const FormatCase & format, const char * damage,
     const std::filesystem::path & capture,
-    const std::filesystem::path & log)
+    const std::filesystem::path & log, unsigned stride)
 {
   const std::string size = std::to_string(kWidth) + "x" +
     std::to_string(kHeight);
   const std::string width = "test:width=" + std::to_string(kWidth);
   const std::string height = "test:height=" + std::to_string(kHeight);
+  const std::string strideArg = "test:stride=" + std::to_string(stride);
   const std::string formatArg = std::string("test:format=") + format.name;
   const std::string damageArg = std::string("test:damage=") + damage;
   const std::string count = "test:frameCount=" +
@@ -124,6 +131,7 @@ int runClient(const FormatCase & format, const char * damage,
     "app:renderer=EGL",
     width,
     height,
+    strideArg,
     formatArg,
     damageArg,
     "test:frameRate=60",
@@ -187,18 +195,21 @@ int runClient(const FormatCase & format, const char * damage,
   return 124;
 }
 
-Capture produceCapture(const FormatCase & format, const char * damage)
+Capture produceCapture(const FormatCase & format, const char * damage,
+    unsigned stride = 0)
 {
   Capture result;
   result.directory = makeTempDirectory();
   if (result.directory.empty())
     return result;
-  result.path = result.directory /
-    (std::string(format.name) + "-" + damage + ".lgcapture");
-  result.log = result.directory /
-    (std::string(format.name) + "-" + damage + ".log");
+  std::string artifactName = std::string(format.name) + "-" + damage;
+  if (stride)
+    artifactName += "-stride" + std::to_string(stride);
+  result.path = result.directory / (artifactName + ".lgcapture");
+  result.log  = result.directory / (artifactName + ".log");
 
-  const int status = runClient(format, damage, result.path, result.log);
+  const int status =
+    runClient(format, damage, result.path, result.log, stride);
   EXPECT_EQ(status, 0) << readText(result.log);
   if (status != 0)
     return result;
@@ -561,5 +572,53 @@ INSTANTIATE_TEST_SUITE_P(FormatDamageMatrix, RenderPipelineTest,
       )
     ),
     renderCaseName);
+
+using StrideRenderCase = std::tuple<StrideCase, DamageCase>;
+
+class StrideRenderPipelineTest :
+  public testing::TestWithParam<StrideRenderCase>
+{
+};
+
+TEST_P(StrideRenderPipelineTest, MatchesReference)
+{
+  const StrideCase & stride = std::get<0>(GetParam());
+  const DamageCase & damage = std::get<1>(GetParam());
+  const FormatCase format = {
+    "bgra", FRAME_TYPE_BGRA, false, false
+  };
+  Capture capture = produceCapture(format, damage.name, stride.stride);
+  ASSERT_FALSE(capture.data.empty()) << "artifacts: " << capture.directory;
+
+  const std::string clientLog = readText(capture.log);
+  const std::string expectedLayout =
+    "stride:" + std::to_string(stride.stride) +
+    " pitch:" + std::to_string(stride.stride * 4);
+  EXPECT_NE(clientLog.find(expectedLayout), std::string::npos) << clientLog;
+
+  compareReference(format, capture);
+  if (!testing::Test::HasFailure())
+    std::filesystem::remove_all(capture.directory);
+}
+
+std::string strideRenderCaseName(
+    const testing::TestParamInfo<StrideRenderCase> & info)
+{
+  return std::string(std::get<0>(info.param).name) + "_" +
+    std::get<1>(info.param).name;
+}
+
+INSTANTIATE_TEST_SUITE_P(BGRAPaddedStride, StrideRenderPipelineTest,
+    testing::Combine(
+      testing::Values(
+        StrideCase {"stride128",  128},
+        StrideCase {"stride1280", 1280}
+      ),
+      testing::Values(
+        DamageCase {"full"},
+        DamageCase {"moving"}
+      )
+    ),
+    strideRenderCaseName);
 
 } // namespace
