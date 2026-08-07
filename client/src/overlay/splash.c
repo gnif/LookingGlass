@@ -99,10 +99,11 @@ static void drawRadialGradient(ImDrawList * list, int x, int y, int w, int h,
 
 static bool splash_init(void ** udata, const void * params)
 {
-  atomic_store_explicit(&l_requestedShow, true, memory_order_relaxed);
+  const bool show = strcmp(g_params.transport, "test") != 0;
+  atomic_store_explicit(&l_requestedShow, show, memory_order_relaxed);
   atomic_store_explicit(&l_fading, false, memory_order_relaxed);
-  l_appliedShow = true;
-  l_state       = SPLASH_VISIBLE;
+  l_appliedShow = show;
+  l_state       = show ? SPLASH_VISIBLE : SPLASH_HIDDEN;
   l_fadeStart   = 0;
 
   overlayLoadSVG(b_lg_logo_svg, b_lg_logo_svg_size, &l_logo, 200, 200);
