@@ -19,42 +19,26 @@
  */
 
 #include "CFrameBufferResource.h"
-#include "CSwapChainProcessor.h"
+#include "CFrameProcessorUtil.h"
+#include "CD3D12Device.h"
+#include "CIndirectDeviceContext.h"
 #include "CDebug.h"
 
 #include <cstring>
 
-static bool ResourceDescMatches(
-  const D3D12_RESOURCE_DESC& left, const D3D12_RESOURCE_DESC& right)
-{
-  return
-    left.Dimension          == right.Dimension          &&
-    left.Alignment          == right.Alignment          &&
-    left.Width              == right.Width              &&
-    left.Height             == right.Height             &&
-    left.DepthOrArraySize   == right.DepthOrArraySize   &&
-    left.MipLevels          == right.MipLevels          &&
-    left.Format             == right.Format             &&
-    left.SampleDesc.Count   == right.SampleDesc.Count   &&
-    left.SampleDesc.Quality == right.SampleDesc.Quality &&
-    left.Layout             == right.Layout             &&
-    left.Flags              == right.Flags;
-}
-
-bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain,
-  unsigned frameIndex, uint8_t * base, size_t size,
+bool CFrameBufferResource::Init(CIndirectDeviceContext * device,
+  CD3D12Device * dx12, unsigned frameIndex, uint8_t * base, size_t size,
   const D3D12_RESOURCE_DESC * textureDesc)
 {
   m_frameIndex = frameIndex;
 
-  if (size > swapChain->GetDevice()->GetMaxFrameSize())
+  if (size > device->GetMaxFrameSize())
   {
     DEBUG_ERROR("Frame size of %llu is too large to fit in shared ram",
       (unsigned long long)size);
     return false;
   }
 
-  const auto         dx12     = swapChain->GetD3D12Device();
   const bool         indirect = dx12->IsIndirectCopy();
   const ResourceType type     = textureDesc ?
     RESOURCE_TEXTURE : RESOURCE_BUFFER;
@@ -99,7 +83,8 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain,
   // Nothing to do if the resource already represents this allocation.
   if (m_base == base && m_type == type &&
       ((type == RESOURCE_BUFFER && m_size >= size) ||
-       (type == RESOURCE_TEXTURE && ResourceDescMatches(m_desc, desc))))
+       (type == RESOURCE_TEXTURE &&
+        CFrameProcessorUtil::ResourceDescMatches(m_desc, desc))))
   {
     m_frameSize = size;
     return true;
@@ -146,14 +131,14 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain,
   {
     const UINT64 heapOffset =
       (uintptr_t)base -
-      (uintptr_t)swapChain->GetDevice()->GetIVSHMEM().GetMem();
+      (uintptr_t)device->GetIVSHMEM().GetMem();
     const D3D12_RESOURCE_ALLOCATION_INFO allocation =
       dx12->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
     allocationSize = allocation.SizeInBytes;
     const D3D12_HEAP_DESC heapDesc = dx12->GetHeap()->GetDesc();
     if (!allocation.Alignment ||
         heapOffset % allocation.Alignment ||
-        allocation.SizeInBytes > swapChain->GetDevice()->GetMaxFrameSize() ||
+        allocation.SizeInBytes > device->GetMaxFrameSize() ||
         heapOffset > heapDesc.SizeInBytes ||
         allocation.SizeInBytes > heapDesc.SizeInBytes - heapOffset)
     {

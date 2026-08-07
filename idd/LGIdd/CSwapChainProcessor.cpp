@@ -19,6 +19,7 @@
  */
 
 #include "CSwapChainProcessor.h"
+#include "CFrameProcessorUtil.h"
 #include "CIndirectMonitorContext.h"
 #include "CPlatformInfo.h"
 
@@ -34,9 +35,6 @@
 static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
 static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
 static const uint64_t PUBLISH_RETRY_NS      = 1000000ULL;
-
-static_assert(LGMP_Q_FRAME_LEN == 2,
-  "IDD candidate pipeline assumes two slots");
 
 class CSRWExclusiveLock
 {
@@ -55,78 +53,6 @@ public:
   }
 };
 
-class CSRWSharedLock
-{
-private:
-  SRWLOCK * m_lock;
-
-public:
-  explicit CSRWSharedLock(SRWLOCK * lock) : m_lock(lock)
-  {
-    AcquireSRWLockShared(m_lock);
-  }
-
-  ~CSRWSharedLock()
-  {
-    ReleaseSRWLockShared(m_lock);
-  }
-};
-
-class CPublishPending
-{
-private:
-  SRWLOCK * m_lock;
-  bool    * m_pending;
-  HANDLE    m_event;
-  bool      m_active = true;
-
-public:
-  CPublishPending(SRWLOCK * lock, bool * pending, HANDLE event) :
-    m_lock(lock),
-    m_pending(pending),
-    m_event(event)
-  {
-    AcquireSRWLockExclusive(m_lock);
-    *m_pending = true;
-    ResetEvent(m_event);
-    ReleaseSRWLockExclusive(m_lock);
-  }
-
-  ~CPublishPending()
-  {
-    Clear();
-  }
-
-  void Clear()
-  {
-    if (!m_active)
-      return;
-
-    AcquireSRWLockExclusive(m_lock);
-    *m_pending = false;
-    SetEvent(m_event);
-    ReleaseSRWLockExclusive(m_lock);
-    m_active = false;
-  }
-};
-
-static bool FrameMetadataChanged(const D12FrameFormat& previous,
-  const D12FrameFormat& current)
-{
-  return
-    previous.hdrMetadata   != current.hdrMetadata   ||
-    previous.sdrWhiteLevel != current.sdrWhiteLevel ||
-    (current.hdrMetadata &&
-      (memcmp(previous.displayPrimary, current.displayPrimary,
-         sizeof(current.displayPrimary)) != 0 ||
-       memcmp(previous.whitePoint, current.whitePoint,
-         sizeof(current.whitePoint)) != 0 ||
-       previous.maxDisplayLuminance       != current.maxDisplayLuminance       ||
-       previous.minDisplayLuminance       != current.minDisplayLuminance       ||
-       previous.maxContentLightLevel      != current.maxContentLightLevel      ||
-       previous.maxFrameAverageLightLevel != current.maxFrameAverageLightLevel));
-}
-
 CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
     CIndirectDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
@@ -144,10 +70,6 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
   // Manual-reset: all worker threads wait on this, so it must stay signalled
   // once set or only one thread would ever observe termination.
   m_terminateEvent.Attach(CreateEvent(nullptr, TRUE, FALSE, nullptr));
-  m_candidateEvent.Attach(CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_candidateAvailableEvent.Attach(
-    CreateEvent(nullptr, FALSE, FALSE, nullptr));
-  m_copySubmitEvent.Attach(CreateEvent(nullptr, TRUE, TRUE, nullptr));
   m_publishTimer.Attach(CreateWaitableTimerExW(nullptr, nullptr,
     CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS));
   if (!m_publishTimer.Get())
@@ -159,9 +81,8 @@ CSwapChainProcessor::CSwapChainProcessor(CIndirectMonitorContext * monitorContex
 
 bool CSwapChainProcessor::Start()
 {
-  if (!m_terminateEvent.Get() || !m_candidateEvent.Get() ||
-      !m_candidateAvailableEvent.Get() || !m_copySubmitEvent.Get() ||
-      !m_publishTimer.Get() || !m_cursorDataEvent.Get() || !m_shapeBuffer)
+  if (!m_terminateEvent.Get() || !m_publishTimer.Get() ||
+      !m_cursorDataEvent.Get() || !m_shapeBuffer)
   {
     DEBUG_ERROR("Failed to initialize swap chain worker resources");
     return false;
@@ -212,10 +133,6 @@ bool CSwapChainProcessor::InitializePipeline()
     }
 
     m_dx12Device = std::move(dx12Device);
-    m_directSoftwareTexture =
-      m_dx11Device->IsSoftware() &&
-      !m_dx12Device->IsIndirectCopy() &&
-      m_dx12Device->CanUseIVSHMEMTexture();
     break;
   }
 
@@ -224,7 +141,6 @@ bool CSwapChainProcessor::InitializePipeline()
     return false;
 
   m_resPool.Init(m_dx11Device, m_dx12Device);
-  m_fbPool.Init(this);
   const bool enableEffects = !m_dx11Device->IsSoftware();
   if (!enableEffects)
     DEBUG_INFO("Software render adapter: post-processing disabled");
@@ -258,6 +174,15 @@ bool CSwapChainProcessor::InitializePipeline()
       "Failed to initialize post-processing effects; effects disabled");
   }
 
+  m_frameProcessor = CreateFrameProcessor(m_dx11Device->IsSoftware(),
+    m_devContext, m_dx12Device, m_postProcessors,
+    &m_pipelineLock, m_terminateEvent.Get());
+  if (!m_frameProcessor)
+  {
+    DEBUG_ERROR("Failed to create the frame processor");
+    return false;
+  }
+
   if (!m_monitorContext->IsAssignmentCurrent(m_assignmentGeneration) ||
       WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
     return false;
@@ -288,13 +213,14 @@ CSwapChainProcessor::~CSwapChainProcessor()
   if (m_dx12Device)
   {
     m_dx12Device->WaitForIdle();
-    ResetCandidates();
+    if (m_frameProcessor)
+      m_frameProcessor->Reset();
   }
 
   for (CPostProcessor& postProcessor : m_postProcessors)
     postProcessor.Reset();
+  m_frameProcessor.reset();
   m_resPool.Reset();
-  m_fbPool.Reset();
   delete[] m_shapeBuffer;
 }
 
@@ -322,20 +248,6 @@ DWORD CALLBACK CSwapChainProcessor::_PublisherThread(LPVOID arg)
   return 0;
 }
 
-bool CSwapChainProcessor::HasReadyCandidate()
-{
-  bool ready = false;
-  AcquireSRWLockShared(&m_candidateLock);
-  for (const FrameCandidate& candidate : m_candidates)
-    if (candidate.state == CANDIDATE_READY)
-    {
-      ready = true;
-      break;
-    }
-  ReleaseSRWLockShared(&m_candidateLock);
-  return ready;
-}
-
 void CSwapChainProcessor::PublisherThread()
 {
   DWORD  avTask       = 0;
@@ -349,20 +261,17 @@ void CSwapChainProcessor::PublisherThread()
   HANDLE idleHandles[] =
   {
     m_terminateEvent.Get(),
-    m_candidateEvent.Get(),
+    m_frameProcessor->GetReadyEvent(),
     scheduleEvent,
   };
   HANDLE timerHandles[] =
   {
     m_terminateEvent.Get(),
-    m_candidateEvent.Get(),
+    m_frameProcessor->GetReadyEvent(),
     scheduleEvent,
     m_publishTimer.Get(),
   };
-  // Software capture publishes source frames immediately. Keep this thread
-  // available for transport delivery and reconnects, but do not wake it for
-  // deadlines the software path cannot reliably meet.
-  const bool cadenceEnabled = !m_dx11Device->IsSoftware();
+  const bool cadenceEnabled = m_frameProcessor->UsesCadence();
 
   for (;;)
   {
@@ -374,11 +283,11 @@ void CSwapChainProcessor::PublisherThread()
     m_devContext->GetPublishTarget(
       now, target, schedule, periodic, republish);
 
-    const bool ready = HasReadyCandidate();
+    const bool ready = m_frameProcessor->HasReadyFrame();
     if (!ready)
     {
       m_devContext->ProcessFrameQueue();
-      if (HasReadyCandidate())
+      if (m_frameProcessor->HasReadyFrame())
         continue;
 
       uint64_t current       = CFrameScheduler::Nanotime();
@@ -547,8 +456,7 @@ void CSwapChainProcessor::PublisherThread()
     const uint64_t publishStart = CFrameScheduler::Nanotime();
     m_devContext->ProcessFrameQueue();
     if (!m_devContext->FrameBufferAvailable(schedule) ||
-        !PublishNewestCandidate(
-          schedule, periodic, publishStart))
+        !m_frameProcessor->Publish(schedule, periodic, publishStart))
     {
       ArmPublishTimer(m_publishTimer.Get(), PUBLISH_RETRY_NS);
       if (WaitForMultipleObjects(
@@ -765,913 +673,6 @@ void CSwapChainProcessor::SwapChainThreadCore()
 
 }
 
-void CSwapChainProcessor::CandidateCompletionFunction(
-  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
-{
-  auto sc        = static_cast<CSwapChainProcessor *>(param1);
-  auto candidate = static_cast<FrameCandidate *>(param2);
-
-  uint64_t gpuStart = 0;
-  uint64_t gpuEnd   = 0;
-  const bool timingValid = result && slot->GetGPUTimes(gpuStart, gpuEnd);
-
-  bool forceFrame = false;
-  AcquireSRWLockExclusive(&sc->m_candidateLock);
-  if (candidate->state == CANDIDATE_PREPARING)
-  {
-    candidate->prepareReady       = CFrameScheduler::Nanotime();
-    candidate->prepareGPUStart    = gpuStart;
-    candidate->prepareGPUEnd      = gpuEnd;
-    candidate->prepareTimingValid = timingValid;
-    candidate->state              =
-      result ? CANDIDATE_READY : CANDIDATE_FREE;
-    forceFrame = result && candidate->timingToken != 0;
-  }
-  ReleaseSRWLockExclusive(&sc->m_candidateLock);
-
-  if (!result)
-  {
-    sc->SetFullPendingDamage();
-    sc->m_devContext->ForceFrame();
-  }
-  else if (forceFrame)
-    sc->m_devContext->ForceFrame();
-  sc->SignalCandidateState();
-}
-
-void CSwapChainProcessor::SoftwareCompletionFunction(
-  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
-{
-  auto sc    = static_cast<CSwapChainProcessor   *>(param1);
-  auto fbRes = static_cast<CFrameBufferResource *>(param2);
-  fbRes->MarkCompletion();
-
-  if (!result)
-  {
-    sc->m_devContext->FailFrameBuffer(fbRes->GetFrameIndex());
-    sc->SetFullPendingDamage();
-    sc->m_devContext->ForceFrame();
-    return;
-  }
-
-  uint64_t indirectCopyTime = 0;
-  if (sc->m_dx12Device->IsIndirectCopy())
-  {
-    const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
-    if (fbRes->IsFullCopy())
-      sc->m_devContext->WriteFrameBuffer(fbRes->GetFrameIndex(),
-        fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
-    else
-    {
-      const unsigned pitch         = fbRes->GetCopyPitch();
-      const unsigned bytesPerPixel = fbRes->GetCopyBytesPerPixel();
-      const RECT * dirtyRects      = fbRes->GetCopyDirtyRects();
-      const unsigned count         = fbRes->GetCopyDirtyRectCount();
-      for (const RECT * rect = dirtyRects; rect < dirtyRects + count; ++rect)
-      {
-        const size_t rowOffset =
-          (size_t)rect->top * pitch +
-          (size_t)rect->left * bytesPerPixel;
-        const size_t rowBytes =
-          (size_t)(rect->right - rect->left) * bytesPerPixel;
-        sc->m_devContext->WriteFrameBufferRows(fbRes->GetFrameIndex(),
-          fbRes->GetMap(), rowOffset, rowBytes, pitch,
-          (unsigned)(rect->bottom - rect->top));
-      }
-    }
-    indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
-  }
-
-  uint64_t       gpuStart       = 0;
-  uint64_t       gpuEnd         = 0;
-  const uint64_t copyReady      = CFrameScheduler::Nanotime();
-  const bool     gpuTimingValid =
-    slot->GetGPUTimes(gpuStart, gpuEnd);
-
-  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-  const uint64_t publishedAt      = CFrameScheduler::Nanotime();
-  const uint64_t postProcessStart = fbRes->GetPostProcessStart();
-  const uint64_t copyStart        = fbRes->GetCopyStart();
-  uint64_t       postProcessTime = copyStart >= postProcessStart ?
-    copyStart - postProcessStart : 0;
-  uint64_t       copyTime = copyReady >= copyStart ?
-    copyReady - copyStart : 0;
-  if (gpuTimingValid && gpuStart >= postProcessStart &&
-      gpuEnd >= gpuStart && gpuEnd <= copyReady)
-  {
-    postProcessTime = gpuStart - postProcessStart;
-    copyTime        = gpuEnd - gpuStart + indirectCopyTime;
-  }
-
-  const uint64_t elapsed   = publishedAt >= postProcessStart ?
-    publishedAt - postProcessStart : 0;
-  const uint64_t measured  = postProcessTime + copyTime;
-  const uint64_t readyTime = elapsed > measured ?
-    elapsed - measured : 0;
-
-  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, 0,
-    fbRes->GetSchedule(), publishedAt);
-  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
-}
-
-void CSwapChainProcessor::CompletionFunction(
-  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
-{
-  auto sc    = static_cast<CSwapChainProcessor   *>(param1);
-  auto fbRes = static_cast<CFrameBufferResource *>(param2);
-  const unsigned candidateIndex = fbRes->GetCandidateIndex();
-
-  if (!result)
-  {
-    // The frame was reserved in LGMP before GPU submission. Make the message
-    // releasable even though its contents failed.
-    sc->m_devContext->FailFrameBuffer(fbRes->GetFrameIndex());
-    sc->SetFullPendingDamage();
-    sc->m_devContext->ForceFrame();
-    sc->ReleaseCandidate(candidateIndex);
-    return;
-  }
-
-  uint64_t prepareCopyStart;
-  uint64_t prepareReady;
-  uint64_t prepareGPUStart;
-  uint64_t prepareGPUEnd;
-  uint64_t timingStart;
-  bool     prepareTimingValid;
-  AcquireSRWLockShared(&sc->m_candidateLock);
-  const FrameCandidate& candidate = sc->m_candidates[candidateIndex];
-  prepareCopyStart   = candidate.prepareCopyStart;
-  prepareReady       = candidate.prepareReady;
-  prepareGPUStart    = candidate.prepareGPUStart;
-  prepareGPUEnd      = candidate.prepareGPUEnd;
-  timingStart        = candidate.timingStart;
-  prepareTimingValid = candidate.prepareTimingValid;
-  ReleaseSRWLockShared(&sc->m_candidateLock);
-
-  const uint64_t publishStart = fbRes->GetCopyStart();
-  uint64_t       gpuCopyStart     = 0;
-  uint64_t       gpuCopyEnd       = 0;
-  uint64_t       indirectCopyTime = 0;
-  if (sc->m_dx12Device->IsIndirectCopy())
-  {
-    // GPU timestamps end at the readback copy. Track the following CPU copy
-    // separately for frame metrics; benchmark wall time includes it directly.
-    const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
-    sc->m_devContext->WriteFrameBuffer(
-      fbRes->GetFrameIndex(), fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
-    indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
-  }
-
-  // Queue waits execute before the start timestamp. The end timestamp follows
-  // the last copy command, separating GPU work from readiness dispatch.
-  const bool gpuTimingValid =
-    slot->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
-
-  const uint64_t copyReady = CFrameScheduler::Nanotime();
-
-  const uint64_t postProcessStart = fbRes->GetPostProcessStart();
-  uint64_t postProcessTime = prepareCopyStart - postProcessStart;
-  uint64_t prepareCopyTime = prepareReady - prepareCopyStart;
-  if (prepareTimingValid && prepareGPUStart >= postProcessStart &&
-      prepareGPUEnd >= prepareGPUStart && prepareGPUEnd <= prepareReady)
-  {
-    postProcessTime = prepareGPUStart - postProcessStart;
-    prepareCopyTime = prepareGPUEnd - prepareGPUStart;
-  }
-
-  uint64_t publishCopyTime = copyReady - publishStart;
-  if (gpuTimingValid && gpuCopyStart >= publishStart &&
-      gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= copyReady)
-    publishCopyTime = gpuCopyEnd - gpuCopyStart + indirectCopyTime;
-
-  const uint64_t copyTime = prepareCopyTime + publishCopyTime;
-
-  // Make the framebuffer readable before phase bookkeeping. If the scheduler
-  // lock is busy, the frame is still delivered and only this phase sample is
-  // discarded.
-  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
-  const uint64_t publishedAt = CFrameScheduler::Nanotime();
-  const uint64_t prepareElapsed     = prepareReady >= postProcessStart ?
-    prepareReady - postProcessStart : 0;
-  const uint64_t prepareMeasured    = postProcessTime + prepareCopyTime;
-  const uint64_t prepareReadyTime   = prepareElapsed > prepareMeasured ?
-    prepareElapsed - prepareMeasured : 0;
-  const uint64_t publishElapsed     = publishedAt >= publishStart ?
-    publishedAt - publishStart : 0;
-  const uint64_t publishReadyTime   = publishElapsed > publishCopyTime ?
-    publishElapsed - publishCopyTime : 0;
-  const uint64_t readyTime          = prepareReadyTime + publishReadyTime;
-  const uint64_t holdTime           = publishStart >= prepareReady ?
-    publishStart - prepareReady : 0;
-
-  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, holdTime,
-    fbRes->GetSchedule(), publishedAt);
-  sc->m_devContext->TryRecordFrameTiming(
-    publishedAt - publishStart);
-
-  // Use matching wall-clock boundaries for both modes. The split excludes the
-  // cadence hold while including the indirect CPU copy only when it occurs.
-  const uint64_t timingToken = fbRes->GetTimingToken();
-  if (timingToken && timingStart && prepareReady >= timingStart &&
-      copyReady >= publishStart)
-  {
-    const uint64_t totalTime =
-      (prepareReady - timingStart) + (copyReady - publishStart);
-    sc->m_postProcessors[candidateIndex].RecordTiming(
-      fbRes->GetTimingEffectIndex(), timingToken,
-      fbRes->IsFullCopy(), totalTime);
-  }
-
-  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
-  sc->ReleaseCandidate(candidateIndex);
-}
-
-
-static bool IsFullDamage(const RECT * dirtyRects, unsigned nbDirtyRects,
-  unsigned width, unsigned height)
-{
-  for (const RECT * rect = dirtyRects;
-       rect < dirtyRects + nbDirtyRects; ++rect)
-    if (rect->left   == 0            &&
-        rect->top    == 0            &&
-        rect->right  == (LONG)width  &&
-        rect->bottom == (LONG)height)
-      return true;
-
-  return false;
-}
-
-static bool DirtyRectContains(const RECT& outer, const RECT& inner)
-{
-  return outer.left   <= inner.left  &&
-         outer.top    <= inner.top   &&
-         outer.right  >= inner.right &&
-         outer.bottom >= inner.bottom;
-}
-
-static bool DirtyRectsTouchOrIntersect(const RECT& a, const RECT& b)
-{
-  return a.left <= b.right  && a.right  >= b.left &&
-         a.top  <= b.bottom && a.bottom >= b.top;
-}
-
-static RECT MergeDirtyRects(const RECT& a, const RECT& b)
-{
-  RECT result;
-  result.left   = min(a.left  , b.left  );
-  result.top    = min(a.top   , b.top   );
-  result.right  = max(a.right , b.right );
-  result.bottom = max(a.bottom, b.bottom);
-  return result;
-}
-
-static uint64_t DirtyRectArea(const RECT& rect)
-{
-  const uint64_t width  = (uint64_t)((int64_t)rect.right  - rect.left);
-  const uint64_t height = (uint64_t)((int64_t)rect.bottom - rect.top );
-  return width * height;
-}
-
-static bool AddCopyDirtyRect(RECT dirtyRects[], unsigned capacity,
-  unsigned * nbDirtyRects, const RECT& dirtyRect)
-{
-  RECT candidate = dirtyRect;
-  for (unsigned i = 0; i < *nbDirtyRects;)
-  {
-    if (DirtyRectContains(dirtyRects[i], candidate))
-      return true;
-
-    const RECT merged = MergeDirtyRects(dirtyRects[i], candidate);
-    // Reduce command and overlap cost without copying more pixels than the
-    // two original rectangles would have copied.
-    if (DirtyRectContains(candidate, dirtyRects[i]) ||
-        (DirtyRectsTouchOrIntersect(dirtyRects[i], candidate) &&
-          DirtyRectArea(merged) <=
-            DirtyRectArea(dirtyRects[i]) + DirtyRectArea(candidate)))
-    {
-      candidate = merged;
-      --(*nbDirtyRects);
-      dirtyRects[i] = dirtyRects[*nbDirtyRects];
-      i = 0;
-      continue;
-    }
-
-    ++i;
-  }
-
-  if (*nbDirtyRects >= capacity)
-    return false;
-
-  dirtyRects[(*nbDirtyRects)++] = candidate;
-  return true;
-}
-
-static bool CopyAreaCoversFrame(const RECT * dirtyRects,
-  unsigned nbDirtyRects, unsigned width, unsigned height)
-{
-  const uint64_t frameArea = (uint64_t)width * height;
-  uint64_t       copyArea  = 0;
-
-  for (const RECT * rect = dirtyRects;
-       rect < dirtyRects + nbDirtyRects; ++rect)
-  {
-    const uint64_t area = DirtyRectArea(*rect);
-    if (area >= frameArea - copyArea)
-      return true;
-    copyArea += area;
-  }
-
-  return false;
-}
-
-static bool ClipDirtyRect(RECT& rect, unsigned width, unsigned height)
-{
-  const LONG maxRight  = (LONG)width;
-  const LONG maxBottom = (LONG)height;
-
-  if (rect.left   < 0        ) rect.left   = 0;
-  if (rect.top    < 0        ) rect.top    = 0;
-  if (rect.right  > maxRight ) rect.right  = maxRight;
-  if (rect.bottom > maxBottom) rect.bottom = maxBottom;
-
-  return rect.left < rect.right && rect.top < rect.bottom;
-}
-
-static void ClipDirtyRects(RECT dirtyRects[], unsigned * nbDirtyRects,
-  unsigned width, unsigned height)
-{
-  unsigned out = 0;
-  for (unsigned i = 0; i < *nbDirtyRects; ++i)
-  {
-    RECT rect = dirtyRects[i];
-    if (ClipDirtyRect(rect, width, height))
-      dirtyRects[out++] = rect;
-  }
-  *nbDirtyRects = out;
-}
-
-static bool BuildCopyDamage(const CPostProcessor& postProcessor,
-  bool destinationNeedsFullCopy,
-  const RECT previousDirtyRects[], unsigned nbPreviousDirtyRects,
-  const RECT currentDirtyRects[], unsigned nbCurrentDirtyRects,
-  unsigned width, unsigned height,
-  RECT copyDirtyRects[], unsigned * nbCopyDirtyRects)
-{
-  *nbCopyDirtyRects = 0;
-  bool fullCopy = destinationNeedsFullCopy ||
-    nbCurrentDirtyRects == 0 || nbPreviousDirtyRects == 0;
-
-  if (fullCopy)
-    return true;
-
-  for (const RECT * rect = previousDirtyRects;
-       rect < previousDirtyRects + nbPreviousDirtyRects && !fullCopy;
-       ++rect)
-  {
-    RECT clipped = *rect;
-    if (ClipDirtyRect(clipped, width, height) &&
-        !AddCopyDirtyRect(copyDirtyRects, LG_MAX_DIRTY_RECTS * 2,
-          nbCopyDirtyRects, clipped))
-      fullCopy = true;
-  }
-
-  for (const RECT * rect = currentDirtyRects;
-       rect < currentDirtyRects + nbCurrentDirtyRects && !fullCopy;
-       ++rect)
-    if (!AddCopyDirtyRect(copyDirtyRects, LG_MAX_DIRTY_RECTS * 2,
-        nbCopyDirtyRects, *rect))
-      fullCopy = true;
-
-  if (!fullCopy)
-    fullCopy = IsFullDamage(copyDirtyRects, *nbCopyDirtyRects,
-        width, height) ||
-      CopyAreaCoversFrame(copyDirtyRects, *nbCopyDirtyRects,
-        width, height);
-
-  if (!fullCopy)
-    fullCopy = postProcessor.ShouldCopyFully(
-      copyDirtyRects, *nbCopyDirtyRects);
-
-  return fullCopy;
-}
-
-static FrameType GetFrameType(DXGI_FORMAT format)
-{
-  switch (format)
-  {
-    case DXGI_FORMAT_B8G8R8A8_UNORM    : return FRAME_TYPE_BGRA;
-    case DXGI_FORMAT_R8G8B8A8_UNORM    : return FRAME_TYPE_RGBA;
-    case DXGI_FORMAT_R10G10B10A2_UNORM : return FRAME_TYPE_RGBA10;
-    case DXGI_FORMAT_R16G16B16A16_FLOAT: return FRAME_TYPE_RGBA16F;
-    default                            : return FRAME_TYPE_INVALID;
-  }
-}
-
-static void AccumulatePendingDamage(
-  RECT pendingDirtyRects[], unsigned * nbPendingDirtyRects,
-  bool * hasPendingDamage, const RECT dirtyRects[], unsigned nbDirtyRects)
-{
-  if (nbDirtyRects > LG_MAX_DIRTY_RECTS)
-    nbDirtyRects = 0;
-
-  if (!*hasPendingDamage)
-  {
-    *hasPendingDamage    = true;
-    *nbPendingDirtyRects = nbDirtyRects;
-    if (nbDirtyRects)
-      memcpy(pendingDirtyRects, dirtyRects,
-        nbDirtyRects * sizeof(*pendingDirtyRects));
-    return;
-  }
-
-  // Zero dirty rectangles represents full-frame damage. Once an accumulated
-  // set is full, no later rectangles can narrow that same set again.
-  if (*nbPendingDirtyRects == 0 || nbDirtyRects == 0 ||
-      *nbPendingDirtyRects + nbDirtyRects > LG_MAX_DIRTY_RECTS)
-  {
-    *nbPendingDirtyRects = 0;
-    return;
-  }
-
-  memcpy(pendingDirtyRects + *nbPendingDirtyRects, dirtyRects,
-    nbDirtyRects * sizeof(*pendingDirtyRects));
-  *nbPendingDirtyRects += nbDirtyRects;
-}
-
-void CSwapChainProcessor::SetFullPendingDamage()
-{
-  AcquireSRWLockExclusive(&m_damageLock);
-  m_hasPendingDamage    = true;
-  m_nbPendingDirtyRects = 0;
-  for (CandidateDamageTail& tail : m_candidateDamageTail)
-    if (tail.active)
-    {
-      tail.hasDamage    = true;
-      tail.nbDirtyRects = 0;
-    }
-  ReleaseSRWLockExclusive(&m_damageLock);
-}
-
-void CSwapChainProcessor::AccumulateFrameDamage(
-  const RECT * dirtyRects, unsigned nbDirtyRects)
-{
-  AcquireSRWLockExclusive(&m_damageLock);
-  AccumulatePendingDamage(
-    m_pendingDirtyRects, &m_nbPendingDirtyRects, &m_hasPendingDamage,
-    dirtyRects, nbDirtyRects);
-  for (CandidateDamageTail& tail : m_candidateDamageTail)
-    if (tail.active)
-      AccumulatePendingDamage(
-        tail.dirtyRects, &tail.nbDirtyRects, &tail.hasDamage,
-        dirtyRects, nbDirtyRects);
-  ReleaseSRWLockExclusive(&m_damageLock);
-}
-
-bool CSwapChainProcessor::HasPendingDamage()
-{
-  AcquireSRWLockShared(&m_damageLock);
-  const bool result = m_hasPendingDamage;
-  ReleaseSRWLockShared(&m_damageLock);
-  return result;
-}
-
-bool CSwapChainProcessor::TakePendingDamage(
-  RECT dirtyRects[], unsigned * nbDirtyRects)
-{
-  AcquireSRWLockExclusive(&m_damageLock);
-  const bool hasDamage = m_hasPendingDamage;
-  *nbDirtyRects = hasDamage ? m_nbPendingDirtyRects : 0;
-  if (*nbDirtyRects)
-    memcpy(dirtyRects, m_pendingDirtyRects,
-      *nbDirtyRects * sizeof(*dirtyRects));
-  m_hasPendingDamage    = false;
-  m_nbPendingDirtyRects = 0;
-  ReleaseSRWLockExclusive(&m_damageLock);
-  return hasDamage;
-}
-
-void CSwapChainProcessor::RestorePendingDamage(
-  const RECT dirtyRects[], unsigned nbDirtyRects, bool hasDamage)
-{
-  if (!hasDamage)
-    return;
-
-  AcquireSRWLockExclusive(&m_damageLock);
-  AccumulatePendingDamage(
-    m_pendingDirtyRects, &m_nbPendingDirtyRects, &m_hasPendingDamage,
-    dirtyRects, nbDirtyRects);
-  ReleaseSRWLockExclusive(&m_damageLock);
-}
-
-void CSwapChainProcessor::CommitFrameDamage(
-  const RECT dirtyRects[], unsigned nbDirtyRects)
-{
-  AcquireSRWLockExclusive(&m_damageLock);
-  m_nbDirtyRects = nbDirtyRects;
-  if (nbDirtyRects)
-    memcpy(m_dirtyRects, dirtyRects,
-      nbDirtyRects * sizeof(*m_dirtyRects));
-  ReleaseSRWLockExclusive(&m_damageLock);
-}
-
-int CSwapChainProcessor::AcquireCandidate(
-  bool exclusiveSample, bool allowSupersede)
-{
-  int      selected   = -1;
-  uint64_t oldest     = UINT64_MAX;
-  bool     superseded = false;
-  bool     idle       = true;
-  bool     publishing = false;
-
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-  {
-    if (m_candidates[i].state != CANDIDATE_FREE)
-    {
-      idle = false;
-      if (m_candidates[i].state == CANDIDATE_PUBLISHING)
-        publishing = true;
-    }
-    else if (selected < 0)
-      selected = static_cast<int>(i);
-  }
-
-  // Effect timing samples must not queue behind work which can later be
-  // superseded, otherwise that discarded work contaminates the sample.
-  if (exclusiveSample && !idle)
-    selected = -1;
-
-  unsigned readyCount = 0;
-  for (const FrameCandidate& candidate : m_candidates)
-    if (candidate.state == CANDIDATE_READY)
-      ++readyCount;
-
-  // Preserve one completed fallback unless another candidate is already
-  // publishing. In that case its peer must remain available for new source
-  // frames instead of being frozen for the duration of the transport copy.
-  if (allowSupersede && !exclusiveSample && selected < 0 &&
-      readyCount > (publishing ? 0U : 1U))
-    for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-      if (m_candidates[i].state == CANDIDATE_READY &&
-          m_candidates[i].sequence < oldest)
-      {
-        selected = static_cast<int>(i);
-        oldest   = m_candidates[i].sequence;
-      }
-
-  if (selected >= 0)
-  {
-    FrameCandidate& candidate =
-      m_candidates[static_cast<unsigned>(selected)];
-    superseded         = candidate.state == CANDIDATE_READY;
-    candidate.state    = CANDIDATE_PREPARING;
-    candidate.sequence = ++m_candidateSequence;
-  }
-  ReleaseSRWLockExclusive(&m_candidateLock);
-
-  if (superseded)
-    m_devContext->FrameSuperseded();
-  return selected;
-}
-
-void CSwapChainProcessor::ReleaseCandidate(unsigned candidateIndex)
-{
-  if (candidateIndex >= ARRAYSIZE(m_candidates))
-    return;
-
-  AcquireSRWLockExclusive(&m_candidateLock);
-  m_candidates[candidateIndex].state = CANDIDATE_FREE;
-  ReleaseSRWLockExclusive(&m_candidateLock);
-  SignalCandidateState();
-}
-
-static bool ResourceDescMatches(
-  const D3D12_RESOURCE_DESC& left, const D3D12_RESOURCE_DESC& right)
-{
-  // Alignment is allocation metadata. GetDesc may report the resolved value
-  // when the creation descriptor requested automatic alignment.
-  return
-    left.Dimension          == right.Dimension          &&
-    left.Width              == right.Width              &&
-    left.Height             == right.Height             &&
-    left.DepthOrArraySize   == right.DepthOrArraySize   &&
-    left.MipLevels          == right.MipLevels          &&
-    left.Format             == right.Format             &&
-    left.SampleDesc.Count   == right.SampleDesc.Count   &&
-    left.SampleDesc.Quality == right.SampleDesc.Quality &&
-    left.Layout             == right.Layout             &&
-    left.Flags              == right.Flags;
-}
-
-bool CSwapChainProcessor::EnsureCandidateResource(
-  unsigned candidateIndex, size_t frameSize)
-{
-  FrameCandidate& candidate = m_candidates[candidateIndex];
-
-  // Keep the transport layout in local GPU memory so publication does not
-  // combine texture detiling with the IVSHMEM or readback transfer.
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Width              = frameSize;
-  desc.Height             = 1;
-  desc.DepthOrArraySize   = 1;
-  desc.MipLevels          = 1;
-  desc.Format             = DXGI_FORMAT_UNKNOWN;
-  desc.SampleDesc.Count   = 1;
-  desc.SampleDesc.Quality = 0;
-  desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
-
-  if (candidate.resource &&
-      ResourceDescMatches(candidate.resource->GetDesc(), desc))
-    return true;
-
-  candidate.resource.Reset();
-
-  D3D12_HEAP_PROPERTIES heapProps = {};
-  heapProps.Type                 = D3D12_HEAP_TYPE_DEFAULT;
-  heapProps.CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-  heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-  heapProps.CreationNodeMask     = 1;
-  heapProps.VisibleNodeMask      = 1;
-
-  const HRESULT hr = m_dx12Device->GetDevice()->CreateCommittedResource(
-    &heapProps, D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_COMMON,
-    nullptr, IID_PPV_ARGS(&candidate.resource));
-  if (FAILED(hr))
-  {
-    DEBUG_ERROR_HR(hr, "Failed to create retained frame candidate");
-    return false;
-  }
-
-  static const WCHAR * names[] =
-  {
-    L"Frame Candidate 0",
-    L"Frame Candidate 1",
-  };
-  candidate.resource->SetName(names[candidateIndex]);
-  return true;
-}
-
-void CSwapChainProcessor::ResetCandidates()
-{
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (FrameCandidate& candidate : m_candidates)
-    candidate = {};
-  ReleaseSRWLockExclusive(&m_candidateLock);
-
-  AcquireSRWLockExclusive(&m_damageLock);
-  for (CandidateDamageTail& tail : m_candidateDamageTail)
-    tail = {};
-  ReleaseSRWLockExclusive(&m_damageLock);
-  SignalCandidateState();
-}
-
-void CSwapChainProcessor::SignalCandidateState()
-{
-  SetEvent(m_candidateEvent.Get());
-  SetEvent(m_candidateAvailableEvent.Get());
-}
-
-bool CSwapChainProcessor::ExecuteCandidateCopy(
-  CD3D12CommandSlot * copySlot)
-{
-  HANDLE waitHandles[] =
-  {
-    m_terminateEvent.Get(),
-    m_copySubmitEvent.Get(),
-  };
-
-  for (;;)
-  {
-    AcquireSRWLockExclusive(&m_copySubmitLock);
-    if (!m_publishPending)
-    {
-      const bool result = copySlot->Execute();
-      ReleaseSRWLockExclusive(&m_copySubmitLock);
-      return result;
-    }
-    ReleaseSRWLockExclusive(&m_copySubmitLock);
-
-    const DWORD result = WaitForMultipleObjects(
-      ARRAYSIZE(waitHandles), waitHandles, FALSE, INFINITE);
-    if (result == WAIT_OBJECT_0 + 1)
-      continue;
-
-    copySlot->Cancel();
-    if (result != WAIT_OBJECT_0)
-      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
-        "Failed while waiting to submit a frame candidate");
-    return false;
-  }
-}
-
-bool CSwapChainProcessor::PublishNewestCandidate(
-  const CFrameScheduler::Schedule& schedule, bool periodic,
-  uint64_t publishStart)
-{
-  // Once a deadline is due, prevent newly recorded preparation work from
-  // being submitted ahead of the transport copy. The short submission gate
-  // allows a preparation which is already submitting to finish first.
-  CPublishPending publishPending(
-    &m_copySubmitLock, &m_publishPending, m_copySubmitEvent.Get());
-  CSRWSharedLock pipelineLock(&m_pipelineLock);
-
-  int      selectedCandidate = -1;
-  uint64_t newestSequence    = 0;
-
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-    if (m_candidates[i].state == CANDIDATE_READY &&
-        (selectedCandidate < 0 ||
-          m_candidates[i].sequence > newestSequence))
-    {
-      selectedCandidate = static_cast<int>(i);
-      newestSequence    = m_candidates[i].sequence;
-    }
-
-  if (selectedCandidate >= 0)
-    m_candidates[static_cast<unsigned>(selectedCandidate)].state =
-      CANDIDATE_PUBLISHING;
-  ReleaseSRWLockExclusive(&m_candidateLock);
-
-  if (selectedCandidate < 0)
-    return false;
-  const unsigned candidateIndex =
-    static_cast<unsigned>(selectedCandidate);
-
-  const auto restoreCandidates = [this, candidateIndex]()
-  {
-    AcquireSRWLockExclusive(&m_candidateLock);
-    if (m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING)
-      m_candidates[candidateIndex].state = CANDIDATE_READY;
-    ReleaseSRWLockExclusive(&m_candidateLock);
-    SignalCandidateState();
-  };
-
-  AcquireSRWLockShared(&m_candidateLock);
-  const bool candidateValid =
-    m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING &&
-    m_candidates[candidateIndex].resource.Get();
-  ReleaseSRWLockShared(&m_candidateLock);
-  if (!candidateValid)
-  {
-    restoreCandidates();
-    return false;
-  }
-
-  FrameCandidate& candidate        = m_candidates[candidateIndex];
-  CPostProcessor& postProcessor    = m_postProcessors[candidateIndex];
-  const uint64_t candidateSequence = candidate.sequence;
-
-  auto buffer = m_devContext->PrepareFrameBuffer(
-    candidate.pitch,
-    candidate.srcFormat,
-    candidate.dstFormat,
-    candidate.dirtyRects,
-    candidate.nbDirtyRects,
-    schedule);
-  if (!buffer.mem)
-  {
-    restoreCandidates();
-    return false;
-  }
-
-  CFrameBufferResource * fbRes =
-    m_fbPool.Get(buffer, candidate.frameSize);
-  if (!fbRes)
-  {
-    m_devContext->AbortFrameBuffer(buffer.frameIndex);
-    restoreCandidates();
-    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  CD3D12CommandSlot * copySlot =
-    m_dx12Device->GetCopySlot(candidateIndex);
-  if (!copySlot)
-  {
-    m_devContext->AbortFrameBuffer(buffer.frameIndex);
-    restoreCandidates();
-    DEBUG_ERROR("Failed to get a copy CommandSlot for publication");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  RECT     previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbPreviousDirtyRects                   = 0;
-  AcquireSRWLockShared(&m_damageLock);
-  nbPreviousDirtyRects = m_nbDirtyRects;
-  if (nbPreviousDirtyRects)
-    memcpy(previousDirtyRects, m_dirtyRects,
-      nbPreviousDirtyRects * sizeof(*previousDirtyRects));
-  ReleaseSRWLockShared(&m_damageLock);
-
-  RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
-  unsigned nbCopyDirtyRects                       = 0;
-  const bool fullCopy = BuildCopyDamage(postProcessor, buffer.fullCopy,
-    previousDirtyRects, nbPreviousDirtyRects,
-    candidate.dirtyRects, candidate.nbDirtyRects,
-    candidate.dstFormat.width, candidate.dstFormat.height,
-    copyDirtyRects, &nbCopyDirtyRects);
-
-  fbRes->SetTiming(
-    candidate.captureTime, candidate.postProcessStart, publishStart);
-  fbRes->SetCandidateIndex(candidateIndex);
-  fbRes->SetPostProcessSample(
-    candidate.timingEffectIndex, candidate.timingToken, fullCopy);
-  copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
-
-  copySlot->BeginTiming();
-  postProcessor.CopyFromCandidate(
-    copySlot->GetGfxList(), fbRes->Get().Get(), candidate.resource.Get(),
-    copyDirtyRects, nbCopyDirtyRects, fullCopy);
-  copySlot->EndTiming();
-
-  // Reserve the LGMP delivery or retained-frame slot before submitting the
-  // copy. This makes failure recoverable without racing a very fast GPU
-  // completion callback.
-  bool deliveredToOwner;
-  if (!m_devContext->PublishFrameBuffer(
-        buffer.frameIndex, schedule, deliveredToOwner))
-  {
-    copySlot->Cancel();
-    m_devContext->AbortFrameBuffer(buffer.frameIndex);
-    restoreCandidates();
-    return false;
-  }
-  CFrameScheduler::Schedule frameSchedule = schedule;
-  // Phase accounting must never hold up D3D submission. Keep the immutable
-  // delivery identity and discard only this feedback sample on contention.
-  if (!deliveredToOwner ||
-      !m_devContext->TryFrameSubmitted(buffer.frameIndex, schedule))
-    frameSchedule.phaseEligible = false;
-  fbRes->SetSchedule(frameSchedule);
-
-  // Retire the candidate damage before submission. The completion callback
-  // may run before Execute returns and make this candidate reusable.
-  AcquireSRWLockExclusive(&m_damageLock);
-  if (candidate.nbDirtyRects)
-    memcpy(m_dirtyRects, candidate.dirtyRects,
-      candidate.nbDirtyRects * sizeof(*m_dirtyRects));
-  m_nbDirtyRects = candidate.nbDirtyRects;
-  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
-  if (tail.active && tail.ownerSequence == candidateSequence)
-  {
-    m_hasPendingDamage    = tail.hasDamage;
-    m_nbPendingDirtyRects = tail.nbDirtyRects;
-    if (tail.hasDamage && tail.nbDirtyRects)
-      memcpy(m_pendingDirtyRects, tail.dirtyRects,
-        tail.nbDirtyRects * sizeof(*m_pendingDirtyRects));
-    tail.ownerSequence = 0;
-    tail.active        = false;
-  }
-  ReleaseSRWLockExclusive(&m_damageLock);
-
-  const bool submitted = copySlot->Execute();
-  publishPending.Clear();
-  if (!submitted)
-  {
-    // The logical damage state was advanced before submission. Force a full
-    // repair whether submission failed or its callback reported the failure.
-    SetFullPendingDamage();
-    AcquireSRWLockShared(&m_candidateLock);
-    const bool callbackPending =
-      candidate.state == CANDIDATE_PUBLISHING;
-    ReleaseSRWLockShared(&m_candidateLock);
-    if (callbackPending && !copySlot->HasSubmittedWork())
-    {
-      m_devContext->FailFrameBuffer(buffer.frameIndex);
-      ReleaseCandidate(candidateIndex);
-    }
-    m_devContext->ForceFrame();
-
-    SignalCandidateState();
-    return false;
-  }
-
-  m_devContext->CommitFrameBuffer(
-    buffer.frameIndex, schedule, periodic, deliveredToOwner);
-
-  unsigned superseded = 0;
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (FrameCandidate& ready : m_candidates)
-    if (ready.state == CANDIDATE_READY &&
-        ready.sequence < candidateSequence)
-    {
-      ready.state = CANDIDATE_FREE;
-      ++superseded;
-    }
-  ReleaseSRWLockExclusive(&m_candidateLock);
-  for (unsigned i = 0; i < superseded; ++i)
-    m_devContext->FrameSuperseded();
-  SignalCandidateState();
-  return true;
-}
-
 #ifdef HAS_IDDCX_110
 void CSwapChainProcessor::UpdateHDRMetadata(const IDDCX_METADATA2& metadata)
 {
@@ -1737,271 +738,6 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
 #endif
 }
 
-bool CSwapChainProcessor::PublishSoftwareFrame(CInteropResource * srcRes,
-  const D12FrameFormat& srcFormat, uint64_t captureTime,
-  uint64_t postProcessStart, bool noImageUpdate)
-{
-  CSRWSharedLock        pipelineLock(&m_pipelineLock);
-  CPostProcessor&       postProcessor = m_postProcessors[0];
-  const D12FrameFormat& dstFormat     = postProcessor.GetOutputFormat();
-
-  D3D12_RESOURCE_DESC         textureDesc    = {};
-  const D3D12_RESOURCE_DESC * textureDescPtr = nullptr;
-  unsigned                    pitch          = postProcessor.GetOutputPitch();
-  size_t                      frameSize      = postProcessor.GetOutputSize();
-  if (m_directSoftwareTexture &&
-      dstFormat.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
-      dstFormat.desc.Width && dstFormat.desc.Height &&
-      dstFormat.desc.Format != DXGI_FORMAT_UNKNOWN)
-  {
-    textureDesc                    = dstFormat.desc;
-    textureDesc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
-    textureDesc.Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    textureDesc.DepthOrArraySize   = 1;
-    textureDesc.MipLevels          = 1;
-    textureDesc.SampleDesc.Count   = 1;
-    textureDesc.SampleDesc.Quality = 0;
-    textureDesc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-    textureDesc.Flags              =
-      D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
-
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout = {};
-    m_dx12Device->GetDevice()->GetCopyableFootprints(
-      &textureDesc, 0, 1, 0, &layout, nullptr, nullptr, nullptr);
-    const unsigned texturePitch = layout.Footprint.RowPitch;
-    if (texturePitch && textureDesc.Height <=
-        m_devContext->GetMaxFrameSize() / texturePitch)
-    {
-      pitch           = texturePitch;
-      frameSize       = (size_t)pitch * textureDesc.Height;
-      textureDescPtr  = &textureDesc;
-    }
-    else
-    {
-      m_directSoftwareTexture = false;
-      DEBUG_WARN("IVSHMEM texture layout does not fit the framebuffer");
-    }
-  }
-  else if (m_directSoftwareTexture)
-  {
-    m_directSoftwareTexture = false;
-    DEBUG_WARN("Post-processor output cannot use an IVSHMEM texture");
-  }
-
-  if (!pitch || !frameSize || frameSize > m_devContext->GetMaxFrameSize())
-  {
-    DEBUG_ERROR("Software frame does not fit in shared memory");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  // Static-desktop re-encodes carry no new image. The retained frame can be
-  // republished without spending GPU or memory bandwidth on another copy. A
-  // pending full-damage request still passes through so startup, format
-  // changes, and failed copies can establish a valid replacement.
-  if (noImageUpdate && !HasPendingDamage())
-    return true;
-
-  for (;;)
-  {
-    CFrameScheduler::Schedule commitSchedule    = {};
-    CFrameScheduler::Schedule deliverySchedule  = {};
-    CIndirectDeviceContext::PreparedFrameBuffer buffer = {};
-    CD3D12CommandSlot * copySlot                 = nullptr;
-    RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned nbDirtyRects                          = 0;
-    bool     hasDamage                             = false;
-
-    uint64_t ignoredTarget    = 0;
-    bool     ignoredPeriodic  = false;
-    bool     ignoredRepublish = false;
-    m_devContext->GetPublishTarget(CFrameScheduler::Nanotime(),
-      ignoredTarget, commitSchedule, ignoredPeriodic, ignoredRepublish);
-    deliverySchedule = commitSchedule;
-    deliverySchedule.deliveryDeadlineSerial = 0;
-    deliverySchedule.phaseEligible          = false;
-
-    m_devContext->ProcessFrameQueue();
-    // Ordinary frames never displace the retained fallback. A must-not-drop
-    // static replacement may reuse it once every transport reference is gone.
-    if (!m_devContext->FrameBufferAvailable(
-          deliverySchedule, noImageUpdate))
-    {
-      if (!noImageUpdate)
-      {
-        m_devContext->FrameSuperseded();
-        return true;
-      }
-
-      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
-        return true;
-      continue;
-    }
-
-    copySlot = m_dx12Device->GetCopySlot();
-    if (!copySlot)
-    {
-      if (!noImageUpdate)
-      {
-        m_devContext->FrameSuperseded();
-        return true;
-      }
-
-      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
-        return true;
-      continue;
-    }
-
-    hasDamage = TakePendingDamage(
-      currentDirtyRects, &nbDirtyRects);
-    ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
-      dstFormat.width, dstFormat.height);
-    buffer = m_devContext->PrepareFrameBuffer(
-      pitch, srcFormat, dstFormat,
-      currentDirtyRects, nbDirtyRects, deliverySchedule,
-      noImageUpdate);
-    if (!buffer.mem)
-    {
-      copySlot->Cancel();
-      RestorePendingDamage(
-        currentDirtyRects, nbDirtyRects, hasDamage);
-      if (!noImageUpdate)
-      {
-        m_devContext->FrameSuperseded();
-        return true;
-      }
-
-      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
-        return true;
-      continue;
-    }
-
-    CFrameBufferResource * fbRes = nullptr;
-    if (textureDescPtr)
-    {
-      fbRes = m_fbPool.Get(buffer, frameSize, textureDescPtr);
-      if (!fbRes)
-      {
-        const HRESULT deviceStatus =
-          m_dx12Device->GetDevice()->GetDeviceRemovedReason();
-        if (FAILED(deviceStatus))
-        {
-          copySlot->Cancel();
-          m_devContext->AbortFrameBuffer(buffer.frameIndex);
-          RestorePendingDamage(
-            currentDirtyRects, nbDirtyRects, hasDamage);
-          DEBUG_ERROR_HR(deviceStatus,
-            "D3D12 device removed while creating an IVSHMEM texture");
-          SetFullPendingDamage();
-          return false;
-        }
-
-        m_directSoftwareTexture = false;
-        textureDescPtr          = nullptr;
-        DEBUG_WARN(
-          "IVSHMEM textures unavailable; using a direct buffer copy");
-      }
-    }
-
-    if (!fbRes)
-      fbRes = m_fbPool.Get(buffer, frameSize);
-    if (!fbRes)
-    {
-      copySlot->Cancel();
-      m_devContext->AbortFrameBuffer(buffer.frameIndex);
-      RestorePendingDamage(
-        currentDirtyRects, nbDirtyRects, hasDamage);
-      DEBUG_ERROR("Failed to get a framebuffer for software capture");
-      SetFullPendingDamage();
-      return false;
-    }
-
-    if (!srcRes->Signal() || !srcRes->Sync(*copySlot))
-    {
-      copySlot->Cancel();
-      m_devContext->AbortFrameBuffer(buffer.frameIndex);
-      RestorePendingDamage(
-        currentDirtyRects, nbDirtyRects, hasDamage);
-      SetFullPendingDamage();
-      return false;
-    }
-
-    RECT     previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned nbPreviousDirtyRects                   = 0;
-    AcquireSRWLockShared(&m_damageLock);
-    nbPreviousDirtyRects = m_nbDirtyRects;
-    if (nbPreviousDirtyRects)
-      memcpy(previousDirtyRects, m_dirtyRects,
-        nbPreviousDirtyRects * sizeof(*previousDirtyRects));
-    ReleaseSRWLockShared(&m_damageLock);
-
-    RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
-    unsigned nbCopyDirtyRects                       = 0;
-    const bool fullCopy = BuildCopyDamage(
-      postProcessor, buffer.fullCopy,
-      previousDirtyRects, nbPreviousDirtyRects,
-      currentDirtyRects, nbDirtyRects,
-      dstFormat.width, dstFormat.height,
-      copyDirtyRects, &nbCopyDirtyRects);
-
-    const unsigned bytesPerPixel =
-      dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
-    const uint64_t copyStart = CFrameScheduler::Nanotime();
-    fbRes->SetTiming(captureTime, postProcessStart, copyStart);
-    fbRes->SetSchedule(deliverySchedule);
-    fbRes->SetCopyDamage(copyDirtyRects, nbCopyDirtyRects,
-      fullCopy, pitch, bytesPerPixel);
-    fbRes->ResetCompletion();
-    copySlot->SetCompletionCallback(
-      &SoftwareCompletionFunction, this, fbRes);
-    copySlot->BeginTiming();
-    postProcessor.CopyToFrameBuffer(copySlot->GetGfxList(),
-      fbRes->Get().Get(), srcRes->GetRes().Get(),
-      copyDirtyRects, nbCopyDirtyRects, fullCopy);
-    copySlot->EndTiming();
-
-    bool deliveredToOwner;
-    if (!m_devContext->PublishFrameBuffer(
-          buffer.frameIndex, deliverySchedule, deliveredToOwner))
-    {
-      copySlot->Cancel();
-      m_devContext->AbortFrameBuffer(buffer.frameIndex);
-      RestorePendingDamage(
-        currentDirtyRects, nbDirtyRects, hasDamage);
-      if (!noImageUpdate)
-      {
-        m_devContext->FrameSuperseded();
-        return true;
-      }
-
-      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
-        return true;
-      continue;
-    }
-
-    CommitFrameDamage(currentDirtyRects, nbDirtyRects);
-    if (!copySlot->Execute())
-    {
-      const bool submittedWork     = copySlot->HasSubmittedWork();
-      const bool completionHandled = fbRes->CompletionHandled();
-      if (!submittedWork && !completionHandled)
-        m_devContext->FailFrameBuffer(buffer.frameIndex);
-      RestorePendingDamage(
-        currentDirtyRects, nbDirtyRects, hasDamage);
-      if (!submittedWork && !completionHandled)
-      {
-        SetFullPendingDamage();
-        m_devContext->ForceFrame();
-      }
-      return false;
-    }
-
-    m_devContext->CommitFrameBuffer(
-      buffer.frameIndex, commitSchedule, false, deliveredToOwner);
-    return true;
-  }
-}
-
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
   unsigned dirtyRectCount, unsigned moveRegionCount,
   DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
@@ -2057,7 +793,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   {
     DEBUG_ERROR_HR(hr,
       "Failed to obtain the ID3D11Texture2D from the acquiredBuffer");
-    SetFullPendingDamage();
+    m_frameProcessor->SetFullDamage();
     return false;
   }
 
@@ -2065,7 +801,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!srcRes)
   {
     DEBUG_ERROR("Failed to get a CInteropResource from the pool");
-    SetFullPendingDamage();
+    m_frameProcessor->SetFullDamage();
     return false;
   }
 
@@ -2078,7 +814,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (!noImageUpdate)
   {
     m_devContext->ObserveFrame(postProcessStart);
-    AccumulateFrameDamage(
+    m_frameProcessor->AccumulateDamage(
       srcRes->GetDirtyRects(), srcRes->GetDirtyRectCount());
   }
 
@@ -2086,7 +822,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.desc           = srcDesc;
   srcFormat.width          = (unsigned)srcDesc.Width;
   srcFormat.height         = srcDesc.Height;
-  srcFormat.format         = GetFrameType(srcDesc.Format);
+  srcFormat.format         = CFrameProcessorUtil::GetFrameType(srcDesc.Format);
   srcFormat.sdrWhiteLevel  = sdrWhiteLevel;
   srcFormat.colorTransform = m_devContext->GetColorTransform();
 
@@ -2173,7 +909,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     m_postProcessors[0].Update(srcFormat);
 
     frameMetadataChanged = noImageUpdate &&
-      FrameMetadataChanged(
+      CFrameProcessorUtil::FrameMetadataChanged(
         m_postProcessors[0].GetOutputFormat(), srcFormat);
 
     for (const CPostProcessor& postProcessor : m_postProcessors)
@@ -2183,16 +919,12 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         break;
       }
 
-    // A format change can replace resources referenced by either retained
-    // candidate. Stop publication, drain both queues, then invalidate them.
+    // A format change can replace resources referenced by in-flight work.
+    // Drain both queues before invalidating the selected frame processor.
     if (needsReconfigure)
     {
-      AcquireSRWLockExclusive(&m_damageLock);
-      m_nbDirtyRects = 0;
-      ReleaseSRWLockExclusive(&m_damageLock);
-      SetFullPendingDamage();
       m_dx12Device->WaitForIdle();
-      ResetCandidates();
+      m_frameProcessor->ResetPipeline();
     }
 
     bool configurationStable = false;
@@ -2203,7 +935,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
         bool formatChanged = false;
         if (!m_postProcessors[i].Configure(srcFormat, &formatChanged))
         {
-          SetFullPendingDamage();
+          m_frameProcessor->SetFullDamage();
           return false;
         }
 
@@ -2223,23 +955,18 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     if (!configurationStable)
     {
       DEBUG_ERROR("Post processor configuration did not stabilize");
-      SetFullPendingDamage();
+      m_frameProcessor->SetFullDamage();
       return false;
     }
 
     if (postProcessFormatChanged)
-    {
-      AcquireSRWLockExclusive(&m_damageLock);
-      m_nbDirtyRects = 0;
-      ReleaseSRWLockExclusive(&m_damageLock);
-      SetFullPendingDamage();
-    }
+      m_frameProcessor->Invalidate();
     else if (frameMetadataChanged)
-      SetFullPendingDamage();
+      m_frameProcessor->SetFullDamage();
 
     requiresFullDamage = m_postProcessors[0].RequiresFullDamage();
     if (requiresFullDamage)
-      SetFullPendingDamage();
+      m_frameProcessor->SetFullDamage();
 
     m_postProcessors[0].GetTimingToken(
       &timingEffectIndex, &timingToken);
@@ -2248,215 +975,17 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)
     m_devContext->ForceFrame();
 
-  if (m_dx11Device->IsSoftware())
-    return PublishSoftwareFrame(srcRes, srcFormat,
-      captureTime, postProcessStart, noImageUpdate);
-
-  // Always prepare the requested static-desktop re-encode. An older
-  // publication can still fail after this frame is acquired, so deciding
-  // solely from the current pending-damage state can lose the final update.
-  int selectedCandidate = AcquireCandidate(timingToken != 0, !noImageUpdate);
-  while (selectedCandidate < 0 && noImageUpdate)
+  const FrameSubmission submission =
   {
-    HANDLE waitHandles[] =
-    {
-      m_terminateEvent.Get(),
-      m_candidateAvailableEvent.Get(),
-    };
-    const DWORD waitResult = WaitForMultipleObjects(
-      ARRAYSIZE(waitHandles), waitHandles, FALSE, INFINITE);
-    if (waitResult == WAIT_OBJECT_0)
-      return true;
-    if (waitResult != WAIT_OBJECT_0 + 1)
-    {
-      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
-        "Failed while waiting for a frame candidate");
-      return false;
-    }
-
-    selectedCandidate = AcquireCandidate(timingToken != 0, false);
-  }
-  if (selectedCandidate < 0)
-  {
-    m_devContext->FrameSuperseded();
-    return true;
-  }
-  const unsigned candidateIndex =
-    static_cast<unsigned>(selectedCandidate);
-
-  FrameCandidate& candidate = m_candidates[candidateIndex];
-
-  CSRWSharedLock pipelineLock(&m_pipelineLock);
-  CPostProcessor& postProcessor = m_postProcessors[candidateIndex];
-  const D12FrameFormat& dstFormat = postProcessor.GetOutputFormat();
-
-  RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbDirtyRects                          = 0;
-  AcquireSRWLockExclusive(&m_damageLock);
-  if (m_hasPendingDamage)
-  {
-    nbDirtyRects = m_nbPendingDirtyRects;
-    if (nbDirtyRects)
-      memcpy(currentDirtyRects, m_pendingDirtyRects,
-        nbDirtyRects * sizeof(*currentDirtyRects));
-  }
-  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
-  tail.ownerSequence = candidate.sequence;
-  tail.nbDirtyRects  = 0;
-  tail.hasDamage     = false;
-  tail.active        = true;
-  ReleaseSRWLockExclusive(&m_damageLock);
-
-  CD3D12CommandSlot * copySlot =
-    m_dx12Device->GetCopySlot(candidateIndex);
-  if (!copySlot)
-  {
-    ReleaseCandidate(candidateIndex);
-    DEBUG_ERROR("Failed to get a copy CommandSlot");
-    SetFullPendingDamage();
-    return false;
-  }
-  // Candidate and copy-slot acquisition are common to both benchmark modes.
-  const uint64_t timingStart = timingToken ?
-    CFrameScheduler::Nanotime() : 0;
-
-  ComPtr<ID3D12Resource> copySrcResource = srcRes->GetRes();
-  CD3D12CommandSlot    * computeSlot     = nullptr;
-  if (postProcessor.HasActiveEffects())
-  {
-    computeSlot = m_dx12Device->GetComputeSlot(candidateIndex);
-    if (!computeSlot)
-    {
-      copySlot->Cancel();
-      ReleaseCandidate(candidateIndex);
-      DEBUG_ERROR("Failed to get a compute CommandSlot");
-      SetFullPendingDamage();
-      return false;
-    }
-  }
-
-  /**
-   * Even though we have not performed any copy/draw operations we still need
-   * to use a fence. Because we share this texture with DirectX12 it is able to
-   * read from it before IddCx has finished updating it.
-   */
-  if (!srcRes->Signal())
-  {
-    if (computeSlot)
-      computeSlot->Cancel();
-    copySlot->Cancel();
-    ReleaseCandidate(candidateIndex);
-    SetFullPendingDamage();
-    return false;
-  }
-
-  if (computeSlot)
-  {
-    if (!srcRes->Sync(*computeSlot))
-    {
-      computeSlot->Cancel();
-      copySlot->Cancel();
-      ReleaseCandidate(candidateIndex);
-      SetFullPendingDamage();
-      return false;
-    }
-
-    copySrcResource = postProcessor.Run(
-      computeSlot->GetGfxList(), copySrcResource,
-      currentDirtyRects, &nbDirtyRects);
-    if (!copySrcResource)
-    {
-      computeSlot->Cancel();
-      copySlot->Cancel();
-      ReleaseCandidate(candidateIndex);
-      DEBUG_ERROR("Post processor returned no output resource");
-      SetFullPendingDamage();
-      return false;
-    }
-
-    if (!computeSlot->Execute())
-    {
-      copySlot->Cancel();
-      m_dx12Device->WaitForIdle();
-      ReleaseCandidate(candidateIndex);
-      SetFullPendingDamage();
-      return false;
-    }
-
-    if (!copySlot->WaitFor(*computeSlot))
-    {
-      copySlot->Cancel();
-      m_dx12Device->WaitForIdle();
-      ReleaseCandidate(candidateIndex);
-      DEBUG_ERROR("Failed to queue compute synchronization");
-      SetFullPendingDamage();
-      return false;
-    }
-  }
-  else if (!srcRes->Sync(*copySlot))
-  {
-    copySlot->Cancel();
-    ReleaseCandidate(candidateIndex);
-    DEBUG_ERROR("Failed to queue source synchronization");
-    SetFullPendingDamage();
-    return false;
-  }
-
-  ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
-    dstFormat.width, dstFormat.height);
-
-  const size_t frameSize = postProcessor.GetOutputSize();
-  if (!EnsureCandidateResource(candidateIndex, frameSize))
-  {
-    copySlot->Cancel();
-    if (computeSlot)
-      m_dx12Device->WaitForIdle();
-    ReleaseCandidate(candidateIndex);
-    SetFullPendingDamage();
-    return false;
-  }
-
-  candidate.srcFormat          = srcFormat;
-  candidate.dstFormat          = dstFormat;
-  candidate.nbDirtyRects       = nbDirtyRects;
-  candidate.pitch              = postProcessor.GetOutputPitch();
-  candidate.frameSize          = frameSize;
-  candidate.captureTime        = captureTime;
-  candidate.postProcessStart   = postProcessStart;
-  candidate.prepareCopyStart   = CFrameScheduler::Nanotime();
-  candidate.prepareReady       = 0;
-  candidate.prepareGPUStart    = 0;
-  candidate.prepareGPUEnd      = 0;
-  candidate.timingStart        = timingStart;
-  candidate.prepareTimingValid = false;
-  if (nbDirtyRects)
-    memcpy(candidate.dirtyRects, currentDirtyRects,
-      nbDirtyRects * sizeof(*candidate.dirtyRects));
-  candidate.timingEffectIndex  = timingEffectIndex;
-  candidate.timingToken        = timingToken;
-
-  copySlot->SetCompletionCallback(
-    &CandidateCompletionFunction, this, &candidate);
-  copySlot->BeginTiming();
-  postProcessor.CopyToCandidate(
-    copySlot->GetGfxList(), candidate.resource.Get(),
-    copySrcResource.Get());
-  copySlot->EndTiming();
-
-  if (!ExecuteCandidateCopy(copySlot))
-  {
-    if (!copySlot->HasSubmittedWork())
-    {
-      if (computeSlot)
-        m_dx12Device->WaitForIdle();
-      ReleaseCandidate(candidateIndex);
-    }
-    SetFullPendingDamage();
-    m_devContext->ForceFrame();
-    return false;
-  }
-
-  return true;
+    srcRes,
+    srcFormat,
+    captureTime,
+    postProcessStart,
+    timingEffectIndex,
+    timingToken,
+    noImageUpdate,
+  };
+  return m_frameProcessor->Submit(submission);
 }
 
 DWORD CALLBACK CSwapChainProcessor::_CursorThread(LPVOID arg)

@@ -30,7 +30,8 @@
 #include "CFrameScheduler.h"
 #include "CInteropResource.h"
 
-class CSwapChainProcessor;
+struct CD3D12Device;
+class CIndirectDeviceContext;
 
 using namespace Microsoft::WRL;
 
@@ -69,8 +70,8 @@ class CFrameBufferResource
     void                    * m_map               = nullptr;
 
   public:
-    bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex,
-      uint8_t * base, size_t size,
+    bool Init(CIndirectDeviceContext * device, CD3D12Device * dx12,
+      unsigned frameIndex, uint8_t * base, size_t size,
       const D3D12_RESOURCE_DESC * textureDesc = nullptr);
     void Reset();
 

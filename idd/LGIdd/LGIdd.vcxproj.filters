@@ -82,6 +82,15 @@
     <ClInclude Include="CFrameBufferPool.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="CFrameProcessor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CFrameProcessorUtil.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CHardwareFrameProcessor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="CFrameScheduler.h">
       <Filter>Header Files</Filter>
     </ClInclude>
@@ -95,6 +104,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPostProcessor.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CSoftwareFrameProcessor.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="effect\CColorTransformEffect.h">
@@ -161,6 +173,15 @@
     <ClCompile Include="CFrameBufferPool.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CFrameProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CFrameProcessorUtil.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CHardwareFrameProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="$(SolutionDir)LGCommon/*.cpp" />
     <ClCompile Include="CPipeServer.cpp">
       <Filter>Source Files</Filter>
@@ -170,6 +191,9 @@
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="CPostProcessor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="CSoftwareFrameProcessor.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="effect\CColorTransformEffect.cpp">

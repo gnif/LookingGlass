@@ -24,7 +24,7 @@
 #include "CD3D12Device.h"
 #include "CIndirectDeviceContext.h"
 #include "CInteropResourcePool.h"
-#include "CFrameBufferPool.h"
+#include "CFrameProcessor.h"
 #include "CPostProcessor.h"
 
 #include <Windows.h>
@@ -34,8 +34,6 @@
 #include <memory>
 
 using namespace Microsoft::WRL;
-
-#define STAGING_TEXTURES 3
 
 class CIndirectMonitorContext;
 
@@ -52,89 +50,20 @@ private:
   std::shared_ptr<CD3D12Device>   m_dx12Device;
   HANDLE                          m_newFrameEvent;
 
-  CInteropResourcePool m_resPool;
-  CFrameBufferPool     m_fbPool;
-  CPostProcessor       m_postProcessors[LGMP_Q_FRAME_LEN];
-
-  enum CandidateState
-  {
-    CANDIDATE_FREE,
-    CANDIDATE_PREPARING,
-    CANDIDATE_READY,
-    CANDIDATE_PUBLISHING,
-  };
-
-  struct FrameCandidate
-  {
-    CandidateState         state               = CANDIDATE_FREE;
-    ComPtr<ID3D12Resource> resource;
-    D12FrameFormat         srcFormat           = {};
-    D12FrameFormat         dstFormat           = {};
-    RECT                   dirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned               nbDirtyRects        = 0;
-    unsigned               pitch               = 0;
-    size_t                 frameSize           = 0;
-    uint64_t               sequence            = 0;
-    uint64_t               captureTime         = 0;
-    uint64_t               postProcessStart    = 0;
-    uint64_t               prepareCopyStart    = 0;
-    uint64_t               prepareReady        = 0;
-    uint64_t               prepareGPUStart     = 0;
-    uint64_t               prepareGPUEnd       = 0;
-    uint64_t               timingStart         = 0;
-    unsigned               timingEffectIndex   = 0;
-    uint64_t               timingToken         = 0;
-    bool                   prepareTimingValid  = false;
-  };
-
-  struct CandidateDamageTail
-  {
-    uint64_t ownerSequence = 0;
-    RECT     dirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned nbDirtyRects  = 0;
-    bool     hasDamage     = false;
-    bool     active        = false;
-  };
-
-  // An active tail records only damage received after its candidate snapshot.
-  FrameCandidate      m_candidates[LGMP_Q_FRAME_LEN];
-  CandidateDamageTail m_candidateDamageTail[LGMP_Q_FRAME_LEN];
-  SRWLOCK             m_candidateLock       = SRWLOCK_INIT;
-  SRWLOCK             m_damageLock          = SRWLOCK_INIT;
+  CInteropResourcePool            m_resPool;
+  CPostProcessor                  m_postProcessors[LGMP_Q_FRAME_LEN];
+  std::unique_ptr<CFrameProcessor> m_frameProcessor;
   // Reconfiguration is exclusive while per-candidate recording is shared.
-  SRWLOCK             m_pipelineLock        = SRWLOCK_INIT;
-  // Capture holds this only across submission; the publisher uses it to
-  // close the gate before recording deadline work.
-  SRWLOCK             m_copySubmitLock      = SRWLOCK_INIT;
-  uint64_t            m_candidateSequence     = 0;
-  bool                m_publishPending        = false;
-  bool                m_directSoftwareTexture = false;
+  SRWLOCK                         m_pipelineLock = SRWLOCK_INIT;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
-  Wrappers::Event m_candidateEvent;
-  Wrappers::Event m_candidateAvailableEvent;
-  Wrappers::Event m_copySubmitEvent;
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_publishTimer;
 
   Wrappers::Event m_cursorDataEvent;
   BYTE*           m_shapeBuffer;
   DWORD           m_lastShapeId = 0;
   std::atomic<UINT> m_sdrWhiteLevel { KVMFR_SDR_WHITE_LEVEL_DEFAULT };
-
-  // Logical output-space damage from the previous published frame. The
-  // shared-memory frame buffers alternate, so this must be copied along with
-  // the current damage to bring the older target buffer up to date.
-  RECT     m_dirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned m_nbDirtyRects = 0;
-
-  // Source-space damage accumulated since the last published frame. Frames
-  // can be dropped while the LGMP queue is full, but their damage must be
-  // included in the next frame sent to the client. A count of zero represents
-  // full-frame damage when m_hasPendingDamage is set.
-  RECT     m_pendingDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned m_nbPendingDirtyRects = 0;
-  bool     m_hasPendingDamage = true;
 
 #ifdef HAS_IDDCX_110
   // The per-frame metadata stream can select the monitor default, provide a
@@ -151,43 +80,14 @@ private:
 
   static DWORD CALLBACK _PublisherThread(LPVOID arg);
   void PublisherThread();
-  bool PublishNewestCandidate(
-    const CFrameScheduler::Schedule& schedule, bool periodic,
-    uint64_t publishStart);
-  bool HasReadyCandidate();
-  int AcquireCandidate(bool exclusiveSample, bool allowSupersede);
-  void ReleaseCandidate(unsigned candidateIndex);
-  bool EnsureCandidateResource(
-    unsigned candidateIndex, size_t frameSize);
-  void ResetCandidates();
-  void SignalCandidateState();
-  bool ExecuteCandidateCopy(CD3D12CommandSlot * copySlot);
-
   static DWORD CALLBACK _CursorThread(LPVOID arg);
   bool QueryHWCursor();
   void CursorThread();
 
-  static void CompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-  static void CandidateCompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-  static void SoftwareCompletionFunction(
-    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-  void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
-  bool HasPendingDamage();
-  bool TakePendingDamage(RECT dirtyRects[], unsigned * nbDirtyRects);
-  void RestorePendingDamage(const RECT dirtyRects[],
-    unsigned nbDirtyRects, bool hasDamage);
-  void CommitFrameDamage(
-    const RECT dirtyRects[], unsigned nbDirtyRects);
-  void SetFullPendingDamage();
 #ifdef HAS_IDDCX_110
   void UpdateHDRMetadata(const IDDCX_METADATA2& metadata);
 #endif
   bool GetContentHDRMetadata(D12FrameFormat& format) const;
-  bool PublishSoftwareFrame(CInteropResource * srcRes,
-    const D12FrameFormat& srcFormat, uint64_t captureTime,
-    uint64_t postProcessStart, bool noImageUpdate);
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
     unsigned dirtyRectCount, unsigned moveRegionCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
@@ -200,7 +100,4 @@ public:
     HANDLE newFrameEvent);
   ~CSwapChainProcessor();
   bool Start();
-
-  CIndirectDeviceContext * GetDevice() { return m_devContext; }
-  std::shared_ptr<CD3D12Device> GetD3D12Device() { return m_dx12Device; }
 };

@@ -20,38 +20,27 @@
 
 #pragma once
 
-#include <Windows.h>
-#include <wdf.h>
-#include <wrl.h>
-#include <dxgi1_5.h>
-#include <d3d11_4.h>
+#include "CFrameProcessor.h"
 
-using namespace Microsoft::WRL;
-
-struct CD3D11Device
+class CSoftwareFrameProcessor final : public CFrameProcessor
 {
 private:
-  LUID m_adapterLuid;
-  ComPtr<IDXGIFactory5       > m_factory;
-  ComPtr<IDXGIAdapter1       > m_adapter;
-  ComPtr<ID3D11Device5       > m_device;
-  ComPtr<ID3D11DeviceContext4> m_context;
-  bool m_isSoftware = false;
+  bool m_directTexture;
+
+  static void CompletionFunction(
+    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
 
 public:
-  CD3D11Device(LUID adapterLuid) :
-    m_adapterLuid(adapterLuid) {};
+  CSoftwareFrameProcessor(CIndirectDeviceContext * device,
+    std::shared_ptr<CD3D12Device> dx12,
+    CPostProcessor postProcessors[LGMP_Q_FRAME_LEN],
+    SRWLOCK * pipelineLock, HANDLE terminateEvent);
 
-  CD3D11Device()
+  bool Submit(const FrameSubmission& submission) override;
+  bool HasReadyFrame() const override { return false; }
+  bool Publish(const CFrameScheduler::Schedule&, bool, uint64_t) override
   {
-    m_adapterLuid = LUID{};
+    return false;
   }
-
-  HRESULT Init();
-
-  ComPtr<ID3D11Device5> GetDevice() { return m_device; }
-
-  ComPtr<ID3D11DeviceContext4> GetContext() { return m_context; }
-
-  bool IsSoftware() { return m_isSoftware; }
+  bool UsesCadence() const override { return false; }
 };

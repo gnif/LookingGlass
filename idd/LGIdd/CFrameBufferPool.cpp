@@ -19,13 +19,14 @@
  */
 
 #include "CFrameBufferPool.h"
-#include "CSwapChainProcessor.h"
 
 #include <stdint.h>
 
-void CFrameBufferPool::Init(CSwapChainProcessor * swapChain)
+void CFrameBufferPool::Init(
+  CIndirectDeviceContext * device, CD3D12Device * dx12)
 {
-  m_swapChain = swapChain;
+  m_device = device;
+  m_dx12   = dx12;
 }
 
 void CFrameBufferPool::Reset()
@@ -42,7 +43,7 @@ CFrameBufferResource * CFrameBufferPool::Get(
     return nullptr;
 
   CFrameBufferResource * fbr = &m_buffers[buffer.frameIndex];
-  if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem,
+  if (!fbr->Init(m_device, m_dx12, buffer.frameIndex, buffer.mem,
       minSize, textureDesc))
     return nullptr;
 

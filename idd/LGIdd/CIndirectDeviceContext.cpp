@@ -2562,7 +2562,7 @@ std::shared_ptr<const D12ColorTransform>
 CIndirectDeviceContext::GetColorTransform() const
 {
   AcquireSRWLockShared(&m_colorTransformLock);
-  auto transform = m_colorTransform;
+  std::shared_ptr<const D12ColorTransform> transform = m_colorTransform;
   ReleaseSRWLockShared(&m_colorTransformLock);
   return transform;
 }

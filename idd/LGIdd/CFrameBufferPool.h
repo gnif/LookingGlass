@@ -24,19 +24,20 @@
 #include "CIndirectDeviceContext.h"
 #include "common/KVMFR.h"
 
-//class CSwapChainProcessor;
+struct CD3D12Device;
 
 class CFrameBufferPool
 {
-  CSwapChainProcessor * m_swapChain;
+  CIndirectDeviceContext * m_device = nullptr;
+  CD3D12Device            * m_dx12   = nullptr;
 
   CFrameBufferResource m_buffers[LGMP_Q_FRAME_BUFFER_LEN];
 
   public:
-    void Init(CSwapChainProcessor * swapChain);
+    void Init(CIndirectDeviceContext * device, CD3D12Device * dx12);
     void Reset();
 
-    CFrameBufferResource* CFrameBufferPool::Get(
+    CFrameBufferResource * Get(
       const CIndirectDeviceContext::PreparedFrameBuffer& buffer,
       size_t minSize,
       const D3D12_RESOURCE_DESC * textureDesc = nullptr);
