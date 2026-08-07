@@ -183,6 +183,10 @@ public:
   size_t   GetOutputSize () const { return m_frameSize; }
   bool ShouldCopyFully(
     const RECT dirtyRects[], unsigned nbDirtyRects) const;
+  void CopyToFrameBuffer(
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    ID3D12Resource * dst, ID3D12Resource * src,
+    const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const;
   void CopyToCandidate(
     const ComPtr<ID3D12GraphicsCommandList>& commandList,
     ID3D12Resource * dst, ID3D12Resource * src) const;

@@ -538,7 +538,22 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
 
 CD3D12CommandSlot * CD3D12CommandQueue::Acquire()
 {
-  return Acquire(0);
+  if (!m_slotCount)
+    return nullptr;
+
+  // The unindexed path is used for immediate software publication. Keep at
+  // most one copy in flight so a newer frame is dropped instead of queued
+  // behind bandwidth-bound work which is already stale.
+  CD3D12CommandSlot& slot = m_slots[0];
+  if (slot.Acquire())
+    return &slot;
+
+  // Complete already-fenced work without waiting for callback dispatch.
+  slot.OnCompletion(false);
+  if (slot.Acquire())
+    return &slot;
+
+  return nullptr;
 }
 
 void CD3D12CommandQueue::WaitForIdle()

@@ -212,6 +212,10 @@ bool CSwapChainProcessor::InitializePipeline()
     }
 
     m_dx12Device = std::move(dx12Device);
+    m_directSoftwareTexture =
+      m_dx11Device->IsSoftware() &&
+      !m_dx12Device->IsIndirectCopy() &&
+      m_dx12Device->CanUseIVSHMEMTexture();
     break;
   }
 
@@ -355,6 +359,10 @@ void CSwapChainProcessor::PublisherThread()
     scheduleEvent,
     m_publishTimer.Get(),
   };
+  // Software capture publishes source frames immediately. Keep this thread
+  // available for transport delivery and reconnects, but do not wake it for
+  // deadlines the software path cannot reliably meet.
+  const bool cadenceEnabled = !m_dx11Device->IsSoftware();
 
   for (;;)
   {
@@ -375,7 +383,7 @@ void CSwapChainProcessor::PublisherThread()
 
       uint64_t current       = CFrameScheduler::Nanotime();
       uint64_t cadenceTarget = 0;
-      if (schedule.deliveryDeadlineSerial && periodic)
+      if (cadenceEnabled && schedule.deliveryDeadlineSerial && periodic)
       {
         if (schedule.deadline <= current)
         {
@@ -791,6 +799,82 @@ void CSwapChainProcessor::CandidateCompletionFunction(
   sc->SignalCandidateState();
 }
 
+void CSwapChainProcessor::SoftwareCompletionFunction(
+  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
+{
+  auto sc    = static_cast<CSwapChainProcessor   *>(param1);
+  auto fbRes = static_cast<CFrameBufferResource *>(param2);
+  fbRes->MarkCompletion();
+
+  if (!result)
+  {
+    sc->m_devContext->FailFrameBuffer(fbRes->GetFrameIndex());
+    sc->SetFullPendingDamage();
+    sc->m_devContext->ForceFrame();
+    return;
+  }
+
+  uint64_t indirectCopyTime = 0;
+  if (sc->m_dx12Device->IsIndirectCopy())
+  {
+    const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
+    if (fbRes->IsFullCopy())
+      sc->m_devContext->WriteFrameBuffer(fbRes->GetFrameIndex(),
+        fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
+    else
+    {
+      const unsigned pitch         = fbRes->GetCopyPitch();
+      const unsigned bytesPerPixel = fbRes->GetCopyBytesPerPixel();
+      const RECT * dirtyRects      = fbRes->GetCopyDirtyRects();
+      const unsigned count         = fbRes->GetCopyDirtyRectCount();
+      for (const RECT * rect = dirtyRects; rect < dirtyRects + count; ++rect)
+      {
+        const size_t rowOffset =
+          (size_t)rect->top * pitch +
+          (size_t)rect->left * bytesPerPixel;
+        const size_t rowBytes =
+          (size_t)(rect->right - rect->left) * bytesPerPixel;
+        sc->m_devContext->WriteFrameBufferRows(fbRes->GetFrameIndex(),
+          fbRes->GetMap(), rowOffset, rowBytes, pitch,
+          (unsigned)(rect->bottom - rect->top));
+      }
+    }
+    indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
+  }
+
+  uint64_t       gpuStart       = 0;
+  uint64_t       gpuEnd         = 0;
+  const uint64_t copyReady      = CFrameScheduler::Nanotime();
+  const bool     gpuTimingValid =
+    slot->GetGPUTimes(gpuStart, gpuEnd);
+
+  sc->m_devContext->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+  const uint64_t publishedAt      = CFrameScheduler::Nanotime();
+  const uint64_t postProcessStart = fbRes->GetPostProcessStart();
+  const uint64_t copyStart        = fbRes->GetCopyStart();
+  uint64_t       postProcessTime = copyStart >= postProcessStart ?
+    copyStart - postProcessStart : 0;
+  uint64_t       copyTime = copyReady >= copyStart ?
+    copyReady - copyStart : 0;
+  if (gpuTimingValid && gpuStart >= postProcessStart &&
+      gpuEnd >= gpuStart && gpuEnd <= copyReady)
+  {
+    postProcessTime = gpuStart - postProcessStart;
+    copyTime        = gpuEnd - gpuStart + indirectCopyTime;
+  }
+
+  const uint64_t elapsed   = publishedAt >= postProcessStart ?
+    publishedAt - postProcessStart : 0;
+  const uint64_t measured  = postProcessTime + copyTime;
+  const uint64_t readyTime = elapsed > measured ?
+    elapsed - measured : 0;
+
+  sc->m_devContext->SetFrameTiming(fbRes->GetFrameIndex(),
+    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, 0,
+    fbRes->GetSchedule(), publishedAt);
+  sc->m_devContext->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
+}
+
 void CSwapChainProcessor::CompletionFunction(
   CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
 {
@@ -1028,6 +1112,51 @@ static void ClipDirtyRects(RECT dirtyRects[], unsigned * nbDirtyRects,
   *nbDirtyRects = out;
 }
 
+static bool BuildCopyDamage(const CPostProcessor& postProcessor,
+  bool destinationNeedsFullCopy,
+  const RECT previousDirtyRects[], unsigned nbPreviousDirtyRects,
+  const RECT currentDirtyRects[], unsigned nbCurrentDirtyRects,
+  unsigned width, unsigned height,
+  RECT copyDirtyRects[], unsigned * nbCopyDirtyRects)
+{
+  *nbCopyDirtyRects = 0;
+  bool fullCopy = destinationNeedsFullCopy ||
+    nbCurrentDirtyRects == 0 || nbPreviousDirtyRects == 0;
+
+  if (fullCopy)
+    return true;
+
+  for (const RECT * rect = previousDirtyRects;
+       rect < previousDirtyRects + nbPreviousDirtyRects && !fullCopy;
+       ++rect)
+  {
+    RECT clipped = *rect;
+    if (ClipDirtyRect(clipped, width, height) &&
+        !AddCopyDirtyRect(copyDirtyRects, LG_MAX_DIRTY_RECTS * 2,
+          nbCopyDirtyRects, clipped))
+      fullCopy = true;
+  }
+
+  for (const RECT * rect = currentDirtyRects;
+       rect < currentDirtyRects + nbCurrentDirtyRects && !fullCopy;
+       ++rect)
+    if (!AddCopyDirtyRect(copyDirtyRects, LG_MAX_DIRTY_RECTS * 2,
+        nbCopyDirtyRects, *rect))
+      fullCopy = true;
+
+  if (!fullCopy)
+    fullCopy = IsFullDamage(copyDirtyRects, *nbCopyDirtyRects,
+        width, height) ||
+      CopyAreaCoversFrame(copyDirtyRects, *nbCopyDirtyRects,
+        width, height);
+
+  if (!fullCopy)
+    fullCopy = postProcessor.ShouldCopyFully(
+      copyDirtyRects, *nbCopyDirtyRects);
+
+  return fullCopy;
+}
+
 static FrameType GetFrameType(DXGI_FORMAT format)
 {
   switch (format)
@@ -1097,6 +1226,53 @@ void CSwapChainProcessor::AccumulateFrameDamage(
       AccumulatePendingDamage(
         tail.dirtyRects, &tail.nbDirtyRects, &tail.hasDamage,
         dirtyRects, nbDirtyRects);
+  ReleaseSRWLockExclusive(&m_damageLock);
+}
+
+bool CSwapChainProcessor::HasPendingDamage()
+{
+  AcquireSRWLockShared(&m_damageLock);
+  const bool result = m_hasPendingDamage;
+  ReleaseSRWLockShared(&m_damageLock);
+  return result;
+}
+
+bool CSwapChainProcessor::TakePendingDamage(
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
+  AcquireSRWLockExclusive(&m_damageLock);
+  const bool hasDamage = m_hasPendingDamage;
+  *nbDirtyRects = hasDamage ? m_nbPendingDirtyRects : 0;
+  if (*nbDirtyRects)
+    memcpy(dirtyRects, m_pendingDirtyRects,
+      *nbDirtyRects * sizeof(*dirtyRects));
+  m_hasPendingDamage    = false;
+  m_nbPendingDirtyRects = 0;
+  ReleaseSRWLockExclusive(&m_damageLock);
+  return hasDamage;
+}
+
+void CSwapChainProcessor::RestorePendingDamage(
+  const RECT dirtyRects[], unsigned nbDirtyRects, bool hasDamage)
+{
+  if (!hasDamage)
+    return;
+
+  AcquireSRWLockExclusive(&m_damageLock);
+  AccumulatePendingDamage(
+    m_pendingDirtyRects, &m_nbPendingDirtyRects, &m_hasPendingDamage,
+    dirtyRects, nbDirtyRects);
+  ReleaseSRWLockExclusive(&m_damageLock);
+}
+
+void CSwapChainProcessor::CommitFrameDamage(
+  const RECT dirtyRects[], unsigned nbDirtyRects)
+{
+  AcquireSRWLockExclusive(&m_damageLock);
+  m_nbDirtyRects = nbDirtyRects;
+  if (nbDirtyRects)
+    memcpy(m_dirtyRects, dirtyRects,
+      nbDirtyRects * sizeof(*m_dirtyRects));
   ReleaseSRWLockExclusive(&m_damageLock);
 }
 
@@ -1396,42 +1572,11 @@ bool CSwapChainProcessor::PublishNewestCandidate(
 
   RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
   unsigned nbCopyDirtyRects                       = 0;
-  bool     fullCopy = buffer.fullCopy ||
-    candidate.nbDirtyRects == 0 || nbPreviousDirtyRects == 0;
-
-  if (!fullCopy)
-  {
-    for (const RECT * rect = previousDirtyRects;
-         rect < previousDirtyRects + nbPreviousDirtyRects && !fullCopy;
-         ++rect)
-    {
-      RECT clipped = *rect;
-      if (ClipDirtyRect(clipped,
-            candidate.dstFormat.width, candidate.dstFormat.height) &&
-          !AddCopyDirtyRect(copyDirtyRects, ARRAYSIZE(copyDirtyRects),
-            &nbCopyDirtyRects, clipped))
-        fullCopy = true;
-    }
-
-    for (const RECT * rect = candidate.dirtyRects;
-         rect < candidate.dirtyRects + candidate.nbDirtyRects && !fullCopy;
-         ++rect)
-      if (!AddCopyDirtyRect(copyDirtyRects, ARRAYSIZE(copyDirtyRects),
-          &nbCopyDirtyRects, *rect))
-        fullCopy = true;
-
-    if (!fullCopy)
-      fullCopy = IsFullDamage(
-          copyDirtyRects, nbCopyDirtyRects,
-          candidate.dstFormat.width, candidate.dstFormat.height) ||
-        CopyAreaCoversFrame(
-          copyDirtyRects, nbCopyDirtyRects,
-          candidate.dstFormat.width, candidate.dstFormat.height);
-
-    if (!fullCopy)
-      fullCopy = postProcessor.ShouldCopyFully(
-        copyDirtyRects, nbCopyDirtyRects);
-  }
+  const bool fullCopy = BuildCopyDamage(postProcessor, buffer.fullCopy,
+    previousDirtyRects, nbPreviousDirtyRects,
+    candidate.dirtyRects, candidate.nbDirtyRects,
+    candidate.dstFormat.width, candidate.dstFormat.height,
+    copyDirtyRects, &nbCopyDirtyRects);
 
   fbRes->SetTiming(
     candidate.captureTime, candidate.postProcessStart, publishStart);
@@ -1590,6 +1735,271 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
   UNREFERENCED_PARAMETER(format);
   return false;
 #endif
+}
+
+bool CSwapChainProcessor::PublishSoftwareFrame(CInteropResource * srcRes,
+  const D12FrameFormat& srcFormat, uint64_t captureTime,
+  uint64_t postProcessStart, bool noImageUpdate)
+{
+  CSRWSharedLock        pipelineLock(&m_pipelineLock);
+  CPostProcessor&       postProcessor = m_postProcessors[0];
+  const D12FrameFormat& dstFormat     = postProcessor.GetOutputFormat();
+
+  D3D12_RESOURCE_DESC         textureDesc    = {};
+  const D3D12_RESOURCE_DESC * textureDescPtr = nullptr;
+  unsigned                    pitch          = postProcessor.GetOutputPitch();
+  size_t                      frameSize      = postProcessor.GetOutputSize();
+  if (m_directSoftwareTexture &&
+      dstFormat.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+      dstFormat.desc.Width && dstFormat.desc.Height &&
+      dstFormat.desc.Format != DXGI_FORMAT_UNKNOWN)
+  {
+    textureDesc                    = dstFormat.desc;
+    textureDesc.Dimension          = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+    textureDesc.Alignment          = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+    textureDesc.DepthOrArraySize   = 1;
+    textureDesc.MipLevels          = 1;
+    textureDesc.SampleDesc.Count   = 1;
+    textureDesc.SampleDesc.Quality = 0;
+    textureDesc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    textureDesc.Flags              =
+      D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
+
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT layout = {};
+    m_dx12Device->GetDevice()->GetCopyableFootprints(
+      &textureDesc, 0, 1, 0, &layout, nullptr, nullptr, nullptr);
+    const unsigned texturePitch = layout.Footprint.RowPitch;
+    if (texturePitch && textureDesc.Height <=
+        m_devContext->GetMaxFrameSize() / texturePitch)
+    {
+      pitch           = texturePitch;
+      frameSize       = (size_t)pitch * textureDesc.Height;
+      textureDescPtr  = &textureDesc;
+    }
+    else
+    {
+      m_directSoftwareTexture = false;
+      DEBUG_WARN("IVSHMEM texture layout does not fit the framebuffer");
+    }
+  }
+  else if (m_directSoftwareTexture)
+  {
+    m_directSoftwareTexture = false;
+    DEBUG_WARN("Post-processor output cannot use an IVSHMEM texture");
+  }
+
+  if (!pitch || !frameSize || frameSize > m_devContext->GetMaxFrameSize())
+  {
+    DEBUG_ERROR("Software frame does not fit in shared memory");
+    SetFullPendingDamage();
+    return false;
+  }
+
+  // Static-desktop re-encodes carry no new image. The retained frame can be
+  // republished without spending GPU or memory bandwidth on another copy. A
+  // pending full-damage request still passes through so startup, format
+  // changes, and failed copies can establish a valid replacement.
+  if (noImageUpdate && !HasPendingDamage())
+    return true;
+
+  for (;;)
+  {
+    CFrameScheduler::Schedule commitSchedule    = {};
+    CFrameScheduler::Schedule deliverySchedule  = {};
+    CIndirectDeviceContext::PreparedFrameBuffer buffer = {};
+    CD3D12CommandSlot * copySlot                 = nullptr;
+    RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned nbDirtyRects                          = 0;
+    bool     hasDamage                             = false;
+
+    uint64_t ignoredTarget    = 0;
+    bool     ignoredPeriodic  = false;
+    bool     ignoredRepublish = false;
+    m_devContext->GetPublishTarget(CFrameScheduler::Nanotime(),
+      ignoredTarget, commitSchedule, ignoredPeriodic, ignoredRepublish);
+    deliverySchedule = commitSchedule;
+    deliverySchedule.deliveryDeadlineSerial = 0;
+    deliverySchedule.phaseEligible          = false;
+
+    m_devContext->ProcessFrameQueue();
+    // Ordinary frames never displace the retained fallback. A must-not-drop
+    // static replacement may reuse it once every transport reference is gone.
+    if (!m_devContext->FrameBufferAvailable(
+          deliverySchedule, noImageUpdate))
+    {
+      if (!noImageUpdate)
+      {
+        m_devContext->FrameSuperseded();
+        return true;
+      }
+
+      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
+        return true;
+      continue;
+    }
+
+    copySlot = m_dx12Device->GetCopySlot();
+    if (!copySlot)
+    {
+      if (!noImageUpdate)
+      {
+        m_devContext->FrameSuperseded();
+        return true;
+      }
+
+      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
+        return true;
+      continue;
+    }
+
+    hasDamage = TakePendingDamage(
+      currentDirtyRects, &nbDirtyRects);
+    ClipDirtyRects(currentDirtyRects, &nbDirtyRects,
+      dstFormat.width, dstFormat.height);
+    buffer = m_devContext->PrepareFrameBuffer(
+      pitch, srcFormat, dstFormat,
+      currentDirtyRects, nbDirtyRects, deliverySchedule,
+      noImageUpdate);
+    if (!buffer.mem)
+    {
+      copySlot->Cancel();
+      RestorePendingDamage(
+        currentDirtyRects, nbDirtyRects, hasDamage);
+      if (!noImageUpdate)
+      {
+        m_devContext->FrameSuperseded();
+        return true;
+      }
+
+      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
+        return true;
+      continue;
+    }
+
+    CFrameBufferResource * fbRes = nullptr;
+    if (textureDescPtr)
+    {
+      fbRes = m_fbPool.Get(buffer, frameSize, textureDescPtr);
+      if (!fbRes)
+      {
+        const HRESULT deviceStatus =
+          m_dx12Device->GetDevice()->GetDeviceRemovedReason();
+        if (FAILED(deviceStatus))
+        {
+          copySlot->Cancel();
+          m_devContext->AbortFrameBuffer(buffer.frameIndex);
+          RestorePendingDamage(
+            currentDirtyRects, nbDirtyRects, hasDamage);
+          DEBUG_ERROR_HR(deviceStatus,
+            "D3D12 device removed while creating an IVSHMEM texture");
+          SetFullPendingDamage();
+          return false;
+        }
+
+        m_directSoftwareTexture = false;
+        textureDescPtr          = nullptr;
+        DEBUG_WARN(
+          "IVSHMEM textures unavailable; using a direct buffer copy");
+      }
+    }
+
+    if (!fbRes)
+      fbRes = m_fbPool.Get(buffer, frameSize);
+    if (!fbRes)
+    {
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      RestorePendingDamage(
+        currentDirtyRects, nbDirtyRects, hasDamage);
+      DEBUG_ERROR("Failed to get a framebuffer for software capture");
+      SetFullPendingDamage();
+      return false;
+    }
+
+    if (!srcRes->Signal() || !srcRes->Sync(*copySlot))
+    {
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      RestorePendingDamage(
+        currentDirtyRects, nbDirtyRects, hasDamage);
+      SetFullPendingDamage();
+      return false;
+    }
+
+    RECT     previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned nbPreviousDirtyRects                   = 0;
+    AcquireSRWLockShared(&m_damageLock);
+    nbPreviousDirtyRects = m_nbDirtyRects;
+    if (nbPreviousDirtyRects)
+      memcpy(previousDirtyRects, m_dirtyRects,
+        nbPreviousDirtyRects * sizeof(*previousDirtyRects));
+    ReleaseSRWLockShared(&m_damageLock);
+
+    RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
+    unsigned nbCopyDirtyRects                       = 0;
+    const bool fullCopy = BuildCopyDamage(
+      postProcessor, buffer.fullCopy,
+      previousDirtyRects, nbPreviousDirtyRects,
+      currentDirtyRects, nbDirtyRects,
+      dstFormat.width, dstFormat.height,
+      copyDirtyRects, &nbCopyDirtyRects);
+
+    const unsigned bytesPerPixel =
+      dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+    const uint64_t copyStart = CFrameScheduler::Nanotime();
+    fbRes->SetTiming(captureTime, postProcessStart, copyStart);
+    fbRes->SetSchedule(deliverySchedule);
+    fbRes->SetCopyDamage(copyDirtyRects, nbCopyDirtyRects,
+      fullCopy, pitch, bytesPerPixel);
+    fbRes->ResetCompletion();
+    copySlot->SetCompletionCallback(
+      &SoftwareCompletionFunction, this, fbRes);
+    copySlot->BeginTiming();
+    postProcessor.CopyToFrameBuffer(copySlot->GetGfxList(),
+      fbRes->Get().Get(), srcRes->GetRes().Get(),
+      copyDirtyRects, nbCopyDirtyRects, fullCopy);
+    copySlot->EndTiming();
+
+    bool deliveredToOwner;
+    if (!m_devContext->PublishFrameBuffer(
+          buffer.frameIndex, deliverySchedule, deliveredToOwner))
+    {
+      copySlot->Cancel();
+      m_devContext->AbortFrameBuffer(buffer.frameIndex);
+      RestorePendingDamage(
+        currentDirtyRects, nbDirtyRects, hasDamage);
+      if (!noImageUpdate)
+      {
+        m_devContext->FrameSuperseded();
+        return true;
+      }
+
+      if (WaitForSingleObject(m_terminateEvent.Get(), 1) == WAIT_OBJECT_0)
+        return true;
+      continue;
+    }
+
+    CommitFrameDamage(currentDirtyRects, nbDirtyRects);
+    if (!copySlot->Execute())
+    {
+      const bool submittedWork     = copySlot->HasSubmittedWork();
+      const bool completionHandled = fbRes->CompletionHandled();
+      if (!submittedWork && !completionHandled)
+        m_devContext->FailFrameBuffer(buffer.frameIndex);
+      RestorePendingDamage(
+        currentDirtyRects, nbDirtyRects, hasDamage);
+      if (!submittedWork && !completionHandled)
+      {
+        SetFullPendingDamage();
+        m_devContext->ForceFrame();
+      }
+      return false;
+    }
+
+    m_devContext->CommitFrameBuffer(
+      buffer.frameIndex, commitSchedule, false, deliveredToOwner);
+    return true;
+  }
 }
 
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
@@ -1837,6 +2247,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)
     m_devContext->ForceFrame();
+
+  if (m_dx11Device->IsSoftware())
+    return PublishSoftwareFrame(srcRes, srcFormat,
+      captureTime, postProcessStart, noImageUpdate);
 
   // Always prepare the requested static-desktop re-encode. An older
   // publication can still fail after this frame is acquired, so deciding

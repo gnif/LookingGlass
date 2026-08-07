@@ -36,13 +36,14 @@ void CFrameBufferPool::Reset()
 
 CFrameBufferResource * CFrameBufferPool::Get(
   const CIndirectDeviceContext::PreparedFrameBuffer& buffer,
-  size_t minSize)
+  size_t minSize, const D3D12_RESOURCE_DESC * textureDesc)
 {
   if (buffer.frameIndex > ARRAYSIZE(m_buffers) - 1)
     return nullptr;
 
   CFrameBufferResource * fbr = &m_buffers[buffer.frameIndex];
-  if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem, minSize))
+  if (!fbr->Init(m_swapChain, buffer.frameIndex, buffer.mem,
+      minSize, textureDesc))
     return nullptr;
 
   return fbr;

@@ -24,9 +24,11 @@
 #include <wdf.h>
 #include <wrl.h>
 #include <d3d12.h>
+#include <atomic>
 #include <stdint.h>
 
 #include "CFrameScheduler.h"
+#include "CInteropResource.h"
 
 class CSwapChainProcessor;
 
@@ -35,6 +37,13 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
+    enum ResourceType
+    {
+      RESOURCE_NONE,
+      RESOURCE_BUFFER,
+      RESOURCE_TEXTURE,
+    };
+
     unsigned                  m_frameIndex        = 0;
     uint8_t                 * m_base              = nullptr;
     size_t                    m_size              = 0;
@@ -48,12 +57,21 @@ class CFrameBufferResource
     unsigned                  m_timingEffectIndex = 0;
     uint64_t                  m_timingToken       = 0;
     bool                      m_fullCopy          = false;
+    RECT                      m_copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
+    unsigned                  m_nbCopyDirtyRects  = 0;
+    unsigned                  m_copyPitch         = 0;
+    unsigned                  m_copyBytesPerPixel = 0;
     unsigned                  m_candidateIndex    = 0;
+    ResourceType              m_type              = RESOURCE_NONE;
+    D3D12_RESOURCE_DESC       m_desc              = {};
+    std::atomic<bool>         m_completionHandled = false;
     ComPtr<ID3D12Resource>    m_res;
     void                    * m_map               = nullptr;
 
   public:
-    bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size);
+    bool Init(CSwapChainProcessor * swapChain, unsigned frameIndex,
+      uint8_t * base, size_t size,
+      const D3D12_RESOURCE_DESC * textureDesc = nullptr);
     void Reset();
 
     unsigned  GetFrameIndex() { return m_frameIndex; }
@@ -89,6 +107,27 @@ class CFrameBufferResource
     unsigned GetTimingEffectIndex() const { return m_timingEffectIndex; }
     uint64_t GetTimingToken      () const { return m_timingToken;       }
     bool     IsFullCopy          () const { return m_fullCopy;          }
+    void SetCopyDamage(const RECT dirtyRects[], unsigned nbDirtyRects,
+      bool fullCopy, unsigned pitch, unsigned bytesPerPixel);
+    const RECT * GetCopyDirtyRects() const { return m_copyDirtyRects;    }
+    unsigned GetCopyDirtyRectCount() const { return m_nbCopyDirtyRects; }
+    unsigned GetCopyPitch         () const { return m_copyPitch;        }
+    unsigned GetCopyBytesPerPixel () const
+    {
+      return m_copyBytesPerPixel;
+    }
+    void ResetCompletion()
+    {
+      m_completionHandled.store(false, std::memory_order_release);
+    }
+    void MarkCompletion()
+    {
+      m_completionHandled.store(true, std::memory_order_release);
+    }
+    bool CompletionHandled() const
+    {
+      return m_completionHandled.load(std::memory_order_acquire);
+    }
     void     SetCandidateIndex(unsigned index) { m_candidateIndex = index; }
     unsigned GetCandidateIndex() const         { return m_candidateIndex; }
 

@@ -38,5 +38,6 @@ class CFrameBufferPool
 
     CFrameBufferResource* CFrameBufferPool::Get(
       const CIndirectDeviceContext::PreparedFrameBuffer& buffer,
-      size_t minSize);
+      size_t minSize,
+      const D3D12_RESOURCE_DESC * textureDesc = nullptr);
 };

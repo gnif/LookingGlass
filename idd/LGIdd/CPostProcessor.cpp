@@ -351,14 +351,15 @@ bool CPostProcessor::ShouldCopyFully(
     m_copyEffect->ShouldCopyFully(dirtyRects, nbDirtyRects);
 }
 
-void CPostProcessor::CopyToCandidate(
+void CPostProcessor::CopyToFrameBuffer(
   const ComPtr<ID3D12GraphicsCommandList>& commandList,
-  ID3D12Resource * dst, ID3D12Resource * src) const
+  ID3D12Resource * dst, ID3D12Resource * src,
+  const RECT dirtyRects[], unsigned nbDirtyRects, bool fullCopy) const
 {
   if (m_copyEffect)
   {
     m_copyEffect->CopyFrame(
-      commandList, dst, src, nullptr, 0, true);
+      commandList, dst, src, dirtyRects, nbDirtyRects, fullCopy);
     return;
   }
 
@@ -368,12 +369,47 @@ void CPostProcessor::CopyToCandidate(
   srcLoc.SubresourceIndex = 0;
 
   D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-  dstLoc.pResource       = dst;
-  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  dstLoc.PlacedFootprint = m_copyLayout;
+  dstLoc.pResource = dst;
+  if (dst->GetDesc().Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+  {
+    dstLoc.Type             = D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;
+    dstLoc.SubresourceIndex = 0;
+  }
+  else
+  {
+    dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
+    dstLoc.PlacedFootprint = m_copyLayout;
+  }
 
-  commandList->CopyTextureRegion(
-    &dstLoc, 0, 0, 0, &srcLoc, nullptr);
+  if (fullCopy)
+  {
+    commandList->CopyTextureRegion(
+      &dstLoc, 0, 0, 0, &srcLoc, nullptr);
+    return;
+  }
+
+  for (const RECT * rect = dirtyRects;
+       rect < dirtyRects + nbDirtyRects; ++rect)
+  {
+    D3D12_BOX box = {};
+    box.left   = rect->left;
+    box.top    = rect->top;
+    box.front  = 0;
+    box.right  = rect->right;
+    box.bottom = rect->bottom;
+    box.back   = 1;
+
+    commandList->CopyTextureRegion(
+      &dstLoc, box.left, box.top, 0, &srcLoc, &box);
+  }
+}
+
+void CPostProcessor::CopyToCandidate(
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  ID3D12Resource * dst, ID3D12Resource * src) const
+{
+  CopyToFrameBuffer(
+    commandList, dst, src, nullptr, 0, true);
 }
 
 void CPostProcessor::CopyFromCandidate(

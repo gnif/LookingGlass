@@ -22,7 +22,28 @@
 #include "CSwapChainProcessor.h"
 #include "CDebug.h"
 
-bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameIndex, uint8_t * base, size_t size)
+#include <cstring>
+
+static bool ResourceDescMatches(
+  const D3D12_RESOURCE_DESC& left, const D3D12_RESOURCE_DESC& right)
+{
+  return
+    left.Dimension          == right.Dimension          &&
+    left.Alignment          == right.Alignment          &&
+    left.Width              == right.Width              &&
+    left.Height             == right.Height             &&
+    left.DepthOrArraySize   == right.DepthOrArraySize   &&
+    left.MipLevels          == right.MipLevels          &&
+    left.Format             == right.Format             &&
+    left.SampleDesc.Count   == right.SampleDesc.Count   &&
+    left.SampleDesc.Quality == right.SampleDesc.Quality &&
+    left.Layout             == right.Layout             &&
+    left.Flags              == right.Flags;
+}
+
+bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain,
+  unsigned frameIndex, uint8_t * base, size_t size,
+  const D3D12_RESOURCE_DESC * textureDesc)
 {
   m_frameIndex = frameIndex;
 
@@ -33,8 +54,52 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
     return false;
   }
 
-  // nothing to do if the resource already exists and is large enough
-  if (m_base == base && m_size >= size)
+  const auto         dx12     = swapChain->GetD3D12Device();
+  const bool         indirect = dx12->IsIndirectCopy();
+  const ResourceType type     = textureDesc ?
+    RESOURCE_TEXTURE : RESOURCE_BUFFER;
+
+  D3D12_RESOURCE_DESC desc = {};
+  if (textureDesc)
+  {
+    if (indirect || !dx12->CanUseIVSHMEMTexture())
+      return false;
+    desc = *textureDesc;
+    if (desc.Dimension        != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+        !desc.Width                                                ||
+        !desc.Height                                               ||
+        desc.DepthOrArraySize != 1                                  ||
+        desc.MipLevels        != 1                                  ||
+        desc.SampleDesc.Count != 1                                  ||
+        desc.SampleDesc.Quality                                     ||
+        desc.Format           == DXGI_FORMAT_UNKNOWN                ||
+        desc.Layout           != D3D12_TEXTURE_LAYOUT_ROW_MAJOR     ||
+        desc.Flags            != D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER)
+      return false;
+  }
+  else
+  {
+    desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width              = size;
+    desc.Height             = 1;
+    desc.DepthOrArraySize   = 1;
+    desc.MipLevels          = 1;
+    desc.Format             = DXGI_FORMAT_UNKNOWN;
+    desc.SampleDesc.Count   = 1;
+    desc.SampleDesc.Quality = 0;
+    desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+    desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
+    if (!indirect)
+    {
+      desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
+      desc.Flags     = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
+    }
+  }
+
+  // Nothing to do if the resource already represents this allocation.
+  if (m_base == base && m_type == type &&
+      ((type == RESOURCE_BUFFER && m_size >= size) ||
+       (type == RESOURCE_TEXTURE && ResourceDescMatches(m_desc, desc))))
   {
     m_frameSize = size;
     return true;
@@ -42,22 +107,11 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
 
   Reset();
 
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Width              = size;
-  desc.Height             = 1;
-  desc.DepthOrArraySize   = 1;
-  desc.MipLevels          = 1;
-  desc.Format             = DXGI_FORMAT_UNKNOWN;
-  desc.SampleDesc.Count   = 1;
-  desc.SampleDesc.Quality = 0;
-  desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-  desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
-
-  HRESULT hr;
+  HRESULT       hr;
   const WCHAR * resName;
+  UINT64        allocationSize = size;
 
-  if (swapChain->GetD3D12Device()->IsIndirectCopy())
+  if (indirect)
   {
     DEBUG_TRACE("Creating standard resource for %p", base);
     D3D12_HEAP_PROPERTIES heapProps = {};
@@ -67,7 +121,7 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
     heapProps.CreationNodeMask     = 1;
     heapProps.VisibleNodeMask      = 1;
 
-    hr = swapChain->GetD3D12Device()->GetDevice()->CreateCommittedResource(
+    hr = dx12->GetDevice()->CreateCommittedResource(
       &heapProps,
       D3D12_HEAP_FLAG_NONE,
       &desc,
@@ -90,19 +144,52 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
   }
   else
   {
-    DEBUG_TRACE("Creating ivshmem resource for %p", base);
-    desc.Alignment = D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-    desc.Flags     = D3D12_RESOURCE_FLAG_ALLOW_CROSS_ADAPTER;
+    const UINT64 heapOffset =
+      (uintptr_t)base -
+      (uintptr_t)swapChain->GetDevice()->GetIVSHMEM().GetMem();
+    const D3D12_RESOURCE_ALLOCATION_INFO allocation =
+      dx12->GetDevice()->GetResourceAllocationInfo(0, 1, &desc);
+    allocationSize = allocation.SizeInBytes;
+    const D3D12_HEAP_DESC heapDesc = dx12->GetHeap()->GetDesc();
+    if (!allocation.Alignment ||
+        heapOffset % allocation.Alignment ||
+        allocation.SizeInBytes > swapChain->GetDevice()->GetMaxFrameSize() ||
+        heapOffset > heapDesc.SizeInBytes ||
+        allocation.SizeInBytes > heapDesc.SizeInBytes - heapOffset)
+    {
+      DEBUG_ERROR("IVSHMEM resource does not fit its framebuffer allocation");
+      return false;
+    }
 
-    hr = swapChain->GetD3D12Device()->GetDevice()->CreatePlacedResource(
-      swapChain->GetD3D12Device()->GetHeap().Get(),
-      (uintptr_t)base - (uintptr_t)swapChain->GetDevice()->GetIVSHMEM().GetMem(),
+    if (type == RESOURCE_TEXTURE)
+    {
+      D3D12_FEATURE_DATA_FORMAT_SUPPORT support = {};
+      support.Format = desc.Format;
+      hr = dx12->GetDevice()->CheckFeatureSupport(
+        D3D12_FEATURE_FORMAT_SUPPORT, &support, sizeof(support));
+      if (FAILED(hr) ||
+          !(support.Support1 & D3D12_FORMAT_SUPPORT1_TEXTURE2D))
+      {
+        DEBUG_ERROR("IVSHMEM texture format is unsupported");
+        return false;
+      }
+      DEBUG_TRACE("Creating IVSHMEM texture for %p", base);
+      resName = L"IVSHMEM Texture";
+    }
+    else
+    {
+      DEBUG_TRACE("Creating IVSHMEM buffer for %p", base);
+      resName = L"IVSHMEM";
+    }
+
+    hr = dx12->GetDevice()->CreatePlacedResource(
+      dx12->GetHeap().Get(),
+      heapOffset,
       &desc,
       D3D12_RESOURCE_STATE_COMMON,
       NULL,
       IID_PPV_ARGS(&m_res)
     );
-    resName = L"IVSHMEM";
   }
 
   if (FAILED(hr))
@@ -114,8 +201,11 @@ bool CFrameBufferResource::Init(CSwapChainProcessor * swapChain, unsigned frameI
   m_res->SetName(resName);
 
   m_base      = base;
-  m_size      = size;
+  m_size      = type == RESOURCE_TEXTURE ?
+    (size_t)allocationSize : size;
   m_frameSize = size;
+  m_type      = type;
+  m_desc      = desc;
   return true;
 }
 
@@ -127,8 +217,27 @@ void CFrameBufferResource::Reset()
     m_map = NULL;
   }
 
-  m_base      = nullptr;
-  m_size      = 0;
-  m_frameSize = 0;
+  m_base              = nullptr;
+  m_size              = 0;
+  m_frameSize         = 0;
+  m_type              = RESOURCE_NONE;
+  m_desc              = {};
+  m_fullCopy          = false;
+  m_nbCopyDirtyRects  = 0;
+  m_copyPitch         = 0;
+  m_copyBytesPerPixel = 0;
   m_res.Reset();
+}
+
+void CFrameBufferResource::SetCopyDamage(const RECT dirtyRects[],
+  unsigned nbDirtyRects, bool fullCopy, unsigned pitch,
+  unsigned bytesPerPixel)
+{
+  m_fullCopy          = fullCopy;
+  m_nbCopyDirtyRects  = fullCopy ? 0 : nbDirtyRects;
+  m_copyPitch         = pitch;
+  m_copyBytesPerPixel = bytesPerPixel;
+  if (m_nbCopyDirtyRects)
+    memcpy(m_copyDirtyRects, dirtyRects,
+      m_nbCopyDirtyRects * sizeof(*m_copyDirtyRects));
 }

@@ -116,6 +116,9 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
   
     D3D12_HEAP_DESC heapDesc = m_ivshmemHeap->GetDesc();
     alignSize = heapDesc.Alignment;
+    m_ivshmemTextureSupported =
+      (heapDesc.Flags & D3D12_HEAP_FLAG_SHARED_CROSS_ADAPTER) &&
+      !(heapDesc.Flags & D3D12_HEAP_FLAG_DENY_NON_RT_DS_TEXTURES);
 
     // test that the heap is usable
     if (!HeapTest())
@@ -128,6 +131,8 @@ CD3D12Device::InitResult CD3D12Device::Init(CIVSHMEM &ivshmem,
     }
 
     DEBUG_INFO("Using IVSHMEM as a D3D12Heap");
+    if (!m_ivshmemTextureSupported)
+      DEBUG_WARN("IVSHMEM heap does not support placed textures");
   }
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,
@@ -205,6 +210,11 @@ bool CD3D12Device::HeapTest()
 CD3D12CommandSlot * CD3D12Device::GetCopySlot(unsigned frameIndex)
 {
   return m_copyQueue.Acquire(frameIndex);
+}
+
+CD3D12CommandSlot * CD3D12Device::GetCopySlot()
+{
+  return m_copyQueue.Acquire();
 }
 
 CD3D12CommandSlot * CD3D12Device::GetComputeSlot(unsigned frameIndex)

@@ -1804,7 +1804,8 @@ int CIndirectDeviceContext::FindNewestCompletedFrame(
 }
 
 bool CIndirectDeviceContext::FrameBufferAvailable(
-  const CFrameScheduler::Schedule& schedule)
+  const CFrameScheduler::Schedule& schedule,
+  bool allowReadyReplacement)
 {
   if (!m_lgmp || !m_frameQueue)
     return false;
@@ -1823,7 +1824,8 @@ bool CIndirectDeviceContext::FrameBufferAvailable(
     const bool ownerBlocked =
       CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN;
     const bool ownerQueuesBlocked = FindAvailableOwnerQueue(0) < 0;
-    allowReady = ownerBlocked || ownerQueuesBlocked;
+    allowReady = allowReadyReplacement &&
+      (ownerBlocked || ownerQueuesBlocked);
   }
   else if (lgmpHostQueuePending(m_frameQueue) != 0)
   {
@@ -1911,7 +1913,8 @@ bool CIndirectDeviceContext::ReplaySharedFrame(uint64_t now, bool& retry)
 CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrameBuffer(
   unsigned pitch, const D12FrameFormat& srcFormat,
   const D12FrameFormat& dstFormat, const RECT * dirtyRects,
-  unsigned nbDirtyRects, const CFrameScheduler::Schedule& schedule)
+  unsigned nbDirtyRects, const CFrameScheduler::Schedule& schedule,
+  bool allowReadyReplacement)
 {
   PreparedFrameBuffer result = {};
 
@@ -1929,8 +1932,9 @@ CIndirectDeviceContext::PreparedFrameBuffer CIndirectDeviceContext::PrepareFrame
   AcquireSRWLockExclusive(&m_framePublishLock);
   const bool ownerBlocked = schedule.clientID &&
     CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN;
-  const bool allowReady = ownerBlocked ||
-    (schedule.clientID && FindAvailableOwnerQueue(0) < 0);
+  const bool allowReady = allowReadyReplacement &&
+    (ownerBlocked ||
+      (schedule.clientID && FindAvailableOwnerQueue(0) < 0));
   const int availableFrameIndex =
     FindAvailableFrameBuffer(allowReady);
   bool expected = false;
@@ -2448,6 +2452,21 @@ void CIndirectDeviceContext::WriteFrameBuffer(unsigned frameIndex, void* src, si
 
   if (setWritePos)
     fb->wp = (uint32_t)(offset + len);
+}
+
+void CIndirectDeviceContext::WriteFrameBufferRows(unsigned frameIndex,
+  void * src, size_t offset, size_t rowBytes, size_t pitch,
+  unsigned rows) const
+{
+  FrameBuffer * fb = m_frameBuffer[frameIndex];
+  uint8_t * dst    = fb->data + offset;
+  uint8_t * source = static_cast<uint8_t *>(src) + offset;
+  for (unsigned row = 0; row < rows; ++row)
+  {
+    memcpy(dst, source, rowBytes);
+    dst    += pitch;
+    source += pitch;
+  }
 }
 
 void CIndirectDeviceContext::FinalizeFrameBuffer(unsigned frameIndex) const

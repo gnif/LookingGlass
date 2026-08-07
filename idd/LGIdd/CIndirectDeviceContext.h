@@ -280,7 +280,8 @@ public:
     bool     fullCopy;
   };
 
-  bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule);
+  bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule,
+    bool allowReadyReplacement = true);
   bool HasPublishedFrame() const
   {
     return m_readyFrameIndex.load(std::memory_order_acquire) >= 0;
@@ -291,7 +292,8 @@ public:
   PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch,
     const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
     const RECT * dirtyRects, unsigned nbDirtyRects,
-    const CFrameScheduler::Schedule& schedule);
+    const CFrameScheduler::Schedule& schedule,
+    bool allowReadyReplacement = true);
   bool PublishFrameBuffer(unsigned frameIndex,
     const CFrameScheduler::Schedule& schedule, bool& deliveredToOwner);
   bool RepublishFrameBuffer(const CFrameScheduler::Schedule& schedule);
@@ -308,6 +310,8 @@ public:
     uint64_t holdTime, const CFrameScheduler::Schedule& schedule,
     uint64_t completedAt);
   void WriteFrameBuffer(unsigned frameIndex, void* src, size_t offset, size_t len, bool setWritePos) const;
+  void WriteFrameBufferRows(unsigned frameIndex, void * src,
+    size_t offset, size_t rowBytes, size_t pitch, unsigned rows) const;
   void FinalizeFrameBuffer(unsigned frameIndex) const;
 
   void ObserveFrame(uint64_t now);

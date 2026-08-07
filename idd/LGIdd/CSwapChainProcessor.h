@@ -106,8 +106,9 @@ private:
   // Capture holds this only across submission; the publisher uses it to
   // close the gate before recording deadline work.
   SRWLOCK             m_copySubmitLock      = SRWLOCK_INIT;
-  uint64_t            m_candidateSequence   = 0;
-  bool                m_publishPending      = false;
+  uint64_t            m_candidateSequence     = 0;
+  bool                m_publishPending        = false;
+  bool                m_directSoftwareTexture = false;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;
@@ -170,12 +171,23 @@ private:
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
   static void CandidateCompletionFunction(
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
+  static void SoftwareCompletionFunction(
+    CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
   void AccumulateFrameDamage(const RECT * dirtyRects, unsigned nbDirtyRects);
+  bool HasPendingDamage();
+  bool TakePendingDamage(RECT dirtyRects[], unsigned * nbDirtyRects);
+  void RestorePendingDamage(const RECT dirtyRects[],
+    unsigned nbDirtyRects, bool hasDamage);
+  void CommitFrameDamage(
+    const RECT dirtyRects[], unsigned nbDirtyRects);
   void SetFullPendingDamage();
 #ifdef HAS_IDDCX_110
   void UpdateHDRMetadata(const IDDCX_METADATA2& metadata);
 #endif
   bool GetContentHDRMetadata(D12FrameFormat& format) const;
+  bool PublishSoftwareFrame(CInteropResource * srcRes,
+    const D12FrameFormat& srcFormat, uint64_t captureTime,
+    uint64_t postProcessStart, bool noImageUpdate);
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
     unsigned dirtyRectCount, unsigned moveRegionCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,
