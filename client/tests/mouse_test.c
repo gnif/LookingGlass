@@ -25,6 +25,8 @@
 #include "test.h"
 #include "util.h"
 
+#include "common/debug.h"
+
 #include <math.h>
 #include <stdarg.h>
 #include <stdint.h>
@@ -870,6 +872,7 @@ static const struct Test tests[] = {
 
 int main(int argc, char ** argv)
 {
+  debug_init();
   lgInput_init();
   lgInput_setFallback(&inputOps, NULL);
 
