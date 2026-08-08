@@ -142,6 +142,7 @@ struct WaylandDSState
   bool fractionalScale;
   bool needsResize;
   bool configured;
+  bool warpSupport;
   struct WlMotion motion;
   double scrollState;
 
