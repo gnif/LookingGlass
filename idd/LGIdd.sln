@@ -6,8 +6,11 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGIdd", "LGIdd\LGIdd.vcxproj", "{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}"
 	ProjectSection(ProjectDependencies) = postProject
 		{0045D7AD-3F26-4B87-81CB-78D18839596D} = {0045D7AD-3F26-4B87-81CB-78D18839596D}
+		{23EC8370-5F3B-4D18-8C31-E89A154F3666} = {23EC8370-5F3B-4D18-8C31-E89A154F3666}
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65} = {FFCC376C-4D98-4B50-B431-E1BBC9C67E65}
 	EndProjectSection
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGInput", "LGInput\LGInput.vcxproj", "{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGMP", "..\repos\LGMP\LGMP.vcxproj", "{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}"
 EndProject
@@ -17,6 +20,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LGCommon", "LGCommon", "{AC
 	ProjectSection(SolutionItems) = preProject
 		LGCommon\CDebug.cpp = LGCommon\CDebug.cpp
 		LGCommon\CDebug.h = LGCommon\CDebug.h
+		LGCommon\CSRWLock.h = LGCommon\CSRWLock.h
 		LGCommon\DefaultDisplayModes.h = LGCommon\DefaultDisplayModes.h
 		LGCommon\PipeMsg.h = LGCommon\PipeMsg.h
 	EndProjectSection
@@ -26,49 +30,55 @@ EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
-		Debug|x86 = Debug|x86
+		Debug-LGInput|x64 = Debug-LGInput|x64
 		Release|x64 = Release|x64
-		Release|x86 = Release|x86
+		Release-LGInput|x64 = Release-LGInput|x64
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x64.ActiveCfg = Debug|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x64.Build.0 = Debug|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x64.Deploy.0 = Debug|x64
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x86.ActiveCfg = Debug|Win32
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x86.Build.0 = Debug|Win32
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug|x86.Deploy.0 = Debug|Win32
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug-LGInput|x64.ActiveCfg = Debug-LGInput|x64
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug-LGInput|x64.Build.0 = Debug-LGInput|x64
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Debug-LGInput|x64.Deploy.0 = Debug-LGInput|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x64.ActiveCfg = Release|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x64.Build.0 = Release|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x64.Deploy.0 = Release|x64
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x86.ActiveCfg = Release|Win32
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x86.Build.0 = Release|Win32
-		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release|x86.Deploy.0 = Release|Win32
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.ActiveCfg = Release-LGInput|x64
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.Build.0 = Release-LGInput|x64
+		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.Deploy.0 = Release-LGInput|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug|x64.ActiveCfg = Debug|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug|x64.Build.0 = Debug|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug-LGInput|x64.ActiveCfg = Debug|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug-LGInput|x64.Build.0 = Debug|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Release|x64.ActiveCfg = Release|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Release|x64.Build.0 = Release|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Release-LGInput|x64.ActiveCfg = Release|x64
+		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Release-LGInput|x64.Build.0 = Release|x64
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug|x64.ActiveCfg = Debug|x64
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug|x64.Build.0 = Debug|x64
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug|x86.ActiveCfg = Debug|Win32
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug|x86.Build.0 = Debug|Win32
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug|x86.Deploy.0 = Debug|Win32
+		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug-LGInput|x64.ActiveCfg = Debug|x64
+		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Debug-LGInput|x64.Build.0 = Debug|x64
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x64.ActiveCfg = Release|x64
 		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x64.Build.0 = Release|x64
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.ActiveCfg = Release|Win32
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.Build.0 = Release|Win32
-		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release|x86.Deploy.0 = Release|Win32
+		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release-LGInput|x64.ActiveCfg = Release|x64
+		{FFCC376C-4D98-4B50-B431-E1BBC9C67E65}.Release-LGInput|x64.Build.0 = Release|x64
 		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x64.ActiveCfg = Debug|x64
 		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x64.Build.0 = Debug|x64
-		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x86.ActiveCfg = Debug|Win32
-		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug|x86.Build.0 = Debug|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug-LGInput|x64.ActiveCfg = Debug|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Debug-LGInput|x64.Build.0 = Debug|x64
 		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x64.ActiveCfg = Release|x64
 		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x64.Build.0 = Release|x64
-		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x86.ActiveCfg = Release|Win32
-		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release|x86.Build.0 = Release|Win32
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release-LGInput|x64.ActiveCfg = Release|x64
+		{0045D7AD-3F26-4B87-81CB-78D18839596D}.Release-LGInput|x64.Build.0 = Release|x64
 		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug|x64.ActiveCfg = Debug|x64
 		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug|x64.Build.0 = Debug|x64
-		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug|x86.ActiveCfg = Debug|Win32
-		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug|x86.Build.0 = Debug|Win32
+		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug-LGInput|x64.ActiveCfg = Debug|x64
+		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Debug-LGInput|x64.Build.0 = Debug|x64
 		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release|x64.ActiveCfg = Release|x64
 		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release|x64.Build.0 = Release|x64
-		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release|x86.ActiveCfg = Release|Win32
-		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release|x86.Build.0 = Release|Win32
+		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release-LGInput|x64.ActiveCfg = Release|x64
+		{23EC8370-5F3B-4D18-8C31-E89A154F3666}.Release-LGInput|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

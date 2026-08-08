@@ -59,7 +59,7 @@ InstallDir "$PROGRAMFILES64\Looking Glass (IDD)"
 
 ;Install and uninstall pages
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "LICENSE.txt"
+!insertmacro MUI_PAGE_LICENSE "LICENSE"
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_INSTFILES
@@ -172,13 +172,16 @@ Section "!Indirect Display Driver (IDD)" Section1
   DetailPrint "Extracting IDD"
   SetOutPath $INSTDIR
   File lgidd.cat
+  File /oname=LGInput.cat "LGInput\LGInput.cat"
   File LGIdd.dll
+  File /oname=LGInput.dll "LGInput\LGInput.dll"
   File LGIdd.inf
+  File /oname=LGInput.inf "LGInput\LGInput.inf"
   File LGIddHelper.exe
   File LGIddInstall.exe
 
   DetailPrint "Extracting support files"
-  File LICENSE.txt
+  File /oname=LICENSE.txt LICENSE
   WriteUninstaller $INSTDIR\uninstaller.exe
 
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
@@ -232,8 +235,11 @@ Section "Uninstall" Section6
   Delete "$INSTDIR\ivshmem.sys"
   Delete "$INSTDIR\ivshmem.pdb"
   Delete "$INSTDIR\lgidd.cat"
+  Delete "$INSTDIR\LGInput.cat"
   Delete "$INSTDIR\LGIdd.dll"
+  Delete "$INSTDIR\LGInput.dll"
   Delete "$INSTDIR\LGIdd.inf"
+  Delete "$INSTDIR\LGInput.inf"
   Delete "$INSTDIR\LGIddHelper.exe"
   Delete "$INSTDIR\LGIddInstall.exe"
   Delete "$INSTDIR\LICENSE.txt"

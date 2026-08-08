@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="12.0"
+  xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|Win32">
+      <Configuration>Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32">
+      <Configuration>Release</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="$(ProjectDir)..\LGCommon\CDebug.cpp">
+      <Link>Common\CDebug.cpp</Link>
+    </ClCompile>
+    <ClCompile Include="CHIDDevice.cpp" />
+    <ClCompile Include="Driver.cpp" />
+    <ClCompile Include="HIDReports.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="$(ProjectDir)..\LGCommon\CDebug.h">
+      <Link>Common\CDebug.h</Link>
+    </ClInclude>
+    <ClInclude Include="$(ProjectDir)..\LGCommon\CSRWLock.h">
+      <Link>Common\CSRWLock.h</Link>
+    </ClInclude>
+    <ClInclude Include="CHIDDevice.h" />
+    <ClInclude Include="Driver.h" />
+    <ClInclude Include="HIDReports.h" />
+    <ClInclude Include="Trace.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="LGInput.inf" />
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}</ProjectGuid>
+    <RootNamespace>LGInput</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <UMDF_VERSION_MAJOR>2</UMDF_VERSION_MAJOR>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">Win32</Platform>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Label="Configuration">
+    <TargetVersion>Windows10</TargetVersion>
+    <DriverTargetPlatform>Universal</DriverTargetPlatform>
+    <DriverType>UMDF</DriverType>
+    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UMDF_VERSION_MINOR>25</UMDF_VERSION_MINOR>
+    <UMDF_MINIMUM_VERSION_REQUIRED>25</UMDF_MINIMUM_VERSION_REQUIRED>
+    <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
+    <Driver_SpectreMitigation>Spectre</Driver_SpectreMitigation>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props"
+      Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')"
+      Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <TargetName>LGInput</TargetName>
+    <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
+    <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WppEnabled>true</WppEnabled>
+      <WppRecorderEnabled>true</WppRecorderEnabled>
+      <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">Trace.h</WppScanConfigurationData>
+      <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\LGCommon;$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib</AdditionalDependencies>
+    </Link>
+    <DriverSign>
+      <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
+    </DriverSign>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <FilesToPackage Include="$(TargetPath)" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+</Project>

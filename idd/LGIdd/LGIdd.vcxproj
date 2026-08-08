@@ -18,6 +18,14 @@
       <Configuration>Release</Configuration>
       <Platform>x64</Platform>
     </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug-LGInput|x64">
+      <Configuration>Debug-LGInput</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release-LGInput|x64">
+      <Configuration>Release-LGInput</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
     <None Include="cpp.hint" />
@@ -109,7 +117,6 @@
     <ClInclude Include="transport\lgmp\CLGMPTransport.h" />
     <ClInclude Include="config\CSettings.h" />
     <ClInclude Include="platform\CPlatformInfo.h" />
-    <ClInclude Include="util\CSRWLock.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="LGIdd.inf" />
@@ -121,8 +128,14 @@
     <MinimumVisualStudioVersion>12.0</MinimumVisualStudioVersion>
     <Configuration>Debug</Configuration>
     <Platform Condition="'$(Platform)' == ''">Win32</Platform>
+    <LGBaseConfiguration Condition="'$(Configuration)'=='Debug-LGInput'">Debug</LGBaseConfiguration>
+    <LGBaseConfiguration Condition="'$(Configuration)'=='Release-LGInput'">Release</LGBaseConfiguration>
+    <LGBaseConfiguration Condition="'$(LGBaseConfiguration)'==''">$(Configuration)</LGBaseConfiguration>
+    <LGInputDeployPackage Condition="'$(Configuration)'=='Debug-LGInput' or '$(Configuration)'=='Release-LGInput'">true</LGInputDeployPackage>
     <RootNamespace>LGIdd</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
+    <LGDriverSolutionDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)\..'))</LGDriverSolutionDir>
+    <SolutionDir Condition="'$(SolutionDir)'==''">$(LGDriverSolutionDir)</SolutionDir>
   </PropertyGroup>
   <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
@@ -134,11 +147,11 @@
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
-  <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+  <PropertyGroup Label="PropertySheets" Condition="'$(LGBaseConfiguration)|$(Platform)'=='Debug|x64'">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
-  <PropertyGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <PropertyGroup Label="PropertySheets" Condition="'$(LGBaseConfiguration)|$(Platform)'=='Release|x64'">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
   </PropertyGroup>
@@ -167,7 +180,7 @@
     <UMDF_MINIMUM_VERSION_REQUIRED>25</UMDF_MINIMUM_VERSION_REQUIRED>
     <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+  <PropertyGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>true</UseDebugLibraries>
     <UMDF_VERSION_MAJOR>2</UMDF_VERSION_MAJOR>
@@ -180,7 +193,7 @@
     <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
     <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+  <PropertyGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <TargetVersion>Windows10</TargetVersion>
     <UseDebugLibraries>false</UseDebugLibraries>
     <UMDF_VERSION_MAJOR>2</UMDF_VERSION_MAJOR>
@@ -208,13 +221,17 @@
     <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+  <PropertyGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Debug|x64'">
     <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <PropertyGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Release|x64'">
     <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+  </PropertyGroup>
+  <PropertyGroup>
+    <LGPackageToolOutDir Condition="'$(Platform)'=='x64'">$([MSBuild]::NormalizeDirectory('$(LGDriverSolutionDir)$(Platform)\$(LGBaseConfiguration)'))</LGPackageToolOutDir>
+    <LGPackageToolOutDir Condition="'$(Platform)'=='Win32'">$([MSBuild]::NormalizeDirectory('$(LGDriverSolutionDir)$(LGBaseConfiguration)'))</LGPackageToolOutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -246,7 +263,7 @@
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
     </DriverSign>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+  <ItemDefinitionGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
@@ -261,7 +278,7 @@
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
     </DriverSign>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+  <ItemDefinitionGroup Condition="'$(LGBaseConfiguration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <WppEnabled>true</WppEnabled>
       <WppRecorderEnabled>true</WppRecorderEnabled>
@@ -278,13 +295,58 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <FilesToPackage Include="$(TargetPath)" />
+    <FilesToPackage Include="$(LGPackageToolOutDir)LGIddHelper.exe" />
+    <FilesToPackage Include="$(LGPackageToolOutDir)LGIddInstall.exe" />
+    <FilesToPackage Include="$(ProjectDir)..\installer.nsi" />
+    <FilesToPackage Include="$(ProjectDir)..\..\resources\icon.ico" />
+    <FilesToPackage Include="$(ProjectDir)..\..\LICENSE" />
+    <FilesToPackage Include="$(ProjectDir)..\LGIddHelper\VERSION" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\LGInput\LGInput.vcxproj">
+      <Project>{2477b25b-cb62-4ad9-a260-ce5f00d77eeb}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <LinkLibraryDependencies>false</LinkLibraryDependencies>
+      <PackageRelativeDirectory>LGInput</PackageRelativeDirectory>
+      <AdditionalProperties Condition="'$(CurrentSolutionConfigurationContents)'==''">Configuration=$(LGBaseConfiguration);Platform=$(Platform);SolutionDir=$(LGDriverSolutionDir)</AdditionalProperties>
+    </ProjectReference>
     <ProjectReference Include="..\..\repos\LGMP\LGMP.vcxproj">
       <Project>{ffcc376c-4d98-4b50-b431-e1bbc9c67e65}</Project>
+      <AdditionalProperties Condition="'$(CurrentSolutionConfigurationContents)'==''">Configuration=$(LGBaseConfiguration);Platform=$(Platform);SolutionDir=$(LGDriverSolutionDir)</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <PropertyGroup>
+    <RemoveDriver>false</RemoveDriver>
+    <InstallMode>CustomCommand</InstallMode>
+    <CommandLine Condition="'$(LGInputDeployPackage)'!='true'">%ComSpec% /d /s /c LGIddInstall.exe install LGIdd LGInput</CommandLine>
+    <CommandLine Condition="'$(LGInputDeployPackage)'=='true'">%ComSpec% /d /s /c LGIddInstall.exe install LGInput LGIdd</CommandLine>
+    <DeployFiles>$(PackageDir)LGIddInstall.exe</DeployFiles>
+  </PropertyGroup>
+  <Target Name="BuildLGIddPackageTools"
+    BeforeTargets="DriverPackageTarget"
+    Condition="'$(CurrentSolutionConfigurationContents)'==''">
+    <MSBuild
+      Projects="$(ProjectDir)..\LGIddHelper\LGIddHelper.vcxproj;$(ProjectDir)..\LGIddInstall\LGIddInstall.vcxproj"
+      Targets="Build"
+      BuildInParallel="false"
+      StopOnFirstFailure="true"
+      Properties="Configuration=$(LGBaseConfiguration);Platform=$(Platform);SolutionDir=$(LGDriverSolutionDir)" />
+  </Target>
+  <Target Name="CleanDriverPackageDirectory" BeforeTargets="DriverPackageTarget">
+    <RemoveDir Directories="$(PackageDir)" />
+  </Target>
+  <PropertyGroup>
+    <LGPeerPackageStageAfterTargets Condition="'$(SignMode)'=='TestSign'">PackageTestSign</LGPeerPackageStageAfterTargets>
+    <LGPeerPackageStageAfterTargets Condition="'$(SignMode)'=='ProductionSign'">PackageProductionSign</LGPeerPackageStageAfterTargets>
+    <LGPeerPackageStageAfterTargets Condition="'$(LGPeerPackageStageAfterTargets)'==''">Inf2Cat</LGPeerPackageStageAfterTargets>
+  </PropertyGroup>
+  <Target Name="StageLGInputDeployPackage" AfterTargets="$(LGPeerPackageStageAfterTargets)">
+    <Error
+      Condition="!Exists('$(PackageDir)LGInput\LGInput.inf') or !Exists('$(PackageDir)LGInput\LGInput.dll') or !Exists('$(PackageDir)LGInput\LGInput.cat')"
+      Text="The deployment package is missing one or more signed LGInput files." />
+    <Copy SourceFiles="$(PackageDir)LGInput\LGInput.inf;$(PackageDir)LGInput\LGInput.dll;$(PackageDir)LGInput\LGInput.cat" DestinationFolder="$(PackageDir)" />
+  </Target>
   <ImportGroup Label="ExtensionTargets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>

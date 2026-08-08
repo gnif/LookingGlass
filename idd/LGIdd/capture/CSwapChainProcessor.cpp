@@ -20,13 +20,13 @@
 
 #include "capture/CSwapChainProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
+#include "CSRWLock.h"
 #include "display/IddCxCompat.h"
 #include "display/CDeviceContext.h"
 #include "display/CMonitorContext.h"
 #include "platform/CPlatformInfo.h"
 #include "transport/IFrameTransport.h"
 #include "transport/IControlTransport.h"
-#include "util/CSRWLock.h"
 
 #include <avrt.h>
 #include <new>

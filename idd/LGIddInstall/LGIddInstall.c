@@ -36,15 +36,74 @@
 
 #define LGIDD_CLASS_GUID GUID_DEVCLASS_DISPLAY
 #define LGIDD_CLASS_NAME L"Display"
+#define LGIDD_NAME L"LGIdd"
 #define LGIDD_HWID L"Root\\LGIdd"
 #define LGIDD_HWID_MULTI_SZ (LGIDD_HWID "\0")
 #define LGIDD_INF_NAME L"LGIdd.inf"
+#define LGIDD_PACKAGE_DIR L"LGIdd"
+#define LGINPUT_CLASS_GUID GUID_DEVCLASS_HIDCLASS
+#define LGINPUT_CLASS_NAME L"HIDClass"
+#define LGINPUT_NAME L"LGInput"
+#define LGINPUT_HWID L"Root\\LGInput"
+#define LGINPUT_HWID_MULTI_SZ (LGINPUT_HWID "\0")
+#define LGINPUT_INF_NAME L"LGInput.inf"
+#define LGINPUT_PACKAGE_DIR L"LGInput"
 #define LGIDD_REGKEY L"Software\\LookingGlass\\IDD"
+#define DEVICE_COUNT 2
+
+typedef struct DeviceDesc
+{
+  const GUID *classGuid;
+  LPCWSTR className;
+  LPCWSTR name;
+  LPCWSTR hardwareId;
+  LPCWSTR hardwareIdMultiSz;
+  DWORD hardwareIdMultiSzSize;
+  LPCWSTR infName;
+  LPCWSTR packageDir;
+}
+DeviceDesc;
+
+static const DeviceDesc LGIDD_DEVICE =
+{
+  .classGuid             = &LGIDD_CLASS_GUID,
+  .className             = LGIDD_CLASS_NAME,
+  .name                  = LGIDD_NAME,
+  .hardwareId            = LGIDD_HWID,
+  .hardwareIdMultiSz     = LGIDD_HWID_MULTI_SZ,
+  .hardwareIdMultiSzSize = sizeof LGIDD_HWID_MULTI_SZ,
+  .infName               = LGIDD_INF_NAME,
+  .packageDir             = LGIDD_PACKAGE_DIR,
+};
+
+static const DeviceDesc LGINPUT_DEVICE =
+{
+  .classGuid             = &LGINPUT_CLASS_GUID,
+  .className             = LGINPUT_CLASS_NAME,
+  .name                  = LGINPUT_NAME,
+  .hardwareId            = LGINPUT_HWID,
+  .hardwareIdMultiSz     = LGINPUT_HWID_MULTI_SZ,
+  .hardwareIdMultiSzSize = sizeof LGINPUT_HWID_MULTI_SZ,
+  .infName               = LGINPUT_INF_NAME,
+  .packageDir             = LGINPUT_PACKAGE_DIR,
+};
 
 void usage(wchar_t *program)
 {
-  wprintf(L"Usage: %s <install|uninstall>\n", program);
+  wprintf(L"Usage: %s install [LGIdd LGInput|LGInput LGIdd]\n", program);
+  wprintf(L"       %s uninstall\n", program);
   exit(2);
+}
+
+const DeviceDesc *getDeviceByName(LPCWSTR name)
+{
+  if (!_wcsicmp(name, LGIDD_DEVICE.name))
+    return &LGIDD_DEVICE;
+
+  if (!_wcsicmp(name, LGINPUT_DEVICE.name))
+    return &LGINPUT_DEVICE;
+
+  return NULL;
 }
 
 void debugWinError(const wchar_t *desc, HRESULT status)
@@ -154,11 +213,18 @@ DWORD deleteKeyTreeHKLM()
   return ec;
 }
 
-typedef bool (*IDD_FOUND_PROC)(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext);
+typedef bool (*DEVICE_FOUND_PROC)(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext);
 
-bool findIddDevice(IDD_FOUND_PROC procFound, void *pContext)
+typedef struct DeviceRemovalContext
 {
-  HDEVINFO hDevInfo = SetupDiGetClassDevsW(&LGIDD_CLASS_GUID, NULL, NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
+  LPBOOL pbNeedRestart;
+  bool success;
+}
+DeviceRemovalContext;
+
+bool findDevice(const DeviceDesc *device, DEVICE_FOUND_PROC procFound, void *pContext)
+{
+  HDEVINFO hDevInfo = SetupDiGetClassDevsW(device->classGuid, NULL, NULL, DIGCF_ALLCLASSES | DIGCF_PRESENT);
   if (hDevInfo == INVALID_HANDLE_VALUE)
   {
     debugWinError(L"SetupDiGetClassDevsW", GetLastError());
@@ -205,7 +271,7 @@ bool findIddDevice(IDD_FOUND_PROC procFound, void *pContext)
 
     for (LPWSTR lpHwId = lpBuffer; *lpHwId; lpHwId += wcslen(lpBuffer) + 1)
     {
-      if (!lstrcmpiW(lpHwId, LGIDD_HWID))
+      if (!lstrcmpiW(lpHwId, device->hardwareId))
       {
         found = true;
         break;
@@ -232,24 +298,24 @@ enum DeviceCreated {
   DEVICE_UNKNOWN,
 };
 
-bool isIddDeviceCreatedEnum(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext)
+bool isDeviceCreatedEnum(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext)
 {
   enum DeviceCreated *result = pContext;
   *result = DEVICE_CREATED;
   return false;
 }
 
-enum DeviceCreated isIddDeviceCreated()
+enum DeviceCreated isDeviceCreated(const DeviceDesc *device)
 {
   enum DeviceCreated result = DEVICE_UNKNOWN;
-  if (findIddDevice(isIddDeviceCreatedEnum, &result) && result == DEVICE_UNKNOWN)
+  if (findDevice(device, isDeviceCreatedEnum, &result) && result == DEVICE_UNKNOWN)
     result = DEVICE_NOT_CREATED;
   return result;
 }
 
-bool createIddDevice(void)
+bool createDevice(const DeviceDesc *device)
 {
-  HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(&LGIDD_CLASS_GUID, NULL);
+  HDEVINFO hDevInfo = SetupDiCreateDeviceInfoList(device->classGuid, NULL);
   if (hDevInfo == INVALID_HANDLE_VALUE)
   {
     debugWinError(L"SetupDiCreateDeviceInfoList", GetLastError());
@@ -257,13 +323,14 @@ bool createIddDevice(void)
   }
 
   SP_DEVINFO_DATA devInfo = { .cbSize = sizeof devInfo, 0 };
-  if (!SetupDiCreateDeviceInfoW(hDevInfo, LGIDD_CLASS_NAME, &LGIDD_CLASS_GUID, NULL, NULL, DICD_GENERATE_ID, &devInfo))
+  if (!SetupDiCreateDeviceInfoW(hDevInfo, device->className, device->classGuid, NULL, NULL, DICD_GENERATE_ID, &devInfo))
   {
     debugWinError(L"SetupDiCreateDeviceInfoW", GetLastError());
     goto fail;
   }
 
-  if (!SetupDiSetDeviceRegistryPropertyW(hDevInfo, &devInfo, SPDRP_HARDWAREID, (PBYTE) LGIDD_HWID_MULTI_SZ, sizeof LGIDD_HWID_MULTI_SZ))
+  if (!SetupDiSetDeviceRegistryPropertyW(hDevInfo, &devInfo, SPDRP_HARDWAREID,
+    (PBYTE) device->hardwareIdMultiSz, device->hardwareIdMultiSzSize))
   {
     debugWinError(L"SetupDiSetDeviceRegistryPropertyW", GetLastError());
     goto fail;
@@ -282,9 +349,9 @@ fail:
   return false;
 }
 
-bool destroyIddDeviceEnum(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void* pContext)
+bool destroyDeviceEnum(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void *pContext)
 {
-  LPBOOL pbNeedRestart = pContext;
+  DeviceRemovalContext *context = pContext;
   BOOL bNeedRestart;
   WCHAR szInfPath[MAX_PATH] = { 0 };
 
@@ -312,40 +379,39 @@ bool destroyIddDeviceEnum(HDEVINFO hDevInfo, PSP_DEVINFO_DATA pDevInfo, void* pC
 
 uninstall:
   if (DiUninstallDevice(NULL, hDevInfo, pDevInfo, 0, &bNeedRestart))
-    *pbNeedRestart |= bNeedRestart;
+    *context->pbNeedRestart |= bNeedRestart;
   else
   {
     debugWinError(L"DiUninstallDevice", GetLastError());
+    context->success = false;
     return true;
   }
 
   if (*szInfPath)
   {
     if (DiUninstallDriverW(NULL, szInfPath, 0, &bNeedRestart))
-      *pbNeedRestart |= bNeedRestart;
+      *context->pbNeedRestart |= bNeedRestart;
     else
+    {
       debugWinError(L"DiUninstallDriverW", GetLastError());
-  }
-
-  DWORD ec = deleteKeyTreeHKLM();
-  if (ec != ERROR_SUCCESS)
-  {
-    debugWinError(L"deleteKeyTreeHKLM failed", ec);
-    // this is non-fatal
+      context->success = false;
+    }
   }
 
   return true;
 }
 
-void destroyIddDevice(LPBOOL pbNeedRestart)
+bool destroyDevice(const DeviceDesc *device, LPBOOL pbNeedRestart)
 {
-  findIddDevice(destroyIddDeviceEnum, pbNeedRestart);
+  DeviceRemovalContext context = { pbNeedRestart, true };
+
+  return findDevice(device, destroyDeviceEnum, &context) && context.success;
 }
 
-bool getIddInfPath(LPWSTR lpszInf)
+bool getInfPath(const DeviceDesc *device, LPWSTR lpszInf)
 {
   WCHAR szDir[MAX_PATH];
-  WCHAR szInf[MAX_PATH];
+  WCHAR szPackageDir[MAX_PATH];
 
   if (!GetModuleFileNameW(NULL, szDir, MAX_PATH))
   {
@@ -354,7 +420,7 @@ bool getIddInfPath(LPWSTR lpszInf)
   }
 
   *PathFindFileNameW(szDir) = 0;
-  if (!PathCombineW(lpszInf, szDir, LGIDD_INF_NAME))
+  if (!PathCombineW(lpszInf, szDir, device->infName))
   {
     debugWinError(L"PathCombineW", GetLastError());
     return false;
@@ -362,18 +428,28 @@ bool getIddInfPath(LPWSTR lpszInf)
 
   if (!PathFileExistsW(lpszInf))
   {
-    fwprintf(stderr, L"INF file does not exist: %s\n", szInf);
-    return false;
+    if (!PathCombineW(szPackageDir, szDir, device->packageDir) ||
+        !PathCombineW(lpszInf, szPackageDir, device->infName))
+    {
+      debugWinError(L"PathCombineW", GetLastError());
+      return false;
+    }
+
+    if (!PathFileExistsW(lpszInf))
+    {
+      fwprintf(stderr, L"INF file does not exist: %s\n", lpszInf);
+      return false;
+    }
   }
 
   return true;
 }
 
-bool installIddInf(PBOOL pbNeedRestart)
+bool installInf(const DeviceDesc *device, PBOOL pbNeedRestart)
 {
   WCHAR szInf[MAX_PATH];
 
-  if (!getIddInfPath(szInf))
+  if (!getInfPath(device, szInf))
     return false;
 
   if (!DiInstallDriverW(NULL, szInf, DIIRFLAG_FORCE_INF, pbNeedRestart))
@@ -385,41 +461,75 @@ bool installIddInf(PBOOL pbNeedRestart)
   return true;
 }
 
-void install()
+void install(const DeviceDesc *const devices[DEVICE_COUNT])
 {
-  switch (isIddDeviceCreated())
+  enum DeviceCreated created[DEVICE_COUNT];
+
+  for (size_t i = 0; i < DEVICE_COUNT; ++i)
   {
-  case DEVICE_NOT_CREATED:
-    wprintf(L"Creating LGIdd device: %s...\n", LGIDD_HWID);
-    if (!createIddDevice())
+    created[i] = isDeviceCreated(devices[i]);
+    if (created[i] == DEVICE_UNKNOWN)
       exit(1);
+  }
 
-    // fallthrough
-  case DEVICE_CREATED:
-    _putws(L"Preparing registry key...");
-    if (!ensureKeyWithAce())
-      exit(1);
-
-    _putws(L"Installing INF...");
-    BOOL bNeedRestart;
-    if (!installIddInf(&bNeedRestart))
-      exit(1);
-
-    if (bNeedRestart)
-    {
-      _putws(L"Restart required to complete installation");
-      exit(12);
-    }
-    break;
-  case DEVICE_UNKNOWN:
+  _putws(L"Preparing registry key...");
+  if (!ensureKeyWithAce())
     exit(1);
+
+  BOOL bNeedRestart = FALSE;
+  BOOL bInfNeedRestart = FALSE;
+
+  for (size_t i = 0; i < DEVICE_COUNT; ++i)
+  {
+    const DeviceDesc *device = devices[i];
+
+    if (created[i] == DEVICE_NOT_CREATED)
+    {
+      wprintf(L"Preinstalling %s INF...\n", device->name);
+      bInfNeedRestart = FALSE;
+      if (!installInf(device, &bInfNeedRestart))
+        exit(1);
+      bNeedRestart |= bInfNeedRestart;
+
+      wprintf(L"Creating %s device: %s...\n", device->name, device->hardwareId);
+      if (!createDevice(device))
+        exit(1);
+    }
+
+    wprintf(L"Installing %s INF...\n", device->name);
+    bInfNeedRestart = FALSE;
+    if (!installInf(device, &bInfNeedRestart))
+      exit(1);
+    bNeedRestart |= bInfNeedRestart;
+  }
+
+  if (bNeedRestart)
+  {
+    _putws(L"Restart required to complete installation");
+    exit(12);
   }
 }
 
 void uninstall()
 {
   BOOL bNeedRestart = 0;
-  destroyIddDevice(&bNeedRestart);
+  bool success = true;
+
+  _putws(L"Uninstalling LGInput...");
+  success &= destroyDevice(&LGINPUT_DEVICE, &bNeedRestart);
+
+  _putws(L"Uninstalling LGIdd...");
+  success &= destroyDevice(&LGIDD_DEVICE, &bNeedRestart);
+
+  DWORD ec = deleteKeyTreeHKLM();
+  if (ec != ERROR_SUCCESS)
+  {
+    debugWinError(L"deleteKeyTreeHKLM failed", ec);
+    // this is non-fatal
+  }
+
+  if (!success)
+    exit(1);
 
   if (bNeedRestart)
   {
@@ -432,13 +542,32 @@ int wmain(int argc, wchar_t **argv)
 {
   _setmode(_fileno(stderr), _O_U16TEXT);
 
-  if (argc != 2)
+  if (argc < 2)
     usage(argv[0]);
 
   if (!wcscmp(argv[1], L"install"))
-    install();
+  {
+    const DeviceDesc *devices[DEVICE_COUNT] = { &LGIDD_DEVICE, &LGINPUT_DEVICE };
+
+    if (argc != 2)
+    {
+      if (argc != 4)
+        usage(argv[0]);
+
+      devices[0] = getDeviceByName(argv[2]);
+      devices[1] = getDeviceByName(argv[3]);
+      if (!devices[0] || !devices[1] || devices[0] == devices[1])
+        usage(argv[0]);
+    }
+
+    install(devices);
+  }
   else if (!wcscmp(argv[1], L"uninstall"))
+  {
+    if (argc != 2)
+      usage(argv[0]);
     uninstall();
+  }
   else
     usage(argv[0]);
 }

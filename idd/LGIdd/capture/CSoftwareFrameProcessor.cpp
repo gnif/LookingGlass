@@ -21,8 +21,8 @@
 #include "capture/CSoftwareFrameProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
 #include "capture/FramePipeline.h"
+#include "CSRWLock.h"
 #include "transport/IFrameTransport.h"
-#include "util/CSRWLock.h"
 #include "CDebug.h"
 
 #include <utility>

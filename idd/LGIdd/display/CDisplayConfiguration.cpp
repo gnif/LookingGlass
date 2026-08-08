@@ -21,7 +21,7 @@
 #include "display/CDisplayConfiguration.h"
 
 #include "CDebug.h"
-#include "util/CSRWLock.h"
+#include "CSRWLock.h"
 
 #include <d3d12.h>
 #include <iterator>

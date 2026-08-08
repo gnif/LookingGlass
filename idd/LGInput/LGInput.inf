@@ -1,0 +1,75 @@
+;
+; LGInput.inf
+;
+
+[Version]
+Signature="$Windows NT$"
+Class=HIDClass
+ClassGuid={745A17A0-74D3-11D0-B6FE-00A0C90F57DA}
+Provider=%ManufacturerName%
+CatalogFile=LGInput.cat
+DriverVer=0.1
+PnpLockdown=1
+
+[Manufacturer]
+%ManufacturerName%=Standard,NT$ARCH$.10.0
+
+[Standard.NT$ARCH$.10.0]
+%DeviceName%=LGInput_Install,Root\LGInput
+
+[LGInput_Install.NT]
+CopyFiles=UMDriverCopy
+
+[LGInput_Install.NT.hw]
+AddReg=LGInput_HardwareSettings
+
+[LGInput_HardwareSettings]
+HKR,,"LowerFilters",0x00010008,"WUDFRd"
+
+[LGInput_Install.NT.Services]
+AddService=WUDFRd,0x000001f8,WUDFRD_ServiceInstall
+AddService=mshidumdf,0x000001fa,mshidumdf_ServiceInstall
+
+[mshidumdf_ServiceInstall]
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\mshidumdf.sys
+
+[WUDFRD_ServiceInstall]
+DisplayName=%WudfRdDisplayName%
+ServiceType=1
+StartType=3
+ErrorControl=1
+ServiceBinary=%12%\WUDFRd.sys
+
+[LGInput_Install.NT.Wdf]
+UmdfService=LGInput,LGInput_ServiceInstall
+UmdfServiceOrder=LGInput
+UmdfKernelModeClientPolicy=AllowKernelModeClients
+UmdfFileObjectPolicy=AllowNullAndUnknownFileObjects
+UmdfMethodNeitherAction=Copy
+UmdfFsContextUsePolicy=CanUseFsContext2
+UmdfHostProcessSharing=ProcessSharingDisabled
+
+[LGInput_ServiceInstall]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%12%\UMDF\LGInput.dll
+
+[DestinationDirs]
+UMDriverCopy=12,UMDF
+
+[UMDriverCopy]
+LGInput.dll
+
+[SourceDisksNames]
+1=%DiskName%
+
+[SourceDisksFiles]
+LGInput.dll=1
+
+[Strings]
+ManufacturerName="Looking Glass"
+DiskName="LGInput Installation Disk"
+DeviceName="Looking Glass"
+WudfRdDisplayName="Windows Driver Foundation - User-mode Driver Framework Reflector"

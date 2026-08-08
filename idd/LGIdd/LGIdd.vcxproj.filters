@@ -193,9 +193,6 @@
     <ClInclude Include="platform\CPlatformInfo.h">
       <Filter>Platform</Filter>
     </ClInclude>
-    <ClInclude Include="util\CSRWLock.h">
-      <Filter>Utilities</Filter>
-    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(SolutionDir)LGCommon\*.cpp">

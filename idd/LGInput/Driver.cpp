@@ -1,0 +1,95 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2026 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "Driver.h"
+#include "Driver.tmh"
+
+#include "CDebug.h"
+#include "CHIDDevice.h"
+
+NTSTATUS DriverEntry(
+  _In_ PDRIVER_OBJECT DriverObject,
+  _In_ PUNICODE_STRING RegistryPath)
+{
+  g_debug.Init(L"looking-glass-input");
+  DEBUG_INFO("Looking Glass Input Driver");
+
+#if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
+  WPP_INIT_TRACING(MYDRIVER_TRACING_ID);
+#else
+  WPP_INIT_TRACING(DriverObject, RegistryPath);
+#endif
+
+  TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
+
+  WDF_DRIVER_CONFIG config;
+  WDF_DRIVER_CONFIG_INIT(&config, LGInputEvtDeviceAdd);
+
+  WDF_OBJECT_ATTRIBUTES attributes;
+  WDF_OBJECT_ATTRIBUTES_INIT(&attributes);
+  attributes.EvtCleanupCallback = LGInputEvtDriverContextCleanup;
+
+  const NTSTATUS status = WdfDriverCreate(
+    DriverObject, RegistryPath, &attributes, &config, WDF_NO_HANDLE);
+  if (!NT_SUCCESS(status))
+  {
+    TraceEvents(
+      TRACE_LEVEL_ERROR,
+      TRACE_DRIVER,
+      "WdfDriverCreate failed %!STATUS!",
+      status);
+#if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
+    WPP_CLEANUP();
+#else
+    WPP_CLEANUP(DriverObject);
+#endif
+    return status;
+  }
+
+  TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Exit");
+  return status;
+}
+
+NTSTATUS LGInputEvtDeviceAdd(
+  _In_ WDFDRIVER Driver,
+  _Inout_ PWDFDEVICE_INIT DeviceInit)
+{
+  UNREFERENCED_PARAMETER(Driver);
+
+  TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
+  const NTSTATUS status = CHIDDevice::Create(DeviceInit);
+  if (!NT_SUCCESS(status))
+    DEBUG_ERROR_HR(status, "Failed to create the HID input device");
+  TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Exit");
+  return status;
+}
+
+VOID LGInputEvtDriverContextCleanup(_In_ WDFOBJECT DriverObject)
+{
+  UNREFERENCED_PARAMETER(DriverObject);
+
+  TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
+
+#if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
+  WPP_CLEANUP();
+#else
+  WPP_CLEANUP(WdfDriverWdmGetDriverObject((WDFDRIVER)DriverObject));
+#endif
+}
