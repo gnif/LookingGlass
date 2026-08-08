@@ -27,6 +27,7 @@
 
 #include "common/framebuffer.h"
 #include "common/types.h"
+#include "interface/input.h"
 
 #define LG_TRANSPORT_MAX_DAMAGE_RECTS LG_MAX_FRAME_DAMAGE_RECTS
 
@@ -244,6 +245,10 @@ typedef struct LG_TransportOps
   void (*disconnect)(LG_Transport * transport);
   bool (*sessionValid)(LG_Transport * transport);
   bool (*supportsDMA)(LG_Transport * transport);
+  /* Queried after connect. The returned operations and opaque value remain
+   * valid until disconnect; NULL indicates that this session has no input. */
+  const LG_InputOps *(*getInputOps)(LG_Transport * transport,
+      void ** opaque);
   bool (*attachRenderer)(LG_Transport * transport,
       const LG_RendererInterop * interop);
   void (*detachRenderer)(LG_Transport * transport);

@@ -241,7 +241,12 @@ void app_mouseTrace(const char * file, unsigned int line,
   (void)format;
 }
 
-bool purespice_mouseMotion(int32_t x, int32_t y)
+bool lgInput_available(void)
+{
+  return g_params.useSpiceInput;
+}
+
+bool lgInput_mouseMotion(int32_t x, int32_t y)
 {
   push(EV_MOTION, x, y, false);
   return true;

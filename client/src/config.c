@@ -419,7 +419,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "captureOnly",
-    .description    = "Only enable input via SPICE if in capture mode",
+    .description    = "Only enable guest input while in capture mode",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
@@ -746,6 +746,12 @@ bool config_load(int argc, char * argv[])
 
   g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
 
+  g_params.scaleMouseInput  = option_get_bool("spice", "scaleCursor");
+  g_params.captureOnStart   = option_get_bool("spice", "captureOnStart");
+  g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
+  g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
+  g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
+
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
   g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
 
@@ -769,12 +775,6 @@ bool config_load(int argc, char * argv[])
       g_params.clipboardToVM    = false;
       g_params.clipboardToLocal = false;
     }
-
-    g_params.scaleMouseInput  = option_get_bool("spice", "scaleCursor");
-    g_params.captureOnStart   = option_get_bool("spice", "captureOnStart");
-    g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
-    g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
-    g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
   }
 
   g_params.audioDebug = option_get_bool("audio", "debug");

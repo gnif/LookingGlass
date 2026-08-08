@@ -1327,6 +1327,13 @@ static LG_TransportStatus lgmp_controlStatus(LG_Transport * this,
     LG_TRANSPORT_OK : LG_TRANSPORT_UNAVAILABLE;
 }
 
+static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
+    void ** opaque)
+{
+  *opaque = NULL;
+  return NULL;
+}
+
 const LG_TransportOps LGT_LGMP =
 {
   .name           = "lgmp",
@@ -1337,6 +1344,7 @@ const LG_TransportOps LGT_LGMP =
   .disconnect     = lgmp_disconnect,
   .sessionValid   = lgmp_sessionValid,
   .supportsDMA    = lgmp_supportsDMA,
+  .getInputOps    = lgmp_getInputOps,
   .attachRenderer = lgmp_attachRenderer,
   .detachRenderer = lgmp_detachRenderer,
   .nextFrame      = lgmp_nextFrame,

@@ -69,6 +69,7 @@
 #include "render_queue.h"
 #include "evdev.h"
 #include "frame_scheduler.h"
+#include "input.h"
 
 #ifdef ENABLE_TESTS
 #include "interface/test_capture.h"
@@ -150,8 +151,8 @@ static void lgInit(void)
   g_cursor.surfaceExit   = false;
   g_cursor.guest.valid   = false;
 
-  // if spice is not in use, hide the local cursor
-  if ((!g_params.useSpiceInput && g_params.hideMouse) || !g_params.showCursorDot)
+  // if guest input is not in use, hide the local cursor
+  if ((!lgInput_available() && g_params.hideMouse) || !g_params.showCursorDot)
     g_state.ds->setPointer(LG_POINTER_NONE);
   else
     g_state.ds->setPointer(LG_POINTER_SQUARE);
@@ -1022,6 +1023,12 @@ static int renderThread(void * unused)
   lgTimerDestroy(tickTimer);
   lgTimerDestroy(fpsTimer);
 
+  if (g_state.transport &&
+      g_state.transportOps->sessionValid(g_state.transport))
+    lgInput_setTransport(NULL, NULL);
+  else
+    lgInput_dropTransport();
+
   core_stopCursorThread();
   core_stopFrameThread();
 
@@ -1058,7 +1065,7 @@ int main_cursorThread(void * unused)
           g_cursor.redraw = false;
           RENDERER(onMouseEvent,
             g_cursor.guest.visible &&
-              (g_cursor.draw || !g_params.useSpiceInput),
+              (g_cursor.draw || !lgInput_available()),
             g_cursor.guest.x, g_cursor.guest.y,
             g_cursor.guest.hx, g_cursor.guest.hy);
           if (!g_state.stopVideo)
@@ -1067,6 +1074,8 @@ int main_cursorThread(void * unused)
         continue;
       }
 
+      if (status == LG_TRANSPORT_DISCONNECTED)
+        lgInput_dropTransport();
       app_setState(status == LG_TRANSPORT_DISCONNECTED ?
         APP_STATE_RESTART : APP_STATE_SHUTDOWN);
       if (status != LG_TRANSPORT_DISCONNECTED)
@@ -1075,7 +1084,7 @@ int main_cursorThread(void * unused)
     }
 
     const bool wasRendered = g_cursor.guest.visible &&
-      (g_cursor.draw || !g_params.useSpiceInput);
+      (g_cursor.draw || !lgInput_available());
     bool hotspotChanged = false;
 
     if (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
@@ -1156,12 +1165,12 @@ int main_cursorThread(void * unused)
     app_updateMouseState();
     g_cursor.redraw = false;
     RENDERER(onMouseEvent,
-      g_cursor.guest.visible && (g_cursor.draw || !g_params.useSpiceInput),
+      g_cursor.guest.visible && (g_cursor.draw || !lgInput_available()),
       g_cursor.guest.x, g_cursor.guest.y,
       g_cursor.guest.hx, g_cursor.guest.hy);
 
     const bool isRendered = g_cursor.guest.visible &&
-      (g_cursor.draw || !g_params.useSpiceInput);
+      (g_cursor.draw || !lgInput_available());
     const bool contentChanged =
       (pointer.flags & (LG_TRANSPORT_POINTER_SHAPE |
         LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) || whiteLevelChanged;
@@ -1211,7 +1220,10 @@ int main_frameThread(void * unused)
         continue;
       }
       if (status == LG_TRANSPORT_DISCONNECTED)
+      {
+        lgInput_dropTransport();
         app_setState(APP_STATE_RESTART);
+      }
       else if (status == LG_TRANSPORT_END)
         app_setState(APP_STATE_SHUTDOWN);
       else
@@ -1484,9 +1496,10 @@ static void checkUUID(void)
   app_msgBox(
       "SPICE Configuration Error",
       "You have connected SPICE to the wrong guest.\n"
-      "Input will not function until this is corrected.");
+      "SPICE input will not function until this is corrected.");
 
   g_params.useSpiceInput = false;
+  lgInput_setFallback(NULL, NULL);
   atomic_store_explicit(&g_state.spiceClose, true, memory_order_release);
   purespice_disconnect();
 }
@@ -1494,6 +1507,9 @@ static void checkUUID(void)
 void spiceReady(void)
 {
   atomic_store_explicit(&g_state.spiceReady, true, memory_order_release);
+  if (g_params.useSpiceInput)
+    lgInput_setFallback(&LGI_Spice, NULL);
+
   if (atomic_load_explicit(&g_state.spiceDisplayRequested,
         memory_order_acquire))
     app_useSpiceDisplay(true);
@@ -1525,7 +1541,7 @@ void spiceReady(void)
     DEBUG_WARN("Failed to obtain SPICE server information");
 
   if (g_params.useSpiceInput)
-    keybind_spiceRegister();
+    keybind_inputRegister();
 
   lgSignalEvent(e_spice);
 }
@@ -1759,27 +1775,12 @@ int spiceThread(void * arg)
     }
   }
 
-  // send key up events for any pressed keys
-  if (g_params.useSpiceInput)
-  {
-    for(int scancode = 0; scancode < KEY_MAX; ++scancode)
-      if (atomic_load_explicit(
-            &g_state.keyDown[scancode], memory_order_relaxed))
-      {
-        const uint32_t ps2 = linux_to_ps2[scancode];
-        if (ps2 && purespice_keyUp(ps2))
-          atomic_store_explicit(
-              &g_state.keyDown[scancode], false, memory_order_relaxed);
-        else
-          DEBUG_ERROR("Failed to release key %d during SPICE shutdown",
-              scancode);
-      }
-  }
-
+  lgInput_setFallback(NULL, NULL);
   purespice_disconnect();
 
 end:
 
+  lgInput_setFallback(NULL, NULL);
   audio_free();
 
   // if the connection was disconnected intentionally we don't want to shutdown
@@ -1890,6 +1891,7 @@ static int lg_run(void)
 {
   LG_LOCK_INIT(l_cursorRepaint.lock);
   frameTimingInit();
+  lgInput_init();
 
 #ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
@@ -2355,8 +2357,13 @@ restart:
   g_state.transportFeatures = session.features;
   frameScheduler_start(session.features);
 
-  if (g_state.spiceReady && g_params.useSpiceInput)
-    keybind_spiceRegister();
+  void              * inputOpaque = NULL;
+  const LG_InputOps * inputOps    = g_state.transportOps->getInputOps ?
+    g_state.transportOps->getInputOps(g_state.transport, &inputOpaque) : NULL;
+  lgInput_setTransport(inputOps, inputOpaque);
+
+  if (lgInput_available())
+    keybind_inputRegister();
   checkUUID();
   DEBUG_INFO("Starting session");
   atomic_store_explicit(
@@ -2371,6 +2378,7 @@ restart:
   {
     if (unlikely(!g_state.transportOps->sessionValid(g_state.transport)))
     {
+      lgInput_dropTransport();
       atomic_store_explicit(
           &g_state.lgHostConnected, false, memory_order_release);
       DEBUG_INFO("Waiting for the host to restart...");
@@ -2391,6 +2399,7 @@ restart:
 
     core_stopFrameThread();
     core_stopCursorThread();
+    lgInput_dropTransport();
     g_state.transportOps->disconnect(g_state.transport);
 
     app_setState(APP_STATE_RUNNING);
@@ -2435,7 +2444,12 @@ static void lg_shutdown(void)
   LG_LOCK_FREE(l_cursorRepaint.lock);
 
   if (g_state.transportOps)
+  {
+    lgInput_dropTransport();
     g_state.transportOps->destroy(&g_state.transport);
+  }
+
+  lgInput_free();
 
   if (g_state.frameEvent)
   {

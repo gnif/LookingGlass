@@ -99,8 +99,6 @@ struct AppState
   int                  escapeAction;
   bool                 escapeHelp;
   struct ll          * bindings;
-  atomic_bool          keyDown[KEY_MAX];
-
   bool                 haveSrcSize;
   struct Point         windowPos;
   int                  windowW, windowH;

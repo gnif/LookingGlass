@@ -24,6 +24,7 @@
 #include "util.h"
 #include "kb.h"
 #include "message.h"
+#include "input.h"
 
 #include "common/time.h"
 #include "common/debug.h"
@@ -132,7 +133,7 @@ static bool moveExit(double ex, double ey)
 
 bool core_inputEnabled(void)
 {
-  return g_params.useSpiceInput && !g_state.ignoreInput &&
+  return lgInput_available() && !g_state.ignoreInput &&
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
@@ -719,7 +720,7 @@ void core_handleMouseGrabbed(double ex, double ey)
   if (x == 0 && y == 0)
     return;
 
-  if (!purespice_mouseMotion(x, y))
+  if (!lgInput_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
@@ -737,9 +738,9 @@ void core_handleMouseNormal(double ex, double ey)
       // wiggle the mouse when the guest has not provided any information, we need
       // to do this because windows doesn't enable a cursor at all until it has
       // been moved for the first time.
-      if (!purespice_mouseMotion(1, 1))
+      if (!lgInput_mouseMotion(1, 1))
         DEBUG_ERROR("failed to send mouse motion message");
-      if (!purespice_mouseMotion(-1, -1))
+      if (!lgInput_mouseMotion(-1, -1))
         DEBUG_ERROR("failed to send mouse motion message");
     }
     return;
@@ -985,7 +986,7 @@ fallback:
       x, y, g_cursor.guest.x, g_cursor.guest.y, didExit, testExit,
       g_cursor.warpState);
 
-  if (!purespice_mouseMotion(x, y))
+  if (!lgInput_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 

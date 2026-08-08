@@ -727,6 +727,13 @@ static LG_TransportStatus test_controlStatus(LG_Transport * this,
     LG_TRANSPORT_DISCONNECTED;
 }
 
+static const LG_InputOps * test_getInputOps(LG_Transport * this,
+    void ** opaque)
+{
+  *opaque = NULL;
+  return NULL;
+}
+
 const LG_TransportOps LGT_Test =
 {
   .name           = "test",
@@ -737,6 +744,7 @@ const LG_TransportOps LGT_Test =
   .disconnect     = test_disconnect,
   .sessionValid   = test_sessionValid,
   .supportsDMA    = test_supportsDMA,
+  .getInputOps    = test_getInputOps,
   .attachRenderer = test_attachRenderer,
   .detachRenderer = test_detachRenderer,
   .nextFrame      = test_nextFrame,

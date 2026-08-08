@@ -26,6 +26,7 @@
 #include "clipboard.h"
 #include "render_queue.h"
 #include "evdev.h"
+#include "input.h"
 
 #include "kb.h"
 
@@ -236,9 +237,7 @@ void app_handleFocusEvent(bool focused)
     core_setCursorInView(false);
 
     if (g_params.releaseKeysOnFocusLoss)
-      for (int key = 0; key < KEY_MAX; key++)
-        if (atomic_load_explicit(&g_state.keyDown[key], memory_order_relaxed))
-          app_handleKeyReleaseInternal(key);
+      lgInput_releaseKeys();
 
     g_state.escapeActive = false;
 
@@ -472,7 +471,7 @@ void app_handleButtonPress(int button)
   if (!core_inputEnabled() || !g_cursor.inView || !g_cursor.viewReq)
     return;
 
-  if (!purespice_mousePress(button))
+  if (!lgInput_mousePress(button))
     DEBUG_ERROR("app_handleButtonPress: failed to send message");
 }
 
@@ -495,7 +494,7 @@ void app_handleButtonRelease(int button)
   if (!core_inputEnabled())
     return;
 
-  if (!purespice_mouseRelease(button))
+  if (!lgInput_mouseRelease(button))
     DEBUG_ERROR("app_handleButtonRelease: failed to send message");
 }
 
@@ -551,20 +550,8 @@ void app_handleKeyPressInternal(int sc)
   if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
-  if (!atomic_load_explicit(&g_state.keyDown[sc], memory_order_relaxed))
-  {
-    uint32_t ps2 = linux_to_ps2[sc];
-    if (!ps2)
-      return;
-
-    if (purespice_keyDown(ps2))
-      atomic_store_explicit(&g_state.keyDown[sc], true, memory_order_relaxed);
-    else
-    {
-      DEBUG_ERROR("app_handleKeyPress: failed to send message");
-      return;
-    }
-  }
+  if (!lgInput_keyDown(sc))
+    DEBUG_ERROR("app_handleKeyPress: failed to send message");
 }
 
 void app_handleKeyReleaseInternal(int sc)
@@ -573,7 +560,7 @@ void app_handleKeyReleaseInternal(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (!g_state.escapeHelp && g_params.useSpiceInput &&
+      if (!g_state.escapeHelp && lgInput_available() &&
           !app_isOverlayMode())
         core_setGrab(!g_cursor.grab);
     }
@@ -592,24 +579,11 @@ void app_handleKeyReleaseInternal(int sc)
   if (!core_inputEnabled())
     return;
 
-  // avoid sending key up events when we didn't send a down
-  if (!atomic_load_explicit(&g_state.keyDown[sc], memory_order_relaxed))
-    return;
-
   if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
     return;
 
-  uint32_t ps2 = linux_to_ps2[sc];
-  if (!ps2)
-    return;
-
-  if (purespice_keyUp(ps2))
-    atomic_store_explicit(&g_state.keyDown[sc], false, memory_order_relaxed);
-  else
-  {
+  if (!lgInput_keyUp(sc))
     DEBUG_ERROR("app_handleKeyRelease: failed to send message");
-    return;
-  }
 }
 
 void app_handleKeyPress(int sc)
@@ -643,12 +617,7 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
   if (!core_inputEnabled())
     return;
 
-  uint32_t modifiers =
-    (scrollLock ? 1 /* SPICE_SCROLL_LOCK_MODIFIER */ : 0) |
-    (numLock    ? 2 /* SPICE_NUM_LOCK_MODIFIER    */ : 0) |
-    (capsLock   ? 4 /* SPICE_CAPS_LOCK_MODIFIER   */ : 0);
-
-  if (!purespice_keyModifiers(modifiers))
+  if (!lgInput_keyboardLEDs(numLock, capsLock, scrollLock))
     DEBUG_ERROR("app_handleKeyboardLEDs: failed to send message");
 }
 
@@ -716,7 +685,7 @@ void app_handleMouseBasic(void)
   g_cursor.projected.x += x;
   g_cursor.projected.y += y;
 
-  if (!purespice_mouseMotion(x, y))
+  if (!lgInput_mouseMotion(x, y))
     DEBUG_ERROR("failed to send mouse motion message");
 }
 
@@ -1395,6 +1364,7 @@ bool app_useSpiceDisplay(bool enable)
   active = enable;
   atomic_store_explicit(&g_state.spiceDisplayActive, active,
       memory_order_release);
+  lgInput_useTransport(!active);
   overlayStatus_set(LG_USER_STATUS_SPICE, enable);
 
 done:

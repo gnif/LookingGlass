@@ -34,6 +34,50 @@ typedef atomic_flag LG_Lock;
   atomic_flag_clear_explicit(&(x), memory_order_release);
 #define LG_LOCK_FREE(x)
 
+typedef struct LG_RWLock
+{
+  atomic_uint readers;
+  atomic_uint writers;
+  atomic_flag writer;
+}
+LG_RWLock;
+
+#define LG_RWLOCK_INIT(x) do { \
+  atomic_init(&(x).readers, 0); \
+  atomic_init(&(x).writers, 0); \
+  atomic_flag_clear(&(x).writer); \
+} while (0)
+
+#define LG_LOCK_SHARED(x) do { \
+  for (;;) \
+  { \
+    while (atomic_load_explicit( \
+        &(x).writers, memory_order_seq_cst)) { ; } \
+    atomic_fetch_add_explicit(&(x).readers, 1, memory_order_seq_cst); \
+    if (!atomic_load_explicit(&(x).writers, memory_order_seq_cst)) \
+      break; \
+    atomic_fetch_sub_explicit(&(x).readers, 1, memory_order_seq_cst); \
+  } \
+} while (0)
+
+#define LG_UNLOCK_SHARED(x) \
+  atomic_fetch_sub_explicit(&(x).readers, 1, memory_order_seq_cst)
+
+#define LG_LOCK_EXCLUSIVE(x) do { \
+  atomic_fetch_add_explicit(&(x).writers, 1, memory_order_seq_cst); \
+  while (atomic_flag_test_and_set_explicit( \
+      &(x).writer, memory_order_seq_cst)) { ; } \
+  while (atomic_load_explicit( \
+      &(x).readers, memory_order_seq_cst)) { ; } \
+} while (0)
+
+#define LG_UNLOCK_EXCLUSIVE(x) do { \
+  atomic_flag_clear_explicit(&(x).writer, memory_order_seq_cst); \
+  atomic_fetch_sub_explicit(&(x).writers, 1, memory_order_seq_cst); \
+} while (0)
+
+#define LG_RWLOCK_FREE(x)
+
 #define INTERLOCKED_INC(x) atomic_fetch_add((x), 1)
 #define INTERLOCKED_DEC(x) atomic_fetch_sub((x), 1)
 

@@ -24,10 +24,10 @@
 #include "app.h"
 #include "audio.h"
 #include "core.h"
+#include "input.h"
 #include "kb.h"
 #include "message.h"
 
-#include <purespice.h>
 #include <stdio.h>
 
 static void bind_fullscreen(int sc, void * opaque)
@@ -96,23 +96,19 @@ static void bind_mouseSens(int sc, void * opaque)
 
 static void bind_ctrlAltFn(int sc, void * opaque)
 {
-  const uint32_t ctrl = linux_to_ps2[KEY_LEFTCTRL];
-  const uint32_t alt  = linux_to_ps2[KEY_LEFTALT ];
-  const uint32_t fn   = linux_to_ps2[sc];
-  purespice_keyDown(ctrl);
-  purespice_keyDown(alt );
-  purespice_keyDown(fn  );
+  lgInput_keyDown(KEY_LEFTCTRL);
+  lgInput_keyDown(KEY_LEFTALT);
+  lgInput_keyDown(sc);
 
-  purespice_keyUp(ctrl);
-  purespice_keyUp(alt );
-  purespice_keyUp(fn  );
+  lgInput_keyUp(KEY_LEFTCTRL);
+  lgInput_keyUp(KEY_LEFTALT);
+  lgInput_keyUp(sc);
 }
 
 static void bind_passthrough(int sc, void * opaque)
 {
-  sc = linux_to_ps2[sc];
-  purespice_keyDown(sc);
-  purespice_keyUp  (sc);
+  lgInput_keyDown(sc);
+  lgInput_keyUp  (sc);
 }
 
 static void bind_toggleOverlay(int sc, void * opaque)
@@ -122,8 +118,9 @@ static void bind_toggleOverlay(int sc, void * opaque)
 
 static void bind_toggleKey(int sc, void * opaque)
 {
-  purespice_keyDown((uintptr_t) opaque);
-  purespice_keyUp((uintptr_t) opaque);
+  const int key = (uintptr_t) opaque;
+  lgInput_keyDown(key);
+  lgInput_keyUp(key);
 }
 
 static void bind_setGuestRes(int sc, void * opaque)
@@ -183,25 +180,25 @@ static void bind_toggleMicDefault(int sc, void * opaque)
 }
 #endif
 
-void keybind_spiceRegister(void)
+void keybind_inputRegister(void)
 {
-  /* register the common keybinds for spice */
+  /* register the common input keybinds */
   static bool firstTime = true;
   if (firstTime)
   {
     app_registerKeybind(KEY_I, bind_input, NULL,
-        "Spice keyboard & mouse toggle");
+        "Keyboard & mouse toggle");
 
     app_registerKeybind(KEY_INSERT, bind_mouseSens, (void *) true,
         "Increase mouse sensitivity in capture mode");
     app_registerKeybind(KEY_DELETE, bind_mouseSens, (void *) false,
         "Decrease mouse sensitivity in capture mode");
 
-    app_registerKeybind(KEY_UP, bind_toggleKey, (void *) PS2_VOLUME_UP,
+    app_registerKeybind(KEY_UP, bind_toggleKey, (void *) KEY_VOLUMEUP,
         "Send volume up to the guest");
-    app_registerKeybind(KEY_DOWN, bind_toggleKey, (void *) PS2_VOLUME_DOWN,
+    app_registerKeybind(KEY_DOWN, bind_toggleKey, (void *) KEY_VOLUMEDOWN,
         "Send volume down to the guest");
-    app_registerKeybind(KEY_M, bind_toggleKey, (void *) PS2_MUTE,
+    app_registerKeybind(KEY_M, bind_toggleKey, (void *) KEY_MUTE,
         "Send mute to the guest");
 
     app_registerKeybind(KEY_LEFTMETA, bind_passthrough, NULL,

@@ -167,6 +167,8 @@ set(SOURCES
   src/render_queue.c
   src/evdev.c
   src/transport.c
+  src/input.c
+  src/input_spice.c
 
   src/overlay/splash.c
   src/overlay/alert.c
