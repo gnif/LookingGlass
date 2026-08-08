@@ -325,10 +325,7 @@ void core_setGrabQuiet(bool enable)
       if (!g_params.captureInputOnly)
         applyView(g_state.ds->isPointerGrabbed(), false);
 
-      /* if exiting capture when input on capture only we need to align the
-       * local cursor to the guest's location before it is shown. */
-      if (g_params.captureInputOnly || !g_params.hideMouse)
-        core_alignToGuest();
+      core_alignToGuest();
     }
   }
 }
