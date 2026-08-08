@@ -26,234 +26,73 @@ CPipeServer g_pipe;
 
 bool CPipeServer::Init()
 {
-  _DeInit();
-
-  m_pipe.Attach(CreateNamedPipeA(
+  m_endpoint.SetHandler(this);
+  return m_endpoint.Start(
     LG_PIPE_NAME,
-    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-    PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
-    1,
-    1024,
-    1024,
-    0,
-    NULL));
-
-  if (!m_pipe.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create the named pipe");
-    return false;
-  }
-
-  m_signal.Attach(CreateEvent(NULL, TRUE, FALSE, NULL));
-  if (!m_signal.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create pipe signal event");
-    return false;
-  }
-
-  m_running = true;
-  m_thread.Attach(CreateThread(
-    NULL,
-    0,
-    _pipeThread,
-    (LPVOID)this,
-    0,
-    NULL));
-
-  if (!m_thread.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create the pipe thread");
-    return false;
-  }
-
-  DEBUG_TRACE("Pipe Initialized");
-  return true;
-}
-
-void CPipeServer::_DeInit()
-{
-  m_running = false;
-  m_connected = false;
-  if (m_signal.IsValid())
-    SetEvent(m_signal.Get());
-
-  if (m_thread.IsValid())
-  {
-    WaitForSingleObject(m_thread.Get(), INFINITE);
-    m_thread.Close();
-  }
-
-  if (m_pipe.IsValid())
-  {
-    FlushFileBuffers(m_pipe.Get());
-    m_pipe.Close();
-  }
-
-  m_signal.Close();
+    CPipeEndpoint::Mode::Server,
+    sizeof(LGPipeMsg));
 }
 
 void CPipeServer::DeInit()
-{  
-  DEBUG_TRACE("Pipe Stopping");
-  _DeInit();
-  DEBUG_TRACE("Pipe Stopped");
+{
+  m_endpoint.Stop();
 }
 
-void CPipeServer::Thread()
+void CPipeServer::OnPipeConnected()
 {
-  DEBUG_TRACE("Pipe thread started");
+  AcquireSRWLockExclusive(&m_queueLock);
+  std::vector<LGPipeMsg> queued;
+  queued.swap(m_queue);
 
-  HandleT<EventTraits> ioEvent(CreateEvent(NULL, TRUE, FALSE, NULL));
-  if (!ioEvent.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Can't create event for overlapped I/O!");
-    WaitForSingleObject(m_signal.Get(), 5000);
-    return;
-  }
-
-  while(m_running)
-  {
-    m_connected = false;
-
-    OVERLAPPED overlapped = { 0 };
-    overlapped.hEvent = ioEvent.Get();
-
-    if (!ConnectNamedPipe(m_pipe.Get(), &overlapped))
+  for (size_t i = 0; i < queued.size(); ++i)
+    if (!m_endpoint.Send(&queued[i], sizeof(queued[i])))
     {
-      DWORD dwError = GetLastError();
-      switch (dwError) {
-      case ERROR_PIPE_CONNECTED:
-        break;
-      case ERROR_IO_PENDING:
-      {
-        HANDLE hWait[] = { ioEvent.Get(), m_signal.Get() };
-        switch (WaitForMultipleObjects(2, hWait, FALSE, INFINITE))
-        {
-        case WAIT_OBJECT_0:
-          break;
-        case WAIT_OBJECT_0 + 1:
-          DEBUG_INFO("Connect interrupted by signal");
-          CancelIo(m_pipe.Get());
-          WaitForSingleObject(ioEvent.Get(), INFINITE);
-          continue;
-        }
-        break;
-      }
-      default:
-        DEBUG_ERROR_HR(dwError, "Error connecting to the named pipe");
-        goto end;
-      }
+      for (; i < queued.size(); ++i)
+        QueueMsgLocked(queued[i]);
+      break;
+    }
+  ReleaseSRWLockExclusive(&m_queueLock);
+}
+
+bool CPipeServer::OnPipeMessage(const void * message, size_t size)
+{
+  if (size != sizeof(LGPipeMsg))
+    return false;
+
+  const LGPipeMsg & msg = *static_cast<const LGPipeMsg *>(message);
+  if (msg.size != sizeof(msg))
+    return false;
+
+  switch (msg.type)
+  {
+    case LGPipeMsg::RELOADSETTINGS:
+      HandleReloadSettings();
+      return true;
+
+    default:
+      DEBUG_ERROR("Unknown message type %d", msg.type);
+      return true;
+  }
+}
+
+void CPipeServer::QueueMsgLocked(const LGPipeMsg & msg)
+{
+  for (LGPipeMsg & queued : m_queue)
+    if (queued.type == msg.type)
+    {
+      queued = msg;
+      return;
     }
 
-    DEBUG_TRACE("Client connected");
-
-    m_connected = true;
-
-    for (const auto& msg : m_queue)
-      WriteMsg(msg);
-    m_queue.clear();
-
-    while (m_running && m_connected)
-    {
-      LGPipeMsg msg;
-
-      if (!ReadFile(m_pipe.Get(), &msg, sizeof(msg), NULL, &overlapped))
-      {
-        DWORD dwError = GetLastError();
-        if (dwError != ERROR_IO_PENDING)
-        {
-          DEBUG_ERROR_HR(dwError, "ReadFile Failed");
-          break;
-        }
-
-        HANDLE hWait[] = { ioEvent.Get(), m_signal.Get() };
-        switch (WaitForMultipleObjects(2, hWait, FALSE, INFINITE))
-        {
-        case WAIT_OBJECT_0:
-          break;
-        case WAIT_OBJECT_0 + 1:
-          DEBUG_INFO("I/O interrupted by signal");
-          CancelIo(m_pipe.Get());
-          WaitForSingleObject(ioEvent.Get(), INFINITE);
-          continue;
-        }
-      }
-
-      DWORD bytesRead;
-      GetOverlappedResult(m_pipe.Get(), &overlapped, &bytesRead, TRUE);
-
-      if (bytesRead != sizeof(msg))
-      {
-        DEBUG_ERROR("Corrupted data, expected %lld bytes, read %lld bytes", sizeof msg, bytesRead);
-        break;
-      }
-
-      if (msg.size != sizeof(msg))
-      {
-        DEBUG_ERROR("Corrupted data, expected %lld bytes, actual message size: %lld bytes", sizeof msg, msg.size);
-        break;
-      }
-
-      switch (msg.type)
-      {
-      case LGPipeMsg::RELOADSETTINGS:
-        HandleReloadSettings();
-        break;
-
-      default:
-        DEBUG_ERROR("Unknown message type %d", msg.type);
-        break;
-      }
-    }
-
-    DEBUG_TRACE("Client disconnected");
-    DisconnectNamedPipe(m_pipe.Get());
-
-    if (m_running)
-      ResetEvent(m_signal.Get());
-  }
-
-end:
-  m_running   = false;
-  m_connected = false;
-  DEBUG_TRACE("Pipe thread shutdown");
+  m_queue.push_back(msg);
 }
 
 void CPipeServer::WriteMsg(const LGPipeMsg & msg)
 {
-  if (!m_connected)
-  {
-    // Not connected yet: keep only the latest message of each type. These are
-    // all latest-state-wins messages, so a burst (e.g. display mode changes
-    // while resizing) must collapse to the final state rather than replay every
-    // intermediate value when the helper reconnects.
-    for (auto & queued : m_queue)
-      if (queued.type == msg.type)
-      {
-        queued = msg;
-        return;
-      }
-    m_queue.push_back(msg);
-    return;
-  }
-
-  DWORD written;
-  if (!WriteFile(m_pipe.Get(), &msg, sizeof(msg), &written, NULL))
-  {
-    DWORD err = GetLastError();
-    if (err == ERROR_BROKEN_PIPE || err == ERROR_NO_DATA)
-    {
-      DEBUG_WARN_HR(err, "Client disconnected, failed to write");
-      m_connected = false;
-      SetEvent(m_signal.Get());
-      return;
-    }
-
-    DEBUG_WARN_HR(err, "WriteFile failed on the pipe");
-    return;
-  }
-
-  FlushFileBuffers(m_pipe.Get());
+  AcquireSRWLockExclusive(&m_queueLock);
+  if (!m_endpoint.Send(&msg, sizeof(msg)))
+    QueueMsgLocked(msg);
+  ReleaseSRWLockExclusive(&m_queueLock);
 }
 
 void CPipeServer::HandleReloadSettings()
@@ -276,7 +115,7 @@ void CPipeServer::SetDeviceContext(CDeviceContext * context)
 void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
 {
   // do not send cursor messages if we are not connected or they will end up queued
-  if (!m_connected)
+  if (!m_endpoint.IsConnected())
     return;
 
   LGPipeMsg msg = {};
@@ -284,7 +123,9 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
   msg.type       = LGPipeMsg::SETCURSORPOS;
   msg.curorPos.x = x;
   msg.curorPos.y = y;
-  WriteMsg(msg);
+  // Cursor position is transient. If the connection is lost during this
+  // write, drop it instead of replaying stale coordinates after reconnect.
+  m_endpoint.Send(&msg, sizeof(msg));
 }
 
 void CPipeServer::SetDisplayMode(

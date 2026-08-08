@@ -32,9 +32,9 @@
     <None Include="packages.config" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp" />
     <ClCompile Include="Device.cpp" />
     <ClCompile Include="Driver.cpp" />
+    <ClCompile Include="ipc\CInputPipeServer.cpp" />
     <ClCompile Include="ipc\CPipeServer.cpp" />
     <ClCompile Include="display\CDisplayConfiguration.cpp" />
     <ClCompile Include="display\CEdid.cpp" />
@@ -70,11 +70,11 @@
     <ClCompile Include="platform\CPlatformInfo.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(SolutionDir)LGCommon\*.h" />
     <ClInclude Include="Device.h" />
     <ClInclude Include="Driver.h" />
     <ClInclude Include="Public.h" />
     <ClInclude Include="Trace.h" />
+    <ClInclude Include="ipc\CInputPipeServer.h" />
     <ClInclude Include="ipc\CPipeServer.h" />
     <ClInclude Include="display\CDisplayConfiguration.h" />
     <ClInclude Include="display\CEdid.h" />
@@ -303,6 +303,12 @@
     <FilesToPackage Include="$(ProjectDir)..\LGIddHelper\VERSION" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\LGCommon\LGCommon.vcxproj">
+      <Project>{acb90e34-01ca-4b86-813b-3d20904994c6}</Project>
+      <SetConfiguration Condition="'$(CurrentSolutionConfigurationContents)'==''">Configuration=$(LGBaseConfiguration)</SetConfiguration>
+      <SetPlatform Condition="'$(CurrentSolutionConfigurationContents)'==''">Platform=$(Platform)</SetPlatform>
+      <AdditionalProperties Condition="'$(CurrentSolutionConfigurationContents)'==''">SolutionDir=$(LGDriverSolutionDir)</AdditionalProperties>
+    </ProjectReference>
     <ProjectReference Include="..\LGInput\LGInput.vcxproj">
       <Project>{2477b25b-cb62-4ad9-a260-ce5f00d77eeb}</Project>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>

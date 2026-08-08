@@ -8,8 +8,8 @@
     <Filter Include="HID">
       <UniqueIdentifier>{D9688549-A0BE-46E6-8FAB-AE454D90E0FA}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Common">
-      <UniqueIdentifier>{938E49D6-F954-4EBE-80AB-E0F67E677F27}</UniqueIdentifier>
+    <Filter Include="IPC">
+      <UniqueIdentifier>{6A9D97A5-1A6C-4A95-A2D0-A7C2D6BE459D}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -18,12 +18,6 @@
     </Inf>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(ProjectDir)..\LGCommon\CDebug.h">
-      <Filter>Common</Filter>
-    </ClInclude>
-    <ClInclude Include="$(ProjectDir)..\LGCommon\CSRWLock.h">
-      <Filter>Common</Filter>
-    </ClInclude>
     <ClInclude Include="CHIDDevice.h">
       <Filter>Driver</Filter>
     </ClInclude>
@@ -33,14 +27,14 @@
     <ClInclude Include="HIDReports.h">
       <Filter>HID</Filter>
     </ClInclude>
+    <ClInclude Include="ipc\CInputPipeClient.h">
+      <Filter>IPC</Filter>
+    </ClInclude>
     <ClInclude Include="Trace.h">
       <Filter>Driver</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(ProjectDir)..\LGCommon\CDebug.cpp">
-      <Filter>Common</Filter>
-    </ClCompile>
     <ClCompile Include="CHIDDevice.cpp">
       <Filter>Driver</Filter>
     </ClCompile>
@@ -49,6 +43,9 @@
     </ClCompile>
     <ClCompile Include="HIDReports.cpp">
       <Filter>HID</Filter>
+    </ClCompile>
+    <ClCompile Include="ipc\CInputPipeClient.cpp">
+      <Filter>IPC</Filter>
     </ClCompile>
   </ItemGroup>
 </Project>

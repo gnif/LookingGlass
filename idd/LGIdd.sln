@@ -16,14 +16,7 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGMP", "..\repos\LGMP\LGMP.
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGIddHelper", "LGIddHelper\LGIddHelper.vcxproj", "{0045D7AD-3F26-4B87-81CB-78D18839596D}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "LGCommon", "LGCommon", "{ACB90E34-01CA-4B86-813B-3D20904994C6}"
-	ProjectSection(SolutionItems) = preProject
-		LGCommon\CDebug.cpp = LGCommon\CDebug.cpp
-		LGCommon\CDebug.h = LGCommon\CDebug.h
-		LGCommon\CSRWLock.h = LGCommon\CSRWLock.h
-		LGCommon\DefaultDisplayModes.h = LGCommon\DefaultDisplayModes.h
-		LGCommon\PipeMsg.h = LGCommon\PipeMsg.h
-	EndProjectSection
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGCommon", "LGCommon\LGCommon.vcxproj", "{ACB90E34-01CA-4B86-813B-3D20904994C6}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "LGIddInstall", "LGIddInstall\LGIddInstall.vcxproj", "{23EC8370-5F3B-4D18-8C31-E89A154F3666}"
 EndProject
@@ -47,6 +40,14 @@ Global
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.ActiveCfg = Release-LGInput|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.Build.0 = Release-LGInput|x64
 		{1CBF3DAA-0726-4F5F-88A2-04D95FB6591A}.Release-LGInput|x64.Deploy.0 = Release-LGInput|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Debug|x64.ActiveCfg = Debug|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Debug|x64.Build.0 = Debug|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Debug-LGInput|x64.ActiveCfg = Debug|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Debug-LGInput|x64.Build.0 = Debug|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Release|x64.ActiveCfg = Release|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Release|x64.Build.0 = Release|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Release-LGInput|x64.ActiveCfg = Release|x64
+		{ACB90E34-01CA-4B86-813B-3D20904994C6}.Release-LGInput|x64.Build.0 = Release|x64
 		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug|x64.ActiveCfg = Debug|x64
 		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug|x64.Build.0 = Debug|x64
 		{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}.Debug-LGInput|x64.ActiveCfg = Debug|x64

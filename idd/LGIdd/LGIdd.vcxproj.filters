@@ -35,9 +35,6 @@
     <Filter Include="Platform">
       <UniqueIdentifier>{1C677205-7587-4037-9E36-92DFE600B985}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Common">
-      <UniqueIdentifier>{938E49D6-F954-4EBE-80AB-E0F67E677F27}</UniqueIdentifier>
-    </Filter>
     <Filter Include="Utilities">
       <UniqueIdentifier>{98768720-86D6-4A83-9EBD-2C8BFB51D793}</UniqueIdentifier>
     </Filter>
@@ -52,9 +49,6 @@
     </Inf>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="$(SolutionDir)LGCommon\*.h">
-      <Filter>Common</Filter>
-    </ClInclude>
     <ClInclude Include="Device.h">
       <Filter>Driver</Filter>
     </ClInclude>
@@ -68,6 +62,9 @@
       <Filter>Driver</Filter>
     </ClInclude>
     <ClInclude Include="ipc\CPipeServer.h">
+      <Filter>IPC</Filter>
+    </ClInclude>
+    <ClInclude Include="ipc\CInputPipeServer.h">
       <Filter>IPC</Filter>
     </ClInclude>
     <ClInclude Include="display\CDisplayConfiguration.h">
@@ -195,9 +192,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="$(SolutionDir)LGCommon\*.cpp">
-      <Filter>Common</Filter>
-    </ClCompile>
     <ClCompile Include="Driver.cpp">
       <Filter>Driver</Filter>
     </ClCompile>
@@ -205,6 +199,9 @@
       <Filter>Driver</Filter>
     </ClCompile>
     <ClCompile Include="ipc\CPipeServer.cpp">
+      <Filter>IPC</Filter>
+    </ClCompile>
+    <ClCompile Include="ipc\CInputPipeServer.cpp">
       <Filter>IPC</Filter>
     </ClCompile>
     <ClCompile Include="display\CDisplayConfiguration.cpp">

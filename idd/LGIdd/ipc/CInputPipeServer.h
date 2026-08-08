@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -20,53 +20,30 @@
 
 #pragma once
 
+#include "CPipeEndpoint.h"
+
+#include <stddef.h>
 #include <stdint.h>
 
-static constexpr wchar_t LG_PIPE_NAME[] = L"\\\\.\\pipe\\LookingGlassIDD";
-
-struct LGPipeMsg
+class CInputPipeServer : private IPipeEndpointHandler
 {
-  unsigned size;
-  enum
-  {
-    SETCURSORPOS,
-    SETDISPLAYMODE,
-    GPUSTATUS,
-    RELOADSETTINGS,
-    RESOLUTIONREJECTED
-  }
-  type;
-  union
-  {
-    struct
-    {
-      uint32_t x;
-      uint32_t y;
-    }
-    curorPos;
+public:
+  ~CInputPipeServer() { DeInit(); }
 
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t refreshMilliHz;
-    }
-    displayMode;
+  bool Init();
+  void DeInit();
 
-    struct
-    {
-      bool software;
-    }
-    gpuStatus;
+  bool SendReport(
+    _In_reads_bytes_(size) const void * report,
+    _In_ size_t size);
+  bool IsConnected() const { return m_endpoint.IsConnected(); }
 
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t requiredSizeMiB;
-    }
-    resolutionRejected;
-  };
+private:
+  bool OnPipeMessage(const void * message, size_t size) override;
+
+  CPipeEndpoint m_endpoint;
+  SRWLOCK m_sendLock = SRWLOCK_INIT;
+  uint64_t m_sequence = 0;
 };
 
-static_assert(sizeof(LGPipeMsg) == 20, "LGPipeMsg wire layout changed");
+extern CInputPipeServer g_inputPipeServer;

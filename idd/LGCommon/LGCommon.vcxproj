@@ -19,25 +19,9 @@
       <Platform>x64</Platform>
     </ProjectConfiguration>
   </ItemGroup>
-  <ItemGroup>
-    <ClCompile Include="CHIDDevice.cpp" />
-    <ClCompile Include="Driver.cpp" />
-    <ClCompile Include="HIDReports.cpp" />
-    <ClCompile Include="ipc\CInputPipeClient.cpp" />
-  </ItemGroup>
-  <ItemGroup>
-    <ClInclude Include="CHIDDevice.h" />
-    <ClInclude Include="Driver.h" />
-    <ClInclude Include="HIDReports.h" />
-    <ClInclude Include="ipc\CInputPipeClient.h" />
-    <ClInclude Include="Trace.h" />
-  </ItemGroup>
-  <ItemGroup>
-    <Inf Include="LGInput.inf" />
-  </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{2477B25B-CB62-4AD9-A260-CE5F00D77EEB}</ProjectGuid>
-    <RootNamespace>LGInput</RootNamespace>
+    <ProjectGuid>{ACB90E34-01CA-4B86-813B-3D20904994C6}</ProjectGuid>
+    <RootNamespace>LGCommon</RootNamespace>
     <WindowsTargetPlatformVersion>10.0.26100.0</WindowsTargetPlatformVersion>
     <UMDF_VERSION_MAJOR>2</UMDF_VERSION_MAJOR>
     <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
@@ -45,11 +29,11 @@
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
     <TargetVersion>Windows10</TargetVersion>
     <DriverTargetPlatform>Universal</DriverTargetPlatform>
     <DriverType>UMDF</DriverType>
-    <PlatformToolset>WindowsUserModeDriver10.0</PlatformToolset>
-    <ConfigurationType>DynamicLibrary</ConfigurationType>
     <UMDF_VERSION_MINOR>25</UMDF_VERSION_MINOR>
     <UMDF_MINIMUM_VERSION_REQUIRED>25</UMDF_MINIMUM_VERSION_REQUIRED>
     <_NT_TARGET_VERSION>0xA000005</_NT_TARGET_VERSION>
@@ -70,32 +54,29 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
-    <TargetName>LGInput</TargetName>
-    <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
-    <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+    <TargetName>LGCommon</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <WppEnabled>true</WppEnabled>
-      <WppRecorderEnabled>true</WppRecorderEnabled>
-      <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">Trace.h</WppScanConfigurationData>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>_ITERATOR_DEBUG_LEVEL=0;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\LGCommon;$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
-    <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib</AdditionalDependencies>
-    </Link>
-    <DriverSign>
-      <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
-    </DriverSign>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <FilesToPackage Include="$(TargetPath)" />
+    <ClCompile Include="CDebug.cpp" />
+    <ClCompile Include="CPipeEndpoint.cpp" />
+    <ClCompile Include="RefreshRate.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\LGCommon\LGCommon.vcxproj">
-      <Project>{acb90e34-01ca-4b86-813b-3d20904994c6}</Project>
-    </ProjectReference>
+    <ClInclude Include="CDebug.h" />
+    <ClInclude Include="CPipeEndpoint.h" />
+    <ClInclude Include="CSRWLock.h" />
+    <ClInclude Include="DefaultDisplayModes.h" />
+    <ClInclude Include="InputPipeProtocol.h" />
+    <ClInclude Include="PipeMsg.h" />
+    <ClInclude Include="RefreshRate.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

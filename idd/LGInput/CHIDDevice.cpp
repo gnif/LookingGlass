@@ -20,10 +20,13 @@
 
 #include "CHIDDevice.h"
 
+#include "CDebug.h"
 #include "CSRWLock.h"
 #include "HIDReports.h"
+#include "ipc/CInputPipeClient.h"
 
 #include <hidport.h>
+#include <new>
 
 static constexpr USHORT LG_INPUT_VENDOR_ID  = 0x0000;
 static constexpr USHORT LG_INPUT_PRODUCT_ID = 0x0000;
@@ -42,12 +45,14 @@ struct HIDDeviceContext
   HID_DEVICE_ATTRIBUTES attributes;
   HID_DESCRIPTOR        descriptor;
   UCHAR                 keyboardLeds;
+  SRWLOCK               lifecycleLock;
   SRWLOCK               reportLock;
   bool                  active;
   bool                  stopping;
   size_t                reportHead;
   size_t                reportCount;
   HIDQueuedReport       reports[REPORT_QUEUE_LENGTH];
+  CInputPipeClient *    inputPipe;
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(HIDDeviceContext, HIDGetDeviceContext);
@@ -57,6 +62,12 @@ static HIDDeviceContext * s_device     = nullptr;
 
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HIDEvtIoDeviceControl;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP HIDEvtReportQueueCleanup;
+EVT_WDF_OBJECT_CONTEXT_CLEANUP HIDEvtDeviceCleanup;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT HIDEvtSelfManagedIoInit;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_CLEANUP HIDEvtSelfManagedIoCleanup;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_FLUSH HIDEvtSelfManagedIoFlush;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_SUSPEND HIDEvtSelfManagedIoSuspend;
+EVT_WDF_DEVICE_SELF_MANAGED_IO_RESTART HIDEvtSelfManagedIoRestart;
 
 static NTSTATUS CopyToRequest(
   _In_ WDFREQUEST request,
@@ -191,6 +202,7 @@ static NTSTATUS ReadReport(
 
 static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
 {
+  CSRWExclusiveLock lifecycleLock(&context->lifecycleLock);
   CSRWExclusiveLock lock(&context->reportLock);
   if (context->stopping)
     return STATUS_DEVICE_NOT_READY;
@@ -202,13 +214,16 @@ static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
 
 static NTSTATUS DeactivateDevice(_Inout_ HIDDeviceContext * context)
 {
-  CSRWExclusiveLock lock(&context->reportLock);
-  if (context->stopping)
-    return STATUS_DEVICE_NOT_READY;
+  CSRWExclusiveLock lifecycleLock(&context->lifecycleLock);
+  {
+    CSRWExclusiveLock lock(&context->reportLock);
+    if (context->stopping)
+      return STATUS_DEVICE_NOT_READY;
 
-  context->active      = false;
-  context->reportHead  = 0;
-  context->reportCount = 0;
+    context->active      = false;
+    context->reportHead  = 0;
+    context->reportCount = 0;
+  }
   WdfIoQueuePurgeSynchronously(context->reportQueue);
   return STATUS_SUCCESS;
 }
@@ -241,8 +256,21 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
 {
   WdfFdoInitSetFilter(deviceInit);
 
+  WDF_PNPPOWER_EVENT_CALLBACKS pnpPowerCallbacks;
+  WDF_PNPPOWER_EVENT_CALLBACKS_INIT(&pnpPowerCallbacks);
+  pnpPowerCallbacks.EvtDeviceSelfManagedIoInit = HIDEvtSelfManagedIoInit;
+  pnpPowerCallbacks.EvtDeviceSelfManagedIoCleanup =
+    HIDEvtSelfManagedIoCleanup;
+  pnpPowerCallbacks.EvtDeviceSelfManagedIoFlush = HIDEvtSelfManagedIoFlush;
+  pnpPowerCallbacks.EvtDeviceSelfManagedIoSuspend =
+    HIDEvtSelfManagedIoSuspend;
+  pnpPowerCallbacks.EvtDeviceSelfManagedIoRestart =
+    HIDEvtSelfManagedIoRestart;
+  WdfDeviceInitSetPnpPowerEventCallbacks(deviceInit, &pnpPowerCallbacks);
+
   WDF_OBJECT_ATTRIBUTES attributes;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&attributes, HIDDeviceContext);
+  attributes.EvtCleanupCallback = HIDEvtDeviceCleanup;
 
   WDFDEVICE device;
   NTSTATUS  status = WdfDeviceCreate(&deviceInit, &attributes, &device);
@@ -251,8 +279,12 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
 
   HIDDeviceContext * context = HIDGetDeviceContext(device);
   RtlZeroMemory(context, sizeof(*context));
+  InitializeSRWLock(&context->lifecycleLock);
   InitializeSRWLock(&context->reportLock);
   context->active = true;
+  context->inputPipe = new (std::nothrow) CInputPipeClient;
+  if (!context->inputPipe)
+    return STATUS_INSUFFICIENT_RESOURCES;
 
   context->attributes.Size          =
     static_cast<ULONG>(sizeof(context->attributes));
@@ -277,6 +309,11 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
 
   {
     CSRWExclusiveLock lock(&s_deviceLock);
+    if (s_device)
+    {
+      DEBUG_ERROR("Only one LGInput device instance is supported");
+      return STATUS_DEVICE_BUSY;
+    }
     s_device = context;
   }
   return STATUS_SUCCESS;
@@ -322,6 +359,22 @@ NTSTATUS CHIDDevice::SubmitReport(
   }
 
   return status;
+}
+
+NTSTATUS CHIDDevice::ClearReports()
+{
+  CSRWSharedLock deviceLock(&s_deviceLock);
+  HIDDeviceContext * context = s_device;
+  if (!context)
+    return STATUS_DEVICE_NOT_READY;
+
+  CSRWExclusiveLock reportLock(&context->reportLock);
+  if (context->stopping)
+    return STATUS_DEVICE_NOT_READY;
+
+  context->reportHead  = 0;
+  context->reportCount = 0;
+  return STATUS_SUCCESS;
 }
 
 VOID HIDEvtIoDeviceControl(
@@ -397,4 +450,63 @@ VOID HIDEvtReportQueueCleanup(_In_ WDFOBJECT object)
     context->reportHead  = 0;
     context->reportCount = 0;
   }
+}
+
+VOID HIDEvtDeviceCleanup(_In_ WDFOBJECT object)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext((WDFDEVICE)object);
+  if (context->inputPipe)
+  {
+    context->inputPipe->Stop();
+    delete context->inputPipe;
+    context->inputPipe = nullptr;
+  }
+
+  CSRWExclusiveLock deviceLock(&s_deviceLock);
+  if (s_device == context)
+    s_device = nullptr;
+}
+
+NTSTATUS HIDEvtSelfManagedIoInit(_In_ WDFDEVICE device)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  if (!context->inputPipe || !context->inputPipe->Start())
+  {
+    DEBUG_ERROR("Failed to start the LGIdd input pipe client");
+    return STATUS_INSUFFICIENT_RESOURCES;
+  }
+  return STATUS_SUCCESS;
+}
+
+VOID HIDEvtSelfManagedIoCleanup(_In_ WDFDEVICE device)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  if (context->inputPipe)
+    context->inputPipe->Stop();
+}
+
+VOID HIDEvtSelfManagedIoFlush(_In_ WDFDEVICE device)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  if (context->inputPipe)
+    context->inputPipe->Stop();
+}
+
+NTSTATUS HIDEvtSelfManagedIoSuspend(_In_ WDFDEVICE device)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  if (context->inputPipe)
+    context->inputPipe->Stop();
+  return STATUS_SUCCESS;
+}
+
+NTSTATUS HIDEvtSelfManagedIoRestart(_In_ WDFDEVICE device)
+{
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  if (!context->inputPipe || !context->inputPipe->Start())
+  {
+    DEBUG_ERROR("Failed to restart the LGIdd input pipe client");
+    return STATUS_INSUFFICIENT_RESOURCES;
+  }
+  return STATUS_SUCCESS;
 }

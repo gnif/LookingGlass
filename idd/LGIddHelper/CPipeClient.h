@@ -22,27 +22,15 @@
 
 #include <windows.h>
 #include <stdint.h>
-#include <wrl.h>
 
+#include "CPipeEndpoint.h"
 #include "PipeMsg.h"
 
-using namespace Microsoft::WRL;
-using namespace Microsoft::WRL::Wrappers;
-using namespace Microsoft::WRL::Wrappers::HandleTraits;
-
-class CPipeClient
+class CPipeClient : private IPipeEndpointHandler
 {
 private:
-  HandleT<HANDLETraits> m_pipe;
-  HandleT<HANDLENullTraits> m_thread;
-  HandleT<EventTraits> m_signal;
-
-  bool m_running = false;
-  bool m_connected = false;
+  CPipeEndpoint m_endpoint;
   SRWLOCK m_displayLock = SRWLOCK_INIT;
-
-  static DWORD WINAPI _pipeThread(LPVOID lpParam) { ((CPipeClient*)lpParam)->Thread(); return 0; }
-  void Thread();
 
   void WriteMsg(const LGPipeMsg& msg);
 
@@ -55,6 +43,9 @@ private:
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
 
+  bool ShouldReconnect() override;
+  bool OnPipeMessage(const void * message, size_t size) override;
+
 public:
   ~CPipeClient() { DeInit(); }
 
@@ -62,7 +53,7 @@ public:
 
   bool Init();
   void DeInit();
-  bool IsRunning() { return m_running; }
+  bool IsRunning() { return m_endpoint.IsRunning(); }
 
   void ReloadSettings();
   bool EnsureOnlyDisplay();

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -20,53 +20,25 @@
 
 #pragma once
 
+#include "CPipeEndpoint.h"
+
+#include <stddef.h>
 #include <stdint.h>
 
-static constexpr wchar_t LG_PIPE_NAME[] = L"\\\\.\\pipe\\LookingGlassIDD";
-
-struct LGPipeMsg
+class CInputPipeClient : private IPipeEndpointHandler
 {
-  unsigned size;
-  enum
-  {
-    SETCURSORPOS,
-    SETDISPLAYMODE,
-    GPUSTATUS,
-    RELOADSETTINGS,
-    RESOLUTIONREJECTED
-  }
-  type;
-  union
-  {
-    struct
-    {
-      uint32_t x;
-      uint32_t y;
-    }
-    curorPos;
+public:
+  ~CInputPipeClient() { Stop(); }
 
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t refreshMilliHz;
-    }
-    displayMode;
+  bool Start();
+  void Stop();
+  bool IsConnected() const { return m_endpoint.IsConnected(); }
 
-    struct
-    {
-      bool software;
-    }
-    gpuStatus;
+private:
+  void OnPipeConnected() override;
+  void OnPipeDisconnected() override;
+  bool OnPipeMessage(const void * message, size_t size) override;
 
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t requiredSizeMiB;
-    }
-    resolutionRejected;
-  };
+  CPipeEndpoint m_endpoint;
+  uint64_t m_lastSequence = 0;
 };
-
-static_assert(sizeof(LGPipeMsg) == 20, "LGPipeMsg wire layout changed");

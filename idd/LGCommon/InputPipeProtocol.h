@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -20,53 +20,32 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
 
-static constexpr wchar_t LG_PIPE_NAME[] = L"\\\\.\\pipe\\LookingGlassIDD";
+static constexpr wchar_t LG_INPUT_PIPE_NAME[] =
+  L"\\\\.\\pipe\\LookingGlassIDDInput";
 
-struct LGPipeMsg
+static constexpr uint32_t LG_INPUT_PIPE_MAGIC = 0x5049474c;
+static constexpr uint16_t LG_INPUT_PIPE_VERSION = 1;
+static constexpr size_t LG_INPUT_PIPE_MAX_REPORT_SIZE = 64;
+
+enum LGInputPipeMessageType : uint16_t
 {
-  unsigned size;
-  enum
-  {
-    SETCURSORPOS,
-    SETDISPLAYMODE,
-    GPUSTATUS,
-    RELOADSETTINGS,
-    RESOLUTIONREJECTED
-  }
-  type;
-  union
-  {
-    struct
-    {
-      uint32_t x;
-      uint32_t y;
-    }
-    curorPos;
-
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t refreshMilliHz;
-    }
-    displayMode;
-
-    struct
-    {
-      bool software;
-    }
-    gpuStatus;
-
-    struct
-    {
-      uint32_t width;
-      uint32_t height;
-      uint32_t requiredSizeMiB;
-    }
-    resolutionRejected;
-  };
+  LG_INPUT_PIPE_MESSAGE_REPORT = 1,
 };
 
-static_assert(sizeof(LGPipeMsg) == 20, "LGPipeMsg wire layout changed");
+#pragma pack(push, 1)
+struct LGInputPipeMessage
+{
+  uint32_t magic;
+  uint16_t version;
+  uint16_t type;
+  uint32_t payloadSize;
+  uint64_t sequence;
+  uint8_t payload[LG_INPUT_PIPE_MAX_REPORT_SIZE];
+};
+#pragma pack(pop)
+
+static_assert(sizeof(LGInputPipeMessage) == 84,
+  "LGInputPipeMessage wire layout changed");

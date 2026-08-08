@@ -24,6 +24,7 @@
 #include "CDebug.h"
 #include "platform/CPlatformInfo.h"
 #include "VersionInfo.h"
+#include "ipc/CInputPipeServer.h"
 #include "ipc/CPipeServer.h"
 
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
@@ -42,6 +43,13 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING Reg
   {
     status = STATUS_UNSUCCESSFUL;
     DEBUG_ERROR("Failed to setup IPC pipe");
+    goto fail;
+  }
+
+  if (!g_inputPipeServer.Init())
+  {
+    status = STATUS_UNSUCCESSFUL;
+    DEBUG_ERROR("Failed to setup the LGInput IPC pipe");
     goto fail;
   }
 
@@ -66,6 +74,8 @@ NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING Reg
   return status;
 
 fail:
+  g_inputPipeServer.DeInit();
+  g_pipe.DeInit();
 #if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0
   WPP_CLEANUP();
 #else
@@ -91,6 +101,7 @@ VOID LGIddEvtDriverContextCleanup(_In_ WDFOBJECT DriverObject)
 
   TraceEvents(TRACE_LEVEL_INFORMATION, TRACE_DRIVER, "%!FUNC! Entry");
 
+  g_inputPipeServer.DeInit();
   g_pipe.DeInit();
 
 #if UMDF_VERSION_MAJOR == 2 && UMDF_VERSION_MINOR == 0

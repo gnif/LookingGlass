@@ -114,51 +114,16 @@ bool CPipeClient::Init()
     return false;
   }
 
-  m_signal.Attach(CreateEvent(NULL, TRUE, FALSE, NULL));
-  if (!m_signal.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create pipe signal event");
-    return false;
-  }
-
-  m_running = true;
-  m_thread.Attach(CreateThread(
-    NULL,
-    0,
-    _pipeThread,
-    (LPVOID)this,
-    0,
-    NULL));
-
-  if (!m_thread.IsValid())
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create the pipe thread");
-    return false;
-  }
-
-  return true;
+  m_endpoint.SetHandler(this);
+  return m_endpoint.Start(
+    LG_PIPE_NAME,
+    CPipeEndpoint::Mode::Client,
+    sizeof(LGPipeMsg));
 }
 
 void CPipeClient::DeInit()
 {
-  m_connected = false;
-  m_running = false;
-  if (m_signal.IsValid())
-    SetEvent(m_signal.Get());
-
-  if (m_thread.IsValid())
-  {
-    WaitForSingleObject(m_thread.Get(), INFINITE);
-    m_thread.Close();
-  }
-
-  if (m_pipe.IsValid())
-  {
-    FlushFileBuffers(m_pipe.Get());
-    m_pipe.Close();
-  }
-
-  m_signal.Close();
+  m_endpoint.Stop();
 }
 
 bool CPipeClient::IsLGIddDeviceAttached()
@@ -228,34 +193,26 @@ void CPipeClient::SetActiveDesktop()
 
 void CPipeClient::WriteMsg(const LGPipeMsg& msg)
 {
-  DWORD written;
-  if (!WriteFile(m_pipe.Get(), &msg, sizeof(msg), &written, NULL))
-  {
-    DWORD err = GetLastError();
-    if (err == ERROR_BROKEN_PIPE)
-    {
-      DEBUG_WARN_HR(err, "Client disconnected, failed to write");
-      m_connected = false;
-      SetEvent(m_signal.Get());
-      return;
-    }
-
-    DEBUG_WARN_HR(err, "WriteFile failed on the pipe");
-    return;
-  }
-
-  FlushFileBuffers(m_pipe.Get());
+  m_endpoint.Send(&msg, sizeof(msg));
 }
 
 void CPipeClient::ReloadSettings()
 {
-  if (!m_connected)
+  if (!m_endpoint.IsConnected())
     return;
 
   LGPipeMsg msg = {};
   msg.size = sizeof(msg);
   msg.type = LGPipeMsg::RELOADSETTINGS;
   WriteMsg(msg);
+}
+
+bool CPipeClient::ShouldReconnect()
+{
+  const bool attached = IsLGIddDeviceAttached();
+  if (!attached)
+    DEBUG_INFO("Looking Glass Indirect Display Device was removed");
+  return attached;
 }
 
 bool CPipeClient::EnsureOnlyDisplayLocked()
@@ -372,124 +329,37 @@ bool CPipeClient::EnsureOnlyDisplay()
   return result;
 }
 
-void CPipeClient::Thread()
+bool CPipeClient::OnPipeMessage(const void * message, size_t size)
 {
-  DEBUG_INFO("Pipe thread started");
+  if (size != sizeof(LGPipeMsg))
+    return false;
 
-  HandleT<EventTraits> ioEvent(CreateEvent(NULL, TRUE, FALSE, NULL));
-  if (!ioEvent.IsValid())
+  const LGPipeMsg & msg = *static_cast<const LGPipeMsg *>(message);
+  if (msg.size != sizeof(msg))
+    return false;
+
+  switch (msg.type)
   {
-    DEBUG_ERROR("Can't create event for overlapped I/O!");
-    WaitForSingleObject(m_signal.Get(), 5000);
-    return;
+    case LGPipeMsg::SETCURSORPOS:
+      HandleSetCursorPos(msg);
+      return true;
+
+    case LGPipeMsg::SETDISPLAYMODE:
+      HandleSetDisplayMode(msg);
+      return true;
+
+    case LGPipeMsg::GPUSTATUS:
+      HandleGPUStatus(msg);
+      return true;
+
+    case LGPipeMsg::RESOLUTIONREJECTED:
+      HandleResolutionRejected(msg);
+      return true;
+
+    default:
+      DEBUG_ERROR("Unknown message type %d", msg.type);
+      return true;
   }
-
-  while (m_running)
-  {
-    if (!IsLGIddDeviceAttached())
-    {
-      m_running = false;
-      DEBUG_ERROR("Device is no longer available, shutting down");
-      break;
-    }
-
-    m_pipe.Attach(CreateFile(
-      TEXT(LG_PIPE_NAME),
-      GENERIC_READ | GENERIC_WRITE,
-      0,
-      NULL,
-      OPEN_EXISTING,
-      FILE_FLAG_OVERLAPPED,
-      NULL
-    ));
-
-    if (!m_pipe.IsValid())
-    {
-      DEBUG_ERROR_HR(GetLastError(), "Failed to open the named pipe");
-      WaitForSingleObject(m_signal.Get(), 5000);
-      continue;
-    }
-
-    m_connected = true;
-    DEBUG_INFO("Pipe connected");
-
-    while (m_running && m_connected)
-    {
-      LGPipeMsg msg;
-
-      OVERLAPPED overlapped = { 0 };
-      overlapped.hEvent = ioEvent.Get();
-
-      if (!ReadFile(m_pipe.Get(), &msg, sizeof(msg), NULL, &overlapped))
-      {
-        DWORD dwError = GetLastError();
-        if (dwError != ERROR_IO_PENDING)
-        {
-          DEBUG_ERROR_HR(dwError, "ReadFile Failed");
-          break;
-        }
-
-        HANDLE hWait[] = { ioEvent.Get(), m_signal.Get() };
-        switch (WaitForMultipleObjects(2, hWait, FALSE, INFINITE))
-        {
-        case WAIT_OBJECT_0:
-          break;
-        case WAIT_OBJECT_0 + 1:
-          DEBUG_INFO("I/O interrupted by signal");
-          CancelIo(m_pipe.Get());
-          WaitForSingleObject(ioEvent.Get(), INFINITE);
-          continue;
-        }
-      }
-
-      DWORD bytesRead;
-      GetOverlappedResult(m_pipe.Get(), &overlapped, &bytesRead, TRUE);
-
-      if (bytesRead != sizeof(msg))
-      {
-        DEBUG_ERROR("Corrupted data, expected %lld bytes, read %lld bytes", sizeof msg, bytesRead);
-        break;
-      }
-
-      if (msg.size != sizeof(msg))
-      {
-        DEBUG_ERROR("Corrupted data, expected %lld bytes, actual message size: %lld bytes", sizeof msg, msg.size);
-        break;
-      }
-
-      switch (msg.type)
-      {
-        case LGPipeMsg::SETCURSORPOS:
-          HandleSetCursorPos(msg);
-          break;
-
-        case LGPipeMsg::SETDISPLAYMODE:
-          HandleSetDisplayMode(msg);
-          break;
-
-        case LGPipeMsg::GPUSTATUS:
-          HandleGPUStatus(msg);
-          break;
-
-        case LGPipeMsg::RESOLUTIONREJECTED:
-          HandleResolutionRejected(msg);
-          break;
-
-        default:
-          DEBUG_ERROR("Unknown message type %d", msg.type);
-          break;
-      }
-    }
-
-    m_pipe.Close();
-    m_connected = false;
-    DEBUG_INFO("Pipe closed");
-
-    if (m_running)
-      ResetEvent(m_signal.Get());
-  }
-
-  DEBUG_INFO("Pipe thread shutdown");
 }
 
 void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)

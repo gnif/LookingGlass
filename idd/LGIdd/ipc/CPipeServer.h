@@ -23,39 +23,30 @@
 #include <windows.h>
 #include <wdf.h>
 #include <stdint.h>
-#include <wrl.h>
 #include <vector>
 
+#include "CPipeEndpoint.h"
 #include "PipeMsg.h"
-
-using namespace Microsoft::WRL;
-using namespace Microsoft::WRL::Wrappers;
-using namespace Microsoft::WRL::Wrappers::HandleTraits;
 
 class CDeviceContext;
 
-class CPipeServer
+class CPipeServer : private IPipeEndpointHandler
 {
   private:
-    HandleT<HANDLETraits>     m_pipe;
-    HandleT<HANDLENullTraits> m_thread;
-    HandleT<EventTraits>      m_signal;
-    std::vector<LGPipeMsg>    m_queue;
-
-    bool m_running   = false;
-    bool m_connected = false;
+    CPipeEndpoint          m_endpoint;
+    SRWLOCK               m_queueLock = SRWLOCK_INIT;
+    std::vector<LGPipeMsg> m_queue;
 
     SRWLOCK          m_deviceContextLock = SRWLOCK_INIT;
     CDeviceContext * m_deviceContext     = nullptr;
 
-    void _DeInit();
-
-    static DWORD WINAPI _pipeThread(LPVOID lpParam) { ((CPipeServer*)lpParam)->Thread(); return 0; }
-    void Thread();
-
     void WriteMsg(const LGPipeMsg & msg);
+    void QueueMsgLocked(const LGPipeMsg & msg);
 
     void HandleReloadSettings();
+
+    void OnPipeConnected() override;
+    bool OnPipeMessage(const void * message, size_t size) override;
 
   public:
     ~CPipeServer() { DeInit(); }
