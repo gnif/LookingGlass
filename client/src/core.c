@@ -327,10 +327,13 @@ void core_setGrabQuiet(bool enable)
     /* ensure the local mouse is inside the window before we capture, this fixes
      * odd UI behaviour if the user is using focus follows mouse and the window
      * was focused without the cursor being in window already */
-    struct DoublePoint local;
-    const bool valid = util_guestCurToLocal(&local);
-    MTRACE("grab align valid=%d", valid);
-    core_warpPointer(local.x, local.y, true);
+    if (warpSupport != LG_DS_WARP_NONE)
+    {
+      struct DoublePoint local;
+      const bool valid = util_guestCurToLocal(&local);
+      MTRACE("grab align valid=%d", valid);
+      core_warpPointer(local.x, local.y, true);
+    }
 
     if (g_params.grabKeyboard)
       g_state.ds->grabKeyboard();
@@ -348,13 +351,18 @@ void core_setGrabQuiet(bool enable)
 
     g_state.ds->uncapturePointer();
 
-    if (!g_params.captureInputOnly && warpSupport != LG_DS_WARP_NONE)
-      applyView(g_state.ds->isPointerGrabbed(), false);
+    if (warpSupport == LG_DS_WARP_NONE)
+      core_handleMouseAbsolute();
+    else
+    {
+      if (!g_params.captureInputOnly)
+        applyView(g_state.ds->isPointerGrabbed(), false);
 
-    /* if exiting capture when input on capture only we need to align the local
-     * cursor to the guest's location before it is shown. */
-    if (g_params.captureInputOnly || !g_params.hideMouse)
-      core_alignToGuest();
+      /* if exiting capture when input on capture only we need to align the
+       * local cursor to the guest's location before it is shown. */
+      if (g_params.captureInputOnly || !g_params.hideMouse)
+        core_alignToGuest();
+    }
   }
 }
 
@@ -369,6 +377,14 @@ bool core_warpPointer(int x, int y, bool exiting)
   if (app_isOverlayMode())
   {
     MTRACE("warp drop=overlay target=%d,%d exit=%d", x, y, exiting);
+    return false;
+  }
+
+  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
+  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
+  if (warpSupport == LG_DS_WARP_NONE)
+  {
+    MTRACE("warp drop=support target=%d,%d exit=%d", x, y, exiting);
     return false;
   }
 

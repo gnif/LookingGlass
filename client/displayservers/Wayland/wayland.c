@@ -36,13 +36,6 @@ static struct Option waylandOptions[] =
 {
   {
     .module       = "wayland",
-    .name         = "warpSupport",
-    .description  = "Enable cursor warping",
-    .type         = OPTION_TYPE_BOOL,
-    .value.x_bool = true,
-  },
-  {
-    .module       = "wayland",
     .name         = "fractionScale",
     .description  = "Enable fractional scale",
     .type         = OPTION_TYPE_BOOL,
@@ -112,7 +105,6 @@ static bool waylandInit(const LG_DSInitParams params)
   LG_LOCK_INIT(wlWm.pendingHDRLock);
   LG_LOCK_INIT(wlWm.hdrLock);
   wlWm.desktop        = WL_Desktops[0];
-  atomic_init(&wlWm.confActive, false);
   atomic_init(&wlWm.lockActive, false);
   atomic_init(&wlWm.cmFeaturesDone, false);
   atomic_init(&wlWm.cmCanDoHDR, false);
@@ -141,7 +133,6 @@ static bool waylandInit(const LG_DSInitParams params)
 
   wl_list_init(&wlWm.surfaceOutputs);
 
-  wlWm.warpSupport        = option_get_bool("wayland", "warpSupport");
   wlWm.useFractionalScale = option_get_bool("wayland", "fractionScale");
 
   if (!waylandPollInit())
@@ -224,7 +215,7 @@ static bool waylandGetProp(LG_DSProperty prop, void * ret)
 {
   if (prop == LG_DS_WARP_SUPPORT)
   {
-    *(enum LG_DSWarpSupport*)ret = wlWm.warpSupport ? LG_DS_WARP_SURFACE : LG_DS_WARP_NONE;
+    *(enum LG_DSWarpSupport*)ret = LG_DS_WARP_NONE;
     return true;
   }
 

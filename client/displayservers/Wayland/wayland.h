@@ -123,7 +123,6 @@ struct WaylandHDRParameters
 
 struct WaylandDSState
 {
-  _Atomic(bool) confActive;
   _Atomic(bool) lockActive;
   bool          keyboardGrabbed;
   bool          pointerInSurface;
@@ -143,7 +142,6 @@ struct WaylandDSState
   bool fractionalScale;
   bool needsResize;
   bool configured;
-  bool warpSupport;
   struct WlMotion motion;
   double scrollState;
 
@@ -196,11 +194,8 @@ struct WaylandDSState
   struct zwp_relative_pointer_manager_v1 * relativePointerManager;
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
-  struct zwp_confined_pointer_v1 * confinedPointer;
   struct zwp_locked_pointer_v1 * lockedPointer;
-  struct wl_callback * confSync;
-  bool confReq;
-  bool inputLive;
+  bool captureRequested;
   bool showPointer;
   uint32_t pointerEnterSerial;
 
@@ -392,7 +387,8 @@ bool waylandIsPointerGrabbed(void);
 bool waylandIsPointerCaptured(void);
 void waylandRealignPointer(void);
 void waylandWarpPointer(int x, int y, bool exiting);
-void waylandGuestPointerUpdated(double x, double y, double localX, double localY);
+void waylandGuestPointerUpdated(double x, double y, double localX,
+    double localY);
 bool waylandGetKeyLabel(int key, char * label, size_t size);
 // output module
 bool waylandOutputInit(void);

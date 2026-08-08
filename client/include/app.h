@@ -72,9 +72,6 @@ void app_invalidateWindow(bool full);
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy);
 
-void app_handleMouseBasic(void);
-void app_resyncMouseBasic(void);
-
 void app_handleButtonPress(int button);
 void app_handleButtonRelease(int button);
 void app_handleWheelMotion(double motion);

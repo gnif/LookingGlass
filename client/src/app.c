@@ -269,7 +269,10 @@ void app_handleEnterEvent(bool entered)
       return;
 
     g_cursor.realign = true;
-    core_handleMouseAbsolute();
+    if (g_cursor.grab)
+      core_setCursorInView(true);
+    else
+      core_handleMouseAbsolute();
   }
   else
   {
@@ -650,58 +653,6 @@ void app_handleMouseRelative(double normx, double normy,
 void app_handleGrabEvent(bool active)
 {
   core_handleGrabEvent(active);
-}
-
-// On some display servers normal cursor logic does not work due to the lack of
-// cursor warp support. Instead, we attempt a best-effort emulation which works
-// with a 1:1 mouse movement patch applied in the guest. For anything fancy, use
-// capture mode.
-void app_handleMouseBasic(void)
-{
-  /* do not pass mouse events to the guest if we do not have focus */
-  if (!g_cursor.guest.valid || !g_state.haveSrcSize || !g_state.focused ||
-      app_isOverlayMode())
-    return;
-
-  if (!core_inputEnabled())
-    return;
-
-  if (lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
-    return;
-
-  const bool inView =
-    g_cursor.pos.x >= g_state.dstRect.x                     &&
-    g_cursor.pos.x <  g_state.dstRect.x + g_state.dstRect.w &&
-    g_cursor.pos.y >= g_state.dstRect.y                     &&
-    g_cursor.pos.y <  g_state.dstRect.y + g_state.dstRect.h;
-
-  core_setCursorInView(inView);
-
-  /* translate the current position to guest coordinate space */
-  struct DoublePoint guest;
-  util_localCurToGuest(&guest);
-
-  int x = (int) round(util_clamp(guest.x, 0, g_state.srcSize.x) -
-      g_cursor.projected.x);
-  int y = (int) round(util_clamp(guest.y, 0, g_state.srcSize.y) -
-      g_cursor.projected.y);
-
-  if (!x && !y)
-    return;
-
-  g_cursor.projected.x += x;
-  g_cursor.projected.y += y;
-
-  if (!lgInput_mouseMotion(x, y))
-    DEBUG_ERROR("failed to send mouse motion message");
-}
-
-void app_resyncMouseBasic(void)
-{
-  if (!g_cursor.guest.valid)
-    return;
-  g_cursor.projected.x = g_cursor.guest.x + g_cursor.guest.hx;
-  g_cursor.projected.y = g_cursor.guest.y + g_cursor.guest.hy;
 }
 
 void app_updateWindowPos(int x, int y)

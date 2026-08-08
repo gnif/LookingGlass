@@ -1150,14 +1150,8 @@ int main_cursorThread(void * unused)
       g_cursor.guest.y     = pointer.y;
       g_cursor.guest.valid = true;
       if (!wasValid && core_inputEnabled())
-      {
         core_alignToGuest();
-        app_resyncMouseBasic();
-      }
     }
-
-    if (hotspotChanged)
-      app_resyncMouseBasic();
 
     if ((pointer.flags & LG_TRANSPORT_POINTER_POSITION) || hotspotChanged)
       core_handleGuestMouseUpdate();
