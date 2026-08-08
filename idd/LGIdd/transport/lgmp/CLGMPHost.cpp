@@ -49,9 +49,10 @@ bool CLGMPHost::Initialize(CIVSHMEM& ivshmem)
     memcpy_s(kvmfr.magic, sizeof(kvmfr.magic), KVMFR_MAGIC, sizeof(KVMFR_MAGIC) - 1);
     kvmfr.version  = KVMFR_VERSION;
     kvmfr.features =
-      KVMFR_FEATURE_SETCURSORPOS |
-      KVMFR_FEATURE_WINDOWSIZE   |
-      KVMFR_FEATURE_FRAME_SCHEDULE;
+      KVMFR_FEATURE_SETCURSORPOS   |
+      KVMFR_FEATURE_WINDOWSIZE     |
+      KVMFR_FEATURE_FRAME_SCHEDULE |
+      KVMFR_FEATURE_INPUT;
     strncpy_s(kvmfr.hostver, LG_VERSION_STR, sizeof(kvmfr.hostver) - 1);
     ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
   }

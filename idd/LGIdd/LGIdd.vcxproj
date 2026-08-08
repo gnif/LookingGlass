@@ -65,6 +65,7 @@
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPHost.cpp" />
+    <ClCompile Include="transport\lgmp\CLGMPInputTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPTransport.cpp" />
     <ClCompile Include="config\CSettings.cpp" />
     <ClCompile Include="platform\CPlatformInfo.cpp" />
@@ -74,6 +75,7 @@
     <ClInclude Include="Driver.h" />
     <ClInclude Include="Public.h" />
     <ClInclude Include="Trace.h" />
+    <ClInclude Include="input\IInputSink.h" />
     <ClInclude Include="ipc\CInputPipeServer.h" />
     <ClInclude Include="ipc\CPipeServer.h" />
     <ClInclude Include="display\CDisplayConfiguration.h" />
@@ -107,6 +109,7 @@
     <ClInclude Include="transport\FrameMemoryLimits.h" />
     <ClInclude Include="transport\IControlTransport.h" />
     <ClInclude Include="transport\IFrameTransport.h" />
+    <ClInclude Include="transport\IInputTransport.h" />
     <ClInclude Include="transport\ITransport.h" />
     <ClInclude Include="transport\PreparedFrameBuffer.h" />
     <ClInclude Include="transport\TransportFactory.h" />
@@ -114,6 +117,7 @@
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPHost.h" />
+    <ClInclude Include="transport\lgmp\CLGMPInputTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPTransport.h" />
     <ClInclude Include="config\CSettings.h" />
     <ClInclude Include="platform\CPlatformInfo.h" />

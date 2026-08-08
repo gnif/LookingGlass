@@ -8,6 +8,9 @@
     <Filter Include="IPC">
       <UniqueIdentifier>{6A9D97A5-1A6C-4A95-A2D0-A7C2D6BE459D}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Input">
+      <UniqueIdentifier>{B37D983B-12F1-41AE-8375-1B9B90A64F87}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Display">
       <UniqueIdentifier>{D2C16E51-6087-4E08-8DA4-5AD1A60EF58E}</UniqueIdentifier>
     </Filter>
@@ -60,6 +63,9 @@
     </ClInclude>
     <ClInclude Include="Trace.h">
       <Filter>Driver</Filter>
+    </ClInclude>
+    <ClInclude Include="input\IInputSink.h">
+      <Filter>Input</Filter>
     </ClInclude>
     <ClInclude Include="ipc\CPipeServer.h">
       <Filter>IPC</Filter>
@@ -160,6 +166,9 @@
     <ClInclude Include="transport\IFrameTransport.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\IInputTransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\ITransport.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -179,6 +188,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CLGMPHost.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPInputTransport.h">
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CLGMPTransport.h">
@@ -289,6 +301,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPHost.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPInputTransport.cpp">
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPTransport.cpp">

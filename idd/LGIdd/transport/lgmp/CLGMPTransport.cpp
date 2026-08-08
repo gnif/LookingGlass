@@ -49,7 +49,8 @@ static bool TranslateFrameScheduleFlags(
 
 CLGMPTransport::CLGMPTransport() :
   m_control(m_host),
-  m_frames(m_host, m_ivshmem)
+  m_frames(m_host, m_ivshmem),
+  m_input(m_host)
 {
 }
 
@@ -69,9 +70,10 @@ bool CLGMPTransport::Initialize()
   if (!m_host.Initialize(m_ivshmem))
     return false;
 
-  // Preserve the shared-memory layout: frame queues precede the pointer queue
-  // and its retained cursor and color-transform allocations.
-  if (!m_frames.Initialize() || !m_control.Initialize())
+  // Preserve the existing shared-memory layout by appending input after the
+  // frame and pointer queues and retained pointer state allocations.
+  if (!m_frames.Initialize() || !m_control.Initialize() ||
+      !m_input.Initialize())
     return false;
 
   m_frames.SealMemoryLayout();

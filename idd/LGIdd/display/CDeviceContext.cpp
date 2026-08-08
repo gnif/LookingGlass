@@ -21,8 +21,10 @@
 #include "display/CDeviceContext.h"
 
 #include "display/IddCxCompat.h"
+#include "ipc/CInputPipeServer.h"
 #include "ipc/CPipeServer.h"
 #include "transport/IFrameTransport.h"
+#include "transport/IInputTransport.h"
 #include "transport/TransportFactory.h"
 #include "CDebug.h"
 
@@ -55,6 +57,9 @@ CDeviceContext::~CDeviceContext()
     WdfTimerStop(m_transportTimer, TRUE);
     m_transportTimer = nullptr;
   }
+
+  if (m_transport && m_transport->Input())
+    m_transport->Input()->Stop();
 }
 
 void CDeviceContext::QueryIddCxCapabilities()
@@ -462,41 +467,49 @@ bool CDeviceContext::SetupTransport(size_t alignSize)
 {
   // Frame buffers cannot be allocated until the GPU-specific alignment is
   // known. The swap-chain path may call this again after setup completed.
-  if (m_transport->Frames().GetMaxFrameSize())
-    return true;
-
-  if (!InitializeTransport() || !m_transport->Setup(alignSize))
-    return false;
-
-  WDF_TIMER_CONFIG config;
-  WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
-    [](WDFTIMER timer) -> void
-    {
-      WDFOBJECT parent = WdfTimerGetParentObject(timer);
-      auto wrapper = WdfObjectGet_CDeviceContextWrapper(parent);
-      wrapper->context->TransportTimer();
-    },
-    10);
-  config.AutomaticSerialization = FALSE;
-
-  /**
-   * Documentation states that Dispatch is not available under UMDF, however
-   * using Passive returns a not-supported error and Dispatch works.
-   */
-  WDF_OBJECT_ATTRIBUTES attribs;
-  WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
-  attribs.ParentObject   = m_wdfDevice;
-  attribs.ExecutionLevel = WdfExecutionLevelDispatch;
-
-  NTSTATUS status = WdfTimerCreate(
-    &config, &attribs, &m_transportTimer);
-  if (!NT_SUCCESS(status))
+  if (!m_transport->Frames().GetMaxFrameSize())
   {
-    DEBUG_ERROR_HR(status, "Timer creation failed");
+    if (!InitializeTransport() || !m_transport->Setup(alignSize))
+      return false;
+
+    WDF_TIMER_CONFIG config;
+    WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
+      [](WDFTIMER timer) -> void
+      {
+        WDFOBJECT parent = WdfTimerGetParentObject(timer);
+        auto wrapper = WdfObjectGet_CDeviceContextWrapper(parent);
+        wrapper->context->TransportTimer();
+      },
+      10);
+    config.AutomaticSerialization = FALSE;
+
+    /**
+     * Documentation states that Dispatch is not available under UMDF,
+     * however using Passive returns a not-supported error and Dispatch works.
+     */
+    WDF_OBJECT_ATTRIBUTES attribs;
+    WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
+    attribs.ParentObject   = m_wdfDevice;
+    attribs.ExecutionLevel = WdfExecutionLevelDispatch;
+
+    NTSTATUS status = WdfTimerCreate(
+      &config, &attribs, &m_transportTimer);
+    if (!NT_SUCCESS(status))
+    {
+      DEBUG_ERROR_HR(status, "Timer creation failed");
+      return false;
+    }
+
+    WdfTimerStart(m_transportTimer, WDF_REL_TIMEOUT_IN_MS(10));
+  }
+
+  IInputTransport * input = m_transport->Input();
+  if (input && !input->Start(g_inputPipeServer))
+  {
+    DEBUG_ERROR("Failed to start input transport");
     return false;
   }
 
-  WdfTimerStart(m_transportTimer, WDF_REL_TIMEOUT_IN_MS(10));
   return true;
 }
 

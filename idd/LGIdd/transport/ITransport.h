@@ -28,6 +28,7 @@
 
 class IControlTransport;
 class IFrameTransport;
+class IInputTransport;
 
 class ITransportEvents
 {
@@ -60,4 +61,5 @@ public:
 
   virtual IFrameTransport& Frames() = 0;
   virtual IControlTransport& Control() = 0;
+  virtual IInputTransport * Input() { return nullptr; }
 };

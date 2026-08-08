@@ -25,6 +25,7 @@
 #include "transport/lgmp/CLGMPControl.h"
 #include "transport/lgmp/CLGMPFrameTransport.h"
 #include "transport/lgmp/CLGMPHost.h"
+#include "transport/lgmp/CLGMPInputTransport.h"
 
 class CLGMPTransport final : public ITransport
 {
@@ -35,6 +36,7 @@ private:
   CLGMPHost           m_host;
   CLGMPControl        m_control;
   CLGMPFrameTransport m_frames;
+  CLGMPInputTransport m_input;
 
 public:
   CLGMPTransport();
@@ -53,4 +55,5 @@ public:
 
   IFrameTransport& Frames() override { return m_frames; }
   IControlTransport& Control() override { return m_control; }
+  IInputTransport * Input() override { return &m_input; }
 };
