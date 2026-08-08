@@ -67,7 +67,6 @@ private:
   uint64_t  m_sequence             = 0;
 
   MouseMode m_mouseMode       = MouseMode::NONE;
-  bool      m_absoluteValid   = false;
   uint16_t  m_absoluteX       = 0;
   uint16_t  m_absoluteY       = 0;
   uint32_t  m_relativeButtons = 0;

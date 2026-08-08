@@ -74,7 +74,6 @@ struct HIDDeviceContext
   uint32_t              relativeButtons;
   uint32_t              absoluteButtons;
   uint16_t              consumerUsage;
-  bool                  absoluteValid;
   uint16_t              absoluteX;
   uint16_t              absoluteY;
   HIDStatistics         statistics;
@@ -545,7 +544,6 @@ NTSTATUS CHIDDevice::SubmitReport(
               static_cast<const HIDMouseAbsoluteReport *>(report);
             context->mouseMode       = reportId;
             context->absoluteButtons = mouse->buttons;
-            context->absoluteValid   = true;
             context->absoluteX       = mouse->x;
             context->absoluteY       = mouse->y;
             break;
@@ -571,9 +569,9 @@ NTSTATUS CHIDDevice::SubmitReport(
 
 NTSTATUS CHIDDevice::ResetReports()
 {
+  UCHAR    mouseMode = 0;
   uint16_t absoluteX = 0;
   uint16_t absoluteY = 0;
-  bool     absoluteValid = false;
   {
     CSRWSharedLock deviceLock(&s_deviceLock);
     HIDDeviceContext * context = s_device;
@@ -584,7 +582,7 @@ NTSTATUS CHIDDevice::ResetReports()
     if (context->stopping)
       return STATUS_DEVICE_NOT_READY;
 
-    absoluteValid              = context->absoluteValid;
+    mouseMode                  = context->mouseMode;
     absoluteX                  = context->absoluteX;
     absoluteY                  = context->absoluteY;
     context->statistics.resetDiscarded += context->reportCount;
@@ -596,13 +594,6 @@ NTSTATUS CHIDDevice::ResetReports()
     context->consumerUsage     = UINT16_MAX;
   }
 
-  const HIDMouseRelativeReport relative = {
-    HID_REPORT_ID_MOUSE_RELATIVE,
-    0,
-    0,
-    0,
-    0,
-  };
   const HIDKeyboardReport keyboard = {
     HID_REPORT_ID_KEYBOARD,
   };
@@ -610,21 +601,39 @@ NTSTATUS CHIDDevice::ResetReports()
     HID_REPORT_ID_CONSUMER,
   };
 
-  NTSTATUS status = SubmitReport(&relative, sizeof(relative));
-  if (absoluteValid)
+  NTSTATUS status = STATUS_SUCCESS;
+  switch (mouseMode)
   {
-    const HIDMouseAbsoluteReport absolute = {
-      HID_REPORT_ID_MOUSE_ABSOLUTE,
-      0,
-      absoluteX,
-      absoluteY,
-      0,
-    };
-    const NTSTATUS absoluteStatus =
-      SubmitReport(&absolute, sizeof(absolute));
-    if (NT_SUCCESS(status))
-      status = absoluteStatus;
+    case HID_REPORT_ID_MOUSE_RELATIVE:
+    {
+      const HIDMouseRelativeReport relative = {
+        HID_REPORT_ID_MOUSE_RELATIVE,
+        0,
+        0,
+        0,
+        0,
+      };
+      status = SubmitReport(&relative, sizeof(relative));
+      break;
+    }
+
+    case HID_REPORT_ID_MOUSE_ABSOLUTE:
+    {
+      const HIDMouseAbsoluteReport absolute = {
+        HID_REPORT_ID_MOUSE_ABSOLUTE,
+        0,
+        absoluteX,
+        absoluteY,
+        0,
+      };
+      status = SubmitReport(&absolute, sizeof(absolute));
+      break;
+    }
+
+    default:
+      break;
   }
+
   const NTSTATUS keyboardStatus =
     SubmitReport(&keyboard, sizeof(keyboard));
   if (NT_SUCCESS(status))

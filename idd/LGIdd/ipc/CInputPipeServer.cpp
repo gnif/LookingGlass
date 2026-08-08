@@ -99,7 +99,6 @@ void CInputPipeServer::DeInit()
   m_queueHead       = 0;
   m_queueCount      = 0;
   m_mouseMode       = MouseMode::NONE;
-  m_absoluteValid   = false;
   m_relativeButtons = 0;
   m_absoluteButtons = 0;
 
@@ -198,17 +197,24 @@ bool CInputPipeServer::QueueRawLocked(
 bool CInputPipeServer::QueueResetLocked()
 {
   KVMFRInputPayload payload = {};
-  if (!QueueRawLocked(
-      LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE, payload, false))
-    return false;
-
-  if (m_absoluteValid)
+  switch (m_mouseMode)
   {
-    payload.mouseAbsolute.x = m_absoluteX;
-    payload.mouseAbsolute.y = m_absoluteY;
-    if (!QueueRawLocked(
-        LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE, payload, false))
-      return false;
+    case MouseMode::RELATIVE_INPUT:
+      if (!QueueRawLocked(
+          LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE, payload, false))
+        return false;
+      break;
+
+    case MouseMode::ABSOLUTE_INPUT:
+      payload.mouseAbsolute.x = m_absoluteX;
+      payload.mouseAbsolute.y = m_absoluteY;
+      if (!QueueRawLocked(
+          LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE, payload, false))
+        return false;
+      break;
+
+    case MouseMode::NONE:
+      break;
   }
 
   payload = {};
@@ -328,7 +334,6 @@ bool CInputPipeServer::SendMouseAbsolute(
     if (switching)
       m_relativeButtons = 0;
     m_mouseMode       = MouseMode::ABSOLUTE_INPUT;
-    m_absoluteValid   = true;
     m_absoluteX       = x;
     m_absoluteY       = y;
     m_absoluteButtons = buttons;
