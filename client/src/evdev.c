@@ -211,8 +211,9 @@ static int evdev_thread(void * opaque)
         {
           case EV_KEY:
           {
-            bool isMouseBtn = ev->code >= BTN_MOUSE && ev->code <= BTN_BACK;
-            static const int mouseBtnMap[] = {1, 3, 2, 6, 7, 0, 0};
+            bool isMouseBtn =
+              ev->code >= BTN_MOUSE && ev->code <= BTN_TASK;
+            static const int mouseBtnMap[] = {1, 3, 2, 6, 7, 8, 9, 10};
 
             if (ev->value == 1)
             {

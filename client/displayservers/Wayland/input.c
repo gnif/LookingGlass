@@ -149,29 +149,37 @@ static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   app_handleWheelMotion(delta / WL_SCROLL_STEP);
 }
 
-static int mapWaylandToSpiceButton(uint32_t button)
+static int mapWaylandButton(uint32_t button)
 {
   switch (button)
   {
     case BTN_LEFT:
-      return 1;  // SPICE_MOUSE_BUTTON_LEFT
+      return 1;
     case BTN_MIDDLE:
-      return 2;  // SPICE_MOUSE_BUTTON_MIDDLE
+      return 2;
     case BTN_RIGHT:
-      return 3;  // SPICE_MOUSE_BUTTON_RIGHT
+      return 3;
     case BTN_SIDE:
-      return 6;  // SPICE_MOUSE_BUTTON_SIDE
+      return 6;
     case BTN_EXTRA:
-      return 7;  // SPICE_MOUSE_BUTTON_EXTRA
+      return 7;
+    case BTN_FORWARD:
+      return 8;
+    case BTN_BACK:
+      return 9;
+    case BTN_TASK:
+      return 10;
   }
 
-  return 0;  // SPICE_MOUSE_BUTTON_INVALID
+  return 0;
 }
 
 static void pointerButtonHandler(void *data, struct wl_pointer *pointer,
     uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
 {
-  button = mapWaylandToSpiceButton(button);
+  button = mapWaylandButton(button);
+  if (!button)
+    return;
 
   if (stateW == WL_POINTER_BUTTON_STATE_PRESSED)
     app_handleButtonPress(button);

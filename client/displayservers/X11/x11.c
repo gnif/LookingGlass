@@ -1196,6 +1196,18 @@ static void x11UpdateKeyboardGroup(void)
     atomic_store(&x11.keyboardGroup, state.group);
 }
 
+static int x11MapButton(unsigned int button)
+{
+  if (button >= 1 && button <= 5)
+    return button;
+
+  /* X11 reserves buttons 6 and 7 for horizontal scrolling. */
+  if (button >= 8 && button < 34)
+    return button - 2;
+
+  return 0;
+}
+
 static void setFocus(bool focused, double x, double y)
 {
   if (x11.focused == focused)
@@ -1226,7 +1238,7 @@ static bool x11GetKeyLabel(int sc, char * label, size_t size)
 
 static void x11XInputEvent(XGenericEventCookie *cookie)
 {
-  static int button_state = 0;
+  static uint32_t button_state = 0;
 
   switch(cookie->evtype)
   {
@@ -1455,13 +1467,13 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      if (device->detail == 4)
+      const int button = x11MapButton(device->detail);
+      if (button == 4)
         app_handleWheelMotion(-0.5);
-      else if (device->detail == 5)
+      else if (button == 5)
         app_handleWheelMotion(0.5);
-      else
-        app_handleButtonPress(
-            device->detail > 5 ? device->detail - 2 : device->detail);
+      else if (button)
+        app_handleButtonPress(button);
 
       return;
     }
@@ -1472,7 +1484,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      app_handleButtonRelease(device->detail);
+      const int button = x11MapButton(device->detail);
+      if (button && button != 4 && button != 5)
+        app_handleButtonRelease(button);
       return;
     }
 
@@ -1482,6 +1496,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIRawEvent *raw = cookie->data;
+      const int button = x11MapButton(raw->detail);
+      if (!button)
+        return;
 
       /* filter out duplicate events */
       static Time         prev_time   = 0;
@@ -1491,10 +1508,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
       prev_time     = raw->time;
       prev_detail   = raw->detail;
-      button_state |= (1 << raw->detail);
+      button_state |= UINT32_C(1) << button;
 
-      app_handleButtonPress(
-          raw->detail > 5 ? raw->detail - 2 : raw->detail);
+      app_handleButtonPress(button);
       return;
     }
 
@@ -1504,6 +1520,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
       XIRawEvent *raw = cookie->data;
+      const int button = x11MapButton(raw->detail);
+      if (!button)
+        return;
 
       /* filter out duplicate events */
       static Time         prev_time   = 0;
@@ -1513,10 +1532,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
       prev_time     = raw->time;
       prev_detail   = raw->detail;
-      button_state &= ~(1 << raw->detail);
+      button_state &= ~(UINT32_C(1) << button);
 
-      app_handleButtonRelease(
-          raw->detail > 5 ? raw->detail - 2 : raw->detail);
+      app_handleButtonRelease(button);
       return;
     }
 

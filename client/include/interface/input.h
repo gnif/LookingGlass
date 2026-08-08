@@ -62,7 +62,7 @@ typedef struct LG_InputOps
   /* Position is in guest pixels and must be within the supplied dimensions. */
   bool (*mousePosition)(void * opaque, uint32_t x, uint32_t y,
       uint32_t width, uint32_t height);
-  /* Button order: left, middle, right, wheel up/down, side, extra. */
+  /* Button order: left, middle, right, wheel up/down, then HID buttons 4+. */
   bool (*mousePress)(void * opaque, unsigned int button);
   bool (*mouseRelease)(void * opaque, unsigned int button);
 

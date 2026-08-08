@@ -59,11 +59,17 @@ static bool spiceMouseMotion(void * opaque, int32_t x, int32_t y)
 
 static bool spiceMousePress(void * opaque, unsigned int button)
 {
+  if (button > 7)
+    return true;
+
   return purespice_mousePress(button);
 }
 
 static bool spiceMouseRelease(void * opaque, unsigned int button)
 {
+  if (button > 7)
+    return true;
+
   return purespice_mouseRelease(button);
 }
 
