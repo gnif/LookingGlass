@@ -172,11 +172,11 @@ Section "!Indirect Display Driver (IDD)" Section1
   DetailPrint "Extracting IDD"
   SetOutPath $INSTDIR
   File lgidd.cat
-  File /oname=LGInput.cat "LGInput\LGInput.cat"
+  File LGInput.cat
   File LGIdd.dll
-  File /oname=LGInput.dll "LGInput\LGInput.dll"
+  File LGInput.dll
   File LGIdd.inf
-  File /oname=LGInput.inf "LGInput\LGInput.inf"
+  File LGInput.inf
   File LGIddHelper.exe
   File LGIddInstall.exe
 
