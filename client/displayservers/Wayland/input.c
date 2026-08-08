@@ -684,12 +684,16 @@ void waylandWarpPointer(int x, int y, bool exiting)
     return;
   }
 
-  LG_LOCK(wlWm.surfaceLock);
-  if (wlWm.lockedPointer)
+  if (!wlWm.pointerWarpper)
   {
-    LG_UNLOCK(wlWm.surfaceLock);
-    MTRACE("warp drop=lock-race target=%d,%d exit=%d", x, y, exiting);
-    return;
+    LG_LOCK(wlWm.surfaceLock);
+
+    if (wlWm.lockedPointer)
+    {
+      LG_UNLOCK(wlWm.surfaceLock);
+      MTRACE("warp drop=lock-race target=%d,%d exit=%d", x, y, exiting);
+      return;
+    }
   }
 
   int width, height;
@@ -700,21 +704,32 @@ void waylandWarpPointer(int x, int y, bool exiting)
   if (y < 0) y = 0;
   else if (y >= height) y = height - 1;
 
-  struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
-  wl_region_add(region, x, y, 1, 1);
+  uint32_t tempId = 0;
+  uint64_t warpSeq;
 
-  struct zwp_confined_pointer_v1 * confine = zwp_pointer_constraints_v1_confine_pointer(
-    wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
-    ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
-  uint32_t tempId = proxyId(confine);
-  wl_surface_commit(wlWm.surface);
-  zwp_confined_pointer_v1_destroy(confine);
+  if (wlWm.pointerWarpper)
+  {
+    wp_pointer_warp_v1_warp_pointer(wlWm.pointerWarpper, wlWm.surface,
+      wlWm.pointer, wl_fixed_from_int(x), wl_fixed_from_int(y),
+      wlWm.pointerEnterSerial);
+    warpSeq = app_mouseSeq();
+  } else {
+    struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
+    wl_region_add(region, x, y, 1, 1);
 
-  wl_surface_commit(wlWm.surface);
-  wl_region_destroy(region);
+    struct zwp_confined_pointer_v1 * confine = zwp_pointer_constraints_v1_confine_pointer(
+      wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
+      ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+    tempId = proxyId(confine);
+    wl_surface_commit(wlWm.surface);
+    zwp_confined_pointer_v1_destroy(confine);
 
-  uint64_t warpSeq = app_mouseSeq();
-  LG_UNLOCK(wlWm.surfaceLock);
+    wl_surface_commit(wlWm.surface);
+    wl_region_destroy(region);
+
+    warpSeq = app_mouseSeq();
+    LG_UNLOCK(wlWm.surfaceLock);
+  }
 
   MLOG(warpSeq, "warp req=%d,%d target=%d,%d exit=%d temp=%u",
       reqX, reqY, x, y, exiting, tempId);

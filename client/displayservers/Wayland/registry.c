@@ -80,6 +80,9 @@ static void registryGlobalHandler(void * data, struct wl_registry * registry,
   else if (!strcmp(interface, xdg_toplevel_icon_manager_v1_interface.name))
     wlWm.iconManager = wl_registry_bind(wlWm.registry, name,
         &xdg_toplevel_icon_manager_v1_interface, 1);
+  else if (!strcmp(interface, wp_pointer_warp_v1_interface.name))
+    wlWm.pointerWarpper = wl_registry_bind(wlWm.registry, name,
+        &wp_pointer_warp_v1_interface, 1);
   else if (wlWm.desktop->registryGlobalHandler(
         data, registry, name, interface, version))
     return;
