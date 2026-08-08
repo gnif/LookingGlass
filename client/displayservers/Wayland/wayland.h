@@ -53,6 +53,7 @@
 #include "wayland-content-type-v1-client-protocol.h"
 #include "wayland-color-management-v1-client-protocol.h"
 #include "wayland-xdg-toplevel-icon-v1-client-protocol.h"
+#include "wayland-pointer-warp-v1-client-protocol.h"
 
 #include "scale.h"
 #include "motion.h"
@@ -196,6 +197,7 @@ struct WaylandDSState
   struct zwp_pointer_constraints_v1 * pointerConstraints;
   struct zwp_relative_pointer_v1 * relativePointer;
   struct zwp_locked_pointer_v1 * lockedPointer;
+  struct wp_pointer_warp_v1 * pointerWarpper;
   bool captureRequested;
   bool showPointer;
   uint32_t pointerEnterSerial;
