@@ -25,22 +25,23 @@
 
 enum HIDReportId : uint8_t
 {
-  HID_REPORT_ID_TABLET   = 1,
-  HID_REPORT_ID_MOUSE    = 2,
-  HID_REPORT_ID_KEYBOARD = 3,
+  HID_REPORT_ID_MOUSE_ABSOLUTE = 1,
+  HID_REPORT_ID_MOUSE_RELATIVE = 2,
+  HID_REPORT_ID_KEYBOARD       = 3,
 };
 
 #pragma pack(push, 1)
 
-struct HIDTabletReport
+struct HIDMouseAbsoluteReport
 {
   uint8_t  reportId;
   uint8_t  buttons;
   uint16_t x;
   uint16_t y;
+  int8_t   wheel;
 };
 
-struct HIDMouseReport
+struct HIDMouseRelativeReport
 {
   uint8_t reportId;
   uint8_t buttons;
@@ -65,8 +66,8 @@ struct HIDKeyboardLedsReport
 
 #pragma pack(pop)
 
-static_assert(sizeof(HIDTabletReport)       == 6);
-static_assert(sizeof(HIDMouseReport)        == 7);
+static_assert(sizeof(HIDMouseAbsoluteReport) == 7);
+static_assert(sizeof(HIDMouseRelativeReport) == 7);
 static_assert(sizeof(HIDKeyboardReport)     == 9);
 static_assert(sizeof(HIDKeyboardLedsReport) == 2);
 

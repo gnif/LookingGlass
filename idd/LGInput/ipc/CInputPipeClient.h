@@ -38,6 +38,10 @@ private:
   void OnPipeConnected() override;
   void OnPipeDisconnected() override;
   bool OnPipeMessage(const void * message, size_t size) override;
+  bool HandleMouseRelative(const void * payload, size_t size);
+  bool HandleMouseAbsolute(const void * payload, size_t size);
+  bool HandleKeyboard(const void * payload, size_t size);
+  bool SubmitReport(const void * report, size_t size);
 
   CPipeEndpoint m_endpoint;
   uint64_t m_lastSequence = 0;

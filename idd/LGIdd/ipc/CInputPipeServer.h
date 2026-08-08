@@ -21,6 +21,7 @@
 #pragma once
 
 #include "CPipeEndpoint.h"
+#include "InputPipeProtocol.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -33,12 +34,29 @@ public:
   bool Init();
   void DeInit();
 
-  bool SendReport(
-    _In_reads_bytes_(size) const void * report,
-    _In_ size_t size);
+  // Mouse buttons use LGInputMouseButton bits. Wheel values are -127..127.
+  bool SendMouseRelative(
+    _In_ int16_t deltaX,
+    _In_ int16_t deltaY,
+    _In_ int8_t wheel,
+    _In_ uint8_t buttons);
+  // Absolute coordinates are normalized to 0..32767 on each axis.
+  bool SendMouseAbsolute(
+    _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t x,
+    _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t y,
+    _In_ int8_t wheel,
+    _In_ uint8_t buttons);
+  // Keys are USB HID Keyboard/Keypad usage IDs; zero marks an empty slot.
+  bool SendKeyboard(
+    _In_ uint8_t modifiers,
+    _In_reads_(LG_INPUT_KEYBOARD_KEY_COUNT) const uint8_t * keys);
   bool IsConnected() const { return m_endpoint.IsConnected(); }
 
 private:
+  bool SendMessage(
+    _In_ LGInputPipeMessageType type,
+    _In_reads_bytes_(size) const void * payload,
+    _In_ size_t size);
   bool OnPipeMessage(const void * message, size_t size) override;
 
   CPipeEndpoint m_endpoint;

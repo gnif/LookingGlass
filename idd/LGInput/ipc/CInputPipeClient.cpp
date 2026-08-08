@@ -23,6 +23,9 @@
 #include "CDebug.h"
 #include "InputPipeProtocol.h"
 #include "../CHIDDevice.h"
+#include "../HIDReports.h"
+
+#include <string.h>
 
 bool CInputPipeClient::Start()
 {
@@ -67,7 +70,6 @@ bool CInputPipeClient::OnPipeMessage(
     *static_cast<const LGInputPipeMessage *>(frame);
   if (message.magic != LG_INPUT_PIPE_MAGIC ||
       message.version != LG_INPUT_PIPE_VERSION ||
-      message.type != LG_INPUT_PIPE_MESSAGE_REPORT ||
       !message.payloadSize ||
       message.payloadSize > sizeof(message.payload))
     return false;
@@ -78,10 +80,111 @@ bool CInputPipeClient::OnPipeMessage(
     DEBUG_WARN("LGInput pipe report sequence changed unexpectedly");
     return false;
   }
-  m_lastSequence = message.sequence;
+  bool handled = false;
+  switch (message.type)
+  {
+    case LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE:
+      handled = HandleMouseRelative(
+        message.payload, message.payloadSize);
+      break;
 
-  const NTSTATUS status =
-    CHIDDevice::SubmitReport(message.payload, message.payloadSize);
+    case LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE:
+      handled = HandleMouseAbsolute(
+        message.payload, message.payloadSize);
+      break;
+
+    case LG_INPUT_PIPE_MESSAGE_KEYBOARD:
+      handled = HandleKeyboard(message.payload, message.payloadSize);
+      break;
+
+    default:
+      return false;
+  }
+
+  if (!handled)
+    return false;
+
+  m_lastSequence = message.sequence;
+  return true;
+}
+
+bool CInputPipeClient::HandleMouseRelative(
+  const void * payload,
+  size_t size)
+{
+  if (size != sizeof(LGInputPipeMouseRelative))
+    return false;
+
+  LGInputPipeMouseRelative input = {};
+  memcpy(&input, payload, sizeof(input));
+  if (input.wheel < LG_INPUT_MOUSE_WHEEL_MIN ||
+      (input.buttons & ~LG_INPUT_MOUSE_BUTTON_MASK))
+    return false;
+
+  const HIDMouseRelativeReport report = {
+    HID_REPORT_ID_MOUSE_RELATIVE,
+    input.buttons,
+    input.deltaX,
+    input.deltaY,
+    input.wheel,
+  };
+  return SubmitReport(&report, sizeof(report));
+}
+
+bool CInputPipeClient::HandleMouseAbsolute(
+  const void * payload,
+  size_t size)
+{
+  if (size != sizeof(LGInputPipeMouseAbsolute))
+    return false;
+
+  LGInputPipeMouseAbsolute input = {};
+  memcpy(&input, payload, sizeof(input));
+  if (input.x > LG_INPUT_MOUSE_ABSOLUTE_MAX ||
+      input.y > LG_INPUT_MOUSE_ABSOLUTE_MAX ||
+      input.wheel < LG_INPUT_MOUSE_WHEEL_MIN ||
+      (input.buttons & ~LG_INPUT_MOUSE_BUTTON_MASK))
+    return false;
+
+  const HIDMouseAbsoluteReport report = {
+    HID_REPORT_ID_MOUSE_ABSOLUTE,
+    input.buttons,
+    input.x,
+    input.y,
+    input.wheel,
+  };
+  return SubmitReport(&report, sizeof(report));
+}
+
+bool CInputPipeClient::HandleKeyboard(
+  const void * payload,
+  size_t size)
+{
+  if (size != sizeof(LGInputPipeKeyboard))
+    return false;
+
+  LGInputPipeKeyboard input = {};
+  memcpy(&input, payload, sizeof(input));
+
+  HIDKeyboardReport report = {};
+  report.reportId = HID_REPORT_ID_KEYBOARD;
+  report.modifiers = input.modifiers;
+  for (size_t i = 0; i < LG_INPUT_KEYBOARD_KEY_COUNT; ++i)
+  {
+    if (input.keys[i] > LG_INPUT_KEYBOARD_USAGE_MAX)
+      return false;
+    report.keys[i] = input.keys[i];
+  }
+
+  return SubmitReport(&report, sizeof(report));
+}
+
+bool CInputPipeClient::SubmitReport(
+  const void * report,
+  size_t size)
+{
+  const NTSTATUS status = CHIDDevice::SubmitReport(report, size);
+
   if (status == STATUS_INVALID_PARAMETER)
     return false;
 
