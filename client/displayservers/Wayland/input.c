@@ -670,9 +670,54 @@ void waylandUngrabKeyboard(void)
 
 void waylandWarpPointer(int x, int y, bool exiting)
 {
-  (void)x;
-  (void)y;
-  (void)exiting;
+  const int reqX = x;
+  const int reqY = y;
+  if (!wlWm.pointerInSurface)
+  {
+    MTRACE("warp drop=surface target=%d,%d exit=%d", x, y, exiting);
+    return;
+  }
+
+  if (wlWm.lockedPointer)
+  {
+    MTRACE("warp drop=lock target=%d,%d exit=%d", x, y, exiting);
+    return;
+  }
+
+  LG_LOCK(wlWm.surfaceLock);
+  if (wlWm.lockedPointer)
+  {
+    LG_UNLOCK(wlWm.surfaceLock);
+    MTRACE("warp drop=lock-race target=%d,%d exit=%d", x, y, exiting);
+    return;
+  }
+
+  int width, height;
+  wlWm.desktop->getSize(&width, &height);
+
+  if (x < 0) x = 0;
+  else if (x >= width) x = width - 1;
+  if (y < 0) y = 0;
+  else if (y >= height) y = height - 1;
+
+  struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
+  wl_region_add(region, x, y, 1, 1);
+
+  struct zwp_confined_pointer_v1 * confine = zwp_pointer_constraints_v1_confine_pointer(
+    wlWm.pointerConstraints, wlWm.surface, wlWm.pointer, region,
+    ZWP_POINTER_CONSTRAINTS_V1_LIFETIME_PERSISTENT);
+  uint32_t tempId = proxyId(confine);
+  wl_surface_commit(wlWm.surface);
+  zwp_confined_pointer_v1_destroy(confine);
+
+  wl_surface_commit(wlWm.surface);
+  wl_region_destroy(region);
+
+  uint64_t warpSeq = app_mouseSeq();
+  LG_UNLOCK(wlWm.surfaceLock);
+
+  MLOG(warpSeq, "warp req=%d,%d target=%d,%d exit=%d temp=%u",
+      reqX, reqY, x, y, exiting, tempId);
 }
 
 void waylandRealignPointer(void)
