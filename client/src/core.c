@@ -218,41 +218,8 @@ void core_setCursorInView(bool enable)
     return;
   }
 
-  enum LG_DSWarpSupport warpSupport = LG_DS_WARP_NONE;
-  app_getProp(LG_DS_WARP_SUPPORT, &warpSupport);
-
-  const bool immediate = g_cursor.grab || g_params.captureInputOnly ||
-    warpSupport == LG_DS_WARP_NONE;
-
-  if (g_cursor.viewReq == enable)
-  {
-    if (immediate)
-      applyView(enable, false);
-    else if (enable && !g_cursor.inView)
-    {
-      g_state.ds->grabPointer();
-      applyView(g_state.ds->isPointerGrabbed(), false);
-    }
-    else
-      MTRACE("view skip=same value=%d", enable);
-    return;
-  }
-
   g_cursor.viewReq = enable;
-
-  if (immediate)
-  {
-    applyView(enable, false);
-    return;
-  }
-
-  if (enable)
-  {
-    g_state.ds->grabPointer();
-    applyView(g_state.ds->isPointerGrabbed(), false);
-  }
-  else
-    g_state.ds->ungrabPointer();
+  applyView(enable, false);
 }
 
 void core_handleGrabEvent(bool active)
