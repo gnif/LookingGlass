@@ -139,6 +139,8 @@ void app_updateCursorPos(double x, double y)
 
   if (app_isOverlayMode())
     g_state.io->MousePos = (ImVec2) { x, y };
+  else
+    core_handleMouseAbsolute();
 }
 
 void app_updateMouseState(void)
@@ -267,6 +269,7 @@ void app_handleEnterEvent(bool entered)
       return;
 
     g_cursor.realign = true;
+    core_handleMouseAbsolute();
   }
   else
   {
@@ -471,6 +474,7 @@ void app_handleButtonPress(int button)
   if (!core_inputEnabled() || !g_cursor.inView || !g_cursor.viewReq)
     return;
 
+  core_handleMouseAbsolute();
   if (!lgInput_mousePress(button))
     DEBUG_ERROR("app_handleButtonPress: failed to send message");
 }
@@ -660,6 +664,9 @@ void app_handleMouseBasic(void)
     return;
 
   if (!core_inputEnabled())
+    return;
+
+  if (lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
     return;
 
   const bool inView =

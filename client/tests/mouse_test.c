@@ -20,6 +20,7 @@
 
 #include "app.h"
 #include "core.h"
+#include "input.h"
 #include "main.h"
 #include "test.h"
 #include "util.h"
@@ -241,16 +242,43 @@ void app_mouseTrace(const char * file, unsigned int line,
   (void)format;
 }
 
-bool lgInput_available(void)
+static bool inputSupports(void * opaque, LG_InputSupport support)
 {
-  return g_params.useSpiceInput;
+  (void)opaque;
+  (void)support;
+  return false;
 }
 
-bool lgInput_mouseMotion(int32_t x, int32_t y)
+static bool inputKey(void * opaque, int key)
 {
+  (void)opaque;
+  (void)key;
+  return true;
+}
+
+static bool inputMouseMotion(void * opaque, int32_t x, int32_t y)
+{
+  (void)opaque;
   push(EV_MOTION, x, y, false);
   return true;
 }
+
+static bool inputMouseButton(void * opaque, unsigned int button)
+{
+  (void)opaque;
+  (void)button;
+  return true;
+}
+
+static const LG_InputOps inputOps = {
+  .name         = "test",
+  .supports     = inputSupports,
+  .keyDown      = inputKey,
+  .keyUp        = inputKey,
+  .mouseMotion  = inputMouseMotion,
+  .mousePress   = inputMouseButton,
+  .mouseRelease = inputMouseButton,
+};
 
 static void reset(void)
 {
@@ -280,8 +308,7 @@ static void reset(void)
     .h     = 80,
   };
 
-  g_params.useSpiceInput     = true;
-  g_params.scaleMouseInput   = true;
+  g_params.scaleMouseInput = true;
 
   g_cursor.inWindow    = true;
   g_cursor.inView      = true;
@@ -843,23 +870,33 @@ static const struct Test tests[] = {
 
 int main(int argc, char ** argv)
 {
+  lgInput_init();
+  lgInput_setFallback(&inputOps, NULL);
+
   if (argc == 2)
   {
     for (unsigned int i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
       if (strcmp(argv[1], tests[i].name) == 0)
       {
         tests[i].run();
+        lgInput_free();
         return 0;
       }
 
     fprintf(stderr, "unknown test: %s\n", argv[1]);
+    lgInput_free();
     return EXIT_FAILURE;
   }
 
   if (argc != 1)
+  {
+    lgInput_free();
     return EXIT_FAILURE;
+  }
 
   for (unsigned int i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
     tests[i].run();
+
+  lgInput_free();
   return 0;
 }

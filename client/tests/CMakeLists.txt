@@ -50,6 +50,7 @@ set_tests_properties(wayland-motion-tests PROPERTIES
 add_executable(mouse-tests
   mouse_test.c
   ../src/core.c
+  ../src/input.c
   ../src/util.c
 )
 target_compile_definitions(mouse-tests PRIVATE

@@ -282,6 +282,8 @@ void core_handleGrabEvent(bool active)
     finishExit();
 
   applyView(active, false);
+  if (active)
+    core_handleMouseAbsolute();
 }
 
 void core_setGrab(bool enable)
@@ -692,6 +694,38 @@ void core_handleGuestMouseUpdate(void)
   );
 }
 
+void core_handleMouseAbsolute(void)
+{
+  if (g_cursor.grab || !g_cursor.inWindow || !g_cursor.valid ||
+      !g_state.haveSrcSize || !g_state.posInfoValid ||
+      !g_state.focused || g_cursor.realigning ||
+      app_isOverlayMode() || !core_inputEnabled() ||
+      !lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
+    return;
+
+  const bool inView = isInView();
+  if (g_cursor.viewReq != inView || g_cursor.inView != inView)
+    core_setCursorInView(inView);
+  if (!inView || !g_cursor.inView || !g_cursor.viewReq)
+    return;
+
+  struct DoublePoint guest;
+  util_localCurToGuest(&guest);
+
+  const uint32_t width  = g_state.srcSize.x;
+  const uint32_t height = g_state.srcSize.y;
+  const uint32_t x      = round(util_clamp(guest.x, 0, width  - 1));
+  const uint32_t y      = round(util_clamp(guest.y, 0, height - 1));
+
+  MTRACE("absolute local=%.3f,%.3f guest=%u,%u size=%ux%u",
+      g_cursor.pos.x, g_cursor.pos.y, x, y, width, height);
+
+  if (!lgInput_mousePosition(x, y, width, height))
+    DEBUG_ERROR("failed to send absolute mouse position message");
+  else
+    g_cursor.realign = false;
+}
+
 void core_handleMouseGrabbed(double ex, double ey)
 {
   const bool active  = g_cursor.grab && g_state.ds->isPointerCaptured();
@@ -730,10 +764,15 @@ void core_handleMouseNormal(double ex, double ey)
       "inView=%d", ex, ey, g_cursor.guest.x, g_cursor.guest.y,
       g_cursor.guest.valid, g_cursor.inWindow, g_cursor.inView);
 
+  const bool absolute =
+    lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
+
   // prevent cursor handling outside of capture if the position is not known
   if (!g_cursor.guest.valid)
   {
-    if (app_guestIsWindows())
+    if (absolute)
+      core_handleMouseAbsolute();
+    else if (app_guestIsWindows())
     {
       // wiggle the mouse when the guest has not provided any information, we need
       // to do this because windows doesn't enable a cursor at all until it has
@@ -793,7 +832,16 @@ void core_handleMouseNormal(double ex, double ey)
   }
 
   /* if we have been instructed to realign */
-  if (g_cursor.realign)
+  if (g_cursor.realign && absolute)
+  {
+    g_cursor.realign = false;
+    core_handleMouseAbsolute();
+    if (!g_cursor.inView)
+      return;
+
+    testExit = false;
+  }
+  else if (g_cursor.realign)
   {
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
@@ -955,6 +1003,9 @@ fallback:
       g_cursor.warpState = WARP_STATE_ON;
     }
   }
+
+  if (absolute)
+    return;
 
   int x, y;
   util_cursorToInt(ex, ey, &x, &y);
