@@ -146,7 +146,7 @@ struct LGMPInput
   struct LGMPInputStats stats;
 };
 
-static void buildKeyboardPayload(const LGMPInput * input,
+static bool buildKeyboardPayload(const LGMPInput * input,
     KVMFRInputPayload * payload);
 static bool queueMouse(LGMPInput * input, enum LGMPInputMouseMode mode,
     int32_t x, int32_t y, int32_t wheel, uint32_t buttons,
@@ -484,12 +484,6 @@ static bool inputStateHeld(const LGMPInput * input)
   return false;
 }
 
-static bool inputStateActive(const LGMPInput * input)
-{
-  return input->mouseMode == LGMP_INPUT_MOUSE_ABSOLUTE ||
-    inputStateHeld(input);
-}
-
 static void discardProtocolState(LGMPInput * input)
 {
   input->pendingHead         = 0;
@@ -504,18 +498,19 @@ static void discardProtocolState(LGMPInput * input)
 
 static bool restoreInputState(LGMPInput * input, bool * wake)
 {
-  if (!inputStateActive(input))
+  if (!inputStateHeld(input))
     return true;
   if (!claim(input, wake))
     return false;
 
   KVMFRInputPayload keyboard = { 0 };
-  buildKeyboardPayload(input, &keyboard);
-  if (!queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+  const bool keyboardHeld = buildKeyboardPayload(input, &keyboard);
+  if (keyboardHeld && !queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
       &keyboard, false, wake))
     return false;
 
-  if (input->mouseMode != LGMP_INPUT_MOUSE_NONE &&
+  if (input->mouseButtons &&
+      input->mouseMode != LGMP_INPUT_MOUSE_NONE &&
       !queueMouse(input, input->mouseMode, 0, 0, 0,
         input->mouseButtons, false, wake))
     return false;
@@ -1087,26 +1082,32 @@ static void inputSetStatusListener(void * opaque,
     callback(callbackOpaque, &status);
 }
 
-static void buildKeyboardPayload(const LGMPInput * input,
+static bool buildKeyboardPayload(const LGMPInput * input,
     KVMFRInputPayload * payload)
 {
+  bool held = false;
   for (unsigned usage = 224; usage <= 231; ++usage)
     if (input->keyState[usage])
+    {
       payload->keyboard.modifiers |= 1U << (usage - 224);
+      held = true;
+    }
 
   unsigned count = 0;
   for (unsigned usage = 1; usage < 224; ++usage)
   {
     if (!input->keyState[usage])
       continue;
+    held = true;
     if (count == KVMFR_INPUT_KEYBOARD_KEY_COUNT)
     {
       memset(payload->keyboard.keys, 1,
         sizeof(payload->keyboard.keys));
-      return;
+      return true;
     }
     payload->keyboard.keys[count++] = (uint8_t)usage;
   }
+  return held;
 }
 
 static bool updateKey(void * opaque, int key, bool pressed)

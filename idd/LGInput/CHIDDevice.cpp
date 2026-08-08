@@ -569,9 +569,10 @@ NTSTATUS CHIDDevice::SubmitReport(
 
 NTSTATUS CHIDDevice::ResetReports()
 {
-  UCHAR    mouseMode = 0;
-  uint16_t absoluteX = 0;
-  uint16_t absoluteY = 0;
+  UCHAR    mouseMode    = 0;
+  uint32_t mouseButtons = 0;
+  uint16_t absoluteX    = 0;
+  uint16_t absoluteY    = 0;
   {
     CSRWSharedLock deviceLock(&s_deviceLock);
     HIDDeviceContext * context = s_device;
@@ -583,6 +584,8 @@ NTSTATUS CHIDDevice::ResetReports()
       return STATUS_DEVICE_NOT_READY;
 
     mouseMode                  = context->mouseMode;
+    mouseButtons               = mouseMode == HID_REPORT_ID_MOUSE_ABSOLUTE ?
+      context->absoluteButtons : context->relativeButtons;
     absoluteX                  = context->absoluteX;
     absoluteY                  = context->absoluteY;
     context->statistics.resetDiscarded += context->reportCount;
@@ -602,36 +605,39 @@ NTSTATUS CHIDDevice::ResetReports()
   };
 
   NTSTATUS status = STATUS_SUCCESS;
-  switch (mouseMode)
+  if (mouseButtons)
   {
-    case HID_REPORT_ID_MOUSE_RELATIVE:
+    switch (mouseMode)
     {
-      const HIDMouseRelativeReport relative = {
-        HID_REPORT_ID_MOUSE_RELATIVE,
-        0,
-        0,
-        0,
-        0,
-      };
-      status = SubmitReport(&relative, sizeof(relative));
-      break;
-    }
+      case HID_REPORT_ID_MOUSE_RELATIVE:
+      {
+        const HIDMouseRelativeReport relative = {
+          HID_REPORT_ID_MOUSE_RELATIVE,
+          0,
+          0,
+          0,
+          0,
+        };
+        status = SubmitReport(&relative, sizeof(relative));
+        break;
+      }
 
-    case HID_REPORT_ID_MOUSE_ABSOLUTE:
-    {
-      const HIDMouseAbsoluteReport absolute = {
-        HID_REPORT_ID_MOUSE_ABSOLUTE,
-        0,
-        absoluteX,
-        absoluteY,
-        0,
-      };
-      status = SubmitReport(&absolute, sizeof(absolute));
-      break;
-    }
+      case HID_REPORT_ID_MOUSE_ABSOLUTE:
+      {
+        const HIDMouseAbsoluteReport absolute = {
+          HID_REPORT_ID_MOUSE_ABSOLUTE,
+          0,
+          absoluteX,
+          absoluteY,
+          0,
+        };
+        status = SubmitReport(&absolute, sizeof(absolute));
+        break;
+      }
 
-    default:
-      break;
+      default:
+        break;
+    }
   }
 
   const NTSTATUS keyboardStatus =

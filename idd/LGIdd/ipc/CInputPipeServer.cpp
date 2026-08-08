@@ -200,17 +200,20 @@ bool CInputPipeServer::QueueResetLocked()
   switch (m_mouseMode)
   {
     case MouseMode::RELATIVE_INPUT:
-      if (!QueueRawLocked(
+      if (m_relativeButtons && !QueueRawLocked(
           LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE, payload, false))
         return false;
       break;
 
     case MouseMode::ABSOLUTE_INPUT:
-      payload.mouseAbsolute.x = m_absoluteX;
-      payload.mouseAbsolute.y = m_absoluteY;
-      if (!QueueRawLocked(
-          LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE, payload, false))
-        return false;
+      if (m_absoluteButtons)
+      {
+        payload.mouseAbsolute.x = m_absoluteX;
+        payload.mouseAbsolute.y = m_absoluteY;
+        if (!QueueRawLocked(
+            LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE, payload, false))
+          return false;
+      }
       break;
 
     case MouseMode::NONE:
@@ -270,7 +273,7 @@ bool CInputPipeServer::SendMouseRelative(
   const bool pureMotion = wheel == 0 && buttons == m_relativeButtons;
   const bool switching  = m_mouseMode == MouseMode::ABSOLUTE_INPUT;
   bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
-  if (queued && switching)
+  if (queued && switching && m_absoluteButtons)
   {
     KVMFRInputPayload neutral = {};
     neutral.mouseAbsolute.x = m_absoluteX;
@@ -317,7 +320,7 @@ bool CInputPipeServer::SendMouseAbsolute(
   const bool pureMotion = wheel == 0 && buttons == m_absoluteButtons;
   const bool switching  = m_mouseMode == MouseMode::RELATIVE_INPUT;
   bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
-  if (queued && switching)
+  if (queued && switching && m_relativeButtons)
   {
     const KVMFRInputPayload neutral = {};
     queued = QueueRawLocked(
