@@ -20,72 +20,59 @@
 
 #pragma once
 
+#include "common/KVMFRInput.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
 static constexpr wchar_t LG_INPUT_PIPE_NAME[] =
   L"\\\\.\\pipe\\LookingGlassIDDInput";
 
-static constexpr uint32_t LG_INPUT_PIPE_MAGIC = 0x5049474c;
-static constexpr uint16_t LG_INPUT_PIPE_VERSION = 2;
-static constexpr size_t LG_INPUT_PIPE_MAX_PAYLOAD_SIZE = 64;
-static constexpr uint8_t LG_INPUT_MOUSE_BUTTON_MASK = 0x1f;
-static constexpr uint16_t LG_INPUT_MOUSE_ABSOLUTE_MAX = 32767;
-static constexpr int8_t LG_INPUT_MOUSE_WHEEL_MIN = -127;
-static constexpr size_t LG_INPUT_KEYBOARD_KEY_COUNT = 6;
-static constexpr uint8_t LG_INPUT_KEYBOARD_USAGE_MAX = 0xe7;
+static constexpr uint32_t LG_INPUT_PIPE_MAGIC                  = 0x5049474c;
+static constexpr uint16_t LG_INPUT_PIPE_VERSION                = 3;
+static constexpr size_t   LG_INPUT_PIPE_MAX_PAYLOAD_SIZE       = 64;
+static constexpr uint16_t LG_INPUT_MOUSE_ABSOLUTE_MAX          =
+  KVMFR_INPUT_MOUSE_ABSOLUTE_MAX;
+static constexpr int8_t   LG_INPUT_MOUSE_WHEEL_MIN             = -127;
+static constexpr int32_t  LG_INPUT_MOUSE_DELTA_MAX             = INT16_MAX * 4;
+static constexpr int32_t  LG_INPUT_MOUSE_DELTA_MIN             = INT16_MIN * 4;
+static constexpr int32_t  LG_INPUT_MOUSE_WHEEL_MAX             = INT8_MAX * 4;
+static constexpr int32_t  LG_INPUT_MOUSE_WHEEL_MIN_TOTAL       =
+  LG_INPUT_MOUSE_WHEEL_MIN * 4;
+static constexpr size_t   LG_INPUT_KEYBOARD_KEY_COUNT          =
+  KVMFR_INPUT_KEYBOARD_KEY_COUNT;
+static constexpr uint8_t  LG_INPUT_KEYBOARD_USAGE_MAX          =
+  KVMFR_INPUT_KEYBOARD_USAGE_MAX;
 
-enum LGInputMouseButton : uint8_t
+enum LGInputMouseButton : uint32_t
 {
-  LG_INPUT_MOUSE_BUTTON_LEFT = 1 << 0,
-  LG_INPUT_MOUSE_BUTTON_RIGHT = 1 << 1,
-  LG_INPUT_MOUSE_BUTTON_MIDDLE = 1 << 2,
-  LG_INPUT_MOUSE_BUTTON_BACK = 1 << 3,
+  LG_INPUT_MOUSE_BUTTON_LEFT    = 1 << 0,
+  LG_INPUT_MOUSE_BUTTON_RIGHT   = 1 << 1,
+  LG_INPUT_MOUSE_BUTTON_MIDDLE  = 1 << 2,
+  LG_INPUT_MOUSE_BUTTON_BACK    = 1 << 3,
   LG_INPUT_MOUSE_BUTTON_FORWARD = 1 << 4,
 };
 
 enum LGInputKeyboardModifier : uint8_t
 {
-  LG_INPUT_KEYBOARD_MODIFIER_LEFT_CONTROL = 1 << 0,
-  LG_INPUT_KEYBOARD_MODIFIER_LEFT_SHIFT = 1 << 1,
-  LG_INPUT_KEYBOARD_MODIFIER_LEFT_ALT = 1 << 2,
-  LG_INPUT_KEYBOARD_MODIFIER_LEFT_GUI = 1 << 3,
+  LG_INPUT_KEYBOARD_MODIFIER_LEFT_CONTROL  = 1 << 0,
+  LG_INPUT_KEYBOARD_MODIFIER_LEFT_SHIFT    = 1 << 1,
+  LG_INPUT_KEYBOARD_MODIFIER_LEFT_ALT      = 1 << 2,
+  LG_INPUT_KEYBOARD_MODIFIER_LEFT_GUI      = 1 << 3,
   LG_INPUT_KEYBOARD_MODIFIER_RIGHT_CONTROL = 1 << 4,
-  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_SHIFT = 1 << 5,
-  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_ALT = 1 << 6,
-  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_GUI = 1 << 7,
+  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_SHIFT   = 1 << 5,
+  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_ALT     = 1 << 6,
+  LG_INPUT_KEYBOARD_MODIFIER_RIGHT_GUI     = 1 << 7,
 };
 
 enum LGInputPipeMessageType : uint16_t
 {
   LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE = 1,
   LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE = 2,
-  LG_INPUT_PIPE_MESSAGE_KEYBOARD = 3,
+  LG_INPUT_PIPE_MESSAGE_KEYBOARD       = 3,
 };
 
 #pragma pack(push, 1)
-struct LGInputPipeMouseRelative
-{
-  uint8_t buttons;
-  int16_t deltaX;
-  int16_t deltaY;
-  int8_t wheel;
-};
-
-struct LGInputPipeMouseAbsolute
-{
-  uint8_t buttons;
-  uint16_t x;
-  uint16_t y;
-  int8_t wheel;
-};
-
-struct LGInputPipeKeyboard
-{
-  uint8_t modifiers;
-  uint8_t keys[LG_INPUT_KEYBOARD_KEY_COUNT];
-};
-
 struct LGInputPipeMessage
 {
   uint32_t magic;
@@ -97,11 +84,15 @@ struct LGInputPipeMessage
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LGInputPipeMouseRelative) == 6,
+using LGInputPipeMouseRelative = KVMFRInputMouseRelative;
+using LGInputPipeMouseAbsolute = KVMFRInputMouseAbsolute;
+using LGInputPipeKeyboard      = KVMFRInputKeyboard;
+
+static_assert(sizeof(LGInputPipeMouseRelative) == 16,
   "LGInputPipeMouseRelative wire layout changed");
-static_assert(sizeof(LGInputPipeMouseAbsolute) == 6,
+static_assert(sizeof(LGInputPipeMouseAbsolute) == 16,
   "LGInputPipeMouseAbsolute wire layout changed");
-static_assert(sizeof(LGInputPipeKeyboard) == 7,
+static_assert(sizeof(LGInputPipeKeyboard) == 16,
   "LGInputPipeKeyboard wire layout changed");
 static_assert(sizeof(LGInputPipeMessage) == 84,
   "LGInputPipeMessage wire layout changed");

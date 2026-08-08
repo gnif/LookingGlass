@@ -54,7 +54,7 @@ private:
   uint32_t  m_ownerGeneration = 0;
   uint32_t  m_ownerSequence   = 0;
   ULONGLONG m_ownerDeadline   = 0;
-  uint64_t  m_sinkGeneration  = 0;
+  uint64_t  m_sinkState       = 0;
 
   bool Initialize();
   void DeInit();

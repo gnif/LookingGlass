@@ -51,6 +51,7 @@ static constexpr int32_t MAX_MOUSE_WHEEL =
   INT8_MAX * MAX_SPLIT_REPORTS;
 static constexpr int32_t MIN_MOUSE_WHEEL =
   -INT8_MAX * MAX_SPLIT_REPORTS;
+static constexpr DWORD WAIT_FIRST_OBJECT_VALUE = 0;
 
 static bool IsZero(const void * data, size_t size)
 {
@@ -104,7 +105,7 @@ bool CLGMPInputTransport::Start(IInputSink& sink)
     const DWORD state = WaitForSingleObject(m_thread, 0);
     if (state == WAIT_TIMEOUT)
       return true;
-    if (state != WAIT_OBJECT_0)
+    if (state != WAIT_FIRST_OBJECT_VALUE)
     {
       DEBUG_ERROR_HR(GetLastError(),
         "Failed to inspect LGMP input worker");
@@ -144,13 +145,13 @@ bool CLGMPInputTransport::Start(IInputSink& sink)
   }
 
   m_sink = &sink;
-  m_sinkGeneration = sink.GetGeneration();
+  m_sinkState = sink.GetState();
   m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
   if (!m_thread)
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create LGMP input worker");
     m_sink = nullptr;
-    m_sinkGeneration = 0;
+    m_sinkState = 0;
     CloseHandle(m_pollTimer);
     CloseHandle(m_stopEvent);
     m_pollTimer = nullptr;
@@ -163,18 +164,13 @@ bool CLGMPInputTransport::Start(IInputSink& sink)
 
 void CLGMPInputTransport::Stop()
 {
-  HANDLE thread;
-  {
-    CSRWExclusiveLock lock(&m_lifecycleLock);
-    thread = m_thread;
-    if (m_stopEvent)
-      SetEvent(m_stopEvent);
-  }
-
-  if (thread)
-    WaitForSingleObject(thread, INFINITE);
-
   CSRWExclusiveLock lock(&m_lifecycleLock);
+
+  if (m_stopEvent)
+    SetEvent(m_stopEvent);
+  if (m_thread)
+    WaitForSingleObject(m_thread, INFINITE);
+
   if (m_thread)
   {
     CloseHandle(m_thread);
@@ -195,7 +191,7 @@ void CLGMPInputTransport::Stop()
   m_ownerGeneration = 0;
   m_ownerSequence   = 0;
   m_ownerDeadline   = 0;
-  m_sinkGeneration  = 0;
+  m_sinkState       = 0;
 }
 
 bool CLGMPInputTransport::IsOwner(
@@ -208,13 +204,12 @@ bool CLGMPInputTransport::IsOwner(
 bool CLGMPInputTransport::Claim(
   uint32_t sourceClientID, const KVMFRInputMessage& message)
 {
-  if (message.sequence != 1 || !m_sink || !m_sink->IsAvailable())
+  if (message.sequence != 1 || !m_sink)
     return false;
 
-  const uint64_t sinkGeneration = m_sink->GetGeneration();
-  if (sinkGeneration != m_sinkGeneration || !m_sink->Reset() ||
-      !m_sink->IsAvailable() ||
-      m_sink->GetGeneration() != sinkGeneration)
+  const uint64_t sinkState = m_sink->GetState();
+  if (!(sinkState & 1) || sinkState != m_sinkState ||
+      !m_sink->Reset() || m_sink->GetState() != sinkState)
     return false;
 
   m_ownerClientID   = sourceClientID;
@@ -255,10 +250,10 @@ void CLGMPInputTransport::CheckOwner()
   if (!m_sink)
     return;
 
-  const uint64_t generation = m_sink->GetGeneration();
-  if (generation != m_sinkGeneration)
+  const uint64_t state = m_sink->GetState();
+  if (state != m_sinkState)
   {
-    m_sinkGeneration = generation;
+    m_sinkState = state;
     ReleaseOwner(true, "input endpoint changed");
     return;
   }
@@ -266,7 +261,7 @@ void CLGMPInputTransport::CheckOwner()
   if (!m_ownerClientID)
     return;
 
-  if (!m_sink->IsAvailable())
+  if (!(state & 1))
   {
     ReleaseOwner(true, "input unavailable");
     return;
@@ -323,11 +318,11 @@ bool CLGMPInputTransport::ProcessMessage(
   uint32_t sourceClientID, const KVMFRInputMessage& message)
 {
   const bool owner = IsOwner(sourceClientID, message.generation);
-  const uint64_t sinkGeneration = m_sink ?
-    m_sink->GetGeneration() : m_sinkGeneration;
-  if (sinkGeneration != m_sinkGeneration)
+  const uint64_t sinkState = m_sink ?
+    m_sink->GetState() : m_sinkState;
+  if (sinkState != m_sinkState)
   {
-    m_sinkGeneration = sinkGeneration;
+    m_sinkState = sinkState;
     if (m_ownerClientID)
     {
       ReleaseOwner(true, "input endpoint changed");
@@ -417,10 +412,10 @@ bool CLGMPInputTransport::ProcessMessage(
     return false;
   }
 
-  const uint64_t deliveredGeneration = m_sink->GetGeneration();
-  if (deliveredGeneration != m_sinkGeneration)
+  const uint64_t deliveredState = m_sink->GetState();
+  if (deliveredState != m_sinkState)
   {
-    m_sinkGeneration = deliveredGeneration;
+    m_sinkState = deliveredState;
     ReleaseOwner(true, "input endpoint changed");
     return false;
   }
@@ -503,9 +498,9 @@ void CLGMPInputTransport::Thread()
 
     const DWORD wait = WaitForMultipleObjects(
       _countof(waitHandles), waitHandles, FALSE, INFINITE);
-    if (wait == WAIT_OBJECT_0)
+    if (wait == WAIT_FIRST_OBJECT_VALUE)
       break;
-    if (wait != WAIT_OBJECT_0 + 1)
+    if (wait != WAIT_FIRST_OBJECT_VALUE + 1)
     {
       DEBUG_ERROR_HR(GetLastError(), "LGMP input worker wait failed");
       break;

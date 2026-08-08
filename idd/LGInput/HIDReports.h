@@ -35,7 +35,7 @@ enum HIDReportId : uint8_t
 struct HIDMouseAbsoluteReport
 {
   uint8_t  reportId;
-  uint8_t  buttons;
+  uint32_t buttons;
   uint16_t x;
   uint16_t y;
   int8_t   wheel;
@@ -44,7 +44,7 @@ struct HIDMouseAbsoluteReport
 struct HIDMouseRelativeReport
 {
   uint8_t reportId;
-  uint8_t buttons;
+  uint32_t buttons;
   int16_t x;
   int16_t y;
   int8_t  wheel;
@@ -66,10 +66,13 @@ struct HIDKeyboardLedsReport
 
 #pragma pack(pop)
 
-static_assert(sizeof(HIDMouseAbsoluteReport) == 7);
-static_assert(sizeof(HIDMouseRelativeReport) == 7);
+static_assert(sizeof(HIDMouseAbsoluteReport) == 10);
+static_assert(sizeof(HIDMouseRelativeReport) == 10);
 static_assert(sizeof(HIDKeyboardReport)     == 9);
 static_assert(sizeof(HIDKeyboardLedsReport) == 2);
+
+static constexpr size_t HID_MAX_INPUT_REPORT_SIZE =
+  sizeof(HIDMouseAbsoluteReport);
 
 const uint8_t * HIDGetReportDescriptor();
 size_t HIDGetReportDescriptorSize();

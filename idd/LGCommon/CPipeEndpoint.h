@@ -128,4 +128,5 @@ private:
   HANDLE m_pipe = INVALID_HANDLE_VALUE;
   HANDLE m_thread = nullptr;
   HANDLE m_stopEvent = nullptr;
+  HANDLE m_writeEvent = nullptr;
 };

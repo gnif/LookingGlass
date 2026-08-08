@@ -32,7 +32,6 @@ public:
 
   bool Start();
   void Stop();
-  bool IsConnected() const { return m_endpoint.IsConnected(); }
 
 private:
   void OnPipeConnected() override;

@@ -26,16 +26,21 @@
 #include "ipc/CInputPipeClient.h"
 
 #include <hidport.h>
+#include <limits.h>
 #include <new>
+#include <string.h>
 
-static constexpr USHORT LG_INPUT_VENDOR_ID  = 0x0000;
-static constexpr USHORT LG_INPUT_PRODUCT_ID = 0x0000;
-static constexpr USHORT LG_INPUT_VERSION    = 0x0001;
-static constexpr size_t REPORT_QUEUE_LENGTH = 64;
+static constexpr USHORT LG_INPUT_VENDOR_ID          = 0x0000;
+static constexpr USHORT LG_INPUT_PRODUCT_ID         = 0x0000;
+static constexpr USHORT LG_INPUT_VERSION            = 0x0001;
+static constexpr size_t REPORT_QUEUE_LENGTH         = 64;
+static constexpr size_t MOTION_COALESCE_THRESHOLD   =
+  REPORT_QUEUE_LENGTH / 2;
 
 struct HIDQueuedReport
 {
-  UCHAR  data[sizeof(HIDKeyboardReport)];
+  UCHAR  data[HID_MAX_INPUT_REPORT_SIZE];
+  bool   pureMotion;
   size_t size;
 };
 
@@ -49,8 +54,14 @@ struct HIDDeviceContext
   SRWLOCK               reportLock;
   bool                  active;
   bool                  stopping;
+  UCHAR                 mouseMode;
   size_t                reportHead;
   size_t                reportCount;
+  uint32_t              relativeButtons;
+  uint32_t              absoluteButtons;
+  bool                  absoluteValid;
+  uint16_t              absoluteX;
+  uint16_t              absoluteY;
   HIDQueuedReport       reports[REPORT_QUEUE_LENGTH];
   CInputPipeClient *    inputPipe;
 };
@@ -151,19 +162,114 @@ static void PopReport(
   --context->reportCount;
 }
 
+static HIDQueuedReport& GetQueuedReport(
+  _Inout_ HIDDeviceContext * context,
+  _In_ size_t position)
+{
+  return context->reports[
+    (context->reportHead + position) % REPORT_QUEUE_LENGTH];
+}
+
+static void RemoveQueuedReport(
+  _Inout_ HIDDeviceContext * context,
+  _In_ size_t position)
+{
+  for (size_t i = position; i + 1 < context->reportCount; ++i)
+    GetQueuedReport(context, i) = GetQueuedReport(context, i + 1);
+  --context->reportCount;
+}
+
+static bool CompactStaleMotion(
+  _Inout_ HIDDeviceContext * context,
+  _In_ UCHAR incomingReportId)
+{
+  for (size_t i = 0; i < context->reportCount; ++i)
+  {
+    HIDQueuedReport& report = GetQueuedReport(context, i);
+    if (!report.pureMotion ||
+        report.data[0] != HID_REPORT_ID_MOUSE_ABSOLUTE)
+      continue;
+
+    bool superseded = incomingReportId == HID_REPORT_ID_MOUSE_ABSOLUTE;
+    for (size_t j = i + 1; !superseded && j < context->reportCount; ++j)
+      superseded = GetQueuedReport(context, j).data[0] ==
+        HID_REPORT_ID_MOUSE_ABSOLUTE;
+
+    if (superseded)
+    {
+      RemoveQueuedReport(context, i);
+      return true;
+    }
+  }
+  return false;
+}
+
 static NTSTATUS QueueReport(
   _Inout_ HIDDeviceContext * context,
   _In_reads_bytes_(size) const void * data,
-  _In_ size_t size)
+  _In_ size_t size,
+  _In_ bool pureMotion)
 {
+  const UCHAR reportId = *static_cast<const UCHAR *>(data);
+  if (context->reportCount)
+  {
+    HIDQueuedReport& tail =
+      GetQueuedReport(context, context->reportCount - 1);
+    if (tail.data[0] == reportId)
+    {
+      if (reportId == HID_REPORT_ID_MOUSE_RELATIVE &&
+          context->reportCount >= MOTION_COALESCE_THRESHOLD &&
+          tail.pureMotion && pureMotion)
+      {
+        HIDMouseRelativeReport * previous =
+          reinterpret_cast<HIDMouseRelativeReport *>(tail.data);
+        const HIDMouseRelativeReport * current =
+          static_cast<const HIDMouseRelativeReport *>(data);
+        const int32_t x = static_cast<int32_t>(previous->x) +
+          current->x;
+        const int32_t y = static_cast<int32_t>(previous->y) +
+          current->y;
+        if (x >= INT16_MIN && x <= INT16_MAX &&
+            y >= INT16_MIN && y <= INT16_MAX &&
+            previous->buttons == current->buttons)
+        {
+          previous->x = static_cast<int16_t>(x);
+          previous->y = static_cast<int16_t>(y);
+          return STATUS_SUCCESS;
+        }
+      }
+      else if (reportId == HID_REPORT_ID_MOUSE_ABSOLUTE &&
+          tail.pureMotion && pureMotion)
+      {
+        const HIDMouseAbsoluteReport * previous =
+          reinterpret_cast<const HIDMouseAbsoluteReport *>(tail.data);
+        const HIDMouseAbsoluteReport * current =
+          static_cast<const HIDMouseAbsoluteReport *>(data);
+        if (previous->buttons == current->buttons)
+        {
+          CopyMemory(tail.data, data, size);
+          tail.size = size;
+          return STATUS_SUCCESS;
+        }
+      }
+      else if (reportId == HID_REPORT_ID_KEYBOARD &&
+          tail.size == size && memcmp(tail.data, data, size) == 0)
+        return STATUS_SUCCESS;
+    }
+  }
+
   if (context->reportCount == REPORT_QUEUE_LENGTH)
-    return STATUS_BUFFER_OVERFLOW;
+  {
+    if (!CompactStaleMotion(context, reportId))
+      return STATUS_BUFFER_OVERFLOW;
+  }
 
   const size_t index =
     (context->reportHead + context->reportCount) % REPORT_QUEUE_LENGTH;
   HIDQueuedReport * report = &context->reports[index];
   CopyMemory(report->data, data, size);
-  report->size = size;
+  report->size       = size;
+  report->pureMotion = pureMotion;
   ++context->reportCount;
   return STATUS_SUCCESS;
 }
@@ -343,38 +449,136 @@ NTSTATUS CHIDDevice::SubmitReport(
       status = STATUS_DEVICE_NOT_READY;
     else
     {
+      bool pureMotion = false;
+      switch (reportId)
+      {
+        case HID_REPORT_ID_MOUSE_RELATIVE:
+        {
+          const HIDMouseRelativeReport * mouse =
+            static_cast<const HIDMouseRelativeReport *>(report);
+          pureMotion = context->mouseMode == reportId &&
+            (mouse->x != 0 || mouse->y != 0 || mouse->buttons != 0) &&
+            mouse->wheel == 0 &&
+            mouse->buttons == context->relativeButtons;
+          break;
+        }
+
+        case HID_REPORT_ID_MOUSE_ABSOLUTE:
+        {
+          const HIDMouseAbsoluteReport * mouse =
+            static_cast<const HIDMouseAbsoluteReport *>(report);
+          pureMotion = context->mouseMode == reportId &&
+            (mouse->x != context->absoluteX ||
+             mouse->y != context->absoluteY || mouse->buttons != 0) &&
+            mouse->wheel == 0 &&
+            mouse->buttons == context->absoluteButtons;
+          break;
+        }
+
+        default:
+          break;
+      }
+
       status = WdfIoQueueRetrieveNextRequest(context->reportQueue, &request);
       if (status == STATUS_NO_MORE_ENTRIES)
       {
         request = nullptr;
-        status = QueueReport(context, report, size);
+        status = QueueReport(context, report, size, pureMotion);
+      }
+      else if (NT_SUCCESS(status))
+        status = CopyToRequest(request, report, size);
+
+      if (NT_SUCCESS(status))
+      {
+        switch (reportId)
+        {
+          case HID_REPORT_ID_MOUSE_RELATIVE:
+            context->mouseMode = reportId;
+            context->relativeButtons =
+              static_cast<const HIDMouseRelativeReport *>(report)->buttons;
+            break;
+
+          case HID_REPORT_ID_MOUSE_ABSOLUTE:
+          {
+            const HIDMouseAbsoluteReport * mouse =
+              static_cast<const HIDMouseAbsoluteReport *>(report);
+            context->mouseMode       = reportId;
+            context->absoluteButtons = mouse->buttons;
+            context->absoluteValid   = true;
+            context->absoluteX       = mouse->x;
+            context->absoluteY       = mouse->y;
+            break;
+          }
+
+          default:
+            break;
+        }
       }
     }
   }
 
   if (request)
-  {
-    status = CopyToRequest(request, report, size);
     WdfRequestComplete(request, status);
-  }
 
   return status;
 }
 
-NTSTATUS CHIDDevice::ClearReports()
+NTSTATUS CHIDDevice::ResetReports()
 {
-  CSRWSharedLock deviceLock(&s_deviceLock);
-  HIDDeviceContext * context = s_device;
-  if (!context)
-    return STATUS_DEVICE_NOT_READY;
+  uint16_t absoluteX = 0;
+  uint16_t absoluteY = 0;
+  bool     absoluteValid = false;
+  {
+    CSRWSharedLock deviceLock(&s_deviceLock);
+    HIDDeviceContext * context = s_device;
+    if (!context)
+      return STATUS_DEVICE_NOT_READY;
 
-  CSRWExclusiveLock reportLock(&context->reportLock);
-  if (context->stopping)
-    return STATUS_DEVICE_NOT_READY;
+    CSRWExclusiveLock reportLock(&context->reportLock);
+    if (context->stopping)
+      return STATUS_DEVICE_NOT_READY;
 
-  context->reportHead  = 0;
-  context->reportCount = 0;
-  return STATUS_SUCCESS;
+    absoluteValid              = context->absoluteValid;
+    absoluteX                  = context->absoluteX;
+    absoluteY                  = context->absoluteY;
+    context->reportHead        = 0;
+    context->reportCount       = 0;
+    context->mouseMode         = 0;
+    context->relativeButtons   = 0;
+    context->absoluteButtons   = 0;
+  }
+
+  const HIDMouseRelativeReport relative = {
+    HID_REPORT_ID_MOUSE_RELATIVE,
+    0,
+    0,
+    0,
+    0,
+  };
+  const HIDKeyboardReport keyboard = {
+    HID_REPORT_ID_KEYBOARD,
+  };
+
+  NTSTATUS status = SubmitReport(&relative, sizeof(relative));
+  if (absoluteValid)
+  {
+    const HIDMouseAbsoluteReport absolute = {
+      HID_REPORT_ID_MOUSE_ABSOLUTE,
+      0,
+      absoluteX,
+      absoluteY,
+      0,
+    };
+    const NTSTATUS absoluteStatus =
+      SubmitReport(&absolute, sizeof(absolute));
+    if (NT_SUCCESS(status))
+      status = absoluteStatus;
+  }
+  const NTSTATUS keyboardStatus =
+    SubmitReport(&keyboard, sizeof(keyboard));
+  if (NT_SUCCESS(status))
+    status = keyboardStatus;
+  return status;
 }
 
 VOID HIDEvtIoDeviceControl(

@@ -130,15 +130,9 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
   const void * message,
   DWORD messageSize)
 {
-  HANDLE ioEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!ioEvent)
-  {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe write event");
-    return PipeIoResult::Error;
-  }
-
+  ResetEvent(m_writeEvent);
   OVERLAPPED overlapped = {};
-  overlapped.hEvent = ioEvent;
+  overlapped.hEvent = m_writeEvent;
   DWORD bytesWritten = 0;
   PipeIoResult result = PipeIoResult::Success;
 
@@ -148,7 +142,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
     if (error == ERROR_IO_PENDING)
       result = WaitForOverlapped(
         pipe,
-        ioEvent,
+        m_writeEvent,
         &overlapped,
         &bytesWritten,
         WRITE_TIMEOUT_MS);
@@ -174,7 +168,6 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
     result = PipeIoResult::Error;
   }
 
-  CloseHandle(ioEvent);
   return result;
 }
 
@@ -197,9 +190,16 @@ bool CPipeEndpoint::Start(
   m_mode = mode;
   m_messageSize = messageSize;
   m_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!m_stopEvent)
+  m_writeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!m_stopEvent || !m_writeEvent)
   {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe stop event");
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe events");
+    if (m_writeEvent)
+      CloseHandle(m_writeEvent);
+    if (m_stopEvent)
+      CloseHandle(m_stopEvent);
+    m_writeEvent = nullptr;
+    m_stopEvent  = nullptr;
     return false;
   }
 
@@ -210,6 +210,8 @@ bool CPipeEndpoint::Start(
     {
       CloseHandle(m_stopEvent);
       m_stopEvent = nullptr;
+      CloseHandle(m_writeEvent);
+      m_writeEvent = nullptr;
       return false;
     }
     PublishPipe(pipe);
@@ -232,6 +234,8 @@ bool CPipeEndpoint::Start(
 
     CloseHandle(m_stopEvent);
     m_stopEvent = nullptr;
+    CloseHandle(m_writeEvent);
+    m_writeEvent = nullptr;
     return false;
   }
 
@@ -241,6 +245,7 @@ bool CPipeEndpoint::Start(
 void CPipeEndpoint::Stop()
 {
   m_running.store(false);
+  m_connected.store(false);
   if (m_stopEvent)
     SetEvent(m_stopEvent);
 
@@ -268,6 +273,12 @@ void CPipeEndpoint::Stop()
   {
     CloseHandle(m_stopEvent);
     m_stopEvent = nullptr;
+  }
+
+  if (m_writeEvent)
+  {
+    CloseHandle(m_writeEvent);
+    m_writeEvent = nullptr;
   }
 
   m_connected.store(false);

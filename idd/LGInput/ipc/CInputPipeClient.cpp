@@ -43,7 +43,7 @@ void CInputPipeClient::Stop()
   m_endpoint.Stop();
   m_lastSequence = 0;
   if (wasRunning)
-    CHIDDevice::ClearReports();
+    CHIDDevice::ResetReports();
 }
 
 void CInputPipeClient::OnPipeConnected()
@@ -55,7 +55,7 @@ void CInputPipeClient::OnPipeConnected()
 void CInputPipeClient::OnPipeDisconnected()
 {
   m_lastSequence = 0;
-  CHIDDevice::ClearReports();
+  CHIDDevice::ResetReports();
   DEBUG_INFO("Disconnected from the LGIdd input transport; reconnecting");
 }
 
@@ -78,6 +78,7 @@ bool CInputPipeClient::OnPipeMessage(
       (m_lastSequence && message.sequence != m_lastSequence + 1))
   {
     DEBUG_WARN("LGInput pipe report sequence changed unexpectedly");
+    CHIDDevice::ResetReports();
     return false;
   }
   bool handled = false;
@@ -117,18 +118,41 @@ bool CInputPipeClient::HandleMouseRelative(
 
   LGInputPipeMouseRelative input = {};
   memcpy(&input, payload, sizeof(input));
-  if (input.wheel < LG_INPUT_MOUSE_WHEEL_MIN ||
-      (input.buttons & ~LG_INPUT_MOUSE_BUTTON_MASK))
+  if (input.deltaX < LG_INPUT_MOUSE_DELTA_MIN ||
+      input.deltaX > LG_INPUT_MOUSE_DELTA_MAX ||
+      input.deltaY < LG_INPUT_MOUSE_DELTA_MIN ||
+      input.deltaY > LG_INPUT_MOUSE_DELTA_MAX ||
+      input.wheel < LG_INPUT_MOUSE_WHEEL_MIN_TOTAL ||
+      input.wheel > LG_INPUT_MOUSE_WHEEL_MAX)
     return false;
 
-  const HIDMouseRelativeReport report = {
-    HID_REPORT_ID_MOUSE_RELATIVE,
-    input.buttons,
-    input.deltaX,
-    input.deltaY,
-    input.wheel,
-  };
-  return SubmitReport(&report, sizeof(report));
+  int32_t x     = input.deltaX;
+  int32_t y     = input.deltaY;
+  int32_t wheel = input.wheel;
+  do
+  {
+    const int16_t reportX = x > INT16_MAX ? INT16_MAX :
+      x < INT16_MIN ? INT16_MIN : static_cast<int16_t>(x);
+    const int16_t reportY = y > INT16_MAX ? INT16_MAX :
+      y < INT16_MIN ? INT16_MIN : static_cast<int16_t>(y);
+    const int8_t reportWheel = wheel > INT8_MAX ? INT8_MAX :
+      wheel < LG_INPUT_MOUSE_WHEEL_MIN ? LG_INPUT_MOUSE_WHEEL_MIN :
+      static_cast<int8_t>(wheel);
+    const HIDMouseRelativeReport report = {
+      HID_REPORT_ID_MOUSE_RELATIVE,
+      input.buttons,
+      reportX,
+      reportY,
+      reportWheel,
+    };
+    if (!SubmitReport(&report, sizeof(report)))
+      return false;
+    x     -= reportX;
+    y     -= reportY;
+    wheel -= reportWheel;
+  }
+  while (x || y || wheel);
+  return true;
 }
 
 bool CInputPipeClient::HandleMouseAbsolute(
@@ -142,18 +166,30 @@ bool CInputPipeClient::HandleMouseAbsolute(
   memcpy(&input, payload, sizeof(input));
   if (input.x > LG_INPUT_MOUSE_ABSOLUTE_MAX ||
       input.y > LG_INPUT_MOUSE_ABSOLUTE_MAX ||
-      input.wheel < LG_INPUT_MOUSE_WHEEL_MIN ||
-      (input.buttons & ~LG_INPUT_MOUSE_BUTTON_MASK))
+      input.wheel < LG_INPUT_MOUSE_WHEEL_MIN_TOTAL ||
+      input.wheel > LG_INPUT_MOUSE_WHEEL_MAX ||
+      input.reserved)
     return false;
 
-  const HIDMouseAbsoluteReport report = {
-    HID_REPORT_ID_MOUSE_ABSOLUTE,
-    input.buttons,
-    input.x,
-    input.y,
-    input.wheel,
-  };
-  return SubmitReport(&report, sizeof(report));
+  int32_t wheel = input.wheel;
+  do
+  {
+    const int8_t reportWheel = wheel > INT8_MAX ? INT8_MAX :
+      wheel < LG_INPUT_MOUSE_WHEEL_MIN ? LG_INPUT_MOUSE_WHEEL_MIN :
+      static_cast<int8_t>(wheel);
+    const HIDMouseAbsoluteReport report = {
+      HID_REPORT_ID_MOUSE_ABSOLUTE,
+      input.buttons,
+      input.x,
+      input.y,
+      reportWheel,
+    };
+    if (!SubmitReport(&report, sizeof(report)))
+      return false;
+    wheel -= reportWheel;
+  }
+  while (wheel);
+  return true;
 }
 
 bool CInputPipeClient::HandleKeyboard(
@@ -165,6 +201,10 @@ bool CInputPipeClient::HandleKeyboard(
 
   LGInputPipeKeyboard input = {};
   memcpy(&input, payload, sizeof(input));
+
+  for (size_t i = 0; i < sizeof(input.reserved); ++i)
+    if (input.reserved[i])
+      return false;
 
   HIDKeyboardReport report = {};
   report.reportId = HID_REPORT_ID_KEYBOARD;
@@ -189,8 +229,16 @@ bool CInputPipeClient::SubmitReport(
     return false;
 
   if (status == STATUS_BUFFER_OVERFLOW)
-    DEBUG_WARN("LGInput HID report queue is full; dropping a report");
-  else if (!NT_SUCCESS(status) && status != STATUS_DEVICE_NOT_READY)
-    DEBUG_WARN_HR(status, "Failed to submit an LGInput HID report");
+  {
+    DEBUG_WARN("LGInput HID report queue overflowed; resetting input state");
+    CHIDDevice::ResetReports();
+    return false;
+  }
+  if (!NT_SUCCESS(status))
+  {
+    if (status != STATUS_DEVICE_NOT_READY)
+      DEBUG_WARN_HR(status, "Failed to submit an LGInput HID report");
+    return false;
+  }
   return true;
 }
