@@ -19,6 +19,7 @@ set_tests_properties(font-tests PROPERTIES
 
 add_executable(lgmp-transport-tests
   lgmp_transport_test.c
+  ../src/kb_hid.c
 )
 target_link_libraries(lgmp-transport-tests
   ${EXE_FLAGS}

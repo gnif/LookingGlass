@@ -20,6 +20,8 @@
 
 #include "interface/transport.h"
 
+#include "input.h"
+
 #include "common/KVMFR.h"
 #include "common/LGMPConfig.h"
 #include "common/debug.h"
@@ -66,6 +68,7 @@ struct LG_Transport
   PLGMPClientQueue  frameQueue;
   PLGMPClientQueue  ownerFrameQueue[LGMP_Q_FRAME_LEN];
   PLGMPClientQueue  pointerQueue;
+  LGMPInput        * input;
   LG_Lock           frameLock;
   LG_Lock           pointerLock;
 
@@ -75,6 +78,7 @@ struct LG_Transport
   bool     connected;
   bool     frameStopRequested;
   bool     frameScheduleSupported;
+  bool     inputSupported;
   uint64_t frameLeaseHandle;
   uint32_t frameGeneration;
   uint32_t clientID;
@@ -232,6 +236,16 @@ static bool lgmp_create(LG_Transport ** result)
     return false;
   }
 
+  if (!lgmpInput_create(this->client, &this->input))
+  {
+    lgmpClientFree(&this->client);
+    ivshmemClose(&this->shm);
+    LG_LOCK_FREE(this->frameLock);
+    LG_LOCK_FREE(this->pointerLock);
+    free(this);
+    return false;
+  }
+
   *result = this;
   return true;
 }
@@ -357,6 +371,7 @@ static void lgmp_destroy(LG_Transport ** transport)
     return;
 
   struct LG_Transport * this = *transport;
+  lgmpInput_destroy(&this->input);
   lgmp_closeQueues(this);
   lgmp_closeDMA(this);
   free(this->pointerData);
@@ -390,6 +405,8 @@ static bool lgmp_parseSession(const uint8_t * data, uint32_t size,
     session->features |= LG_TRANSPORT_FEATURE_WINDOW_SIZE;
   if (header->features & KVMFR_FEATURE_FRAME_SCHEDULE)
     session->features |= LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
+  if (header->features & KVMFR_FEATURE_INPUT)
+    session->features |= LG_TRANSPORT_FEATURE_INPUT;
 
   data += sizeof(*header);
   size -= sizeof(*header);
@@ -468,6 +485,8 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
       this->frameStopRequested     = false;
       this->frameScheduleSupported =
         session->features & LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
+      this->inputSupported         =
+        session->features & LG_TRANSPORT_FEATURE_INPUT;
       this->frameSerial            = 0;
       this->frameSerialValid       = false;
       this->formatValid            = false;
@@ -489,6 +508,7 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
 
 static void lgmp_disconnect(LG_Transport * this)
 {
+  lgmpInput_disconnect(this->input);
   lgmp_closeQueues(this);
 
   LG_LOCK(this->frameLock);
@@ -499,6 +519,7 @@ static void lgmp_disconnect(LG_Transport * this)
     this->ownerFrameQueue[i] = NULL;
   this->connected              = false;
   this->frameScheduleSupported = false;
+  this->inputSupported         = false;
   this->clientID               = 0;
   LG_UNLOCK(this->frameLock);
 
@@ -1331,7 +1352,12 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
     void ** opaque)
 {
   *opaque = NULL;
-  return NULL;
+  if (!this->connected || !this->inputSupported ||
+      !lgmpInput_connect(this->input))
+    return NULL;
+
+  *opaque = this->input;
+  return lgmpInput_getOps();
 }
 
 const LG_TransportOps LGT_LGMP =

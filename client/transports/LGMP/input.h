@@ -18,20 +18,23 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_KB_
-#define _H_LG_KB_
+#ifndef _H_LG_CLIENT_TRANSPORT_LGMP_INPUT_
+#define _H_LG_CLIENT_TRANSPORT_LGMP_INPUT_
 
-#include <linux/input.h>
-#include <stdint.h>
+#include "interface/input.h"
 
-#define PS2_MUTE        0xE020
-#define PS2_VOLUME_UP   0xE030
-#define PS2_VOLUME_DOWN 0xE02E
+#include <lgmp/client.h>
 
-extern const uint32_t linux_to_ps2[KEY_MAX];
-extern const uint8_t  linux_to_hid[KEY_MAX];
-extern const char *   linux_to_str[KEY_MAX];
-extern const char *   linux_to_display[KEY_MAX];
-extern const int      linux_to_imgui[KEY_MAX];
+#include <stdbool.h>
+
+typedef struct LGMPInput LGMPInput;
+
+bool lgmpInput_create(PLGMPClient client, LGMPInput ** result);
+void lgmpInput_destroy(LGMPInput ** input);
+
+bool lgmpInput_connect(LGMPInput * input);
+void lgmpInput_disconnect(LGMPInput * input);
+
+const LG_InputOps * lgmpInput_getOps(void);
 
 #endif

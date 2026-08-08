@@ -159,6 +159,7 @@ set(SOURCES
   src/util.c
   src/clipboard.c
   src/kb.c
+  src/kb_hid.c
   src/gl_dynprocs.c
   src/egl_dynprocs.c
   src/eglutil.c
