@@ -28,9 +28,10 @@
 #include <stddef.h>
 #include "types.h"
 #include "LGMPConfig.h"
+#include "KVMFRInput.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 29
+#define KVMFR_VERSION 30
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
@@ -61,7 +62,8 @@ enum
 {
   KVMFR_FEATURE_SETCURSORPOS   = 0x1,
   KVMFR_FEATURE_WINDOWSIZE     = 0x2,
-  KVMFR_FEATURE_FRAME_SCHEDULE = 0x4
+  KVMFR_FEATURE_FRAME_SCHEDULE = 0x4,
+  KVMFR_FEATURE_INPUT          = 0x8
 };
 
 typedef uint32_t KVMFRFeatureFlags;
