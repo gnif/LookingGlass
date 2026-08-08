@@ -35,6 +35,10 @@ bool CInputPipeServer::Init()
   DeInit();
 
   m_state.store(0, std::memory_order_release);
+  m_performanceFrequency.QuadPart = 0;
+  if (!QueryPerformanceFrequency(&m_performanceFrequency))
+    m_performanceFrequency.QuadPart = 0;
+  m_lastStatistics = GetTickCount64();
   m_stopEvent  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   m_queueEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   if (!m_stopEvent || !m_queueEvent)
@@ -98,6 +102,19 @@ void CInputPipeServer::DeInit()
   m_absoluteValid   = false;
   m_relativeButtons = 0;
   m_absoluteButtons = 0;
+
+  m_statEnqueued          = 0;
+  m_statRelativeCoalesced = 0;
+  m_statAbsoluteCoalesced = 0;
+  m_statResyncs           = 0;
+  m_statResyncDiscarded   = 0;
+  m_statQueueHighWater    = 0;
+  m_statSent              = 0;
+  m_statStale             = 0;
+  m_statWriteFailed       = 0;
+  m_statSlowWrites        = 0;
+  m_statWriteTicks        = 0;
+  m_statMaxWriteTicks     = 0;
 }
 
 bool CInputPipeServer::QueueLocked(
@@ -133,6 +150,7 @@ bool CInputPipeServer::QueueLocked(
         {
           tail.payload.mouseRelative.deltaX = static_cast<int32_t>(x);
           tail.payload.mouseRelative.deltaY = static_cast<int32_t>(y);
+          ++m_statRelativeCoalesced;
           return true;
         }
       }
@@ -145,6 +163,7 @@ bool CInputPipeServer::QueueLocked(
       {
         tail.payload.mouseAbsolute.x = payload.mouseAbsolute.x;
         tail.payload.mouseAbsolute.y = payload.mouseAbsolute.y;
+        ++m_statAbsoluteCoalesced;
         return true;
       }
     }
@@ -169,6 +188,9 @@ bool CInputPipeServer::QueueRawLocked(
   m_queue[index].payload    = payload;
   m_queue[index].pureMotion = pureMotion;
   ++m_queueCount;
+  ++m_statEnqueued;
+  if (m_queueCount > m_statQueueHighWater)
+    m_statQueueHighWater = m_queueCount;
   SetEvent(m_queueEvent);
   return true;
 }
@@ -201,6 +223,8 @@ bool CInputPipeServer::QueueResetLocked()
 
 void CInputPipeServer::ResyncLocked()
 {
+  ++m_statResyncs;
+  m_statResyncDiscarded += m_queueCount;
   m_queueHead  = 0;
   m_queueCount = 0;
   uint64_t state = m_state.load(std::memory_order_relaxed);
@@ -375,6 +399,9 @@ bool CInputPipeServer::Send(const QueueItem& item)
 
   bool current;
   bool sent = true;
+  bool timed = false;
+  LARGE_INTEGER start = {};
+  LARGE_INTEGER end   = {};
   {
     CSRWSharedLock lock(&m_connectionLock);
     const uint64_t state = m_state.load(std::memory_order_acquire);
@@ -382,8 +409,31 @@ bool CInputPipeServer::Send(const QueueItem& item)
     if (current)
     {
       message.sequence = ++m_sequence;
+      timed = QueryPerformanceCounter(&start) != FALSE;
       sent = m_endpoint.Send(&message, sizeof(message));
+      timed = timed && QueryPerformanceCounter(&end) != FALSE;
     }
+  }
+
+  if (!current)
+    ++m_statStale;
+  else
+  {
+    if (timed)
+    {
+      const int64_t ticks = end.QuadPart - start.QuadPart;
+      m_statWriteTicks += ticks;
+      if (ticks > m_statMaxWriteTicks)
+        m_statMaxWriteTicks = ticks;
+      if (m_performanceFrequency.QuadPart &&
+          ticks * 1000 >= m_performanceFrequency.QuadPart)
+        ++m_statSlowWrites;
+    }
+
+    if (sent)
+      ++m_statSent;
+    else
+      ++m_statWriteFailed;
   }
 
   if (!sent)
@@ -392,6 +442,78 @@ bool CInputPipeServer::Send(const QueueItem& item)
     return false;
   }
   return current;
+}
+
+void CInputPipeServer::LogStatistics()
+{
+  const ULONGLONG now = GetTickCount64();
+  if (now - m_lastStatistics < STATISTICS_INTERVAL_MS)
+    return;
+
+  uint64_t enqueued;
+  uint64_t relativeCoalesced;
+  uint64_t absoluteCoalesced;
+  uint64_t resyncs;
+  uint64_t resyncDiscarded;
+  size_t   queueHighWater;
+  {
+    CSRWExclusiveLock lock(&m_queueLock);
+    enqueued          = m_statEnqueued;
+    relativeCoalesced = m_statRelativeCoalesced;
+    absoluteCoalesced = m_statAbsoluteCoalesced;
+    resyncs           = m_statResyncs;
+    resyncDiscarded   = m_statResyncDiscarded;
+    queueHighWater    = m_statQueueHighWater;
+
+    m_statEnqueued          = 0;
+    m_statRelativeCoalesced = 0;
+    m_statAbsoluteCoalesced = 0;
+    m_statResyncs           = 0;
+    m_statResyncDiscarded   = 0;
+    m_statQueueHighWater    = m_queueCount;
+  }
+
+  const uint64_t sent          = m_statSent;
+  const uint64_t stale         = m_statStale;
+  const uint64_t writeFailed   = m_statWriteFailed;
+  const uint64_t slowWrites    = m_statSlowWrites;
+  const int64_t  writeTicks    = m_statWriteTicks;
+  const int64_t  maxWriteTicks = m_statMaxWriteTicks;
+
+  m_statSent          = 0;
+  m_statStale         = 0;
+  m_statWriteFailed   = 0;
+  m_statSlowWrites    = 0;
+  m_statWriteTicks    = 0;
+  m_statMaxWriteTicks = 0;
+  m_lastStatistics    = now;
+
+  if (!(enqueued || relativeCoalesced || absoluteCoalesced || resyncs ||
+      resyncDiscarded || sent || stale || writeFailed || slowWrites))
+    return;
+
+  const double writeMs = m_performanceFrequency.QuadPart ?
+    static_cast<double>(writeTicks) * 1000.0 /
+      m_performanceFrequency.QuadPart : 0.0;
+  const double maxWriteMs = m_performanceFrequency.QuadPart ?
+    static_cast<double>(maxWriteTicks) * 1000.0 /
+      m_performanceFrequency.QuadPart : 0.0;
+  DEBUG_TRACE("LGInput pipe: %llu queued, %llu sent, %llu stale, "
+    "%llu failed; %llu relative and %llu absolute coalesced, "
+    "%llu resyncs discarded %llu, peak %zu; %.3f ms writes, "
+    "%.3f ms max, %llu slow",
+    static_cast<unsigned long long>(enqueued),
+    static_cast<unsigned long long>(sent),
+    static_cast<unsigned long long>(stale),
+    static_cast<unsigned long long>(writeFailed),
+    static_cast<unsigned long long>(relativeCoalesced),
+    static_cast<unsigned long long>(absoluteCoalesced),
+    static_cast<unsigned long long>(resyncs),
+    static_cast<unsigned long long>(resyncDiscarded),
+    queueHighWater,
+    writeMs,
+    maxWriteMs,
+    static_cast<unsigned long long>(slowWrites));
 }
 
 void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
@@ -435,8 +557,12 @@ void CInputPipeServer::Thread()
 
     QueueItem item = {};
     while (Pop(item))
-      if (!Send(item))
+    {
+      const bool sent = Send(item);
+      if (!sent)
         break;
+    }
+    LogStatistics();
   }
 
   Invalidate(0, false);

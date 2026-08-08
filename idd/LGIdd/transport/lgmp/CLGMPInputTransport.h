@@ -40,6 +40,23 @@ class CLGMPInputTransport final : public IInputTransport
 private:
   static constexpr ULONGLONG OWNER_LEASE_MS = 500;
   static constexpr ULONGLONG ACTIVE_POLL_MS  = 50;
+  static constexpr ULONGLONG LOG_INTERVAL_MS = 5000;
+
+  struct Statistics
+  {
+    ULONGLONG lastLog;
+    uint64_t  messages;
+    uint64_t  reports;
+    uint64_t  drainLimit;
+    uint64_t  malformedSize;
+    uint64_t  malformedMessage;
+    uint64_t  sequenceErrors;
+    uint64_t  nonOwner;
+    uint64_t  deliveryFailures;
+    uint64_t  claims;
+    uint64_t  releases;
+    unsigned  maxDrain;
+  };
 
   CLGMPHost& m_host;
 
@@ -52,19 +69,21 @@ private:
   HANDLE  m_pollTimer     = nullptr;
   HANDLE  m_thread        = nullptr;
 
-  uint32_t  m_ownerClientID       = 0;
-  uint32_t  m_ownerGeneration     = 0;
-  uint32_t  m_ownerSequence       = 0;
-  ULONGLONG m_ownerDeadline       = 0;
-  uint64_t  m_sinkState           = 0;
-  uint32_t  m_endpointGeneration = 0;
-  uint32_t  m_statusSerial        = 0;
-  bool      m_statusDirty         = false;
+  uint32_t   m_ownerClientID       = 0;
+  uint32_t   m_ownerGeneration     = 0;
+  uint32_t   m_ownerSequence       = 0;
+  ULONGLONG  m_ownerDeadline       = 0;
+  uint64_t   m_sinkState           = 0;
+  uint32_t   m_endpointGeneration = 0;
+  uint32_t   m_statusSerial        = 0;
+  bool       m_statusDirty         = false;
+  Statistics m_statistics         = {};
 
   bool Initialize();
   void DeInit();
   void UpdateSinkState(uint64_t state);
   void PublishStatus();
+  void LogStatistics(ULONGLONG now);
   bool DrainMessages();
   bool ProcessMessage(uint32_t sourceClientID,
     const KVMFRInputMessage& message);

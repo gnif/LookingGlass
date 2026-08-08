@@ -44,6 +44,20 @@ struct HIDQueuedReport
   size_t size;
 };
 
+struct HIDStatistics
+{
+  uint64_t direct;
+  uint64_t queued;
+  uint64_t relativeCoalesced;
+  uint64_t absoluteCoalesced;
+  uint64_t staleAbsoluteCompacted;
+  uint64_t keyboardDuplicates;
+  uint64_t consumerDuplicates;
+  uint64_t overflows;
+  uint64_t resetDiscarded;
+  size_t   queueHighWater;
+};
+
 struct HIDDeviceContext
 {
   WDFQUEUE              reportQueue;
@@ -63,6 +77,7 @@ struct HIDDeviceContext
   bool                  absoluteValid;
   uint16_t              absoluteX;
   uint16_t              absoluteY;
+  HIDStatistics         statistics;
   HIDQueuedReport       reports[REPORT_QUEUE_LENGTH];
   CInputPipeClient *    inputPipe;
 };
@@ -199,6 +214,7 @@ static bool CompactStaleMotion(
     if (superseded)
     {
       RemoveQueuedReport(context, i);
+      ++context->statistics.staleAbsoluteCompacted;
       return true;
     }
   }
@@ -236,6 +252,7 @@ static NTSTATUS QueueReport(
         {
           previous->x = static_cast<int16_t>(x);
           previous->y = static_cast<int16_t>(y);
+          ++context->statistics.relativeCoalesced;
           return STATUS_SUCCESS;
         }
       }
@@ -250,19 +267,26 @@ static NTSTATUS QueueReport(
         {
           CopyMemory(tail.data, data, size);
           tail.size = size;
+          ++context->statistics.absoluteCoalesced;
           return STATUS_SUCCESS;
         }
       }
       else if (reportId == HID_REPORT_ID_KEYBOARD &&
           tail.size == size && memcmp(tail.data, data, size) == 0)
+      {
+        ++context->statistics.keyboardDuplicates;
         return STATUS_SUCCESS;
+      }
     }
   }
 
   if (context->reportCount == REPORT_QUEUE_LENGTH)
   {
     if (!CompactStaleMotion(context, reportId))
+    {
+      ++context->statistics.overflows;
       return STATUS_BUFFER_OVERFLOW;
+    }
   }
 
   const size_t index =
@@ -272,6 +296,9 @@ static NTSTATUS QueueReport(
   report->size       = size;
   report->pureMotion = pureMotion;
   ++context->reportCount;
+  ++context->statistics.queued;
+  if (context->reportCount > context->statistics.queueHighWater)
+    context->statistics.queueHighWater = context->reportCount;
   return STATUS_SUCCESS;
 }
 
@@ -454,7 +481,10 @@ NTSTATUS CHIDDevice::SubmitReport(
       if (reportId == HID_REPORT_ID_CONSUMER &&
           context->consumerUsage ==
             static_cast<const HIDConsumerReport *>(report)->usage)
+      {
+        ++context->statistics.consumerDuplicates;
         return STATUS_SUCCESS;
+      }
 
       bool pureMotion = false;
       switch (reportId)
@@ -493,7 +523,11 @@ NTSTATUS CHIDDevice::SubmitReport(
         status = QueueReport(context, report, size, pureMotion);
       }
       else if (NT_SUCCESS(status))
+      {
         status = CopyToRequest(request, report, size);
+        if (NT_SUCCESS(status))
+          ++context->statistics.direct;
+      }
 
       if (NT_SUCCESS(status))
       {
@@ -553,6 +587,7 @@ NTSTATUS CHIDDevice::ResetReports()
     absoluteValid              = context->absoluteValid;
     absoluteX                  = context->absoluteX;
     absoluteY                  = context->absoluteY;
+    context->statistics.resetDiscarded += context->reportCount;
     context->reportHead        = 0;
     context->reportCount       = 0;
     context->mouseMode         = 0;
@@ -599,6 +634,44 @@ NTSTATUS CHIDDevice::ResetReports()
   if (NT_SUCCESS(status))
     status = consumerStatus;
   return status;
+}
+
+void CHIDDevice::LogStatistics()
+{
+  HIDStatistics statistics = {};
+  {
+    CSRWSharedLock deviceLock(&s_deviceLock);
+    HIDDeviceContext * context = s_device;
+    if (!context)
+      return;
+
+    CSRWExclusiveLock reportLock(&context->reportLock);
+    statistics = context->statistics;
+    context->statistics = {};
+    context->statistics.queueHighWater = context->reportCount;
+  }
+
+  if (!(statistics.direct || statistics.queued ||
+      statistics.relativeCoalesced || statistics.absoluteCoalesced ||
+      statistics.staleAbsoluteCompacted ||
+      statistics.keyboardDuplicates || statistics.consumerDuplicates ||
+      statistics.overflows || statistics.resetDiscarded))
+    return;
+
+  DEBUG_TRACE("HID reports: %llu direct, %llu queued, peak %zu; "
+    "%llu relative and %llu absolute coalesced, %llu stale absolute "
+    "compacted, %llu keyboard and %llu consumer duplicates, "
+    "%llu overflows, %llu discarded on reset",
+    static_cast<unsigned long long>(statistics.direct),
+    static_cast<unsigned long long>(statistics.queued),
+    statistics.queueHighWater,
+    static_cast<unsigned long long>(statistics.relativeCoalesced),
+    static_cast<unsigned long long>(statistics.absoluteCoalesced),
+    static_cast<unsigned long long>(statistics.staleAbsoluteCompacted),
+    static_cast<unsigned long long>(statistics.keyboardDuplicates),
+    static_cast<unsigned long long>(statistics.consumerDuplicates),
+    static_cast<unsigned long long>(statistics.overflows),
+    static_cast<unsigned long long>(statistics.resetDiscarded));
 }
 
 VOID HIDEvtIoDeviceControl(

@@ -30,6 +30,7 @@
 #include "common/thread.h"
 #include "common/time.h"
 
+#include <inttypes.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -44,6 +45,7 @@
 #define INPUT_RELEASE_TIMEOUT_US           50000
 #define INPUT_WORKER_IDLE_MS               10
 #define INPUT_WORKER_RETRY_MS              1
+#define INPUT_STATS_INTERVAL_US            5000000
 #define INPUT_MAX_SPLIT_REPORTS            4
 #define INPUT_MOUSE_DELTA_MIN              (INT16_MIN * INPUT_MAX_SPLIT_REPORTS)
 #define INPUT_MOUSE_DELTA_MAX              (INT16_MAX * INPUT_MAX_SPLIT_REPORTS)
@@ -59,6 +61,42 @@ struct LGMPInputPending
 {
   KVMFRInputMessage message;
   bool              pureMotion;
+};
+
+struct LGMPInputCounters
+{
+  uint64_t immediateSends;
+  uint64_t deferredSends;
+  uint64_t localEnqueues;
+  uint64_t initialBusy;
+  uint64_t initialFull;
+  uint64_t retryBusy;
+  uint64_t retryFull;
+  uint64_t relativeCoalesces;
+  uint64_t absoluteCoalesces;
+  uint64_t reservedRejects;
+  uint64_t motionEvictions;
+  uint64_t discreteOverflowFailures;
+  uint64_t discreteOverflowResets;
+  uint64_t claims;
+  uint64_t releases;
+  uint64_t keepalives;
+  uint64_t terminalFailures;
+  uint64_t ackTotal;
+  uint64_t ackMax;
+  uint64_t ackSamples;
+  unsigned pendingHighWater;
+};
+
+struct LGMPInputStats
+{
+  struct LGMPInputCounters counters;
+  uint64_t                 lastReport;
+  uint64_t                 nextProbe;
+  uint64_t                 probeStart;
+  uint32_t                 probeSerial;
+  bool                     probeOutstanding;
+  bool                     probeDue;
 };
 
 struct LGMPInput
@@ -104,6 +142,8 @@ struct LGMPInput
 
   LG_InputStatusFn statusCallback;
   void           * statusOpaque;
+
+  struct LGMPInputStats stats;
 };
 
 static void buildKeyboardPayload(const LGMPInput * input,
@@ -162,10 +202,16 @@ static void published(LGMPInput * input,
   {
     case KVMFR_INPUT_MESSAGE_CLAIM:
       input->publishedClaimed = true;
+      ++input->stats.counters.claims;
       break;
 
     case KVMFR_INPUT_MESSAGE_RELEASE:
       input->publishedClaimed = false;
+      ++input->stats.counters.releases;
+      break;
+
+    case KVMFR_INPUT_MESSAGE_KEEPALIVE:
+      ++input->stats.counters.keepalives;
       break;
   }
 }
@@ -173,25 +219,74 @@ static void published(LGMPInput * input,
 static void connectionFailed(LGMPInput * input, LGMP_STATUS status)
 {
   if (input->connected)
+  {
     DEBUG_WARN("LGMP input transport failed: %s", lgmpStatusString(status));
+    ++input->stats.counters.terminalFailures;
+  }
 
   if (input->available || input->endpointGeneration)
     input->notifyStatus = true;
-  input->connected        = false;
-  input->claimed          = false;
-  input->available        = false;
-  input->ownerBlocked     = false;
-  input->pendingHead      = 0;
-  input->pendingCount     = 0;
-  input->mouseMode        = LGMP_INPUT_MOUSE_NONE;
-  input->mouseButtons     = 0;
-  input->publishedClaimed = false;
-  input->lastInput        = 0;
-  input->capabilities     = 0;
-  input->statusValid      = false;
-  input->ownerConfirmed   = false;
+  input->connected              = false;
+  input->claimed                = false;
+  input->available              = false;
+  input->ownerBlocked           = false;
+  input->pendingHead            = 0;
+  input->pendingCount           = 0;
+  input->mouseMode              = LGMP_INPUT_MOUSE_NONE;
+  input->mouseButtons           = 0;
+  input->publishedClaimed       = false;
+  input->lastInput              = 0;
+  input->capabilities           = 0;
+  input->statusValid            = false;
+  input->ownerConfirmed         = false;
+  input->stats.probeOutstanding = false;
   memset(input->keyState, 0, sizeof(input->keyState));
   atomic_store_explicit(&input->stop, true, memory_order_release);
+}
+
+static LGMP_STATUS trySend(LGMPInput * input,
+    const KVMFRInputMessage * message, bool deferred)
+{
+  const bool probe = input->stats.probeDue &&
+    !input->stats.probeOutstanding;
+  uint32_t serial;
+  const LGMP_STATUS status = lgmpClientTrySendData(input->queue,
+    message, sizeof(*message), probe ? &serial : NULL);
+
+  if (status == LGMP_OK)
+  {
+    if (deferred)
+      ++input->stats.counters.deferredSends;
+    else
+      ++input->stats.counters.immediateSends;
+
+    if (probe)
+    {
+      const uint64_t now = microtime();
+      input->stats.probeOutstanding = true;
+      input->stats.probeDue         = false;
+      input->stats.probeSerial      = serial;
+      input->stats.probeStart       = now;
+      input->stats.nextProbe        = now + INPUT_STATS_INTERVAL_US;
+    }
+    return status;
+  }
+
+  if (status == LGMP_ERR_QUEUE_BUSY)
+  {
+    if (deferred)
+      ++input->stats.counters.retryBusy;
+    else
+      ++input->stats.counters.initialBusy;
+  }
+  else if (status == LGMP_ERR_QUEUE_FULL)
+  {
+    if (deferred)
+      ++input->stats.counters.retryFull;
+    else
+      ++input->stats.counters.initialFull;
+  }
+  return status;
 }
 
 static bool coalesceMotion(LGMPInput * input,
@@ -209,6 +304,7 @@ static bool coalesceMotion(LGMPInput * input,
   if (type == KVMFR_INPUT_MESSAGE_MOUSE_ABSOLUTE)
   {
     tail->message.payload = *payload;
+    ++input->stats.counters.absoluteCoalesces;
     return true;
   }
 
@@ -229,6 +325,7 @@ static bool coalesceMotion(LGMPInput * input,
 
   tail->message.payload.mouseRelative.deltaX = (int32_t)x;
   tail->message.payload.mouseRelative.deltaY = (int32_t)y;
+  ++input->stats.counters.relativeCoalesces;
   return true;
 }
 
@@ -257,6 +354,7 @@ static bool discardPendingMotion(LGMPInput * input)
     if (generation == input->generation)
       input->sequence = input->sequence == 1 ?
         UINT32_MAX : input->sequence - 1;
+    ++input->stats.counters.motionEvictions;
     return true;
   }
   return false;
@@ -280,10 +378,16 @@ static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
   }
   if (pureMotion && input->pendingCount >=
       INPUT_PENDING_LENGTH - INPUT_PENDING_RESERVED)
+  {
+    ++input->stats.counters.reservedRejects;
     return false;
+  }
   if (!pureMotion && input->pendingCount == INPUT_PENDING_LENGTH &&
       !discardPendingMotion(input))
+  {
+    ++input->stats.counters.discreteOverflowFailures;
     return false;
+  }
 
   const uint32_t previousSequence = input->sequence;
   if (++input->sequence == 0)
@@ -299,13 +403,15 @@ static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
 
   if (!input->pendingCount)
   {
-    const LGMP_STATUS status = lgmpClientTrySendData(input->queue,
-      &message, sizeof(message), NULL);
+    const bool probeOutstanding = input->stats.probeOutstanding;
+    const LGMP_STATUS status = trySend(input, &message, false);
     if (status == LGMP_OK)
     {
       published(input, &message);
       if (inputMessage)
         input->lastInput = microtime();
+      if (!probeOutstanding && input->stats.probeOutstanding)
+        *wake = true;
       return true;
     }
 
@@ -326,6 +432,9 @@ static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
   struct LGMPInputPending * item = pendingAt(input, input->pendingCount++);
   item->message    = message;
   item->pureMotion = pureMotion;
+  ++input->stats.counters.localEnqueues;
+  if (input->pendingCount > input->stats.counters.pendingHighWater)
+    input->stats.counters.pendingHighWater = input->pendingCount;
   if (inputMessage)
     input->lastInput = microtime();
   *wake = true;
@@ -578,8 +687,7 @@ static void flushPending(LGMPInput * input)
   while (input->connected && input->pendingCount)
   {
     struct LGMPInputPending * item = pendingAt(input, 0);
-    const LGMP_STATUS status = lgmpClientTrySendData(input->queue,
-      &item->message, sizeof(item->message), NULL);
+    const LGMP_STATUS status = trySend(input, &item->message, true);
     if (status == LGMP_ERR_QUEUE_BUSY || status == LGMP_ERR_QUEUE_FULL)
       return;
     if (status != LGMP_OK)
@@ -593,6 +701,78 @@ static void flushPending(LGMPInput * input)
       (input->pendingHead + 1) % INPUT_PENDING_LENGTH;
     --input->pendingCount;
   }
+}
+
+static void pollAckProbe(LGMPInput * input)
+{
+  if (!input->stats.probeOutstanding)
+    return;
+
+  uint32_t processed;
+  const LGMP_STATUS status =
+    lgmpClientGetSerial(input->queue, &processed);
+  if (status != LGMP_OK)
+  {
+    input->stats.probeOutstanding = false;
+    connectionFailed(input, status);
+    return;
+  }
+  if ((int32_t)(processed - input->stats.probeSerial) < 0)
+    return;
+
+  const uint64_t elapsed = microtime() - input->stats.probeStart;
+  input->stats.probeOutstanding = false;
+  input->stats.counters.ackTotal += elapsed;
+  ++input->stats.counters.ackSamples;
+  if (elapsed > input->stats.counters.ackMax)
+    input->stats.counters.ackMax = elapsed;
+}
+
+static bool collectStats(LGMPInput * input, uint64_t now, bool force,
+    struct LGMPInputCounters * result)
+{
+  if (!force && now - input->stats.lastReport < INPUT_STATS_INTERVAL_US)
+    return false;
+
+  input->stats.lastReport = now;
+  *result = input->stats.counters;
+  memset(&input->stats.counters, 0, sizeof(input->stats.counters));
+  input->stats.counters.pendingHighWater = input->pendingCount;
+
+  return result->immediateSends || result->deferredSends ||
+    result->localEnqueues || result->initialBusy ||
+    result->initialFull || result->retryBusy || result->retryFull ||
+    result->relativeCoalesces || result->absoluteCoalesces ||
+    result->reservedRejects || result->motionEvictions ||
+    result->discreteOverflowFailures ||
+    result->discreteOverflowResets || result->claims ||
+    result->releases || result->keepalives ||
+    result->terminalFailures || result->ackSamples;
+}
+
+static void logStats(const struct LGMPInputCounters * stats)
+{
+  const uint64_t ackAverage = stats->ackSamples ?
+    stats->ackTotal / stats->ackSamples : 0;
+
+  DEBUG_TRACE("LGMP input: sent immediate/deferred %" PRIu64 "/%" PRIu64
+    ", queued %" PRIu64 " (high %u), initial busy/full %" PRIu64
+    "/%" PRIu64 ", retry busy/full %" PRIu64 "/%" PRIu64
+    ", coalesced relative/absolute %" PRIu64 "/%" PRIu64
+    ", motion rejected/evicted %" PRIu64 "/%" PRIu64
+    ", overflow failures/resets %" PRIu64 "/%" PRIu64
+    ", published claim/release/keepalive %" PRIu64 "/%" PRIu64
+    "/%" PRIu64 ", terminal failures %" PRIu64
+    ", LGMP ACK average/max %" PRIu64 "/%" PRIu64 " us (%" PRIu64
+    " samples)", stats->immediateSends, stats->deferredSends,
+    stats->localEnqueues, stats->pendingHighWater,
+    stats->initialBusy, stats->initialFull, stats->retryBusy,
+    stats->retryFull, stats->relativeCoalesces,
+    stats->absoluteCoalesces, stats->reservedRejects,
+    stats->motionEvictions, stats->discreteOverflowFailures,
+    stats->discreteOverflowResets, stats->claims, stats->releases,
+    stats->keepalives, stats->terminalFailures, ackAverage,
+    stats->ackMax, stats->ackSamples);
 }
 
 static void releaseOnDisconnect(LGMPInput * input)
@@ -652,13 +832,18 @@ static int inputThread(void * opaque)
   LGMPInput * input = opaque;
   while (!atomic_load_explicit(&input->stop, memory_order_acquire))
   {
+    struct LGMPInputCounters stats = { 0 };
     unsigned timeout = INPUT_WORKER_IDLE_MS;
     bool wake = false;
     LG_LOCK(input->lock);
     processInputStatus(input, &wake);
     flushPending(input);
+    pollAckProbe(input);
 
     const uint64_t now = microtime();
+    if (!input->stats.probeOutstanding &&
+        now >= input->stats.nextProbe)
+      input->stats.probeDue = true;
     if (input->connected && input->claimed && !inputStateHeld(input) &&
         !input->pendingCount &&
         input->publishedGeneration == input->generation &&
@@ -678,8 +863,13 @@ static int inputThread(void * opaque)
 
     if (input->pendingCount)
       timeout = INPUT_WORKER_RETRY_MS;
+    if (input->stats.probeOutstanding)
+      timeout = INPUT_WORKER_RETRY_MS;
+    const bool report = collectStats(input, now, false, &stats);
     LG_UNLOCK(input->lock);
 
+    if (report)
+      logStats(&stats);
     notifyInputStatus(input);
     if (wake)
       lgSignalEvent(input->event);
@@ -688,6 +878,13 @@ static int inputThread(void * opaque)
       break;
     lgWaitEvent(input->event, timeout);
   }
+
+  struct LGMPInputCounters stats = { 0 };
+  LG_LOCK(input->lock);
+  const bool report = collectStats(input, microtime(), true, &stats);
+  LG_UNLOCK(input->lock);
+  if (report)
+    logStats(&stats);
   notifyInputStatus(input);
   return 0;
 }
@@ -772,6 +969,9 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
   input->lastSend              = 0;
   input->lastInput             = 0;
   input->generation            = 0;
+  memset(&input->stats, 0, sizeof(input->stats));
+  input->stats.lastReport      = microtime();
+  input->stats.probeDue        = true;
   clearInputState(input);
   atomic_store_explicit(&input->stop, false, memory_order_release);
   LGThread * thread;
@@ -953,10 +1153,17 @@ static bool updateKey(void * opaque, int key, bool pressed)
 
   KVMFRInputPayload payload = { 0 };
   buildKeyboardPayload(input, &payload);
+  const uint64_t overflowFailures =
+    input->stats.counters.discreteOverflowFailures;
   bool result = queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
     &payload, false, &wake);
   if (!result && !pressed && input->connected)
+  {
+    if (input->stats.counters.discreteOverflowFailures !=
+        overflowFailures)
+      ++input->stats.counters.discreteOverflowResets;
     result = release(input, &wake);
+  }
   else if (!result && input->connected)
     *state = previous;
   LG_UNLOCK(input->lock);
@@ -1152,12 +1359,17 @@ static bool updateMouseButton(void * opaque, unsigned int button,
     return true;
   }
 
+  const uint64_t overflowFailures =
+    input->stats.counters.discreteOverflowFailures;
   bool result = input->connected && input->available &&
     claim(input, &wake) &&
     queueMouse(input, mode, 0, 0, 0, buttons, false, &wake);
   bool reset = false;
   if (!result && !pressed && input->connected)
   {
+    if (input->stats.counters.discreteOverflowFailures !=
+        overflowFailures)
+      ++input->stats.counters.discreteOverflowResets;
     reset  = release(input, &wake);
     result = reset;
   }

@@ -31,4 +31,5 @@ public:
     _In_reads_bytes_(size) const void * report,
     _In_ size_t size);
   static NTSTATUS ResetReports();
+  static void LogStatistics();
 };

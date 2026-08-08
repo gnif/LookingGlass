@@ -34,6 +34,8 @@ public:
   void Stop();
 
 private:
+  static constexpr ULONGLONG STATISTICS_INTERVAL_MS = 5000;
+
   void OnPipeConnected() override;
   void OnPipeDisconnected() override;
   bool OnPipeMessage(const void * message, size_t size) override;
@@ -41,7 +43,13 @@ private:
   bool HandleMouseAbsolute(const void * payload, size_t size);
   bool HandleKeyboard(const void * payload, size_t size);
   bool SubmitReport(const void * report, size_t size);
+  void LogStatistics(bool force);
 
   CPipeEndpoint m_endpoint;
-  uint64_t      m_lastSequence = 0;
+  uint64_t      m_lastSequence       = 0;
+  uint64_t      m_statReceived       = 0;
+  uint64_t      m_statMalformed      = 0;
+  uint64_t      m_statSequenceResets = 0;
+  uint64_t      m_statSubmitFailed   = 0;
+  ULONGLONG     m_lastStatistics     = 0;
 };

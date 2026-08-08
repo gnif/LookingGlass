@@ -289,19 +289,31 @@ bool CLGMPInputTransport::IsOwner(
 bool CLGMPInputTransport::Claim(
   uint32_t sourceClientID, const KVMFRInputMessage& message)
 {
-  if (message.sequence != 1 || !m_sink)
+  if (message.sequence != 1)
+  {
+    ++m_statistics.sequenceErrors;
     return false;
+  }
+  if (!m_sink)
+  {
+    ++m_statistics.deliveryFailures;
+    return false;
+  }
 
   const uint64_t sinkState = m_sink->GetState();
   if (!(sinkState & 1) || sinkState != m_sinkState ||
       !m_sink->Reset() || m_sink->GetState() != sinkState)
+  {
+    ++m_statistics.deliveryFailures;
     return false;
+  }
 
   m_ownerClientID   = sourceClientID;
   m_ownerGeneration = message.generation;
   m_ownerSequence   = message.sequence;
   RenewLease();
   m_statusDirty = true;
+  ++m_statistics.claims;
   DEBUG_INFO("Input owner %u generation %u acquired",
     m_ownerClientID, m_ownerGeneration);
   return true;
@@ -328,6 +340,7 @@ void CLGMPInputTransport::ReleaseOwner(
   m_ownerSequence   = 0;
   m_ownerDeadline   = 0;
   m_statusDirty     = true;
+  ++m_statistics.releases;
   DEBUG_INFO("Input owner %u generation %u released (%s)",
     clientID, generation, reason);
 }
@@ -420,6 +433,7 @@ bool CLGMPInputTransport::ProcessMessage(
   if (!message.generation || !message.sequence || message.reserved ||
       !ValidatePayload(message))
   {
+    ++m_statistics.malformedMessage;
     if (owner)
       ReleaseOwner(true, "invalid input message");
     return false;
@@ -430,10 +444,14 @@ bool CLGMPInputTransport::ProcessMessage(
     if (m_ownerClientID)
     {
       if (!owner)
+      {
+        ++m_statistics.nonOwner;
         return true;
+      }
       if (message.sequence == 1 && m_ownerSequence == 1)
         return true;
 
+      ++m_statistics.sequenceErrors;
       ReleaseOwner(true, "sequence discontinuity");
       return false;
     }
@@ -441,18 +459,23 @@ bool CLGMPInputTransport::ProcessMessage(
   }
 
   if (!owner)
+  {
+    ++m_statistics.nonOwner;
     return true;
+  }
 
   uint32_t expectedSequence = m_ownerSequence + 1;
   if (!expectedSequence)
     expectedSequence = 1;
   if (message.sequence != expectedSequence)
   {
+    ++m_statistics.sequenceErrors;
     ReleaseOwner(true, "sequence discontinuity");
     return false;
   }
 
-  bool accepted = false;
+  bool accepted    = false;
+  bool inputReport = false;
   switch (message.type)
   {
     case KVMFR_INPUT_MESSAGE_RELEASE:
@@ -468,6 +491,7 @@ bool CLGMPInputTransport::ProcessMessage(
       break;
 
     case KVMFR_INPUT_MESSAGE_MOUSE_RELATIVE:
+      inputReport = true;
       accepted = m_sink && m_sink->SendMouseRelative(
         message.payload.mouseRelative.deltaX,
         message.payload.mouseRelative.deltaY,
@@ -476,6 +500,7 @@ bool CLGMPInputTransport::ProcessMessage(
       break;
 
     case KVMFR_INPUT_MESSAGE_MOUSE_ABSOLUTE:
+      inputReport = true;
       accepted = m_sink && m_sink->SendMouseAbsolute(
         message.payload.mouseAbsolute.x,
         message.payload.mouseAbsolute.y,
@@ -484,6 +509,7 @@ bool CLGMPInputTransport::ProcessMessage(
       break;
 
     case KVMFR_INPUT_MESSAGE_KEYBOARD:
+      inputReport = true;
       accepted = m_sink && m_sink->SendKeyboard(
         message.payload.keyboard.modifiers,
         message.payload.keyboard.keys);
@@ -495,6 +521,7 @@ bool CLGMPInputTransport::ProcessMessage(
 
   if (!accepted)
   {
+    ++m_statistics.deliveryFailures;
     ReleaseOwner(true, "input delivery failed");
     return false;
   }
@@ -509,13 +536,16 @@ bool CLGMPInputTransport::ProcessMessage(
 
   m_ownerSequence = message.sequence;
   RenewLease();
+  if (inputReport)
+    ++m_statistics.reports;
   return true;
 }
 
 bool CLGMPInputTransport::DrainMessages()
 {
   bool received = false;
-  for (unsigned count = 0; count < 256; ++count)
+  unsigned count = 0;
+  for (; count < 256; ++count)
   {
     uint8_t data[LGMP_MSGS_SIZE] = {};
     size_t size = 0;
@@ -532,9 +562,11 @@ bool CLGMPInputTransport::DrainMessages()
     }
 
     received = true;
+    ++m_statistics.messages;
     if (size != sizeof(KVMFRInputMessage))
     {
       DEBUG_WARN("Ignoring invalid KVMFR input message size");
+      ++m_statistics.malformedSize;
       if (sourceClientID == m_ownerClientID)
         ReleaseOwner(true, "invalid input message");
     }
@@ -547,7 +579,48 @@ bool CLGMPInputTransport::DrainMessages()
 
     lgmpHostAckData(m_queue);
   }
+  if (count > m_statistics.maxDrain)
+    m_statistics.maxDrain = count;
+  if (count == 256)
+    ++m_statistics.drainLimit;
   return received;
+}
+
+void CLGMPInputTransport::LogStatistics(ULONGLONG now)
+{
+  if (!m_statistics.lastLog)
+  {
+    m_statistics.lastLog = now;
+    return;
+  }
+  if (now - m_statistics.lastLog < LOG_INTERVAL_MS)
+    return;
+
+  const Statistics statistics = m_statistics;
+  m_statistics = {};
+  m_statistics.lastLog = now;
+
+  if (!statistics.messages && !statistics.claims &&
+      !statistics.releases && !statistics.deliveryFailures)
+    return;
+
+  const double elapsed =
+    static_cast<double>(now - statistics.lastLog) / 1000.0;
+  DEBUG_TRACE("LGMP input host: %.1f msg/s, %llu reports, "
+    "drain max %u, %llu limit; %llu bad size, %llu malformed, "
+    "%llu sequence, %llu non-owner, %llu delivery failures; "
+    "%llu claims, %llu releases",
+    statistics.messages / elapsed,
+    static_cast<unsigned long long>(statistics.reports),
+    statistics.maxDrain,
+    static_cast<unsigned long long>(statistics.drainLimit),
+    static_cast<unsigned long long>(statistics.malformedSize),
+    static_cast<unsigned long long>(statistics.malformedMessage),
+    static_cast<unsigned long long>(statistics.sequenceErrors),
+    static_cast<unsigned long long>(statistics.nonOwner),
+    static_cast<unsigned long long>(statistics.deliveryFailures),
+    static_cast<unsigned long long>(statistics.claims),
+    static_cast<unsigned long long>(statistics.releases));
 }
 
 DWORD CALLBACK CLGMPInputTransport::ThreadProc(void * context)
@@ -567,15 +640,20 @@ void CLGMPInputTransport::Thread()
       GetLastError());
 
   ULONGLONG activeUntil = 0;
+  m_statistics = {};
+  m_statistics.lastLog = GetTickCount64();
   const HANDLE waitHandles[] = { m_stopEvent, m_pollTimer };
   for (;;)
   {
     CheckOwner();
-    if (DrainMessages())
-      activeUntil = GetTickCount64() + ACTIVE_POLL_MS;
+    const bool received = DrainMessages();
     PublishStatus();
+    const ULONGLONG now = GetTickCount64();
+    if (received)
+      activeUntil = now + ACTIVE_POLL_MS;
+    LogStatistics(now);
 
-    const bool active = GetTickCount64() < activeUntil;
+    const bool active = now < activeUntil;
     if (!ArmPollTimer(m_pollTimer, active))
     {
       DEBUG_ERROR_HR(GetLastError(), "Failed to arm LGMP input timer");

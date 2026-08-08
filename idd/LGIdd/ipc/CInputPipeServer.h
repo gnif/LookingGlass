@@ -33,6 +33,7 @@ class CInputPipeServer : public IInputSink, private IPipeEndpointHandler
 private:
   static constexpr size_t QUEUE_LENGTH              = 128;
   static constexpr size_t MOTION_COALESCE_THRESHOLD = QUEUE_LENGTH / 2;
+  static constexpr DWORD  STATISTICS_INTERVAL_MS    = 5000;
 
   struct QueueItem
   {
@@ -72,6 +73,22 @@ private:
   uint32_t  m_relativeButtons = 0;
   uint32_t  m_absoluteButtons = 0;
 
+  uint64_t m_statEnqueued          = 0;
+  uint64_t m_statRelativeCoalesced = 0;
+  uint64_t m_statAbsoluteCoalesced = 0;
+  uint64_t m_statResyncs           = 0;
+  uint64_t m_statResyncDiscarded   = 0;
+  size_t   m_statQueueHighWater    = 0;
+
+  uint64_t      m_statSent            = 0;
+  uint64_t      m_statStale           = 0;
+  uint64_t      m_statWriteFailed     = 0;
+  uint64_t      m_statSlowWrites      = 0;
+  int64_t       m_statWriteTicks      = 0;
+  int64_t       m_statMaxWriteTicks   = 0;
+  ULONGLONG     m_lastStatistics      = 0;
+  LARGE_INTEGER m_performanceFrequency = {};
+
   bool QueueLocked(LGInputPipeMessageType type,
     const KVMFRInputPayload& payload, bool pureMotion);
   bool QueueRawLocked(LGInputPipeMessageType type,
@@ -81,6 +98,7 @@ private:
   bool Pop(QueueItem& item);
   bool Send(const QueueItem& item);
   void Invalidate(uint64_t state, bool requireMatch);
+  void LogStatistics();
   void Thread();
 
   static DWORD WINAPI ThreadProc(void * context);

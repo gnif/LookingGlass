@@ -37,7 +37,13 @@ static constexpr uint16_t HID_CONSUMER_USAGE_VOLUME_DOWN = 0xea;
 
 bool CInputPipeClient::Start()
 {
-  m_lastSequence = 0;
+  m_endpoint.Stop();
+  m_lastSequence       = 0;
+  m_statReceived       = 0;
+  m_statMalformed      = 0;
+  m_statSequenceResets = 0;
+  m_statSubmitFailed   = 0;
+  m_lastStatistics     = GetTickCount64();
   m_endpoint.SetHandler(this);
   return m_endpoint.Start(
     LG_INPUT_PIPE_NAME,
@@ -51,7 +57,10 @@ void CInputPipeClient::Stop()
   m_endpoint.Stop();
   m_lastSequence = 0;
   if (wasRunning)
+  {
+    LogStatistics(true);
     CHIDDevice::ResetReports();
+  }
 }
 
 void CInputPipeClient::OnPipeConnected()
@@ -63,6 +72,7 @@ void CInputPipeClient::OnPipeConnected()
 void CInputPipeClient::OnPipeDisconnected()
 {
   m_lastSequence = 0;
+  LogStatistics(true);
   CHIDDevice::ResetReports();
   DEBUG_INFO("Disconnected from the LGIdd input transport; reconnecting");
 }
@@ -72,7 +82,11 @@ bool CInputPipeClient::OnPipeMessage(
   size_t size)
 {
   if (size != sizeof(LGInputPipeMessage))
+  {
+    ++m_statMalformed;
+    DEBUG_WARN("Received a malformed LGInput pipe message");
     return false;
+  }
 
   const LGInputPipeMessage & message =
     *static_cast<const LGInputPipeMessage *>(frame);
@@ -80,16 +94,22 @@ bool CInputPipeClient::OnPipeMessage(
       message.version != LG_INPUT_PIPE_VERSION ||
       !message.payloadSize ||
       message.payloadSize > sizeof(message.payload))
+  {
+    ++m_statMalformed;
+    DEBUG_WARN("Received a malformed LGInput pipe message");
     return false;
+  }
 
   if (!message.sequence ||
       (m_lastSequence && message.sequence != m_lastSequence + 1))
   {
+    ++m_statSequenceResets;
     DEBUG_WARN("LGInput pipe report sequence changed unexpectedly");
     CHIDDevice::ResetReports();
     return false;
   }
   bool handled = false;
+  const uint64_t submitFailures = m_statSubmitFailed;
   switch (message.type)
   {
     case LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE:
@@ -107,13 +127,24 @@ bool CInputPipeClient::OnPipeMessage(
       break;
 
     default:
+      ++m_statMalformed;
+      DEBUG_WARN("Received an unknown LGInput pipe message");
       return false;
   }
 
   if (!handled)
+  {
+    if (m_statSubmitFailed == submitFailures)
+    {
+      ++m_statMalformed;
+      DEBUG_WARN("Received a malformed LGInput pipe payload");
+    }
     return false;
+  }
 
   m_lastSequence = message.sequence;
+  ++m_statReceived;
+  LogStatistics(false);
   return true;
 }
 
@@ -265,19 +296,53 @@ bool CInputPipeClient::SubmitReport(
   const NTSTATUS status = CHIDDevice::SubmitReport(report, size);
 
   if (status == STATUS_INVALID_PARAMETER)
+  {
+    ++m_statSubmitFailed;
     return false;
+  }
 
   if (status == STATUS_BUFFER_OVERFLOW)
   {
+    ++m_statSubmitFailed;
     DEBUG_WARN("LGInput HID report queue overflowed; resetting input state");
     CHIDDevice::ResetReports();
     return false;
   }
   if (!NT_SUCCESS(status))
   {
+    ++m_statSubmitFailed;
     if (status != STATUS_DEVICE_NOT_READY)
       DEBUG_WARN_HR(status, "Failed to submit an LGInput HID report");
     return false;
   }
   return true;
+}
+
+void CInputPipeClient::LogStatistics(bool force)
+{
+  const ULONGLONG now = GetTickCount64();
+  if (!force && now - m_lastStatistics < STATISTICS_INTERVAL_MS)
+    return;
+
+  const uint64_t received       = m_statReceived;
+  const uint64_t malformed      = m_statMalformed;
+  const uint64_t sequenceResets = m_statSequenceResets;
+  const uint64_t submitFailed   = m_statSubmitFailed;
+
+  m_statReceived       = 0;
+  m_statMalformed      = 0;
+  m_statSequenceResets = 0;
+  m_statSubmitFailed   = 0;
+  m_lastStatistics     = now;
+
+  if (received || malformed || sequenceResets || submitFailed)
+  {
+    DEBUG_TRACE("LGInput pipe receive: %llu reports, %llu malformed, "
+      "%llu sequence resets, %llu HID submit failures",
+      static_cast<unsigned long long>(received),
+      static_cast<unsigned long long>(malformed),
+      static_cast<unsigned long long>(sequenceResets),
+      static_cast<unsigned long long>(submitFailed));
+  }
+  CHIDDevice::LogStatistics();
 }
