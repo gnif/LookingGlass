@@ -43,5 +43,5 @@ private:
   bool SubmitReport(const void * report, size_t size);
 
   CPipeEndpoint m_endpoint;
-  uint64_t m_lastSequence = 0;
+  uint64_t      m_lastSequence = 0;
 };

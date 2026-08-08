@@ -59,6 +59,7 @@ struct HIDDeviceContext
   size_t                reportCount;
   uint32_t              relativeButtons;
   uint32_t              absoluteButtons;
+  uint16_t              consumerUsage;
   bool                  absoluteValid;
   uint16_t              absoluteX;
   uint16_t              absoluteY;
@@ -326,9 +327,10 @@ static NTSTATUS DeactivateDevice(_Inout_ HIDDeviceContext * context)
     if (context->stopping)
       return STATUS_DEVICE_NOT_READY;
 
-    context->active      = false;
-    context->reportHead  = 0;
-    context->reportCount = 0;
+    context->active        = false;
+    context->reportHead    = 0;
+    context->reportCount   = 0;
+    context->consumerUsage = UINT16_MAX;
   }
   WdfIoQueuePurgeSynchronously(context->reportQueue);
   return STATUS_SUCCESS;
@@ -449,6 +451,11 @@ NTSTATUS CHIDDevice::SubmitReport(
       status = STATUS_DEVICE_NOT_READY;
     else
     {
+      if (reportId == HID_REPORT_ID_CONSUMER &&
+          context->consumerUsage ==
+            static_cast<const HIDConsumerReport *>(report)->usage)
+        return STATUS_SUCCESS;
+
       bool pureMotion = false;
       switch (reportId)
       {
@@ -510,6 +517,11 @@ NTSTATUS CHIDDevice::SubmitReport(
             break;
           }
 
+          case HID_REPORT_ID_CONSUMER:
+            context->consumerUsage =
+              static_cast<const HIDConsumerReport *>(report)->usage;
+            break;
+
           default:
             break;
         }
@@ -546,6 +558,7 @@ NTSTATUS CHIDDevice::ResetReports()
     context->mouseMode         = 0;
     context->relativeButtons   = 0;
     context->absoluteButtons   = 0;
+    context->consumerUsage     = UINT16_MAX;
   }
 
   const HIDMouseRelativeReport relative = {
@@ -557,6 +570,9 @@ NTSTATUS CHIDDevice::ResetReports()
   };
   const HIDKeyboardReport keyboard = {
     HID_REPORT_ID_KEYBOARD,
+  };
+  const HIDConsumerReport consumer = {
+    HID_REPORT_ID_CONSUMER,
   };
 
   NTSTATUS status = SubmitReport(&relative, sizeof(relative));
@@ -578,6 +594,10 @@ NTSTATUS CHIDDevice::ResetReports()
     SubmitReport(&keyboard, sizeof(keyboard));
   if (NT_SUCCESS(status))
     status = keyboardStatus;
+  const NTSTATUS consumerStatus =
+    SubmitReport(&consumer, sizeof(consumer));
+  if (NT_SUCCESS(status))
+    status = consumerStatus;
   return status;
 }
 

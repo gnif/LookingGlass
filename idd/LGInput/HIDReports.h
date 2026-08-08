@@ -28,6 +28,7 @@ enum HIDReportId : uint8_t
   HID_REPORT_ID_MOUSE_ABSOLUTE = 1,
   HID_REPORT_ID_MOUSE_RELATIVE = 2,
   HID_REPORT_ID_KEYBOARD       = 3,
+  HID_REPORT_ID_CONSUMER       = 4,
 };
 
 #pragma pack(push, 1)
@@ -64,12 +65,19 @@ struct HIDKeyboardLedsReport
   uint8_t leds;
 };
 
+struct HIDConsumerReport
+{
+  uint8_t  reportId;
+  uint16_t usage;
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(HIDMouseAbsoluteReport) == 10);
 static_assert(sizeof(HIDMouseRelativeReport) == 10);
 static_assert(sizeof(HIDKeyboardReport)     == 9);
 static_assert(sizeof(HIDKeyboardLedsReport) == 2);
+static_assert(sizeof(HIDConsumerReport)     == 3);
 
 static constexpr size_t HID_MAX_INPUT_REPORT_SIZE =
   sizeof(HIDMouseAbsoluteReport);

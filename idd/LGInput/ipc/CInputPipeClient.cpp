@@ -27,6 +27,14 @@
 
 #include <string.h>
 
+static constexpr uint8_t HID_KEYBOARD_USAGE_MUTE        = 0x7f;
+static constexpr uint8_t HID_KEYBOARD_USAGE_VOLUME_UP   = 0x80;
+static constexpr uint8_t HID_KEYBOARD_USAGE_VOLUME_DOWN = 0x81;
+
+static constexpr uint16_t HID_CONSUMER_USAGE_MUTE        = 0xe2;
+static constexpr uint16_t HID_CONSUMER_USAGE_VOLUME_UP   = 0xe9;
+static constexpr uint16_t HID_CONSUMER_USAGE_VOLUME_DOWN = 0xea;
+
 bool CInputPipeClient::Start()
 {
   m_lastSequence = 0;
@@ -209,14 +217,45 @@ bool CInputPipeClient::HandleKeyboard(
   HIDKeyboardReport report = {};
   report.reportId = HID_REPORT_ID_KEYBOARD;
   report.modifiers = input.modifiers;
+  // The Consumer Control report carries one active array usage.
+  uint16_t consumerUsage = 0;
+  size_t   keyIndex      = 0;
   for (size_t i = 0; i < LG_INPUT_KEYBOARD_KEY_COUNT; ++i)
   {
     if (input.keys[i] > LG_INPUT_KEYBOARD_USAGE_MAX)
       return false;
-    report.keys[i] = input.keys[i];
+
+    switch (input.keys[i])
+    {
+      case HID_KEYBOARD_USAGE_MUTE:
+        if (!consumerUsage)
+          consumerUsage = HID_CONSUMER_USAGE_MUTE;
+        break;
+
+      case HID_KEYBOARD_USAGE_VOLUME_UP:
+        if (!consumerUsage)
+          consumerUsage = HID_CONSUMER_USAGE_VOLUME_UP;
+        break;
+
+      case HID_KEYBOARD_USAGE_VOLUME_DOWN:
+        if (!consumerUsage)
+          consumerUsage = HID_CONSUMER_USAGE_VOLUME_DOWN;
+        break;
+
+      default:
+        report.keys[keyIndex++] = input.keys[i];
+        break;
+    }
   }
 
-  return SubmitReport(&report, sizeof(report));
+  if (!SubmitReport(&report, sizeof(report)))
+    return false;
+
+  const HIDConsumerReport consumer = {
+    HID_REPORT_ID_CONSUMER,
+    consumerUsage,
+  };
+  return SubmitReport(&consumer, sizeof(consumer));
 }
 
 bool CInputPipeClient::SubmitReport(

@@ -120,6 +120,20 @@ static const uint8_t REPORT_DESCRIPTOR[] =
   0x95, 0x06,             // Report Count (6)
   0x81, 0x00,             // Input (Data, Array, Absolute)
   0xC0,                   // End Collection
+
+  // Consumer control, report ID 4.
+  0x05, 0x0C,             // Usage Page (Consumer)
+  0x09, 0x01,             // Usage (Consumer Control)
+  0xA1, 0x01,             // Collection (Application)
+  0x85, HID_REPORT_ID_CONSUMER,
+  0x19, 0x00,             // Usage Minimum (Unassigned)
+  0x2A, 0xFF, 0x03,       // Usage Maximum (1023)
+  0x15, 0x00,             // Logical Minimum (0)
+  0x26, 0xFF, 0x03,       // Logical Maximum (1023)
+  0x75, 0x10,             // Report Size (16)
+  0x95, 0x01,             // Report Count (1)
+  0x81, 0x00,             // Input (Data, Array, Absolute)
+  0xC0,                   // End Collection
 };
 
 const uint8_t * HIDGetReportDescriptor()
@@ -144,6 +158,9 @@ size_t HIDGetInputReportSize(uint8_t reportId)
 
     case HID_REPORT_ID_KEYBOARD:
       return sizeof(HIDKeyboardReport);
+
+    case HID_REPORT_ID_CONSUMER:
+      return sizeof(HIDConsumerReport);
 
     default:
       return 0;
