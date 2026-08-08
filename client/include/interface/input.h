@@ -30,12 +30,27 @@ typedef enum LG_InputSupport
 }
 LG_InputSupport;
 
+typedef struct LG_InputStatus
+{
+  bool     available;
+  uint32_t generation;
+}
+LG_InputStatus;
+
+typedef void (*LG_InputStatusFn)(void * opaque,
+    const LG_InputStatus * status);
+
 typedef struct LG_InputOps
 {
   const char * name;
 
   /* Operations must fail safely if a remote endpoint disappears. */
   bool (*supports)(void * opaque, LG_InputSupport support);
+
+  /* Registration must synchronously report the current status after releasing
+   * any backend locks. Passing NULL unregisters the listener. */
+  void (*setStatusListener)(void * opaque, LG_InputStatusFn callback,
+      void * callbackOpaque);
 
   /* Keyboard codes use the Linux input-event KEY_* values. */
   bool (*keyDown)(void * opaque, int key);

@@ -42,7 +42,7 @@
 #define INPUT_KEEPALIVE_US                 200000
 #define INPUT_IDLE_RELEASE_US              400000
 #define INPUT_RELEASE_TIMEOUT_US           50000
-#define INPUT_WORKER_IDLE_MS               50
+#define INPUT_WORKER_IDLE_MS               10
 #define INPUT_WORKER_RETRY_MS              1
 #define INPUT_MAX_SPLIT_REPORTS            4
 #define INPUT_MOUSE_DELTA_MIN              (INT16_MIN * INPUT_MAX_SPLIT_REPORTS)
@@ -71,6 +71,8 @@ struct LGMPInput
   atomic_bool       stop;
   bool              connected;
   bool              claimed;
+  bool              available;
+  bool              ownerBlocked;
 
   uint32_t generation;
   uint32_t sequence;
@@ -89,13 +91,64 @@ struct LGMPInput
   uint16_t                absoluteY;
   uint8_t                 keyState[KVMFR_INPUT_KEYBOARD_USAGE_MAX + 1];
   uint64_t                lastInput;
+
+  uint32_t clientID;
+  uint32_t capabilities;
+  uint32_t endpointGeneration;
+  uint32_t statusSerial;
+  uint32_t statusOwnerClientID;
+  uint32_t statusOwnerGeneration;
+  bool     ownerConfirmed;
+  bool     statusValid;
+  bool     notifyStatus;
+
+  LG_InputStatusFn statusCallback;
+  void           * statusOpaque;
 };
+
+static void buildKeyboardPayload(const LGMPInput * input,
+    KVMFRInputPayload * payload);
+static bool queueMouse(LGMPInput * input, enum LGMPInputMouseMode mode,
+    int32_t x, int32_t y, int32_t wheel, uint32_t buttons,
+    bool pureMotion, bool * wake);
 
 static struct LGMPInputPending * pendingAt(
     LGMPInput * input, unsigned position)
 {
   return &input->pending[
     (input->pendingHead + position) % INPUT_PENDING_LENGTH];
+}
+
+static LG_InputStatus inputStatus(const LGMPInput * input)
+{
+  return (LG_InputStatus)
+  {
+    .available  = input->available,
+    .generation = input->endpointGeneration,
+  };
+}
+
+static void notifyInputStatus(LGMPInput * input)
+{
+  LG_InputStatusFn callback;
+  void           * opaque;
+  LG_InputStatus   status;
+
+  LG_LOCK(input->lock);
+  if (!input->notifyStatus)
+  {
+    LG_UNLOCK(input->lock);
+    return;
+  }
+
+  input->notifyStatus = false;
+  callback = input->statusCallback;
+  opaque   = input->statusOpaque;
+  status   = inputStatus(input);
+  LG_UNLOCK(input->lock);
+
+  if (callback)
+    callback(opaque, &status);
 }
 
 static void published(LGMPInput * input,
@@ -122,14 +175,21 @@ static void connectionFailed(LGMPInput * input, LGMP_STATUS status)
   if (input->connected)
     DEBUG_WARN("LGMP input transport failed: %s", lgmpStatusString(status));
 
+  if (input->available || input->endpointGeneration)
+    input->notifyStatus = true;
   input->connected        = false;
   input->claimed          = false;
+  input->available        = false;
+  input->ownerBlocked     = false;
   input->pendingHead      = 0;
   input->pendingCount     = 0;
   input->mouseMode        = LGMP_INPUT_MOUSE_NONE;
   input->mouseButtons     = 0;
   input->publishedClaimed = false;
   input->lastInput        = 0;
+  input->capabilities     = 0;
+  input->statusValid      = false;
+  input->ownerConfirmed   = false;
   memset(input->keyState, 0, sizeof(input->keyState));
   atomic_store_explicit(&input->stop, true, memory_order_release);
 }
@@ -276,11 +336,14 @@ static bool claim(LGMPInput * input, bool * wake)
 {
   if (input->claimed)
     return true;
+  if (!input->available || input->ownerBlocked)
+    return false;
 
   if (++input->generation == 0)
     ++input->generation;
-  input->sequence = 0;
-  input->claimed  = true;
+  input->sequence       = 0;
+  input->claimed        = true;
+  input->ownerConfirmed = false;
 
   const KVMFRInputPayload payload = { 0 };
   if (queuePayload(input, KVMFR_INPUT_MESSAGE_CLAIM,
@@ -310,6 +373,187 @@ static bool inputStateHeld(const LGMPInput * input)
     if (input->keyState[usage])
       return true;
   return false;
+}
+
+static bool inputStateActive(const LGMPInput * input)
+{
+  return input->mouseMode == LGMP_INPUT_MOUSE_ABSOLUTE ||
+    inputStateHeld(input);
+}
+
+static void discardProtocolState(LGMPInput * input)
+{
+  input->pendingHead         = 0;
+  input->pendingCount        = 0;
+  input->claimed             = false;
+  input->sequence            = 0;
+  input->publishedGeneration = 0;
+  input->publishedSequence   = 0;
+  input->publishedClaimed    = false;
+  input->ownerConfirmed      = false;
+}
+
+static bool restoreInputState(LGMPInput * input, bool * wake)
+{
+  if (!inputStateActive(input))
+    return true;
+  if (!claim(input, wake))
+    return false;
+
+  KVMFRInputPayload keyboard = { 0 };
+  buildKeyboardPayload(input, &keyboard);
+  if (!queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+      &keyboard, false, wake))
+    return false;
+
+  if (input->mouseMode != LGMP_INPUT_MOUSE_NONE &&
+      !queueMouse(input, input->mouseMode, 0, 0, 0,
+        input->mouseButtons, false, wake))
+    return false;
+  return true;
+}
+
+static bool validInputStatus(const KVMFRInputStatus * status)
+{
+  static const uint32_t capabilities =
+    KVMFR_INPUT_CAP_MOUSE_RELATIVE |
+    KVMFR_INPUT_CAP_MOUSE_ABSOLUTE |
+    KVMFR_INPUT_CAP_KEYBOARD;
+  static const uint32_t flags =
+    KVMFR_INPUT_STATUS_AVAILABLE |
+    KVMFR_INPUT_STATUS_HAS_OWNER;
+
+  if (status->version != KVMFR_INPUT_VERSION ||
+      status->capabilities & ~capabilities ||
+      status->flags & ~flags || !status->generation ||
+      !status->lease || !status->maxButtons ||
+      status->maxButtons > KVMFR_INPUT_MOUSE_BUTTON_COUNT)
+    return false;
+
+  const bool available =
+    (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
+  const bool hasOwner =
+    (status->flags & KVMFR_INPUT_STATUS_HAS_OWNER) != 0;
+  if (!available && (status->capabilities || hasOwner))
+    return false;
+  if (available &&
+      (status->capabilities &
+        (KVMFR_INPUT_CAP_MOUSE_RELATIVE | KVMFR_INPUT_CAP_KEYBOARD)) !=
+      (KVMFR_INPUT_CAP_MOUSE_RELATIVE | KVMFR_INPUT_CAP_KEYBOARD))
+    return false;
+  return hasOwner ?
+    status->ownerClientID && status->ownerGeneration :
+    !status->ownerClientID && !status->ownerGeneration;
+}
+
+static void applyInputStatus(LGMPInput * input,
+    const KVMFRInputStatus * status, uint32_t serial, bool * wake)
+{
+  const bool     wasValid       = input->statusValid;
+  const bool     wasAvailable   = input->available;
+  const uint32_t oldCapabilities = input->capabilities;
+  const uint32_t oldGeneration   = input->endpointGeneration;
+  const bool     available =
+    (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
+  const bool     endpointChanged = wasValid &&
+    oldGeneration != status->generation;
+  bool restore = false;
+
+  input->statusValid           = true;
+  input->statusSerial          = serial;
+  input->available             = available;
+  input->capabilities          = status->capabilities;
+  input->endpointGeneration    = status->generation;
+  input->statusOwnerClientID   = status->ownerClientID;
+  input->statusOwnerGeneration = status->ownerGeneration;
+
+  if (endpointChanged || !available)
+  {
+    discardProtocolState(input);
+    restore = endpointChanged && available;
+  }
+
+  if (status->flags & KVMFR_INPUT_STATUS_HAS_OWNER)
+  {
+    if (input->claimed &&
+        status->ownerClientID == input->clientID &&
+        status->ownerGeneration == input->generation)
+    {
+      input->ownerBlocked   = false;
+      input->ownerConfirmed = true;
+    }
+    else
+    {
+      discardProtocolState(input);
+      input->ownerBlocked = true;
+      restore = false;
+    }
+  }
+  else
+  {
+    if (input->ownerBlocked ||
+        (input->claimed && input->ownerConfirmed))
+    {
+      discardProtocolState(input);
+      restore = available;
+    }
+    input->ownerBlocked = false;
+  }
+
+  if (restore && !restoreInputState(input, wake))
+    discardProtocolState(input);
+
+  if (!wasValid || wasAvailable != available ||
+      oldCapabilities != status->capabilities ||
+      oldGeneration != status->generation)
+    input->notifyStatus = true;
+}
+
+static void processInputStatus(LGMPInput * input, bool * wake)
+{
+  LGMP_STATUS result = lgmpClientAdvanceToLast(input->queue);
+  if (result == LGMP_ERR_QUEUE_EMPTY)
+    return;
+  if (result != LGMP_OK)
+  {
+    connectionFailed(input, result);
+    return;
+  }
+
+  LGMPMessage message;
+  result = lgmpClientProcess(input->queue, &message);
+  if (result == LGMP_ERR_QUEUE_EMPTY)
+    return;
+  if (result != LGMP_OK)
+  {
+    connectionFailed(input, result);
+    return;
+  }
+
+  KVMFRInputStatus status = { 0 };
+  const bool valid = message.udata && message.udata <= UINT32_MAX &&
+    message.size == sizeof(status);
+  if (valid)
+    memcpy(&status, message.mem, sizeof(status));
+
+  result = lgmpClientMessageDone(input->queue);
+  if (result != LGMP_OK)
+  {
+    connectionFailed(input, result);
+    return;
+  }
+
+  const uint32_t serial = (uint32_t)message.udata;
+  if (!valid || !validInputStatus(&status))
+  {
+    DEBUG_WARN("Ignoring invalid LGMP input status");
+    return;
+  }
+  if (input->statusValid &&
+      (int32_t)(serial - input->statusSerial) <= 0)
+    return;
+
+  applyInputStatus(input, &status, serial, wake);
 }
 
 static bool release(LGMPInput * input, bool * wake)
@@ -409,7 +653,9 @@ static int inputThread(void * opaque)
   while (!atomic_load_explicit(&input->stop, memory_order_acquire))
   {
     unsigned timeout = INPUT_WORKER_IDLE_MS;
+    bool wake = false;
     LG_LOCK(input->lock);
+    processInputStatus(input, &wake);
     flushPending(input);
 
     const uint64_t now = microtime();
@@ -418,7 +664,6 @@ static int inputThread(void * opaque)
         input->publishedGeneration == input->generation &&
         now - input->lastInput >= INPUT_IDLE_RELEASE_US)
     {
-      bool wake = false;
       release(input, &wake);
     }
     else if (input->connected && input->claimed &&
@@ -426,7 +671,6 @@ static int inputThread(void * opaque)
         input->publishedGeneration == input->generation &&
         now - input->lastSend >= INPUT_KEEPALIVE_US)
     {
-      bool wake = false;
       const KVMFRInputPayload payload = { 0 };
       queuePayload(input, KVMFR_INPUT_MESSAGE_KEEPALIVE,
         &payload, false, &wake);
@@ -436,10 +680,15 @@ static int inputThread(void * opaque)
       timeout = INPUT_WORKER_RETRY_MS;
     LG_UNLOCK(input->lock);
 
+    notifyInputStatus(input);
+    if (wake)
+      lgSignalEvent(input->event);
+
     if (atomic_load_explicit(&input->stop, memory_order_acquire))
       break;
     lgWaitEvent(input->event, timeout);
   }
+  notifyInputStatus(input);
   return 0;
 }
 
@@ -467,13 +716,17 @@ void lgmpInput_destroy(LGMPInput ** input)
   *input = NULL;
 }
 
-bool lgmpInput_connect(LGMPInput * input)
+bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
 {
+  if (!clientID)
+    return false;
+
   LG_LOCK(input->lock);
   if (input->connected)
   {
+    const bool sameClient = input->clientID == clientID;
     LG_UNLOCK(input->lock);
-    return true;
+    return sameClient;
   }
   if (input->thread || input->queue)
   {
@@ -499,15 +752,26 @@ bool lgmpInput_connect(LGMPInput * input)
     return false;
   }
 
-  input->connected           = true;
-  input->claimed             = false;
-  input->pendingHead         = 0;
-  input->pendingCount        = 0;
-  input->publishedGeneration = 0;
-  input->publishedSequence   = 0;
-  input->publishedClaimed    = false;
-  input->lastSend            = 0;
-  input->lastInput           = 0;
+  input->connected             = true;
+  input->claimed               = false;
+  input->available             = false;
+  input->ownerBlocked          = false;
+  input->pendingHead           = 0;
+  input->pendingCount          = 0;
+  input->clientID              = clientID;
+  input->capabilities          = 0;
+  input->endpointGeneration    = 0;
+  input->statusSerial          = 0;
+  input->statusOwnerClientID   = 0;
+  input->statusOwnerGeneration = 0;
+  input->ownerConfirmed        = false;
+  input->statusValid           = false;
+  input->publishedGeneration   = 0;
+  input->publishedSequence     = 0;
+  input->publishedClaimed      = false;
+  input->lastSend              = 0;
+  input->lastInput             = 0;
+  input->generation            = 0;
   clearInputState(input);
   atomic_store_explicit(&input->stop, false, memory_order_release);
   LGThread * thread;
@@ -545,6 +809,13 @@ void lgmpInput_disconnect(LGMPInput * input)
   input->pendingCount = 0;
   input->connected    = false;
   input->claimed      = false;
+  if (input->available || input->endpointGeneration)
+    input->notifyStatus = true;
+  input->available      = false;
+  input->ownerBlocked   = false;
+  input->capabilities   = 0;
+  input->statusValid    = false;
+  input->ownerConfirmed = false;
   clearInputState(input);
   atomic_store_explicit(&input->stop, true, memory_order_release);
   LGThread * thread = input->thread;
@@ -580,16 +851,40 @@ void lgmpInput_disconnect(LGMPInput * input)
 
 static bool inputSupports(void * opaque, LG_InputSupport support)
 {
-  (void)opaque;
+  LGMPInput * input = opaque;
+  LG_LOCK(input->lock);
 
+  bool result;
   switch (support)
   {
     case LG_INPUT_SUPPORT_MOUSE_ABSOLUTE:
-      return true;
+      result = input->available &&
+        (input->capabilities & KVMFR_INPUT_CAP_MOUSE_ABSOLUTE) != 0;
+      break;
 
     default:
-      return false;
+      result = false;
+      break;
   }
+  LG_UNLOCK(input->lock);
+  return result;
+}
+
+static void inputSetStatusListener(void * opaque,
+    LG_InputStatusFn callback, void * callbackOpaque)
+{
+  LGMPInput * input = opaque;
+  LG_InputStatus status;
+
+  LG_LOCK(input->lock);
+  input->statusCallback = callback;
+  input->statusOpaque   = callbackOpaque;
+  input->notifyStatus   = false;
+  status = inputStatus(input);
+  LG_UNLOCK(input->lock);
+
+  if (callback)
+    callback(callbackOpaque, &status);
 }
 
 static void buildKeyboardPayload(const LGMPInput * input,
@@ -626,11 +921,9 @@ static bool updateKey(void * opaque, int key, bool pressed)
   LGMPInput * input = opaque;
   bool wake = false;
   LG_LOCK(input->lock);
-  if (!input->connected || !claim(input, &wake))
+  if (!input->connected || !input->available)
   {
     LG_UNLOCK(input->lock);
-    if (wake)
-      lgSignalEvent(input->event);
     return false;
   }
 
@@ -643,6 +936,20 @@ static bool updateKey(void * opaque, int key, bool pressed)
   }
   else if (*state)
     --*state;
+
+  if (input->ownerBlocked)
+  {
+    LG_UNLOCK(input->lock);
+    return true;
+  }
+  if (!claim(input, &wake))
+  {
+    *state = previous;
+    LG_UNLOCK(input->lock);
+    if (wake)
+      lgSignalEvent(input->event);
+    return false;
+  }
 
   KVMFRInputPayload payload = { 0 };
   buildKeyboardPayload(input, &payload);
@@ -704,7 +1011,15 @@ static bool inputMouseMotion(void * opaque, int32_t x, int32_t y)
   LGMPInput * input = opaque;
   bool wake = false;
   LG_LOCK(input->lock);
-  bool result = input->connected && claim(input, &wake) &&
+  if (input->connected && input->available && input->ownerBlocked)
+  {
+    input->mouseMode = LGMP_INPUT_MOUSE_RELATIVE;
+    LG_UNLOCK(input->lock);
+    return true;
+  }
+
+  bool result = input->connected && input->available &&
+    claim(input, &wake) &&
     queueMouse(input, LGMP_INPUT_MOUSE_RELATIVE,
       x, y, 0, input->mouseButtons, true, &wake);
   if (result)
@@ -732,10 +1047,24 @@ static bool inputMousePosition(void * opaque, uint32_t x, uint32_t y,
   LGMPInput * input = opaque;
   bool wake = false;
   LG_LOCK(input->lock);
+  if (!input->available ||
+      !(input->capabilities & KVMFR_INPUT_CAP_MOUSE_ABSOLUTE))
+  {
+    LG_UNLOCK(input->lock);
+    return false;
+  }
+
   const uint16_t previousX = input->absoluteX;
   const uint16_t previousY = input->absoluteY;
   input->absoluteX = absoluteX;
   input->absoluteY = absoluteY;
+  if (input->ownerBlocked)
+  {
+    input->mouseMode = LGMP_INPUT_MOUSE_ABSOLUTE;
+    LG_UNLOCK(input->lock);
+    return true;
+  }
+
   bool result = input->connected && claim(input, &wake) &&
     queueMouse(input, LGMP_INPUT_MOUSE_ABSOLUTE,
       0, 0, 0, input->mouseButtons, true, &wake);
@@ -784,10 +1113,17 @@ static bool updateMouseButton(void * opaque, unsigned int button,
     LGMPInput * input = opaque;
     bool wake = false;
     LG_LOCK(input->lock);
+    if (input->connected && input->available && input->ownerBlocked)
+    {
+      LG_UNLOCK(input->lock);
+      return true;
+    }
+
     const enum LGMPInputMouseMode mode =
       input->mouseMode == LGMP_INPUT_MOUSE_ABSOLUTE ?
         LGMP_INPUT_MOUSE_ABSOLUTE : LGMP_INPUT_MOUSE_RELATIVE;
-    const bool result = input->connected && claim(input, &wake) &&
+    const bool result = input->connected && input->available &&
+      claim(input, &wake) &&
       queueMouse(input, mode, 0, 0, button == 4 ? 1 : -1,
         input->mouseButtons, false, &wake);
     LG_UNLOCK(input->lock);
@@ -808,7 +1144,16 @@ static bool updateMouseButton(void * opaque, unsigned int button,
   const enum LGMPInputMouseMode mode =
     input->mouseMode == LGMP_INPUT_MOUSE_ABSOLUTE ?
       LGMP_INPUT_MOUSE_ABSOLUTE : LGMP_INPUT_MOUSE_RELATIVE;
-  bool result = input->connected && claim(input, &wake) &&
+  if (input->connected && input->available && input->ownerBlocked)
+  {
+    input->mouseButtons = buttons;
+    input->mouseMode    = mode;
+    LG_UNLOCK(input->lock);
+    return true;
+  }
+
+  bool result = input->connected && input->available &&
+    claim(input, &wake) &&
     queueMouse(input, mode, 0, 0, 0, buttons, false, &wake);
   bool reset = false;
   if (!result && !pressed && input->connected)
@@ -852,16 +1197,17 @@ static void inputReset(void * opaque)
 
 static const LG_InputOps INPUT_OPS =
 {
-  .name          = "LGMP",
-  .supports      = inputSupports,
-  .keyDown       = inputKeyDown,
-  .keyUp         = inputKeyUp,
-  .keyboardLEDs  = NULL,
-  .mouseMotion   = inputMouseMotion,
-  .mousePosition = inputMousePosition,
-  .mousePress    = inputMousePress,
-  .mouseRelease  = inputMouseRelease,
-  .reset         = inputReset,
+  .name              = "LGMP",
+  .supports          = inputSupports,
+  .setStatusListener = inputSetStatusListener,
+  .keyDown           = inputKeyDown,
+  .keyUp             = inputKeyUp,
+  .keyboardLEDs      = NULL,
+  .mouseMotion       = inputMouseMotion,
+  .mousePosition     = inputMousePosition,
+  .mousePress        = inputMousePress,
+  .mouseRelease      = inputMouseRelease,
+  .reset             = inputReset,
 };
 
 const LG_InputOps * lgmpInput_getOps(void)

@@ -21,6 +21,7 @@
 #pragma once
 
 #include "transport/IInputTransport.h"
+#include "common/LGMPConfig.h"
 
 #include <Windows.h>
 
@@ -42,22 +43,28 @@ private:
 
   CLGMPHost& m_host;
 
-  PLGMPHostQueue m_queue = nullptr;
-  IInputSink   * m_sink  = nullptr;
+  PLGMPHostQueue m_queue                          = nullptr;
+  PLGMPMemory    m_statusMemory[LGMP_Q_INPUT_LEN] = {};
+  IInputSink   * m_sink                           = nullptr;
 
   SRWLOCK m_lifecycleLock = SRWLOCK_INIT;
   HANDLE  m_stopEvent     = nullptr;
   HANDLE  m_pollTimer     = nullptr;
   HANDLE  m_thread        = nullptr;
 
-  uint32_t  m_ownerClientID   = 0;
-  uint32_t  m_ownerGeneration = 0;
-  uint32_t  m_ownerSequence   = 0;
-  ULONGLONG m_ownerDeadline   = 0;
-  uint64_t  m_sinkState       = 0;
+  uint32_t  m_ownerClientID       = 0;
+  uint32_t  m_ownerGeneration     = 0;
+  uint32_t  m_ownerSequence       = 0;
+  ULONGLONG m_ownerDeadline       = 0;
+  uint64_t  m_sinkState           = 0;
+  uint32_t  m_endpointGeneration = 0;
+  uint32_t  m_statusSerial        = 0;
+  bool      m_statusDirty         = false;
 
   bool Initialize();
   void DeInit();
+  void UpdateSinkState(uint64_t state);
+  void PublishStatus();
   bool DrainMessages();
   bool ProcessMessage(uint32_t sourceClientID,
     const KVMFRInputMessage& message);

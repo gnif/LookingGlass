@@ -1353,7 +1353,7 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
 {
   *opaque = NULL;
   if (!this->connected || !this->inputSupported ||
-      !lgmpInput_connect(this->input))
+      !lgmpInput_connect(this->input, this->clientID))
     return NULL;
 
   *opaque = this->input;

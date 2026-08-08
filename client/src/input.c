@@ -30,7 +30,9 @@ struct InputBinding
 {
   const LG_InputOps * ops;
   void              * opaque;
+  bool                available;
   bool                mouseAbsolute;
+  uint32_t            generation;
 };
 
 static struct
@@ -63,12 +65,15 @@ static bool validOps(const LG_InputOps * ops)
 static struct InputBinding makeBinding(const LG_InputOps * ops,
     void * opaque)
 {
+  const bool available = ops && !ops->setStatusListener;
   return (struct InputBinding)
   {
     .ops           = ops,
     .opaque        = opaque,
-    .mouseAbsolute = ops && ops->mousePosition &&
+    .available     = available,
+    .mouseAbsolute = available && ops->mousePosition &&
       ops->supports(opaque, LG_INPUT_SUPPORT_MOUSE_ABSOLUTE),
+    .generation    = 0,
   };
 }
 
@@ -112,12 +117,17 @@ static void clearStateNL(void)
 static void updateActiveNL(void)
 {
   const struct InputBinding next =
-    l_input.useTransport && l_input.transport.ops ?
-      l_input.transport : l_input.fallback;
+    l_input.useTransport && l_input.transport.available ?
+      l_input.transport :
+    l_input.fallback.available ? l_input.fallback :
+      (struct InputBinding) { 0 };
 
   if (next.ops == l_input.active.ops &&
       next.opaque == l_input.active.opaque)
+  {
+    l_input.active = next;
     return;
+  }
 
   resetActiveNL();
   l_input.active = next;
@@ -130,6 +140,52 @@ static void updateActiveNL(void)
   }
   else
     DEBUG_INFO("Input is unavailable");
+}
+
+static void updateStatusNL(struct InputBinding * binding,
+    const LG_InputStatus * status)
+{
+  const bool wasActive =
+    l_input.active.ops    == binding->ops &&
+    l_input.active.opaque == binding->opaque;
+
+  if (wasActive && !status->available)
+  {
+    resetActiveNL();
+    l_input.active = (struct InputBinding) { 0 };
+  }
+
+  binding->available     = status->available;
+  binding->mouseAbsolute = status->available &&
+    binding->ops->mousePosition &&
+    binding->ops->supports(binding->opaque,
+      LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
+  binding->generation    = status->generation;
+  updateActiveNL();
+}
+
+static void fallbackStatusChanged(void * opaque,
+    const LG_InputStatus * status)
+{
+  if (!status)
+    return;
+
+  LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  if (l_input.fallback.ops && l_input.fallback.opaque == opaque)
+    updateStatusNL(&l_input.fallback, status);
+  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+}
+
+static void transportStatusChanged(void * opaque,
+    const LG_InputStatus * status)
+{
+  if (!status)
+    return;
+
+  LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  if (l_input.transport.ops && l_input.transport.opaque == opaque)
+    updateStatusNL(&l_input.transport, status);
+  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
 }
 
 void lgInput_init(void)
@@ -148,12 +204,23 @@ void lgInput_init(void)
 
 void lgInput_free(void)
 {
+  struct InputBinding fallback;
+  struct InputBinding transport;
+
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   resetActiveNL();
+  fallback             = l_input.fallback;
+  transport            = l_input.transport;
   l_input.active       = (struct InputBinding) { 0 };
   l_input.fallback     = (struct InputBinding) { 0 };
   l_input.transport    = (struct InputBinding) { 0 };
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (fallback.ops && fallback.ops->setStatusListener)
+    fallback.ops->setStatusListener(fallback.opaque, NULL, NULL);
+  if (transport.ops && transport.ops->setStatusListener)
+    transport.ops->setStatusListener(transport.opaque, NULL, NULL);
+
   LG_RWLOCK_FREE(l_input.activeLock);
 }
 
@@ -166,10 +233,20 @@ void lgInput_setFallback(const LG_InputOps * ops, void * opaque)
     opaque = NULL;
   }
 
+  const struct InputBinding next = makeBinding(ops, opaque);
+  struct InputBinding old;
+
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  l_input.fallback = makeBinding(ops, opaque);
+  old              = l_input.fallback;
+  l_input.fallback = next;
   updateActiveNL();
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
+  if (next.ops && next.ops->setStatusListener)
+    next.ops->setStatusListener(next.opaque,
+        fallbackStatusChanged, next.opaque);
 }
 
 void lgInput_setTransport(const LG_InputOps * ops, void * opaque)
@@ -181,15 +258,28 @@ void lgInput_setTransport(const LG_InputOps * ops, void * opaque)
     opaque = NULL;
   }
 
+  const struct InputBinding next = makeBinding(ops, opaque);
+  struct InputBinding old;
+
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  l_input.transport = makeBinding(ops, opaque);
+  old               = l_input.transport;
+  l_input.transport = next;
   updateActiveNL();
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
+  if (next.ops && next.ops->setStatusListener)
+    next.ops->setStatusListener(next.opaque,
+        transportStatusChanged, next.opaque);
 }
 
 void lgInput_dropTransport(void)
 {
+  struct InputBinding old;
+
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  old = l_input.transport;
   if (l_input.useTransport && l_input.active.ops == l_input.transport.ops &&
       l_input.active.opaque == l_input.transport.opaque)
   {
@@ -200,6 +290,9 @@ void lgInput_dropTransport(void)
   l_input.transport = (struct InputBinding) { 0 };
   updateActiveNL();
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
 }
 
 void lgInput_useTransport(bool enable)

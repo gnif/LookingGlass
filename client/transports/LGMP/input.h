@@ -26,13 +26,14 @@
 #include <lgmp/client.h>
 
 #include <stdbool.h>
+#include <stdint.h>
 
 typedef struct LGMPInput LGMPInput;
 
 bool lgmpInput_create(PLGMPClient client, LGMPInput ** result);
 void lgmpInput_destroy(LGMPInput ** input);
 
-bool lgmpInput_connect(LGMPInput * input);
+bool lgmpInput_connect(LGMPInput * input, uint32_t clientID);
 void lgmpInput_disconnect(LGMPInput * input);
 
 const LG_InputOps * lgmpInput_getOps(void);

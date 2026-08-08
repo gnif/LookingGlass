@@ -2362,7 +2362,7 @@ restart:
     g_state.transportOps->getInputOps(g_state.transport, &inputOpaque) : NULL;
   lgInput_setTransport(inputOps, inputOpaque);
 
-  if (lgInput_available())
+  if (inputOps || lgInput_available())
     keybind_inputRegister();
   checkUUID();
   DEBUG_INFO("Starting session");

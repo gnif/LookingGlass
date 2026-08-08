@@ -79,7 +79,7 @@ bool CLGMPInputTransport::Initialize()
   if (m_queue)
     return true;
 
-  const LGMP_STATUS status = m_host.CreateQueue(
+  LGMP_STATUS status = m_host.CreateQueue(
     INPUT_QUEUE_CONFIG, &m_queue);
   if (status != LGMP_OK)
   {
@@ -88,13 +88,93 @@ bool CLGMPInputTransport::Initialize()
     return false;
   }
 
+  for (PLGMPMemory& memory : m_statusMemory)
+  {
+    status = m_host.Allocate(sizeof(KVMFRInputStatus), &memory);
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostMemAlloc Failed (Input Status): %s",
+        lgmpStatusString(status));
+      DeInit();
+      return false;
+    }
+    memset(lgmpHostMemPtr(memory), 0, sizeof(KVMFRInputStatus));
+  }
+
+  m_statusDirty = true;
   return true;
 }
 
 void CLGMPInputTransport::DeInit()
 {
   Stop();
+  for (PLGMPMemory& memory : m_statusMemory)
+    lgmpHostMemFree(&memory);
   m_queue = nullptr;
+}
+
+void CLGMPInputTransport::UpdateSinkState(uint64_t state)
+{
+  if (state == m_sinkState)
+    return;
+
+  m_sinkState = state;
+  if (++m_endpointGeneration == 0)
+    ++m_endpointGeneration;
+  m_statusDirty = true;
+}
+
+void CLGMPInputTransport::PublishStatus()
+{
+  if (!m_queue)
+    return;
+
+  if (lgmpHostQueueNewSubs(m_queue))
+    m_statusDirty = true;
+  if (!m_statusDirty || !lgmpHostQueueHasSubs(m_queue))
+    return;
+
+  PLGMPMemory memory = nullptr;
+  for (PLGMPMemory candidate : m_statusMemory)
+    if (!lgmpHostQueuePayloadPending(m_queue, candidate))
+    {
+      memory = candidate;
+      break;
+    }
+  if (!memory)
+    return;
+
+  const bool available = (m_sinkState & 1) != 0;
+  KVMFRInputStatus status = {};
+  status.version      = KVMFR_INPUT_VERSION;
+  status.capabilities = available ?
+    KVMFR_INPUT_CAP_MOUSE_RELATIVE |
+    KVMFR_INPUT_CAP_MOUSE_ABSOLUTE |
+    KVMFR_INPUT_CAP_KEYBOARD : 0;
+  status.flags = available ? KVMFR_INPUT_STATUS_AVAILABLE : 0;
+  if (m_ownerClientID)
+  {
+    status.flags          |= KVMFR_INPUT_STATUS_HAS_OWNER;
+    status.ownerClientID   = m_ownerClientID;
+    status.ownerGeneration = m_ownerGeneration;
+  }
+  status.generation = m_endpointGeneration;
+  status.lease      = static_cast<uint32_t>(OWNER_LEASE_MS);
+  status.maxButtons = KVMFR_INPUT_MOUSE_BUTTON_COUNT;
+  memcpy(lgmpHostMemPtr(memory), &status, sizeof(status));
+
+  uint32_t serial = m_statusSerial + 1;
+  if (!serial)
+    ++serial;
+  const LGMP_STATUS result = lgmpHostQueuePost(m_queue, serial, memory);
+  if (result == LGMP_OK)
+  {
+    m_statusSerial = serial;
+    m_statusDirty  = false;
+  }
+  else if (result != LGMP_ERR_QUEUE_FULL)
+    DEBUG_WARN("lgmpHostQueuePost Failed (Input Status): %s",
+      lgmpStatusString(result));
 }
 
 bool CLGMPInputTransport::Start(IInputSink& sink)
@@ -145,7 +225,12 @@ bool CLGMPInputTransport::Start(IInputSink& sink)
   }
 
   m_sink = &sink;
-  m_sinkState = sink.GetState();
+  UpdateSinkState(sink.GetState());
+  if (!m_endpointGeneration)
+  {
+    m_endpointGeneration = 1;
+    m_statusDirty        = true;
+  }
   m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
   if (!m_thread)
   {
@@ -216,6 +301,7 @@ bool CLGMPInputTransport::Claim(
   m_ownerGeneration = message.generation;
   m_ownerSequence   = message.sequence;
   RenewLease();
+  m_statusDirty = true;
   DEBUG_INFO("Input owner %u generation %u acquired",
     m_ownerClientID, m_ownerGeneration);
   return true;
@@ -241,6 +327,7 @@ void CLGMPInputTransport::ReleaseOwner(
   m_ownerGeneration = 0;
   m_ownerSequence   = 0;
   m_ownerDeadline   = 0;
+  m_statusDirty     = true;
   DEBUG_INFO("Input owner %u generation %u released (%s)",
     clientID, generation, reason);
 }
@@ -253,7 +340,7 @@ void CLGMPInputTransport::CheckOwner()
   const uint64_t state = m_sink->GetState();
   if (state != m_sinkState)
   {
-    m_sinkState = state;
+    UpdateSinkState(state);
     ReleaseOwner(true, "input endpoint changed");
     return;
   }
@@ -322,7 +409,7 @@ bool CLGMPInputTransport::ProcessMessage(
     m_sink->GetState() : m_sinkState;
   if (sinkState != m_sinkState)
   {
-    m_sinkState = sinkState;
+    UpdateSinkState(sinkState);
     if (m_ownerClientID)
     {
       ReleaseOwner(true, "input endpoint changed");
@@ -415,7 +502,7 @@ bool CLGMPInputTransport::ProcessMessage(
   const uint64_t deliveredState = m_sink->GetState();
   if (deliveredState != m_sinkState)
   {
-    m_sinkState = deliveredState;
+    UpdateSinkState(deliveredState);
     ReleaseOwner(true, "input endpoint changed");
     return false;
   }
@@ -486,6 +573,7 @@ void CLGMPInputTransport::Thread()
     CheckOwner();
     if (DrainMessages())
       activeUntil = GetTickCount64() + ACTIVE_POLL_MS;
+    PublishStatus();
 
     const bool active = GetTickCount64() < activeUntil;
     if (!ArmPollTimer(m_pollTimer, active))
@@ -508,6 +596,8 @@ void CLGMPInputTransport::Thread()
   }
 
   ReleaseOwner(true, "transport stopped");
+  UpdateSinkState(0);
+  PublishStatus();
   if (avTaskHandle)
     AvRevertMmThreadCharacteristics(avTaskHandle);
 }
