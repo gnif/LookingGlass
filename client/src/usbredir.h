@@ -57,6 +57,9 @@ void lgUsbRedir_destroy(LG_USBRedir * usbredir);
  * lgUsbRedir_process on the PureSpice processing thread. */
 void lgUsbRedir_setPlugged(LG_USBRedir * usbredir, bool plugged);
 bool lgUsbRedir_available(const LG_USBRedir * usbredir);
+/* True after a device disconnect has been sent and until the guest has
+ * completed the detach. This must be queried on the processing thread. */
+bool lgUsbRedir_disconnectPending(const LG_USBRedir * usbredir);
 
 /* Apply pending device state and flush parser output. This must be called on
  * the PureSpice processing thread. */

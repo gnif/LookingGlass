@@ -224,6 +224,7 @@ static bool tickTimerFn(void * unused)
 #define FRAME_TIMING_RECORD_COUNT       1024
 #define FRAME_TIMING_PUBLISH_BATCH_SIZE 32
 #define FRAME_TIMING_PRESENT_TIMEOUT_NS 500000000ULL
+#define USB_REDIR_DISCONNECT_TIMEOUT_US 500000ULL
 
 enum FrameTimingReady
 {
@@ -1810,7 +1811,8 @@ int spiceThread(void * arg)
 #endif
   };
 
-  bool connected = false;
+  bool     connected = false;
+  PSStatus status    = PS_STATUS_SHUTDOWN;
   if (!purespice_connect(&config))
   {
     DEBUG_ERROR("Failed to connect to spice server");
@@ -1818,6 +1820,7 @@ int spiceThread(void * arg)
     goto end;
   }
   connected = true;
+  status    = PS_STATUS_RUN;
 
   int processTimeout = 100;
 #if ENABLE_USB_AUDIO
@@ -1837,7 +1840,6 @@ int spiceThread(void * arg)
       DEBUG_WARN("Failed to process USB audio redirection");
 #endif
 
-    PSStatus status;
     if ((status = purespice_process(processTimeout)) != PS_STATUS_RUN)
     {
       if (status != PS_STATUS_SHUTDOWN)
@@ -1856,8 +1858,27 @@ end:
   lgaSpice_setAvailable(false);
 #endif
 #if ENABLE_USB_AUDIO
-  if (connected && usbRedir && !lgUsbRedir_process(usbRedir))
-    DEBUG_WARN("Failed to disconnect USB audio device");
+  if (connected && status == PS_STATUS_RUN && usbRedir)
+  {
+    if (!lgUsbRedir_process(usbRedir))
+      DEBUG_WARN("Failed to disconnect USB audio device");
+    else
+    {
+      const uint64_t deadline =
+        microtime() + USB_REDIR_DISCONNECT_TIMEOUT_US;
+      while (lgUsbRedir_disconnectPending(usbRedir) &&
+          microtime() < deadline)
+      {
+        status = purespice_process(10);
+        if (status != PS_STATUS_RUN)
+          break;
+      }
+
+      if (status == PS_STATUS_RUN &&
+          lgUsbRedir_disconnectPending(usbRedir))
+        DEBUG_WARN("Timed out disconnecting USB audio device");
+    }
+  }
 #endif
   if (connected)
     purespice_disconnect();

@@ -48,6 +48,7 @@ struct LG_USBRedir
   atomic_bool desiredPlugged;
   atomic_bool available;
   bool        plugged;
+  bool        disconnectPending;
 };
 
 static void setAvailable(LG_USBRedir * usbredir, bool available)
@@ -118,6 +119,12 @@ static void helloUSBRedir(void * opaque,
   setAvailable(usbredir, true);
 }
 
+static void deviceDisconnectAck(void * opaque)
+{
+  LG_USBRedir * usbredir = opaque;
+  usbredir->disconnectPending = false;
+}
+
 static void unplugDevice(LG_USBRedir * usbredir)
 {
   if (!usbredir->plugged)
@@ -131,6 +138,7 @@ static void destroyParser(LG_USBRedir * usbredir)
 {
   setAvailable(usbredir, false);
   unplugDevice(usbredir);
+  usbredir->disconnectPending = false;
 
   if (!usbredir->parser)
     return;
@@ -187,13 +195,16 @@ static bool createParser(LG_USBRedir * usbredir)
   }
 
   usbredir->deviceOps->setup(usbredir->deviceOpaque, usbredir->parser);
-  usbredir->parser->priv       = usbredir;
-  usbredir->parser->log_func   = logUSBRedir;
-  usbredir->parser->read_func  = readUSBRedir;
-  usbredir->parser->write_func = writeUSBRedir;
-  usbredir->parser->hello_func = helloUSBRedir;
+  usbredir->parser->priv                       = usbredir;
+  usbredir->parser->log_func                   = logUSBRedir;
+  usbredir->parser->read_func                  = readUSBRedir;
+  usbredir->parser->write_func                 = writeUSBRedir;
+  usbredir->parser->hello_func                 = helloUSBRedir;
+  usbredir->parser->device_disconnect_ack_func = deviceDisconnectAck;
 
   uint32_t caps[USB_REDIR_CAPS_SIZE] = { 0 };
+  usbredirparser_caps_set_cap(caps,
+      usb_redir_cap_device_disconnect_ack);
   usbredirparser_caps_set_cap(caps,
       usb_redir_cap_connect_device_version);
   usbredirparser_caps_set_cap(caps,
@@ -252,10 +263,18 @@ bool lgUsbRedir_available(const LG_USBRedir * usbredir)
   return atomic_load_explicit(&usbredir->available, memory_order_acquire);
 }
 
+bool lgUsbRedir_disconnectPending(const LG_USBRedir * usbredir)
+{
+  return usbredir->disconnectPending;
+}
+
 bool lgUsbRedir_process(LG_USBRedir * usbredir)
 {
   if (!usbredir->parser ||
       !atomic_load_explicit(&usbredir->available, memory_order_acquire))
+    return flushUSBRedir(usbredir);
+
+  if (usbredir->disconnectPending)
     return flushUSBRedir(usbredir);
 
   const bool desired = atomic_load_explicit(&usbredir->desiredPlugged,
@@ -271,6 +290,8 @@ bool lgUsbRedir_process(LG_USBRedir * usbredir)
     else
     {
       unplugDevice(usbredir);
+      usbredir->disconnectPending = usbredirparser_peer_has_cap(
+          usbredir->parser, usb_redir_cap_device_disconnect_ack);
       usbredirparser_send_device_disconnect(usbredir->parser);
     }
   }
