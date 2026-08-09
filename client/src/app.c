@@ -962,6 +962,10 @@ void app_initOverlays(void)
     }
   }
   ll_unlock(g_state.overlays);
+
+  /* Do not seed ImGui's clock with absolute host uptime. ImGui stores the
+   * background and foreground draw-list activity time as a float. */
+  g_state.lastImGuiFrame = nanotime();
 }
 
 static inline void mergeRect(struct Rect * dest, const struct Rect * a, const struct Rect * b)
