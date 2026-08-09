@@ -252,6 +252,7 @@ static size_t sampleSize(LG_AudioSampleFormat format)
     case LG_AUDIO_FMT_S24_LE: return 3;
     case LG_AUDIO_FMT_S32_LE: return 4;
     case LG_AUDIO_FMT_F32_LE: return 4;
+    case LG_AUDIO_FMT_F32_NE: return 4;
     case LG_AUDIO_FMT_F64_LE: return 8;
   }
 

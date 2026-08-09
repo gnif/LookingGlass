@@ -37,6 +37,8 @@ typedef enum LG_AudioSampleFormat
   /* IEEE 754 little-endian floating-point samples. */
   LG_AUDIO_FMT_F32_LE,
   LG_AUDIO_FMT_F64_LE,
+  /* Native-endian floating point for client-side processing. */
+  LG_AUDIO_FMT_F32_NE,
 }
 LG_AudioSampleFormat;
 

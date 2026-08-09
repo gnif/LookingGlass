@@ -156,6 +156,7 @@ static enum spa_audio_format pipewire_sampleFormat(
     case LG_AUDIO_FMT_S24_LE : return SPA_AUDIO_FORMAT_S24_LE;
     case LG_AUDIO_FMT_S32_LE : return SPA_AUDIO_FORMAT_S32_LE;
     case LG_AUDIO_FMT_F32_LE : return SPA_AUDIO_FORMAT_F32_LE;
+    case LG_AUDIO_FMT_F32_NE : return SPA_AUDIO_FORMAT_F32;
     case LG_AUDIO_FMT_F64_LE : return SPA_AUDIO_FORMAT_F64_LE;
   }
 
@@ -170,7 +171,8 @@ static int pipewire_sampleSize(LG_AudioSampleFormat format)
     case LG_AUDIO_FMT_S16_LE : return 2;
     case LG_AUDIO_FMT_S24_LE : return 3;
     case LG_AUDIO_FMT_S32_LE :
-    case LG_AUDIO_FMT_F32_LE : return 4;
+    case LG_AUDIO_FMT_F32_LE :
+    case LG_AUDIO_FMT_F32_NE : return 4;
     case LG_AUDIO_FMT_F64_LE : return 8;
   }
 
@@ -278,15 +280,15 @@ static inline void pipewire_updatePlaybackLatency(void)
 }
 
 #if PW_CHECK_VERSION(1, 4, 0)
-static bool pipewire_playbackSetRate(double ratio)
+static bool pipewire_playbackSetRate(double * ratio)
 {
-  if (ratio <= 0.0 ||
+  if (!ratio || *ratio <= 0.0 ||
       !pw.playback.resamplerEnabled)
     return false;
-  if (ratio == pw.playback.appliedResampleRatio)
+  if (*ratio == pw.playback.appliedResampleRatio)
     return true;
 
-  const int result = pw_stream_set_rate(pw.playback.stream, ratio);
+  const int result = pw_stream_set_rate(pw.playback.stream, *ratio);
   if (result < 0)
   {
     int expected = 0;
@@ -296,7 +298,7 @@ static bool pipewire_playbackSetRate(double ratio)
     return false;
   }
 
-  pw.playback.appliedResampleRatio = ratio;
+  pw.playback.appliedResampleRatio = *ratio;
   return true;
 }
 
@@ -507,6 +509,12 @@ static bool pipewire_playbackSetup(const LG_AudioFormat * format,
 
   const int channels   = format->channelCount;
   const int sampleRate = format->sampleRate;
+  const int sampleSize =
+    pipewire_sampleSize(format->sampleFormat);
+  const enum spa_audio_format sampleFormat =
+    pipewire_sampleFormat(format->sampleFormat);
+  if (!sampleSize || sampleFormat == SPA_AUDIO_FORMAT_UNKNOWN)
+    return false;
 
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
@@ -541,7 +549,7 @@ static bool pipewire_playbackSetup(const LG_AudioFormat * format,
     requestedPeriodFrames, sampleRate);
 
   pw.playback.format = *format;
-  pw.playback.stride = sizeof(float) * channels;
+  pw.playback.stride = sampleSize * channels;
   pw.playback.pullFn = pullFn;
 
   pw_thread_loop_lock(pw.thread);
@@ -627,7 +635,7 @@ static bool pipewire_playbackSetup(const LG_AudioFormat * format,
   *startFrames     = pw.playback.startFrames;
 
   struct spa_audio_info_raw info =
-    pipewire_audioInfo(format, SPA_AUDIO_FORMAT_F32);
+    pipewire_audioInfo(format, sampleFormat);
   params[0] = spa_format_audio_raw_build(
       &b, SPA_PARAM_EnumFormat, &info);
 

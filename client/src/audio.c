@@ -217,6 +217,7 @@ typedef struct
     int         channels;
     int         sampleRate;
     int         stride;
+    bool        convertToFloat;
     int         deviceMaxPeriodFrames;
     int         deviceStartFrames;
     int         targetStartFrames;
@@ -288,7 +289,8 @@ static size_t audioSampleSize(LG_AudioSampleFormat format)
     case LG_AUDIO_FMT_S16_LE: return 2;
     case LG_AUDIO_FMT_S24_LE: return 3;
     case LG_AUDIO_FMT_S32_LE:
-    case LG_AUDIO_FMT_F32_LE: return 4;
+    case LG_AUDIO_FMT_F32_LE:
+    case LG_AUDIO_FMT_F32_NE: return 4;
     case LG_AUDIO_FMT_F64_LE: return 8;
   }
 
@@ -397,6 +399,10 @@ static bool audioConvertToFloat(float * dst, const void * src,
 #endif
       return true;
     }
+
+    case LG_AUDIO_FMT_F32_NE:
+      memcpy(dst, src, samples * sizeof(*dst));
+      return true;
 
     case LG_AUDIO_FMT_F64_LE:
     {
@@ -923,7 +929,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   {
     nextRatio = atomic_load_explicit(
         &audio.playback.backendResampleRatio, memory_order_acquire);
-    if (!audio.audioDev->playback.setRate(nextRatio))
+    if (!audio.audioDev->playback.setRate(&nextRatio))
     {
       atomic_store_explicit(
           &audio.playback.backendResamplerFailed, true,
@@ -1038,6 +1044,22 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   return frames;
 }
 
+static bool playbackSetupDevice(const LG_AudioFormat * format,
+    int requestedPeriodFrames, bool requestResampler)
+{
+  audio.playback.backendResampler      = false;
+  audio.playback.deviceMaxPeriodFrames = 0;
+  audio.playback.deviceStartFrames     = 0;
+
+  return audio.audioDev->playback.setup(format,
+      requestedPeriodFrames, requestResampler,
+      &audio.playback.backendResampler,
+      &audio.playback.deviceMaxPeriodFrames,
+      &audio.playback.deviceStartFrames, playbackPullFrames) &&
+    audio.playback.deviceMaxPeriodFrames > 0 &&
+    audio.playback.deviceStartFrames >= 0;
+}
+
 static void playbackStart(const LG_AudioFormat * format,
     const LG_AudioClock * sourceClock)
 {
@@ -1076,19 +1098,12 @@ static void playbackStart(const LG_AudioFormat * format,
   if (state != STREAM_STATE_STOP)
     playbackStop();
 
-  const int bufferFrames = sampleRate;
-  audio.playback.buffer = ringbuffer_newUnbounded(bufferFrames,
-      channels * sizeof(float));
-  if (!audio.playback.buffer)
-    return;
-
   audio.playback.format          = *format;
   audio.playback.lastFormat      = *format;
   audio.playback.lastFormatValid = true;
 
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
-  audio.playback.stride     = channels * sizeof(float);
   playbackSetState(STREAM_STATE_SETUP_SOURCE);
 
   audio.playback.deviceData.nextPosition         = 0;
@@ -1142,8 +1157,6 @@ static void playbackStart(const LG_AudioFormat * format,
   const int requestedPeriodFrames = g_params.audioPeriodSize > 0 ?
     clamp(g_params.audioPeriodSize, 1, sampleRate) :
     max(sampleRate / 100, 1);
-  audio.playback.deviceMaxPeriodFrames = 0;
-  audio.playback.deviceStartFrames     = 0;
   audio.playback.targetStartFrames     = 0;
   audio.playback.startupLowWaterFrames = 0;
   audio.playback.startupPacketDeadline = 0;
@@ -1151,16 +1164,44 @@ static void playbackStart(const LG_AudioFormat * format,
   const bool requestBackendResampler =
     g_params.audioResampler != AUDIO_RESAMPLER_LIBSAMPLERATE;
   LG_AudioFormat deviceFormat = *format;
-  deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_LE;
-  if (!audio.audioDev->playback.setup(&deviceFormat,
-        requestedPeriodFrames, requestBackendResampler,
-        &audio.playback.backendResampler,
-        &audio.playback.deviceMaxPeriodFrames,
-        &audio.playback.deviceStartFrames, playbackPullFrames) ||
-      audio.playback.deviceMaxPeriodFrames <= 0 ||
-      audio.playback.deviceStartFrames < 0)
+
+  /* The ring generates zero-filled silence. Keep unsigned PCM on the float
+   * path because its silence level is biased rather than zero. */
+  if (!requestBackendResampler ||
+      deviceFormat.sampleFormat == LG_AUDIO_FMT_U8)
+    deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_NE;
+
+  bool deviceConfigured = playbackSetupDevice(
+      &deviceFormat, requestedPeriodFrames, requestBackendResampler);
+
+  /* Native samples require the backend to own rate correction. If it cannot,
+   * reconnect using float samples for the libsamplerate path. This also
+   * provides a float fallback for formats unsupported by the backend. */
+  if ((!deviceConfigured || !audio.playback.backendResampler) &&
+      deviceFormat.sampleFormat != LG_AUDIO_FMT_F32_NE)
+  {
+    deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_NE;
+    deviceConfigured = playbackSetupDevice(
+        &deviceFormat, requestedPeriodFrames, requestBackendResampler);
+  }
+
+  if (!deviceConfigured)
   {
     DEBUG_ERROR("Failed to configure audio playback device");
+    playbackStop();
+    return;
+  }
+
+  audio.playback.stride = channels *
+    audioSampleSize(deviceFormat.sampleFormat);
+  audio.playback.convertToFloat =
+    !audio.playback.backendResampler ||
+    deviceFormat.sampleFormat != format->sampleFormat;
+
+  audio.playback.buffer = ringbuffer_newUnbounded(
+      sampleRate, audio.playback.stride);
+  if (!audio.playback.buffer)
+  {
     playbackStop();
     return;
   }
@@ -1291,10 +1332,11 @@ static double computeDevicePosition(int64_t curTime)
 static bool playbackEnsureConversionBuffers(
     PlaybackSourceData * sourceData, int frames)
 {
-  if (frames > sourceData->framesInSize)
+  if (audio.playback.convertToFloat &&
+      frames > sourceData->framesInSize)
   {
     float * framesIn = realloc(sourceData->framesIn,
-        (size_t)frames * audio.playback.stride);
+        (size_t)frames * audio.playback.channels * sizeof(float));
     if (!framesIn)
     {
       DEBUG_ERROR("Failed to grow playback input buffer");
@@ -1312,7 +1354,7 @@ static bool playbackEnsureConversionBuffers(
     if (framesOut > sourceData->framesOutSize)
     {
       float * output = realloc(sourceData->framesOut,
-          (size_t)framesOut * audio.playback.stride);
+          (size_t)framesOut * audio.playback.channels * sizeof(float));
       if (!output)
       {
         DEBUG_ERROR("Failed to grow playback output buffer");
@@ -1418,13 +1460,19 @@ static void playbackData(const void * data, size_t frameCount,
     playbackStop();
     return;
   }
-  if (!audioConvertToFloat(sourceData->framesIn, data,
-        (size_t)frames * audio.playback.channels,
-        audio.playback.format.sampleFormat))
+
+  const void * inputFrames = data;
+  if (audio.playback.convertToFloat)
   {
-    DEBUG_ERROR("Failed to convert playback samples");
-    playbackStop();
-    return;
+    if (!audioConvertToFloat(sourceData->framesIn, data,
+          (size_t)frames * audio.playback.channels,
+          audio.playback.format.sampleFormat))
+    {
+      DEBUG_ERROR("Failed to convert playback samples");
+      playbackStop();
+      return;
+    }
+    inputFrames = sourceData->framesIn;
   }
 
   bool discontinuity = sourceClock && sourceClock->discontinuity;
@@ -1769,7 +1817,7 @@ static void playbackData(const void * data, size_t frameCount,
         &audio.playback.backendResampleRatio, ratio,
         memory_order_release);
     const int outputFrames =
-      playbackAppendFrames(sourceData, sourceData->framesIn, frames);
+      playbackAppendFrames(sourceData, inputFrames, frames);
     sourceData->outputPosition += outputFrames;
   }
   else

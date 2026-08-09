@@ -40,10 +40,17 @@ struct PulseAudio
   bool                   sinkCorked;
   bool                   sinkMuted;
   bool                   sinkStarting;
+  bool                   sinkResamplerEnabled;
+  bool                   sinkRateFailed;
   int                    sinkMaxPeriodFrames;
   int                    sinkStartFrames;
   LG_AudioFormat         sinkFormat;
   int                    sinkStride;
+  uint32_t               sinkNominalRate;
+  uint32_t               sinkAppliedRate;
+  uint32_t               sinkPendingRate;
+  uint32_t               sinkRequestedRate;
+  pa_operation         * sinkRateOperation;
   LG_AudioPullFn         sinkPullFn;
   _Atomic(int64_t)       sinkPresentationDeadline;
 };
@@ -59,6 +66,23 @@ static bool pulseaudio_audioFormatEqual(const LG_AudioFormat * a,
     a->channelCount == b->channelCount &&
     memcmp(a->channels, b->channels,
         a->channelCount * sizeof(*a->channels)) == 0;
+}
+
+static pa_sample_format_t pulseaudio_sampleFormat(
+    LG_AudioSampleFormat format)
+{
+  switch (format)
+  {
+    case LG_AUDIO_FMT_U8     : return PA_SAMPLE_U8;
+    case LG_AUDIO_FMT_S16_LE : return PA_SAMPLE_S16LE;
+    case LG_AUDIO_FMT_S24_LE : return PA_SAMPLE_S24LE;
+    case LG_AUDIO_FMT_S32_LE : return PA_SAMPLE_S32LE;
+    case LG_AUDIO_FMT_F32_LE : return PA_SAMPLE_FLOAT32LE;
+    case LG_AUDIO_FMT_F32_NE : return PA_SAMPLE_FLOAT32;
+    case LG_AUDIO_FMT_F64_LE : return PA_SAMPLE_INVALID;
+  }
+
+  return PA_SAMPLE_INVALID;
 }
 
 static pa_channel_position_t pulseaudio_channel(
@@ -116,6 +140,54 @@ static void pulseaudio_unrefOperation(pa_operation * operation)
 {
   if (operation)
     pa_operation_unref(operation);
+}
+
+static bool pulseaudio_submitRateUpdate(void);
+
+static void pulseaudio_rateUpdate_cb(pa_stream * stream, int success,
+    void * userdata)
+{
+  if (stream != pa.sink || !pa.sinkRateOperation)
+    return;
+
+  pa_operation * operation = pa.sinkRateOperation;
+  pa.sinkRateOperation = NULL;
+  pa_operation_unref(operation);
+
+  if (!success)
+  {
+    DEBUG_ERROR("Failed to update PulseAudio sample rate: %s",
+        pa_strerror(pa_context_errno(pa.context)));
+    pa.sinkRateFailed = true;
+    return;
+  }
+
+  pa.sinkAppliedRate = pa.sinkPendingRate;
+  if (pa.sinkCorked)
+    pulseaudio_submitRateUpdate();
+}
+
+static bool pulseaudio_submitRateUpdate(void)
+{
+  if (pa.sinkRateFailed)
+    return false;
+
+  if (pa.sinkRateOperation ||
+      pa.sinkRequestedRate == pa.sinkAppliedRate)
+    return true;
+
+  pa.sinkPendingRate = pa.sinkRequestedRate;
+  pa.sinkRateOperation = pa_stream_update_sample_rate(pa.sink,
+      pa.sinkPendingRate, pulseaudio_rateUpdate_cb, NULL);
+  if (!pa.sinkRateOperation)
+  {
+    DEBUG_ERROR("Failed to request a PulseAudio sample rate update: %s",
+        pa_strerror(pa_context_errno(pa.context)));
+    pa.sinkRateFailed = true;
+    return false;
+  }
+
+  return true;
 }
 
 static void pulseaudio_sink_input_cb(pa_context *c, const pa_sink_input_info *i,
@@ -268,9 +340,22 @@ static void pulseaudio_sink_close_nl(void)
   pa_stream_set_write_callback(pa.sink, NULL, NULL);
   pa_stream_set_underflow_callback(pa.sink, NULL, NULL);
   pa_stream_set_overflow_callback(pa.sink, NULL, NULL);
+  if (pa.sinkRateOperation)
+  {
+    pa_operation * operation = pa.sinkRateOperation;
+    pa.sinkRateOperation = NULL;
+    pa_operation_cancel(operation);
+    pa_operation_unref(operation);
+  }
   pulseaudio_unrefOperation(pa_stream_flush(pa.sink, NULL, NULL));
   pa_stream_unref(pa.sink);
   pa.sink = NULL;
+  pa.sinkResamplerEnabled = false;
+  pa.sinkRateFailed       = false;
+  pa.sinkNominalRate      = 0;
+  pa.sinkAppliedRate      = 0;
+  pa.sinkPendingRate      = 0;
+  pa.sinkRequestedRate    = 0;
   atomic_store_explicit(
       &pa.sinkPresentationDeadline, 0, memory_order_release);
 }
@@ -340,6 +425,11 @@ static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
     return;
   }
 
+  /* Queue rate changes after the current audio block. This keeps the rate
+   * reported by the preceding pull aligned with the block PulseAudio has
+   * already received. */
+  pulseaudio_submitRateUpdate();
+
   pa_usec_t latency;
   int negative;
   if (pa_stream_get_latency(p, &latency, &negative) == 0)
@@ -370,23 +460,24 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   const int channels   = format->channelCount;
   const int sampleRate = format->sampleRate;
 
-  if (pa.sink && pulseaudio_audioFormatEqual(&pa.sinkFormat, format))
-  {
-    *maxPeriodFrames = pa.sinkMaxPeriodFrames;
-    *startFrames     = pa.sinkStartFrames;
-    return true;
-  }
+  const pa_sample_format_t sampleFormat =
+    pulseaudio_sampleFormat(format->sampleFormat);
+  if (sampleFormat == PA_SAMPLE_INVALID)
+    return false;
 
   pa_sample_spec spec = {
-    .format   = PA_SAMPLE_FLOAT32,
+    .format   = sampleFormat,
     .rate     = sampleRate,
     .channels = channels
   };
+  if (!pa_sample_spec_valid(&spec))
+    return false;
+
   pa_channel_map channelMap = { .channels = channels };
   for (uint8_t i = 0; i < format->channelCount; ++i)
     channelMap.map[i] = pulseaudio_channel(format->channels[i], i);
 
-  int stride = channels * sizeof(float);
+  const int stride = (int)pa_frame_size(&spec);
   int bufferSize = requestedPeriodFrames * 2 * stride;
   pa_buffer_attr attribs =
   {
@@ -397,13 +488,36 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   };
 
   pa_threaded_mainloop_lock(pa.loop);
+  /* pa_stream_update_sample_rate requires protocol version 12. */
+  const bool enableResampler = requestResampler &&
+    pa_context_get_server_protocol_version(pa.context) >= 12;
+  if (pa.sink && !pa.sinkRateFailed &&
+      pa.sinkResamplerEnabled == enableResampler &&
+      !pa.sinkRateOperation &&
+      pa.sinkAppliedRate == pa.sinkNominalRate &&
+      pa.sinkRequestedRate == pa.sinkNominalRate &&
+      pulseaudio_audioFormatEqual(&pa.sinkFormat, format))
+  {
+    *resamplerEnabled = pa.sinkResamplerEnabled;
+    *maxPeriodFrames  = pa.sinkMaxPeriodFrames;
+    *startFrames      = pa.sinkStartFrames;
+    pa_threaded_mainloop_unlock(pa.loop);
+    return true;
+  }
+
   pulseaudio_sink_close_nl();
 
-  pa.sinkFormat   = *format;
-  pa.sinkStride   = stride;
-  pa.sinkPullFn   = pullFn;
-  pa.sinkCorked   = true;
-  pa.sinkStarting = false;
+  pa.sinkFormat             = *format;
+  pa.sinkStride             = stride;
+  pa.sinkPullFn             = pullFn;
+  pa.sinkCorked             = true;
+  pa.sinkStarting           = false;
+  pa.sinkResamplerEnabled   = enableResampler;
+  pa.sinkRateFailed         = false;
+  pa.sinkNominalRate        = sampleRate;
+  pa.sinkAppliedRate        = sampleRate;
+  pa.sinkPendingRate        = sampleRate;
+  pa.sinkRequestedRate      = sampleRate;
 
   pa.sink = pa_stream_new(
       pa.context, "Looking Glass", &spec, &channelMap);
@@ -424,7 +538,8 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
     PA_STREAM_START_CORKED |
     PA_STREAM_ADJUST_LATENCY |
     PA_STREAM_INTERPOLATE_TIMING |
-    PA_STREAM_AUTO_TIMING_UPDATE;
+    PA_STREAM_AUTO_TIMING_UPDATE |
+    (enableResampler ? PA_STREAM_VARIABLE_RATE : 0);
   if (pa_stream_connect_playback(
         pa.sink, NULL, &attribs, flags, NULL, NULL) < 0)
   {
@@ -464,8 +579,9 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   pa.sinkMaxPeriodFrames = actualMinRequest;
   pa.sinkStartFrames     = actualTarget;
 
-  *maxPeriodFrames = pa.sinkMaxPeriodFrames;
-  *startFrames     = pa.sinkStartFrames;
+  *maxPeriodFrames  = pa.sinkMaxPeriodFrames;
+  *startFrames      = pa.sinkStartFrames;
+  *resamplerEnabled = pa.sinkResamplerEnabled;
 
   atomic_store_explicit(
       &pa.sinkPresentationDeadline, 0, memory_order_release);
@@ -504,6 +620,11 @@ static void pulseaudio_stop(void)
   pulseaudio_unrefOperation(pa_stream_cork(pa.sink, 1, NULL, NULL));
   pa.sinkCorked   = true;
   pa.sinkStarting = false;
+  if (pa.sinkResamplerEnabled)
+  {
+    pa.sinkRequestedRate = pa.sinkNominalRate;
+    pulseaudio_submitRateUpdate();
+  }
   atomic_store_explicit(
       &pa.sinkPresentationDeadline, 0, memory_order_release);
 
@@ -539,6 +660,26 @@ static void pulseaudio_mute(bool mute)
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
+static bool pulseaudio_setRate(double * ratio)
+{
+  if (!pa.sink || !pa.sinkResamplerEnabled ||
+      pa.sinkRateFailed || !ratio || !(*ratio > 0.0))
+    return false;
+
+  const double requestedRate = pa.sinkNominalRate / *ratio;
+  if (requestedRate < 1.0 || requestedRate > PA_RATE_MAX)
+    return false;
+
+  pa.sinkRequestedRate = (uint32_t)llround(requestedRate);
+  const uint32_t scheduledRate = pa.sinkRateOperation ?
+    pa.sinkPendingRate : pa.sinkRequestedRate;
+  if (!scheduledRate)
+    return false;
+
+  *ratio = (double)pa.sinkNominalRate / scheduledRate;
+  return true;
+}
+
 static uint64_t pulseaudio_latency(void)
 {
   const int64_t deadline = atomic_load_explicit(
@@ -556,11 +697,12 @@ struct LG_AudioDevOps LGAD_PulseAudio =
   .free   = pulseaudio_free,
   .playback =
   {
-    .setup  = pulseaudio_setup,
-    .start  = pulseaudio_start,
-    .stop   = pulseaudio_stop,
-    .volume = pulseaudio_volume,
-    .mute   = pulseaudio_mute,
+    .setup   = pulseaudio_setup,
+    .start   = pulseaudio_start,
+    .stop    = pulseaudio_stop,
+    .volume  = pulseaudio_volume,
+    .mute    = pulseaudio_mute,
+    .setRate = pulseaudio_setRate,
     .latency = pulseaudio_latency
   }
 };

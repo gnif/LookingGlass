@@ -46,12 +46,11 @@ struct LG_AudioDevOps
 
   struct
   {
-    /* setup the stream for playback but don't start it yet, returning false
-     * if the stream could not be configured. If backend resampling is
+    /* Setup the stream for playback but don't start it yet, returning false
+     * if the stream could not be configured. The pull function returns the
+     * exact interleaved format supplied here. If backend resampling is
      * requested, resamplerEnabled reports whether it was activated for this
-     * stream.
-     * Note: the pull function returns f32 samples
-     */
+     * stream. */
     bool (*setup)(const LG_AudioFormat * format, int requestedPeriodFrames,
       bool requestResampler, bool * resamplerEnabled,
       int * maxPeriodFrames, int * startFrames, LG_AudioPullFn pullFn);
@@ -69,8 +68,10 @@ struct LG_AudioDevOps
     void (*mute)(bool mute);
 
     /* [optional] update the active backend resampler's output/input ratio.
-     * Called from the backend's playback callback and must be realtime safe. */
-    bool (*setRate)(double ratio);
+     * The backend replaces ratio with the value it selected for the next
+     * pull. Called from the backend's playback callback and must be realtime
+     * safe. */
+    bool (*setRate)(double * ratio);
 
     /* return the current total playback latency in microseconds */
     uint64_t (*latency)(void);
