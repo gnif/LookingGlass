@@ -69,14 +69,14 @@ target_link_libraries(mouse-tests
 set(MOUSE_CASES
   inset-exit
   surface-exit
-  exit-delay
+  exit-immediate
   exit-guest
-  exit-cancel
-  confine-pending
-  confine-guest
+  exit-reentry
+  view-immediate
   capture-pending
   capture-revoked
   capture-release
+  capture-align
   capture-fallback
   rotate-scale
   geometry

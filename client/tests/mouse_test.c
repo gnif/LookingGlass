@@ -343,15 +343,13 @@ static void testInsetExit(void)
 
   core_handleMouseNormal(-0.25, -0.25);
 
-  const int drop = first(EV_UNGRAB);
-  const int move = first(EV_WARP);
-  CHECK(drop >= 0);
-  CHECK(count(EV_WARP) == 1);
-  CHECK(move > drop);
-  CHECK(m.ev[move].x == 9);
-  CHECK(m.ev[move].y == 19);
-  CHECK(m.ev[move].exit);
+  CHECK(count(EV_UNGRAB) == 0);
+  CHECK(count(EV_WARP) == 0);
+  CHECK(near(g_cursor.exitPos.x, 9.75));
+  CHECK(near(g_cursor.exitPos.y, 19.75));
+  CHECK(g_cursor.exit);
   CHECK(!g_cursor.inView);
+  CHECK(!g_cursor.viewReq);
 
   core_handleGuestMouseUpdate();
   CHECK(count(EV_GUEST) == 0);
@@ -444,36 +442,20 @@ static void startExit(void)
 {
   reset();
   setLocal(109, 50);
-  m.conf.hold = true;
 
   core_handleMouseNormal(2, 0);
 }
 
-static void testExitWait(void)
+static void testExitImmediate(void)
 {
   startExit();
-  const int drop = first(EV_UNGRAB);
-  CHECK(drop >= 0);
+  CHECK(count(EV_UNGRAB) == 0);
   CHECK(count(EV_WARP) == 0);
-  CHECK(g_cursor.inView);
+  CHECK(near(g_cursor.exitPos.x, 111));
+  CHECK(near(g_cursor.exitPos.y, 50));
+  CHECK(!g_cursor.inView);
   CHECK(!g_cursor.viewReq);
   CHECK(g_cursor.exit);
-
-  g_cursor.pos       = (struct DoublePoint) { 111, 50 };
-  g_cursor.warpState = WARP_STATE_OFF;
-  setConf(false);
-  const int move = first(EV_WARP);
-  CHECK(move > drop);
-  CHECK(count(EV_WARP) == 1);
-  CHECK(m.ev[move].x == 111);
-  CHECK(m.ev[move].y == 50);
-  CHECK(m.ev[move].exit);
-  CHECK(!m.ev[move].conf);
-  CHECK(!g_cursor.inView);
-  CHECK(!g_cursor.exit);
-
-  setConf(false);
-  CHECK(count(EV_WARP) == 1);
 }
 
 static void testExitGuest(void)
@@ -484,35 +466,29 @@ static void testExitGuest(void)
   CHECK(count(EV_GUEST) == 0);
 }
 
-static void testExitCancel(void)
+static void testExitReentry(void)
 {
   startExit();
   CHECK(g_cursor.exit);
-
-  core_handleMouseNormal(1, 0);
-  CHECK(g_cursor.exit);
+  CHECK(!g_cursor.inView);
   CHECK(!g_cursor.viewReq);
 
-  core_handleMouseNormal(-3, 0);
+  setLocal(50, 50);
+  core_handleMouseNormal(0, 0);
   CHECK(!g_cursor.exit);
   CHECK(g_cursor.viewReq);
-  CHECK(m.conf.req);
-  CHECK(count(EV_WARP) == 0);
-
-  setConf(false);
-  CHECK(count(EV_WARP) == 0);
-  setConf(true);
   CHECK(g_cursor.inView);
+  CHECK(count(EV_GRAB) == 0);
+  CHECK(count(EV_UNGRAB) == 0);
+  CHECK(count(EV_WARP) == 0);
 
   startExit();
   g_state.focused = false;
   core_setCursorInView(false);
   CHECK(!g_cursor.exit);
-  setConf(false);
-  CHECK(count(EV_WARP) == 0);
 }
 
-static void startConf(void)
+static void testViewImmediate(void)
 {
   reset();
   setLocal(50, 50);
@@ -521,28 +497,14 @@ static void startConf(void)
   g_cursor.inView  = false;
   g_cursor.viewReq = false;
 
-  core_handleMouseNormal(0, 0);
-}
-
-static void testConfWait(void)
-{
-  startConf();
-  CHECK(m.conf.req);
+  core_setCursorInView(true);
+  CHECK(!m.conf.req);
   CHECK(!m.conf.on);
-  CHECK(!g_cursor.inView);
-
-  setConf(true);
+  CHECK(count(EV_GRAB) == 0);
+  CHECK(count(EV_UNGRAB) == 0);
+  CHECK(g_cursor.viewReq);
   CHECK(g_cursor.inView);
-}
 
-static void testConfGuest(void)
-{
-  startConf();
-  core_handleGuestMouseUpdate();
-  CHECK(m.conf.req);
-  CHECK(count(EV_GUEST) == 0);
-
-  setConf(true);
   core_handleGuestMouseUpdate();
   CHECK(count(EV_GUEST) == 1);
 }
@@ -606,6 +568,28 @@ static void testCapRelease(void)
 
   core_handleMouseGrabbed(1, 0);
   CHECK(count(EV_MOTION) == 1);
+}
+
+static void testCapAlign(void)
+{
+  reset();
+  setLocal(50, 50);
+  g_params.hideMouse = true;
+  core_setGrabQuiet(true);
+
+  m.lock.on = true;
+  g_cursor.guest.x += 10;
+  g_cursor.warpState = WARP_STATE_ON;
+  m.count = 0;
+  core_setGrabQuiet(false);
+
+  const int drop = first(EV_UNCAPTURE);
+  const int warp = first(EV_WARP);
+  CHECK(drop >= 0);
+  CHECK(warp > drop);
+  CHECK(m.ev[warp].x == 60);
+  CHECK(m.ev[warp].y == 50);
+  CHECK(!m.ev[warp].exit);
 }
 
 static void testCapFallback(void)
@@ -771,11 +755,13 @@ static void testEdges(void)
 
       core_handleMouseNormal(input.x, input.y);
 
-      const int index = first(EV_WARP);
-      CHECK(index >= 0);
-      CHECK(m.ev[index].x == cases[i].target.x);
-      CHECK(m.ev[index].y == cases[i].target.y);
-      CHECK(m.ev[index].exit);
+      CHECK(count(EV_UNGRAB) == 0);
+      CHECK(count(EV_WARP) == 0);
+      CHECK(g_cursor.exit);
+      CHECK(!g_cursor.inView);
+      CHECK(!g_cursor.viewReq);
+      CHECK(near(g_cursor.exitPos.x, cases[i].target.x));
+      CHECK(near(g_cursor.exitPos.y, cases[i].target.y));
     }
 }
 
@@ -804,10 +790,13 @@ static void testScales(void)
 
     core_handleMouseNormal(cases[i].delta, 0);
 
-    const int index = first(EV_WARP);
-    CHECK(index >= 0);
-    CHECK(m.ev[index].x == cases[i].target);
-    CHECK(m.ev[index].y == 50);
+    CHECK(count(EV_UNGRAB) == 0);
+    CHECK(count(EV_WARP) == 0);
+    CHECK(g_cursor.exit);
+    CHECK(!g_cursor.inView);
+    CHECK(!g_cursor.viewReq);
+    CHECK(near(g_cursor.exitPos.x, cases[i].target));
+    CHECK(near(g_cursor.exitPos.y, 50));
   }
 }
 
@@ -834,14 +823,16 @@ static void testBorderExit(void)
     core_handleMouseNormal(2, 0);
 
     const int check = first(EV_VALID);
-    const int move  = first(EV_WARP);
     CHECK(check >= 0);
-    CHECK(move > check);
     CHECK(m.ev[check].x == cases[i].valid.x);
     CHECK(m.ev[check].y == cases[i].valid.y);
-    CHECK(m.ev[move].x == 111);
-    CHECK(m.ev[move].y == 50);
-    CHECK(m.ev[move].exit);
+    CHECK(count(EV_UNGRAB) == 0);
+    CHECK(count(EV_WARP) == 0);
+    CHECK(g_cursor.exit);
+    CHECK(!g_cursor.inView);
+    CHECK(!g_cursor.viewReq);
+    CHECK(near(g_cursor.exitPos.x, 111));
+    CHECK(near(g_cursor.exitPos.y, 50));
   }
 }
 
@@ -854,14 +845,14 @@ struct Test
 static const struct Test tests[] = {
   { "inset-exit"      , testInsetExit    },
   { "surface-exit"    , testSurfaceExit  },
-  { "exit-delay"      , testExitWait     },
+  { "exit-immediate"  , testExitImmediate},
   { "exit-guest"      , testExitGuest    },
-  { "exit-cancel"     , testExitCancel   },
-  { "confine-pending" , testConfWait     },
-  { "confine-guest"   , testConfGuest    },
+  { "exit-reentry"    , testExitReentry  },
+  { "view-immediate"  , testViewImmediate},
   { "capture-pending" , testCapWait      },
   { "capture-revoked" , testCapRevoke    },
   { "capture-release" , testCapRelease   },
+  { "capture-align"   , testCapAlign     },
   { "capture-fallback", testCapFallback  },
   { "rotate-scale"    , testRotateScale  },
   { "geometry"        , testGeometry     },
