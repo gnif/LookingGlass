@@ -207,9 +207,9 @@ void keybind_inputRegister(void)
         "Send RWin to the guest");
 
 #if ENABLE_AUDIO
-    if (audio_supportsRecord())
+    if (lgAudio_supportsRecord())
     {
-      app_registerKeybind(KEY_E, audio_recordToggleKeybind, NULL,
+      app_registerKeybind(KEY_E, lgAudio_recordToggleKeybind, NULL,
           "Toggle audio recording");
       app_registerKeybind(KEY_C, bind_toggleMicDefault, NULL,
           "Cycle audio recording default");

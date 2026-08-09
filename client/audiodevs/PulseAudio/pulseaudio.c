@@ -42,14 +42,75 @@ struct PulseAudio
   bool                   sinkStarting;
   int                    sinkMaxPeriodFrames;
   int                    sinkStartFrames;
-  int                    sinkSampleRate;
-  int                    sinkChannels;
+  LG_AudioFormat         sinkFormat;
   int                    sinkStride;
   LG_AudioPullFn         sinkPullFn;
   _Atomic(int64_t)       sinkPresentationDeadline;
 };
 
 static struct PulseAudio pa = {0};
+
+static bool pulseaudio_audioFormatEqual(const LG_AudioFormat * a,
+    const LG_AudioFormat * b)
+{
+  return
+    a->sampleFormat == b->sampleFormat &&
+    a->sampleRate   == b->sampleRate &&
+    a->channelCount == b->channelCount &&
+    memcmp(a->channels, b->channels,
+        a->channelCount * sizeof(*a->channels)) == 0;
+}
+
+static pa_channel_position_t pulseaudio_channel(
+    LG_AudioChannel channel, uint8_t index)
+{
+  switch (channel)
+  {
+    case LG_AUDIO_CH_UNKNOWN:
+      return (pa_channel_position_t)(PA_CHANNEL_POSITION_AUX0 + index);
+
+    case LG_AUDIO_CH_MONO               :
+      return PA_CHANNEL_POSITION_MONO;
+    case LG_AUDIO_CH_FRONT_LEFT         :
+      return PA_CHANNEL_POSITION_FRONT_LEFT;
+    case LG_AUDIO_CH_FRONT_RIGHT        :
+      return PA_CHANNEL_POSITION_FRONT_RIGHT;
+    case LG_AUDIO_CH_FRONT_CENTER       :
+      return PA_CHANNEL_POSITION_FRONT_CENTER;
+    case LG_AUDIO_CH_LFE                :
+      return PA_CHANNEL_POSITION_LFE;
+    case LG_AUDIO_CH_REAR_LEFT          :
+      return PA_CHANNEL_POSITION_REAR_LEFT;
+    case LG_AUDIO_CH_REAR_RIGHT         :
+      return PA_CHANNEL_POSITION_REAR_RIGHT;
+    case LG_AUDIO_CH_FRONT_LEFT_CENTER  :
+      return PA_CHANNEL_POSITION_FRONT_LEFT_OF_CENTER;
+    case LG_AUDIO_CH_FRONT_RIGHT_CENTER :
+      return PA_CHANNEL_POSITION_FRONT_RIGHT_OF_CENTER;
+    case LG_AUDIO_CH_REAR_CENTER        :
+      return PA_CHANNEL_POSITION_REAR_CENTER;
+    case LG_AUDIO_CH_SIDE_LEFT          :
+      return PA_CHANNEL_POSITION_SIDE_LEFT;
+    case LG_AUDIO_CH_SIDE_RIGHT         :
+      return PA_CHANNEL_POSITION_SIDE_RIGHT;
+    case LG_AUDIO_CH_TOP_CENTER         :
+      return PA_CHANNEL_POSITION_TOP_CENTER;
+    case LG_AUDIO_CH_TOP_FRONT_LEFT     :
+      return PA_CHANNEL_POSITION_TOP_FRONT_LEFT;
+    case LG_AUDIO_CH_TOP_FRONT_CENTER   :
+      return PA_CHANNEL_POSITION_TOP_FRONT_CENTER;
+    case LG_AUDIO_CH_TOP_FRONT_RIGHT    :
+      return PA_CHANNEL_POSITION_TOP_FRONT_RIGHT;
+    case LG_AUDIO_CH_TOP_REAR_LEFT      :
+      return PA_CHANNEL_POSITION_TOP_REAR_LEFT;
+    case LG_AUDIO_CH_TOP_REAR_CENTER    :
+      return PA_CHANNEL_POSITION_TOP_REAR_CENTER;
+    case LG_AUDIO_CH_TOP_REAR_RIGHT     :
+      return PA_CHANNEL_POSITION_TOP_REAR_RIGHT;
+  }
+
+  return (pa_channel_position_t)(PA_CHANNEL_POSITION_AUX0 + index);
+}
 
 static void pulseaudio_unrefOperation(pa_operation * operation)
 {
@@ -299,14 +360,17 @@ static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
   DEBUG_WARN("Overflow");
 }
 
-static bool pulseaudio_setup(int channels, int sampleRate,
+static bool pulseaudio_setup(const LG_AudioFormat * format,
     int requestedPeriodFrames, bool requestResampler,
     bool * resamplerEnabled, int * maxPeriodFrames, int * startFrames,
     LG_AudioPullFn pullFn)
 {
   *resamplerEnabled = false;
 
-  if (pa.sink && pa.sinkChannels == channels && pa.sinkSampleRate == sampleRate)
+  const int channels   = format->channelCount;
+  const int sampleRate = format->sampleRate;
+
+  if (pa.sink && pulseaudio_audioFormatEqual(&pa.sinkFormat, format))
   {
     *maxPeriodFrames = pa.sinkMaxPeriodFrames;
     *startFrames     = pa.sinkStartFrames;
@@ -318,6 +382,9 @@ static bool pulseaudio_setup(int channels, int sampleRate,
     .rate     = sampleRate,
     .channels = channels
   };
+  pa_channel_map channelMap = { .channels = channels };
+  for (uint8_t i = 0; i < format->channelCount; ++i)
+    channelMap.map[i] = pulseaudio_channel(format->channels[i], i);
 
   int stride = channels * sizeof(float);
   int bufferSize = requestedPeriodFrames * 2 * stride;
@@ -332,14 +399,14 @@ static bool pulseaudio_setup(int channels, int sampleRate,
   pa_threaded_mainloop_lock(pa.loop);
   pulseaudio_sink_close_nl();
 
-  pa.sinkChannels   = channels;
-  pa.sinkSampleRate = sampleRate;
-  pa.sinkStride     = stride;
-  pa.sinkPullFn     = pullFn;
-  pa.sinkCorked     = true;
-  pa.sinkStarting   = false;
+  pa.sinkFormat   = *format;
+  pa.sinkStride   = stride;
+  pa.sinkPullFn   = pullFn;
+  pa.sinkCorked   = true;
+  pa.sinkStarting = false;
 
-  pa.sink = pa_stream_new(pa.context, "Looking Glass", &spec, NULL);
+  pa.sink = pa_stream_new(
+      pa.context, "Looking Glass", &spec, &channelMap);
   if (!pa.sink)
   {
     DEBUG_ERROR("Failed to create PulseAudio stream: %s",

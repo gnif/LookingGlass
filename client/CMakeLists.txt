@@ -188,7 +188,10 @@ if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 if(ENABLE_AUDIO)
-  list(APPEND SOURCES src/audio.c)
+  list(APPEND SOURCES
+    src/audio.c
+    src/audio_spice.c
+  )
 endif()
 
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")

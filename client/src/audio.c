@@ -23,6 +23,10 @@
 #include "audio.h"
 #include "main.h"
 #include "common/array.h"
+#include "common/debug.h"
+#include "common/event.h"
+#include "common/locking.h"
+#include "common/thread.h"
 #include "common/util.h"
 #include "common/ringbuffer.h"
 
@@ -51,7 +55,7 @@
  * retains 20 frames at unity; the bounded ratio range changes this by less
  * than one frame. Keep it in the latency model, but not in the safety buffer. */
 #define PLAYBACK_RESAMPLER_DELAY_FRAMES 20
-#define PLAYBACK_TIMESTAMP_DISCONTINUITY_MS 2000
+#define PLAYBACK_TIMESTAMP_DISCONTINUITY_NS INT64_C(2000000000)
 #define PLAYBACK_RATE_WINDOW_MS 60000
 #define PLAYBACK_RATE_MIN_SPAN_MS 45000
 #define PLAYBACK_RATE_SAMPLE_INTERVAL_MS 100
@@ -65,7 +69,7 @@
 typedef enum
 {
   STREAM_STATE_STOP,
-  STREAM_STATE_SETUP_SPICE,
+  STREAM_STATE_SETUP_SOURCE,
   STREAM_STATE_SETUP_DEVICE,
   STREAM_STATE_RUN,
   STREAM_STATE_KEEP_ALIVE,
@@ -119,9 +123,11 @@ typedef struct
   int64_t inputPosition;
   int64_t outputPosition;
 
-  uint32_t mediaTime;
+  int64_t  mediaTime;
+  int64_t  mediaElapsed;
   int64_t  mediaTimeMs;
   int64_t  mediaLocalOrigin;
+  uint64_t mediaPosition;
   int64_t  lastPacketTime;
   int64_t  lastArrivalTime;
   double   arrivalJitterSec;
@@ -130,6 +136,8 @@ typedef struct
   double   sourcePacketDurationSec;
   bool     sourcePhaseBaselineValid;
   bool     mediaClockValid;
+  bool     mediaPositionValid;
+  bool     mediaClockFromSource;
 
   PlaybackRateSample rateSamples[PLAYBACK_RATE_MAX_SAMPLES];
   unsigned int rateSampleStart;
@@ -163,7 +171,7 @@ typedef struct
   PlaybackClock outputClock;
   SRC_STATE * src;
 }
-PlaybackSpiceData;
+PlaybackSourceData;
 
 typedef struct
 {
@@ -177,15 +185,35 @@ PlaybackDeviceTiming;
 
 typedef struct
 {
+  const LG_AudioOps * ops;
+  void              * opaque;
+  bool                available;
+  uint32_t            generation;
+}
+AudioBinding;
+
+typedef struct
+{
   struct LG_AudioDevOps * audioDev;
+
+  LG_Lock   providerLock;
+  LG_RWLock activeLock;
+  AudioBinding fallback;
+  AudioBinding transport;
+  AudioBinding active;
 
   struct
   {
+    LG_Lock              sourceLock;
     _Atomic(StreamState) state;
     atomic_uint          callbackState;
+    atomic_uint          streamGeneration;
     int         volumeChannels;
-    uint16_t    volume[8];
+    uint16_t    volume[LG_AUDIO_MAX_CHANNELS];
     bool        mute;
+    LG_AudioFormat format;
+    LG_AudioFormat lastFormat;
+    bool        lastFormatValid;
     int         channels;
     int         sampleRate;
     int         stride;
@@ -206,39 +234,194 @@ typedef struct
     GraphHandle graph;
 
     /* These two structs contain data specifically for use in the device and
-     * Spice data threads respectively. Keep them on separate cache lines to
+     * source data threads respectively. Keep them on separate cache lines to
      * avoid false sharing. */
     alignas(64) PlaybackDeviceData deviceData;
-    alignas(64) PlaybackSpiceData  spiceData;
+    alignas(64) PlaybackSourceData  sourceData;
   }
   playback;
 
   struct
   {
     LG_Lock       lock;
+    atomic_uint    streamGeneration;
     bool          shuttingDown;
     bool          requested;
     bool          started;
     int           volumeChannels;
-    uint16_t      volume[8];
+    uint16_t      volume[LG_AUDIO_MAX_CHANNELS];
     bool          mute;
-    atomic_int    stride;
-    uint32_t      time;
-    int           lastChannels;
-    int           lastSampleRate;
-    PSAudioFormat lastFormat;
+    LG_AudioFormat format;
+    LG_AudioFormat lastFormat;
     MsgBoxHandle  confirmHandle;
     uint64_t      confirmGeneration;
     bool          confirmPending;
-    int           confirmChannels;
-    int           confirmSampleRate;
-    PSAudioFormat confirmFormat;
+    LG_AudioFormat confirmFormat;
   }
   record;
+
+  struct
+  {
+    LG_Lock    lock;
+    LGEvent  * event;
+    LGThread * thread;
+    atomic_bool stop;
+    bool        pending;
+
+    const LG_AudioOps * ops;
+    void              * opaque;
+    uint32_t            bindingGeneration;
+    uint32_t            generation;
+    LG_AudioClock       clock;
+  }
+  feedback;
 }
 AudioState;
 
 static AudioState audio = { 0 };
+
+static size_t audioSampleSize(LG_AudioSampleFormat format)
+{
+  switch (format)
+  {
+    case LG_AUDIO_FMT_U8:     return 1;
+    case LG_AUDIO_FMT_S16_LE: return 2;
+    case LG_AUDIO_FMT_S24_LE: return 3;
+    case LG_AUDIO_FMT_S32_LE:
+    case LG_AUDIO_FMT_F32_LE: return 4;
+    case LG_AUDIO_FMT_F64_LE: return 8;
+  }
+
+  return 0;
+}
+
+static bool audioFormatValid(const LG_AudioFormat * format)
+{
+  if (!format || format->channelCount < 1 ||
+      format->channelCount > LG_AUDIO_MAX_CHANNELS ||
+      format->sampleRate < 8000 || format->sampleRate > 384000 ||
+      audioSampleSize(format->sampleFormat) == 0)
+    return false;
+
+  for (unsigned int i = 0; i < format->channelCount; ++i)
+    if (format->channels[i] > LG_AUDIO_CH_TOP_REAR_RIGHT)
+      return false;
+
+  return true;
+}
+
+static bool audioFormatEqual(const LG_AudioFormat * a,
+    const LG_AudioFormat * b)
+{
+  return a->sampleFormat == b->sampleFormat &&
+    a->sampleRate == b->sampleRate &&
+    a->channelCount == b->channelCount &&
+    memcmp(a->channels, b->channels,
+      sizeof(*a->channels) * a->channelCount) == 0;
+}
+
+static bool audioConvertToFloat(float * dst, const void * src,
+    size_t samples, LG_AudioSampleFormat format)
+{
+  if (!dst || !src)
+    return false;
+
+  switch (format)
+  {
+    case LG_AUDIO_FMT_U8:
+    {
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i)
+        dst[i] = ((int)in[i] - 128) / 128.0f;
+      return true;
+    }
+
+    case LG_AUDIO_FMT_S16_LE:
+    {
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i, in += 2)
+      {
+        const int16_t value = (int16_t)(
+          (uint16_t)in[0] | (uint16_t)in[1] << 8);
+        dst[i] = value / 32768.0f;
+      }
+      return true;
+    }
+
+    case LG_AUDIO_FMT_S24_LE:
+    {
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i, in += 3)
+      {
+        int32_t value =
+          (int32_t)((uint32_t)in[0] |
+            (uint32_t)in[1] << 8 |
+            (uint32_t)in[2] << 16);
+        if (value & 0x800000)
+          value |= (int32_t)0xff000000;
+        dst[i] = value / 8388608.0f;
+      }
+      return true;
+    }
+
+    case LG_AUDIO_FMT_S32_LE:
+    {
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i, in += 4)
+      {
+        const int32_t value = (int32_t)(
+          (uint32_t)in[0] |
+          (uint32_t)in[1] << 8 |
+          (uint32_t)in[2] << 16 |
+          (uint32_t)in[3] << 24);
+        dst[i] = value / 2147483648.0f;
+      }
+      return true;
+    }
+
+    case LG_AUDIO_FMT_F32_LE:
+    {
+#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+      memcpy(dst, src, samples * sizeof(*dst));
+#else
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i, in += 4)
+      {
+        const uint32_t bits =
+          (uint32_t)in[0] |
+          (uint32_t)in[1] << 8 |
+          (uint32_t)in[2] << 16 |
+          (uint32_t)in[3] << 24;
+        memcpy(&dst[i], &bits, sizeof(bits));
+      }
+#endif
+      return true;
+    }
+
+    case LG_AUDIO_FMT_F64_LE:
+    {
+      const uint8_t * in = src;
+      for (size_t i = 0; i < samples; ++i, in += 8)
+      {
+        const uint64_t bits =
+          (uint64_t)in[0] |
+          (uint64_t)in[1] << 8 |
+          (uint64_t)in[2] << 16 |
+          (uint64_t)in[3] << 24 |
+          (uint64_t)in[4] << 32 |
+          (uint64_t)in[5] << 40 |
+          (uint64_t)in[6] << 48 |
+          (uint64_t)in[7] << 56;
+        double value;
+        memcpy(&value, &bits, sizeof(value));
+        dst[i] = value;
+      }
+      return true;
+    }
+  }
+
+  return false;
+}
 
 typedef struct
 {
@@ -321,7 +504,7 @@ static bool playbackSourceClockUpdate(PlaybackClock * clock, int64_t time,
     return false;
   }
 
-  /* SPICE multimedia time periodically changes phase by several
+  /* source media time periodically changes phase by several
    * milliseconds. Preserve it as a diagnostic and discontinuity signal, but
    * advance the source clock solely from decoded sample position. Short-term
    * timestamp corrections must not move the playback buffer. */
@@ -332,57 +515,57 @@ static bool playbackSourceClockUpdate(PlaybackClock * clock, int64_t time,
   return true;
 }
 
-static void playbackDeviceClockAcquireReset(PlaybackSpiceData * spiceData)
+static void playbackDeviceClockAcquireReset(PlaybackSourceData * sourceData)
 {
-  spiceData->deviceClockAcquireStart  = INT64_MIN;
-  spiceData->deviceClockCheckTime     = INT64_MIN;
-  spiceData->deviceClockStableSec     = 0.0;
-  spiceData->devicePositionOffsetFrames = 0.0;
-  spiceData->deviceClockStable        = false;
-  spiceData->ratioIntegral            = 0.0;
-  spiceData->lastClockRatio           = 1.0;
+  sourceData->deviceClockAcquireStart  = INT64_MIN;
+  sourceData->deviceClockCheckTime     = INT64_MIN;
+  sourceData->deviceClockStableSec     = 0.0;
+  sourceData->devicePositionOffsetFrames = 0.0;
+  sourceData->deviceClockStable        = false;
+  sourceData->ratioIntegral            = 0.0;
+  sourceData->lastClockRatio           = 1.0;
 }
 
 static bool playbackDeviceClockAcquire(
-    PlaybackSpiceData * spiceData, int64_t time)
+    PlaybackSourceData * sourceData, int64_t time)
 {
-  if (spiceData->deviceClockStable)
+  if (sourceData->deviceClockStable)
     return false;
 
-  if (spiceData->deviceClockAcquireStart == INT64_MIN)
+  if (sourceData->deviceClockAcquireStart == INT64_MIN)
   {
-    spiceData->deviceClockAcquireStart = time;
-    spiceData->deviceClockCheckTime = time;
-    spiceData->deviceClockCheckFrameSec =
-      spiceData->deviceClock.frameSec;
+    sourceData->deviceClockAcquireStart = time;
+    sourceData->deviceClockCheckTime = time;
+    sourceData->deviceClockCheckFrameSec =
+      sourceData->deviceClock.frameSec;
     return false;
   }
 
   const double checkSec =
-    (time - spiceData->deviceClockCheckTime) * 1.0e-9;
+    (time - sourceData->deviceClockCheckTime) * 1.0e-9;
   if (checkSec < PLAYBACK_DEVICE_RATE_CHECK_SEC)
     return false;
 
   const double rateDeltaPpm = fabs(
-      spiceData->deviceClock.frameSec /
-        spiceData->deviceClockCheckFrameSec - 1.0) * 1.0e6;
+      sourceData->deviceClock.frameSec /
+        sourceData->deviceClockCheckFrameSec - 1.0) * 1.0e6;
   if (rateDeltaPpm <= PLAYBACK_DEVICE_RATE_STABLE_DELTA_PPM)
-    spiceData->deviceClockStableSec += checkSec;
+    sourceData->deviceClockStableSec += checkSec;
   else
-    spiceData->deviceClockStableSec = 0.0;
+    sourceData->deviceClockStableSec = 0.0;
 
-  spiceData->deviceClockCheckTime = time;
-  spiceData->deviceClockCheckFrameSec =
-    spiceData->deviceClock.frameSec;
+  sourceData->deviceClockCheckTime = time;
+  sourceData->deviceClockCheckFrameSec =
+    sourceData->deviceClock.frameSec;
 
   const double acquireSec =
-    (time - spiceData->deviceClockAcquireStart) * 1.0e-9;
-  if (spiceData->deviceClockStableSec <
+    (time - sourceData->deviceClockAcquireStart) * 1.0e-9;
+  if (sourceData->deviceClockStableSec <
         PLAYBACK_DEVICE_RATE_STABLE_SEC &&
       acquireSec < PLAYBACK_DEVICE_RATE_MAX_ACQUIRE_SEC)
     return false;
 
-  spiceData->deviceClockStable = true;
+  sourceData->deviceClockStable = true;
   return true;
 }
 
@@ -392,58 +575,58 @@ static double playbackClockPosition(const PlaybackClock * clock, int64_t time)
     (time - clock->time) * 1.0e-9 / clock->frameSec;
 }
 
-static void playbackSourceRateReset(PlaybackSpiceData * spiceData)
+static void playbackSourceRateReset(PlaybackSourceData * sourceData)
 {
-  spiceData->rateSampleStart      = 0;
-  spiceData->rateSampleCount      = 0;
-  spiceData->rateLastSampleTimeMs = INT64_MIN;
-  spiceData->rateFilterTimeMs     = INT64_MIN;
-  spiceData->sourceRateValid      = false;
+  sourceData->rateSampleStart      = 0;
+  sourceData->rateSampleCount      = 0;
+  sourceData->rateLastSampleTimeMs = INT64_MIN;
+  sourceData->rateFilterTimeMs     = INT64_MIN;
+  sourceData->sourceRateValid      = false;
 }
 
 static void playbackSourceRateAdd(
-    PlaybackSpiceData * spiceData, double nominalFrameSec)
+    PlaybackSourceData * sourceData, double nominalFrameSec)
 {
-  const int64_t timeMs = spiceData->mediaTimeMs;
-  if (spiceData->rateLastSampleTimeMs != INT64_MIN &&
-      timeMs - spiceData->rateLastSampleTimeMs <
+  const int64_t timeMs = sourceData->mediaTimeMs;
+  if (sourceData->rateLastSampleTimeMs != INT64_MIN &&
+      timeMs - sourceData->rateLastSampleTimeMs <
         PLAYBACK_RATE_SAMPLE_INTERVAL_MS)
     return;
 
-  spiceData->rateLastSampleTimeMs = timeMs;
+  sourceData->rateLastSampleTimeMs = timeMs;
 
-  while (spiceData->rateSampleCount > 0)
+  while (sourceData->rateSampleCount > 0)
   {
     const PlaybackRateSample * oldest =
-      &spiceData->rateSamples[spiceData->rateSampleStart];
+      &sourceData->rateSamples[sourceData->rateSampleStart];
     if (timeMs - oldest->timeMs <= PLAYBACK_RATE_WINDOW_MS)
       break;
 
-    spiceData->rateSampleStart =
-      (spiceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
-    --spiceData->rateSampleCount;
+    sourceData->rateSampleStart =
+      (sourceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
+    --sourceData->rateSampleCount;
   }
 
-  if (spiceData->rateSampleCount == PLAYBACK_RATE_MAX_SAMPLES)
+  if (sourceData->rateSampleCount == PLAYBACK_RATE_MAX_SAMPLES)
   {
-    spiceData->rateSampleStart =
-      (spiceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
-    --spiceData->rateSampleCount;
+    sourceData->rateSampleStart =
+      (sourceData->rateSampleStart + 1) % PLAYBACK_RATE_MAX_SAMPLES;
+    --sourceData->rateSampleCount;
   }
 
   const unsigned int index =
-    (spiceData->rateSampleStart + spiceData->rateSampleCount) %
+    (sourceData->rateSampleStart + sourceData->rateSampleCount) %
       PLAYBACK_RATE_MAX_SAMPLES;
-  spiceData->rateSamples[index] = (PlaybackRateSample)
+  sourceData->rateSamples[index] = (PlaybackRateSample)
   {
     .timeMs   = timeMs,
-    .position = spiceData->inputPosition
+    .position = sourceData->inputPosition
   };
-  ++spiceData->rateSampleCount;
+  ++sourceData->rateSampleCount;
 
   const PlaybackRateSample * first =
-    &spiceData->rateSamples[spiceData->rateSampleStart];
-  if (spiceData->rateSampleCount < 2 ||
+    &sourceData->rateSamples[sourceData->rateSampleStart];
+  if (sourceData->rateSampleCount < 2 ||
       timeMs - first->timeMs < PLAYBACK_RATE_MIN_SPAN_MS)
     return;
 
@@ -451,11 +634,11 @@ static void playbackSourceRateAdd(
   double sumTime     = 0.0;
   double sumPosition2 = 0.0;
   double sumPositionTime = 0.0;
-  for (unsigned int i = 0; i < spiceData->rateSampleCount; ++i)
+  for (unsigned int i = 0; i < sourceData->rateSampleCount; ++i)
   {
     const PlaybackRateSample * sample =
-      &spiceData->rateSamples[
-        (spiceData->rateSampleStart + i) % PLAYBACK_RATE_MAX_SAMPLES];
+      &sourceData->rateSamples[
+        (sourceData->rateSampleStart + i) % PLAYBACK_RATE_MAX_SAMPLES];
     const double position = sample->position - first->position;
     const double timeSec = (sample->timeMs - first->timeMs) / 1000.0;
 
@@ -465,7 +648,7 @@ static void playbackSourceRateAdd(
     sumPositionTime += position * timeSec;
   }
 
-  const double count = spiceData->rateSampleCount;
+  const double count = sourceData->rateSampleCount;
   const double denominator =
     sumPosition2 - sumPosition * sumPosition / count;
   if (denominator <= 0.0)
@@ -479,21 +662,21 @@ static void playbackSourceRateAdd(
         (1.0 + PLAYBACK_MAX_RATE_CORRECTION))
     return;
 
-  if (!spiceData->sourceRateValid)
+  if (!sourceData->sourceRateValid)
   {
-    spiceData->sourceRateFrameSec = frameSec;
-    spiceData->sourceRateValid = true;
+    sourceData->sourceRateFrameSec = frameSec;
+    sourceData->sourceRateValid = true;
   }
   else
   {
     const double elapsedSec =
-      (timeMs - spiceData->rateFilterTimeMs) / 1000.0;
+      (timeMs - sourceData->rateFilterTimeMs) / 1000.0;
     const double alpha =
       -expm1(-elapsedSec / PLAYBACK_RATE_FILTER_TIME_SEC);
-    spiceData->sourceRateFrameSec +=
-      alpha * (frameSec - spiceData->sourceRateFrameSec);
+    sourceData->sourceRateFrameSec +=
+      alpha * (frameSec - sourceData->sourceRateFrameSec);
   }
-  spiceData->rateFilterTimeMs = timeMs;
+  sourceData->rateFilterTimeMs = timeMs;
 }
 
 static void playbackPublishDeviceTiming(
@@ -543,57 +726,89 @@ static bool playbackReadDeviceTiming(
   return true;
 }
 
-static void playbackResetMediaClock(
-    PlaybackSpiceData * spiceData, uint32_t time, int64_t now)
+static void playbackResetMediaClock(PlaybackSourceData * sourceData,
+    int64_t time, uint64_t position, bool fromSource, int64_t now)
 {
-  spiceData->mediaTime        = time;
-  spiceData->mediaTimeMs      = 0;
-  spiceData->mediaLocalOrigin = now;
-  spiceData->lastPacketTime   = INT64_MIN;
-  spiceData->lastArrivalTime  = INT64_MIN;
-  spiceData->mediaClockValid  = true;
-  spiceData->inputPosition    = 0;
-  spiceData->sourceClock.valid = false;
-  playbackSourceRateReset(spiceData);
+  sourceData->mediaTime        = time;
+  sourceData->mediaElapsed     = 0;
+  sourceData->mediaTimeMs      = 0;
+  sourceData->mediaLocalOrigin = now;
+  sourceData->mediaPosition    = position;
+  sourceData->lastPacketTime   = INT64_MIN;
+  sourceData->lastArrivalTime  = INT64_MIN;
+  sourceData->mediaClockValid  = true;
+  sourceData->mediaPositionValid = true;
+  sourceData->mediaClockFromSource = fromSource;
+  sourceData->sourceClock.valid = false;
+  playbackSourceRateReset(sourceData);
 }
 
 static void playbackPrepareMediaClock(
-    PlaybackSpiceData * spiceData, uint32_t time)
+    PlaybackSourceData * sourceData, const LG_AudioClock * sourceClock)
 {
-  spiceData->mediaTime       = time;
-  spiceData->mediaClockValid = false;
-  spiceData->inputPosition   = 0;
-  spiceData->sourceClock.valid = false;
-  playbackSourceRateReset(spiceData);
+  sourceData->mediaTime          = 0;
+  sourceData->mediaClockValid    = false;
+  sourceData->mediaPositionValid = sourceClock != NULL;
+  sourceData->mediaClockFromSource = sourceClock != NULL;
+  sourceData->mediaPosition = sourceClock ? sourceClock->position : 0;
+  sourceData->inputPosition = 0;
+  sourceData->sourceClock.valid = false;
+  playbackSourceRateReset(sourceData);
 }
 
-static int64_t playbackMapMediaTime(PlaybackSpiceData * spiceData,
-    uint32_t time, int64_t now, bool * discontinuity)
+static int64_t playbackMapMediaTime(PlaybackSourceData * sourceData,
+    const LG_AudioClock * clock, int frames, int sampleRate,
+    int64_t now, bool * discontinuity)
 {
-  if (!spiceData->mediaClockValid)
+  const bool fromSource = clock != NULL;
+  const uint64_t position = clock ? clock->position :
+    (uint64_t)sourceData->inputPosition;
+  const int64_t time = clock ? clock->time :
+    llrint(sourceData->inputPosition * (1.0e9 / sampleRate));
+
+  if (clock && clock->discontinuity)
+    *discontinuity = true;
+
+  if (!sourceData->mediaClockValid)
   {
-    playbackResetMediaClock(spiceData, time, now);
+    if (sourceData->mediaPositionValid &&
+        (sourceData->mediaClockFromSource != fromSource ||
+         sourceData->mediaPosition != position))
+      *discontinuity = true;
+
+    playbackResetMediaClock(
+        sourceData, time, position, fromSource, now);
+    sourceData->mediaPosition = position + frames;
     return now;
   }
 
-  const int32_t deltaMs = (int32_t)(time - spiceData->mediaTime);
-  if (deltaMs < 0 || deltaMs > PLAYBACK_TIMESTAMP_DISCONTINUITY_MS)
+  const int64_t delta = time - sourceData->mediaTime;
+  if (*discontinuity ||
+      sourceData->mediaClockFromSource != fromSource ||
+      !sourceData->mediaPositionValid ||
+      sourceData->mediaPosition != position || delta < 0 ||
+      delta > PLAYBACK_TIMESTAMP_DISCONTINUITY_NS)
   {
-    playbackResetMediaClock(spiceData, time, now);
+    playbackResetMediaClock(
+        sourceData, time, position, fromSource, now);
+    sourceData->mediaPosition = position + frames;
     *discontinuity = true;
     return now;
   }
 
-  spiceData->mediaTime = time;
-  spiceData->mediaTimeMs += deltaMs;
-  return spiceData->mediaLocalOrigin + spiceData->mediaTimeMs * 1000000;
+  sourceData->mediaTime = time;
+  sourceData->mediaPosition = position + frames;
+  sourceData->mediaElapsed += delta;
+  sourceData->mediaTimeMs =
+    sourceData->mediaElapsed / INT64_C(1000000);
+  return sourceData->mediaLocalOrigin + sourceData->mediaElapsed;
 }
 
 static void playbackStop(void);
 static MsgBoxHandle recordCancelConfirmLocked(void);
-static void realRecordStartLocked(
-    int channels, int sampleRate, PSAudioFormat format);
+static void realRecordStartLocked(const LG_AudioFormat * format);
 static void realRecordStopLocked(void);
+static void recordStop(void);
 
 static StreamState playbackGetState(void)
 {
@@ -646,51 +861,7 @@ static void playbackWaitForCallbacks(void)
     ;
 }
 
-void audio_init(void)
-{
-  LG_LOCK_INIT(audio.record.lock);
-  audio.record.shuttingDown = false;
-  atomic_store_explicit(
-      &audio.playback.callbackState, PLAYBACK_CALLBACK_DISABLED,
-      memory_order_release);
-
-  // search for the best audiodev to use
-  for(int i = 0; i < LG_AUDIODEV_COUNT; ++i)
-    if (LG_AudioDevs[i]->init())
-    {
-      audio.audioDev = LG_AudioDevs[i];
-      DEBUG_INFO("Using AudioDev: %s", audio.audioDev->name);
-      return;
-    }
-
-  DEBUG_WARN("Failed to initialize an audio backend");
-}
-
-void audio_free(void)
-{
-  // immediate stop of the stream, do not wait for drain
-  if (audio.audioDev)
-    playbackStop();
-
-  LG_LOCK(audio.record.lock);
-  audio.record.shuttingDown = true;
-  audio.record.requested = false;
-  MsgBoxHandle confirm = recordCancelConfirmLocked();
-
-  if (audio.audioDev && audio.record.started)
-    realRecordStopLocked();
-
-  struct LG_AudioDevOps * audioDev = audio.audioDev;
-  audio.audioDev = NULL;
-  LG_UNLOCK(audio.record.lock);
-
-  app_msgBoxClose(confirm);
-
-  if (audioDev)
-    audioDev->free();
-}
-
-bool audio_supportsPlayback(void)
+bool lgAudio_supportsPlayback(void)
 {
   return audio.audioDev && audio.audioDev->playback.start;
 }
@@ -716,16 +887,16 @@ static void playbackStop(void)
 
   playbackSetState(STREAM_STATE_STOP);
   ringbuffer_free(&audio.playback.buffer);
-  audio.playback.spiceData.src = src_delete(audio.playback.spiceData.src);
+  audio.playback.sourceData.src = src_delete(audio.playback.sourceData.src);
 
-  if (audio.playback.spiceData.framesIn)
+  if (audio.playback.sourceData.framesIn)
   {
-    free(audio.playback.spiceData.framesIn);
-    free(audio.playback.spiceData.framesOut);
-    audio.playback.spiceData.framesIn = NULL;
-    audio.playback.spiceData.framesOut = NULL;
-    audio.playback.spiceData.framesInSize = 0;
-    audio.playback.spiceData.framesOutSize = 0;
+    free(audio.playback.sourceData.framesIn);
+    free(audio.playback.sourceData.framesOut);
+    audio.playback.sourceData.framesIn = NULL;
+    audio.playback.sourceData.framesOut = NULL;
+    audio.playback.sourceData.framesInSize = 0;
+    audio.playback.sourceData.framesOutSize = 0;
   }
 
   if (audio.playback.timings)
@@ -867,37 +1038,35 @@ static int playbackPullFrames(uint8_t * dst, int frames)
   return frames;
 }
 
-void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
-  uint32_t time)
+static void playbackStart(const LG_AudioFormat * format,
+    const LG_AudioClock * sourceClock)
 {
   if (!audio.audioDev)
     return;
 
-  if (channels < 1 || channels > 8 || sampleRate < 8000 ||
-      sampleRate > 384000 || format != PS_AUDIO_FMT_S16)
+  if (!audioFormatValid(format))
   {
-    DEBUG_ERROR("Invalid playback format: %d channels, %d Hz, format %d",
-        channels, sampleRate, format);
+    DEBUG_ERROR("Invalid playback format");
     if (playbackGetState() != STREAM_STATE_STOP)
       playbackStop();
     return;
   }
 
-  static int lastChannels   = 0;
-  static int lastSampleRate = 0;
-  static PSAudioFormat lastFormat = PS_AUDIO_FMT_INVALID;
+  const int channels   = format->channelCount;
+  const int sampleRate = format->sampleRate;
 
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_KEEP_ALIVE &&
-      channels == lastChannels && sampleRate == lastSampleRate &&
-      format == lastFormat)
+      audio.playback.lastFormatValid &&
+      audioFormatEqual(format, &audio.playback.lastFormat))
   {
     StreamState expected = STREAM_STATE_KEEP_ALIVE;
     if (atomic_compare_exchange_strong_explicit(
           &audio.playback.state, &expected, STREAM_STATE_RESUMING,
           memory_order_acq_rel, memory_order_acquire))
     {
-      playbackPrepareMediaClock(&audio.playback.spiceData, time);
+      playbackPrepareMediaClock(
+          &audio.playback.sourceData, sourceClock);
       return;
     }
 
@@ -913,43 +1082,43 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.playback.buffer)
     return;
 
-  lastChannels   = channels;
-  lastSampleRate = sampleRate;
-  lastFormat     = format;
+  audio.playback.format          = *format;
+  audio.playback.lastFormat      = *format;
+  audio.playback.lastFormatValid = true;
 
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
   audio.playback.stride     = channels * sizeof(float);
-  playbackSetState(STREAM_STATE_SETUP_SPICE);
+  playbackSetState(STREAM_STATE_SETUP_SOURCE);
 
   audio.playback.deviceData.nextPosition         = 0;
   audio.playback.deviceData.outputPosition       = 0.0;
   audio.playback.deviceData.appliedRatio         = 1.0;
   audio.playback.deviceData.startupSilenceFrames = 0;
 
-  audio.playback.spiceData.inputPosition       = 0;
-  audio.playback.spiceData.outputPosition      = 0;
-  audio.playback.spiceData.devPeriodFrames     = 0;
-  audio.playback.spiceData.devReadPosition     = 0;
-  audio.playback.spiceData.deviceTimingSequence = 0;
-  playbackDeviceClockAcquireReset(&audio.playback.spiceData);
-  audio.playback.spiceData.offsetError         = 0.0;
-  audio.playback.spiceData.offsetErrorIntegral = 0.0;
-  audio.playback.spiceData.ratioIntegral       = 0.0;
-  audio.playback.spiceData.lastRatio           = 1.0;
-  audio.playback.spiceData.lastClockRatio      = 1.0;
-  audio.playback.spiceData.bufferOverrunPending = false;
-  audio.playback.spiceData.bufferOverruns      = 0;
-  audio.playback.spiceData.nextLogTime         =
+  audio.playback.sourceData.inputPosition       = 0;
+  audio.playback.sourceData.outputPosition      = 0;
+  audio.playback.sourceData.devPeriodFrames     = 0;
+  audio.playback.sourceData.devReadPosition     = 0;
+  audio.playback.sourceData.deviceTimingSequence = 0;
+  playbackDeviceClockAcquireReset(&audio.playback.sourceData);
+  audio.playback.sourceData.offsetError         = 0.0;
+  audio.playback.sourceData.offsetErrorIntegral = 0.0;
+  audio.playback.sourceData.ratioIntegral       = 0.0;
+  audio.playback.sourceData.lastRatio           = 1.0;
+  audio.playback.sourceData.lastClockRatio      = 1.0;
+  audio.playback.sourceData.bufferOverrunPending = false;
+  audio.playback.sourceData.bufferOverruns      = 0;
+  audio.playback.sourceData.nextLogTime         =
     nanotime() + INT64_C(5000000000);
-  audio.playback.spiceData.arrivalJitterSec    = 0.0;
-  audio.playback.spiceData.sourcePhaseBaselineSec = 0.0;
-  audio.playback.spiceData.sourcePhaseReserveSec = 0.0;
-  audio.playback.spiceData.sourcePacketDurationSec = 0.0;
-  audio.playback.spiceData.sourcePhaseBaselineValid = false;
-  audio.playback.spiceData.deviceClock.valid   = false;
-  audio.playback.spiceData.outputClock.valid   = false;
-  playbackPrepareMediaClock(&audio.playback.spiceData, time);
+  audio.playback.sourceData.arrivalJitterSec    = 0.0;
+  audio.playback.sourceData.sourcePhaseBaselineSec = 0.0;
+  audio.playback.sourceData.sourcePhaseReserveSec = 0.0;
+  audio.playback.sourceData.sourcePacketDurationSec = 0.0;
+  audio.playback.sourceData.sourcePhaseBaselineValid = false;
+  audio.playback.sourceData.deviceClock.valid   = false;
+  audio.playback.sourceData.outputClock.valid   = false;
+  playbackPrepareMediaClock(&audio.playback.sourceData, sourceClock);
 
   atomic_store_explicit(
       &audio.playback.deviceTiming.sequence, 0, memory_order_relaxed);
@@ -981,7 +1150,9 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   audio.playback.startupPacketPeriod   = 0;
   const bool requestBackendResampler =
     g_params.audioResampler != AUDIO_RESAMPLER_LIBSAMPLERATE;
-  if (!audio.audioDev->playback.setup(channels, sampleRate,
+  LG_AudioFormat deviceFormat = *format;
+  deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_LE;
+  if (!audio.audioDev->playback.setup(&deviceFormat,
         requestedPeriodFrames, requestBackendResampler,
         &audio.playback.backendResampler,
         &audio.playback.deviceMaxPeriodFrames,
@@ -1002,9 +1173,9 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
   if (!audio.playback.backendResampler)
   {
     int srcError;
-    audio.playback.spiceData.src =
+    audio.playback.sourceData.src =
       src_new(SRC_SINC_FASTEST, channels, &srcError);
-    if (!audio.playback.spiceData.src)
+    if (!audio.playback.sourceData.src)
     {
       DEBUG_ERROR("Failed to create resampler: %s", src_strerror(srcError));
       playbackStop();
@@ -1012,7 +1183,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
     }
   }
   else
-    audio.playback.spiceData.src = NULL;
+    audio.playback.sourceData.src = NULL;
 
   DEBUG_INFO("Using audio resampler: %s",
       audio.playback.backendResampler ?
@@ -1036,7 +1207,7 @@ void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
       &audio.playback.callbackState, 0, memory_order_release);
 }
 
-void audio_playbackStop(void)
+static void playbackSourceStop(void)
 {
   if (!audio.audioDev)
     return;
@@ -1051,9 +1222,9 @@ void audio_playbackStop(void)
       playbackSetState(STREAM_STATE_KEEP_ALIVE);
 
       // Reset the software resampler so it is safe for the next playback
-      if (audio.playback.spiceData.src)
+      if (audio.playback.sourceData.src)
       {
-        int error = src_reset(audio.playback.spiceData.src);
+        int error = src_reset(audio.playback.sourceData.src);
         if (error)
         {
           DEBUG_ERROR("Failed to reset resampler: %s", src_strerror(error));
@@ -1064,7 +1235,7 @@ void audio_playbackStop(void)
       break;
     }
 
-    case STREAM_STATE_SETUP_SPICE:
+    case STREAM_STATE_SETUP_SOURCE:
     case STREAM_STATE_SETUP_DEVICE:
     case STREAM_STATE_STOP_PENDING:
       // Playback hasn't actually started yet so just clean up
@@ -1078,7 +1249,7 @@ void audio_playbackStop(void)
   }
 }
 
-void audio_playbackVolume(int channels, const uint16_t volume[])
+static void playbackVolume(int channels, const uint16_t volume[])
 {
   if (!audio.audioDev || !audio.audioDev->playback.volume ||
       !g_params.audioSyncVolume)
@@ -1095,7 +1266,7 @@ void audio_playbackVolume(int channels, const uint16_t volume[])
   audio.audioDev->playback.volume(channels, volume);
 }
 
-void audio_playbackMute(bool mute)
+static void playbackMute(bool mute)
 {
   if (!audio.audioDev || !audio.audioDev->playback.mute)
     return;
@@ -1110,19 +1281,19 @@ void audio_playbackMute(bool mute)
 
 static double computeDevicePosition(int64_t curTime)
 {
-  const PlaybackSpiceData * spiceData =
-    &audio.playback.spiceData;
+  const PlaybackSourceData * sourceData =
+    &audio.playback.sourceData;
   return playbackClockPosition(
-      &spiceData->deviceClock, curTime) +
-    spiceData->devicePositionOffsetFrames;
+      &sourceData->deviceClock, curTime) +
+    sourceData->devicePositionOffsetFrames;
 }
 
 static bool playbackEnsureConversionBuffers(
-    PlaybackSpiceData * spiceData, int frames)
+    PlaybackSourceData * sourceData, int frames)
 {
-  if (frames > spiceData->framesInSize)
+  if (frames > sourceData->framesInSize)
   {
-    float * framesIn = realloc(spiceData->framesIn,
+    float * framesIn = realloc(sourceData->framesIn,
         (size_t)frames * audio.playback.stride);
     if (!framesIn)
     {
@@ -1130,17 +1301,17 @@ static bool playbackEnsureConversionBuffers(
       return false;
     }
 
-    spiceData->framesIn = framesIn;
-    spiceData->framesInSize = frames;
+    sourceData->framesIn = framesIn;
+    sourceData->framesInSize = frames;
   }
 
   if (!audio.playback.backendResampler)
   {
     const int framesOut =
       (int)ceil(frames * (1.0 + PLAYBACK_MAX_RATE_CORRECTION)) + 64;
-    if (framesOut > spiceData->framesOutSize)
+    if (framesOut > sourceData->framesOutSize)
     {
-      float * output = realloc(spiceData->framesOut,
+      float * output = realloc(sourceData->framesOut,
           (size_t)framesOut * audio.playback.stride);
       if (!output)
       {
@@ -1148,8 +1319,8 @@ static bool playbackEnsureConversionBuffers(
         return false;
       }
 
-      spiceData->framesOut = output;
-      spiceData->framesOutSize = framesOut;
+      sourceData->framesOut = output;
+      sourceData->framesOutSize = framesOut;
     }
   }
 
@@ -1157,7 +1328,7 @@ static bool playbackEnsureConversionBuffers(
 }
 
 static int playbackAppendFrames(
-    PlaybackSpiceData * spiceData, const void * frames, int count)
+    PlaybackSourceData * sourceData, const void * frames, int count)
 {
   const int occupancy = ringbuffer_getCount(audio.playback.buffer);
   const int length = ringbuffer_getLength(audio.playback.buffer);
@@ -1175,15 +1346,15 @@ static int playbackAppendFrames(
      * Doing so makes a positive buffer count refer to overwritten samples and
      * sounds like corrupted PCM rather than an underrun. Resynchronize on the
      * next packet after dropping the excess output. */
-    spiceData->bufferOverrunPending = true;
-    ++spiceData->bufferOverruns;
+    sourceData->bufferOverrunPending = true;
+    ++sourceData->bufferOverruns;
   }
 
   return advanced;
 }
 
 static int playbackSlewBuffer(
-    PlaybackSpiceData * spiceData, int requested)
+    PlaybackSourceData * sourceData, int requested)
 {
   const int occupancy = ringbuffer_getCount(audio.playback.buffer);
   const int length = ringbuffer_getLength(audio.playback.buffer);
@@ -1196,12 +1367,13 @@ static int playbackSlewBuffer(
   DEBUG_ASSERT(advanced == slew);
 
   if (slew != requested)
-    spiceData->bufferOverrunPending = true;
+    sourceData->bufferOverrunPending = true;
 
   return advanced;
 }
 
-void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
+static void playbackData(const void * data, size_t frameCount,
+    const LG_AudioClock * sourceClock)
 {
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_STOP_PENDING)
@@ -1210,7 +1382,7 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     return;
   }
 
-  if (state == STREAM_STATE_STOP || !audio.audioDev || size == 0)
+  if (state == STREAM_STATE_STOP || !audio.audioDev || frameCount == 0)
     return;
 
   if (audio.playback.backendResampler &&
@@ -1223,151 +1395,162 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     return;
   }
 
-  PlaybackSpiceData * spiceData = &audio.playback.spiceData;
+  PlaybackSourceData * sourceData = &audio.playback.sourceData;
   /* Backend resampling changes how many source frames PipeWire requests per
    * device period. Use the command-normalized output clock for rate matching,
    * while deviceClock remains in the ring's source-frame domain for latency. */
   const PlaybackClock * rateClock = audio.playback.backendResampler ?
-    &spiceData->outputClock : &spiceData->deviceClock;
+    &sourceData->outputClock : &sourceData->deviceClock;
   const int64_t now = nanotime();
   const double nominalFrameSec = 1.0 / audio.playback.sampleRate;
 
-  const int spiceStride = audio.playback.channels * sizeof(int16_t);
-  if (size % spiceStride != 0 || size / spiceStride > INT_MAX)
+  if (!data || frameCount > INT_MAX ||
+      frameCount > (size_t)audio.playback.sampleRate * 2)
   {
-    DEBUG_ERROR("Invalid playback packet size: %zu bytes for stride %d",
-        size, spiceStride);
+    DEBUG_ERROR("Invalid playback packet length: %zu frames", frameCount);
     playbackStop();
     return;
   }
+  const int frames = frameCount;
 
-  const int frames = size / spiceStride;
-  if (frames == 0 || frames > audio.playback.sampleRate * 2)
-  {
-    DEBUG_ERROR("Invalid playback packet length: %d frames", frames);
-    playbackStop();
-    return;
-  }
-
-  if (!playbackEnsureConversionBuffers(spiceData, frames))
+  if (!playbackEnsureConversionBuffers(sourceData, frames))
   {
     playbackStop();
     return;
   }
-  src_short_to_float_array((int16_t *) data, spiceData->framesIn,
-    frames * audio.playback.channels);
+  if (!audioConvertToFloat(sourceData->framesIn, data,
+        (size_t)frames * audio.playback.channels,
+        audio.playback.format.sampleFormat))
+  {
+    DEBUG_ERROR("Failed to convert playback samples");
+    playbackStop();
+    return;
+  }
 
-  bool discontinuity = false;
+  bool discontinuity = sourceClock && sourceClock->discontinuity;
   const int64_t packetTime =
-    playbackMapMediaTime(spiceData, time, now, &discontinuity);
-  if (spiceData->bufferOverrunPending)
+    playbackMapMediaTime(sourceData, sourceClock, frames,
+        audio.playback.sampleRate, now, &discontinuity);
+  if (sourceData->bufferOverrunPending)
   {
     discontinuity = true;
-    spiceData->bufferOverrunPending = false;
+    sourceData->bufferOverrunPending = false;
   }
 
-  if (spiceData->lastPacketTime != INT64_MIN &&
-      spiceData->lastArrivalTime != INT64_MIN)
+  if (sourceData->lastPacketTime != INT64_MIN &&
+      sourceData->lastArrivalTime != INT64_MIN)
   {
     const double mediaDelta =
-      (packetTime - spiceData->lastPacketTime) * 1.0e-9;
+      (packetTime - sourceData->lastPacketTime) * 1.0e-9;
     const double arrivalDelta =
-      (now - spiceData->lastArrivalTime) * 1.0e-9;
+      (now - sourceData->lastArrivalTime) * 1.0e-9;
     const double jitter = fabs(arrivalDelta - mediaDelta);
 
     /* Keep a slowly decaying peak rather than feeding arrival jitter into the
      * virtual clock. This lets the buffer absorb real delivery jitter while
-     * the rate controller follows only the SPICE multimedia clock. */
-    spiceData->arrivalJitterSec =
+     * the rate controller follows only the source media clock. */
+    sourceData->arrivalJitterSec =
       min(PLAYBACK_MAX_JITTER_SEC,
-          max(jitter, spiceData->arrivalJitterSec * 0.999));
+          max(jitter, sourceData->arrivalJitterSec * 0.999));
   }
-  spiceData->lastPacketTime  = packetTime;
-  spiceData->lastArrivalTime = now;
+  sourceData->lastPacketTime  = packetTime;
+  sourceData->lastArrivalTime = now;
 
   const bool sourceRateWasValid =
-    spiceData->sourceRateValid;
-  playbackSourceRateAdd(spiceData, nominalFrameSec);
+    sourceData->sourceRateValid;
+  playbackSourceRateAdd(sourceData, nominalFrameSec);
+  if (sourceClock && sourceClock->stable && sourceClock->rate > 0.0)
+  {
+    const double frameSec = 1.0 / sourceClock->rate;
+    if (frameSec >= nominalFrameSec *
+          (1.0 - PLAYBACK_MAX_RATE_CORRECTION) &&
+        frameSec <= nominalFrameSec *
+          (1.0 + PLAYBACK_MAX_RATE_CORRECTION))
+    {
+      sourceData->sourceRateFrameSec = frameSec;
+      sourceData->sourceRateValid = true;
+    }
+  }
   const bool sourceRateBecameValid =
-    !sourceRateWasValid && spiceData->sourceRateValid;
-  if (!playbackSourceClockUpdate(&spiceData->sourceClock,
-        packetTime, spiceData->inputPosition, nominalFrameSec))
+    !sourceRateWasValid && sourceData->sourceRateValid;
+  if (!playbackSourceClockUpdate(&sourceData->sourceClock,
+        packetTime, sourceData->inputPosition, nominalFrameSec))
     discontinuity = true;
-  if (spiceData->sourceRateValid)
-    spiceData->sourceClock.frameSec = spiceData->sourceRateFrameSec;
+  if (sourceData->sourceRateValid)
+    sourceData->sourceClock.frameSec = sourceData->sourceRateFrameSec;
 
   /* Track phase variation around its local baseline, not its absolute value.
    * The absolute phase depends on the arbitrary local origin assigned to the
-   * SPICE multimedia clock and must not become buffer reserve. Positive
+   * source media clock and must not become buffer reserve. Positive
    * deviation means the latency model temporarily overstates how much audio
    * remains in the ring. */
   const double sourcePhaseSec =
-    spiceData->sourceClock.phaseResidualSec;
+    sourceData->sourceClock.phaseResidualSec;
   const double packetSec =
     frames * nominalFrameSec;
-  spiceData->sourcePacketDurationSec =
-    max(packetSec, spiceData->sourcePacketDurationSec *
+  sourceData->sourcePacketDurationSec =
+    max(packetSec, sourceData->sourcePacketDurationSec *
         exp(-packetSec / PLAYBACK_PHASE_RESERVE_DECAY_SEC));
 
-  if (!spiceData->sourcePhaseBaselineValid ||
-      spiceData->sourceClock.updates == 1)
+  if (!sourceData->sourcePhaseBaselineValid ||
+      sourceData->sourceClock.updates == 1)
   {
-    spiceData->sourcePhaseBaselineSec = sourcePhaseSec;
-    spiceData->sourcePhaseBaselineValid = true;
+    sourceData->sourcePhaseBaselineSec = sourcePhaseSec;
+    sourceData->sourcePhaseBaselineValid = true;
   }
   else
   {
     const double alpha =
       -expm1(-packetSec / PLAYBACK_PHASE_BASELINE_TIME_SEC);
-    spiceData->sourcePhaseBaselineSec +=
+    sourceData->sourcePhaseBaselineSec +=
       alpha * (sourcePhaseSec -
-        spiceData->sourcePhaseBaselineSec);
+        sourceData->sourcePhaseBaselineSec);
   }
 
   const double sourcePhaseDeviationSec =
     max(0.0, sourcePhaseSec -
-      spiceData->sourcePhaseBaselineSec);
-  spiceData->sourcePhaseReserveSec =
+      sourceData->sourcePhaseBaselineSec);
+  sourceData->sourcePhaseReserveSec =
     min(PLAYBACK_MAX_JITTER_SEC,
         max(sourcePhaseDeviationSec,
-          spiceData->sourcePhaseReserveSec *
+          sourceData->sourcePhaseReserveSec *
             exp(-packetSec /
               PLAYBACK_PHASE_RESERVE_DECAY_SEC)));
 
-  int64_t curTime = spiceData->sourceClock.time;
-  int64_t curPosition = spiceData->outputPosition;
+  int64_t curTime = sourceData->sourceClock.time;
+  int64_t curPosition = sourceData->outputPosition;
   const double sourceReserveFrames =
-    max(spiceData->sourcePacketDurationSec * 0.5,
-        spiceData->sourcePhaseReserveSec) *
+    max(sourceData->sourcePacketDurationSec * 0.5,
+        sourceData->sourcePhaseReserveSec) *
       audio.playback.sampleRate;
 
   // Receive the newest timing information from the audio device thread.
   PlaybackDeviceTick deviceTick;
   unsigned int deviceSequence;
   bool deviceClockBecameStable = false;
-  if (playbackReadDeviceTiming(spiceData->deviceTimingSequence,
+  if (playbackReadDeviceTiming(sourceData->deviceTimingSequence,
         &deviceTick, &deviceSequence))
   {
-    spiceData->deviceTimingSequence = deviceSequence;
-    spiceData->devPeriodFrames = deviceTick.periodFrames;
-    spiceData->devReadPosition =
+    sourceData->deviceTimingSequence = deviceSequence;
+    sourceData->devPeriodFrames = deviceTick.periodFrames;
+    sourceData->devReadPosition =
       deviceTick.nextPosition + deviceTick.periodFrames;
     const bool deviceClockUpdated =
-      playbackClockUpdate(&spiceData->deviceClock,
+      playbackClockUpdate(&sourceData->deviceClock,
           deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
     const bool outputClockUpdated =
       !audio.playback.backendResampler ||
-      playbackClockUpdate(&spiceData->outputClock,
+      playbackClockUpdate(&sourceData->outputClock,
           deviceTick.nextTime, deviceTick.outputPosition,
           nominalFrameSec);
     if (!deviceClockUpdated || !outputClockUpdated)
     {
-      playbackDeviceClockAcquireReset(spiceData);
+      playbackDeviceClockAcquireReset(sourceData);
       discontinuity = true;
     }
     else
       deviceClockBecameStable =
-        playbackDeviceClockAcquire(spiceData, deviceTick.nextTime);
+        playbackDeviceClockAcquire(sourceData, deviceTick.nextTime);
   }
 
   if (deviceClockBecameStable)
@@ -1376,16 +1559,16 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
      * acquisition model. Their position origins are otherwise unrelated, so
      * switching models would create a false phase step and drive the resampler
      * despite an already-correct ring level. Keep the source clock untouched:
-     * changing it would also disturb SPICE phase and jitter tracking. */
+     * changing it would also disturb source phase and jitter tracking. */
     const double rawDevicePosition =
-      playbackClockPosition(&spiceData->deviceClock, curTime);
-    spiceData->devicePositionOffsetFrames =
-      spiceData->devReadPosition - sourceReserveFrames -
+      playbackClockPosition(&sourceData->deviceClock, curTime);
+    sourceData->devicePositionOffsetFrames =
+      sourceData->devReadPosition - sourceReserveFrames -
         rawDevicePosition;
   }
 
   const int maxPeriodFrames =
-    max(audio.playback.deviceMaxPeriodFrames, spiceData->devPeriodFrames);
+    max(audio.playback.deviceMaxPeriodFrames, sourceData->devPeriodFrames);
   /* The device period, delivery jitter, packet phase, and resampler delay
    * define the minimum viable latency. latencyOffset is strictly an additive
    * user offset over that same minimum for both startup and steady state. */
@@ -1393,7 +1576,7 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     max(g_params.audioLatencyOffset, 0) *
       audio.playback.sampleRate / 1000.0;
   const double arrivalReserveFrames =
-    (spiceData->arrivalJitterSec + 0.001) *
+    (sourceData->arrivalJitterSec + 0.001) *
       audio.playback.sampleRate;
   const double minimumLowWaterReserveFrames =
     maxPeriodFrames * 0.1 + arrivalReserveFrames;
@@ -1418,28 +1601,28 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
   if ((discontinuity ||
        state == STREAM_STATE_KEEP_ALIVE ||
        state == STREAM_STATE_RESUMING) &&
-      spiceData->deviceClock.valid &&
-      spiceData->deviceClockStable)
+      sourceData->deviceClock.valid &&
+      sourceData->deviceClockStable)
   {
     devPosition = computeDevicePosition(curTime);
     const double slew = devPosition + targetBufferFrames - curPosition;
     const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
         (int64_t)INT_MAX);
-    const int actualSlew = playbackSlewBuffer(spiceData, slewFrames);
-    spiceData->outputPosition += actualSlew;
+    const int actualSlew = playbackSlewBuffer(sourceData, slewFrames);
+    sourceData->outputPosition += actualSlew;
     curPosition += actualSlew;
 
-    spiceData->offsetError         = 0.0;
-    spiceData->offsetErrorIntegral = 0.0;
-    spiceData->ratioIntegral       = 0.0;
+    sourceData->offsetError         = 0.0;
+    sourceData->offsetErrorIntegral = 0.0;
+    sourceData->ratioIntegral       = 0.0;
     playbackSetState(STREAM_STATE_RUN);
   }
 
   double actualLatencyFrames = 0.0;
   double actualOffsetError = 0.0;
-  if (spiceData->deviceClock.valid)
+  if (sourceData->deviceClock.valid)
   {
-    if (spiceData->deviceClockStable)
+    if (sourceData->deviceClockStable)
     {
       if (devPosition == DBL_MIN)
         devPosition = computeDevicePosition(curTime);
@@ -1452,23 +1635,23 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     else
     {
       actualLatencyFrames =
-        curPosition - spiceData->devReadPosition +
+        curPosition - sourceData->devReadPosition +
           sourceReserveFrames + resamplerDelayFrames;
       actualOffsetError =
         targetLatencyFrames - actualLatencyFrames;
     }
 
     const double error =
-      actualOffsetError - spiceData->offsetError;
+      actualOffsetError - sourceData->offsetError;
     const double periodSec = frames * nominalFrameSec;
     const double omega =
       2.0 * M_PI * PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ * periodSec;
     const double b = M_SQRT2 * omega;
     const double c = omega * omega;
 
-    spiceData->offsetError += b * error +
-      spiceData->offsetErrorIntegral;
-    spiceData->offsetErrorIntegral += c * error;
+    sourceData->offsetError += b * error +
+      sourceData->offsetErrorIntegral;
+    sourceData->offsetErrorIntegral += c * error;
   }
 
   /* Feed forward the measured source/device rate ratio, then use a slow,
@@ -1492,27 +1675,27 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
   const double ki =
     naturalFrequency * naturalFrequency / audio.playback.sampleRate;
   if (sourceRateBecameValid)
-    spiceData->ratioIntegral = 0.0;
+    sourceData->ratioIntegral = 0.0;
 
-  if (spiceData->deviceClockStable &&
-      spiceData->sourceRateValid &&
+  if (sourceData->deviceClockStable &&
+      sourceData->sourceRateValid &&
       rateClock->updates >= 2)
   {
     const double clockRatio = clamp(
-        spiceData->sourceRateFrameSec /
+        sourceData->sourceRateFrameSec /
           rateClock->frameSec,
         1.0 - PLAYBACK_MAX_RATE_CORRECTION,
         1.0 + PLAYBACK_MAX_RATE_CORRECTION);
-    spiceData->lastClockRatio = clockRatio;
+    sourceData->lastClockRatio = clockRatio;
   }
 
   const double periodSec = frames * nominalFrameSec;
-  /* SPICE timestamps have millisecond resolution. Do not resample in
+  /* source timestamps have millisecond resolution. Do not resample in
    * response to phase error that cannot be distinguished from quantization;
    * subtracting the deadband outside it keeps the response continuous. */
   const double phaseDeadbandFrames =
     PLAYBACK_PHASE_DEADBAND_SEC * audio.playback.sampleRate;
-  const double rawPhaseError = spiceData->offsetError;
+  const double rawPhaseError = sourceData->offsetError;
   double phaseError = rawPhaseError;
   if (fabs(phaseError) <= phaseDeadbandFrames)
     phaseError = 0.0;
@@ -1520,11 +1703,11 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     phaseError -= copysign(phaseDeadbandFrames, phaseError);
 
   const bool acquiringDeviceClock =
-    spiceData->deviceClock.valid && !spiceData->deviceClockStable;
+    sourceData->deviceClock.valid && !sourceData->deviceClockStable;
   double controllerKp = kp;
   double controllerKi = ki;
   double controllerError = phaseError;
-  double controllerBase = spiceData->lastClockRatio;
+  double controllerBase = sourceData->lastClockRatio;
 
   if (acquiringDeviceClock)
   {
@@ -1533,7 +1716,7 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     controllerKp =
       2.0 * acquireFrequency / audio.playback.sampleRate;
     controllerBase = 1.0;
-    spiceData->ratioIntegral = 0.0;
+    sourceData->ratioIntegral = 0.0;
 
     if (actualOffsetError <= 0.0)
       controllerError = 0.0;
@@ -1545,16 +1728,16 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     /* Acquisition correction is transient, not a clock-rate estimate. Start
      * the stable integral clean; the output-rate slew keeps the applied ratio
      * continuous across this transition. */
-    spiceData->ratioIntegral = 0.0;
+    sourceData->ratioIntegral = 0.0;
   }
   /* Use the unfiltered latency error here so filter lag cannot retain a phase
    * correction after the target has already been crossed. */
-  else if (spiceData->ratioIntegral * actualOffsetError <= 0.0)
-    spiceData->ratioIntegral = 0.0;
+  else if (sourceData->ratioIntegral * actualOffsetError <= 0.0)
+    sourceData->ratioIntegral = 0.0;
 
   const double candidateIntegral = acquiringDeviceClock ?
     0.0 :
-    spiceData->ratioIntegral +
+    sourceData->ratioIntegral +
       (deviceClockBecameStable ? 0.0 : controllerError * periodSec);
   const double phaseCorrection =
     controllerKp * controllerError +
@@ -1567,18 +1750,18 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
         1.0 - PLAYBACK_MAX_RATE_CORRECTION,
       1.0 + PLAYBACK_MAX_RATE_CORRECTION);
 
-  if (!acquiringDeviceClock && spiceData->deviceClockStable &&
+  if (!acquiringDeviceClock && sourceData->deviceClockStable &&
       (desiredRatio == boundedRatio ||
        (desiredRatio > boundedRatio && controllerError < 0.0) ||
        (desiredRatio < boundedRatio && controllerError > 0.0)))
-    spiceData->ratioIntegral = candidateIntegral;
+    sourceData->ratioIntegral = candidateIntegral;
 
   const double maxRatioStep =
     PLAYBACK_MAX_RATE_SLEW_PER_SEC * periodSec;
   const double ratio = clamp(boundedRatio,
-      spiceData->lastRatio - maxRatioStep,
-      spiceData->lastRatio + maxRatioStep);
-  spiceData->lastRatio = ratio;
+      sourceData->lastRatio - maxRatioStep,
+      sourceData->lastRatio + maxRatioStep);
+  sourceData->lastRatio = ratio;
 
   if (audio.playback.backendResampler)
   {
@@ -1586,8 +1769,8 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
         &audio.playback.backendResampleRatio, ratio,
         memory_order_release);
     const int outputFrames =
-      playbackAppendFrames(spiceData, spiceData->framesIn, frames);
-    spiceData->outputPosition += outputFrames;
+      playbackAppendFrames(sourceData, sourceData->framesIn, frames);
+    sourceData->outputPosition += outputFrames;
   }
   else
   {
@@ -1596,18 +1779,18 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     {
       SRC_DATA srcData =
       {
-        .data_in           = spiceData->framesIn +
+        .data_in           = sourceData->framesIn +
           consumed * audio.playback.channels,
-        .data_out          = spiceData->framesOut,
+        .data_out          = sourceData->framesOut,
         .input_frames      = frames - consumed,
-        .output_frames     = spiceData->framesOutSize,
+        .output_frames     = sourceData->framesOutSize,
         .input_frames_used = 0,
         .output_frames_gen = 0,
         .end_of_input      = 0,
         .src_ratio         = ratio
       };
 
-      int error = src_process(spiceData->src, &srcData);
+      int error = src_process(sourceData->src, &srcData);
       if (error)
       {
         DEBUG_ERROR("Resampling failed: %s", src_strerror(error));
@@ -1623,15 +1806,15 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
       }
 
       const int outputFrames = playbackAppendFrames(
-          spiceData, spiceData->framesOut, srcData.output_frames_gen);
+          sourceData, sourceData->framesOut, srcData.output_frames_gen);
 
       consumed += srcData.input_frames_used;
-      spiceData->outputPosition += outputFrames;
+      sourceData->outputPosition += outputFrames;
     }
   }
-  spiceData->inputPosition += frames;
+  sourceData->inputPosition += frames;
 
-  if (playbackGetState() == STREAM_STATE_SETUP_SPICE)
+  if (playbackGetState() == STREAM_STATE_SETUP_SOURCE)
   {
     /* At a packet boundary, targetLowWaterFrames is the physical ring target;
      * sourceReserveFrames accounts for the packet's average delivery phase
@@ -1696,10 +1879,10 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
     app_invalidateGraph(audio.playback.graph);
   }
 
-  if (now >= spiceData->nextLogTime)
+  if (now >= sourceData->nextLogTime)
   {
-    const double sourcePpm = spiceData->sourceRateValid ?
-      (spiceData->sourceRateFrameSec / nominalFrameSec - 1.0) * 1.0e6 :
+    const double sourcePpm = sourceData->sourceRateValid ?
+      (sourceData->sourceRateFrameSec / nominalFrameSec - 1.0) * 1.0e6 :
       0.0;
     const double devicePpm = rateClock->valid ?
       (rateClock->frameSec / nominalFrameSec - 1.0) * 1.0e6 :
@@ -1713,24 +1896,57 @@ void audio_playbackData(uint8_t * data, size_t size, uint32_t time)
         softwareLatencyMs,
         targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
         (ratio - 1.0) * 1.0e6, sourcePpm, devicePpm,
-        spiceData->arrivalJitterSec * 1000.0,
-        underruns, spiceData->bufferOverruns);
+        sourceData->arrivalJitterSec * 1000.0,
+        underruns, sourceData->bufferOverruns);
 
-    spiceData->bufferOverruns = 0;
-    spiceData->nextLogTime = now + INT64_C(5000000000);
+    sourceData->bufferOverruns = 0;
+    sourceData->nextLogTime = now + INT64_C(5000000000);
   }
 }
 
-bool audio_supportsRecord(void)
+static bool playbackGetFeedback(LG_AudioClock * clock)
+{
+  const PlaybackSourceData * sourceData = &audio.playback.sourceData;
+  if (!clock || !sourceData->deviceClock.valid ||
+      sourceData->deviceClock.position < 0.0 ||
+      sourceData->deviceClock.frameSec <= 0.0)
+    return false;
+
+  const uint64_t latency = audio.audioDev->playback.latency ?
+    audio.audioDev->playback.latency() : 0;
+
+  *clock = (LG_AudioClock)
+  {
+    .position = llrint(sourceData->deviceClock.position),
+    .time     = sourceData->deviceClock.time + latency * 1000,
+    .rate     = 1.0 / sourceData->deviceClock.frameSec,
+    .stable   = sourceData->deviceClockStable,
+  };
+  return true;
+}
+
+bool lgAudio_supportsRecord(void)
 {
   return audio.audioDev && audio.audioDev->record.start;
 }
 
 static void recordPushFrames(uint8_t * data, int frames)
 {
-  const int stride = atomic_load_explicit(
-      &audio.record.stride, memory_order_acquire);
-  purespice_writeAudio(data, frames * stride, 0);
+  if (frames <= 0)
+    return;
+
+  const uint32_t generation = atomic_load_explicit(
+      &audio.record.streamGeneration, memory_order_acquire);
+  if (!generation)
+    return;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  if (generation == atomic_load_explicit(
+        &audio.record.streamGeneration, memory_order_acquire) &&
+      audio.active.ops && audio.active.ops->recordData)
+    audio.active.ops->recordData(audio.active.opaque,
+        generation, data, frames, NULL);
+  LG_UNLOCK_SHARED(audio.activeLock);
 }
 
 static MsgBoxHandle recordCancelConfirmLocked(void)
@@ -1742,14 +1958,12 @@ static MsgBoxHandle recordCancelConfirmLocked(void)
   return handle;
 }
 
-static void realRecordStartLocked(
-    int channels, int sampleRate, PSAudioFormat format)
+static void realRecordStartLocked(const LG_AudioFormat * format)
 {
   audio.record.started = true;
-  atomic_store_explicit(&audio.record.stride,
-      channels * sizeof(uint16_t), memory_order_release);
+  audio.record.format  = *format;
 
-  audio.audioDev->record.start(channels, sampleRate, recordPushFrames);
+  audio.audioDev->record.start(format, recordPushFrames);
 
   // if a volume level was stored, set it before we return
   if (audio.record.volumeChannels)
@@ -1764,13 +1978,6 @@ static void realRecordStartLocked(
   if (g_params.micShowIndicator)
     app_showRecord(true);
 }
-
-struct AudioFormat
-{
-   int channels;
-   int sampleRate;
-   PSAudioFormat format;
-};
 
 static void recordConfirm(bool yes, void * opaque)
 {
@@ -1791,10 +1998,7 @@ static void recordConfirm(bool yes, void * opaque)
       !audio.record.shuttingDown && audio.audioDev)
   {
     DEBUG_INFO("Microphone access granted");
-    realRecordStartLocked(
-        audio.record.confirmChannels,
-        audio.record.confirmSampleRate,
-        audio.record.confirmFormat);
+    realRecordStartLocked(&audio.record.confirmFormat);
   }
   else if (yes)
     DEBUG_INFO("Ignoring stale microphone access confirmation");
@@ -1804,11 +2008,14 @@ static void recordConfirm(bool yes, void * opaque)
   LG_UNLOCK(audio.record.lock);
 }
 
-void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
+static void recordStart(const LG_AudioFormat * format)
 {
   LG_LOCK(audio.record.lock);
-  if (!audio.audioDev || audio.record.shuttingDown)
+  if (!audio.audioDev || audio.record.shuttingDown ||
+      !audioFormatValid(format))
   {
+    if (format && !audioFormatValid(format))
+      DEBUG_ERROR("Invalid recording format");
     LG_UNLOCK(audio.record.lock);
     return;
   }
@@ -1816,9 +2023,7 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   const bool restart = audio.record.started;
   if (audio.record.started)
   {
-    if (channels   == audio.record.lastChannels &&
-        sampleRate == audio.record.lastSampleRate &&
-        format     == audio.record.lastFormat)
+    if (audioFormatEqual(format, &audio.record.lastFormat))
     {
       LG_UNLOCK(audio.record.lock);
       return;
@@ -1828,25 +2033,21 @@ void audio_recordStart(int channels, int sampleRate, PSAudioFormat format)
   }
 
   MsgBoxHandle oldConfirm = recordCancelConfirmLocked();
-  audio.record.requested      = true;
-  audio.record.lastChannels   = channels;
-  audio.record.lastSampleRate = sampleRate;
-  audio.record.lastFormat     = format;
+  audio.record.requested  = true;
+  audio.record.lastFormat = *format;
 
   if (restart)
-    realRecordStartLocked(channels, sampleRate, format);
+    realRecordStartLocked(format);
   else if (g_state.micDefaultState == MIC_DEFAULT_DENY)
     DEBUG_INFO("Microphone access denied by default");
   else if (g_state.micDefaultState == MIC_DEFAULT_ALLOW)
   {
     DEBUG_INFO("Microphone access granted by default");
-    realRecordStartLocked(channels, sampleRate, format);
+    realRecordStartLocked(format);
   }
   else
   {
-    audio.record.confirmChannels   = channels;
-    audio.record.confirmSampleRate = sampleRate;
-    audio.record.confirmFormat     = format;
+    audio.record.confirmFormat     = *format;
     audio.record.confirmPending    = true;
     const uint64_t generation = ++audio.record.confirmGeneration;
     LG_UNLOCK(audio.record.lock);
@@ -1889,7 +2090,7 @@ static void realRecordStopLocked(void)
     app_showRecord(false);
 }
 
-void audio_recordStop(void)
+static void recordStop(void)
 {
   LG_LOCK(audio.record.lock);
   audio.record.requested = false;
@@ -1905,7 +2106,7 @@ void audio_recordStop(void)
   app_msgBoxClose(confirm);
 }
 
-void audio_recordToggleKeybind(int sc, void * opaque)
+void lgAudio_recordToggleKeybind(int sc, void * opaque)
 {
   LG_LOCK(audio.record.lock);
   if (!audio.audioDev || audio.record.shuttingDown)
@@ -1933,10 +2134,7 @@ void audio_recordToggleKeybind(int sc, void * opaque)
   else
   {
     DEBUG_INFO("Microphone recording started by user");
-    realRecordStartLocked(
-        audio.record.lastChannels,
-        audio.record.lastSampleRate,
-        audio.record.lastFormat);
+    realRecordStartLocked(&audio.record.lastFormat);
     started = true;
   }
   LG_UNLOCK(audio.record.lock);
@@ -1946,7 +2144,7 @@ void audio_recordToggleKeybind(int sc, void * opaque)
       started ? "Microphone enabled" : "Microphone disabled");
 }
 
-void audio_recordVolume(int channels, const uint16_t volume[])
+static void recordVolume(int channels, const uint16_t volume[])
 {
   LG_LOCK(audio.record.lock);
   if (!audio.audioDev || !audio.audioDev->record.volume ||
@@ -1971,7 +2169,7 @@ void audio_recordVolume(int channels, const uint16_t volume[])
   LG_UNLOCK(audio.record.lock);
 }
 
-void audio_recordMute(bool mute)
+static void recordMute(bool mute)
 {
   LG_LOCK(audio.record.lock);
   if (!audio.audioDev || !audio.audioDev->record.mute ||
@@ -1991,6 +2189,513 @@ void audio_recordMute(bool mute)
 
   audio.audioDev->record.mute(mute);
   LG_UNLOCK(audio.record.lock);
+}
+
+static bool bindingActiveNL(const AudioBinding * binding)
+{
+  return binding->ops &&
+    audio.active.ops    == binding->ops &&
+    audio.active.opaque == binding->opaque &&
+    audio.active.generation == binding->generation;
+}
+
+static void queueFeedback(const LG_AudioOps * ops, void * opaque,
+    uint32_t bindingGeneration, uint32_t generation,
+    const LG_AudioClock * clock)
+{
+  if (!audio.feedback.event || !audio.feedback.thread || !clock)
+    return;
+
+  LG_LOCK(audio.feedback.lock);
+  audio.feedback.ops        = ops;
+  audio.feedback.opaque     = opaque;
+  audio.feedback.bindingGeneration = bindingGeneration;
+  audio.feedback.generation = generation;
+  audio.feedback.clock      = *clock;
+  audio.feedback.pending    = true;
+  LG_UNLOCK(audio.feedback.lock);
+  lgSignalEvent(audio.feedback.event);
+}
+
+static void eventPlaybackStart(void * opaque, uint32_t generation,
+    const LG_AudioFormat * format, const LG_AudioClock * sourceClock)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  if (bindingActiveNL(binding))
+  {
+    LG_LOCK(audio.playback.sourceLock);
+    atomic_store_explicit(&audio.playback.streamGeneration,
+        generation, memory_order_release);
+    playbackStart(format, sourceClock);
+    LG_UNLOCK(audio.playback.sourceLock);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventPlaybackStop(void * opaque, uint32_t generation)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  if (bindingActiveNL(binding))
+  {
+    LG_LOCK(audio.playback.sourceLock);
+    if (atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == generation)
+    {
+      playbackSourceStop();
+      atomic_store_explicit(
+          &audio.playback.streamGeneration, 0, memory_order_release);
+    }
+    LG_UNLOCK(audio.playback.sourceLock);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventPlaybackVolume(void * opaque, uint32_t generation,
+    uint8_t channels, const uint16_t volume[])
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  if (bindingActiveNL(binding))
+  {
+    LG_LOCK(audio.playback.sourceLock);
+    if (volume &&
+        atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == generation)
+      playbackVolume(channels, volume);
+    LG_UNLOCK(audio.playback.sourceLock);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventPlaybackMute(void * opaque, uint32_t generation, bool mute)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  if (bindingActiveNL(binding))
+  {
+    LG_LOCK(audio.playback.sourceLock);
+    if (atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == generation)
+      playbackMute(mute);
+    LG_UNLOCK(audio.playback.sourceLock);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventPlaybackData(void * opaque, uint32_t generation,
+    const void * data, size_t frames, const LG_AudioClock * sourceClock)
+{
+  AudioBinding * binding = opaque;
+  const LG_AudioOps * ops;
+  void * providerOpaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  const bool active = bindingActiveNL(binding);
+  ops               = active ? binding->ops    : NULL;
+  providerOpaque    = active ? binding->opaque : NULL;
+  if (active)
+  {
+    LG_LOCK(audio.playback.sourceLock);
+    if (atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == generation)
+    {
+      playbackData(data, frames, sourceClock);
+
+      LG_AudioClock feedback;
+      if (ops->clockFeedback && playbackGetFeedback(&feedback))
+        queueFeedback(ops, providerOpaque, binding->generation,
+            generation, &feedback);
+    }
+    LG_UNLOCK(audio.playback.sourceLock);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventRecordStart(void * opaque, uint32_t generation,
+    const LG_AudioFormat * format)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  const bool active = bindingActiveNL(binding) &&
+    binding->ops->recordData;
+  if (active)
+  {
+    atomic_store_explicit(&audio.record.streamGeneration,
+        generation, memory_order_release);
+    recordStart(format);
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventRecordStop(void * opaque, uint32_t generation)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  const bool active = bindingActiveNL(binding);
+  if (active &&
+      atomic_load_explicit(&audio.record.streamGeneration,
+        memory_order_acquire) == generation)
+  {
+    atomic_store_explicit(
+        &audio.record.streamGeneration, 0, memory_order_release);
+    recordStop();
+  }
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventRecordVolume(void * opaque, uint32_t generation,
+    uint8_t channels, const uint16_t volume[])
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  const bool active = bindingActiveNL(binding);
+  if (active && volume &&
+      atomic_load_explicit(&audio.record.streamGeneration,
+        memory_order_acquire) == generation)
+    recordVolume(channels, volume);
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static void eventRecordMute(void * opaque, uint32_t generation, bool mute)
+{
+  AudioBinding * binding = opaque;
+
+  LG_LOCK_SHARED(audio.activeLock);
+  const bool active = bindingActiveNL(binding);
+  if (active &&
+      atomic_load_explicit(&audio.record.streamGeneration,
+        memory_order_acquire) == generation)
+    recordMute(mute);
+  LG_UNLOCK_SHARED(audio.activeLock);
+}
+
+static const LG_AudioEventOps eventOps =
+{
+  .playbackStart  = eventPlaybackStart,
+  .playbackStop   = eventPlaybackStop,
+  .playbackVolume = eventPlaybackVolume,
+  .playbackMute   = eventPlaybackMute,
+  .playbackData   = eventPlaybackData,
+  .recordStart    = eventRecordStart,
+  .recordStop     = eventRecordStop,
+  .recordVolume   = eventRecordVolume,
+  .recordMute     = eventRecordMute,
+};
+
+static bool validOps(const LG_AudioOps * ops)
+{
+  return ops && ops->name && ops->attach && ops->detach;
+}
+
+static AudioBinding makeBinding(const LG_AudioOps * ops, void * opaque)
+{
+  return (AudioBinding)
+  {
+    .ops        = ops,
+    .opaque     = opaque,
+    .available  = ops && !ops->setStatusListener,
+    .generation = 0,
+  };
+}
+
+static AudioBinding * nextBindingSlotNL(void)
+{
+  if (audio.transport.available)
+    return &audio.transport;
+  if (audio.fallback.available)
+    return &audio.fallback;
+  return NULL;
+}
+
+static void stopStreams(void)
+{
+  LG_LOCK(audio.playback.sourceLock);
+  if (audio.audioDev)
+    playbackStop();
+  atomic_store_explicit(
+      &audio.playback.streamGeneration, 0, memory_order_release);
+  LG_UNLOCK(audio.playback.sourceLock);
+
+  atomic_store_explicit(
+      &audio.record.streamGeneration, 0, memory_order_release);
+  recordStop();
+}
+
+/* providerLock must be held. dropActive suppresses calls into an endpoint
+ * which has already disappeared. */
+static void updateActive(bool dropActive)
+{
+  for (;;)
+  {
+    LG_LOCK_EXCLUSIVE(audio.activeLock);
+    AudioBinding * slot = nextBindingSlotNL();
+    AudioBinding next = slot ? *slot : (AudioBinding) { 0 };
+    const AudioBinding old = audio.active;
+    if (old.ops == next.ops && old.opaque == next.opaque &&
+        old.generation == next.generation)
+    {
+      audio.active = next;
+      LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+      return;
+    }
+    audio.active = (AudioBinding) { 0 };
+    LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+
+    if (old.ops && !dropActive)
+      old.ops->detach(old.opaque);
+    dropActive = false;
+    stopStreams();
+
+    LG_LOCK_EXCLUSIVE(audio.activeLock);
+    slot = nextBindingSlotNL();
+    if (!slot)
+    {
+      LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+      DEBUG_INFO("Audio is unavailable");
+      return;
+    }
+    next = *slot;
+    audio.active = next;
+    LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+
+    if (next.ops->attach(next.opaque, &eventOps, slot))
+    {
+      DEBUG_INFO("Using Audio: %s", next.ops->name);
+      return;
+    }
+
+    next.ops->detach(next.opaque);
+    stopStreams();
+
+    LG_LOCK_EXCLUSIVE(audio.activeLock);
+    if (audio.active.ops == next.ops &&
+        audio.active.opaque == next.opaque)
+      audio.active = (AudioBinding) { 0 };
+    if (slot->ops == next.ops && slot->opaque == next.opaque)
+      slot->available = false;
+    LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+
+    DEBUG_WARN("Failed to attach Audio provider: %s", next.ops->name);
+  }
+}
+
+static void fallbackStatusChanged(void * opaque,
+    const LG_AudioStatus * status)
+{
+  if (!status)
+    return;
+
+  LG_LOCK(audio.providerLock);
+  LG_LOCK_EXCLUSIVE(audio.activeLock);
+  const bool current = audio.fallback.ops &&
+    audio.fallback.opaque == opaque;
+  if (current)
+  {
+    audio.fallback.available  = status->available;
+    audio.fallback.generation = status->generation;
+  }
+  LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+  if (current)
+    updateActive(false);
+  LG_UNLOCK(audio.providerLock);
+}
+
+static void transportStatusChanged(void * opaque,
+    const LG_AudioStatus * status)
+{
+  if (!status)
+    return;
+
+  LG_LOCK(audio.providerLock);
+  LG_LOCK_EXCLUSIVE(audio.activeLock);
+  const bool current = audio.transport.ops &&
+    audio.transport.opaque == opaque;
+  if (current)
+  {
+    audio.transport.available  = status->available;
+    audio.transport.generation = status->generation;
+  }
+  LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+  if (current)
+    updateActive(false);
+  LG_UNLOCK(audio.providerLock);
+}
+
+static void setBinding(AudioBinding * target, const LG_AudioOps * ops,
+    void * opaque, LG_AudioStatusFn statusFn)
+{
+  if (ops && !validOps(ops))
+  {
+    DEBUG_ERROR("Invalid audio operations");
+    ops    = NULL;
+    opaque = NULL;
+  }
+
+  LG_LOCK(audio.providerLock);
+  const AudioBinding old = *target;
+  LG_UNLOCK(audio.providerLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
+
+  const AudioBinding next = makeBinding(ops, opaque);
+  LG_LOCK(audio.providerLock);
+  LG_LOCK_EXCLUSIVE(audio.activeLock);
+  *target = next;
+  LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+  updateActive(false);
+  LG_UNLOCK(audio.providerLock);
+
+  if (next.ops && next.ops->setStatusListener)
+    next.ops->setStatusListener(next.opaque, statusFn, next.opaque);
+}
+
+static int feedbackThread(void * opaque)
+{
+  while (lgWaitEvent(audio.feedback.event, TIMEOUT_INFINITE))
+  {
+    if (atomic_load_explicit(
+          &audio.feedback.stop, memory_order_acquire))
+      break;
+
+    const LG_AudioOps * ops;
+    void * providerOpaque;
+    uint32_t bindingGeneration;
+    uint32_t generation;
+    LG_AudioClock clock;
+
+    LG_LOCK(audio.feedback.lock);
+    const bool pending = audio.feedback.pending;
+    ops                = audio.feedback.ops;
+    providerOpaque     = audio.feedback.opaque;
+    bindingGeneration  = audio.feedback.bindingGeneration;
+    generation         = audio.feedback.generation;
+    clock              = audio.feedback.clock;
+    audio.feedback.pending = false;
+    LG_UNLOCK(audio.feedback.lock);
+
+    if (!pending || !ops || !ops->clockFeedback)
+      continue;
+
+    LG_LOCK_SHARED(audio.activeLock);
+    if (audio.active.ops == ops &&
+        audio.active.opaque == providerOpaque &&
+        audio.active.generation == bindingGeneration &&
+        atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == generation)
+      ops->clockFeedback(providerOpaque, generation, &clock);
+    LG_UNLOCK_SHARED(audio.activeLock);
+  }
+
+  return 0;
+}
+
+void lgAudio_init(void)
+{
+  LG_LOCK_INIT(audio.providerLock);
+  LG_RWLOCK_INIT(audio.activeLock);
+  LG_LOCK_INIT(audio.playback.sourceLock);
+  LG_LOCK_INIT(audio.record.lock);
+  LG_LOCK_INIT(audio.feedback.lock);
+  audio.record.shuttingDown = false;
+  atomic_init(&audio.playback.streamGeneration, 0);
+  atomic_init(&audio.record.streamGeneration, 0);
+  atomic_init(&audio.feedback.stop, false);
+  atomic_store_explicit(
+      &audio.playback.callbackState, PLAYBACK_CALLBACK_DISABLED,
+      memory_order_release);
+
+  audio.feedback.event = lgCreateEvent(true, 0);
+  if (audio.feedback.event &&
+      !lgCreateThread("audioFeedback", feedbackThread,
+        NULL, &audio.feedback.thread))
+  {
+    lgFreeEvent(audio.feedback.event);
+    audio.feedback.event = NULL;
+  }
+
+  for (int i = 0; i < LG_AUDIODEV_COUNT; ++i)
+    if (LG_AudioDevs[i]->init())
+    {
+      audio.audioDev = LG_AudioDevs[i];
+      DEBUG_INFO("Using AudioDev: %s", audio.audioDev->name);
+      return;
+    }
+
+  DEBUG_WARN("Failed to initialize an audio backend");
+}
+
+void lgAudio_free(void)
+{
+  lgAudio_setTransport(NULL, NULL);
+  lgAudio_setFallback(NULL, NULL);
+  stopStreams();
+
+  if (audio.feedback.thread)
+  {
+    atomic_store_explicit(
+        &audio.feedback.stop, true, memory_order_release);
+    lgSignalEvent(audio.feedback.event);
+    lgJoinThread(audio.feedback.thread, NULL);
+    audio.feedback.thread = NULL;
+  }
+  if (audio.feedback.event)
+  {
+    lgFreeEvent(audio.feedback.event);
+    audio.feedback.event = NULL;
+  }
+
+  LG_LOCK(audio.record.lock);
+  audio.record.shuttingDown = true;
+  audio.record.requested = false;
+  MsgBoxHandle confirm = recordCancelConfirmLocked();
+  struct LG_AudioDevOps * audioDev = audio.audioDev;
+  audio.audioDev = NULL;
+  LG_UNLOCK(audio.record.lock);
+
+  app_msgBoxClose(confirm);
+  if (audioDev)
+    audioDev->free();
+
+  LG_RWLOCK_FREE(audio.activeLock);
+  LG_LOCK_FREE(audio.playback.sourceLock);
+  LG_LOCK_FREE(audio.providerLock);
+  LG_LOCK_FREE(audio.record.lock);
+  LG_LOCK_FREE(audio.feedback.lock);
+}
+
+void lgAudio_setFallback(const LG_AudioOps * ops, void * opaque)
+{
+  setBinding(&audio.fallback, ops, opaque, fallbackStatusChanged);
+}
+
+void lgAudio_setTransport(const LG_AudioOps * ops, void * opaque)
+{
+  setBinding(&audio.transport, ops, opaque, transportStatusChanged);
+}
+
+void lgAudio_dropTransport(void)
+{
+  LG_LOCK(audio.providerLock);
+  LG_LOCK_EXCLUSIVE(audio.activeLock);
+  const AudioBinding old = audio.transport;
+  const bool wasActive = bindingActiveNL(&audio.transport);
+  audio.transport = (AudioBinding) { 0 };
+  LG_UNLOCK_EXCLUSIVE(audio.activeLock);
+  updateActive(wasActive);
+  LG_UNLOCK(audio.providerLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
 }
 
 #endif

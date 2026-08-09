@@ -18,32 +18,37 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#ifndef _H_LG_CLIENT_AUDIO_
+#define _H_LG_CLIENT_AUDIO_
+
+#include "interface/audio.h"
+
 #if ENABLE_AUDIO
 
-#include <stdbool.h>
-#include <purespice.h>
+void lgAudio_init(void);
+void lgAudio_free(void);
 
-void audio_init(void);
-void audio_free(void);
+void lgAudio_setFallback(const LG_AudioOps * ops, void * opaque);
+void lgAudio_setTransport(const LG_AudioOps * ops, void * opaque);
+void lgAudio_dropTransport(void);
 
-bool audio_supportsPlayback(void);
-void audio_playbackStart(int channels, int sampleRate, PSAudioFormat format,
-  uint32_t time);
-void audio_playbackStop(void);
-void audio_playbackVolume(int channels, const uint16_t volume[]);
-void audio_playbackMute(bool mute);
-void audio_playbackData(uint8_t * data, size_t size, uint32_t time);
-
-bool audio_supportsRecord(void);
-void audio_recordStart(int channels, int sampleRate, PSAudioFormat format);
-void audio_recordToggleKeybind(int sc, void * opaque);
-void audio_recordStop(void);
-void audio_recordVolume(int channels, const uint16_t volume[]);
-void audio_recordMute(bool mute);
+bool lgAudio_supportsPlayback(void);
+bool lgAudio_supportsRecord(void);
+void lgAudio_recordToggleKeybind(int sc, void * opaque);
 
 #else
 
-static inline void audio_init(void) {}
-static inline void audio_free(void) {}
+static inline void lgAudio_init(void) {}
+static inline void lgAudio_free(void) {}
+static inline void lgAudio_setFallback(
+    const LG_AudioOps * ops, void * opaque) {}
+static inline void lgAudio_setTransport(
+    const LG_AudioOps * ops, void * opaque) {}
+static inline void lgAudio_dropTransport(void) {}
+static inline bool lgAudio_supportsPlayback(void) { return false; }
+static inline bool lgAudio_supportsRecord(void) { return false; }
+static inline void lgAudio_recordToggleKeybind(int sc, void * opaque) {}
+
+#endif
 
 #endif

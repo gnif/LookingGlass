@@ -25,6 +25,8 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include "interface/audio.h"
+
 typedef int  (*LG_AudioPullFn)(uint8_t * dst, int frames);
 typedef void (*LG_AudioPushFn)(uint8_t * src, int frames);
 
@@ -50,14 +52,14 @@ struct LG_AudioDevOps
      * stream.
      * Note: the pull function returns f32 samples
      */
-    bool (*setup)(int channels, int sampleRate, int requestedPeriodFrames,
+    bool (*setup)(const LG_AudioFormat * format, int requestedPeriodFrames,
       bool requestResampler, bool * resamplerEnabled,
       int * maxPeriodFrames, int * startFrames, LG_AudioPullFn pullFn);
 
     /* called when there is data available to start playback */
     void (*start)(void);
 
-    /* called when SPICE reports the audio stream has stopped */
+    /* called when the source reports the audio stream has stopped */
     void (*stop)(void);
 
     /* [optional] called to set the volume of the channels */
@@ -77,12 +79,10 @@ struct LG_AudioDevOps
 
   struct
   {
-    /* start the record stream
-     * Note: currently SPICE only supports S16 samples so always assume so
-     */
-    void (*start)(int channels, int sampleRate, LG_AudioPushFn pushFn);
+    /* start the record stream using the requested interleaved format */
+    void (*start)(const LG_AudioFormat * format, LG_AudioPushFn pushFn);
 
-    /* called when SPICE reports the audio stream has stopped */
+    /* called when the source reports the audio stream has stopped */
     void (*stop)(void);
 
     /* [optional] called to set the volume of the channels */

@@ -58,6 +58,9 @@
 #include "core.h"
 #include "app.h"
 #include "audio.h"
+#if ENABLE_AUDIO
+#include "audio_spice.h"
+#endif
 #include "keybind.h"
 #include "clipboard.h"
 #include "kb.h"
@@ -1025,9 +1028,15 @@ static int renderThread(void * unused)
 
   if (g_state.transport &&
       g_state.transportOps->sessionValid(g_state.transport))
+  {
     lgInput_setTransport(NULL, NULL);
+    lgAudio_setTransport(NULL, NULL);
+  }
   else
+  {
     lgInput_dropTransport();
+    lgAudio_dropTransport();
+  }
 
   core_stopCursorThread();
   core_stopFrameThread();
@@ -1075,7 +1084,10 @@ int main_cursorThread(void * unused)
       }
 
       if (status == LG_TRANSPORT_DISCONNECTED)
+      {
         lgInput_dropTransport();
+        lgAudio_dropTransport();
+      }
       app_setState(status == LG_TRANSPORT_DISCONNECTED ?
         APP_STATE_RESTART : APP_STATE_SHUTDOWN);
       if (status != LG_TRANSPORT_DISCONNECTED)
@@ -1216,6 +1228,7 @@ int main_frameThread(void * unused)
       if (status == LG_TRANSPORT_DISCONNECTED)
       {
         lgInput_dropTransport();
+        lgAudio_dropTransport();
         app_setState(APP_STATE_RESTART);
       }
       else if (status == LG_TRANSPORT_END)
@@ -1503,6 +1516,13 @@ void spiceReady(void)
   atomic_store_explicit(&g_state.spiceReady, true, memory_order_release);
   if (g_params.useSpiceInput)
     lgInput_setFallback(&LGI_Spice, NULL);
+#if ENABLE_AUDIO
+  if (g_params.useSpiceAudio)
+  {
+    lgaSpice_setAvailable(true);
+    lgAudio_setFallback(&LGA_Spice, NULL);
+  }
+#endif
 
   if (atomic_load_explicit(&g_state.spiceDisplayRequested,
         memory_order_acquire))
@@ -1687,9 +1707,6 @@ static void spice_setCursorState(bool visible, int x, int y)
 
 int spiceThread(void * arg)
 {
-  if (g_params.useSpiceAudio)
-    audio_init();
-
   const struct PSConfig config =
   {
     .host      = g_params.spiceHost,
@@ -1730,22 +1747,22 @@ int spiceThread(void * arg)
 #if ENABLE_AUDIO
     .playback =
     {
-      .enable      = audio_supportsPlayback(),
+      .enable      = g_params.useSpiceAudio && lgAudio_supportsPlayback(),
       .autoConnect = true,
-      .start       = audio_playbackStart,
-      .volume      = audio_playbackVolume,
-      .mute        = audio_playbackMute,
-      .stop        = audio_playbackStop,
-      .data        = audio_playbackData
+      .start       = lgaSpice_playbackStart,
+      .volume      = lgaSpice_playbackVolume,
+      .mute        = lgaSpice_playbackMute,
+      .stop        = lgaSpice_playbackStop,
+      .data        = lgaSpice_playbackData
     },
     .record =
     {
-      .enable      = audio_supportsRecord(),
+      .enable      = g_params.useSpiceAudio && lgAudio_supportsRecord(),
       .autoConnect = true,
-      .start       = audio_recordStart,
-      .volume      = audio_recordVolume,
-      .mute        = audio_recordMute,
-      .stop        = audio_recordStop
+      .start       = lgaSpice_recordStart,
+      .volume      = lgaSpice_recordVolume,
+      .mute        = lgaSpice_recordMute,
+      .stop        = lgaSpice_recordStop
     }
 #endif
   };
@@ -1770,12 +1787,19 @@ int spiceThread(void * arg)
   }
 
   lgInput_setFallback(NULL, NULL);
+  lgAudio_setFallback(NULL, NULL);
+#if ENABLE_AUDIO
+  lgaSpice_setAvailable(false);
+#endif
   purespice_disconnect();
 
 end:
 
   lgInput_setFallback(NULL, NULL);
-  audio_free();
+  lgAudio_setFallback(NULL, NULL);
+#if ENABLE_AUDIO
+  lgaSpice_setAvailable(false);
+#endif
 
   // if the connection was disconnected intentionally we don't want to shutdown
   // so that the user can see the message box and take action
@@ -1886,6 +1910,7 @@ static int lg_run(void)
   LG_LOCK_INIT(l_cursorRepaint.lock);
   frameTimingInit();
   lgInput_init();
+  lgAudio_init();
 
 #ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
@@ -2356,6 +2381,11 @@ restart:
     g_state.transportOps->getInputOps(g_state.transport, &inputOpaque) : NULL;
   lgInput_setTransport(inputOps, inputOpaque);
 
+  void              * audioOpaque = NULL;
+  const LG_AudioOps * audioOps    = g_state.transportOps->getAudioOps ?
+    g_state.transportOps->getAudioOps(g_state.transport, &audioOpaque) : NULL;
+  lgAudio_setTransport(audioOps, audioOpaque);
+
   if (inputOps || lgInput_available())
     keybind_inputRegister();
   checkUUID();
@@ -2373,6 +2403,7 @@ restart:
     if (unlikely(!g_state.transportOps->sessionValid(g_state.transport)))
     {
       lgInput_dropTransport();
+      lgAudio_dropTransport();
       atomic_store_explicit(
           &g_state.lgHostConnected, false, memory_order_release);
       DEBUG_INFO("Waiting for the host to restart...");
@@ -2394,6 +2425,7 @@ restart:
     core_stopFrameThread();
     core_stopCursorThread();
     lgInput_dropTransport();
+    lgAudio_dropTransport();
     g_state.transportOps->disconnect(g_state.transport);
 
     app_setState(APP_STATE_RUNNING);
@@ -2440,10 +2472,16 @@ static void lg_shutdown(void)
   if (g_state.transportOps)
   {
     lgInput_dropTransport();
+    if (g_state.transport &&
+        g_state.transportOps->sessionValid(g_state.transport))
+      lgAudio_setTransport(NULL, NULL);
+    else
+      lgAudio_dropTransport();
     g_state.transportOps->destroy(&g_state.transport);
   }
 
   lgInput_free();
+  lgAudio_free();
 
   if (g_state.frameEvent)
   {
