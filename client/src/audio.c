@@ -1525,7 +1525,16 @@ static void playbackData(const void * data, size_t frameCount,
     inputFrames = sourceData->framesIn;
   }
 
-  bool discontinuity = sourceClock && sourceClock->discontinuity;
+  const bool providerRateControl =
+    audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
+  /* Do not carry an underrun as buffer debt. Provider feedback is bounded,
+   * so repaying a guest stall by rate correction would discard resumed audio
+   * for many seconds. Rebase at the first packet instead. */
+  const bool providerUnderrun =
+    providerRateControl && playbackGetState() == STREAM_STATE_RUN &&
+    ringbuffer_getCount(audio.playback.buffer) < 0;
+  bool discontinuity =
+    providerUnderrun || (sourceClock && sourceClock->discontinuity);
   const int64_t packetTime =
     playbackMapMediaTime(sourceData, sourceClock, frames,
         audio.playback.sampleRate, now, &discontinuity);
@@ -1556,8 +1565,6 @@ static void playbackData(const void * data, size_t frameCount,
 
   const bool sourceRateWasValid =
     sourceData->sourceRateValid;
-  const bool providerRateControl =
-    audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
   const int64_t sourceRateTimeMs = providerRateControl ?
     (now - sourceData->mediaLocalOrigin) / INT64_C(1000000) :
     sourceData->mediaTimeMs;
@@ -1719,6 +1726,11 @@ static void playbackData(const void * data, size_t frameCount,
     sourceData->offsetError         = 0.0;
     sourceData->offsetErrorIntegral = 0.0;
     sourceData->ratioIntegral       = 0.0;
+    if (providerUnderrun)
+    {
+      sourceData->lastRatio        = 1.0;
+      sourceData->nextFeedbackTime = 0;
+    }
     playbackSetState(STREAM_STATE_RUN);
   }
   else if ((discontinuity ||
