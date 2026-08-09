@@ -26,18 +26,7 @@
 #include <EGL/egl.h>
 #include "common/types.h"
 #include "common/debug.h"
-
-typedef enum LG_ClipboardData
-{
-  LG_CLIPBOARD_DATA_TEXT = 0,
-  LG_CLIPBOARD_DATA_PNG,
-  LG_CLIPBOARD_DATA_BMP,
-  LG_CLIPBOARD_DATA_TIFF,
-  LG_CLIPBOARD_DATA_JPEG,
-
-  LG_CLIPBOARD_DATA_NONE // enum max, not a data type
-}
-LG_ClipboardData;
+#include "interface/clipboard.h"
 
 typedef enum LG_DSProperty
 {
@@ -135,9 +124,6 @@ typedef struct LG_DSInitParams
   bool jitRender;
 }
 LG_DSInitParams;
-
-typedef void (* LG_ClipboardReplyFn)(void * opaque, const LG_ClipboardData type,
-    uint8_t * data, uint32_t size);
 
 typedef struct LG_DSGLContext
   * LG_DSGLContext;
@@ -262,7 +248,7 @@ struct LG_DisplayServerOps
   bool (*cbInit)(void);
   void (*cbNotice)(LG_ClipboardData type);
   void (*cbRelease)(void);
-  void (*cbRequest)(LG_ClipboardData type);
+  void (*cbRequest)(LG_ClipboardRequest request, LG_ClipboardData type);
 };
 
 #ifdef ENABLE_EGL

@@ -28,6 +28,7 @@
 #include "common/framebuffer.h"
 #include "common/types.h"
 #include "interface/audio.h"
+#include "interface/clipboard.h"
 #include "interface/input.h"
 
 #define LG_TRANSPORT_MAX_DAMAGE_RECTS LG_MAX_FRAME_DAMAGE_RECTS
@@ -254,6 +255,11 @@ typedef struct LG_TransportOps
   /* Queried after connect. The returned operations and opaque value remain
    * valid until disconnect; NULL indicates that this session has no audio. */
   const LG_AudioOps *(*getAudioOps)(LG_Transport * transport,
+      void ** opaque);
+  /* Queried after connect. The returned operations and opaque value remain
+   * valid until disconnect; NULL indicates that this session has no
+   * clipboard. */
+  const LG_ClipboardOps *(*getClipboardOps)(LG_Transport * transport,
       void ** opaque);
   bool (*attachRenderer)(LG_Transport * transport,
       const LG_RendererInterop * interop);

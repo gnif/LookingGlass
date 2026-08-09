@@ -158,6 +158,7 @@ set(SOURCES
   src/font.c
   src/util.c
   src/clipboard.c
+  src/clipboard_spice.c
   src/kb.c
   src/kb_hid.c
   src/gl_dynprocs.c

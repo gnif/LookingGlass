@@ -299,148 +299,31 @@ void app_handleEnterEvent(bool entered)
 
 void app_clipboardRelease(void)
 {
-  if (!g_params.clipboardToVM)
-    return;
-
-  purespice_clipboardRelease();
+  lgClipboard_release();
 }
 
 void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
 {
-  if (!g_params.clipboardToVM)
+  if (count < 0)
     return;
-
-  if (count == 0)
-  {
-    purespice_clipboardRelease();
-    return;
-  }
-
-  PSDataType conv[count];
-  for(int i = 0; i < count; ++i)
-    conv[i] = cb_lgTypeToSpiceType(types[i]);
-
-  purespice_clipboardGrab(conv, count);
+  lgClipboard_notifyTypes(types, (size_t)count);
 }
 
-void app_clipboardNotifySize(const LG_ClipboardData type, size_t size)
+void app_clipboardData(LG_ClipboardRequest request,
+    const LG_ClipboardData type, const void * data, size_t size)
 {
-  if (!g_params.clipboardToVM)
-    return;
-
-  if (type == LG_CLIPBOARD_DATA_NONE)
-  {
-    purespice_clipboardRelease();
-    return;
-  }
-
-  const PSDataType spiceType = cb_lgTypeToSpiceType(type);
-  if (spiceType == SPICE_DATA_NONE)
-    return;
-
-  if (!purespice_clipboardDataStart(spiceType, size))
-  {
-    DEBUG_ERROR("Failed to start a %zu-byte SPICE clipboard transfer", size);
-    return;
-  }
-
-  g_state.cbWriteType = spiceType;
-  g_state.cbChunked   = true;
-  g_state.cbXfer      = size;
+  lgClipboard_data(request, type, data, size);
 }
 
-void app_clipboardData(const LG_ClipboardData type, uint8_t * data, size_t size)
+void app_clipboardAbort(LG_ClipboardRequest request)
 {
-  if (!g_params.clipboardToVM)
-    return;
-
-  const PSDataType spiceType = cb_lgTypeToSpiceType(type);
-  if (spiceType == SPICE_DATA_NONE)
-    return;
-
-  if (size && !data)
-  {
-    DEBUG_ERROR("SPICE clipboard data is NULL");
-    return;
-  }
-
-  if (g_state.cbChunked)
-  {
-    if (spiceType != g_state.cbWriteType)
-    {
-      DEBUG_ERROR("SPICE clipboard transfer type changed");
-      return;
-    }
-
-    if (size > g_state.cbXfer)
-    {
-      DEBUG_ERROR("SPICE clipboard chunk exceeds the remaining transfer size");
-      return;
-    }
-
-    if (size && !purespice_clipboardData(spiceType, data, size))
-    {
-      DEBUG_ERROR("Failed to send SPICE clipboard data");
-      return;
-    }
-
-    g_state.cbXfer -= size;
-    if (g_state.cbXfer == 0)
-    {
-      g_state.cbWriteType = SPICE_DATA_NONE;
-      g_state.cbChunked   = false;
-    }
-    return;
-  }
-
-  if (!purespice_clipboardDataStart(spiceType, size))
-  {
-    DEBUG_ERROR("Failed to start a %zu-byte SPICE clipboard transfer", size);
-    return;
-  }
-
-  if (size && !purespice_clipboardData(spiceType, data, size))
-    DEBUG_ERROR("Failed to send SPICE clipboard data");
+  lgClipboard_abort(request);
 }
 
-bool app_clipboardRequest(const LG_ClipboardReplyFn replyFn, void * opaque)
+bool app_clipboardRequest(LG_ClipboardData type,
+    LG_ClipboardReplyFn replyFn, void * opaque)
 {
-  if (!g_params.clipboardToLocal || !replyFn || !g_state.cbRequestList)
-    return false;
-
-  const PSDataType type = atomic_load_explicit(
-      &g_state.cbRemoteType, memory_order_acquire);
-  struct CBRequest * cbr = malloc(sizeof(*cbr));
-  if (!cbr)
-  {
-    DEBUG_ERROR("out of memory");
-    return false;
-  }
-
-  cbr->type    = type;
-  cbr->replyFn = replyFn;
-  cbr->opaque  = opaque;
-
-  if (!ll_push(g_state.cbRequestList, cbr))
-  {
-    free(cbr);
-    return false;
-  }
-
-  if (purespice_clipboardRequest(type))
-    return true;
-
-  /*
-   * Queue the callback before sending so a fast response cannot arrive before
-   * its request is visible. If another thread has already consumed it, the
-   * callback owns both cbr and opaque and the request completed successfully
-   * from the caller's perspective.
-   */
-  if (!ll_removeData(g_state.cbRequestList, cbr))
-    return true;
-
-  free(cbr);
-  return false;
+  return lgClipboard_request(type, replyFn, opaque);
 }
 
 static int mapSpiceToImGuiButton(uint32_t button)

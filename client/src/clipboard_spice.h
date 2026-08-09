@@ -18,26 +18,20 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_CLIENT_CLIPBOARD_
-#define _H_LG_CLIENT_CLIPBOARD_
+#ifndef _H_LG_CLIENT_CLIPBOARD_SPICE_
+#define _H_LG_CLIENT_CLIPBOARD_SPICE_
 
 #include "interface/clipboard.h"
 
-void lgClipboard_init(void);
-void lgClipboard_free(void);
-void lgClipboard_setLocalAvailable(bool available);
+#include <purespice.h>
 
-void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque);
-void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque);
-void lgClipboard_dropTransport(void);
+extern const LG_ClipboardOps LGC_Spice;
 
-void lgClipboard_release(void);
-void lgClipboard_notifyTypes(
-    const LG_ClipboardData types[], size_t count);
-void lgClipboard_data(LG_ClipboardRequest request,
-    LG_ClipboardData type, const void * data, size_t size);
-void lgClipboard_abort(LG_ClipboardRequest request);
-bool lgClipboard_request(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque);
+void lgcSpice_setAvailable(bool available);
+
+void lgcSpice_notice(PSDataType type);
+void lgcSpice_data(PSDataType type, uint8_t * buffer, uint32_t size);
+void lgcSpice_release(void);
+void lgcSpice_request(PSDataType type);
 
 #endif

@@ -108,9 +108,11 @@ static bool getCompositor(char * dst, size_t size)
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
+  memset(&wlCb, 0, sizeof(wlCb));
   LG_LOCK_INIT(wlWm.surfaceLock);
   LG_LOCK_INIT(wlWm.pendingHDRLock);
   LG_LOCK_INIT(wlWm.hdrLock);
+  LG_LOCK_INIT(wlCb.lock);
   wlWm.desktop        = WL_Desktops[0];
   atomic_init(&wlWm.lockActive, false);
   atomic_init(&wlWm.cmFeaturesDone, false);
@@ -207,6 +209,7 @@ static void waylandShutdown(void)
 
 static void waylandFree(void)
 {
+  waylandCBFree();
   waylandIdleFree();
   waylandPresentationFree();
   waylandWindowFree();
@@ -215,6 +218,7 @@ static void waylandFree(void)
   waylandColorMgmtFree();
   waylandRegistryFree();
   waylandCursorFree();
+  waylandPollFree();
   wl_display_disconnect(wlWm.display);
   LG_LOCK_FREE(wlWm.hdrLock);
   LG_LOCK_FREE(wlWm.pendingHDRLock);

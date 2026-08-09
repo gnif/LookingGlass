@@ -263,7 +263,7 @@ void libdecor_pollWait(struct wl_display * display, int epollFd,
   for (int i = 0; i < count; ++i)
   {
     struct WaylandPoll * poll = events[i].data.ptr;
-    if (!poll->removed)
+    if (!atomic_load_explicit(&poll->removed, memory_order_acquire))
       poll->callback(events[i].events, poll->opaque);
   }
 }

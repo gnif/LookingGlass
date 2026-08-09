@@ -25,6 +25,7 @@
 
 #include <errno.h>
 #include <sys/epoll.h>
+#include <unistd.h>
 #include <wayland-client.h>
 
 #include "common/debug.h"
@@ -47,84 +48,150 @@ bool waylandPollInit(void)
   return wlWm.desktop->pollInit(wlWm.display);
 }
 
-void waylandWait(unsigned int time)
+static void waylandPollDestroyNode(struct WaylandPoll * node)
 {
-  wlWm.desktop->pollWait(wlWm.display, wlWm.epollFd, time);
-  INTERLOCKED_SECTION(wlWm.pollFreeLock,
-  {
-    struct WaylandPoll * node;
-    struct WaylandPoll * temp;
-    wl_list_for_each_safe(node, temp, &wlWm.pollFree, link)
-    {
-      wl_list_remove(&node->link);
-      free(node);
-    }
-  });
+  if (node->cleanup)
+    node->cleanup(node->opaque);
+  free(node);
 }
 
-static void waylandPollRemoveNode(struct WaylandPoll * node)
+static void waylandPollDestroyList(struct wl_list * list)
 {
-  INTERLOCKED_SECTION(wlWm.pollLock,
+  struct WaylandPoll * node;
+  struct WaylandPoll * temp;
+  wl_list_for_each_safe(node, temp, list, link)
   {
     wl_list_remove(&node->link);
-  });
+    waylandPollDestroyNode(node);
+  }
 }
 
-bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events)
+static void waylandPollTakeList(struct wl_list * source,
+    struct wl_list * destination)
+{
+  struct WaylandPoll * node;
+  struct WaylandPoll * temp;
+  wl_list_for_each_safe(node, temp, source, link)
+  {
+    wl_list_remove(&node->link);
+    wl_list_insert(destination, &node->link);
+  }
+}
+
+void waylandWait(unsigned int time)
+{
+  INTERLOCKED_SECTION(wlWm.pollFreeLock,
+  {
+    ++wlWm.pollWaiters;
+  });
+
+  wlWm.desktop->pollWait(wlWm.display, wlWm.epollFd, time);
+
+  struct wl_list retired;
+  wl_list_init(&retired);
+  INTERLOCKED_SECTION(wlWm.pollFreeLock,
+  {
+    if (--wlWm.pollWaiters == 0)
+      waylandPollTakeList(&wlWm.pollFree, &retired);
+  });
+  waylandPollDestroyList(&retired);
+}
+
+void waylandPollFree(void)
+{
+  if (wlWm.epollFd >= 0)
+  {
+    close(wlWm.epollFd);
+    wlWm.epollFd = -1;
+  }
+
+  struct wl_list active;
+  struct wl_list retired;
+  wl_list_init(&active);
+  wl_list_init(&retired);
+  INTERLOCKED_SECTION(wlWm.pollLock,
+  {
+    waylandPollTakeList(&wlWm.poll, &active);
+  });
+
+  INTERLOCKED_SECTION(wlWm.pollFreeLock,
+  {
+    waylandPollTakeList(&wlWm.pollFree, &retired);
+  });
+  waylandPollDestroyList(&active);
+  waylandPollDestroyList(&retired);
+
+  LG_LOCK_FREE(wlWm.pollFreeLock);
+  LG_LOCK_FREE(wlWm.pollLock);
+}
+
+bool waylandPollRegisterWithCleanup(int fd, WaylandPollCallback callback,
+    void * opaque, WaylandPollCleanup cleanup, uint32_t events)
 {
   struct WaylandPoll * node = malloc(sizeof(*node));
   if (!node)
     return false;
 
   node->fd       = fd;
-  node->removed  = false;
   node->callback = callback;
+  node->cleanup  = cleanup;
   node->opaque   = opaque;
+  atomic_init(&node->removed, false);
 
-  INTERLOCKED_SECTION(wlWm.pollLock,
-  {
-    wl_list_insert(&wlWm.poll, &node->link);
-  });
-
+  LG_LOCK(wlWm.pollLock);
   if (epoll_ctl(wlWm.epollFd, EPOLL_CTL_ADD, fd, &(struct epoll_event) {
     .events = events,
     .data = (epoll_data_t) { .ptr = node },
   }) < 0)
   {
-    waylandPollRemoveNode(node);
+    LG_UNLOCK(wlWm.pollLock);
     free(node);
     return false;
   }
+  wl_list_insert(&wlWm.poll, &node->link);
+  LG_UNLOCK(wlWm.pollLock);
 
   return true;
+}
+
+bool waylandPollRegister(int fd, WaylandPollCallback callback,
+    void * opaque, uint32_t events)
+{
+  return waylandPollRegisterWithCleanup(
+      fd, callback, opaque, NULL, events);
 }
 
 bool waylandPollUnregister(int fd)
 {
   struct WaylandPoll * node = NULL;
-  INTERLOCKED_SECTION(wlWm.pollLock,
+  LG_LOCK(wlWm.pollLock);
+  struct WaylandPoll * current;
+  wl_list_for_each(current, &wlWm.poll, link)
   {
-    wl_list_for_each(node, &wlWm.poll, link)
+    if (current->fd == fd)
     {
-      if (node->fd == fd)
-        break;
+      node = current;
+      atomic_store_explicit(
+          &node->removed, true, memory_order_release);
+      break;
     }
-  });
+  }
 
   if (!node)
   {
+    LG_UNLOCK(wlWm.pollLock);
     DEBUG_ERROR("Attempt to unregister a fd that was not registered: %d", fd);
     return false;
   }
 
-  node->removed = true;
   if (epoll_ctl(wlWm.epollFd, EPOLL_CTL_DEL, fd, NULL) < 0)
   {
-    DEBUG_ERROR("Failed to unregistered from epoll: %s", strerror(errno));
+    LG_UNLOCK(wlWm.pollLock);
+    DEBUG_ERROR("Failed to unregister from epoll: %s", strerror(errno));
     return false;
   }
-
-  waylandPollRemoveNode(node);
+  wl_list_remove(&node->link);
+  LG_UNLOCK(wlWm.pollLock);
 
   INTERLOCKED_SECTION(wlWm.pollFreeLock,
   {

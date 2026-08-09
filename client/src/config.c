@@ -755,26 +755,19 @@ bool config_load(int argc, char * argv[])
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
   g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
 
+  g_params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
+  g_params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
+
   if ((g_params.useSpice = option_get_bool("spice", "enable")))
   {
     g_params.spiceHost         = option_get_string("spice", "host");
     g_params.spicePort         = option_get_int   ("spice", "port");
 
     g_params.useSpiceInput     = option_get_bool("spice", "input"    );
-    g_params.useSpiceClipboard = option_get_bool("spice", "clipboard");
+    g_params.useSpiceClipboard =
+      option_get_bool("spice", "clipboard") &&
+      (g_params.clipboardToVM || g_params.clipboardToLocal);
     g_params.useSpiceAudio     = option_get_bool("spice", "audio"    );
-
-    if (g_params.useSpiceClipboard)
-    {
-      g_params.clipboardToVM     = option_get_bool("spice", "clipboardToVM"   );
-      g_params.clipboardToLocal  = option_get_bool("spice", "clipboardToLocal");
-      g_params.useSpiceClipboard = g_params.clipboardToVM || g_params.clipboardToLocal;
-    }
-    else
-    {
-      g_params.clipboardToVM    = false;
-      g_params.clipboardToLocal = false;
-    }
   }
 
   g_params.audioDebug = option_get_bool("audio", "debug");

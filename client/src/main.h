@@ -123,13 +123,6 @@ struct AppState
   LG_Lock              lgrLock;
   bool                 useDMA;
 
-  bool                 cbAvailable;
-  _Atomic(PSDataType)  cbRemoteType;
-  PSDataType           cbWriteType;
-  bool                 cbChunked;
-  size_t               cbXfer;
-  struct ll          * cbRequestList;
-
   LG_Transport              * transport;
   const LG_TransportOps     * transportOps;
   LG_TransportFeatureFlags    transportFeatures;
@@ -241,13 +234,6 @@ struct AppParams
   bool                 micShowIndicator;
   enum MicDefaultState micDefaultState;
   bool                 audioSyncVolume;
-};
-
-struct CBRequest
-{
-  PSDataType          type;
-  LG_ClipboardReplyFn replyFn;
-  void              * opaque;
 };
 
 struct KeybindHandle

@@ -63,6 +63,7 @@
 #endif
 #include "keybind.h"
 #include "clipboard.h"
+#include "clipboard_spice.h"
 #include "kb.h"
 #include "egl_dynprocs.h"
 #include "gl_dynprocs.h"
@@ -108,11 +109,7 @@ l_cursorRepaint;
 
 _Atomic(enum RunState) p_appState = APP_STATE_RUNNING;
 
-struct AppState g_state =
-{
-  .cbRemoteType = SPICE_DATA_NONE,
-  .cbWriteType  = SPICE_DATA_NONE,
-};
+struct AppState g_state = { 0 };
 struct CursorState g_cursor;
 
 // this structure is initialized in config.c
@@ -1031,11 +1028,13 @@ static int renderThread(void * unused)
   {
     lgInput_setTransport(NULL, NULL);
     lgAudio_setTransport(NULL, NULL);
+    lgClipboard_setTransport(NULL, NULL);
   }
   else
   {
     lgInput_dropTransport();
     lgAudio_dropTransport();
+    lgClipboard_dropTransport();
   }
 
   core_stopCursorThread();
@@ -1087,6 +1086,7 @@ int main_cursorThread(void * unused)
       {
         lgInput_dropTransport();
         lgAudio_dropTransport();
+        lgClipboard_dropTransport();
       }
       app_setState(status == LG_TRANSPORT_DISCONNECTED ?
         APP_STATE_RESTART : APP_STATE_SHUTDOWN);
@@ -1229,6 +1229,7 @@ int main_frameThread(void * unused)
       {
         lgInput_dropTransport();
         lgAudio_dropTransport();
+        lgClipboard_dropTransport();
         app_setState(APP_STATE_RESTART);
       }
       else if (status == LG_TRANSPORT_END)
@@ -1507,6 +1508,8 @@ static void checkUUID(void)
 
   g_params.useSpiceInput = false;
   lgInput_setFallback(NULL, NULL);
+  lgcSpice_setAvailable(false);
+  lgClipboard_setFallback(NULL, NULL);
   atomic_store_explicit(&g_state.spiceClose, true, memory_order_release);
   purespice_disconnect();
 }
@@ -1553,6 +1556,10 @@ void spiceReady(void)
   }
   else
     DEBUG_WARN("Failed to obtain SPICE server information");
+
+  if (g_params.useSpiceClipboard &&
+      !atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
+    lgClipboard_setFallback(&LGC_Spice, NULL);
 
   if (g_params.useSpiceInput)
     keybind_inputRegister();
@@ -1721,10 +1728,11 @@ int spiceThread(void * arg)
     .clipboard =
     {
       .enable  = g_params.useSpiceClipboard,
-      .notice  = cb_spiceNotice,
-      .data    = cb_spiceData,
-      .release = cb_spiceRelease,
-      .request = cb_spiceRequest
+      .notice  = lgcSpice_notice,
+      .data    = lgcSpice_data,
+      .release = lgcSpice_release,
+      .request = lgcSpice_request,
+      .status  = lgcSpice_setAvailable,
     },
     .display  =
     {
@@ -1784,10 +1792,13 @@ int spiceThread(void * arg)
         DEBUG_ERROR("failed to process spice messages");
       goto end;
     }
+
   }
 
   lgInput_setFallback(NULL, NULL);
   lgAudio_setFallback(NULL, NULL);
+  lgcSpice_setAvailable(false);
+  lgClipboard_setFallback(NULL, NULL);
 #if ENABLE_AUDIO
   lgaSpice_setAvailable(false);
 #endif
@@ -1795,8 +1806,10 @@ int spiceThread(void * arg)
 
 end:
 
+  lgcSpice_setAvailable(false);
   lgInput_setFallback(NULL, NULL);
   lgAudio_setFallback(NULL, NULL);
+  lgClipboard_setFallback(NULL, NULL);
 #if ENABLE_AUDIO
   lgaSpice_setAvailable(false);
 #endif
@@ -1911,6 +1924,7 @@ static int lg_run(void)
   frameTimingInit();
   lgInput_init();
   lgAudio_init();
+  lgClipboard_init();
 
 #ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
@@ -2214,9 +2228,9 @@ static int lg_run(void)
   }
 
   g_state.ds->startup();
-  g_state.cbAvailable = g_state.ds->cbInit && g_state.ds->cbInit();
-  if (g_state.cbAvailable)
-    g_state.cbRequestList = ll_new();
+  const bool clipboardAvailable =
+    g_state.ds->cbInit && g_state.ds->cbInit();
+  lgClipboard_setLocalAvailable(clipboardAvailable);
 
   if (g_params.captureOnStart)
     core_setGrab(true);
@@ -2386,6 +2400,13 @@ restart:
     g_state.transportOps->getAudioOps(g_state.transport, &audioOpaque) : NULL;
   lgAudio_setTransport(audioOps, audioOpaque);
 
+  void * clipboardOpaque = NULL;
+  const LG_ClipboardOps * clipboardOps =
+    g_state.transportOps->getClipboardOps ?
+      g_state.transportOps->getClipboardOps(
+          g_state.transport, &clipboardOpaque) : NULL;
+  lgClipboard_setTransport(clipboardOps, clipboardOpaque);
+
   if (inputOps || lgInput_available())
     keybind_inputRegister();
   checkUUID();
@@ -2404,6 +2425,7 @@ restart:
     {
       lgInput_dropTransport();
       lgAudio_dropTransport();
+      lgClipboard_dropTransport();
       atomic_store_explicit(
           &g_state.lgHostConnected, false, memory_order_release);
       DEBUG_INFO("Waiting for the host to restart...");
@@ -2426,6 +2448,7 @@ restart:
     core_stopCursorThread();
     lgInput_dropTransport();
     lgAudio_dropTransport();
+    lgClipboard_dropTransport();
     g_state.transportOps->disconnect(g_state.transport);
 
     app_setState(APP_STATE_RUNNING);
@@ -2474,14 +2497,21 @@ static void lg_shutdown(void)
     lgInput_dropTransport();
     if (g_state.transport &&
         g_state.transportOps->sessionValid(g_state.transport))
+    {
       lgAudio_setTransport(NULL, NULL);
+      lgClipboard_setTransport(NULL, NULL);
+    }
     else
+    {
       lgAudio_dropTransport();
+      lgClipboard_dropTransport();
+    }
     g_state.transportOps->destroy(&g_state.transport);
   }
 
   lgInput_free();
   lgAudio_free();
+  lgClipboard_setLocalAvailable(false);
 
   if (g_state.frameEvent)
   {
@@ -2503,12 +2533,7 @@ static void lg_shutdown(void)
 
   if (g_state.ds)
     g_state.ds->shutdown();
-
-  if (g_state.cbRequestList)
-  {
-    ll_free(g_state.cbRequestList);
-    g_state.cbRequestList = NULL;
-  }
+  lgClipboard_free();
 
   app_releaseAllKeybinds();
   ll_free(g_state.bindings);

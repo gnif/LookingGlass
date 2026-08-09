@@ -59,14 +59,16 @@
 #include "motion.h"
 
 typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
+typedef void (*WaylandPollCleanup)(void * opaque);
 
 struct WaylandPoll
 {
-  int fd;
-  bool removed;
+  int                 fd;
+  atomic_bool         removed;
   WaylandPollCallback callback;
-  void * opaque;
-  struct wl_list link;
+  WaylandPollCleanup  cleanup;
+  void              * opaque;
+  struct wl_list      link;
 };
 
 struct OutputColorDescription;
@@ -273,40 +275,39 @@ struct WaylandDSState
 
   struct wl_list poll; // WaylandPoll::link
   struct wl_list pollFree; // WaylandPoll::link
-  LG_Lock pollLock;
-  LG_Lock pollFreeLock;
-  int epollFd;
-  int displayFd;
+  LG_Lock        pollLock;
+  LG_Lock        pollFreeLock;
+  unsigned int   pollWaiters;
+  int            epollFd;
+  int            displayFd;
 };
 
 struct WCBTransfer
 {
   struct CountedBuffer * data;
-  const char ** mimetypes;
+  const char           ** mimetypes;
 };
 
 struct ClipboardRead
 {
-  int fd;
-  size_t size;
-  size_t numRead;
-  uint8_t * buf;
-  enum LG_ClipboardData type;
-  struct wl_data_offer * offer;
+  int                    fd;
+  size_t                 size;
+  size_t                 numRead;
+  uint8_t              * buf;
+  LG_ClipboardRequest    request;
+  LG_ClipboardData       type;
 };
 
 struct WCBState
 {
   struct wl_data_device * dataDevice;
-  char lgMimetype[64];
+  char                    lgMimetype[64];
 
-  char * mimetypes[LG_CLIPBOARD_DATA_NONE];
+  char                 * mimetypes[LG_CLIPBOARD_DATA_NONE];
   struct wl_data_offer * offer;
   struct wl_data_offer * dndOffer;
 
-  bool haveRequest;
-  LG_ClipboardData type;
-
+  LG_Lock                lock;
   struct ClipboardRead * currentRead;
 };
 
@@ -320,7 +321,8 @@ void waylandActivationRequestActivation(void);
 
 // clipboard module
 bool waylandCBInit(void);
-void waylandCBRequest(LG_ClipboardData type);
+void waylandCBFree(void);
+void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type);
 void waylandCBNotice(LG_ClipboardData type);
 void waylandCBRelease(void);
 void waylandCBInvalidate(void);
@@ -407,8 +409,11 @@ void waylandOutputUpdateHDRWhiteLevel(void);
 
 // poll module
 bool waylandPollInit(void);
+void waylandPollFree(void);
 void waylandWait(unsigned int time);
 bool waylandPollRegister(int fd, WaylandPollCallback callback, void * opaque, uint32_t events);
+bool waylandPollRegisterWithCleanup(int fd, WaylandPollCallback callback,
+    void * opaque, WaylandPollCleanup cleanup, uint32_t events);
 bool waylandPollUnregister(int fd);
 
 // presentation module

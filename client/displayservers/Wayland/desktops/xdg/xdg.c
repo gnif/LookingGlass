@@ -300,7 +300,7 @@ void xdg_pollWait(struct wl_display * display, int epollFd,
   bool sawDisplay = false;
   for (int i = 0; i < count; ++i) {
     struct WaylandPoll * poll = events[i].data.ptr;
-    if (!poll->removed)
+    if (!atomic_load_explicit(&poll->removed, memory_order_acquire))
       poll->callback(events[i].events, poll->opaque);
     if (poll->fd == state.displayFd)
       sawDisplay = true;
