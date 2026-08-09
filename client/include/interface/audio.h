@@ -120,6 +120,7 @@ typedef struct LG_AudioEventOps
       const void * data, size_t frames,
       const LG_AudioClock * sourceClock);
 
+  /* May repeat with the same generation to update an active stream format. */
   void (*recordStart)(void * opaque, uint32_t generation,
       const LG_AudioFormat * format);
   void (*recordStop)(void * opaque, uint32_t generation);

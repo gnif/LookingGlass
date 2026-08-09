@@ -2156,7 +2156,7 @@ static void realRecordStartLocked(const LG_AudioFormat * format)
   audio.audioDev->record.start(format, recordPushFrames);
 
   // if a volume level was stored, set it before we return
-  if (audio.record.volumeChannels)
+  if (audio.record.volumeChannels && audio.audioDev->record.volume)
     audio.audioDev->record.volume(
         audio.record.volumeChannels,
         audio.record.volume);
@@ -2201,7 +2201,8 @@ static void recordConfirm(bool yes, void * opaque)
 static void recordStart(const LG_AudioFormat * format)
 {
   LG_LOCK(audio.record.lock);
-  if (!audio.audioDev || audio.record.shuttingDown ||
+  if (!audio.audioDev || !audio.audioDev->record.start ||
+      audio.record.shuttingDown ||
       !audioFormatValid(format))
   {
     if (format && !audioFormatValid(format))
@@ -2269,6 +2270,29 @@ static void recordStart(const LG_AudioFormat * format)
 
   LG_UNLOCK(audio.record.lock);
   app_msgBoxClose(oldConfirm);
+}
+
+static void recordReconfigure(const LG_AudioFormat * format)
+{
+  LG_LOCK(audio.record.lock);
+  if (!audio.audioDev || !audio.audioDev->record.start ||
+      audio.record.shuttingDown || !audioFormatValid(format))
+  {
+    LG_UNLOCK(audio.record.lock);
+    return;
+  }
+
+  audio.record.lastFormat = *format;
+  if (audio.record.started &&
+      !audioFormatEqual(format, &audio.record.format))
+  {
+    realRecordStopLocked();
+    realRecordStartLocked(format);
+  }
+  else if (audio.record.confirmPending)
+    audio.record.confirmFormat = *format;
+
+  LG_UNLOCK(audio.record.lock);
 }
 
 static void realRecordStopLocked(void)
@@ -2522,9 +2546,12 @@ static void eventRecordStart(void * opaque, uint32_t generation,
     binding->ops->recordData;
   if (active)
   {
-    atomic_store_explicit(&audio.record.streamGeneration,
-        generation, memory_order_release);
-    recordStart(format);
+    const uint32_t previous = atomic_exchange_explicit(
+        &audio.record.streamGeneration, generation, memory_order_acq_rel);
+    if (previous == generation)
+      recordReconfigure(format);
+    else
+      recordStart(format);
   }
   LG_UNLOCK_SHARED(audio.activeLock);
 }

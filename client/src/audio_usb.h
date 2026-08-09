@@ -31,6 +31,7 @@ LGA_USBState * lgaUsb_create(void);
 void lgaUsb_destroy(LGA_USBState * state);
 
 LG_USBRedir * lgaUsb_redir(LGA_USBState * state);
+bool lgaUsb_recording(const LGA_USBState * state);
 
 extern const LG_AudioOps LGA_USB;
 

@@ -67,12 +67,15 @@ struct LGA_USBState
   const LG_AudioEventOps * events;
   void                   * eventOpaque;
 
-  LG_AudioFormat           streamFormat;
-  uint32_t                 streamGeneration;
+  LG_AudioFormat           playbackFormat;
+  uint32_t                 playbackGeneration;
+  LG_AudioFormat           recordFormat;
+  uint32_t                 recordGeneration;
   uint32_t                 generationSerial;
-  int64_t                  clockOrigin;
-  atomic_uint_fast64_t     position;
-  atomic_uint              deliveryGeneration;
+  int64_t                  playbackClockOrigin;
+  atomic_uint_fast64_t     playbackPosition;
+  atomic_uint              playbackDeliveryGeneration;
+  atomic_uint              recordDeliveryGeneration;
   atomic_uint              inFlight;
 };
 
@@ -153,12 +156,12 @@ static void endCallback(USBAudioCallbackFrame * frame,
   atomic_fetch_sub_explicit(inFlight, 1, memory_order_seq_cst);
 }
 
-static LG_AudioClock makeClock(
+static LG_AudioClock makePlaybackClock(
     const LGA_USBState * state, uint64_t position)
 {
   /* USB redirection carries no publisher timestamp or USB frame number.
    * Preserve the sample timeline, but do not claim a measured source rate. */
-  const uint32_t sampleRate = state->streamFormat.sampleRate;
+  const uint32_t sampleRate = state->playbackFormat.sampleRate;
   const int64_t elapsed =
     position / sampleRate * USB_AUDIO_NS_PER_SECOND +
     position % sampleRate * USB_AUDIO_NS_PER_SECOND / sampleRate;
@@ -166,7 +169,7 @@ static LG_AudioClock makeClock(
   return (LG_AudioClock)
   {
     .position = position,
-    .time     = state->clockOrigin + elapsed,
+    .time     = state->playbackClockOrigin + elapsed,
     .rate     = 0.0,
     .stable   = false,
   };
@@ -197,11 +200,18 @@ static bool attachmentCurrentNL(const LGA_USBState * state,
     state->eventOpaque           == target->opaque;
 }
 
-static bool eventCurrentNL(const LGA_USBState * state,
+static bool playbackEventCurrentNL(const LGA_USBState * state,
     const USBAudioEventTarget * target, uint32_t streamGeneration)
 {
   return attachmentCurrentNL(state, target) &&
-    state->streamGeneration == streamGeneration;
+    state->playbackGeneration == streamGeneration;
+}
+
+static bool recordEventCurrentNL(const LGA_USBState * state,
+    const USBAudioEventTarget * target, uint32_t streamGeneration)
+{
+  return attachmentCurrentNL(state, target) &&
+    state->recordGeneration == streamGeneration;
 }
 
 static void endEvent(LGA_USBState * state, USBAudioEventTarget * target)
@@ -258,7 +268,7 @@ static void waitStatusCallbacks(const LGA_USBState * state)
     ;
 }
 
-static void usbAudioStart(
+static void usbPlaybackStart(
     void * opaque, uint32_t sampleRate, uint32_t channelMask)
 {
   LGA_USBState * state = opaque;
@@ -268,21 +278,22 @@ static void usbAudioStart(
   LG_AudioClock       clock;
 
   LG_LOCK(state->stateLock);
-  if (state->streamGeneration)
+  if (state->playbackGeneration)
   {
     LG_UNLOCK(state->stateLock);
     return;
   }
 
-  setStreamFormat(&state->streamFormat, sampleRate, channelMask);
+  setStreamFormat(&state->playbackFormat, sampleRate, channelMask);
   generation = state->generationSerial =
     nextGeneration(state->generationSerial);
-  state->streamGeneration = generation;
-  state->clockOrigin = (int64_t)nanotime();
-  atomic_store_explicit(&state->position, 0, memory_order_relaxed);
+  state->playbackGeneration  = generation;
+  state->playbackClockOrigin = (int64_t)nanotime();
   atomic_store_explicit(
-      &state->deliveryGeneration, 0, memory_order_seq_cst);
-  clock    = makeClock(state, 0);
+      &state->playbackPosition, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &state->playbackDeliveryGeneration, 0, memory_order_seq_cst);
+  clock    = makePlaybackClock(state, 0);
   const bool admitted = beginEventNL(state, &target);
   dispatch = admitted && target.events->playbackStart;
   if (admitted && !dispatch)
@@ -293,32 +304,32 @@ static void usbAudioStart(
     return;
 
   target.events->playbackStart(
-      target.opaque, generation, &state->streamFormat, &clock);
+      target.opaque, generation, &state->playbackFormat, &clock);
 
   LG_LOCK(state->stateLock);
-  if (eventCurrentNL(state, &target, generation))
-    atomic_store_explicit(&state->deliveryGeneration,
+  if (playbackEventCurrentNL(state, &target, generation))
+    atomic_store_explicit(&state->playbackDeliveryGeneration,
         generation, memory_order_seq_cst);
   LG_UNLOCK(state->stateLock);
   endEvent(state, &target);
 }
 
-static void usbAudioStop(void * opaque)
+static void usbPlaybackStop(void * opaque)
 {
   LGA_USBState * state = opaque;
   USBAudioEventTarget target;
 
   LG_LOCK(state->stateLock);
-  const uint32_t generation = state->streamGeneration;
+  const uint32_t generation = state->playbackGeneration;
   if (!generation)
   {
     LG_UNLOCK(state->stateLock);
     return;
   }
 
-  state->streamGeneration = 0;
+  state->playbackGeneration = 0;
   atomic_store_explicit(
-      &state->deliveryGeneration, 0, memory_order_seq_cst);
+      &state->playbackDeliveryGeneration, 0, memory_order_seq_cst);
   const bool admitted = beginEventNL(state, &target);
   LG_UNLOCK(state->stateLock);
 
@@ -337,23 +348,24 @@ static void usbAudioStop(void * opaque)
   endEvent(state, &target);
 }
 
-static void usbAudioData(void * opaque, const void * data, size_t frames)
+static void usbPlaybackData(
+    void * opaque, const void * data, size_t frames)
 {
   LGA_USBState * state = opaque;
   USBAudioCallbackFrame frame;
   beginCallback(state, &frame, &l_eventFrames, &state->inFlight);
 
   const uint64_t position = atomic_fetch_add_explicit(
-      &state->position, frames, memory_order_relaxed);
+      &state->playbackPosition, frames, memory_order_relaxed);
   const uint32_t generation = atomic_load_explicit(
-      &state->deliveryGeneration, memory_order_seq_cst);
+      &state->playbackDeliveryGeneration, memory_order_seq_cst);
   if (generation)
   {
     const LG_AudioEventOps * events = state->events;
     void                   * target = state->eventOpaque;
     if (events && events->playbackData)
     {
-      const LG_AudioClock clock = makeClock(state, position);
+      const LG_AudioClock clock = makePlaybackClock(state, position);
       events->playbackData(
           target, generation, data, frames, &clock);
     }
@@ -361,11 +373,86 @@ static void usbAudioData(void * opaque, const void * data, size_t frames)
   endCallback(&frame, &l_eventFrames, &state->inFlight);
 }
 
+static void usbRecordStart(
+    void * opaque, uint32_t sampleRate, uint32_t channelMask)
+{
+  LGA_USBState * state = opaque;
+  USBAudioEventTarget target;
+  bool                dispatch;
+  uint32_t            generation;
+
+  LG_LOCK(state->stateLock);
+  setStreamFormat(&state->recordFormat, sampleRate, channelMask);
+  generation = state->recordGeneration;
+  if (!generation)
+  {
+    generation = state->generationSerial =
+      nextGeneration(state->generationSerial);
+    state->recordGeneration = generation;
+  }
+  atomic_store_explicit(
+      &state->recordDeliveryGeneration, 0, memory_order_seq_cst);
+  const bool admitted = beginEventNL(state, &target);
+  dispatch = admitted && target.events->recordStart;
+  if (admitted && !dispatch)
+    endEvent(state, &target);
+  LG_UNLOCK(state->stateLock);
+
+  if (!dispatch)
+    return;
+
+  target.events->recordStart(
+      target.opaque, generation, &state->recordFormat);
+
+  LG_LOCK(state->stateLock);
+  if (recordEventCurrentNL(state, &target, generation))
+    atomic_store_explicit(&state->recordDeliveryGeneration,
+        generation, memory_order_seq_cst);
+  LG_UNLOCK(state->stateLock);
+  endEvent(state, &target);
+}
+
+static void usbRecordStop(void * opaque)
+{
+  LGA_USBState * state = opaque;
+  USBAudioEventTarget target;
+
+  LG_LOCK(state->stateLock);
+  const uint32_t generation = state->recordGeneration;
+  if (!generation)
+  {
+    LG_UNLOCK(state->stateLock);
+    return;
+  }
+
+  state->recordGeneration = 0;
+  atomic_store_explicit(
+      &state->recordDeliveryGeneration, 0, memory_order_seq_cst);
+  const bool admitted = beginEventNL(state, &target);
+  LG_UNLOCK(state->stateLock);
+
+  waitEvents(state);
+
+  if (!admitted)
+    return;
+
+  LG_LOCK(state->stateLock);
+  const bool dispatch = attachmentCurrentNL(state, &target) &&
+    target.events->recordStop;
+  LG_UNLOCK(state->stateLock);
+
+  if (dispatch)
+    target.events->recordStop(target.opaque, generation);
+  endEvent(state, &target);
+}
+
 static const LG_USBAudioEventOps l_usbAudioEvents =
 {
-  .start = usbAudioStart,
-  .stop  = usbAudioStop,
-  .data  = usbAudioData,
+  .playbackStart = usbPlaybackStart,
+  .playbackStop  = usbPlaybackStop,
+  .playbackData  = usbPlaybackData,
+  .recordStart   = usbRecordStart,
+  .recordStop    = usbRecordStop,
 };
 
 static void usbSetAvailable(void * opaque, bool available)
@@ -443,9 +530,14 @@ static bool usbAttach(void * opaque, const LG_AudioEventOps * events,
     return false;
 
   USBAudioEventTarget target;
-  LG_AudioClock       clock;
-  uint32_t            generation;
-  bool                dispatch;
+  LG_AudioFormat      playbackFormat;
+  LG_AudioFormat      recordFormat;
+  LG_AudioClock       playbackClock;
+  uint32_t            playbackGeneration;
+  uint32_t            recordGeneration;
+  bool                playbackDispatch;
+  bool                recordDispatch;
+  bool                admitted;
 
   for (;;)
   {
@@ -469,27 +561,60 @@ static bool usbAttach(void * opaque, const LG_AudioEventOps * events,
     nextGeneration(state->attachmentGeneration);
   state->events               = events;
   state->eventOpaque          = eventOpaque;
-  generation                  = state->streamGeneration;
-  dispatch = generation && events->playbackStart &&
+  playbackGeneration          = state->playbackGeneration;
+  recordGeneration            = state->recordGeneration;
+  playbackDispatch = playbackGeneration && events->playbackStart;
+  recordDispatch   = recordGeneration && events->recordStart;
+  admitted = (playbackDispatch || recordDispatch) &&
     beginEventNL(state, &target);
-  if (dispatch)
-    clock = makeClock(state, atomic_load_explicit(
-        &state->position, memory_order_relaxed));
+  playbackDispatch = playbackDispatch && admitted;
+  recordDispatch   = recordDispatch   && admitted;
+  if (playbackDispatch)
+  {
+    playbackFormat = state->playbackFormat;
+    playbackClock = makePlaybackClock(state, atomic_load_explicit(
+        &state->playbackPosition, memory_order_relaxed));
+  }
+  if (recordDispatch)
+    recordFormat = state->recordFormat;
   lgUsbRedir_setPlugged(state->redir, true);
   LG_UNLOCK(state->stateLock);
 
-  if (dispatch)
+  if (playbackDispatch)
   {
     target.events->playbackStart(
-        target.opaque, generation, &state->streamFormat, &clock);
+        target.opaque, playbackGeneration,
+        &playbackFormat, &playbackClock);
 
     LG_LOCK(state->stateLock);
-    if (eventCurrentNL(state, &target, generation))
-      atomic_store_explicit(&state->deliveryGeneration,
-          generation, memory_order_seq_cst);
+    if (playbackEventCurrentNL(
+          state, &target, playbackGeneration))
+      atomic_store_explicit(&state->playbackDeliveryGeneration,
+          playbackGeneration, memory_order_seq_cst);
     LG_UNLOCK(state->stateLock);
-    endEvent(state, &target);
   }
+
+  if (recordDispatch)
+  {
+    LG_LOCK(state->stateLock);
+    recordDispatch = recordEventCurrentNL(
+        state, &target, recordGeneration);
+    LG_UNLOCK(state->stateLock);
+
+    if (recordDispatch)
+      target.events->recordStart(
+          target.opaque, recordGeneration, &recordFormat);
+
+    LG_LOCK(state->stateLock);
+    if (recordDispatch &&
+        recordEventCurrentNL(state, &target, recordGeneration))
+      atomic_store_explicit(&state->recordDeliveryGeneration,
+          recordGeneration, memory_order_seq_cst);
+    LG_UNLOCK(state->stateLock);
+  }
+
+  if (admitted)
+    endEvent(state, &target);
 
   return true;
 }
@@ -515,7 +640,9 @@ static void usbDetach(void * opaque)
   const uint32_t attachmentGeneration =
     state->attachmentGeneration;
   atomic_store_explicit(
-      &state->deliveryGeneration, 0, memory_order_seq_cst);
+      &state->playbackDeliveryGeneration, 0, memory_order_seq_cst);
+  atomic_store_explicit(
+      &state->recordDeliveryGeneration, 0, memory_order_seq_cst);
   lgUsbRedir_setPlugged(state->redir, false);
   LG_UNLOCK(state->stateLock);
 
@@ -538,13 +665,14 @@ static bool usbClockFeedback(void * opaque, uint32_t generation,
   LGA_USBState * state = opaque;
 
   LG_LOCK(state->stateLock);
-  if (!state->attached || state->streamGeneration != generation)
+  if (!state->attached ||
+      state->playbackGeneration != generation)
   {
     LG_UNLOCK(state->stateLock);
     return false;
   }
 
-  const double nominalRate = state->streamFormat.sampleRate;
+  const double nominalRate = state->playbackFormat.sampleRate;
   const double rate = playbackClock &&
       targetRate >= nominalRate * 0.995 &&
       targetRate <= nominalRate * 1.005 ?
@@ -554,13 +682,31 @@ static bool usbClockFeedback(void * opaque, uint32_t generation,
   return true;
 }
 
+static bool usbRecordData(void * opaque, uint32_t generation,
+    const void * data, size_t frames,
+    const LG_AudioClock * sourceClock)
+{
+  (void)sourceClock;
+  LGA_USBState * state = opaque;
+  USBAudioCallbackFrame frame;
+  beginCallback(state, &frame, &l_eventFrames, &state->inFlight);
+
+  const bool valid = generation && generation == atomic_load_explicit(
+      &state->recordDeliveryGeneration, memory_order_seq_cst);
+  const bool result = valid &&
+    lgUsbAudio_recordData(state->device, data, frames);
+
+  endCallback(&frame, &l_eventFrames, &state->inFlight);
+  return result;
+}
+
 const LG_AudioOps LGA_USB =
 {
   .name              = "USB Audio",
   .setStatusListener = usbSetStatusListener,
   .attach            = usbAttach,
   .detach            = usbDetach,
-  .recordData        = NULL,
+  .recordData        = usbRecordData,
   .clockFeedback     = usbClockFeedback,
 };
 
@@ -573,13 +719,15 @@ LGA_USBState * lgaUsb_create(void)
   LG_LOCK_INIT(state->statusLock);
   LG_LOCK_INIT(state->stateLock);
   atomic_init(&state->available, false);
-  atomic_init(&state->position, 0);
-  atomic_init(&state->deliveryGeneration, 0);
+  atomic_init(&state->playbackPosition, 0);
+  atomic_init(&state->playbackDeliveryGeneration, 0);
+  atomic_init(&state->recordDeliveryGeneration, 0);
   atomic_init(&state->inFlight, 0);
   atomic_init(&state->statusInFlight, 0);
   atomic_init(&state->statusNextTicket, 0);
   atomic_init(&state->statusServingTicket, 0);
-  state->streamFormat = l_formatTemplate;
+  state->playbackFormat = l_formatTemplate;
+  state->recordFormat   = l_formatTemplate;
 
   state->device = lgUsbAudio_create(&l_usbAudioEvents, state);
   if (!state->device)
@@ -617,4 +765,9 @@ void lgaUsb_destroy(LGA_USBState * state)
 LG_USBRedir * lgaUsb_redir(LGA_USBState * state)
 {
   return state ? state->redir : NULL;
+}
+
+bool lgaUsb_recording(const LGA_USBState * state)
+{
+  return state && lgUsbAudio_recording(state->device);
 }

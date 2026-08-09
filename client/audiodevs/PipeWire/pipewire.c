@@ -915,7 +915,10 @@ static void pipewire_recordQueueFrames(const void * data, int frames)
     atomic_fetch_add_explicit(
         &pw.record.droppedFrames, frames - append, memory_order_relaxed);
 
-  if (occupancy == 0 && append > 0 && sem_post(&pw.record.sendWake) < 0)
+  /* Posting only when the producer observes an empty queue can lose a wake
+   * while the consumer drains the previous batch. Always notify for appended
+   * data; the sender coalesces all queued frames when it wakes. */
+  if (append > 0 && sem_post(&pw.record.sendWake) < 0)
     atomic_fetch_add_explicit(
         &pw.record.signalErrors, 1, memory_order_relaxed);
 }
@@ -961,9 +964,13 @@ static void pipewire_onRecordProcess(void * userdata)
 static void pipewire_recordStart(const LG_AudioFormat * format,
     LG_AudioPushFn pushFn)
 {
-  const int channels   = format->channelCount;
-  const int sampleRate = format->sampleRate;
-  const int sampleSize = pipewire_sampleSize(format->sampleFormat);
+  const int channels     = format->channelCount;
+  const int sampleRate   = format->sampleRate;
+  const int sampleSize   = pipewire_sampleSize(format->sampleFormat);
+  const int periodFrames = max(sampleRate / 1000, 1);
+  char requestedNodeLatency[32];
+  snprintf(requestedNodeLatency, sizeof(requestedNodeLatency), "%d/%d",
+      periodFrames, sampleRate);
   const struct spa_pod * params[1];
   uint8_t buffer[1024];
   struct spa_pod_builder b = SPA_POD_BUILDER_INIT(buffer, sizeof(buffer));
@@ -1000,6 +1007,7 @@ static void pipewire_recordStart(const LG_AudioFormat * format,
       PW_KEY_MEDIA_TYPE    , "Audio",
       PW_KEY_MEDIA_CATEGORY, "Capture",
       PW_KEY_MEDIA_ROLE    , "Music",
+      PW_KEY_NODE_LATENCY  , requestedNodeLatency,
       NULL
     );
   if (!props)

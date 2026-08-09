@@ -1838,6 +1838,8 @@ int spiceThread(void * arg)
 #if ENABLE_USB_AUDIO
     if (usbRedir && !lgUsbRedir_process(usbRedir))
       DEBUG_WARN("Failed to process USB audio redirection");
+    if (usbAudio)
+      processTimeout = lgaUsb_recording(usbAudio) ? 1 : 10;
 #endif
 
     if ((status = purespice_process(processTimeout)) != PS_STATUS_RUN)

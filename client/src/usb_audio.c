@@ -21,9 +21,13 @@
 #include "usb_audio.h"
 
 #include "common/debug.h"
+#include "common/locking.h"
+#include "common/ringbuffer.h"
+#include "common/time.h"
 
 #include <usbredirparser.h>
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -32,29 +36,50 @@
 
 enum
 {
-  USB_AUDIO_VENDOR_ID          = 0x043e,
-  USB_AUDIO_PRODUCT_ID         = 0x0001,
-  USB_AUDIO_DEVICE_VERSION     = 0x010b,
-  USB_AUDIO_CONFIGURATION      = 1,
-  USB_AUDIO_CONTROL_IFACE      = 0,
-  USB_AUDIO_STREAM_IFACE       = 1,
-  USB_AUDIO_CLOCK_ID           = 1,
-  USB_AUDIO_DATA_ENDPOINT      = 0x01,
-  USB_AUDIO_FEEDBACK_ENDPOINT  = 0x81,
-  USB_AUDIO_DATA_EP_INDEX      = 1,
-  USB_AUDIO_FEEDBACK_EP_INDEX  = 17,
-  USB_AUDIO_DATA_INTERVAL      = 1,
-  USB_AUDIO_FEEDBACK_INTERVAL  = 8,
-  USB_AUDIO_FEEDBACK_BINTERVAL = 4,
-  USB_AUDIO_FEEDBACK_SIZE      = 4,
-  USB_AUDIO_FEEDBACK_MAX_QUEUE = 512,
-  USB_AUDIO_SAMPLE_SIZE        = 3,
-  USB_AUDIO_HS_PACKET_FRAMES   = 25,
-  USB_AUDIO_FS_PACKET_FRAMES   = 97,
-  USB_AUDIO_DESCRIPTOR_BASE    = 81,
-  USB_AUDIO_STREAM_DESC_SIZE   = 53,
-  USB_AUDIO_OTHER_SPEED_SIZE   =
-    USB_AUDIO_DESCRIPTOR_BASE + USB_AUDIO_STREAM_DESC_SIZE,
+  USB_AUDIO_VENDOR_ID                 = 0x043e,
+  USB_AUDIO_PRODUCT_ID                = 0x0001,
+  USB_AUDIO_DEVICE_VERSION            = 0x010d,
+  USB_AUDIO_CONFIGURATION             = 1,
+  USB_AUDIO_PLAYBACK_CONTROL_IFACE    = 0,
+  USB_AUDIO_PLAYBACK_IFACE            = 1,
+  USB_AUDIO_RECORD_CONTROL_IFACE      = 2,
+  USB_AUDIO_RECORD_IFACE              = 3,
+  USB_AUDIO_PLAYBACK_CLOCK_ID         = 1,
+  USB_AUDIO_RECORD_CLOCK_ID           = 1,
+  USB_AUDIO_PLAYBACK_DATA_ENDPOINT    = 0x01,
+  USB_AUDIO_FEEDBACK_ENDPOINT         = 0x81,
+  USB_AUDIO_RECORD_DATA_ENDPOINT      = 0x82,
+  USB_AUDIO_PLAYBACK_DATA_EP_INDEX    = 1,
+  USB_AUDIO_FEEDBACK_EP_INDEX         = 17,
+  USB_AUDIO_RECORD_DATA_EP_INDEX      = 18,
+  USB_AUDIO_PLAYBACK_DATA_INTERVAL    = 1,
+  USB_AUDIO_FEEDBACK_INTERVAL         = 8,
+  USB_AUDIO_RECORD_DATA_INTERVAL      = 4,
+  USB_AUDIO_FEEDBACK_BINTERVAL        = 4,
+  USB_AUDIO_RECORD_DATA_BINTERVAL     = 3,
+  USB_AUDIO_FEEDBACK_SIZE             = 4,
+  USB_AUDIO_FEEDBACK_MAX_QUEUE        = 512,
+  USB_AUDIO_SAMPLE_SIZE               = 3,
+  USB_AUDIO_PLAYBACK_HS_PACKET_FRAMES = 25,
+  USB_AUDIO_FS_PACKET_FRAMES          = 97,
+  USB_AUDIO_RECORD_PACKET_FRAMES      = 97,
+  USB_AUDIO_RECORD_PACKETS_PER_SECOND = 2000,
+  USB_AUDIO_RECORD_PACKET_INTERVAL_NS = 500000,
+  USB_AUDIO_RECORD_RATE_SCALE         = 65536,
+  USB_AUDIO_RECORD_RATE_SETTLE_NS     = 2000000000,
+  USB_AUDIO_RECORD_RATE_GAP_NS        = 100000000,
+  USB_AUDIO_RECORD_RATE_DENOMINATOR   =
+    USB_AUDIO_RECORD_PACKETS_PER_SECOND * USB_AUDIO_RECORD_RATE_SCALE,
+  USB_AUDIO_RECORD_MAX_BATCH          = 64,
+  USB_AUDIO_RECORD_QUEUE_FRAMES       = 3840,
+  USB_AUDIO_RECORD_FRAME_SIZE         =
+    2 * USB_AUDIO_SAMPLE_SIZE,
+  USB_AUDIO_RECORD_PACKET_SIZE        =
+    USB_AUDIO_RECORD_PACKET_FRAMES * USB_AUDIO_RECORD_FRAME_SIZE,
+  USB_AUDIO_CONFIGURATION_DESC_SIZE   = 9,
+  USB_AUDIO_FUNCTION_CONTROL_SIZE     = 63,
+  USB_AUDIO_PLAYBACK_STREAM_DESC_SIZE = 53,
+  USB_AUDIO_RECORD_STREAM_DESC_SIZE   = 46,
 };
 
 enum
@@ -74,11 +99,22 @@ enum
 #define USB_AUDIO_COUNT_LAYOUT(alt, channels, mask) + 1
 enum
 {
-  USB_AUDIO_LAYOUT_COUNT       =
+  USB_AUDIO_LAYOUT_COUNT =
     0 USB_AUDIO_LAYOUTS(USB_AUDIO_COUNT_LAYOUT),
+  USB_AUDIO_RECORD_FUNCTION_OFFSET =
+    USB_AUDIO_CONFIGURATION_DESC_SIZE +
+    USB_AUDIO_FUNCTION_CONTROL_SIZE + 9 +
+    USB_AUDIO_LAYOUT_COUNT * USB_AUDIO_PLAYBACK_STREAM_DESC_SIZE,
   USB_AUDIO_CONFIGURATION_SIZE =
-    USB_AUDIO_DESCRIPTOR_BASE +
-    USB_AUDIO_LAYOUT_COUNT * USB_AUDIO_STREAM_DESC_SIZE,
+    USB_AUDIO_RECORD_FUNCTION_OFFSET +
+    USB_AUDIO_FUNCTION_CONTROL_SIZE +
+    9 + USB_AUDIO_RECORD_STREAM_DESC_SIZE,
+  USB_AUDIO_OTHER_SPEED_SIZE =
+    USB_AUDIO_CONFIGURATION_DESC_SIZE +
+    USB_AUDIO_FUNCTION_CONTROL_SIZE +
+    9 + USB_AUDIO_PLAYBACK_STREAM_DESC_SIZE +
+    USB_AUDIO_FUNCTION_CONTROL_SIZE +
+    9 + USB_AUDIO_RECORD_STREAM_DESC_SIZE,
 };
 #undef USB_AUDIO_COUNT_LAYOUT
 
@@ -142,9 +178,10 @@ static const uint8_t l_deviceDescriptor[] =
   0x03, 0x01,
 };
 
-#define USB_AUDIO_STREAM_DESCRIPTOR(alt, channels, mask, packetFrames, \
-    feedbackSize, feedbackInterval) \
-  0x09, 0x04, 0x01, alt, 0x02, 0x01, 0x02, 0x20, 0x00, \
+#define USB_AUDIO_PLAYBACK_STREAM_DESCRIPTOR(alt, channels, mask, \
+    packetFrames, feedbackSize, feedbackInterval) \
+  0x09, 0x04, USB_AUDIO_PLAYBACK_IFACE, alt, \
+    0x02, 0x01, 0x02, 0x20, 0x00, \
   0x10, 0x24, 0x01, 0x02, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, \
     channels, \
     (mask)       & 0xff, \
@@ -153,18 +190,30 @@ static const uint8_t l_deviceDescriptor[] =
     (mask) >> 24 & 0xff, \
     0x00, \
   0x06, 0x24, 0x02, 0x01, 0x03, 0x18, \
-  0x07, 0x05, USB_AUDIO_DATA_ENDPOINT, 0x05, \
+  0x07, 0x05, USB_AUDIO_PLAYBACK_DATA_ENDPOINT, 0x05, \
     USB_AUDIO_PACKET_SIZE(packetFrames, channels)      & 0xff, \
     USB_AUDIO_PACKET_SIZE(packetFrames, channels) >> 8 & 0xff, \
-    USB_AUDIO_DATA_INTERVAL, \
+    USB_AUDIO_PLAYBACK_DATA_INTERVAL, \
   0x08, 0x25, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, \
   0x07, 0x05, USB_AUDIO_FEEDBACK_ENDPOINT, 0x11, \
     feedbackSize, 0x00, feedbackInterval,
 
-#define USB_AUDIO_HS_STREAM_DESCRIPTOR(alt, channels, mask) \
-  USB_AUDIO_STREAM_DESCRIPTOR( \
-      alt, channels, mask, USB_AUDIO_HS_PACKET_FRAMES, \
+#define USB_AUDIO_PLAYBACK_HS_STREAM_DESCRIPTOR(alt, channels, mask) \
+  USB_AUDIO_PLAYBACK_STREAM_DESCRIPTOR( \
+      alt, channels, mask, USB_AUDIO_PLAYBACK_HS_PACKET_FRAMES, \
       USB_AUDIO_FEEDBACK_SIZE, USB_AUDIO_FEEDBACK_BINTERVAL)
+
+#define USB_AUDIO_RECORD_STREAM_DESCRIPTOR(packetFrames, interval) \
+  0x09, 0x04, USB_AUDIO_RECORD_IFACE, 0x01, \
+    0x01, 0x01, 0x02, 0x20, 0x00, \
+  0x10, 0x24, 0x01, 0x03, 0x00, 0x01, 0x01, 0x00, 0x00, 0x00, \
+    0x02, 0x03, 0x00, 0x00, 0x00, 0x00, \
+  0x06, 0x24, 0x02, 0x01, 0x03, 0x18, \
+  0x07, 0x05, USB_AUDIO_RECORD_DATA_ENDPOINT, 0x05, \
+    USB_AUDIO_PACKET_SIZE(packetFrames, 2)      & 0xff, \
+    USB_AUDIO_PACKET_SIZE(packetFrames, 2) >> 8 & 0xff, \
+    interval, \
+  0x08, 0x25, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00,
 
 static const uint8_t l_configurationDescriptor[] =
 {
@@ -172,35 +221,70 @@ static const uint8_t l_configurationDescriptor[] =
   0x09, 0x02,
   USB_AUDIO_CONFIGURATION_SIZE       & 0xff,
   USB_AUDIO_CONFIGURATION_SIZE >> 8  & 0xff,
-  0x02, 0x01, 0x00, 0x80, 0x32,
+  0x04, 0x01, 0x00, 0x80, 0x32,
 
-  /* Audio function interface association */
-  0x08, 0x0b, 0x00, 0x02, 0x01, 0x00, 0x20, 0x00,
+  /* Playback audio function */
+  0x08, 0x0b, USB_AUDIO_PLAYBACK_CONTROL_IFACE, 0x02,
+    0x01, 0x00, 0x20, 0x02,
 
-  /* Audio control interface */
-  0x09, 0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x20, 0x00,
+  0x09, 0x04, USB_AUDIO_PLAYBACK_CONTROL_IFACE, 0x00,
+    0x00, 0x01, 0x01, 0x20, 0x00,
   0x09, 0x24, 0x01, 0x00, 0x02, 0x02, 0x2e, 0x00, 0x00,
-  0x08, 0x24, 0x0a, 0x01, 0x03, 0x07, 0x00, 0x00,
+  0x08, 0x24, 0x0a, USB_AUDIO_PLAYBACK_CLOCK_ID,
+    0x03, 0x07, 0x00, 0x00,
   0x11, 0x24, 0x02, 0x02, 0x01, 0x01, 0x00, 0x01, 0x08,
   0x3f, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
   0x0c, 0x24, 0x03, 0x03, 0x01, 0x03, 0x00, 0x02, 0x01,
   0x00, 0x00, 0x00,
 
-  /* Audio streaming interface, idle alternate setting */
-  0x09, 0x04, 0x01, 0x00, 0x00, 0x01, 0x02, 0x20, 0x00,
+  /* Playback interface, idle alternate setting */
+  0x09, 0x04, USB_AUDIO_PLAYBACK_IFACE, 0x00,
+    0x00, 0x01, 0x02, 0x20, 0x00,
 
   /* Publish the maximum topology first for the Windows endpoint model. */
-  USB_AUDIO_LAYOUTS(USB_AUDIO_HS_STREAM_DESCRIPTOR)
+  USB_AUDIO_LAYOUTS(USB_AUDIO_PLAYBACK_HS_STREAM_DESCRIPTOR)
+
+  /* Recording audio function */
+  0x08, 0x0b, USB_AUDIO_RECORD_CONTROL_IFACE, 0x02,
+    0x01, 0x00, 0x20, 0x04,
+
+  0x09, 0x04, USB_AUDIO_RECORD_CONTROL_IFACE, 0x00,
+    0x00, 0x01, 0x01, 0x20, 0x00,
+  0x09, 0x24, 0x01, 0x00, 0x02, 0x03, 0x2e, 0x00, 0x00,
+  0x08, 0x24, 0x0a, USB_AUDIO_RECORD_CLOCK_ID,
+    0x03, 0x07, 0x00, 0x00,
+  0x11, 0x24, 0x02, 0x02, 0x01, 0x02, 0x00, 0x01, 0x02,
+    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x04,
+  0x0c, 0x24, 0x03, 0x03, 0x01, 0x01, 0x00, 0x02, 0x01,
+    0x00, 0x00, 0x00,
+
+  /* Recording interface, idle alternate setting */
+  0x09, 0x04, USB_AUDIO_RECORD_IFACE, 0x00,
+    0x00, 0x01, 0x02, 0x20, 0x00,
+  USB_AUDIO_RECORD_STREAM_DESCRIPTOR(
+      USB_AUDIO_RECORD_PACKET_FRAMES,
+      USB_AUDIO_RECORD_DATA_BINTERVAL)
 };
-#undef USB_AUDIO_HS_STREAM_DESCRIPTOR
+#undef USB_AUDIO_PLAYBACK_HS_STREAM_DESCRIPTOR
 #undef USB_AUDIO_LAYOUTS
 
-static const uint8_t l_fullSpeedStreamDescriptor[] =
+static const uint8_t l_fullSpeedPlaybackDescriptor[] =
 {
-  USB_AUDIO_STREAM_DESCRIPTOR(1, 2, USB_AUDIO_LAYOUT_STEREO,
+  0x09, 0x04, USB_AUDIO_PLAYBACK_IFACE, 0x00,
+    0x00, 0x01, 0x02, 0x20, 0x00,
+  USB_AUDIO_PLAYBACK_STREAM_DESCRIPTOR(1, 2, USB_AUDIO_LAYOUT_STEREO,
       USB_AUDIO_FS_PACKET_FRAMES, 3, 1)
 };
-#undef USB_AUDIO_STREAM_DESCRIPTOR
+
+static const uint8_t l_fullSpeedRecordDescriptor[] =
+{
+  0x09, 0x04, USB_AUDIO_RECORD_IFACE, 0x00,
+    0x00, 0x01, 0x02, 0x20, 0x00,
+  USB_AUDIO_RECORD_STREAM_DESCRIPTOR(
+      USB_AUDIO_FS_PACKET_FRAMES, 1)
+};
+#undef USB_AUDIO_RECORD_STREAM_DESCRIPTOR
+#undef USB_AUDIO_PLAYBACK_STREAM_DESCRIPTOR
 #undef USB_AUDIO_PACKET_SIZE
 
 static const uint8_t l_deviceQualifierDescriptor[] =
@@ -228,15 +312,20 @@ _Static_assert(sizeof(l_channelLayouts) / sizeof(*l_channelLayouts) ==
 _Static_assert(sizeof(l_configurationDescriptor) ==
     USB_AUDIO_CONFIGURATION_SIZE,
     "invalid USB configuration descriptor size");
-_Static_assert(sizeof(l_fullSpeedStreamDescriptor) ==
-    USB_AUDIO_STREAM_DESC_SIZE,
-    "invalid full-speed stream descriptor size");
+_Static_assert(sizeof(l_fullSpeedPlaybackDescriptor) ==
+    9 + USB_AUDIO_PLAYBACK_STREAM_DESC_SIZE,
+    "invalid full-speed playback descriptor size");
+_Static_assert(sizeof(l_fullSpeedRecordDescriptor) ==
+    9 + USB_AUDIO_RECORD_STREAM_DESC_SIZE,
+    "invalid full-speed recording descriptor size");
 _Static_assert(sizeof(l_deviceQualifierDescriptor) == 10,
     "invalid USB device qualifier descriptor size");
 _Static_assert(USB_AUDIO_OTHER_SPEED_SIZE <=
     sizeof(l_configurationDescriptor), "invalid other-speed descriptor size");
 _Static_assert(USB_AUDIO_FS_PACKET_FRAMES * 2 * USB_AUDIO_SAMPLE_SIZE <=
     1023, "full-speed stream packet is too large");
+_Static_assert(USB_AUDIO_RECORD_PACKET_SIZE <= 1024,
+    "high-speed recording packet is too large");
 
 struct LG_USBAudio
 {
@@ -244,19 +333,39 @@ struct LG_USBAudio
   void                      * eventOpaque;
   struct usbredirparser     * parser;
 
-  uint8_t  configuration;
-  uint8_t  streamAlt;
-  uint32_t sampleRate;
-  bool     dataStreaming;
-  bool     feedbackStreaming;
-  uint64_t feedbackPacketId;
-  uint8_t  feedbackDataPackets;
+  uint8_t     configuration;
+  uint8_t     playbackAlt;
+  uint8_t     recordAlt;
+  uint32_t    playbackSampleRate;
+  uint32_t    recordSampleRate;
+  bool        playbackStreaming;
+  bool        feedbackStreaming;
+  uint64_t    feedbackPacketId;
+  uint8_t     feedbackDataPackets;
   atomic_uint feedbackValue;
+
+  atomic_bool recordStreaming;
+  uint64_t    recordPacketId;
+  uint64_t    recordPacketPhase;
+  uint64_t    recordNextPacketTime;
+  LG_Lock     recordLock;
+  RingBuffer  recordBuffer;
+  uint64_t    recordRateQ16;
+  uint64_t    recordRateStartTime;
+  uint64_t    recordRateLastTime;
+  uint64_t    recordRateFrames;
 };
 
 static LG_USBAudio * getAudio(void * opaque)
 {
   return lgUsbRedir_device(opaque);
+}
+
+static uint64_t recordTime(void)
+{
+  /* PipeWire timestamps use CLOCK_MONOTONIC. Keep USB capture scheduling in
+   * that domain instead of introducing MONOTONIC_RAW clock drift. */
+  return microtime() * UINT64_C(1000);
 }
 
 static uint32_t readLE32(const uint8_t * data)
@@ -290,7 +399,7 @@ static uint32_t encodeFeedbackRate(double sampleRate)
 static void resetFeedbackRate(LG_USBAudio * audio)
 {
   atomic_store_explicit(&audio->feedbackValue,
-      encodeFeedbackRate(audio->sampleRate), memory_order_release);
+      encodeFeedbackRate(audio->playbackSampleRate), memory_order_release);
 }
 
 static uint32_t nearestSampleRate(uint32_t sampleRate)
@@ -325,7 +434,7 @@ static const USBAudioLayout * getLayout(uint8_t alt)
 
 static uint16_t layoutPacketSize(const USBAudioLayout * layout)
 {
-  return USB_AUDIO_HS_PACKET_FRAMES * layout->channelCount *
+  return USB_AUDIO_PLAYBACK_HS_PACKET_FRAMES * layout->channelCount *
     USB_AUDIO_SAMPLE_SIZE;
 }
 
@@ -347,13 +456,13 @@ static size_t writeSampleRateRange(uint8_t * buffer)
 
 static void stopPlayback(LG_USBAudio * audio)
 {
-  if (!audio->dataStreaming)
+  if (!audio->playbackStreaming)
     return;
 
-  audio->dataStreaming = false;
+  audio->playbackStreaming = false;
   resetFeedbackRate(audio);
-  if (audio->events && audio->events->stop)
-    audio->events->stop(audio->eventOpaque);
+  if (audio->events && audio->events->playbackStop)
+    audio->events->playbackStop(audio->eventOpaque);
 }
 
 static void stopFeedback(LG_USBAudio * audio)
@@ -362,7 +471,7 @@ static void stopFeedback(LG_USBAudio * audio)
   audio->feedbackDataPackets = 0;
 }
 
-static void stopStreams(LG_USBAudio * audio)
+static void stopPlaybackStreams(LG_USBAudio * audio)
 {
   stopPlayback(audio);
   stopFeedback(audio);
@@ -370,37 +479,127 @@ static void stopStreams(LG_USBAudio * audio)
 
 static void startPlayback(LG_USBAudio * audio)
 {
-  const USBAudioLayout * layout = getLayout(audio->streamAlt);
-  if (audio->dataStreaming || !layout)
+  const USBAudioLayout * layout = getLayout(audio->playbackAlt);
+  if (audio->playbackStreaming || !layout)
     return;
 
   resetFeedbackRate(audio);
-  audio->dataStreaming = true;
-  if (audio->events && audio->events->start)
-    audio->events->start(
-        audio->eventOpaque, audio->sampleRate, layout->channelMask);
+  audio->playbackStreaming = true;
+  if (audio->events && audio->events->playbackStart)
+    audio->events->playbackStart(
+        audio->eventOpaque, audio->playbackSampleRate,
+        layout->channelMask);
 }
 
-static void setSampleRate(LG_USBAudio * audio, uint32_t sampleRate)
+static void stopRecord(LG_USBAudio * audio)
 {
-  if (audio->sampleRate == sampleRate)
+  if (!atomic_exchange_explicit(
+        &audio->recordStreaming, false, memory_order_acq_rel))
     return;
 
-  const bool restart = audio->dataStreaming;
+  if (audio->events && audio->events->recordStop)
+    audio->events->recordStop(audio->eventOpaque);
 
+  LG_LOCK(audio->recordLock);
+  ringbuffer_reset(audio->recordBuffer);
+  LG_UNLOCK(audio->recordLock);
+}
+
+static void resetRecordData(LG_USBAudio * audio)
+{
+  LG_LOCK(audio->recordLock);
+  ringbuffer_reset(audio->recordBuffer);
+  audio->recordRateQ16 =
+    (uint64_t)audio->recordSampleRate * USB_AUDIO_RECORD_RATE_SCALE;
+  audio->recordRateStartTime = 0;
+  audio->recordRateLastTime  = 0;
+  audio->recordRateFrames    = 0;
+  LG_UNLOCK(audio->recordLock);
+  audio->recordPacketPhase = 0;
+}
+
+static void startRecord(LG_USBAudio * audio)
+{
+  if (audio->recordAlt != 1 || atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+    return;
+
+  resetRecordData(audio);
+  audio->recordPacketId = 0;
+  atomic_store_explicit(
+      &audio->recordStreaming, true, memory_order_release);
+
+  if (audio->events && audio->events->recordStart)
+    audio->events->recordStart(audio->eventOpaque,
+        audio->recordSampleRate, USB_AUDIO_LAYOUT_STEREO);
+
+  /* Backend startup may block while the capture graph is configured. Do not
+   * turn that setup time into a burst of stale USB packets. */
+  audio->recordNextPacketTime = recordTime();
+}
+
+static void reconfigureRecord(LG_USBAudio * audio)
+{
+  if (!atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+    return;
+
+  if (audio->events && audio->events->recordStart)
+    audio->events->recordStart(audio->eventOpaque,
+        audio->recordSampleRate, USB_AUDIO_LAYOUT_STEREO);
+
+  /* The provider restart has quiesced the old producer. Drop any frames
+   * queued around the format transition and restart the USB sample phase. */
+  resetRecordData(audio);
+  audio->recordNextPacketTime = recordTime();
+}
+
+static void stopStreams(LG_USBAudio * audio)
+{
+  stopPlaybackStreams(audio);
+  stopRecord(audio);
+}
+
+static void setPlaybackSampleRate(
+    LG_USBAudio * audio, uint32_t sampleRate)
+{
+  if (audio->playbackSampleRate == sampleRate)
+    return;
+
+  const bool restartPlayback = audio->playbackStreaming;
   stopPlayback(audio);
-  audio->sampleRate = sampleRate;
+  audio->playbackSampleRate = sampleRate;
   resetFeedbackRate(audio);
-  if (restart)
+  if (restartPlayback)
     startPlayback(audio);
+}
+
+static void setRecordSampleRate(
+    LG_USBAudio * audio, uint32_t sampleRate)
+{
+  LG_LOCK(audio->recordLock);
+  const bool changed = audio->recordSampleRate != sampleRate;
+  audio->recordSampleRate = sampleRate;
+  LG_UNLOCK(audio->recordLock);
+  if (!changed)
+    return;
+
+  const bool restartRecord = atomic_load_explicit(
+      &audio->recordStreaming, memory_order_acquire);
+  if (restartRecord)
+    reconfigureRecord(audio);
 }
 
 static void resetDevice(LG_USBAudio * audio)
 {
   stopStreams(audio);
-  audio->configuration = 0;
-  audio->streamAlt     = 0;
-  audio->sampleRate    = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  audio->configuration       = 0;
+  audio->playbackAlt         = 0;
+  audio->recordAlt           = 0;
+  audio->playbackSampleRate  = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  LG_LOCK(audio->recordLock);
+  audio->recordSampleRate    = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  LG_UNLOCK(audio->recordLock);
   resetFeedbackRate(audio);
 }
 
@@ -408,11 +607,17 @@ static void sendInterfaceInfo(LG_USBAudio * audio)
 {
   struct usb_redir_interface_info_header info =
   {
-    .interface_count    = 2,
-    .interface          = { USB_AUDIO_CONTROL_IFACE, USB_AUDIO_STREAM_IFACE },
-    .interface_class    = { 0x01, 0x01 },
-    .interface_subclass = { 0x01, 0x02 },
-    .interface_protocol = { 0x20, 0x20 },
+    .interface_count = 4,
+    .interface =
+    {
+      USB_AUDIO_PLAYBACK_CONTROL_IFACE,
+      USB_AUDIO_PLAYBACK_IFACE,
+      USB_AUDIO_RECORD_CONTROL_IFACE,
+      USB_AUDIO_RECORD_IFACE,
+    },
+    .interface_class    = { 0x01, 0x01, 0x01, 0x01 },
+    .interface_subclass = { 0x01, 0x02, 0x01, 0x02 },
+    .interface_protocol = { 0x20, 0x20, 0x20, 0x20 },
   };
   usbredirparser_send_interface_info(audio->parser, &info);
 }
@@ -420,7 +625,7 @@ static void sendInterfaceInfo(LG_USBAudio * audio)
 static void sendEndpointInfo(LG_USBAudio * audio)
 {
   struct usb_redir_ep_info_header info = { 0 };
-  const USBAudioLayout * layout = getLayout(audio->streamAlt);
+  const USBAudioLayout * layout = getLayout(audio->playbackAlt);
   memset(info.type, usb_redir_type_invalid, sizeof(info.type));
 
   info.type[0]             = usb_redir_type_control;
@@ -430,19 +635,33 @@ static void sendEndpointInfo(LG_USBAudio * audio)
 
   if (audio->configuration == USB_AUDIO_CONFIGURATION && layout)
   {
-    info.type[USB_AUDIO_DATA_EP_INDEX]            = usb_redir_type_iso;
-    info.interval[USB_AUDIO_DATA_EP_INDEX]        = USB_AUDIO_DATA_INTERVAL;
-    info.interface[USB_AUDIO_DATA_EP_INDEX]       = USB_AUDIO_STREAM_IFACE;
-    info.max_packet_size[USB_AUDIO_DATA_EP_INDEX] =
+    info.type[USB_AUDIO_PLAYBACK_DATA_EP_INDEX] = usb_redir_type_iso;
+    info.interval[USB_AUDIO_PLAYBACK_DATA_EP_INDEX] =
+      USB_AUDIO_PLAYBACK_DATA_INTERVAL;
+    info.interface[USB_AUDIO_PLAYBACK_DATA_EP_INDEX] =
+      USB_AUDIO_PLAYBACK_IFACE;
+    info.max_packet_size[USB_AUDIO_PLAYBACK_DATA_EP_INDEX] =
       layoutPacketSize(layout);
 
     info.type[USB_AUDIO_FEEDBACK_EP_INDEX]            = usb_redir_type_iso;
     info.interval[USB_AUDIO_FEEDBACK_EP_INDEX]        =
       USB_AUDIO_FEEDBACK_INTERVAL;
     info.interface[USB_AUDIO_FEEDBACK_EP_INDEX]       =
-      USB_AUDIO_STREAM_IFACE;
+      USB_AUDIO_PLAYBACK_IFACE;
     info.max_packet_size[USB_AUDIO_FEEDBACK_EP_INDEX] =
       USB_AUDIO_FEEDBACK_SIZE;
+  }
+
+  if (audio->configuration == USB_AUDIO_CONFIGURATION &&
+      audio->recordAlt == 1)
+  {
+    info.type[USB_AUDIO_RECORD_DATA_EP_INDEX] = usb_redir_type_iso;
+    info.interval[USB_AUDIO_RECORD_DATA_EP_INDEX] =
+      USB_AUDIO_RECORD_DATA_INTERVAL;
+    info.interface[USB_AUDIO_RECORD_DATA_EP_INDEX] =
+      USB_AUDIO_RECORD_IFACE;
+    info.max_packet_size[USB_AUDIO_RECORD_DATA_EP_INDEX] =
+      USB_AUDIO_RECORD_PACKET_SIZE;
   }
 
   usbredirparser_send_ep_info(audio->parser, &info);
@@ -507,14 +726,24 @@ static void setAltSetting(void * opaque, uint64_t id,
   };
 
   if (audio->configuration == USB_AUDIO_CONFIGURATION &&
-      request->interface == USB_AUDIO_CONTROL_IFACE && request->alt == 0)
+      (request->interface == USB_AUDIO_PLAYBACK_CONTROL_IFACE ||
+       request->interface == USB_AUDIO_RECORD_CONTROL_IFACE) &&
+      request->alt == 0)
     status.status = usb_redir_success;
   else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
-      request->interface == USB_AUDIO_STREAM_IFACE &&
+      request->interface == USB_AUDIO_PLAYBACK_IFACE &&
       (request->alt == 0 || getLayout(request->alt)))
   {
-    stopStreams(audio);
-    audio->streamAlt = request->alt;
+    stopPlaybackStreams(audio);
+    audio->playbackAlt = request->alt;
+    status.status      = usb_redir_success;
+  }
+  else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
+      request->interface == USB_AUDIO_RECORD_IFACE &&
+      request->alt <= 1)
+  {
+    stopRecord(audio);
+    audio->recordAlt = request->alt;
     status.status    = usb_redir_success;
   }
 
@@ -535,13 +764,20 @@ static void getAltSetting(void * opaque, uint64_t id,
   };
 
   if (audio->configuration == USB_AUDIO_CONFIGURATION &&
-      request->interface == USB_AUDIO_CONTROL_IFACE)
+      (request->interface == USB_AUDIO_PLAYBACK_CONTROL_IFACE ||
+       request->interface == USB_AUDIO_RECORD_CONTROL_IFACE))
     status.status = usb_redir_success;
   else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
-      request->interface == USB_AUDIO_STREAM_IFACE)
+      request->interface == USB_AUDIO_PLAYBACK_IFACE)
   {
     status.status = usb_redir_success;
-    status.alt    = audio->streamAlt;
+    status.alt    = audio->playbackAlt;
+  }
+  else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
+      request->interface == USB_AUDIO_RECORD_IFACE)
+  {
+    status.status = usb_redir_success;
+    status.alt    = audio->recordAlt;
   }
 
   usbredirparser_send_alt_setting_status(audio->parser, id, &status);
@@ -576,6 +812,65 @@ static void sendFeedbackPackets(LG_USBAudio * audio, uint32_t count)
         &packet, data, USB_AUDIO_FEEDBACK_SIZE);
 }
 
+static void sendRecordPackets(LG_USBAudio * audio)
+{
+  if (!atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+    return;
+
+  const uint64_t now = recordTime();
+  if (audio->recordNextPacketTime > now)
+    return;
+
+  uint64_t count =
+    (now - audio->recordNextPacketTime) /
+    USB_AUDIO_RECORD_PACKET_INTERVAL_NS + 1;
+  if (count > USB_AUDIO_RECORD_MAX_BATCH)
+  {
+    count = USB_AUDIO_RECORD_MAX_BATCH;
+    audio->recordNextPacketTime = now -
+      (count - 1) * USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
+  }
+
+  uint8_t data[USB_AUDIO_RECORD_PACKET_SIZE];
+  const int target = max(
+      (int)(audio->recordSampleRate / 50),
+      USB_AUDIO_RECORD_PACKET_FRAMES);
+  LG_LOCK(audio->recordLock);
+  const uint64_t rateQ16 = audio->recordRateQ16;
+  LG_UNLOCK(audio->recordLock);
+  struct usb_redir_iso_packet_header packet =
+  {
+    .endpoint = USB_AUDIO_RECORD_DATA_ENDPOINT,
+    .status   = usb_redir_success,
+  };
+
+  for (uint64_t i = 0; i < count; ++i)
+  {
+    audio->recordPacketPhase += rateQ16;
+    const uint32_t frames = (uint32_t)(audio->recordPacketPhase /
+        USB_AUDIO_RECORD_RATE_DENOMINATOR);
+    audio->recordPacketPhase %= USB_AUDIO_RECORD_RATE_DENOMINATOR;
+    DEBUG_ASSERT(frames <= USB_AUDIO_RECORD_PACKET_FRAMES);
+
+    const size_t size = frames * USB_AUDIO_RECORD_FRAME_SIZE;
+    memset(data, 0, size);
+
+    LG_LOCK(audio->recordLock);
+    const int queued = ringbuffer_getCount(audio->recordBuffer);
+    if (queued > target)
+      ringbuffer_consume(audio->recordBuffer, NULL, queued - target);
+    ringbuffer_consume(audio->recordBuffer, data, frames);
+    LG_UNLOCK(audio->recordLock);
+
+    packet.length = (uint16_t)size;
+    usbredirparser_send_iso_packet(audio->parser,
+        audio->recordPacketId++, &packet, data, (int)size);
+    audio->recordNextPacketTime +=
+      USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
+  }
+}
+
 static void startISOStream(void * opaque, uint64_t id,
     struct usb_redir_start_iso_stream_header * request)
 {
@@ -583,17 +878,20 @@ static void startISOStream(void * opaque, uint64_t id,
   uint8_t       result          = usb_redir_stall;
   uint32_t      feedbackPrefill = 0;
 
-  if (audio->configuration == USB_AUDIO_CONFIGURATION &&
-      getLayout(audio->streamAlt))
+  if (audio->configuration == USB_AUDIO_CONFIGURATION)
   {
     switch (request->endpoint)
     {
-      case USB_AUDIO_DATA_ENDPOINT:
+      case USB_AUDIO_PLAYBACK_DATA_ENDPOINT:
+        if (!getLayout(audio->playbackAlt))
+          break;
         result = usb_redir_success;
         startPlayback(audio);
         break;
 
       case USB_AUDIO_FEEDBACK_ENDPOINT:
+        if (!getLayout(audio->playbackAlt))
+          break;
         resetFeedbackRate(audio);
         audio->feedbackStreaming   = true;
         audio->feedbackDataPackets = 0;
@@ -606,6 +904,13 @@ static void startISOStream(void * opaque, uint64_t id,
             USB_AUDIO_FEEDBACK_MAX_QUEUE)
           feedbackPrefill = USB_AUDIO_FEEDBACK_MAX_QUEUE;
         result = usb_redir_success;
+        break;
+
+      case USB_AUDIO_RECORD_DATA_ENDPOINT:
+        if (audio->recordAlt != 1)
+          break;
+        result = usb_redir_success;
+        startRecord(audio);
         break;
     }
   }
@@ -622,13 +927,18 @@ static void stopISOStream(void * opaque, uint64_t id,
   uint8_t result = usb_redir_stall;
   switch (request->endpoint)
   {
-    case USB_AUDIO_DATA_ENDPOINT:
+    case USB_AUDIO_PLAYBACK_DATA_ENDPOINT:
       stopPlayback(audio);
       result = usb_redir_success;
       break;
 
     case USB_AUDIO_FEEDBACK_ENDPOINT:
       stopFeedback(audio);
+      result = usb_redir_success;
+      break;
+
+    case USB_AUDIO_RECORD_DATA_ENDPOINT:
+      stopRecord(audio);
       result = usb_redir_success;
       break;
   }
@@ -654,9 +964,10 @@ static size_t stringDescriptor(uint8_t index, uint8_t * buffer,
   const char * text;
   switch (index)
   {
-    case 1: text = "Looking Glass"          ; break;
-    case 2: text = "Looking Glass USB Audio"; break;
-    case 3: text = "LG-UAC2-0004"           ; break;
+    case 1: text = "Looking Glass"            ; break;
+    case 2: text = "Looking Glass USB Audio"  ; break;
+    case 3: text = "LG-UAC2-0006"             ; break;
+    case 4: text = "Looking Glass Microphone" ; break;
     default: return 0;
   }
 
@@ -758,14 +1069,25 @@ static void controlPacket(void * opaque, uint64_t id,
         {
           /* Full-speed USB cannot carry the maximum PCM24 stream. Expose a
            * functional stereo alternate sized for rates through 96 kHz. */
+          const size_t playbackControlSize =
+            USB_AUDIO_CONFIGURATION_DESC_SIZE +
+            USB_AUDIO_FUNCTION_CONTROL_SIZE;
           memcpy(buffer, l_configurationDescriptor,
-              USB_AUDIO_DESCRIPTOR_BASE);
-          memcpy(buffer + USB_AUDIO_DESCRIPTOR_BASE,
-              l_fullSpeedStreamDescriptor,
-              sizeof(l_fullSpeedStreamDescriptor));
+              playbackControlSize);
+          size_t offset = playbackControlSize;
+          memcpy(buffer + offset, l_fullSpeedPlaybackDescriptor,
+              sizeof(l_fullSpeedPlaybackDescriptor));
+          offset += sizeof(l_fullSpeedPlaybackDescriptor);
+          memcpy(buffer + offset,
+              l_configurationDescriptor +
+                USB_AUDIO_RECORD_FUNCTION_OFFSET,
+              USB_AUDIO_FUNCTION_CONTROL_SIZE);
+          offset += USB_AUDIO_FUNCTION_CONTROL_SIZE;
+          memcpy(buffer + offset, l_fullSpeedRecordDescriptor,
+              sizeof(l_fullSpeedRecordDescriptor));
           buffer[1]    = USB_DESCRIPTOR_OTHER_SPEED;
-          buffer[2]    = USB_AUDIO_OTHER_SPEED_SIZE;
-          buffer[3]    = 0;
+          buffer[2]    = USB_AUDIO_OTHER_SPEED_SIZE & 0xff;
+          buffer[3]    = USB_AUDIO_OTHER_SPEED_SIZE >> 8;
           response     = buffer;
           responseSize = USB_AUDIO_OTHER_SPEED_SIZE;
         }
@@ -787,16 +1109,20 @@ static void controlPacket(void * opaque, uint64_t id,
 
       case USB_REQUEST_TYPE_IN_STANDARD_INTERFACE:
         valid = audio->configuration == USB_AUDIO_CONFIGURATION &&
-          (request->index == USB_AUDIO_CONTROL_IFACE ||
-           request->index == USB_AUDIO_STREAM_IFACE);
+          (request->index == USB_AUDIO_PLAYBACK_CONTROL_IFACE ||
+           request->index == USB_AUDIO_PLAYBACK_IFACE ||
+           request->index == USB_AUDIO_RECORD_CONTROL_IFACE ||
+           request->index == USB_AUDIO_RECORD_IFACE);
         break;
 
       case USB_REQUEST_TYPE_IN_STANDARD_ENDPOINT:
         valid = request->index == 0x00 || request->index == 0x80 ||
           (audio->configuration == USB_AUDIO_CONFIGURATION &&
-           getLayout(audio->streamAlt) &&
-           (request->index == USB_AUDIO_DATA_ENDPOINT ||
-            request->index == USB_AUDIO_FEEDBACK_ENDPOINT));
+           ((getLayout(audio->playbackAlt) &&
+             (request->index == USB_AUDIO_PLAYBACK_DATA_ENDPOINT ||
+              request->index == USB_AUDIO_FEEDBACK_ENDPOINT)) ||
+            (audio->recordAlt == 1 &&
+             request->index == USB_AUDIO_RECORD_DATA_ENDPOINT)));
         break;
     }
 
@@ -809,15 +1135,23 @@ static void controlPacket(void * opaque, uint64_t id,
   }
   else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
       request->requesttype == USB_REQUEST_TYPE_IN_CLASS_INTERFACE &&
-      request->index ==
-        ((USB_AUDIO_CLOCK_ID << 8) | USB_AUDIO_CONTROL_IFACE) &&
+      (request->index ==
+         ((USB_AUDIO_PLAYBACK_CLOCK_ID << 8) |
+          USB_AUDIO_PLAYBACK_CONTROL_IFACE) ||
+       request->index ==
+         ((USB_AUDIO_RECORD_CLOCK_ID << 8) |
+          USB_AUDIO_RECORD_CONTROL_IFACE)) &&
       (uint8_t)request->value == 0)
   {
+    const bool playbackClock = request->index ==
+      ((USB_AUDIO_PLAYBACK_CLOCK_ID << 8) |
+       USB_AUDIO_PLAYBACK_CONTROL_IFACE);
     const uint8_t control = request->value >> 8;
     if (request->request == USB_REQUEST_CUR &&
         control == USB_AUDIO_CONTROL_FREQUENCY)
     {
-      writeLE32(buffer, audio->sampleRate);
+      writeLE32(buffer, playbackClock ?
+          audio->playbackSampleRate : audio->recordSampleRate);
       response     = buffer;
       responseSize = 4;
       status       = usb_redir_success;
@@ -840,12 +1174,22 @@ static void controlPacket(void * opaque, uint64_t id,
   else if (audio->configuration == USB_AUDIO_CONFIGURATION &&
       request->requesttype == USB_REQUEST_TYPE_OUT_CLASS_INTERFACE &&
       request->request == USB_REQUEST_CUR &&
-      request->index ==
-        ((USB_AUDIO_CLOCK_ID << 8) | USB_AUDIO_CONTROL_IFACE) &&
+      (request->index ==
+         ((USB_AUDIO_PLAYBACK_CLOCK_ID << 8) |
+          USB_AUDIO_PLAYBACK_CONTROL_IFACE) ||
+       request->index ==
+         ((USB_AUDIO_RECORD_CLOCK_ID << 8) |
+          USB_AUDIO_RECORD_CONTROL_IFACE)) &&
       request->value == (USB_AUDIO_CONTROL_FREQUENCY << 8) &&
       request->length == 4 && dataLength == 4 && data)
   {
-    setSampleRate(audio, nearestSampleRate(readLE32(data)));
+    const uint32_t sampleRate = nearestSampleRate(readLE32(data));
+    if (request->index ==
+        ((USB_AUDIO_PLAYBACK_CLOCK_ID << 8) |
+         USB_AUDIO_PLAYBACK_CONTROL_IFACE))
+      setPlaybackSampleRate(audio, sampleRate);
+    else
+      setRecordSampleRate(audio, sampleRate);
     status = usb_redir_success;
   }
 
@@ -854,10 +1198,11 @@ static void controlPacket(void * opaque, uint64_t id,
     usbredirparser_free_packet_data(audio->parser, data);
 }
 
-static void stallStream(LG_USBAudio * audio)
+static void stallPlayback(LG_USBAudio * audio)
 {
   stopPlayback(audio);
-  sendISOStatus(audio, 0, USB_AUDIO_DATA_ENDPOINT, usb_redir_stall);
+  sendISOStatus(audio, 0,
+      USB_AUDIO_PLAYBACK_DATA_ENDPOINT, usb_redir_stall);
 }
 
 static void isoPacket(void * opaque, uint64_t id,
@@ -866,25 +1211,25 @@ static void isoPacket(void * opaque, uint64_t id,
 {
   (void)id;
   LG_USBAudio * audio = getAudio(opaque);
-  const USBAudioLayout * layout = getLayout(audio->streamAlt);
+  const USBAudioLayout * layout = getLayout(audio->playbackAlt);
 
-  if (audio->dataStreaming)
+  if (audio->playbackStreaming)
   {
     const uint16_t frameSize =
       layout ? layout->channelCount * USB_AUDIO_SAMPLE_SIZE : 0;
-    if (packet->endpoint != USB_AUDIO_DATA_ENDPOINT ||
+    if (packet->endpoint != USB_AUDIO_PLAYBACK_DATA_ENDPOINT ||
         packet->status != usb_redir_success || dataLength < 0 ||
         packet->length != dataLength ||
         !layout || dataLength > layoutPacketSize(layout) ||
         dataLength % frameSize != 0)
     {
       DEBUG_WARN("Invalid USB audio isochronous packet");
-      stallStream(audio);
+      stallPlayback(audio);
     }
     else
     {
-      if (dataLength && audio->events && audio->events->data)
-        audio->events->data(audio->eventOpaque, data,
+      if (dataLength && audio->events && audio->events->playbackData)
+        audio->events->playbackData(audio->eventOpaque, data,
             dataLength / frameSize);
 
       if (audio->feedbackStreaming &&
@@ -942,11 +1287,17 @@ static void unplugDevice(void * opaque)
   resetDevice(opaque);
 }
 
+static void processDevice(void * opaque)
+{
+  sendRecordPackets(opaque);
+}
+
 static const LG_USBRedirDeviceOps l_deviceOps =
 {
-  .setup  = setupDevice,
-  .plug   = plugDevice,
-  .unplug = unplugDevice,
+  .setup   = setupDevice,
+  .plug    = plugDevice,
+  .process = processDevice,
+  .unplug  = unplugDevice,
 };
 
 LG_USBAudio * lgUsbAudio_create(
@@ -956,11 +1307,22 @@ LG_USBAudio * lgUsbAudio_create(
   if (!audio)
     return NULL;
 
-  audio->events      = events;
-  audio->eventOpaque = eventOpaque;
-  audio->sampleRate  = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  audio->events             = events;
+  audio->eventOpaque        = eventOpaque;
+  audio->playbackSampleRate = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  audio->recordSampleRate   = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE;
+  LG_LOCK_INIT(audio->recordLock);
+  audio->recordBuffer = ringbuffer_new(
+      USB_AUDIO_RECORD_QUEUE_FRAMES, USB_AUDIO_RECORD_FRAME_SIZE);
+  if (!audio->recordBuffer)
+  {
+    free(audio);
+    return NULL;
+  }
+
   atomic_init(&audio->feedbackValue,
-      encodeFeedbackRate(audio->sampleRate));
+      encodeFeedbackRate(audio->playbackSampleRate));
+  atomic_init(&audio->recordStreaming, false);
   return audio;
 }
 
@@ -973,11 +1335,98 @@ void lgUsbAudio_setFeedbackRate(LG_USBAudio * audio, double sampleRate)
       encodeFeedbackRate(sampleRate), memory_order_release);
 }
 
+bool lgUsbAudio_recordData(
+    LG_USBAudio * audio, const void * data, size_t frames)
+{
+  if (!audio || frames > INT_MAX || (frames && !data) ||
+      !atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+    return false;
+
+  LG_LOCK(audio->recordLock);
+  if (!atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+  {
+    LG_UNLOCK(audio->recordLock);
+    return false;
+  }
+
+  const size_t receivedFrames = frames;
+  const uint64_t now = recordTime();
+  /* Average complete capture batches over time so callback jitter does not
+   * become USB packet jitter. recordRateQ16 is frames/second in Q16. */
+  const bool resetRate =
+    !audio->recordRateLastTime ||
+    now - audio->recordRateLastTime > USB_AUDIO_RECORD_RATE_GAP_NS;
+  if (resetRate)
+  {
+    audio->recordRateQ16 =
+      (uint64_t)audio->recordSampleRate * USB_AUDIO_RECORD_RATE_SCALE;
+    audio->recordRateStartTime = now;
+    audio->recordRateFrames    = 0;
+  }
+  else
+    audio->recordRateFrames += receivedFrames;
+  audio->recordRateLastTime = now;
+
+  const uint64_t elapsed = now - audio->recordRateStartTime;
+  if (elapsed >= USB_AUDIO_RECORD_RATE_SETTLE_NS)
+  {
+    const double measured =
+      (double)audio->recordRateFrames * 1000000000.0 / elapsed;
+    if (measured >= audio->recordSampleRate * 0.995 &&
+        measured <= audio->recordSampleRate * 1.005)
+    {
+      const uint64_t measuredQ16 = (uint64_t)(
+          measured * USB_AUDIO_RECORD_RATE_SCALE + 0.5);
+      audio->recordRateQ16 =
+        (audio->recordRateQ16 * 3 + measuredQ16) / 4;
+    }
+
+    audio->recordRateStartTime = now;
+    audio->recordRateFrames    = 0;
+  }
+
+  const int length = ringbuffer_getLength(audio->recordBuffer);
+  const uint8_t * input = data;
+  bool dropped = false;
+  if (frames > (size_t)length)
+  {
+    input += (frames - length) * USB_AUDIO_RECORD_FRAME_SIZE;
+    frames = length;
+    ringbuffer_reset(audio->recordBuffer);
+    dropped = true;
+  }
+  else
+  {
+    const int overflow =
+      ringbuffer_getCount(audio->recordBuffer) + (int)frames - length;
+    if (overflow > 0)
+    {
+      ringbuffer_consume(audio->recordBuffer, NULL, overflow);
+      dropped = true;
+    }
+  }
+
+  const int appended = ringbuffer_append(
+      audio->recordBuffer, input, (int)frames);
+  LG_UNLOCK(audio->recordLock);
+  return !dropped && appended == (int)frames;
+}
+
+bool lgUsbAudio_recording(const LG_USBAudio * audio)
+{
+  return audio && atomic_load_explicit(
+      &audio->recordStreaming, memory_order_acquire);
+}
+
 void lgUsbAudio_destroy(LG_USBAudio * audio)
 {
   if (!audio)
     return;
 
+  ringbuffer_free(&audio->recordBuffer);
+  LG_LOCK_FREE(audio->recordLock);
   free(audio);
 }
 

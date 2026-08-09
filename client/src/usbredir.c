@@ -296,6 +296,9 @@ bool lgUsbRedir_process(LG_USBRedir * usbredir)
     }
   }
 
+  if (usbredir->plugged && usbredir->deviceOps->process)
+    usbredir->deviceOps->process(usbredir->deviceOpaque);
+
   return flushUSBRedir(usbredir);
 }
 

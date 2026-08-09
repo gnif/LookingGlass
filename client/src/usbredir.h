@@ -42,6 +42,10 @@ typedef struct LG_USBRedirDeviceOps
   /* Queue the device descriptors and connection announcement. */
   void (*plug)(void * opaque, struct usbredirparser * parser);
 
+  /* Queue time-sensitive device data. This runs on the PureSpice processing
+   * thread immediately before parser output is flushed. */
+  void (*process)(void * opaque);
+
   /* Stop all device activity. The bridge sends the disconnect packet. */
   void (*unplug)(void * opaque);
 }

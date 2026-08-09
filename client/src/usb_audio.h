@@ -32,13 +32,19 @@ typedef struct LG_USBAudio LG_USBAudio;
 
 typedef struct LG_USBAudioEventOps
 {
-  void (*start)(void * opaque, uint32_t sampleRate, uint32_t channelMask);
-  void (*stop)(void * opaque);
+  void (*playbackStart)(
+      void * opaque, uint32_t sampleRate, uint32_t channelMask);
+  void (*playbackStop)(void * opaque);
 
   /* Data is borrowed interleaved packed signed 24-bit PCM, little endian.
    * Channels are ordered by ascending set bits in the selected UAC channel
    * mask. */
-  void (*data)(void * opaque, const void * data, size_t frames);
+  void (*playbackData)(void * opaque, const void * data, size_t frames);
+
+  /* Repeated while active when the recording clock changes rate. */
+  void (*recordStart)(
+      void * opaque, uint32_t sampleRate, uint32_t channelMask);
+  void (*recordStop)(void * opaque);
 }
 LG_USBAudioEventOps;
 
@@ -50,6 +56,14 @@ void lgUsbAudio_destroy(LG_USBAudio * audio);
 /* Publish the requested source rate without touching usbredir from the audio
  * feedback thread. */
 void lgUsbAudio_setFeedbackRate(LG_USBAudio * audio, double sampleRate);
+
+/* Queue interleaved packed signed 24-bit microphone frames. This may be
+ * called from the audio recording thread. */
+bool lgUsbAudio_recordData(
+    LG_USBAudio * audio, const void * data, size_t frames);
+
+/* This must be queried on the PureSpice processing thread. */
+bool lgUsbAudio_recording(const LG_USBAudio * audio);
 
 const LG_USBRedirDeviceOps * lgUsbAudio_deviceOps(void);
 
