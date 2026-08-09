@@ -493,6 +493,13 @@ static struct Option options[] =
   },
   {
     .module         = "spice",
+    .name           = "usbAudio",
+    .description    = "Use USB redirection for SPICE audio playback",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "spice",
     .name           = "scaleCursor",
     .description    = "Scale cursor input position to screen size when up/down scaled",
     .shortopt       = 'j',
@@ -760,14 +767,23 @@ bool config_load(int argc, char * argv[])
 
   if ((g_params.useSpice = option_get_bool("spice", "enable")))
   {
-    g_params.spiceHost         = option_get_string("spice", "host");
-    g_params.spicePort         = option_get_int   ("spice", "port");
+    g_params.spiceHost            = option_get_string("spice", "host");
+    g_params.spicePort            = option_get_int   ("spice", "port");
 
-    g_params.useSpiceInput     = option_get_bool("spice", "input"    );
-    g_params.useSpiceClipboard =
+    g_params.useSpiceInput        = option_get_bool("spice", "input"    );
+    g_params.useSpiceClipboard    =
       option_get_bool("spice", "clipboard") &&
       (g_params.clipboardToVM || g_params.clipboardToLocal);
-    g_params.useSpiceAudio     = option_get_bool("spice", "audio"    );
+    g_params.useSpiceAudio        = option_get_bool("spice", "audio"   );
+    g_params.useSpiceUSBAudio     = option_get_bool("spice", "usbAudio");
+
+#if !ENABLE_USB_AUDIO
+    if (g_params.useSpiceAudio && g_params.useSpiceUSBAudio)
+    {
+      DEBUG_WARN("USB audio is unavailable in this build, using SPICE audio");
+      g_params.useSpiceUSBAudio = false;
+    }
+#endif
   }
 
   g_params.audioDebug = option_get_bool("audio", "debug");

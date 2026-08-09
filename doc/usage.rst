@@ -358,6 +358,8 @@ All command line options
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:audio            |       | yes       | Enable SPICE audio support                                          |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
+  | spice:usbAudio         |       | no        | Use USB redirection for SPICE audio playback                        |
+  +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:scaleCursor      | -j    | yes       | Scale cursor input position to screen size when up/down scaled      |
   +------------------------+-------+-----------+---------------------------------------------------------------------+
   | spice:captureOnStart   |       | no        | Capture mouse and keyboard on start                                 |

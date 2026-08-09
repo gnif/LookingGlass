@@ -61,6 +61,9 @@
 #if ENABLE_AUDIO
 #include "audio_spice.h"
 #endif
+#if ENABLE_USB_AUDIO
+#include "audio_usb.h"
+#endif
 #include "keybind.h"
 #include "clipboard.h"
 #include "clipboard_spice.h"
@@ -1511,7 +1514,6 @@ static void checkUUID(void)
   lgcSpice_setAvailable(false);
   lgClipboard_setFallback(NULL, NULL);
   atomic_store_explicit(&g_state.spiceClose, true, memory_order_release);
-  purespice_disconnect();
 }
 
 void spiceReady(void)
@@ -1520,7 +1522,7 @@ void spiceReady(void)
   if (g_params.useSpiceInput)
     lgInput_setFallback(&LGI_Spice, NULL);
 #if ENABLE_AUDIO
-  if (g_params.useSpiceAudio)
+  if (g_params.useSpiceAudio && !g_params.useSpiceUSBAudio)
   {
     lgaSpice_setAvailable(true);
     lgAudio_setFallback(&LGA_Spice, NULL);
@@ -1714,6 +1716,27 @@ static void spice_setCursorState(bool visible, int x, int y)
 
 int spiceThread(void * arg)
 {
+#if ENABLE_USB_AUDIO
+  LGA_USBState * usbAudio = NULL;
+  LG_USBRedir   * usbRedir = NULL;
+
+  if (g_params.useSpiceAudio && g_params.useSpiceUSBAudio)
+  {
+    if (!lgAudio_supportsPlayback())
+    {
+      DEBUG_WARN("USB audio requires a playback backend, using SPICE audio");
+      g_params.useSpiceUSBAudio = false;
+    }
+    else if (!(usbAudio = lgaUsb_create()))
+    {
+      DEBUG_WARN("Failed to initialize USB audio, using SPICE audio");
+      g_params.useSpiceUSBAudio = false;
+    }
+    else
+      usbRedir = lgaUsb_redir(usbAudio);
+  }
+#endif
+
   const struct PSConfig config =
   {
     .host      = g_params.spiceHost,
@@ -1755,7 +1778,8 @@ int spiceThread(void * arg)
 #if ENABLE_AUDIO
     .playback =
     {
-      .enable      = g_params.useSpiceAudio && lgAudio_supportsPlayback(),
+      .enable      = g_params.useSpiceAudio &&
+        !g_params.useSpiceUSBAudio && lgAudio_supportsPlayback(),
       .autoConnect = true,
       .start       = lgaSpice_playbackStart,
       .volume      = lgaSpice_playbackVolume,
@@ -1765,35 +1789,64 @@ int spiceThread(void * arg)
     },
     .record =
     {
-      .enable      = g_params.useSpiceAudio && lgAudio_supportsRecord(),
+      .enable      = g_params.useSpiceAudio &&
+        !g_params.useSpiceUSBAudio && lgAudio_supportsRecord(),
       .autoConnect = true,
       .start       = lgaSpice_recordStart,
       .volume      = lgaSpice_recordVolume,
       .mute        = lgaSpice_recordMute,
       .stop        = lgaSpice_recordStop
-    }
+    },
+#endif
+#if ENABLE_USB_AUDIO
+    .usbRedir =
+    {
+      .enable      = usbAudio != NULL,
+      .autoConnect = false,
+      .opaque      = usbRedir,
+      .state       = lgUsbRedir_state,
+      .data        = lgUsbRedir_data,
+    },
 #endif
   };
 
+  bool connected = false;
   if (!purespice_connect(&config))
   {
     DEBUG_ERROR("Failed to connect to spice server");
     lgSignalEvent(e_spice);
     goto end;
   }
+  connected = true;
+
+  int processTimeout = 100;
+#if ENABLE_USB_AUDIO
+  if (usbAudio)
+  {
+    lgAudio_setFallback(&LGA_USB, usbAudio);
+    processTimeout = 10;
+  }
+#endif
 
   // process all spice messages
-  while(app_getState() != APP_STATE_SHUTDOWN)
+  while(app_getState() != APP_STATE_SHUTDOWN &&
+      !atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
   {
+#if ENABLE_USB_AUDIO
+    if (usbRedir && !lgUsbRedir_process(usbRedir))
+      DEBUG_WARN("Failed to process USB audio redirection");
+#endif
+
     PSStatus status;
-    if ((status = purespice_process(100)) != PS_STATUS_RUN)
+    if ((status = purespice_process(processTimeout)) != PS_STATUS_RUN)
     {
       if (status != PS_STATUS_SHUTDOWN)
         DEBUG_ERROR("failed to process spice messages");
       goto end;
     }
-
   }
+
+end:
 
   lgInput_setFallback(NULL, NULL);
   lgAudio_setFallback(NULL, NULL);
@@ -1802,16 +1855,14 @@ int spiceThread(void * arg)
 #if ENABLE_AUDIO
   lgaSpice_setAvailable(false);
 #endif
-  purespice_disconnect();
-
-end:
-
-  lgcSpice_setAvailable(false);
-  lgInput_setFallback(NULL, NULL);
-  lgAudio_setFallback(NULL, NULL);
-  lgClipboard_setFallback(NULL, NULL);
-#if ENABLE_AUDIO
-  lgaSpice_setAvailable(false);
+#if ENABLE_USB_AUDIO
+  if (connected && usbRedir && !lgUsbRedir_process(usbRedir))
+    DEBUG_WARN("Failed to disconnect USB audio device");
+#endif
+  if (connected)
+    purespice_disconnect();
+#if ENABLE_USB_AUDIO
+  lgaUsb_destroy(usbAudio);
 #endif
 
   // if the connection was disconnected intentionally we don't want to shutdown

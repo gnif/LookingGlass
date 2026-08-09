@@ -183,6 +183,7 @@ struct AppParams
   bool                 useSpiceInput;
   bool                 useSpiceClipboard;
   bool                 useSpiceAudio;
+  bool                 useSpiceUSBAudio;
   const char *         spiceHost;
   unsigned int         spicePort;
   bool                 clipboardToVM;
