@@ -67,6 +67,7 @@ struct LGA_USBState
   const LG_AudioEventOps * events;
   void                   * eventOpaque;
 
+  LG_AudioFormat           streamFormat;
   uint32_t                 streamGeneration;
   uint32_t                 generationSerial;
   int64_t                  clockOrigin;
@@ -78,17 +79,42 @@ struct LGA_USBState
 static _Thread_local USBAudioCallbackFrame * l_eventFrames;
 static _Thread_local USBAudioCallbackFrame * l_statusFrames;
 
-static const LG_AudioFormat l_format =
+static const LG_AudioFormat l_formatTemplate =
 {
-  .sampleFormat = LG_AUDIO_FMT_F32_LE,
-  .sampleRate   = LG_USB_AUDIO_SAMPLE_RATE,
-  .channelCount = LG_USB_AUDIO_CHANNELS,
-  .channels     =
-  {
-    LG_AUDIO_CH_FRONT_LEFT,
-    LG_AUDIO_CH_FRONT_RIGHT,
-  },
+  .sampleFormat = LG_AUDIO_FMT_S24_LE,
+  .sampleRate   = LG_USB_AUDIO_DEFAULT_SAMPLE_RATE,
 };
+
+static const LG_AudioChannel l_uacChannels[] =
+{
+  LG_AUDIO_CH_FRONT_LEFT,
+  LG_AUDIO_CH_FRONT_RIGHT,
+  LG_AUDIO_CH_FRONT_CENTER,
+  LG_AUDIO_CH_LFE,
+  LG_AUDIO_CH_REAR_LEFT,
+  LG_AUDIO_CH_REAR_RIGHT,
+  LG_AUDIO_CH_FRONT_LEFT_CENTER,
+  LG_AUDIO_CH_FRONT_RIGHT_CENTER,
+  LG_AUDIO_CH_REAR_CENTER,
+  LG_AUDIO_CH_SIDE_LEFT,
+  LG_AUDIO_CH_SIDE_RIGHT,
+};
+
+static void setStreamFormat(LG_AudioFormat * format,
+    uint32_t sampleRate, uint32_t channelMask)
+{
+  *format            = l_formatTemplate;
+  format->sampleRate = sampleRate;
+
+  for (size_t bit = 0;
+      bit < sizeof(l_uacChannels) / sizeof(*l_uacChannels); ++bit)
+  {
+    if (!(channelMask & (UINT32_C(1) << bit)))
+      continue;
+
+    format->channels[format->channelCount++] = l_uacChannels[bit];
+  }
+}
 
 static uint32_t nextGeneration(uint32_t generation)
 {
@@ -132,10 +158,10 @@ static LG_AudioClock makeClock(
 {
   /* USB redirection carries no publisher timestamp or USB frame number.
    * Preserve the sample timeline, but do not claim a measured source rate. */
+  const uint32_t sampleRate = state->streamFormat.sampleRate;
   const int64_t elapsed =
-    position / LG_USB_AUDIO_SAMPLE_RATE * USB_AUDIO_NS_PER_SECOND +
-    position % LG_USB_AUDIO_SAMPLE_RATE * USB_AUDIO_NS_PER_SECOND /
-      LG_USB_AUDIO_SAMPLE_RATE;
+    position / sampleRate * USB_AUDIO_NS_PER_SECOND +
+    position % sampleRate * USB_AUDIO_NS_PER_SECOND / sampleRate;
 
   return (LG_AudioClock)
   {
@@ -232,7 +258,8 @@ static void waitStatusCallbacks(const LGA_USBState * state)
     ;
 }
 
-static void usbAudioStart(void * opaque)
+static void usbAudioStart(
+    void * opaque, uint32_t sampleRate, uint32_t channelMask)
 {
   LGA_USBState * state = opaque;
   USBAudioEventTarget target;
@@ -247,6 +274,7 @@ static void usbAudioStart(void * opaque)
     return;
   }
 
+  setStreamFormat(&state->streamFormat, sampleRate, channelMask);
   generation = state->generationSerial =
     nextGeneration(state->generationSerial);
   state->streamGeneration = generation;
@@ -265,7 +293,7 @@ static void usbAudioStart(void * opaque)
     return;
 
   target.events->playbackStart(
-      target.opaque, generation, &l_format, &clock);
+      target.opaque, generation, &state->streamFormat, &clock);
 
   LG_LOCK(state->stateLock);
   if (eventCurrentNL(state, &target, generation))
@@ -453,7 +481,7 @@ static bool usbAttach(void * opaque, const LG_AudioEventOps * events,
   if (dispatch)
   {
     target.events->playbackStart(
-        target.opaque, generation, &l_format, &clock);
+        target.opaque, generation, &state->streamFormat, &clock);
 
     LG_LOCK(state->stateLock);
     if (eventCurrentNL(state, &target, generation))
@@ -529,6 +557,7 @@ LGA_USBState * lgaUsb_create(void)
   atomic_init(&state->statusInFlight, 0);
   atomic_init(&state->statusNextTicket, 0);
   atomic_init(&state->statusServingTicket, 0);
+  state->streamFormat = l_formatTemplate;
 
   state->device = lgUsbAudio_create(&l_usbAudioEvents, state);
   if (!state->device)

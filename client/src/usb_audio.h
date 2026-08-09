@@ -24,18 +24,20 @@
 #include "usbredir.h"
 
 #include <stddef.h>
+#include <stdint.h>
 
-#define LG_USB_AUDIO_SAMPLE_RATE 48000
-#define LG_USB_AUDIO_CHANNELS 2
+#define LG_USB_AUDIO_DEFAULT_SAMPLE_RATE 48000
 
 typedef struct LG_USBAudio LG_USBAudio;
 
 typedef struct LG_USBAudioEventOps
 {
-  void (*start)(void * opaque);
+  void (*start)(void * opaque, uint32_t sampleRate, uint32_t channelMask);
   void (*stop)(void * opaque);
 
-  /* Data is borrowed interleaved stereo 32-bit IEEE float, little endian. */
+  /* Data is borrowed interleaved packed signed 24-bit PCM, little endian.
+   * Channels are ordered by ascending set bits in the selected UAC channel
+   * mask. */
   void (*data)(void * opaque, const void * data, size_t frames);
 }
 LG_USBAudioEventOps;
