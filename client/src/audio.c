@@ -66,6 +66,7 @@
 #define PLAYBACK_DEVICE_RATE_STABLE_DELTA_PPM 50.0
 #define PLAYBACK_DEVICE_RATE_MAX_ACQUIRE_SEC 20.0
 #define PLAYBACK_FEEDBACK_INTERVAL_NS INT64_C(1000000)
+#define PLAYBACK_GRAPH_INTERVAL_NS INT64_C(25000000)
 
 typedef enum
 {
@@ -173,6 +174,7 @@ typedef struct
   double  lastRatio;
   double  lastClockRatio;
   int64_t nextFeedbackTime;
+  int64_t nextGraphTime;
   int64_t nextLogTime;
   unsigned int bufferOverruns;
 
@@ -1137,6 +1139,7 @@ static void playbackStart(const LG_AudioFormat * format,
   audio.playback.sourceData.lastRatio           = 1.0;
   audio.playback.sourceData.lastClockRatio      = 1.0;
   audio.playback.sourceData.nextFeedbackTime    = 0;
+  audio.playback.sourceData.nextGraphTime       = 0;
   audio.playback.sourceData.bufferOverrunPending = false;
   audio.playback.sourceData.bufferOverruns      = 0;
   audio.playback.sourceData.nextLogTime         =
@@ -2018,8 +2021,9 @@ static void playbackData(const void * data, size_t frameCount,
   const double softwareLatencyMs =
     actualLatencyFrames * 1000.0 / audio.playback.sampleRate;
 
-  if (audio.playback.graph)
+  if (audio.playback.graph && now >= sourceData->nextGraphTime)
   {
+    sourceData->nextGraphTime = now + PLAYBACK_GRAPH_INTERVAL_NS;
     const float latency = softwareLatencyMs;
     ringbuffer_push(audio.playback.timings, &latency);
     app_invalidateGraph(audio.playback.graph);
