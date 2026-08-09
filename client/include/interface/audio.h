@@ -156,12 +156,15 @@ typedef struct LG_AudioOps
   bool (*recordData)(void * opaque, uint32_t generation,
       const void * data, size_t frames, const LG_AudioClock * sourceClock);
 
-  /* Optional active synchronization feedback. This is called outside the
-   * realtime audio callback with the measured playback device clock. Its
-   * position uses the device's independent output-frame timeline and its time
-   * includes the backend's estimated presentation latency. */
+  /* Optional active synchronization feedback. A provider implementing this
+   * owns playback rate control, so the client preserves its frame rate and
+   * does not activate a local resampler. This is called outside the realtime
+   * audio callback with the measured playback device clock. Its position uses
+   * the device's independent output-frame timeline and its time includes the
+   * backend's estimated presentation latency. targetRate is the source frame
+   * rate requested by the client's buffer controller. */
   bool (*clockFeedback)(void * opaque, uint32_t generation,
-      const LG_AudioClock * playbackClock);
+      const LG_AudioClock * playbackClock, double targetRate);
 }
 LG_AudioOps;
 

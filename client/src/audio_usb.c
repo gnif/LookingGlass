@@ -532,6 +532,28 @@ static void usbDetach(void * opaque)
   LG_UNLOCK(state->stateLock);
 }
 
+static bool usbClockFeedback(void * opaque, uint32_t generation,
+    const LG_AudioClock * playbackClock, double targetRate)
+{
+  LGA_USBState * state = opaque;
+
+  LG_LOCK(state->stateLock);
+  if (!state->attached || state->streamGeneration != generation)
+  {
+    LG_UNLOCK(state->stateLock);
+    return false;
+  }
+
+  const double nominalRate = state->streamFormat.sampleRate;
+  const double rate = playbackClock &&
+      targetRate >= nominalRate * 0.995 &&
+      targetRate <= nominalRate * 1.005 ?
+    targetRate : nominalRate;
+  lgUsbAudio_setFeedbackRate(state->device, rate);
+  LG_UNLOCK(state->stateLock);
+  return true;
+}
+
 const LG_AudioOps LGA_USB =
 {
   .name              = "USB Audio",
@@ -539,7 +561,7 @@ const LG_AudioOps LGA_USB =
   .attach            = usbAttach,
   .detach            = usbDetach,
   .recordData        = NULL,
-  .clockFeedback     = NULL,
+  .clockFeedback     = usbClockFeedback,
 };
 
 LGA_USBState * lgaUsb_create(void)

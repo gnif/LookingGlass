@@ -47,6 +47,10 @@ LG_USBAudio * lgUsbAudio_create(
 /* Destroy the LG_USBRedir using this device before destroying the device. */
 void lgUsbAudio_destroy(LG_USBAudio * audio);
 
+/* Publish the requested source rate without touching usbredir from the audio
+ * feedback thread. */
+void lgUsbAudio_setFeedbackRate(LG_USBAudio * audio, double sampleRate);
+
 const LG_USBRedirDeviceOps * lgUsbAudio_deviceOps(void);
 
 #endif

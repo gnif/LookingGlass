@@ -65,6 +65,7 @@
 #define PLAYBACK_DEVICE_RATE_STABLE_SEC 2.0
 #define PLAYBACK_DEVICE_RATE_STABLE_DELTA_PPM 50.0
 #define PLAYBACK_DEVICE_RATE_MAX_ACQUIRE_SEC 20.0
+#define PLAYBACK_FEEDBACK_INTERVAL_NS INT64_C(1000000)
 
 typedef enum
 {
@@ -77,6 +78,14 @@ typedef enum
   STREAM_STATE_STOP_PENDING
 }
 StreamState;
+
+typedef enum
+{
+  PLAYBACK_RATE_SOFTWARE,
+  PLAYBACK_RATE_BACKEND,
+  PLAYBACK_RATE_PROVIDER,
+}
+PlaybackRateControl;
 
 #define STREAM_ACTIVE(state) \
   (state == STREAM_STATE_RUN        || \
@@ -163,6 +172,7 @@ typedef struct
   double  ratioIntegral;
   double  lastRatio;
   double  lastClockRatio;
+  int64_t nextFeedbackTime;
   int64_t nextLogTime;
   unsigned int bufferOverruns;
 
@@ -224,7 +234,8 @@ typedef struct
     int         startupLowWaterFrames;
     int64_t     startupPacketDeadline;
     int64_t     startupPacketPeriod;
-    bool        backendResampler;
+    PlaybackRateControl rateControl;
+    bool                lastProviderRateControl;
     _Atomic(double) backendResampleRatio;
     atomic_bool     backendResamplerFailed;
     RingBuffer  buffer;
@@ -274,6 +285,7 @@ typedef struct
     uint32_t            bindingGeneration;
     uint32_t            generation;
     LG_AudioClock       clock;
+    double              targetRate;
   }
   feedback;
 }
@@ -590,10 +602,9 @@ static void playbackSourceRateReset(PlaybackSourceData * sourceData)
   sourceData->sourceRateValid      = false;
 }
 
-static void playbackSourceRateAdd(
-    PlaybackSourceData * sourceData, double nominalFrameSec)
+static void playbackSourceRateAdd(PlaybackSourceData * sourceData,
+    int64_t timeMs, double nominalFrameSec)
 {
-  const int64_t timeMs = sourceData->mediaTimeMs;
   if (sourceData->rateLastSampleTimeMs != INT64_MIN &&
       timeMs - sourceData->rateLastSampleTimeMs <
         PLAYBACK_RATE_SAMPLE_INTERVAL_MS)
@@ -925,7 +936,7 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
   PlaybackDeviceData * data = &audio.playback.deviceData;
   double nextRatio = 1.0;
-  if (audio.playback.backendResampler)
+  if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND)
   {
     nextRatio = atomic_load_explicit(
         &audio.playback.backendResampleRatio, memory_order_acquire);
@@ -1045,15 +1056,16 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 }
 
 static bool playbackSetupDevice(const LG_AudioFormat * format,
-    int requestedPeriodFrames, bool requestResampler)
+    int requestedPeriodFrames, bool requestResampler,
+    bool * backendResampler)
 {
-  audio.playback.backendResampler      = false;
   audio.playback.deviceMaxPeriodFrames = 0;
   audio.playback.deviceStartFrames     = 0;
+  *backendResampler                    = false;
 
   return audio.audioDev->playback.setup(format,
       requestedPeriodFrames, requestResampler,
-      &audio.playback.backendResampler,
+      backendResampler,
       &audio.playback.deviceMaxPeriodFrames,
       &audio.playback.deviceStartFrames, playbackPullFrames) &&
     audio.playback.deviceMaxPeriodFrames > 0 &&
@@ -1061,7 +1073,7 @@ static bool playbackSetupDevice(const LG_AudioFormat * format,
 }
 
 static void playbackStart(const LG_AudioFormat * format,
-    const LG_AudioClock * sourceClock)
+    const LG_AudioClock * sourceClock, bool providerRateControl)
 {
   if (!audio.audioDev)
     return;
@@ -1080,6 +1092,7 @@ static void playbackStart(const LG_AudioFormat * format,
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_KEEP_ALIVE &&
       audio.playback.lastFormatValid &&
+      audio.playback.lastProviderRateControl == providerRateControl &&
       audioFormatEqual(format, &audio.playback.lastFormat))
   {
     StreamState expected = STREAM_STATE_KEEP_ALIVE;
@@ -1098,9 +1111,10 @@ static void playbackStart(const LG_AudioFormat * format,
   if (state != STREAM_STATE_STOP)
     playbackStop();
 
-  audio.playback.format          = *format;
-  audio.playback.lastFormat      = *format;
-  audio.playback.lastFormatValid = true;
+  audio.playback.format                  = *format;
+  audio.playback.lastFormat              = *format;
+  audio.playback.lastFormatValid         = true;
+  audio.playback.lastProviderRateControl = providerRateControl;
 
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
@@ -1122,6 +1136,7 @@ static void playbackStart(const LG_AudioFormat * format,
   audio.playback.sourceData.ratioIntegral       = 0.0;
   audio.playback.sourceData.lastRatio           = 1.0;
   audio.playback.sourceData.lastClockRatio      = 1.0;
+  audio.playback.sourceData.nextFeedbackTime    = 0;
   audio.playback.sourceData.bufferOverrunPending = false;
   audio.playback.sourceData.bufferOverruns      = 0;
   audio.playback.sourceData.nextLogTime         =
@@ -1161,28 +1176,32 @@ static void playbackStart(const LG_AudioFormat * format,
   audio.playback.startupLowWaterFrames = 0;
   audio.playback.startupPacketDeadline = 0;
   audio.playback.startupPacketPeriod   = 0;
-  const bool requestBackendResampler =
+  const bool requestBackendResampler = !providerRateControl &&
     g_params.audioResampler != AUDIO_RESAMPLER_LIBSAMPLERATE;
   LG_AudioFormat deviceFormat = *format;
 
   /* The ring generates zero-filled silence. Keep unsigned PCM on the float
    * path because its silence level is biased rather than zero. */
-  if (!requestBackendResampler ||
+  if ((!requestBackendResampler && !providerRateControl) ||
       deviceFormat.sampleFormat == LG_AUDIO_FMT_U8)
     deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_NE;
 
+  bool backendResampler;
   bool deviceConfigured = playbackSetupDevice(
-      &deviceFormat, requestedPeriodFrames, requestBackendResampler);
+      &deviceFormat, requestedPeriodFrames, requestBackendResampler,
+      &backendResampler);
 
-  /* Native samples require the backend to own rate correction. If it cannot,
-   * reconnect using float samples for the libsamplerate path. This also
-   * provides a float fallback for formats unsupported by the backend. */
-  if ((!deviceConfigured || !audio.playback.backendResampler) &&
+  /* Native samples require either provider feedback or backend rate control.
+   * Otherwise reconnect using float samples for the libsamplerate path. This
+   * also provides a float fallback for formats unsupported by the backend. */
+  if ((!deviceConfigured ||
+       (!providerRateControl && !backendResampler)) &&
       deviceFormat.sampleFormat != LG_AUDIO_FMT_F32_NE)
   {
     deviceFormat.sampleFormat = LG_AUDIO_FMT_F32_NE;
     deviceConfigured = playbackSetupDevice(
-        &deviceFormat, requestedPeriodFrames, requestBackendResampler);
+        &deviceFormat, requestedPeriodFrames, requestBackendResampler,
+        &backendResampler);
   }
 
   if (!deviceConfigured)
@@ -1195,8 +1214,11 @@ static void playbackStart(const LG_AudioFormat * format,
   audio.playback.stride = channels *
     audioSampleSize(deviceFormat.sampleFormat);
   audio.playback.convertToFloat =
-    !audio.playback.backendResampler ||
+    (!providerRateControl && !backendResampler) ||
     deviceFormat.sampleFormat != format->sampleFormat;
+  audio.playback.rateControl = providerRateControl ?
+    PLAYBACK_RATE_PROVIDER : backendResampler ?
+      PLAYBACK_RATE_BACKEND : PLAYBACK_RATE_SOFTWARE;
 
   audio.playback.buffer = ringbuffer_newUnbounded(
       sampleRate, audio.playback.stride);
@@ -1207,11 +1229,11 @@ static void playbackStart(const LG_AudioFormat * format,
   }
 
   if (g_params.audioResampler == AUDIO_RESAMPLER_BACKEND &&
-      !audio.playback.backendResampler)
+      !providerRateControl && !backendResampler)
     DEBUG_WARN("%s could not activate backend resampling; "
         "using libsamplerate", audio.audioDev->name);
 
-  if (!audio.playback.backendResampler)
+  if (audio.playback.rateControl == PLAYBACK_RATE_SOFTWARE)
   {
     int srcError;
     audio.playback.sourceData.src =
@@ -1226,9 +1248,20 @@ static void playbackStart(const LG_AudioFormat * format,
   else
     audio.playback.sourceData.src = NULL;
 
-  DEBUG_INFO("Using audio resampler: %s",
-      audio.playback.backendResampler ?
-        audio.audioDev->name : "libsamplerate");
+  switch (audio.playback.rateControl)
+  {
+    case PLAYBACK_RATE_PROVIDER:
+      DEBUG_INFO("Using audio rate control: provider feedback");
+      break;
+
+    case PLAYBACK_RATE_BACKEND:
+      DEBUG_INFO("Using audio resampler: %s", audio.audioDev->name);
+      break;
+
+    case PLAYBACK_RATE_SOFTWARE:
+      DEBUG_INFO("Using audio resampler: libsamplerate");
+      break;
+  }
 
   // if a volume level was stored, set it before we return
   if (audio.playback.volumeChannels)
@@ -1329,6 +1362,19 @@ static double computeDevicePosition(int64_t curTime)
     sourceData->devicePositionOffsetFrames;
 }
 
+static double playbackProviderRate(const PlaybackSourceData * sourceData)
+{
+  const double nominalRate = audio.playback.sampleRate;
+  if (!sourceData->deviceClock.valid ||
+      sourceData->deviceClock.frameSec <= 0.0)
+    return nominalRate;
+
+  return clamp(
+      sourceData->lastRatio / sourceData->deviceClock.frameSec,
+      nominalRate * (1.0 - PLAYBACK_MAX_RATE_CORRECTION),
+      nominalRate * (1.0 + PLAYBACK_MAX_RATE_CORRECTION));
+}
+
 static bool playbackEnsureConversionBuffers(
     PlaybackSourceData * sourceData, int frames)
 {
@@ -1347,7 +1393,7 @@ static bool playbackEnsureConversionBuffers(
     sourceData->framesInSize = frames;
   }
 
-  if (!audio.playback.backendResampler)
+  if (audio.playback.rateControl == PLAYBACK_RATE_SOFTWARE)
   {
     const int framesOut =
       (int)ceil(frames * (1.0 + PLAYBACK_MAX_RATE_CORRECTION)) + 64;
@@ -1427,7 +1473,7 @@ static void playbackData(const void * data, size_t frameCount,
   if (state == STREAM_STATE_STOP || !audio.audioDev || frameCount == 0)
     return;
 
-  if (audio.playback.backendResampler &&
+  if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND &&
       atomic_exchange_explicit(
         &audio.playback.backendResamplerFailed, false,
         memory_order_acq_rel))
@@ -1441,7 +1487,8 @@ static void playbackData(const void * data, size_t frameCount,
   /* Backend resampling changes how many source frames PipeWire requests per
    * device period. Use the command-normalized output clock for rate matching,
    * while deviceClock remains in the ring's source-frame domain for latency. */
-  const PlaybackClock * rateClock = audio.playback.backendResampler ?
+  const PlaybackClock * rateClock =
+    audio.playback.rateControl == PLAYBACK_RATE_BACKEND ?
     &sourceData->outputClock : &sourceData->deviceClock;
   const int64_t now = nanotime();
   const double nominalFrameSec = 1.0 / audio.playback.sampleRate;
@@ -1506,7 +1553,13 @@ static void playbackData(const void * data, size_t frameCount,
 
   const bool sourceRateWasValid =
     sourceData->sourceRateValid;
-  playbackSourceRateAdd(sourceData, nominalFrameSec);
+  const bool providerRateControl =
+    audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
+  const int64_t sourceRateTimeMs = providerRateControl ?
+    (now - sourceData->mediaLocalOrigin) / INT64_C(1000000) :
+    sourceData->mediaTimeMs;
+  playbackSourceRateAdd(
+      sourceData, sourceRateTimeMs, nominalFrameSec);
   if (sourceClock && sourceClock->stable && sourceClock->rate > 0.0)
   {
     const double frameSec = 1.0 / sourceClock->rate;
@@ -1524,7 +1577,7 @@ static void playbackData(const void * data, size_t frameCount,
   if (!playbackSourceClockUpdate(&sourceData->sourceClock,
         packetTime, sourceData->inputPosition, nominalFrameSec))
     discontinuity = true;
-  if (sourceData->sourceRateValid)
+  if (sourceData->sourceRateValid && !providerRateControl)
     sourceData->sourceClock.frameSec = sourceData->sourceRateFrameSec;
 
   /* Track phase variation around its local baseline, not its absolute value.
@@ -1587,7 +1640,7 @@ static void playbackData(const void * data, size_t frameCount,
       playbackClockUpdate(&sourceData->deviceClock,
           deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
     const bool outputClockUpdated =
-      !audio.playback.backendResampler ||
+      audio.playback.rateControl != PLAYBACK_RATE_BACKEND ||
       playbackClockUpdate(&sourceData->outputClock,
           deviceTick.nextTime, deviceTick.outputPosition,
           nominalFrameSec);
@@ -1608,11 +1661,12 @@ static void playbackData(const void * data, size_t frameCount,
      * switching models would create a false phase step and drive the resampler
      * despite an already-correct ring level. Keep the source clock untouched:
      * changing it would also disturb source phase and jitter tracking. */
+    const int64_t referenceTime = providerRateControl ? now : curTime;
     const double rawDevicePosition =
-      playbackClockPosition(&sourceData->deviceClock, curTime);
+      playbackClockPosition(&sourceData->deviceClock, referenceTime);
     sourceData->devicePositionOffsetFrames =
-      sourceData->devReadPosition - sourceReserveFrames -
-        rawDevicePosition;
+      sourceData->devReadPosition - rawDevicePosition -
+        (providerRateControl ? 0.0 : sourceReserveFrames);
   }
 
   const int maxPeriodFrames =
@@ -1637,8 +1691,8 @@ static void playbackData(const void * data, size_t frameCount,
   const double targetBufferFrames =
     minimumBufferFrames + latencyOffsetFrames;
   const double resamplerDelayFrames =
-    audio.playback.backendResampler ?
-      0.0 : PLAYBACK_RESAMPLER_DELAY_FRAMES;
+    audio.playback.rateControl == PLAYBACK_RATE_SOFTWARE ?
+      PLAYBACK_RESAMPLER_DELAY_FRAMES : 0.0;
   const double minimumLatencyFrames =
     minimumBufferFrames + resamplerDelayFrames;
   const double targetLatencyFrames =
@@ -1646,9 +1700,27 @@ static void playbackData(const void * data, size_t frameCount,
 
   double devPosition = DBL_MIN;
   state = playbackGetState();
-  if ((discontinuity ||
+  if (providerRateControl &&
+      (discontinuity ||
        state == STREAM_STATE_KEEP_ALIVE ||
-       state == STREAM_STATE_RESUMING) &&
+       state == STREAM_STATE_RESUMING))
+  {
+    const int occupancy = ringbuffer_getCount(audio.playback.buffer);
+    const int slewFrames = clamp(
+        llrint(targetLowWaterFrames - occupancy),
+        (int64_t)INT_MIN, (int64_t)INT_MAX);
+    const int actualSlew = playbackSlewBuffer(sourceData, slewFrames);
+    sourceData->outputPosition += actualSlew;
+    curPosition += actualSlew;
+
+    sourceData->offsetError         = 0.0;
+    sourceData->offsetErrorIntegral = 0.0;
+    sourceData->ratioIntegral       = 0.0;
+    playbackSetState(STREAM_STATE_RUN);
+  }
+  else if ((discontinuity ||
+            state == STREAM_STATE_KEEP_ALIVE ||
+            state == STREAM_STATE_RESUMING) &&
       sourceData->deviceClock.valid &&
       sourceData->deviceClockStable)
   {
@@ -1668,7 +1740,25 @@ static void playbackData(const void * data, size_t frameCount,
 
   double actualLatencyFrames = 0.0;
   double actualOffsetError = 0.0;
-  if (sourceData->deviceClock.valid)
+  if (providerRateControl)
+  {
+    const int occupancy = ringbuffer_getCount(audio.playback.buffer);
+    actualLatencyFrames = occupancy + sourceReserveFrames;
+    actualOffsetError   = targetLowWaterFrames - occupancy;
+
+    const double error =
+      actualOffsetError - sourceData->offsetError;
+    const double periodSec = frames * nominalFrameSec;
+    const double omega =
+      2.0 * M_PI * PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ * periodSec;
+    const double b = M_SQRT2 * omega;
+    const double c = omega * omega;
+
+    sourceData->offsetError += b * error +
+      sourceData->offsetErrorIntegral;
+    sourceData->offsetErrorIntegral += c * error;
+  }
+  else if (sourceData->deviceClock.valid)
   {
     if (sourceData->deviceClockStable)
     {
@@ -1722,10 +1812,11 @@ static void playbackData(const void * data, size_t frameCount,
     2.0 * naturalFrequency / audio.playback.sampleRate;
   const double ki =
     naturalFrequency * naturalFrequency / audio.playback.sampleRate;
-  if (sourceRateBecameValid)
+  if (sourceRateBecameValid && !providerRateControl)
     sourceData->ratioIntegral = 0.0;
 
-  if (sourceData->deviceClockStable &&
+  if (!providerRateControl &&
+      sourceData->deviceClockStable &&
       sourceData->sourceRateValid &&
       rateClock->updates >= 2)
   {
@@ -1755,7 +1846,8 @@ static void playbackData(const void * data, size_t frameCount,
   double controllerKp = kp;
   double controllerKi = ki;
   double controllerError = phaseError;
-  double controllerBase = sourceData->lastClockRatio;
+  double controllerBase = providerRateControl ?
+    1.0 : sourceData->lastClockRatio;
 
   if (acquiringDeviceClock)
   {
@@ -1811,11 +1903,17 @@ static void playbackData(const void * data, size_t frameCount,
       sourceData->lastRatio + maxRatioStep);
   sourceData->lastRatio = ratio;
 
-  if (audio.playback.backendResampler)
+  if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND)
   {
     atomic_store_explicit(
         &audio.playback.backendResampleRatio, ratio,
         memory_order_release);
+    const int outputFrames =
+      playbackAppendFrames(sourceData, inputFrames, frames);
+    sourceData->outputPosition += outputFrames;
+  }
+  else if (audio.playback.rateControl == PLAYBACK_RATE_PROVIDER)
+  {
     const int outputFrames =
       playbackAppendFrames(sourceData, inputFrames, frames);
     sourceData->outputPosition += outputFrames;
@@ -1887,7 +1985,7 @@ static void playbackData(const void * data, size_t frameCount,
         const float graphMax =
           targetLatencyFrames * 1000.0 /
           audio.playback.sampleRate * 2;
-        audio.playback.graph = app_registerGraph("PLAYBACK",
+        audio.playback.graph = app_registerGraph("PLAYBACK RING",
             audio.playback.timings, 0.0f, graphMax,
             audioGraphFormatFn);
         if (!audio.playback.graph)
@@ -1929,21 +2027,36 @@ static void playbackData(const void * data, size_t frameCount,
 
   if (now >= sourceData->nextLogTime)
   {
+    const double backendLatencyMs =
+      audio.audioDev->playback.latency ?
+        audio.audioDev->playback.latency() / 1000.0 : 0.0;
     const double sourcePpm = sourceData->sourceRateValid ?
-      (sourceData->sourceRateFrameSec / nominalFrameSec - 1.0) * 1.0e6 :
+      (nominalFrameSec / sourceData->sourceRateFrameSec - 1.0) * 1.0e6 :
       0.0;
     const double devicePpm = rateClock->valid ?
-      (rateClock->frameSec / nominalFrameSec - 1.0) * 1.0e6 :
+      (nominalFrameSec / rateClock->frameSec - 1.0) * 1.0e6 :
       0.0;
+    const bool providerControl =
+      audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
+    const double controlPpm = providerControl ?
+      (playbackProviderRate(sourceData) /
+        audio.playback.sampleRate - 1.0) * 1.0e6 :
+      (ratio - 1.0) * 1.0e6;
+    const char * controlName = providerControl ? "feedback" :
+      audio.playback.rateControl == PLAYBACK_RATE_BACKEND ?
+        "backend" : "software";
+    const char * sourceRateName = providerControl ? "arrival" : "source";
     const unsigned int underruns = atomic_exchange_explicit(
         &audio.playback.underruns, 0, memory_order_relaxed);
 
     DEBUG_INFO(
-        "Audio sync: %.2f/%.2f ms, ratio %+.1f ppm, "
-        "clocks %+.1f/%+.1f ppm, jitter %.2f ms, xruns %u/%u",
+        "Audio sync: ring %.2f/%.2f ms, backend %.2f ms, "
+        "%s %+.1f ppm, rates %s/device %+.1f/%+.1f ppm, "
+        "jitter %.2f ms, xruns %u/%u",
         softwareLatencyMs,
         targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
-        (ratio - 1.0) * 1.0e6, sourcePpm, devicePpm,
+        backendLatencyMs, controlName, controlPpm,
+        sourceRateName, sourcePpm, devicePpm,
         sourceData->arrivalJitterSec * 1000.0,
         underruns, sourceData->bufferOverruns);
 
@@ -1952,12 +2065,24 @@ static void playbackData(const void * data, size_t frameCount,
   }
 }
 
-static bool playbackGetFeedback(LG_AudioClock * clock)
+static bool playbackGetFeedback(
+    LG_AudioClock * clock, double * targetRate)
 {
-  const PlaybackSourceData * sourceData = &audio.playback.sourceData;
-  if (!clock || !sourceData->deviceClock.valid ||
-      sourceData->deviceClock.position < 0.0 ||
+  PlaybackSourceData * sourceData = &audio.playback.sourceData;
+  if (!clock || !targetRate ||
+      audio.playback.rateControl != PLAYBACK_RATE_PROVIDER ||
+      !sourceData->deviceClock.valid ||
       sourceData->deviceClock.frameSec <= 0.0)
+    return false;
+
+  const int64_t now = nanotime();
+  if (now < sourceData->nextFeedbackTime)
+    return false;
+
+  sourceData->nextFeedbackTime = now + PLAYBACK_FEEDBACK_INTERVAL_NS;
+  const double position =
+    playbackClockPosition(&sourceData->deviceClock, now);
+  if (position < 0.0)
     return false;
 
   const uint64_t latency = audio.audioDev->playback.latency ?
@@ -1965,11 +2090,12 @@ static bool playbackGetFeedback(LG_AudioClock * clock)
 
   *clock = (LG_AudioClock)
   {
-    .position = llrint(sourceData->deviceClock.position),
-    .time     = sourceData->deviceClock.time + latency * 1000,
+    .position = llrint(position),
+    .time     = now + latency * 1000,
     .rate     = 1.0 / sourceData->deviceClock.frameSec,
     .stable   = sourceData->deviceClockStable,
   };
+  *targetRate = playbackProviderRate(sourceData);
   return true;
 }
 
@@ -2249,18 +2375,19 @@ static bool bindingActiveNL(const AudioBinding * binding)
 
 static void queueFeedback(const LG_AudioOps * ops, void * opaque,
     uint32_t bindingGeneration, uint32_t generation,
-    const LG_AudioClock * clock)
+    const LG_AudioClock * clock, double targetRate)
 {
   if (!audio.feedback.event || !audio.feedback.thread || !clock)
     return;
 
   LG_LOCK(audio.feedback.lock);
-  audio.feedback.ops        = ops;
-  audio.feedback.opaque     = opaque;
+  audio.feedback.ops               = ops;
+  audio.feedback.opaque            = opaque;
   audio.feedback.bindingGeneration = bindingGeneration;
-  audio.feedback.generation = generation;
-  audio.feedback.clock      = *clock;
-  audio.feedback.pending    = true;
+  audio.feedback.generation        = generation;
+  audio.feedback.clock             = *clock;
+  audio.feedback.targetRate        = targetRate;
+  audio.feedback.pending           = true;
   LG_UNLOCK(audio.feedback.lock);
   lgSignalEvent(audio.feedback.event);
 }
@@ -2276,7 +2403,9 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
     LG_LOCK(audio.playback.sourceLock);
     atomic_store_explicit(&audio.playback.streamGeneration,
         generation, memory_order_release);
-    playbackStart(format, sourceClock);
+    playbackStart(format, sourceClock,
+        binding->ops->clockFeedback &&
+        audio.feedback.event && audio.feedback.thread);
     LG_UNLOCK(audio.playback.sourceLock);
   }
   LG_UNLOCK_SHARED(audio.activeLock);
@@ -2356,9 +2485,11 @@ static void eventPlaybackData(void * opaque, uint32_t generation,
       playbackData(data, frames, sourceClock);
 
       LG_AudioClock feedback;
-      if (ops->clockFeedback && playbackGetFeedback(&feedback))
+      double targetRate;
+      if (ops->clockFeedback &&
+          playbackGetFeedback(&feedback, &targetRate))
         queueFeedback(ops, providerOpaque, binding->generation,
-            generation, &feedback);
+            generation, &feedback, targetRate);
     }
     LG_UNLOCK(audio.playback.sourceLock);
   }
@@ -2616,18 +2747,20 @@ static int feedbackThread(void * opaque)
       break;
 
     const LG_AudioOps * ops;
-    void * providerOpaque;
-    uint32_t bindingGeneration;
-    uint32_t generation;
-    LG_AudioClock clock;
+    void              * providerOpaque;
+    uint32_t            bindingGeneration;
+    uint32_t            generation;
+    LG_AudioClock       clock;
+    double              targetRate;
 
     LG_LOCK(audio.feedback.lock);
-    const bool pending = audio.feedback.pending;
-    ops                = audio.feedback.ops;
-    providerOpaque     = audio.feedback.opaque;
-    bindingGeneration  = audio.feedback.bindingGeneration;
-    generation         = audio.feedback.generation;
-    clock              = audio.feedback.clock;
+    const bool pending     = audio.feedback.pending;
+    ops                    = audio.feedback.ops;
+    providerOpaque         = audio.feedback.opaque;
+    bindingGeneration      = audio.feedback.bindingGeneration;
+    generation             = audio.feedback.generation;
+    clock                  = audio.feedback.clock;
+    targetRate             = audio.feedback.targetRate;
     audio.feedback.pending = false;
     LG_UNLOCK(audio.feedback.lock);
 
@@ -2640,7 +2773,8 @@ static int feedbackThread(void * opaque)
         audio.active.generation == bindingGeneration &&
         atomic_load_explicit(&audio.playback.streamGeneration,
           memory_order_acquire) == generation)
-      ops->clockFeedback(providerOpaque, generation, &clock);
+      ops->clockFeedback(
+          providerOpaque, generation, &clock, targetRate);
     LG_UNLOCK_SHARED(audio.activeLock);
   }
 
