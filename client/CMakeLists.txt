@@ -79,6 +79,25 @@ if(ENABLE_AUDIO AND NOT (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO))
 endif()
 add_feature_info(ENABLE_AUDIO ENABLE_AUDIO "Audio support.")
 
+cmake_dependent_option(
+  ENABLE_USB_AUDIO
+  "Build with USB audio support"
+  ON
+  "ENABLE_AUDIO"
+  OFF
+)
+
+if(ENABLE_USB_AUDIO)
+  pkg_check_modules(USBREDIRPARSER QUIET IMPORTED_TARGET
+    libusbredirparser-0.5>=0.7.1)
+  if(NOT USBREDIRPARSER_FOUND)
+    message(STATUS
+      "libusbredirparser was not found, disabling USB audio support")
+    set(ENABLE_USB_AUDIO OFF)
+  endif()
+endif()
+add_feature_info(ENABLE_USB_AUDIO ENABLE_USB_AUDIO "USB audio support.")
+
 add_compile_options(
   "-Wall"
   "-Wextra"
@@ -195,6 +214,12 @@ if(ENABLE_AUDIO)
   )
 endif()
 
+if(ENABLE_USB_AUDIO)
+  list(APPEND SOURCES
+    src/usbredir.c
+  )
+endif()
+
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
@@ -256,6 +281,13 @@ if(ENABLE_AUDIO)
   pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
   target_link_libraries(looking-glass-client
     PkgConfig::SAMPLERATE
+  )
+endif()
+
+if(ENABLE_USB_AUDIO)
+  target_compile_definitions(looking-glass-client PRIVATE ENABLE_USB_AUDIO)
+  target_link_libraries(looking-glass-client
+    PkgConfig::USBREDIRPARSER
   )
 endif()
 
