@@ -34,6 +34,8 @@ struct LG_USBRedir
 {
   const LG_USBRedirDeviceOps * deviceOps;
   void                       * deviceOpaque;
+  LG_USBRedirStatusFn          status;
+  void                       * statusOpaque;
 
   PSUSBRedirChannel * channels[USB_REDIR_CHANNEL_COUNT];
   PSUSBRedirChannel * channel;
@@ -47,6 +49,14 @@ struct LG_USBRedir
   atomic_bool available;
   bool        plugged;
 };
+
+static void setAvailable(LG_USBRedir * usbredir, bool available)
+{
+  const bool previous = atomic_exchange_explicit(
+      &usbredir->available, available, memory_order_acq_rel);
+  if (previous != available && usbredir->status)
+    usbredir->status(usbredir->statusOpaque, available);
+}
 
 static int readUSBRedir(void * opaque, uint8_t * data, int count)
 {
@@ -105,7 +115,7 @@ static void helloUSBRedir(void * opaque,
 {
   (void)hello;
   LG_USBRedir * usbredir = opaque;
-  atomic_store_explicit(&usbredir->available, true, memory_order_release);
+  setAvailable(usbredir, true);
 }
 
 static void unplugDevice(LG_USBRedir * usbredir)
@@ -119,7 +129,7 @@ static void unplugDevice(LG_USBRedir * usbredir)
 
 static void destroyParser(LG_USBRedir * usbredir)
 {
-  atomic_store_explicit(&usbredir->available, false, memory_order_release);
+  setAvailable(usbredir, false);
   unplugDevice(usbredir);
 
   if (!usbredir->parser)
@@ -202,7 +212,8 @@ static bool createParser(LG_USBRedir * usbredir)
 }
 
 LG_USBRedir * lgUsbRedir_create(
-    const LG_USBRedirDeviceOps * deviceOps, void * deviceOpaque)
+    const LG_USBRedirDeviceOps * deviceOps, void * deviceOpaque,
+    LG_USBRedirStatusFn status, void * statusOpaque)
 {
   if (!deviceOps || !deviceOps->setup || !deviceOps->plug ||
       !deviceOps->unplug)
@@ -214,6 +225,8 @@ LG_USBRedir * lgUsbRedir_create(
 
   usbredir->deviceOps      = deviceOps;
   usbredir->deviceOpaque   = deviceOpaque;
+  usbredir->status         = status;
+  usbredir->statusOpaque   = statusOpaque;
   atomic_init(&usbredir->desiredPlugged, false);
   atomic_init(&usbredir->available, false);
   return usbredir;

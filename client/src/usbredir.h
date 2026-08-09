@@ -31,6 +31,9 @@ struct usbredirparser;
 
 typedef struct LG_USBRedir LG_USBRedir;
 
+/* Availability transitions are delivered on the PureSpice process thread. */
+typedef void (*LG_USBRedirStatusFn)(void * opaque, bool available);
+
 typedef struct LG_USBRedirDeviceOps
 {
   /* Install the device packet callbacks on a newly-created parser. */
@@ -45,7 +48,8 @@ typedef struct LG_USBRedirDeviceOps
 LG_USBRedirDeviceOps;
 
 LG_USBRedir * lgUsbRedir_create(
-    const LG_USBRedirDeviceOps * deviceOps, void * deviceOpaque);
+    const LG_USBRedirDeviceOps * deviceOps, void * deviceOpaque,
+    LG_USBRedirStatusFn status, void * statusOpaque);
 /* The PureSpice session must be stopped before destroying the bridge. */
 void lgUsbRedir_destroy(LG_USBRedir * usbredir);
 
