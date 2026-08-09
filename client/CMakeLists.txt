@@ -216,6 +216,7 @@ endif()
 
 if(ENABLE_USB_AUDIO)
   list(APPEND SOURCES
+    src/usb_audio.c
     src/usbredir.c
   )
 endif()
