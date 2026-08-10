@@ -24,14 +24,16 @@
 #include "interface/audio.h"
 #include "usbredir.h"
 
+#include <stdint.h>
+
 typedef struct LGA_USBState LGA_USBState;
 
-LGA_USBState * lgaUsb_create(void);
+LGA_USBState * lgaUsb_create(bool debug);
 /* Detach this provider and stop PureSpice before destroying its state. */
 void lgaUsb_destroy(LGA_USBState * state);
 
 LG_USBRedir * lgaUsb_redir(LGA_USBState * state);
-bool lgaUsb_recording(const LGA_USBState * state);
+uint64_t lgaUsb_processDelayNs(const LGA_USBState * state);
 
 extern const LG_AudioOps LGA_USB;
 

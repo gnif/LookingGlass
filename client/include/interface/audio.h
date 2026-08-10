@@ -106,7 +106,8 @@ typedef struct LG_AudioEventOps
 {
   /* Format and clock pointers are borrowed for the duration of each call.
    * A NULL source clock indicates that the provider has no usable clock.
-   * Providers must serialize event delivery for an attachment. Stream
+   * Providers must serialize event delivery within each stream direction.
+   * Playback and recording events may be delivered concurrently. Stream
    * generations are nonzero and uniquely identify each stream instance. */
   void (*playbackStart)(void * opaque, uint32_t generation,
       const LG_AudioFormat * format, const LG_AudioClock * sourceClock);
@@ -163,7 +164,9 @@ typedef struct LG_AudioOps
    * audio callback with the measured playback device clock. Its position uses
    * the device's independent output-frame timeline and its time includes the
    * backend's estimated presentation latency. targetRate is the source frame
-   * rate requested by the client's buffer controller. */
+   * rate requested by the client's buffer controller. Return false while
+   * active rate feedback is unavailable; sustained failure makes the client
+   * restart playback with local rate control. */
   bool (*clockFeedback)(void * opaque, uint32_t generation,
       const LG_AudioClock * playbackClock, double targetRate);
 }

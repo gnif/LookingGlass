@@ -21,6 +21,7 @@
 #include "usbredir.h"
 
 #include "common/debug.h"
+#include "common/time.h"
 
 #include <usbredirparser.h>
 
@@ -29,6 +30,9 @@
 #include <string.h>
 
 #define USB_REDIR_CHANNEL_COUNT 256
+#define USB_REDIR_DISCONNECT_TIMEOUT_NS INT64_C(500000000)
+#define USB_REDIR_RECONNECT_DELAY_NS    INT64_C(250000000)
+#define USB_REDIR_MAX_OUTPUT_BYTES      UINT64_C(1048576)
 
 struct LG_USBRedir
 {
@@ -49,6 +53,8 @@ struct LG_USBRedir
   atomic_bool available;
   bool        plugged;
   bool        disconnectPending;
+  int64_t     disconnectDeadline;
+  int64_t     reconnectDeadline;
 };
 
 static void setAvailable(LG_USBRedir * usbredir, bool available)
@@ -123,6 +129,7 @@ static void deviceDisconnectAck(void * opaque)
 {
   LG_USBRedir * usbredir = opaque;
   usbredir->disconnectPending = false;
+  usbredir->disconnectDeadline = 0;
 }
 
 static void unplugDevice(LG_USBRedir * usbredir)
@@ -139,6 +146,7 @@ static void destroyParser(LG_USBRedir * usbredir)
   setAvailable(usbredir, false);
   unplugDevice(usbredir);
   usbredir->disconnectPending = false;
+  usbredir->disconnectDeadline = 0;
 
   if (!usbredir->parser)
     return;
@@ -149,8 +157,20 @@ static void destroyParser(LG_USBRedir * usbredir)
 
 static bool flushUSBRedir(LG_USBRedir * usbredir)
 {
-  return !usbredir->parser ||
-    usbredirparser_do_write(usbredir->parser) == 0;
+  if (!usbredir->parser)
+    return true;
+
+  if (usbredirparser_do_write(usbredir->parser) != 0)
+    return false;
+
+  const uint64_t buffered =
+    usbredirparser_get_bufferered_output_size(usbredir->parser);
+  if (buffered <= USB_REDIR_MAX_OUTPUT_BYTES)
+    return true;
+
+  DEBUG_ERROR("USB redirection output queue exceeded %u bytes",
+      (unsigned int)USB_REDIR_MAX_OUTPUT_BYTES);
+  return false;
 }
 
 static bool connectChannel(LG_USBRedir * usbredir,
@@ -166,10 +186,10 @@ static bool connectChannel(LG_USBRedir * usbredir,
   return false;
 }
 
-static void selectChannel(LG_USBRedir * usbredir)
+static bool selectChannel(LG_USBRedir * usbredir)
 {
   if (usbredir->channel)
-    return;
+    return true;
 
   for (unsigned int i = 0; i < USB_REDIR_CHANNEL_COUNT; ++i)
   {
@@ -178,8 +198,28 @@ static void selectChannel(LG_USBRedir * usbredir)
       continue;
 
     if (connectChannel(usbredir, channel))
-      return;
+    {
+      usbredir->reconnectDeadline = 0;
+      return true;
+    }
   }
+
+  usbredir->reconnectDeadline =
+    (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
+  return false;
+}
+
+static void resetChannel(LG_USBRedir * usbredir)
+{
+  PSUSBRedirChannel * channel = usbredir->channel;
+  usbredir->channel = NULL;
+  destroyParser(usbredir);
+
+  if (channel && purespice_usbRedirConnected(channel))
+    purespice_usbRedirDisconnect(channel);
+
+  usbredir->reconnectDeadline =
+    (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
 }
 
 static bool createParser(LG_USBRedir * usbredir)
@@ -268,14 +308,37 @@ bool lgUsbRedir_disconnectPending(const LG_USBRedir * usbredir)
   return usbredir->disconnectPending;
 }
 
-bool lgUsbRedir_process(LG_USBRedir * usbredir)
+static bool processUSBRedir(LG_USBRedir * usbredir, bool recover)
 {
+  const int64_t now = (int64_t)nanotime();
+  if (!usbredir->channel &&
+      now >= usbredir->reconnectDeadline)
+    selectChannel(usbredir);
+
   if (!usbredir->parser ||
       !atomic_load_explicit(&usbredir->available, memory_order_acquire))
-    return flushUSBRedir(usbredir);
+  {
+    const bool result = flushUSBRedir(usbredir);
+    if (!result && recover)
+      resetChannel(usbredir);
+    return result;
+  }
 
   if (usbredir->disconnectPending)
-    return flushUSBRedir(usbredir);
+  {
+    if (usbredir->disconnectDeadline &&
+        now >= usbredir->disconnectDeadline)
+    {
+      DEBUG_WARN("USB redirection disconnect acknowledgement timed out");
+      resetChannel(usbredir);
+      return true;
+    }
+
+    const bool result = flushUSBRedir(usbredir);
+    if (!result && recover)
+      resetChannel(usbredir);
+    return result;
+  }
 
   const bool desired = atomic_load_explicit(&usbredir->desiredPlugged,
       memory_order_acquire);
@@ -292,6 +355,8 @@ bool lgUsbRedir_process(LG_USBRedir * usbredir)
       unplugDevice(usbredir);
       usbredir->disconnectPending = usbredirparser_peer_has_cap(
           usbredir->parser, usb_redir_cap_device_disconnect_ack);
+      usbredir->disconnectDeadline = usbredir->disconnectPending ?
+        now + USB_REDIR_DISCONNECT_TIMEOUT_NS : 0;
       usbredirparser_send_device_disconnect(usbredir->parser);
     }
   }
@@ -299,7 +364,15 @@ bool lgUsbRedir_process(LG_USBRedir * usbredir)
   if (usbredir->plugged && usbredir->deviceOps->process)
     usbredir->deviceOps->process(usbredir->deviceOpaque);
 
-  return flushUSBRedir(usbredir);
+  const bool result = flushUSBRedir(usbredir);
+  if (!result && recover)
+    resetChannel(usbredir);
+  return result;
+}
+
+bool lgUsbRedir_process(LG_USBRedir * usbredir)
+{
+  return processUSBRedir(usbredir, true);
 }
 
 void lgUsbRedir_state(PSUSBRedirChannel * channel,
@@ -328,7 +401,13 @@ void lgUsbRedir_state(PSUSBRedirChannel * channel,
 
     case PS_USB_REDIR_DISCONNECTED:
       if (channel == usbredir->channel)
+      {
         destroyParser(usbredir);
+        usbredir->channel = NULL;
+        if (purespice_usbRedirAvailable(channel))
+          usbredir->reconnectDeadline =
+            (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
+      }
       break;
 
     case PS_USB_REDIR_UNAVAILABLE:
@@ -375,7 +454,9 @@ bool lgUsbRedir_data(PSUSBRedirChannel * channel,
     return false;
   }
 
-  return lgUsbRedir_process(usbredir);
+  /* Returning false lets PureSpice disconnect after this callback unwinds;
+   * resetting it here would destroy the channel during its own dispatch. */
+  return processUSBRedir(usbredir, false);
 }
 
 void * lgUsbRedir_device(void * parserOpaque)

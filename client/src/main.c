@@ -1728,7 +1728,7 @@ int spiceThread(void * arg)
       DEBUG_WARN("USB audio requires a playback backend, using SPICE audio");
       g_params.useSpiceUSBAudio = false;
     }
-    else if (!(usbAudio = lgaUsb_create()))
+    else if (!(usbAudio = lgaUsb_create(g_params.audioDebug)))
     {
       DEBUG_WARN("Failed to initialize USB audio, using SPICE audio");
       g_params.useSpiceUSBAudio = false;
@@ -1839,7 +1839,17 @@ int spiceThread(void * arg)
     if (usbRedir && !lgUsbRedir_process(usbRedir))
       DEBUG_WARN("Failed to process USB audio redirection");
     if (usbAudio)
-      processTimeout = lgaUsb_recording(usbAudio) ? 1 : 10;
+    {
+      const uint64_t delay = lgaUsb_processDelayNs(usbAudio);
+      if (delay == UINT64_MAX)
+        processTimeout = 10;
+      else
+      {
+        const uint64_t timeout = delay / UINT64_C(1000000) +
+          (delay % UINT64_C(1000000) != 0);
+        processTimeout = (int)min(timeout, UINT64_C(10));
+      }
+    }
 #endif
 
     if ((status = purespice_process(processTimeout)) != PS_STATUS_RUN)

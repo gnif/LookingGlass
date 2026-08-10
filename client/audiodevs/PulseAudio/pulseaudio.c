@@ -28,18 +28,23 @@
 #include "common/debug.h"
 #include "common/time.h"
 
+#define PULSEAUDIO_ERROR_REPORT_INTERVAL_NS INT64_C(1000000000)
+#define PULSEAUDIO_OPERATION_TIMEOUT_US      UINT64_C(250000)
+#define PULSEAUDIO_READY_TIMEOUT_US          UINT64_C(5000000)
+#define PULSEAUDIO_RATE_UPDATE_INTERVAL_NS   INT64_C(50000000)
+#define PULSEAUDIO_RATE_UPDATE_MAX_HOLD_NS   INT64_C(250000000)
+#define PULSEAUDIO_RATE_UPDATE_DEADBAND_HZ   UINT32_C(1)
+
 struct PulseAudio
 {
   pa_threaded_mainloop * loop;
   pa_mainloop_api      * api;
   pa_context           * context;
-  pa_operation         * contextSub;
+  bool                   loopStarted;
 
   pa_stream            * sink;
-  int                    sinkIndex;
+  uint32_t               sinkIndex;
   bool                   sinkCorked;
-  bool                   sinkMuted;
-  bool                   sinkStarting;
   bool                   sinkResamplerEnabled;
   bool                   sinkRateFailed;
   int                    sinkMaxPeriodFrames;
@@ -50,9 +55,26 @@ struct PulseAudio
   uint32_t               sinkAppliedRate;
   uint32_t               sinkPendingRate;
   uint32_t               sinkRequestedRate;
+  uint32_t               sinkDeferredRate;
+  int64_t                sinkNextRateUpdate;
+  int64_t                sinkRateDeferredSince;
+  bool                   sinkRateUpdateArmed;
   pa_operation         * sinkRateOperation;
+  pa_operation         * sinkStartOperation;
+  pa_time_event        * sinkStartTimer;
+  uint32_t               sinkStartSerial;
   LG_AudioPullFn         sinkPullFn;
-  _Atomic(int64_t)       sinkPresentationDeadline;
+  LG_AudioFailureFn      sinkFailureFn;
+  uint32_t               sinkFailureCookie;
+  _Atomic(int64_t)       sinkLatencyNs;
+  atomic_bool            sinkLatencyUpdateRequested;
+  atomic_bool            sinkErrorsPending;
+  _Atomic(int64_t)       sinkNextErrorReport;
+  atomic_uint            sinkUnderflows;
+  atomic_uint            sinkOverflows;
+  atomic_uint            sinkWriteErrors;
+  atomic_uint            sinkRateErrors;
+  atomic_uint            sinkControlErrors;
 };
 
 static struct PulseAudio pa = {0};
@@ -136,13 +158,83 @@ static pa_channel_position_t pulseaudio_channel(
   return (pa_channel_position_t)(PA_CHANNEL_POSITION_AUX0 + index);
 }
 
-static void pulseaudio_unrefOperation(pa_operation * operation)
+static void pulseaudio_noteError(atomic_uint * counter)
 {
-  if (operation)
+  atomic_fetch_add_explicit(counter, 1, memory_order_relaxed);
+  atomic_store_explicit(
+      &pa.sinkErrorsPending, true, memory_order_release);
+}
+
+static void pulseaudio_trackControlOperation(pa_operation * operation)
+{
+  if (!operation)
+    pulseaudio_noteError(&pa.sinkControlErrors);
+  else
     pa_operation_unref(operation);
 }
 
-static bool pulseaudio_submitRateUpdate(void);
+static void pulseaudio_streamControl_cb(
+    pa_stream * stream, int success, void * userdata)
+{
+  if (!success)
+    pulseaudio_noteError(&pa.sinkControlErrors);
+}
+
+static void pulseaudio_contextControl_cb(
+    pa_context * context, int success, void * userdata)
+{
+  if (!success)
+    pulseaudio_noteError(&pa.sinkControlErrors);
+}
+
+static void pulseaudio_reportErrors(bool force)
+{
+  if (!atomic_load_explicit(
+        &pa.sinkErrorsPending, memory_order_acquire))
+    return;
+
+  const int64_t now = (int64_t)nanotime();
+  if (!force)
+  {
+    int64_t next = atomic_load_explicit(
+        &pa.sinkNextErrorReport, memory_order_relaxed);
+    if (now < next || !atomic_compare_exchange_strong_explicit(
+          &pa.sinkNextErrorReport, &next,
+          now + PULSEAUDIO_ERROR_REPORT_INTERVAL_NS,
+          memory_order_relaxed, memory_order_relaxed))
+      return;
+  }
+
+  if (!atomic_exchange_explicit(
+        &pa.sinkErrorsPending, false, memory_order_acq_rel))
+    return;
+
+  const unsigned int underflows = atomic_exchange_explicit(
+      &pa.sinkUnderflows, 0, memory_order_relaxed);
+  const unsigned int overflows = atomic_exchange_explicit(
+      &pa.sinkOverflows, 0, memory_order_relaxed);
+  const unsigned int writeErrors = atomic_exchange_explicit(
+      &pa.sinkWriteErrors, 0, memory_order_relaxed);
+  const unsigned int rateErrors = atomic_exchange_explicit(
+      &pa.sinkRateErrors, 0, memory_order_relaxed);
+  const unsigned int controlErrors = atomic_exchange_explicit(
+      &pa.sinkControlErrors, 0, memory_order_relaxed);
+
+  if (underflows)
+    DEBUG_WARN("PulseAudio playback underflowed %u time(s)", underflows);
+  if (overflows)
+    DEBUG_WARN("PulseAudio playback overflowed %u time(s)", overflows);
+  if (writeErrors)
+    DEBUG_WARN("PulseAudio playback write failed %u time(s)", writeErrors);
+  if (rateErrors)
+    DEBUG_WARN("PulseAudio sample rate update failed %u time(s)",
+        rateErrors);
+  if (controlErrors)
+    DEBUG_WARN("PulseAudio control operation failed %u time(s)",
+        controlErrors);
+}
+
+static bool pulseaudio_submitRateUpdate(bool force);
 
 static void pulseaudio_rateUpdate_cb(pa_stream * stream, int success,
     void * userdata)
@@ -156,33 +248,46 @@ static void pulseaudio_rateUpdate_cb(pa_stream * stream, int success,
 
   if (!success)
   {
-    DEBUG_ERROR("Failed to update PulseAudio sample rate: %s",
-        pa_strerror(pa_context_errno(pa.context)));
+    pulseaudio_noteError(&pa.sinkRateErrors);
     pa.sinkRateFailed = true;
     return;
   }
 
   pa.sinkAppliedRate = pa.sinkPendingRate;
   if (pa.sinkCorked)
-    pulseaudio_submitRateUpdate();
+    pulseaudio_submitRateUpdate(true);
 }
 
-static bool pulseaudio_submitRateUpdate(void)
+static bool pulseaudio_submitRateUpdate(bool force)
 {
   if (pa.sinkRateFailed)
     return false;
 
-  if (pa.sinkRateOperation ||
-      pa.sinkRequestedRate == pa.sinkAppliedRate)
+  if (pa.sinkRateOperation)
     return true;
 
-  pa.sinkPendingRate = pa.sinkRequestedRate;
+  if (pa.sinkRequestedRate == pa.sinkAppliedRate)
+  {
+    pa.sinkDeferredRate      = pa.sinkRequestedRate;
+    pa.sinkRateUpdateArmed   = false;
+    pa.sinkRateDeferredSince = 0;
+    return true;
+  }
+
+  if (!force && !pa.sinkRateUpdateArmed)
+    return true;
+
+  pa.sinkPendingRate       = pa.sinkRequestedRate;
+  pa.sinkDeferredRate      = pa.sinkPendingRate;
+  pa.sinkRateUpdateArmed   = false;
+  pa.sinkRateDeferredSince = 0;
+  pa.sinkNextRateUpdate =
+    (int64_t)nanotime() + PULSEAUDIO_RATE_UPDATE_INTERVAL_NS;
   pa.sinkRateOperation = pa_stream_update_sample_rate(pa.sink,
       pa.sinkPendingRate, pulseaudio_rateUpdate_cb, NULL);
   if (!pa.sinkRateOperation)
   {
-    DEBUG_ERROR("Failed to request a PulseAudio sample rate update: %s",
-        pa_strerror(pa_context_errno(pa.context)));
+    pulseaudio_noteError(&pa.sinkRateErrors);
     pa.sinkRateFailed = true;
     return false;
   }
@@ -190,31 +295,43 @@ static bool pulseaudio_submitRateUpdate(void)
   return true;
 }
 
-static void pulseaudio_sink_input_cb(pa_context *c, const pa_sink_input_info *i,
-    int eol, void *userdata)
+static void pulseaudio_cancelStartTimer_nl(void)
 {
-  if (eol < 0 || eol == 1)
+  if (!pa.sinkStartTimer)
     return;
 
-  pa.sinkIndex = i->index;
+  pa_time_event * timer = pa.sinkStartTimer;
+  pa.sinkStartTimer = NULL;
+  pa.api->time_free(timer);
 }
 
-static void pulseaudio_subscribe_cb(pa_context *c,
-    pa_subscription_event_type_t t, uint32_t index, void *userdata)
+static void pulseaudio_cancelStartOperation_nl(void)
 {
-  switch (t & PA_SUBSCRIPTION_EVENT_FACILITY_MASK)
-  {
-    case PA_SUBSCRIPTION_EVENT_SINK_INPUT:
-      if ((t & PA_SUBSCRIPTION_EVENT_TYPE_MASK) == PA_SUBSCRIPTION_EVENT_REMOVE)
-        pa.sinkIndex = 0;
-      else
-      {
-        pa_operation *o = pa_context_get_sink_input_info(c, index,
-            pulseaudio_sink_input_cb, NULL);
-        pulseaudio_unrefOperation(o);
-      }
-      break;
-  }
+  if (!pa.sinkStartOperation)
+    return;
+
+  pa_operation * operation = pa.sinkStartOperation;
+  pa.sinkStartOperation    = NULL;
+  pa_operation_cancel(operation);
+  pa_operation_unref(operation);
+}
+
+static void pulseaudio_sinkDisarm_nl(void)
+{
+  ++pa.sinkStartSerial;
+  pulseaudio_cancelStartTimer_nl();
+  pulseaudio_cancelStartOperation_nl();
+  pa.sinkFailureFn     = NULL;
+  pa.sinkFailureCookie = 0;
+}
+
+static void pulseaudio_sinkFailed_nl(void)
+{
+  LG_AudioFailureFn failureFn = pa.sinkFailureFn;
+  const uint32_t failureCookie = pa.sinkFailureCookie;
+  pulseaudio_sinkDisarm_nl();
+  if (failureFn)
+    failureFn(failureCookie);
 }
 
 static void pulseaudio_ctx_state_change_cb(pa_context * c, void * userdata)
@@ -228,28 +345,120 @@ static void pulseaudio_ctx_state_change_cb(pa_context * c, void * userdata)
 
     case PA_CONTEXT_READY:
       DEBUG_INFO("Connected to PulseAudio server");
-      pa_context_set_subscribe_callback(c, pulseaudio_subscribe_cb, NULL);
-      pa_context_subscribe(c, PA_SUBSCRIPTION_MASK_SINK_INPUT, NULL, NULL);
       pa_threaded_mainloop_signal(pa.loop, 0);
       break;
 
     case PA_CONTEXT_TERMINATED:
-      if (pa.contextSub)
-      {
-        pa_operation_unref(pa.contextSub);
-        pa.contextSub = NULL;
-      }
+      if (c == pa.context)
+        pulseaudio_sinkFailed_nl();
+      pa_threaded_mainloop_signal(pa.loop, 0);
       break;
 
     case PA_CONTEXT_FAILED:
     default:
+      if (c == pa.context)
+        pulseaudio_sinkFailed_nl();
       DEBUG_ERROR("context error: %s", pa_strerror(pa_context_errno(c)));
+      pa_threaded_mainloop_signal(pa.loop, 0);
       break;
   }
 }
 
+static void pulseaudio_context_close_nl(void)
+{
+  if (!pa.context)
+    return;
+
+  pa_context_set_state_callback(pa.context, NULL, NULL);
+  pa_context_disconnect(pa.context);
+  pa_context_unref(pa.context);
+  pa.context = NULL;
+}
+
+struct PulseWait
+{
+  bool timedOut;
+};
+
+static void pulseaudio_timeout_cb(pa_mainloop_api * api,
+    pa_time_event * event, const struct timeval * tv, void * userdata)
+{
+  (void)api;
+  (void)event;
+  (void)tv;
+  struct PulseWait * wait = userdata;
+  wait->timedOut = true;
+  pa_threaded_mainloop_signal(pa.loop, 0);
+}
+
+/* The PulseAudio threaded mainloop must be locked. */
+static bool pulseaudio_contextConnect_nl(void)
+{
+  pa_proplist * propList = pa_proplist_new();
+  if (!propList)
+  {
+    DEBUG_ERROR("Failed to create the PulseAudio property list");
+    return false;
+  }
+  pa_proplist_sets(propList, PA_PROP_MEDIA_ROLE, "video");
+
+  pa.context = pa_context_new_with_proplist(
+      pa.api, "Looking Glass", propList);
+  pa_proplist_free(propList);
+  if (!pa.context)
+  {
+    DEBUG_ERROR("Failed to create the PulseAudio context");
+    return false;
+  }
+
+  pa_context_set_state_callback(pa.context,
+      pulseaudio_ctx_state_change_cb, NULL);
+  if (pa_context_connect(
+        pa.context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) < 0)
+  {
+    DEBUG_ERROR("Failed to connect to the PulseAudio server: %s",
+        pa_strerror(pa_context_errno(pa.context)));
+    pulseaudio_context_close_nl();
+    return false;
+  }
+
+  struct PulseWait wait = {0};
+  pa_time_event * timer = pa_context_rttime_new(pa.context,
+      pa_rtclock_now() + PULSEAUDIO_READY_TIMEOUT_US,
+      pulseaudio_timeout_cb, &wait);
+  if (!timer)
+  {
+    DEBUG_ERROR("Failed to create the PulseAudio connection timer");
+    pulseaudio_context_close_nl();
+    return false;
+  }
+
+  pa_context_state_t state;
+  while (!wait.timedOut)
+  {
+    state = pa_context_get_state(pa.context);
+    if (state == PA_CONTEXT_READY || !PA_CONTEXT_IS_GOOD(state))
+      break;
+    pa_threaded_mainloop_wait(pa.loop);
+  }
+  state = pa_context_get_state(pa.context);
+  pa.api->time_free(timer);
+
+  if (state == PA_CONTEXT_READY)
+    return true;
+
+  if (wait.timedOut)
+    DEBUG_ERROR("Timed out connecting to the PulseAudio server");
+  else
+    DEBUG_ERROR("PulseAudio context did not become ready: %s",
+        pa_strerror(pa_context_errno(pa.context)));
+  pulseaudio_context_close_nl();
+  return false;
+}
+
 static bool pulseaudio_init(void)
 {
+  pa.sinkIndex = PA_INVALID_INDEX;
   pa.loop = pa_threaded_mainloop_new();
   if (!pa.loop)
   {
@@ -258,74 +467,33 @@ static bool pulseaudio_init(void)
   }
 
   pa.api = pa_threaded_mainloop_get_api(pa.loop);
-  if (pa_signal_init(pa.api) != 0)
-  {
-    DEBUG_ERROR("Failed to init signals");
-    goto err_loop;
-  }
-
   if (pa_threaded_mainloop_start(pa.loop) < 0)
   {
     DEBUG_ERROR("Failed to start the main loop");
     goto err_loop;
   }
-
-  pa_proplist * propList = pa_proplist_new();
-  if (!propList)
-  {
-    DEBUG_ERROR("Failed to create the proplist");
-    goto err_thread;
-  }
-  pa_proplist_sets(propList, PA_PROP_MEDIA_ROLE, "video");
+  pa.loopStarted = true;
 
   pa_threaded_mainloop_lock(pa.loop);
-  pa.context = pa_context_new_with_proplist(
-      pa.api,
-      "Looking Glass",
-      propList);
-  if (!pa.context)
+  if (!pulseaudio_contextConnect_nl())
   {
-    DEBUG_ERROR("Failed to create the context");
-    goto err_context;
+    pa_threaded_mainloop_unlock(pa.loop);
+    goto err_thread;
   }
-
-  pa_context_set_state_callback(pa.context,
-      pulseaudio_ctx_state_change_cb, NULL);
-
-  if (pa_context_connect(pa.context, NULL, PA_CONTEXT_NOAUTOSPAWN, NULL) < 0)
-  {
-    DEBUG_ERROR("Failed to connect to the context server");
-    goto err_context;
-  }
-
-  for(;;)
-  {
-    pa_context_state_t state = pa_context_get_state(pa.context);
-    if(!PA_CONTEXT_IS_GOOD(state))
-    {
-      DEBUG_ERROR("Context is bad");
-      goto err_context;
-    }
-
-    if (state == PA_CONTEXT_READY)
-      break;
-
-    pa_threaded_mainloop_wait(pa.loop);
-  }
-
   pa_threaded_mainloop_unlock(pa.loop);
-  pa_proplist_free(propList);
   return true;
 
-err_context:
-  pa_threaded_mainloop_unlock(pa.loop);
-  pa_proplist_free(propList);
-
 err_thread:
-  pa_threaded_mainloop_stop(pa.loop);
+  if (pa.loopStarted)
+  {
+    pa_threaded_mainloop_stop(pa.loop);
+    pa.loopStarted = false;
+  }
 
 err_loop:
   pa_threaded_mainloop_free(pa.loop);
+  pa.loop = NULL;
+  pa.api  = NULL;
 
 err:
   return false;
@@ -333,6 +501,7 @@ err:
 
 static void pulseaudio_sink_close_nl(void)
 {
+  pulseaudio_sinkDisarm_nl();
   if (!pa.sink)
     return;
 
@@ -347,49 +516,90 @@ static void pulseaudio_sink_close_nl(void)
     pa_operation_cancel(operation);
     pa_operation_unref(operation);
   }
-  pulseaudio_unrefOperation(pa_stream_flush(pa.sink, NULL, NULL));
+  pa_stream_disconnect(pa.sink);
   pa_stream_unref(pa.sink);
-  pa.sink = NULL;
-  pa.sinkResamplerEnabled = false;
-  pa.sinkRateFailed       = false;
-  pa.sinkNominalRate      = 0;
-  pa.sinkAppliedRate      = 0;
-  pa.sinkPendingRate      = 0;
-  pa.sinkRequestedRate    = 0;
+  pa.sink                  = NULL;
+  pa.sinkIndex             = PA_INVALID_INDEX;
+  pa.sinkResamplerEnabled  = false;
+  pa.sinkRateFailed        = false;
+  pa.sinkNominalRate       = 0;
+  pa.sinkAppliedRate       = 0;
+  pa.sinkPendingRate       = 0;
+  pa.sinkRequestedRate     = 0;
+  pa.sinkDeferredRate      = 0;
+  pa.sinkNextRateUpdate    = 0;
+  pa.sinkRateDeferredSince = 0;
+  pa.sinkRateUpdateArmed   = false;
   atomic_store_explicit(
-      &pa.sinkPresentationDeadline, 0, memory_order_release);
+      &pa.sinkLatencyNs, 0, memory_order_release);
+  atomic_store_explicit(
+      &pa.sinkLatencyUpdateRequested, false, memory_order_relaxed);
 }
 
 static void pulseaudio_free(void)
 {
+  if (!pa.loop)
+    return;
+
   pa_threaded_mainloop_lock(pa.loop);
 
   pulseaudio_sink_close_nl();
-
-  pa_context_set_state_callback(pa.context, NULL, NULL);
-  pa_context_set_subscribe_callback(pa.context, NULL, NULL);
-  pa_context_disconnect(pa.context);
-  pa_context_unref(pa.context);
-
-  if (pa.contextSub)
-  {
-    pa_operation_unref(pa.contextSub);
-    pa.contextSub = NULL;
-  }
-
+  pulseaudio_context_close_nl();
   pa_threaded_mainloop_unlock(pa.loop);
+  pulseaudio_reportErrors(true);
+
+  if (pa.loopStarted)
+  {
+    pa_threaded_mainloop_stop(pa.loop);
+    pa.loopStarted = false;
+  }
+  pa_threaded_mainloop_free(pa.loop);
+  pa.loop = NULL;
+  pa.api  = NULL;
 }
 
 static void pulseaudio_state_cb(pa_stream * p, void * userdata)
 {
-  if (pa.sinkStarting && pa_stream_get_state(pa.sink) == PA_STREAM_READY)
-  {
-    pulseaudio_unrefOperation(pa_stream_cork(pa.sink, 0, NULL, NULL));
-    pa.sinkCorked   = false;
-    pa.sinkStarting = false;
-  }
-
+  const pa_stream_state_t state = pa_stream_get_state(p);
+  if (p == pa.sink &&
+      (state == PA_STREAM_FAILED || state == PA_STREAM_TERMINATED))
+    pulseaudio_sinkFailed_nl();
   pa_threaded_mainloop_signal(pa.loop, 0);
+}
+
+static void pulseaudio_start_cb(
+    pa_stream * stream, int success, void * userdata)
+{
+  const uint32_t serial = (uint32_t)(uintptr_t)userdata;
+  if (stream != pa.sink || serial != pa.sinkStartSerial)
+    return;
+
+  pa_operation * operation = pa.sinkStartOperation;
+  pa.sinkStartOperation    = NULL;
+  if (operation)
+    pa_operation_unref(operation);
+  pulseaudio_cancelStartTimer_nl();
+  if (!success || pa_stream_get_state(stream) != PA_STREAM_READY ||
+      !pa.context ||
+      pa_context_get_state(pa.context) != PA_CONTEXT_READY)
+  {
+    pa.sinkCorked = true;
+    pulseaudio_sinkFailed_nl();
+  }
+}
+
+static void pulseaudio_startTimeout_cb(pa_mainloop_api * api,
+    pa_time_event * event, const struct timeval * tv, void * userdata)
+{
+  (void)tv;
+  const uint32_t serial = (uint32_t)(uintptr_t)userdata;
+  if (event != pa.sinkStartTimer || serial != pa.sinkStartSerial)
+    return;
+
+  pa.sinkStartTimer = NULL;
+  api->time_free(event);
+  pa.sinkCorked = true;
+  pulseaudio_sinkFailed_nl();
 }
 
 static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
@@ -403,10 +613,16 @@ static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
 
   if (pa_stream_begin_write(p, (void **)&dst, &nbytes) < 0)
   {
-    DEBUG_ERROR("pa_stream_begin_write failed: %s",
-        pa_strerror(pa_context_errno(pa.context)));
+    pulseaudio_noteError(&pa.sinkWriteErrors);
     return;
   }
+
+  pa_usec_t latency = 0;
+  int negative = 0;
+  bool latencyValid = false;
+  if (atomic_exchange_explicit(
+        &pa.sinkLatencyUpdateRequested, false, memory_order_acquire))
+    latencyValid = pa_stream_get_latency(p, &latency, &negative) == 0;
 
   int frames = nbytes / pa.sinkStride;
   frames = pa.sinkPullFn(dst, frames);
@@ -419,8 +635,7 @@ static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
   if (pa_stream_write(
         p, dst, frames * pa.sinkStride, NULL, 0, PA_SEEK_RELATIVE) < 0)
   {
-    DEBUG_ERROR("pa_stream_write failed: %s",
-        pa_strerror(pa_context_errno(pa.context)));
+    pulseaudio_noteError(&pa.sinkWriteErrors);
     pa_stream_cancel_write(p);
     return;
   }
@@ -428,26 +643,24 @@ static void pulseaudio_write_cb(pa_stream * p, size_t nbytes, void * userdata)
   /* Queue rate changes after the current audio block. This keeps the rate
    * reported by the preceding pull aligned with the block PulseAudio has
    * already received. */
-  pulseaudio_submitRateUpdate();
+  pulseaudio_submitRateUpdate(false);
 
-  pa_usec_t latency;
-  int negative;
-  if (pa_stream_get_latency(p, &latency, &negative) == 0)
+  if (latencyValid)
   {
     const int64_t latencyNs = negative ? 0 : (int64_t)latency * 1000;
-    atomic_store_explicit(&pa.sinkPresentationDeadline,
-        (int64_t)nanotime() + latencyNs, memory_order_release);
+    atomic_store_explicit(
+        &pa.sinkLatencyNs, latencyNs, memory_order_release);
   }
 }
 
 static void pulseaudio_underflow_cb(pa_stream * p, void * userdata)
 {
-  DEBUG_WARN("Underflow");
+  pulseaudio_noteError(&pa.sinkUnderflows);
 }
 
 static void pulseaudio_overflow_cb(pa_stream * p, void * userdata)
 {
-  DEBUG_WARN("Overflow");
+  pulseaudio_noteError(&pa.sinkOverflows);
 }
 
 static bool pulseaudio_setup(const LG_AudioFormat * format,
@@ -456,6 +669,7 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
     LG_AudioPullFn pullFn)
 {
   *resamplerEnabled = false;
+  pulseaudio_reportErrors(false);
 
   const int channels   = format->channelCount;
   const int sampleRate = format->sampleRate;
@@ -488,10 +702,25 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   };
 
   pa_threaded_mainloop_lock(pa.loop);
+  if (!pa.context ||
+      pa_context_get_state(pa.context) != PA_CONTEXT_READY)
+  {
+    pulseaudio_sink_close_nl();
+    pulseaudio_context_close_nl();
+    if (!pulseaudio_contextConnect_nl())
+    {
+      pa_threaded_mainloop_unlock(pa.loop);
+      return false;
+    }
+  }
+
   /* pa_stream_update_sample_rate requires protocol version 12. */
   const bool enableResampler = requestResampler &&
     pa_context_get_server_protocol_version(pa.context) >= 12;
-  if (pa.sink && !pa.sinkRateFailed &&
+  if (pa.sink && pa.context &&
+      pa_stream_get_state(pa.sink) == PA_STREAM_READY &&
+      pa_context_get_state(pa.context) == PA_CONTEXT_READY &&
+      !pa.sinkRateFailed &&
       pa.sinkResamplerEnabled == enableResampler &&
       !pa.sinkRateOperation &&
       pa.sinkAppliedRate == pa.sinkNominalRate &&
@@ -511,13 +740,16 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   pa.sinkStride             = stride;
   pa.sinkPullFn             = pullFn;
   pa.sinkCorked             = true;
-  pa.sinkStarting           = false;
   pa.sinkResamplerEnabled   = enableResampler;
   pa.sinkRateFailed         = false;
   pa.sinkNominalRate        = sampleRate;
   pa.sinkAppliedRate        = sampleRate;
   pa.sinkPendingRate        = sampleRate;
   pa.sinkRequestedRate      = sampleRate;
+  pa.sinkDeferredRate       = sampleRate;
+  pa.sinkNextRateUpdate     = 0;
+  pa.sinkRateDeferredSince  = 0;
+  pa.sinkRateUpdateArmed    = false;
 
   pa.sink = pa_stream_new(
       pa.context, "Looking Glass", &spec, &channelMap);
@@ -550,17 +782,43 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
     return false;
   }
 
-  while (pa_stream_get_state(pa.sink) == PA_STREAM_CREATING)
-    pa_threaded_mainloop_wait(pa.loop);
-
-  if (pa_stream_get_state(pa.sink) != PA_STREAM_READY)
+  pa_stream  * sink    = pa.sink;
+  pa_context * context = pa.context;
+  struct PulseWait wait = {0};
+  pa_time_event * timer = pa_context_rttime_new(context,
+      pa_rtclock_now() + PULSEAUDIO_READY_TIMEOUT_US,
+      pulseaudio_timeout_cb, &wait);
+  if (!timer)
   {
-    DEBUG_ERROR("PulseAudio stream did not become ready: %s",
-        pa_strerror(pa_context_errno(pa.context)));
+    DEBUG_ERROR("Failed to create the PulseAudio stream setup timer");
     pulseaudio_sink_close_nl();
     pa_threaded_mainloop_unlock(pa.loop);
     return false;
   }
+
+  while (!wait.timedOut && pa.sink == sink &&
+      pa_stream_get_state(sink) == PA_STREAM_CREATING &&
+      pa.context == context &&
+      PA_CONTEXT_IS_GOOD(pa_context_get_state(context)))
+    pa_threaded_mainloop_wait(pa.loop);
+
+  const bool ready = pa.sink == sink && pa.context == context &&
+    pa_stream_get_state(sink) == PA_STREAM_READY &&
+    pa_context_get_state(context) == PA_CONTEXT_READY;
+  pa.api->time_free(timer);
+
+  if (!ready)
+  {
+    if (wait.timedOut)
+      DEBUG_ERROR("Timed out setting up the PulseAudio stream");
+    else
+      DEBUG_ERROR("PulseAudio stream did not become ready: %s",
+          pa_strerror(pa_context_errno(context)));
+    pulseaudio_sink_close_nl();
+    pa_threaded_mainloop_unlock(pa.loop);
+    return false;
+  }
+  pa.sinkIndex = pa_stream_get_index(pa.sink);
 
   const pa_buffer_attr * actual = pa_stream_get_buffer_attr(pa.sink);
   const uint64_t minRequestFrames =
@@ -584,79 +842,123 @@ static bool pulseaudio_setup(const LG_AudioFormat * format,
   *resamplerEnabled = pa.sinkResamplerEnabled;
 
   atomic_store_explicit(
-      &pa.sinkPresentationDeadline, 0, memory_order_release);
+      &pa.sinkLatencyNs, 0, memory_order_release);
+  atomic_store_explicit(
+      &pa.sinkLatencyUpdateRequested, false, memory_order_relaxed);
   pa_threaded_mainloop_unlock(pa.loop);
   return true;
 }
 
-static void pulseaudio_start(void)
+static bool pulseaudio_start(
+    LG_AudioFailureFn failureFn, uint32_t failureCookie)
 {
-  if (!pa.sink)
-    return;
+  pulseaudio_reportErrors(false);
+  if (!pa.loop || pa_threaded_mainloop_in_thread(pa.loop))
+    return false;
 
   pa_threaded_mainloop_lock(pa.loop);
 
-  pa_stream_state_t state = pa_stream_get_state(pa.sink);
-  if (state == PA_STREAM_CREATING)
-    pa.sinkStarting = true;
-  else
+  pa_stream  * sink    = pa.sink;
+  pa_context * context = pa.context;
+  if (!sink || !context ||
+      pa_stream_get_state(sink) != PA_STREAM_READY ||
+      pa_context_get_state(context) != PA_CONTEXT_READY)
   {
-    pulseaudio_unrefOperation(pa_stream_cork(pa.sink, 0, NULL, NULL));
-    pa.sinkCorked = false;
+    pa_threaded_mainloop_unlock(pa.loop);
+    return false;
   }
 
+  pulseaudio_sinkDisarm_nl();
+  pa.sinkFailureFn     = failureFn;
+  pa.sinkFailureCookie = failureCookie;
+  const uint32_t serial = pa.sinkStartSerial;
+  pa.sinkStartTimer    = pa_context_rttime_new(context,
+      pa_rtclock_now() + PULSEAUDIO_OPERATION_TIMEOUT_US,
+      pulseaudio_startTimeout_cb, (void *)(uintptr_t)serial);
+  if (!pa.sinkStartTimer)
+  {
+    pulseaudio_sinkDisarm_nl();
+    pa_threaded_mainloop_unlock(pa.loop);
+    return false;
+  }
+
+  pa.sinkStartOperation = pa_stream_cork(sink, 0,
+      pulseaudio_start_cb, (void *)(uintptr_t)serial);
+  if (!pa.sinkStartOperation)
+  {
+    pulseaudio_sinkDisarm_nl();
+    pa_threaded_mainloop_unlock(pa.loop);
+    return false;
+  }
+  pa.sinkCorked = false;
+
   pa_threaded_mainloop_unlock(pa.loop);
+  return true;
 }
 
 static void pulseaudio_stop(void)
 {
-  if (!pa.sink)
+  if (!pa.loop)
     return;
 
   bool needLock = !pa_threaded_mainloop_in_thread(pa.loop);
   if (needLock)
     pa_threaded_mainloop_lock(pa.loop);
 
-  pulseaudio_unrefOperation(pa_stream_cork(pa.sink, 1, NULL, NULL));
-  pa.sinkCorked   = true;
-  pa.sinkStarting = false;
+  pulseaudio_sinkDisarm_nl();
+  if (!pa.sink)
+  {
+    if (needLock)
+      pa_threaded_mainloop_unlock(pa.loop);
+    return;
+  }
+
+  pa.sinkCorked = true;
+  if (pa_stream_get_state(pa.sink) == PA_STREAM_READY)
+  {
+    pulseaudio_trackControlOperation(
+        pa_stream_cork(pa.sink, 1, pulseaudio_streamControl_cb, NULL));
+    pulseaudio_trackControlOperation(
+        pa_stream_flush(pa.sink, pulseaudio_streamControl_cb, NULL));
+  }
   if (pa.sinkResamplerEnabled)
   {
     pa.sinkRequestedRate = pa.sinkNominalRate;
-    pulseaudio_submitRateUpdate();
+    pulseaudio_submitRateUpdate(true);
   }
   atomic_store_explicit(
-      &pa.sinkPresentationDeadline, 0, memory_order_release);
+      &pa.sinkLatencyNs, 0, memory_order_release);
+  atomic_store_explicit(
+      &pa.sinkLatencyUpdateRequested, false, memory_order_relaxed);
 
   if (needLock)
+  {
     pa_threaded_mainloop_unlock(pa.loop);
+    pulseaudio_reportErrors(false);
+  }
 }
 
 static void pulseaudio_volume(int channels, const uint16_t volume[])
 {
-  if (!pa.sink || !pa.sinkIndex)
-    return;
-
   struct pa_cvolume v = { .channels = channels };
   for(int i = 0; i < channels; ++i)
     v.values[i] = pa_sw_volume_from_linear(
-      9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787);
+      max(0.0,
+        9.3234e-7 * pow(1.000211902, volume[i]) - 0.000172787));
 
   pa_threaded_mainloop_lock(pa.loop);
-  pulseaudio_unrefOperation(pa_context_set_sink_input_volume(
-      pa.context, pa.sinkIndex, &v, NULL, NULL));
+  if (pa.sink && pa.sinkIndex != PA_INVALID_INDEX)
+    pulseaudio_trackControlOperation(pa_context_set_sink_input_volume(
+        pa.context, pa.sinkIndex, &v, pulseaudio_contextControl_cb, NULL));
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
 static void pulseaudio_mute(bool mute)
 {
-  if (!pa.sink || !pa.sinkIndex || pa.sinkMuted == mute)
-    return;
-
-  pa.sinkMuted = mute;
   pa_threaded_mainloop_lock(pa.loop);
-  pulseaudio_unrefOperation(pa_context_set_sink_input_mute(
-      pa.context, pa.sinkIndex, mute, NULL, NULL));
+  if (pa.sink && pa.sinkIndex != PA_INVALID_INDEX)
+    pulseaudio_trackControlOperation(pa_context_set_sink_input_mute(
+        pa.context, pa.sinkIndex, mute, pulseaudio_contextControl_cb, NULL));
   pa_threaded_mainloop_unlock(pa.loop);
 }
 
@@ -671,8 +973,53 @@ static bool pulseaudio_setRate(double * ratio)
     return false;
 
   pa.sinkRequestedRate = (uint32_t)llround(requestedRate);
-  const uint32_t scheduledRate = pa.sinkRateOperation ?
-    pa.sinkPendingRate : pa.sinkRequestedRate;
+
+  uint32_t scheduledRate;
+  if (pa.sinkRateOperation)
+  {
+    scheduledRate = pa.sinkPendingRate;
+    if (pa.sinkRequestedRate == scheduledRate)
+      pa.sinkRateDeferredSince = 0;
+    else if (!pa.sinkRateDeferredSince ||
+        pa.sinkDeferredRate != pa.sinkRequestedRate)
+    {
+      pa.sinkDeferredRate = pa.sinkRequestedRate;
+      pa.sinkRateDeferredSince = (int64_t)nanotime();
+    }
+  }
+  else
+  {
+    scheduledRate = pa.sinkAppliedRate;
+    pa.sinkRateUpdateArmed = false;
+    if (pa.sinkRequestedRate == scheduledRate)
+      pa.sinkRateDeferredSince = 0;
+    else
+    {
+      const int64_t now = (int64_t)nanotime();
+      if (!pa.sinkRateDeferredSince ||
+          pa.sinkDeferredRate != pa.sinkRequestedRate)
+      {
+        pa.sinkDeferredRate = pa.sinkRequestedRate;
+        pa.sinkRateDeferredSince = now;
+      }
+
+      const uint32_t difference = pa.sinkRequestedRate > scheduledRate ?
+        pa.sinkRequestedRate - scheduledRate :
+        scheduledRate - pa.sinkRequestedRate;
+      /* Coalesce controller noise around an integer-Hz boundary while still
+       * applying a persistent one-Hz correction. Larger corrections only
+       * wait for the operation-rate limit. */
+      if (now >= pa.sinkNextRateUpdate &&
+          (difference > PULSEAUDIO_RATE_UPDATE_DEADBAND_HZ ||
+           now - pa.sinkRateDeferredSince >=
+             PULSEAUDIO_RATE_UPDATE_MAX_HOLD_NS))
+      {
+        pa.sinkRateUpdateArmed = true;
+        scheduledRate = pa.sinkRequestedRate;
+      }
+    }
+  }
+
   if (!scheduledRate)
     return false;
 
@@ -682,12 +1029,15 @@ static bool pulseaudio_setRate(double * ratio)
 
 static uint64_t pulseaudio_latency(void)
 {
-  const int64_t deadline = atomic_load_explicit(
-      &pa.sinkPresentationDeadline, memory_order_acquire);
-  if (deadline <= 0)
+  atomic_store_explicit(
+      &pa.sinkLatencyUpdateRequested, true, memory_order_release);
+
+  const int64_t latencyNs = atomic_load_explicit(
+      &pa.sinkLatencyNs, memory_order_acquire);
+  if (latencyNs <= 0)
     return 0;
 
-  return max(INT64_C(0), deadline - (int64_t)nanotime()) / 1000;
+  return latencyNs / 1000;
 }
 
 struct LG_AudioDevOps LGAD_PulseAudio =

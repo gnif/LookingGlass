@@ -28,7 +28,9 @@
 #include "interface/audio.h"
 
 typedef int  (*LG_AudioPullFn)(uint8_t * dst, int frames);
-typedef void (*LG_AudioPushFn)(uint8_t * src, int frames);
+typedef bool (*LG_AudioPushFn)(uint8_t * src, int frames,
+    const LG_AudioClock * sourceClock);
+typedef void (*LG_AudioFailureFn)(uint32_t cookie);
 
 struct LG_AudioDevOps
 {
@@ -55,10 +57,13 @@ struct LG_AudioDevOps
       bool requestResampler, bool * resamplerEnabled,
       int * maxPeriodFrames, int * startFrames, LG_AudioPullFn pullFn);
 
-    /* called when there is data available to start playback */
-    void (*start)(void);
+    /* Called when there is data available to start playback. failureFn may
+     * report an asynchronous failure using the supplied cookie. Returning
+     * false means the failure callback is already quiescent. */
+    bool (*start)(LG_AudioFailureFn failureFn, uint32_t cookie);
 
-    /* called when the source reports the audio stream has stopped */
+    /* Called when the source reports the audio stream has stopped. This must
+     * synchronously quiesce the failure callback before returning. */
     void (*stop)(void);
 
     /* [optional] called to set the volume of the channels */
@@ -80,10 +85,17 @@ struct LG_AudioDevOps
 
   struct
   {
-    /* start the record stream using the requested interleaved format */
-    void (*start)(const LG_AudioFormat * format, LG_AudioPushFn pushFn);
+    /* Start the record stream using the requested interleaved format.
+     * sourceClock is borrowed for the duration of pushFn and describes the
+     * first frame. It is NULL when the backend has no source clock. pushFn
+     * returns false when the active provider rejects the frames.
+     * failureFn may report an asynchronous failure using the supplied cookie.
+     * Returning false means both callbacks are already quiescent. */
+    bool (*start)(const LG_AudioFormat * format, LG_AudioPushFn pushFn,
+      LG_AudioFailureFn failureFn, uint32_t cookie);
 
-    /* called when the source reports the audio stream has stopped */
+    /* Called when the source reports the audio stream has stopped. This must
+     * synchronously quiesce both callbacks before returning. */
     void (*stop)(void);
 
     /* [optional] called to set the volume of the channels */

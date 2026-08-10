@@ -21,6 +21,7 @@
 #include "interface/overlay.h"
 #include "math.h"
 #include "cimgui.h"
+#include <stdatomic.h>
 
 #include "../overlays.h"
 #include "../main.h"
@@ -32,7 +33,7 @@
 //TODO: Make this user configurable?
 #define ICON_SIZE 32
 
-static bool         l_state[LG_USER_STATUS_MAX] = { 0 };
+static atomic_bool  l_state[LG_USER_STATUS_MAX] = { 0 };
 static OverlayImage l_image[LG_USER_STATUS_MAX] = { 0 };
 static bool         l_recordToggle;
 static double       l_scale = 1.0;
@@ -92,7 +93,8 @@ static int status_render(void * udata, bool interactive, struct Rect * windowRec
   for(int i = 0; i < LG_USER_STATUS_MAX; ++i)
   {
     OverlayImage * img = &l_image[i];
-    if (!l_state[i] || !img->tex)
+    if (!atomic_load_explicit(&l_state[i], memory_order_relaxed) ||
+        !img->tex)
       continue;
 
     // if the recording indicator is off, don't draw but reserve space
@@ -147,9 +149,9 @@ struct LG_OverlayOps LGOverlayStatus =
 
 void overlayStatus_set(LGUserStatus status, bool value)
 {
-  if (l_state[status] == value)
+  if (atomic_exchange_explicit(
+        &l_state[status], value, memory_order_relaxed) == value)
     return;
 
-  l_state[status] = value;
   app_invalidateOverlay(true);
 };

@@ -21,6 +21,7 @@
 #include "audio_spice.h"
 
 #include "common/debug.h"
+#include "common/event.h"
 #include "common/locking.h"
 
 #include <stdatomic.h>
@@ -50,6 +51,22 @@ typedef struct SpiceAudioEventTarget
 }
 SpiceAudioEventTarget;
 
+typedef struct SpiceAudioCallbackWaiter
+{
+  struct SpiceAudioCallbackWaiter * next;
+  LGEvent                         * event;
+  unsigned int                      depth;
+}
+SpiceAudioCallbackWaiter;
+
+typedef struct SpiceAudioCallbackWaitQueue
+{
+  LG_Lock                    lock;
+  atomic_uint                count;
+  SpiceAudioCallbackWaiter * waiters;
+}
+SpiceAudioCallbackWaitQueue;
+
 static struct
 {
   LG_RWLock lock;
@@ -59,11 +76,13 @@ static struct
   LG_AudioStatusFn statusCallback;
   void           * statusOpaque;
   atomic_uint      statusInFlight;
+  SpiceAudioCallbackWaitQueue statusWait;
 
   const LG_AudioEventOps * events;
   void                   * eventOpaque;
   uint32_t                 eventGeneration;
   atomic_uint              inFlight;
+  SpiceAudioCallbackWaitQueue eventWait;
 
   SpiceAudioStream playback;
   SpiceAudioStream record;
@@ -83,7 +102,17 @@ l_spice =
     .writer  = ATOMIC_FLAG_INIT,
   },
   .statusInFlight = ATOMIC_VAR_INIT(0),
+  .statusWait =
+  {
+    .lock  = ATOMIC_FLAG_INIT,
+    .count = ATOMIC_VAR_INIT(0),
+  },
   .inFlight       = ATOMIC_VAR_INIT(0),
+  .eventWait =
+  {
+    .lock  = ATOMIC_FLAG_INIT,
+    .count = ATOMIC_VAR_INIT(0),
+  },
 };
 
 static _Thread_local unsigned int l_eventDepth;
@@ -94,6 +123,96 @@ static uint32_t nextGeneration(uint32_t generation)
   if (++generation == 0)
     ++generation;
   return generation;
+}
+
+static LGEvent * createWaitEvent(void)
+{
+  LGEvent * event = lgCreateEvent(true, 0);
+  if (!event)
+    DEBUG_FATAL("Failed to create SPICE audio wait event");
+  return event;
+}
+
+static void waitEvent(LGEvent * event)
+{
+  if (!lgWaitEvent(event, TIMEOUT_INFINITE))
+    DEBUG_FATAL("Failed to wait for SPICE audio event");
+}
+
+static void signalWaitEvent(LGEvent * event)
+{
+  if (!lgSignalEvent(event))
+    DEBUG_FATAL("Failed to signal SPICE audio event");
+}
+
+static void signalCallbackWaiters(
+    SpiceAudioCallbackWaitQueue * queue, unsigned int remaining)
+{
+  if (!atomic_load_explicit(&queue->count, memory_order_acquire))
+    return;
+
+  LG_LOCK(queue->lock);
+  SpiceAudioCallbackWaiter ** link = &queue->waiters;
+  while (*link)
+  {
+    SpiceAudioCallbackWaiter * waiter = *link;
+    if (remaining > waiter->depth)
+    {
+      link = &waiter->next;
+      continue;
+    }
+
+    *link = waiter->next;
+    atomic_fetch_sub_explicit(
+        &queue->count, 1, memory_order_release);
+    signalWaitEvent(waiter->event);
+  }
+  LG_UNLOCK(queue->lock);
+}
+
+static void endCallback(atomic_uint * inFlight,
+    SpiceAudioCallbackWaitQueue * waitQueue)
+{
+  const unsigned int previous = atomic_fetch_sub_explicit(
+      inFlight, 1, memory_order_release);
+  DEBUG_ASSERT(previous > 0);
+  signalCallbackWaiters(waitQueue, previous - 1);
+}
+
+static void waitCallbacks(atomic_uint * inFlight,
+    SpiceAudioCallbackWaitQueue * waitQueue, unsigned int depth)
+{
+  if (atomic_load_explicit(inFlight, memory_order_acquire) <= depth)
+    return;
+
+  SpiceAudioCallbackWaiter waiter =
+  {
+    .event = createWaitEvent(),
+    .depth = depth,
+  };
+
+  bool queued = false;
+  LG_LOCK(waitQueue->lock);
+  if (atomic_load_explicit(inFlight, memory_order_acquire) > depth)
+  {
+    waiter.next        = waitQueue->waiters;
+    waitQueue->waiters = &waiter;
+    atomic_fetch_add_explicit(
+        &waitQueue->count, 1, memory_order_release);
+    queued = true;
+  }
+  LG_UNLOCK(waitQueue->lock);
+
+  if (queued)
+  {
+    waitEvent(waiter.event);
+
+    /* The signaler owns the waiter until it releases the queue lock. */
+    LG_LOCK(waitQueue->lock);
+    LG_UNLOCK(waitQueue->lock);
+  }
+
+  lgFreeEvent(waiter.event);
 }
 
 /* l_spice.lock must be held exclusively while admitting a callback so detach
@@ -142,7 +261,7 @@ static bool recordEventCurrent(const SpiceAudioEventTarget * target,
 static void endEvent(void)
 {
   --l_eventDepth;
-  atomic_fetch_sub_explicit(&l_spice.inFlight, 1, memory_order_release);
+  endCallback(&l_spice.inFlight, &l_spice.eventWait);
 }
 
 static bool sampleFormat(PSAudioFormat source,
@@ -318,13 +437,11 @@ static void spiceSetStatusListener(void * opaque,
   {
     callback(callbackOpaque, &status);
     --l_statusDepth;
-    atomic_fetch_sub_explicit(
-        &l_spice.statusInFlight, 1, memory_order_release);
+    endCallback(&l_spice.statusInFlight, &l_spice.statusWait);
   }
   else
-    while (atomic_load_explicit(
-          &l_spice.statusInFlight, memory_order_acquire) > l_statusDepth)
-      ;
+    waitCallbacks(&l_spice.statusInFlight,
+        &l_spice.statusWait, l_statusDepth);
 }
 
 static bool spiceAttach(void * opaque, const LG_AudioEventOps * events,
@@ -413,9 +530,7 @@ static void spiceDetach(void * opaque)
     nextGeneration(l_spice.eventGeneration);
   LG_UNLOCK_EXCLUSIVE(l_spice.lock);
 
-  while (atomic_load_explicit(
-        &l_spice.inFlight, memory_order_acquire) > l_eventDepth)
-    ;
+  waitCallbacks(&l_spice.inFlight, &l_spice.eventWait, l_eventDepth);
 }
 
 static bool spiceRecordData(void * opaque, uint32_t generation,
@@ -501,8 +616,7 @@ void lgaSpice_setAvailable(bool available)
   {
     callback(callbackOpaque, &status);
     --l_statusDepth;
-    atomic_fetch_sub_explicit(
-        &l_spice.statusInFlight, 1, memory_order_release);
+    endCallback(&l_spice.statusInFlight, &l_spice.statusWait);
   }
 }
 

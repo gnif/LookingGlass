@@ -21,6 +21,7 @@
 #ifndef _H_LG_CLIENT_USB_AUDIO_
 #define _H_LG_CLIENT_USB_AUDIO_
 
+#include "interface/audio.h"
 #include "usbredir.h"
 
 #include <stddef.h>
@@ -49,21 +50,25 @@ typedef struct LG_USBAudioEventOps
 LG_USBAudioEventOps;
 
 LG_USBAudio * lgUsbAudio_create(
-    const LG_USBAudioEventOps * events, void * eventOpaque);
+    const LG_USBAudioEventOps * events, void * eventOpaque, bool debug);
 /* Destroy the LG_USBRedir using this device before destroying the device. */
 void lgUsbAudio_destroy(LG_USBAudio * audio);
 
 /* Publish the requested source rate without touching usbredir from the audio
  * feedback thread. */
 void lgUsbAudio_setFeedbackRate(LG_USBAudio * audio, double sampleRate);
+bool lgUsbAudio_feedbackActive(const LG_USBAudio * audio);
 
-/* Queue interleaved packed signed 24-bit microphone frames. This may be
- * called from the audio recording thread. */
+/* Queue interleaved packed signed 24-bit microphone frames. sourceClock is
+ * borrowed for the call and identifies the first frame when present. This may
+ * be called from the audio recording thread. */
 bool lgUsbAudio_recordData(
-    LG_USBAudio * audio, const void * data, size_t frames);
+    LG_USBAudio * audio, const void * data, size_t frames,
+    const LG_AudioClock * sourceClock);
 
-/* This must be queried on the PureSpice processing thread. */
-bool lgUsbAudio_recording(const LG_USBAudio * audio);
+/* Return the time until ISO-IN processing is needed. This must be queried on
+ * the PureSpice processing thread. */
+uint64_t lgUsbAudio_processDelayNs(const LG_USBAudio * audio);
 
 const LG_USBRedirDeviceOps * lgUsbAudio_deviceOps(void);
 
