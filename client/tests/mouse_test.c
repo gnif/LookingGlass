@@ -262,9 +262,8 @@ void app_mouseTrace(const char * file, unsigned int line,
 
 static bool inputSupports(void * opaque, LG_InputSupport support)
 {
-  (void)opaque;
-  (void)support;
-  return false;
+  return support == LG_INPUT_SUPPORT_MOUSE_ABSOLUTE &&
+    opaque && *(const bool *)opaque;
 }
 
 static bool inputKey(void * opaque, int key)
@@ -281,6 +280,17 @@ static bool inputMouseMotion(void * opaque, int32_t x, int32_t y)
   return true;
 }
 
+static bool inputMousePosition(void * opaque, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height)
+{
+  (void)opaque;
+  (void)x;
+  (void)y;
+  (void)width;
+  (void)height;
+  return true;
+}
+
 static bool inputMouseButton(void * opaque, unsigned int button)
 {
   (void)opaque;
@@ -289,13 +299,14 @@ static bool inputMouseButton(void * opaque, unsigned int button)
 }
 
 static const LG_InputOps inputOps = {
-  .name         = "test",
-  .supports     = inputSupports,
-  .keyDown      = inputKey,
-  .keyUp        = inputKey,
-  .mouseMotion  = inputMouseMotion,
-  .mousePress   = inputMouseButton,
-  .mouseRelease = inputMouseButton,
+  .name          = "test",
+  .supports      = inputSupports,
+  .keyDown       = inputKey,
+  .keyUp         = inputKey,
+  .mouseMotion   = inputMouseMotion,
+  .mousePosition = inputMousePosition,
+  .mousePress    = inputMouseButton,
+  .mouseRelease  = inputMouseButton,
 };
 
 static void reset(void)
@@ -480,6 +491,24 @@ static void testExitGuest(void)
   g_cursor.guest.x = 99;
   core_handleGuestMouseUpdate();
   CHECK(count(EV_GUEST) == 0);
+}
+
+static void testAbsoluteSync(void)
+{
+  reset();
+  setLocal(50, 50);
+
+  core_handleGuestMouseUpdate();
+  CHECK(count(EV_GUEST) == 1);
+
+  bool absolute = true;
+  lgInput_setFallback(&inputOps, &absolute);
+  m.count = 0;
+
+  core_handleGuestMouseUpdate();
+  CHECK(count(EV_GUEST) == 0);
+
+  lgInput_setFallback(&inputOps, NULL);
 }
 
 static void testExitReentry(void)
@@ -895,6 +924,7 @@ static const struct Test tests[] = {
   { "surface-exit"    , testSurfaceExit  },
   { "exit-immediate"  , testExitImmediate},
   { "exit-guest"      , testExitGuest    },
+  { "absolute-sync"   , testAbsoluteSync },
   { "exit-reentry"    , testExitReentry  },
   { "view-immediate"  , testViewImmediate},
   { "capture-pending" , testCapWait      },

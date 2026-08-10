@@ -642,6 +642,11 @@ void core_stopFrameThread(void)
 
 void core_handleGuestMouseUpdate(void)
 {
+  /* The local cursor is authoritative with absolute input. Sending delayed
+   * guest positions back to the display server creates a warp feedback loop. */
+  if (lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
+    return;
+
   struct DoublePoint localPos;
   if (!util_guestCurToLocal(&localPos))
   {

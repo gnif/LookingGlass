@@ -120,6 +120,7 @@ set(MOUSE_CASES
   surface-exit
   exit-immediate
   exit-guest
+  absolute-sync
   exit-reentry
   view-immediate
   capture-pending
