@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdatomic.h>
 #include <stdint.h>
 
 #include "../input.h"
@@ -32,13 +33,22 @@ typedef struct X11Input
   const LG_DSInputSink * sink;
   void                 * opaque;
   uint32_t               buttons;
+  _Atomic(bool)          pointerGrabbed;
+  _Atomic(bool)          keyboardGrabbed;
   bool                   entered;
   bool                   focused;
 }
 X11Input;
 
+#define X11_INPUT_KEYMAP_SIZE 32
+
 void x11InputInit(X11Input * input, const LG_DSInputSink * sink,
     void * opaque);
+
+void x11InputSetPointerGrabbed(X11Input * input, bool grabbed);
+bool x11InputIsPointerGrabbed(const X11Input * input);
+void x11InputSetKeyboardGrabbed(X11Input * input, bool grabbed);
+bool x11InputIsKeyboardGrabbed(const X11Input * input);
 
 bool x11InputFocus(X11Input * input, bool focused,
     const uint32_t * keys, size_t count);
@@ -51,11 +61,15 @@ void x11InputPointerButton(X11Input * input, unsigned int button,
     bool pressed, bool raw);
 void x11InputRelativeMotion(X11Input * input,
     double x, double y, double rawX, double rawY);
-void x11InputKeyboardKey(X11Input * input, unsigned int keycode,
-    int minKeycode, bool pressed, bool raw, bool inputActive,
-    const char * text);
+bool x11InputKeyboardKey(X11Input * input, unsigned int keycode,
+    int minKeycode, bool pressed, bool raw);
+void x11InputKeyboardText(X11Input * input, const char * text);
 void x11InputKeyboardState(X11Input * input,
     bool ctrl, bool shift, bool alt, bool super,
     bool numLock, bool capsLock, bool scrollLock);
+size_t x11InputHeldKeys(
+    const char keymap[X11_INPUT_KEYMAP_SIZE],
+    int minKeycode, int maxKeycode,
+    uint32_t * keys, size_t capacity);
 
 #endif

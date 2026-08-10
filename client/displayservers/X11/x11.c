@@ -443,7 +443,6 @@ static bool x11Init(const LG_DSInitParams params)
   x11InputInit(&x11.input, &inputSink, NULL);
   LG_LOCK_INIT(x11.pointerLock);
   atomic_init(&x11.captureActive, false);
-  atomic_init(&x11.pointerGrabbed, false);
   x11.xValuator           = -1;
   x11.yValuator           = -1;
   x11.numLockIndicator    = -1;
@@ -1363,19 +1362,15 @@ static void setFocus(bool focused)
   {
     x11UpdateKeyboardGroup();
 
-    char keymap[32] = { 0 };
+    char keymap[X11_INPUT_KEYMAP_SIZE] = { 0 };
     XQueryKeymap(x11.display, keymap);
     memset(x11.modifiers, 0, sizeof(x11.modifiers));
 
-    for (int keycode = x11.minKeycode;
-         keycode <= x11.maxKeycode && keycode < 256; ++keycode)
+    count = x11InputHeldKeys(keymap, x11.minKeycode, x11.maxKeycode,
+        keys, ARRAY_LENGTH(keys));
+    for (size_t i = 0; i < count; ++i)
     {
-      const unsigned char keyByte = keymap[keycode / 8];
-      if (!(keyByte & (1U << (keycode % 8))))
-        continue;
-
-      keys[count++] = keycode - x11.minKeycode;
-
+      const unsigned int keycode = keys[i] + x11.minKeycode;
       const KeySym sym = XkbKeycodeToKeysym(x11.display, keycode,
           atomic_load(&x11.keyboardGroup), 0);
       const int modifier = keySymToModifier(sym);
@@ -1384,7 +1379,7 @@ static void setFocus(bool focused)
     }
   }
 
-  x11InputFocus(&x11.input, focused, keys, count);
+  x11InputFocus(&x11.input, focused, focused ? keys : NULL, count);
   if (focused)
     updateKeyboardState();
 }
@@ -1519,13 +1514,11 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_KeyPress:
     {
-      if (!x11.input.focused || x11.keyboardGrabbed)
-        return;
-
       XIDeviceEvent *device = cookie->data;
       atomic_store(&x11.keyboardGroup, device->group.effective);
-      x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
-          true, false, true, NULL);
+      if (!x11InputKeyboardKey(&x11.input, device->detail,
+            x11.minKeycode, true, false))
+        return;
 
       if (x11.xic && app_isOverlayMode())
       {
@@ -1548,7 +1541,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         else if (status == XLookupChars || status == XLookupBoth)
         {
           buffer[count] = '\0';
-          inputText(x11.input.opaque, buffer);
+          x11InputKeyboardText(&x11.input, buffer);
         }
       }
 
@@ -1558,36 +1551,33 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_KeyRelease:
     {
-      if (!x11.input.focused || x11.keyboardGrabbed)
+      XIDeviceEvent *device = cookie->data;
+      if (!x11InputKeyboardKey(&x11.input, device->detail,
+            x11.minKeycode, false, false))
         return;
 
-      XIDeviceEvent *device = cookie->data;
-      x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
-          false, false, true, NULL);
       updateKeyState(device->detail, false);
       return;
     }
 
     case XI_RawKeyPress:
     {
-      if (!x11.input.focused || !x11.keyboardGrabbed)
+      XIRawEvent *raw = cookie->data;
+      if (!x11InputKeyboardKey(&x11.input, raw->detail,
+            x11.minKeycode, true, true))
         return;
 
-      XIRawEvent *raw = cookie->data;
-      x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
-          true, true, true, NULL);
       updateKeyState(raw->detail, true);
       return;
     }
 
     case XI_RawKeyRelease:
     {
-      if (!x11.input.focused || !x11.keyboardGrabbed)
+      XIRawEvent *raw = cookie->data;
+      if (!x11InputKeyboardKey(&x11.input, raw->detail,
+            x11.minKeycode, false, true))
         return;
 
-      XIRawEvent *raw = cookie->data;
-      x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
-          false, true, true, NULL);
       updateKeyState(raw->detail, false);
       return;
     }
@@ -1608,10 +1598,6 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_RawButtonPress:
     {
-      if (!x11.input.entered ||
-          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
-        return;
-
       XIRawEvent *raw = cookie->data;
       x11InputPointerButton(&x11.input, raw->detail, true, true);
       return;
@@ -1619,10 +1605,6 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_RawButtonRelease:
     {
-      if (!x11.input.entered ||
-          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
-        return;
-
       XIRawEvent *raw = cookie->data;
       x11InputPointerButton(&x11.input, raw->detail, false, true);
       return;
@@ -1637,10 +1619,6 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_RawMotion:
     {
-      if (!x11.input.entered ||
-          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
-        return;
-
       XIRawEvent *raw = cookie->data;
       double raw_axis[2] = { 0 };
       double axis[2] = { 0 };
@@ -2027,7 +2005,7 @@ static void x11PrintGrabError(const char * type, int dev, Status ret)
 
 static bool x11GrabPointerLocked(void)
 {
-  if (atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+  if (x11InputIsPointerGrabbed(&x11.input))
     return true;
 
   unsigned char mask_bits[XIMaskLen(XI_LASTEVENT)] = { 0 };
@@ -2076,7 +2054,7 @@ static bool x11GrabPointerLocked(void)
     return false;
   }
 
-  atomic_store_explicit(&x11.pointerGrabbed, true, memory_order_release);
+  x11InputSetPointerGrabbed(&x11.input, true);
   return true;
 }
 
@@ -2089,7 +2067,7 @@ static void x11GrabPointer(void)
 
 static void x11UngrabPointerLocked(void)
 {
-  if (!atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+  if (!x11InputIsPointerGrabbed(&x11.input))
   {
     app_handleGrabEvent(false);
     return;
@@ -2098,7 +2076,7 @@ static void x11UngrabPointerLocked(void)
   XIUngrabDevice(x11.display, x11.pointerDev, CurrentTime);
   XSync(x11.display, False);
 
-  atomic_store_explicit(&x11.pointerGrabbed, false, memory_order_release);
+  x11InputSetPointerGrabbed(&x11.input, false);
   app_handleGrabEvent(false);
 }
 
@@ -2112,7 +2090,7 @@ static void x11UngrabPointer(void)
 
 static bool x11IsPointerGrabbed(void)
 {
-  return atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire);
+  return x11InputIsPointerGrabbed(&x11.input);
 }
 
 static void x11CapturePointer(void)
@@ -2148,7 +2126,7 @@ static bool x11IsPointerCaptured(void)
 
 static void x11GrabKeyboard(void)
 {
-  if (x11.keyboardGrabbed)
+  if (x11InputIsKeyboardGrabbed(&x11.input))
     return;
 
   unsigned char mask_bits[XIMaskLen (XI_LASTEVENT)] = { 0 };
@@ -2178,18 +2156,18 @@ static void x11GrabKeyboard(void)
     return;
   }
 
-  x11.keyboardGrabbed = true;
+  x11InputSetKeyboardGrabbed(&x11.input, true);
 }
 
 static void x11UngrabKeyboard(void)
 {
-  if (!x11.keyboardGrabbed)
+  if (!x11InputIsKeyboardGrabbed(&x11.input))
     return;
 
   XIUngrabDevice(x11.display, x11.keyboardDev, CurrentTime);
   XSync(x11.display, False);
 
-  x11.keyboardGrabbed = false;
+  x11InputSetKeyboardGrabbed(&x11.input, false);
 }
 
 static void x11WarpPointer(int x, int y, bool exiting)

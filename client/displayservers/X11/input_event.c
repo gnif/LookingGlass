@@ -38,8 +38,34 @@ void x11InputInit(X11Input * input, const LG_DSInputSink * sink,
     void * opaque)
 {
   memset(input, 0, sizeof(*input));
+  atomic_init(&input->pointerGrabbed, false);
+  atomic_init(&input->keyboardGrabbed, false);
   input->sink   = sink;
   input->opaque = opaque;
+}
+
+void x11InputSetPointerGrabbed(X11Input * input, bool grabbed)
+{
+  atomic_store_explicit(&input->pointerGrabbed, grabbed,
+      memory_order_release);
+}
+
+bool x11InputIsPointerGrabbed(const X11Input * input)
+{
+  return atomic_load_explicit(&input->pointerGrabbed,
+      memory_order_acquire);
+}
+
+void x11InputSetKeyboardGrabbed(X11Input * input, bool grabbed)
+{
+  atomic_store_explicit(&input->keyboardGrabbed, grabbed,
+      memory_order_release);
+}
+
+bool x11InputIsKeyboardGrabbed(const X11Input * input)
+{
+  return atomic_load_explicit(&input->keyboardGrabbed,
+      memory_order_acquire);
 }
 
 bool x11InputFocus(X11Input * input, bool focused,
@@ -90,7 +116,7 @@ void x11InputPointerMotion(X11Input * input, double x, double y)
 void x11InputPointerButton(X11Input * input, unsigned int detail,
     bool pressed, bool raw)
 {
-  if (!raw && !input->entered)
+  if (!input->entered || raw != x11InputIsPointerGrabbed(input))
     return;
 
   const unsigned int button = mapButton(detail);
@@ -123,24 +149,25 @@ void x11InputPointerButton(X11Input * input, unsigned int detail,
 void x11InputRelativeMotion(X11Input * input,
     double x, double y, double rawX, double rawY)
 {
+  if (!input->entered || !x11InputIsPointerGrabbed(input))
+    return;
+
   input->sink->relative(input->opaque, x, y, rawX, rawY);
 }
 
-void x11InputKeyboardKey(X11Input * input, unsigned int keycode,
-    int minKeycode, bool pressed, bool raw, bool inputActive,
-    const char * text)
+bool x11InputKeyboardKey(X11Input * input, unsigned int keycode,
+    int minKeycode, bool pressed, bool raw)
 {
-  if (raw)
-  {
-    if (!inputActive)
-      return;
-  }
-  else if (!input->focused)
-    return;
+  if (!input->focused || raw != x11InputIsKeyboardGrabbed(input))
+    return false;
 
   input->sink->key(input->opaque, (int)keycode - minKeycode, pressed);
+  return true;
+}
 
-  if (!raw && pressed && text)
+void x11InputKeyboardText(X11Input * input, const char * text)
+{
+  if (text && *text)
     input->sink->text(input->opaque, text);
 }
 
@@ -150,4 +177,30 @@ void x11InputKeyboardState(X11Input * input,
 {
   input->sink->modifiers(input->opaque, ctrl, shift, alt, super);
   input->sink->leds(input->opaque, numLock, capsLock, scrollLock);
+}
+
+size_t x11InputHeldKeys(
+    const char keymap[X11_INPUT_KEYMAP_SIZE],
+    int minKeycode, int maxKeycode,
+    uint32_t * keys, size_t capacity)
+{
+  if (minKeycode < 0 || maxKeycode < minKeycode)
+    return 0;
+
+  size_t count = 0;
+  for (int keycode = minKeycode;
+       keycode <= maxKeycode && keycode < X11_INPUT_KEYMAP_SIZE * 8;
+       ++keycode)
+  {
+    const unsigned char keyByte = (unsigned char)keymap[keycode / 8];
+    if (!(keyByte & (1U << (keycode % 8))))
+      continue;
+
+    if (count == capacity)
+      break;
+
+    keys[count++] = keycode - minKeycode;
+  }
+
+  return count;
 }

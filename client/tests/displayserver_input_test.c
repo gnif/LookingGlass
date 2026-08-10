@@ -523,8 +523,11 @@ static void relativeMotion(struct Fixture * fixture, bool active,
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputRelativeMotion(&fixture->input.wayland, active,
         x, y, rawX, rawY);
-  else if (active)
+  else
+  {
+    x11InputSetPointerGrabbed(&fixture->input.x11, active);
     x11InputRelativeMotion(&fixture->input.x11, x, y, rawX, rawY);
+  }
 }
 
 static void keyboardEnter(struct Fixture * fixture, bool mainSurface,
@@ -545,13 +548,17 @@ static void keyboardLeave(struct Fixture * fixture, bool mainSurface)
 }
 
 static void keyboardKey(struct Fixture * fixture, unsigned int key,
-    bool pressed, const char * text, bool inputActive)
+    bool pressed, const char * text)
 {
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputKeyboardKey(&fixture->input.wayland, key, pressed, text);
   else
-    x11InputKeyboardKey(&fixture->input.x11, key + 8, 8, pressed,
-        false, inputActive, text);
+  {
+    const bool accepted = x11InputKeyboardKey(
+        &fixture->input.x11, key + 8, 8, pressed, false);
+    if (accepted && pressed)
+      x11InputKeyboardText(&fixture->input.x11, text);
+  }
 }
 
 static void keyboardState(struct Fixture * fixture,
@@ -759,29 +766,138 @@ static void testKeyboardKeys(enum Backend backend)
   struct Fixture fixture;
   initFixture(&fixture, backend);
 
-  keyboardKey(&fixture, 30, true, "ignored", true);
-  keyboardKey(&fixture, 30, false, "ignored", true);
+  keyboardKey(&fixture, 30, true, "ignored");
+  keyboardKey(&fixture, 30, false, "ignored");
   CHECK(fixture.trace.count == 0);
 
   keyboardEnter(&fixture, true, NULL, 0);
   clearTrace(&fixture);
 
-  keyboardKey(&fixture, 30, true, "a", true);
-  keyboardKey(&fixture, 30, false, "ignored", true);
+  keyboardKey(&fixture, 30, true, "a");
+  keyboardKey(&fixture, 30, false, "ignored");
+  keyboardKey(&fixture, 31, true, "");
+  keyboardKey(&fixture, 31, false, NULL);
 
   static const struct Trace expected[] =
   {
     KEY(30, true),
     TEXT("a"),
     KEY(30, false),
+    KEY(31, true),
+    KEY(31, false),
   };
   expectTrace(&fixture, expected, ARRAY_LENGTH(expected));
 
   keyboardLeave(&fixture, true);
   clearTrace(&fixture);
-  keyboardKey(&fixture, 31, true, "s", true);
-  keyboardKey(&fixture, 31, false, NULL, true);
+  keyboardKey(&fixture, 31, true, "s");
+  keyboardKey(&fixture, 31, false, NULL);
   CHECK(fixture.trace.count == 0);
+}
+
+static void testX11PointerRouting(enum Backend backend)
+{
+  CHECK(backend == BACKEND_X11);
+
+  struct Fixture fixture;
+  initFixture(&fixture, backend);
+  pointerEnter(&fixture, true, 40.0, 30.0);
+  clearTrace(&fixture);
+
+  x11InputPointerButton(&fixture.input.x11, 1, true, true);
+  x11InputRelativeMotion(&fixture.input.x11, 1.0, 2.0, 3.0, 4.0);
+
+  x11InputSetPointerGrabbed(&fixture.input.x11, true);
+  x11InputPointerButton(&fixture.input.x11, 1, true, false);
+  x11InputPointerButton(&fixture.input.x11, 1, true, true);
+  x11InputRelativeMotion(&fixture.input.x11, 1.0, 2.0, 3.0, 4.0);
+
+  x11InputSetPointerGrabbed(&fixture.input.x11, false);
+  x11InputPointerButton(&fixture.input.x11, 1, false, true);
+  x11InputRelativeMotion(&fixture.input.x11, 1.0, 2.0, 3.0, 4.0);
+  x11InputPointerButton(&fixture.input.x11, 1, false, false);
+
+  static const struct Trace expected[] =
+  {
+    BUTTON(1, true),
+    RELATIVE(1.0, 2.0, 3.0, 4.0),
+    BUTTON(1, false),
+  };
+  expectTrace(&fixture, expected, ARRAY_LENGTH(expected));
+  CHECK(fixture.input.x11.buttons == 0);
+}
+
+static void testX11KeyboardRouting(enum Backend backend)
+{
+  CHECK(backend == BACKEND_X11);
+
+  struct Fixture fixture;
+  initFixture(&fixture, backend);
+  keyboardEnter(&fixture, true, NULL, 0);
+  clearTrace(&fixture);
+
+  CHECK(!x11InputKeyboardKey(&fixture.input.x11,
+      30 + 8, 8, true, true));
+  CHECK(x11InputKeyboardKey(&fixture.input.x11,
+      30 + 8, 8, true, false));
+  x11InputKeyboardText(&fixture.input.x11, "a");
+
+  x11InputSetKeyboardGrabbed(&fixture.input.x11, true);
+  CHECK(!x11InputKeyboardKey(&fixture.input.x11,
+      31 + 8, 8, true, false));
+  CHECK(x11InputKeyboardKey(&fixture.input.x11,
+      30 + 8, 8, false, true));
+  CHECK(x11InputKeyboardKey(&fixture.input.x11,
+      31 + 8, 8, true, true));
+
+  x11InputSetKeyboardGrabbed(&fixture.input.x11, false);
+  CHECK(!x11InputKeyboardKey(&fixture.input.x11,
+      31 + 8, 8, false, true));
+  CHECK(x11InputKeyboardKey(&fixture.input.x11,
+      31 + 8, 8, false, false));
+
+  static const struct Trace expected[] =
+  {
+    KEY(30, true),
+    TEXT("a"),
+    KEY(30, false),
+    KEY(31, true),
+    KEY(31, false),
+  };
+  expectTrace(&fixture, expected, ARRAY_LENGTH(expected));
+}
+
+static void setKeymapKey(char keymap[X11_INPUT_KEYMAP_SIZE],
+    unsigned int keycode)
+{
+  CHECK(keycode < X11_INPUT_KEYMAP_SIZE * 8);
+  keymap[keycode / 8] = (char)(
+      (unsigned char)keymap[keycode / 8] | (1U << (keycode % 8)));
+}
+
+static void testX11HeldKeys(enum Backend backend)
+{
+  CHECK(backend == BACKEND_X11);
+
+  char keymap[X11_INPUT_KEYMAP_SIZE] = { 0 };
+  setKeymapKey(keymap, 7);
+  setKeymapKey(keymap, 8);
+  setKeymapKey(keymap, 30);
+  setKeymapKey(keymap, 42);
+  setKeymapKey(keymap, 43);
+
+  uint32_t keys[4];
+  size_t count = x11InputHeldKeys(keymap, 8, 42,
+      keys, ARRAY_LENGTH(keys));
+  CHECK(count == 3);
+  CHECK(keys[0] == 0);
+  CHECK(keys[1] == 22);
+  CHECK(keys[2] == 34);
+
+  count = x11InputHeldKeys(keymap, 8, 42, keys, 2);
+  CHECK(count == 2);
+  CHECK(keys[0] == 0);
+  CHECK(keys[1] == 22);
 }
 
 static void testKeyboardState(enum Backend backend)
@@ -814,16 +930,19 @@ struct Test
 
 static const struct Test tests[] =
 {
-  { "pointer-events" , testPointerEvents  },
-  { "pointer-buttons", testPointerButtons },
-  { "pointer-release", testPointerRelease },
-  { "wheel-steps"    , testWheelSteps     },
-  { "wheel-residual" , testWheelResidual  },
-  { "wheel-multiple" , testWheelMultiple  },
-  { "relative-motion", testRelativeMotion },
-  { "keyboard-focus" , testKeyboardFocus  },
-  { "keyboard-keys"  , testKeyboardKeys   },
-  { "keyboard-state" , testKeyboardState  },
+  { "pointer-events"  , testPointerEvents      },
+  { "pointer-buttons" , testPointerButtons     },
+  { "pointer-release" , testPointerRelease     },
+  { "wheel-steps"     , testWheelSteps         },
+  { "wheel-residual"  , testWheelResidual      },
+  { "wheel-multiple"  , testWheelMultiple      },
+  { "relative-motion" , testRelativeMotion     },
+  { "keyboard-focus"  , testKeyboardFocus      },
+  { "keyboard-keys"   , testKeyboardKeys       },
+  { "keyboard-state"  , testKeyboardState      },
+  { "pointer-routing" , testX11PointerRouting  },
+  { "keyboard-routing", testX11KeyboardRouting },
+  { "held-keys"       , testX11HeldKeys        },
 };
 
 static bool parseBackend(const char * name, enum Backend * backend)

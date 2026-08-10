@@ -104,8 +104,6 @@ struct X11DSState
   X11Input      input;
   LG_Lock       pointerLock;
   _Atomic(bool) captureActive;
-  _Atomic(bool) pointerGrabbed;
-  bool          keyboardGrabbed;
   bool fullscreen;
 
   struct Rect   rect;

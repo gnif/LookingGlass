@@ -87,6 +87,15 @@ foreach(name IN ITEMS wheel-residual wheel-multiple)
   )
 endforeach()
 
+foreach(name IN ITEMS pointer-routing keyboard-routing held-keys)
+  add_test(NAME display-input-x11-${name}
+    COMMAND displayserver-input-tests x11 ${name}
+  )
+  set_tests_properties(display-input-x11-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(mouse-tests
   mouse_test.c
   ../src/core.c
