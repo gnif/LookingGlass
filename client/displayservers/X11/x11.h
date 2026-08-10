@@ -64,6 +64,10 @@ struct X11DSState
 
   int                   minKeycode, maxKeycode;
   _Atomic(unsigned int) keyboardGroup;
+  int                   numLockIndicator;
+  int                   capsLockIndicator;
+  int                   scrollLockIndicator;
+  int                   xkbEvent;
 
   //Extended Window Manager Hints
   //ref: https://specifications.freedesktop.org/wm-spec/latest/

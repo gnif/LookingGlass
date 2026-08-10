@@ -93,6 +93,10 @@ static int  x11EventThread(void * unused);
 static void x11XInputEvent(XGenericEventCookie *cookie);
 static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11UpdateKeyboardGroup(void);
+static int  x11GetIndicatorIndex(const char * name);
+static void emitKeyboardState(unsigned int indicators);
+static void updateKeyboardState(void);
+static void setFocus(bool focused);
 static void x11GrabPointer(void);
 
 static void inputPosition(void * opaque, double x, double y)
@@ -440,12 +444,16 @@ static bool x11Init(const LG_DSInitParams params)
   LG_LOCK_INIT(x11.pointerLock);
   atomic_init(&x11.captureActive, false);
   atomic_init(&x11.pointerGrabbed, false);
-  x11.xValuator = -1;
-  x11.yValuator = -1;
-  x11.display   = XOpenDisplay(NULL);
-  x11.jitRender = params.jitRender;
-  x11.wm        = &X11WM_Default;
-  x11.rect      = (struct Rect) {
+  x11.xValuator           = -1;
+  x11.yValuator           = -1;
+  x11.numLockIndicator    = -1;
+  x11.capsLockIndicator   = -1;
+  x11.scrollLockIndicator = -1;
+  x11.xkbEvent            = -1;
+  x11.display             = XOpenDisplay(NULL);
+  x11.jitRender           = params.jitRender;
+  x11.wm                  = &X11WM_Default;
+  x11.rect                = (struct Rect) {
     .x = params.x,
     .y = params.y,
     .w = params.w,
@@ -741,6 +749,22 @@ static bool x11Init(const LG_DSInitParams params)
 
   XDisplayKeycodes(x11.display, &x11.minKeycode, &x11.maxKeycode);
   x11UpdateKeyboardGroup();
+  x11.numLockIndicator    = x11GetIndicatorIndex("Num Lock");
+  x11.capsLockIndicator   = x11GetIndicatorIndex("Caps Lock");
+  x11.scrollLockIndicator = x11GetIndicatorIndex("Scroll Lock");
+
+  int xkbOpcode;
+  int xkbEvent;
+  int xkbError;
+  int xkbMajor = XkbMajorVersion;
+  int xkbMinor = XkbMinorVersion;
+  if (XkbQueryExtension(x11.display, &xkbOpcode, &xkbEvent,
+        &xkbError, &xkbMajor, &xkbMinor))
+  {
+    x11.xkbEvent = xkbEvent;
+    XkbSelectEvents(x11.display, XkbUseCoreKbd,
+        XkbIndicatorStateNotifyMask, XkbIndicatorStateNotifyMask);
+  }
 
   XIFreeDeviceInfo(devinfo);
 
@@ -1089,6 +1113,14 @@ static int x11EventThread(void * unused)
       continue;
     }
 
+    if (xe.type == x11.xkbEvent)
+    {
+      const XkbEvent * event = (const XkbEvent *)&xe;
+      if (event->any.xkb_type == XkbIndicatorStateNotify)
+        emitKeyboardState(event->indicators.state);
+      continue;
+    }
+
     // call the clipboard handling code
     if (x11CBEventThread(&xe))
       continue;
@@ -1201,10 +1233,7 @@ static int x11EventThread(void * unused)
           }
 
           if (x11.ewmhHasFocusEvent && x11.input.focused != focused)
-          {
-            x11.input.focused = focused;
-            inputFocus(x11.input.opaque, focused);
-          }
+            setFocus(focused);
 
           x11.fullscreen = fullscreen;
           XFree(data);
@@ -1262,14 +1291,58 @@ static enum Modifiers keySymToModifier(KeySym sym)
   }
 }
 
-static void updateModifiers(void)
+static int x11GetIndicatorIndex(const char * name)
+{
+  const Atom atom = XInternAtom(x11.display, name, True);
+  int index;
+
+  if (atom == None ||
+      !XkbGetNamedIndicator(x11.display, atom, &index, NULL, NULL, NULL))
+    return -1;
+
+  return index;
+}
+
+static bool indicatorActive(unsigned int state, int index)
+{
+  return index >= 0 && index < XkbNumIndicators &&
+    (state & (UINT32_C(1) << index));
+}
+
+static void emitKeyboardState(unsigned int indicators)
 {
   x11InputKeyboardState(&x11.input,
     x11.modifiers[MOD_CTRL_LEFT] || x11.modifiers[MOD_CTRL_RIGHT],
     x11.modifiers[MOD_SHIFT_LEFT] || x11.modifiers[MOD_SHIFT_RIGHT],
     x11.modifiers[MOD_ALT_LEFT] || x11.modifiers[MOD_ALT_RIGHT],
     x11.modifiers[MOD_SUPER_LEFT] || x11.modifiers[MOD_SUPER_RIGHT],
-    false, false, false);
+    indicatorActive(indicators, x11.numLockIndicator),
+    indicatorActive(indicators, x11.capsLockIndicator),
+    indicatorActive(indicators, x11.scrollLockIndicator));
+}
+
+static void updateKeyboardState(void)
+{
+  unsigned int indicators = 0;
+  XkbGetIndicatorState(x11.display, XkbUseCoreKbd, &indicators);
+  emitKeyboardState(indicators);
+}
+
+static void updateKeyState(unsigned int keycode, bool pressed)
+{
+  const KeySym sym = XkbKeycodeToKeysym(x11.display, keycode,
+      atomic_load(&x11.keyboardGroup), 0);
+  const int modifier = keySymToModifier(sym);
+  if (modifier >= 0)
+  {
+    x11.modifiers[modifier] = pressed;
+    updateKeyboardState();
+    return;
+  }
+
+  if (pressed &&
+      (sym == XK_Num_Lock || sym == XK_Caps_Lock || sym == XK_Scroll_Lock))
+    updateKeyboardState();
 }
 
 static void x11UpdateKeyboardGroup(void)
@@ -1279,15 +1352,41 @@ static void x11UpdateKeyboardGroup(void)
     atomic_store(&x11.keyboardGroup, state.group);
 }
 
-static void setFocus(bool focused, double x, double y)
+static void setFocus(bool focused)
 {
   if (x11.input.focused == focused)
     return;
 
+  uint32_t keys[256];
+  size_t count = 0;
   if (focused)
+  {
     x11UpdateKeyboardGroup();
 
-  x11InputFocus(&x11.input, focused, x, y, NULL, 0);
+    char keymap[32] = { 0 };
+    XQueryKeymap(x11.display, keymap);
+    memset(x11.modifiers, 0, sizeof(x11.modifiers));
+
+    for (int keycode = x11.minKeycode;
+         keycode <= x11.maxKeycode && keycode < 256; ++keycode)
+    {
+      const unsigned char keyByte = keymap[keycode / 8];
+      if (!(keyByte & (1U << (keycode % 8))))
+        continue;
+
+      keys[count++] = keycode - x11.minKeycode;
+
+      const KeySym sym = XkbKeycodeToKeysym(x11.display, keycode,
+          atomic_load(&x11.keyboardGroup), 0);
+      const int modifier = keySymToModifier(sym);
+      if (modifier >= 0)
+        x11.modifiers[modifier] = true;
+    }
+  }
+
+  x11InputFocus(&x11.input, focused, keys, count);
+  if (focused)
+    updateKeyboardState();
 }
 
 static bool x11GetKeyLabel(int sc, char * label, size_t size)
@@ -1316,7 +1415,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta ungrab for move/resize
         if (xie->mode == XINotifyUngrab)
-          setFocus(true, xie->event_x, xie->event_y);
+          setFocus(true);
         return;
       }
 
@@ -1330,7 +1429,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
         return;
 
 
-      setFocus(true, xie->event_x, xie->event_y);
+      setFocus(true);
       return;
     }
 
@@ -1341,7 +1440,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       {
         // if meta grab for move/resize
         if (xie->mode == XINotifyGrab)
-          setFocus(false, xie->event_x, xie->event_y);
+          setFocus(false);
         return;
       }
 
@@ -1354,7 +1453,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
           xie->mode != XINotifyGrab)
         return;
 
-      setFocus(false, xie->event_x, xie->event_y);
+      setFocus(false);
       return;
     }
 
@@ -1428,45 +1527,32 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
           true, false, true, NULL);
 
-      if (!x11.xic || !app_isOverlayMode())
-        return;
-
-      char buffer[128];
-      KeySym sym;
-      Status status;
-      int count;
-      XKeyPressedEvent ev = {
-        .display = x11.display,
-        .window  = x11.window,
-        .type    = KeyPress,
-        .keycode = device->detail,
-        .state   = device->mods.effective,
-      };
-
-      count = Xutf8LookupString(x11.xic, &ev, buffer, sizeof(buffer),
-        &sym, &status);
-
-      if (status == XBufferOverflow || count >= sizeof(buffer))
+      if (x11.xic && app_isOverlayMode())
       {
-        DEBUG_WARN("Typing too many characters at once, ignoring");
-        return;
-      }
+        char buffer[128];
+        KeySym sym;
+        Status status;
+        XKeyPressedEvent ev = {
+          .display = x11.display,
+          .window  = x11.window,
+          .type    = KeyPress,
+          .keycode = device->detail,
+          .state   = device->mods.effective,
+        };
 
-      if (status == XLookupChars || status == XLookupBoth)
-      {
-        buffer[count] = '\0';
-        inputText(x11.input.opaque, buffer);
-      }
+        const int count = Xutf8LookupString(x11.xic, &ev, buffer,
+            sizeof(buffer), &sym, &status);
 
-      if (status == XLookupKeySym || status == XLookupBoth)
-      {
-        int modifier = keySymToModifier(sym);
-        if (modifier >= 0)
+        if (status == XBufferOverflow || count >= sizeof(buffer))
+          DEBUG_WARN("Typing too many characters at once, ignoring");
+        else if (status == XLookupChars || status == XLookupBoth)
         {
-          x11.modifiers[modifier] = true;
-          updateModifiers();
+          buffer[count] = '\0';
+          inputText(x11.input.opaque, buffer);
         }
       }
+
+      updateKeyState(device->detail, true);
       return;
     }
 
@@ -1478,41 +1564,31 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       XIDeviceEvent *device = cookie->data;
       x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
           false, false, true, NULL);
-
-      if (!x11.xic || !app_isOverlayMode())
-        return;
-
-      XKeyPressedEvent ev = {
-        .display = x11.display,
-        .window  = x11.window,
-        .type    = KeyRelease,
-        .keycode = device->detail,
-        .state   = device->mods.effective,
-      };
-      KeySym sym = XLookupKeysym(&ev, 0);
-      int modifier = keySymToModifier(sym);
-
-      if (modifier >= 0)
-      {
-        x11.modifiers[modifier] = false;
-        updateModifiers();
-      }
+      updateKeyState(device->detail, false);
       return;
     }
 
     case XI_RawKeyPress:
     {
+      if (!x11.input.focused || !x11.keyboardGrabbed)
+        return;
+
       XIRawEvent *raw = cookie->data;
       x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
-          true, true, x11.input.focused, NULL);
+          true, true, true, NULL);
+      updateKeyState(raw->detail, true);
       return;
     }
 
     case XI_RawKeyRelease:
     {
+      if (!x11.input.focused || !x11.keyboardGrabbed)
+        return;
+
       XIRawEvent *raw = cookie->data;
       x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
-          false, true, x11.input.focused, NULL);
+          false, true, true, NULL);
+      updateKeyState(raw->detail, false);
       return;
     }
 

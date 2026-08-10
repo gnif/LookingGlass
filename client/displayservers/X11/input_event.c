@@ -42,18 +42,19 @@ void x11InputInit(X11Input * input, const LG_DSInputSink * sink,
   input->opaque = opaque;
 }
 
-bool x11InputFocus(X11Input * input, bool focused, double x, double y,
+bool x11InputFocus(X11Input * input, bool focused,
     const uint32_t * keys, size_t count)
 {
-  (void)keys;
-  (void)count;
-
   if (input->focused == focused)
     return false;
 
   input->focused = focused;
-  input->sink->position(input->opaque, x, y);
   input->sink->focus(input->opaque, focused);
+
+  if (focused)
+    for (size_t i = 0; i < count; ++i)
+      input->sink->key(input->opaque, keys[i], true);
+
   return true;
 }
 
@@ -147,8 +148,6 @@ void x11InputKeyboardState(X11Input * input,
     bool ctrl, bool shift, bool alt, bool super,
     bool numLock, bool capsLock, bool scrollLock)
 {
-  (void)numLock;
-  (void)capsLock;
-  (void)scrollLock;
   input->sink->modifiers(input->opaque, ctrl, shift, alt, super);
+  input->sink->leds(input->opaque, numLock, capsLock, scrollLock);
 }

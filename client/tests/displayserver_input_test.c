@@ -533,7 +533,7 @@ static void keyboardEnter(struct Fixture * fixture, bool mainSurface,
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputKeyboardEnter(&fixture->input.wayland, mainSurface, keys, count);
   else if (mainSurface)
-    x11InputFocus(&fixture->input.x11, true, 40.0, 30.0, keys, count);
+    x11InputFocus(&fixture->input.x11, true, keys, count);
 }
 
 static void keyboardLeave(struct Fixture * fixture, bool mainSurface)
@@ -541,7 +541,7 @@ static void keyboardLeave(struct Fixture * fixture, bool mainSurface)
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputKeyboardLeave(&fixture->input.wayland, mainSurface);
   else if (mainSurface)
-    x11InputFocus(&fixture->input.x11, false, 40.0, 30.0, NULL, 0);
+    x11InputFocus(&fixture->input.x11, false, NULL, 0);
 }
 
 static void keyboardKey(struct Fixture * fixture, unsigned int key,

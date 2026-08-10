@@ -40,7 +40,7 @@ X11Input;
 void x11InputInit(X11Input * input, const LG_DSInputSink * sink,
     void * opaque);
 
-bool x11InputFocus(X11Input * input, bool focused, double x, double y,
+bool x11InputFocus(X11Input * input, bool focused,
     const uint32_t * keys, size_t count);
 bool x11InputPointerEnter(X11Input * input, bool mainWindow,
     bool normal, double x, double y);
