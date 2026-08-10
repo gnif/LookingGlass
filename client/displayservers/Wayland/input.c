@@ -32,9 +32,6 @@
 #include "app.h"
 #include "common/debug.h"
 
-const double WL_SCROLL_STEP = 15.0;
-const double WL_HALF_SCROLL_STEP = WL_SCROLL_STEP / 2.0;
-
 #define MTRACE(fmt, ...) \
   do \
   { \
@@ -59,6 +56,93 @@ static uint32_t proxyId(void * proxy)
   return proxy ? wl_proxy_get_id(proxy) : 0;
 }
 
+static void inputPosition(void * opaque, double x, double y)
+{
+  (void)opaque;
+  app_updateCursorPos(x, y);
+}
+
+static void inputRelative(void * opaque, double x, double y,
+    double rawX, double rawY)
+{
+  (void)opaque;
+  app_handleMouseRelative(x, y, rawX, rawY);
+}
+
+static void inputButton(void * opaque, unsigned int button, bool pressed)
+{
+  (void)opaque;
+  if (pressed)
+    app_handleButtonPress(button);
+  else
+    app_handleButtonRelease(button);
+}
+
+static void inputWheel(void * opaque, double motion)
+{
+  (void)opaque;
+  app_handleWheelMotion(motion);
+}
+
+static void inputKey(void * opaque, int scancode, bool pressed)
+{
+  (void)opaque;
+  if (pressed)
+    app_handleKeyPress(scancode);
+  else
+    app_handleKeyRelease(scancode);
+}
+
+static void inputText(void * opaque, const char * text)
+{
+  (void)opaque;
+  /* Test overlay state after the key callback, matching the native event
+   * handler's ordering. */
+  if (app_isOverlayMode())
+    app_handleKeyboardTyped(text);
+}
+
+static void inputModifiers(void * opaque, bool ctrl, bool shift, bool alt,
+    bool super)
+{
+  (void)opaque;
+  app_handleKeyboardModifiers(ctrl, shift, alt, super);
+}
+
+static void inputLEDs(void * opaque, bool numLock, bool capsLock,
+    bool scrollLock)
+{
+  (void)opaque;
+  app_handleKeyboardLEDs(numLock, capsLock, scrollLock);
+}
+
+static void inputEnter(void * opaque, bool entered)
+{
+  (void)opaque;
+  app_handleEnterEvent(entered);
+}
+
+static void inputFocus(void * opaque, bool focused)
+{
+  (void)opaque;
+  if (!focused)
+    waylandCBInvalidate();
+  app_handleFocusEvent(focused);
+}
+
+static const LG_DSInputSink inputSink = {
+  .position  = inputPosition,
+  .relative  = inputRelative,
+  .button    = inputButton,
+  .wheel     = inputWheel,
+  .key       = inputKey,
+  .text      = inputText,
+  .modifiers = inputModifiers,
+  .leds      = inputLEDs,
+  .enter     = inputEnter,
+  .focus     = inputFocus,
+};
+
 // Mouse-handling listeners.
 
 static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
@@ -68,7 +152,7 @@ static void pointerMotionHandler(void * data, struct wl_pointer * pointer,
       wl_fixed_to_double(syW));
   MTRACE("abs time=%u pos=%.3f,%.3f", time, wlWm.motion.x,
       wlWm.motion.y);
-  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
+  wlInputPointerMotion(&wlWm.input, wlWm.motion.x, wlWm.motion.y);
 }
 
 static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
@@ -79,18 +163,15 @@ static void pointerEnterHandler(void * data, struct wl_pointer * pointer,
       surface == wlWm.surface, (void *)surface, serial,
       wl_fixed_to_double(sxW), wl_fixed_to_double(syW));
 
-  if (surface != wlWm.surface)
+  if (!wlInputPointerEnter(&wlWm.input, surface == wlWm.surface))
     return;
-
-  wlWm.pointerInSurface = true;
-  app_handleEnterEvent(true);
 
   wl_pointer_set_cursor(pointer, serial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
   wlWm.pointerEnterSerial = serial;
 
   wlMotionAbs(&wlWm.motion, wl_fixed_to_double(sxW),
       wl_fixed_to_double(syW));
-  app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
+  wlInputPointerMotion(&wlWm.input, wlWm.motion.x, wlWm.motion.y);
 }
 
 static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
@@ -99,76 +180,21 @@ static void pointerLeaveHandler(void * data, struct wl_pointer * pointer,
   MTRACE("leave main=%d surface=%p serial=%u",
       surface == wlWm.surface, (void *)surface, serial);
 
-  if (surface != wlWm.surface)
-    return;
-
-  wlWm.pointerInSurface = false;
-  app_handleEnterEvent(false);
+  wlInputPointerLeave(&wlWm.input, surface == wlWm.surface);
 }
 
 static void pointerAxisHandler(void * data, struct wl_pointer * pointer,
   uint32_t serial, uint32_t axis, wl_fixed_t value)
 {
-  if (axis != WL_POINTER_AXIS_VERTICAL_SCROLL)
-    return;
-
-  double delta = wl_fixed_to_double(value);
-
-  wlWm.scrollState += delta;
-
-  while (wlWm.scrollState > WL_HALF_SCROLL_STEP)
-  {
-    app_handleButtonPress(5 /* SPICE_MOUSE_BUTTON_DOWN */);
-    app_handleButtonRelease(5 /* SPICE_MOUSE_BUTTON_DOWN */);
-    wlWm.scrollState -= WL_SCROLL_STEP;
-  }
-
-  while (wlWm.scrollState < -WL_HALF_SCROLL_STEP)
-  {
-    app_handleButtonPress(4 /* SPICE_MOUSE_BUTTON_UP */);
-    app_handleButtonRelease(4 /* SPICE_MOUSE_BUTTON_UP */);
-    wlWm.scrollState += WL_SCROLL_STEP;
-  }
-
-  app_handleWheelMotion(delta / WL_SCROLL_STEP);
-}
-
-static int mapWaylandButton(uint32_t button)
-{
-  switch (button)
-  {
-    case BTN_LEFT:
-      return 1;
-    case BTN_MIDDLE:
-      return 2;
-    case BTN_RIGHT:
-      return 3;
-    case BTN_SIDE:
-      return 6;
-    case BTN_EXTRA:
-      return 7;
-    case BTN_FORWARD:
-      return 8;
-    case BTN_BACK:
-      return 9;
-    case BTN_TASK:
-      return 10;
-  }
-
-  return 0;
+  wlInputPointerAxis(&wlWm.input,
+      axis == WL_POINTER_AXIS_VERTICAL_SCROLL, wl_fixed_to_double(value));
 }
 
 static void pointerButtonHandler(void *data, struct wl_pointer *pointer,
     uint32_t serial, uint32_t time, uint32_t button, uint32_t stateW)
 {
-  button = mapWaylandButton(button);
-  if (!button)
-    return;
-
-  if (stateW == WL_POINTER_BUTTON_STATE_PRESSED)
-    app_handleButtonPress(button);
-  else
-    app_handleButtonRelease(button);
+  wlInputPointerButton(&wlWm.input, button,
+      stateW == WL_POINTER_BUTTON_STATE_PRESSED);
 }
 
 static const struct wl_pointer_listener pointerListener = {
@@ -223,21 +249,18 @@ static void relativePointerMotionHandler(void * data,
     wl_fixed_t dxW, wl_fixed_t dyW, wl_fixed_t dxUnaccelW,
     wl_fixed_t dyUnaccelW)
 {
-  if (!atomic_load_explicit(&wlWm.lockActive, memory_order_acquire))
-    return;
-
+  const bool active =
+    atomic_load_explicit(&wlWm.lockActive, memory_order_acquire);
   const double dx = wl_fixed_to_double(dxW);
   const double dy = wl_fixed_to_double(dyW);
-  MTRACE("rel time=%u:%u delta=%.3f,%.3f raw=%.3f,%.3f "
-      "pos=%.3f,%.3f", timeHi, timeLo, dx, dy,
-      wl_fixed_to_double(dxUnaccelW), wl_fixed_to_double(dyUnaccelW),
-      wlWm.motion.x, wlWm.motion.y);
+  const double rawX = wl_fixed_to_double(dxUnaccelW);
+  const double rawY = wl_fixed_to_double(dyUnaccelW);
+  if (active)
+    MTRACE("rel time=%u:%u delta=%.3f,%.3f raw=%.3f,%.3f "
+        "pos=%.3f,%.3f", timeHi, timeLo, dx, dy, rawX, rawY,
+        wlWm.motion.x, wlWm.motion.y);
 
-  app_handleMouseRelative(
-      dx,
-      dy,
-      wl_fixed_to_double(dxUnaccelW),
-      wl_fixed_to_double(dyUnaccelW));
+  wlInputRelativeMotion(&wlWm.input, active, dx, dy, rawX, rawY);
 }
 
 static const struct zwp_relative_pointer_v1_listener relativePointerListener = {
@@ -314,51 +337,46 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface, struct wl_array * keys)
 {
   if (surface != wlWm.surface)
+  {
+    wlInputKeyboardEnter(&wlWm.input, false, NULL, 0);
     return;
+  }
 
-  wlWm.focusedOnSurface = true;
-  app_handleFocusEvent(true);
   wlWm.keyboardEnterSerial = serial;
-
-  uint32_t * key;
-  wl_array_for_each(key, keys)
-    app_handleKeyPress(*key);
+  wlInputKeyboardEnter(&wlWm.input, true, keys->data,
+      keys->size / sizeof(uint32_t));
 }
 
 static void keyboardLeaveHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, struct wl_surface * surface)
 {
-  if (surface != wlWm.surface)
-    return;
-
-  wlWm.focusedOnSurface = false;
-  waylandCBInvalidate();
-  app_handleFocusEvent(false);
+  wlInputKeyboardLeave(&wlWm.input, surface == wlWm.surface);
 }
 
 static void keyboardKeyHandler(void * data, struct wl_keyboard * keyboard,
     uint32_t serial, uint32_t time, uint32_t key, uint32_t state)
 {
-  if (!wlWm.focusedOnSurface)
+  if (!wlWm.input.focused)
     return;
 
-  if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
-    app_handleKeyPress(key);
-  else
-    app_handleKeyRelease(key);
-
-  if (!wlWm.xkbState || !app_isOverlayMode() || state != WL_KEYBOARD_KEY_STATE_PRESSED)
+  const bool pressed = state == WL_KEYBOARD_KEY_STATE_PRESSED;
+  if (!wlWm.xkbState || !pressed)
+  {
+    wlInputKeyboardKey(&wlWm.input, key, pressed, NULL);
     return;
+  }
 
-  key += 8; // xkb scancode is evdev scancode + 8
-  int size = xkb_state_key_get_utf8(wlWm.xkbState, key, NULL, 0);
-
+  const xkb_keycode_t xkbKey = key + 8;
+  const int size = xkb_state_key_get_utf8(wlWm.xkbState, xkbKey, NULL, 0);
   if (size <= 0)
+  {
+    wlInputKeyboardKey(&wlWm.input, key, true, NULL);
     return;
+  }
 
   char buffer[size + 1];
-  xkb_state_key_get_utf8(wlWm.xkbState, key, buffer, size + 1);
-  app_handleKeyboardTyped(buffer);
+  xkb_state_key_get_utf8(wlWm.xkbState, xkbKey, buffer, size + 1);
+  wlInputKeyboardKey(&wlWm.input, key, true, buffer);
 }
 
 static void keyboardModifiersHandler(void * data,
@@ -369,18 +387,24 @@ static void keyboardModifiersHandler(void * data,
     return;
 
   xkb_state_update_mask(wlWm.xkbState, modsDepressed, modsLatched, modsLocked, 0, 0, group);
-  app_handleKeyboardModifiers(
-    xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0,
-    xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0,
-    xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0,
-    xkb_state_mod_name_is_active(wlWm.xkbState, XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0
-  );
+  const bool ctrl = xkb_state_mod_name_is_active(wlWm.xkbState,
+      XKB_MOD_NAME_CTRL, XKB_STATE_MODS_EFFECTIVE) > 0;
+  const bool shift = xkb_state_mod_name_is_active(wlWm.xkbState,
+      XKB_MOD_NAME_SHIFT, XKB_STATE_MODS_EFFECTIVE) > 0;
+  const bool alt = xkb_state_mod_name_is_active(wlWm.xkbState,
+      XKB_MOD_NAME_ALT, XKB_STATE_MODS_EFFECTIVE) > 0;
+  const bool super = xkb_state_mod_name_is_active(wlWm.xkbState,
+      XKB_MOD_NAME_LOGO, XKB_STATE_MODS_EFFECTIVE) > 0;
 
-  app_handleKeyboardLEDs(
-    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_NUM) > 0,
-    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_CAPS) > 0,
-    xkb_state_led_name_is_active(wlWm.xkbState, XKB_LED_NAME_SCROLL) > 0
-  );
+  const bool numLock = xkb_state_led_name_is_active(wlWm.xkbState,
+      XKB_LED_NAME_NUM) > 0;
+  const bool capsLock = xkb_state_led_name_is_active(wlWm.xkbState,
+      XKB_LED_NAME_CAPS) > 0;
+  const bool scrollLock = xkb_state_led_name_is_active(wlWm.xkbState,
+      XKB_LED_NAME_SCROLL) > 0;
+
+  wlInputKeyboardState(&wlWm.input, ctrl, shift, alt, super,
+      numLock, capsLock, scrollLock);
 }
 
 static const struct wl_keyboard_listener keyboardListener = {
@@ -468,13 +492,10 @@ static void waylandCleanUpPointer(bool notify)
 
     wl_pointer_destroy(wlWm.pointer);
     wlWm.pointer = NULL;
-    wlWm.pointerInSurface = false;
   });
 
   MLOG(lockSeq, "lock destroy id=%u why=pointer", lockId);
-
-  if (notify)
-    app_handleEnterEvent(false);
+  wlInputPointerDisconnect(&wlWm.input, notify);
 }
 
 // Seat-handling listeners.
@@ -531,6 +552,8 @@ static const struct wl_seat_listener seatListener = {
 
 bool waylandInputInit(bool allowNoInput)
 {
+  wlInputInit(&wlWm.input, &inputSink, NULL);
+
   if (!wlWm.seat)
   {
     MTRACE("input seat=0 allowNone=%d", allowNoInput);
@@ -672,7 +695,7 @@ void waylandWarpPointer(int x, int y, bool exiting)
 {
   const int reqX = x;
   const int reqY = y;
-  if (!wlWm.pointerInSurface)
+  if (!wlWm.input.pointerInSurface)
   {
     MTRACE("warp drop=surface target=%d,%d exit=%d", x, y, exiting);
     return;
@@ -737,8 +760,7 @@ void waylandWarpPointer(int x, int y, bool exiting)
 
 void waylandRealignPointer(void)
 {
-  if (wlWm.pointerInSurface)
-    app_updateCursorPos(wlWm.motion.x, wlWm.motion.y);
+  wlInputRealignPointer(&wlWm.input, wlWm.motion.x, wlWm.motion.y);
 }
 
 void waylandGuestPointerUpdated(double x, double y, double localX,

@@ -19,6 +19,7 @@ add_library(displayserver_Wayland STATIC
   icon.c
   idle.c
   input.c
+  input_event.c
   output.c
   poll.c
   presentation.c

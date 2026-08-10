@@ -16,6 +16,7 @@ pkg_check_modules(DISPLAYSERVER_X11 REQUIRED IMPORTED_TARGET
 
 add_library(displayserver_X11 STATIC
   x11.c
+  input_event.c
   atoms.c
   clipboard.c
   cursor.c

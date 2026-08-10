@@ -34,6 +34,7 @@
 #include "common/locking.h"
 #include "common/thread.h"
 #include "common/types.h"
+#include "input_event.h"
 #include "wm.h"
 
 enum Modifiers
@@ -96,12 +97,11 @@ struct X11DSState
   int xValuator;
   int yValuator;
 
+  X11Input      input;
   LG_Lock       pointerLock;
   _Atomic(bool) captureActive;
   _Atomic(bool) pointerGrabbed;
   bool          keyboardGrabbed;
-  bool entered;
-  bool focused;
   bool fullscreen;
 
   struct Rect   rect;

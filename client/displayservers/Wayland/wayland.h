@@ -57,6 +57,7 @@
 
 #include "scale.h"
 #include "motion.h"
+#include "input_event.h"
 
 typedef void (*WaylandPollCallback)(uint32_t events, void * opaque);
 typedef void (*WaylandPollCleanup)(void * opaque);
@@ -128,8 +129,7 @@ struct WaylandDSState
 {
   _Atomic(bool) lockActive;
   bool          keyboardGrabbed;
-  bool          pointerInSurface;
-  bool          focusedOnSurface;
+  WaylandInput  input;
 
   WL_DesktopOps * desktop;
 
@@ -147,7 +147,6 @@ struct WaylandDSState
   bool configured;
   bool warpSupport;
   struct WlMotion motion;
-  double scrollState;
 
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
   struct wl_egl_window * eglWindow;

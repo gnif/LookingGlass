@@ -47,6 +47,46 @@ set_tests_properties(wayland-motion-tests PROPERTIES
   TIMEOUT 10
 )
 
+add_executable(displayserver-input-tests
+  displayserver_input_test.c
+  ../displayservers/Wayland/input_event.c
+  ../displayservers/X11/input_event.c
+)
+target_include_directories(displayserver-input-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers"
+)
+
+set(DISPLAYSERVER_INPUT_CASES
+  pointer-events
+  pointer-buttons
+  pointer-release
+  wheel-steps
+  relative-motion
+  keyboard-focus
+  keyboard-keys
+  keyboard-state
+)
+
+foreach(backend IN ITEMS wayland x11)
+  foreach(name IN LISTS DISPLAYSERVER_INPUT_CASES)
+    add_test(NAME display-input-${backend}-${name}
+      COMMAND displayserver-input-tests ${backend} ${name}
+    )
+    set_tests_properties(display-input-${backend}-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endforeach()
+
+foreach(name IN ITEMS wheel-residual wheel-multiple)
+  add_test(NAME display-input-wayland-${name}
+    COMMAND displayserver-input-tests wayland ${name}
+  )
+  set_tests_properties(display-input-wayland-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(mouse-tests
   mouse_test.c
   ../src/core.c

@@ -95,6 +95,88 @@ static void x11XPresentEvent(XGenericEventCookie *cookie);
 static void x11UpdateKeyboardGroup(void);
 static void x11GrabPointer(void);
 
+static void inputPosition(void * opaque, double x, double y)
+{
+  (void)opaque;
+  app_updateCursorPos(x, y);
+}
+
+static void inputRelative(void * opaque, double x, double y,
+    double rawX, double rawY)
+{
+  (void)opaque;
+  app_handleMouseRelative(x, y, rawX, rawY);
+}
+
+static void inputButton(void * opaque, unsigned int button, bool pressed)
+{
+  (void)opaque;
+  if (pressed)
+    app_handleButtonPress(button);
+  else
+    app_handleButtonRelease(button);
+}
+
+static void inputWheel(void * opaque, double motion)
+{
+  (void)opaque;
+  app_handleWheelMotion(motion);
+}
+
+static void inputKey(void * opaque, int scancode, bool pressed)
+{
+  (void)opaque;
+  if (pressed)
+    app_handleKeyPress(scancode);
+  else
+    app_handleKeyRelease(scancode);
+}
+
+static void inputText(void * opaque, const char * text)
+{
+  (void)opaque;
+  app_handleKeyboardTyped(text);
+}
+
+static void inputModifiers(void * opaque, bool ctrl, bool shift,
+    bool alt, bool super)
+{
+  (void)opaque;
+  app_handleKeyboardModifiers(ctrl, shift, alt, super);
+}
+
+static void inputLEDs(void * opaque, bool numLock, bool capsLock,
+    bool scrollLock)
+{
+  (void)opaque;
+  app_handleKeyboardLEDs(numLock, capsLock, scrollLock);
+}
+
+static void inputEnter(void * opaque, bool entered)
+{
+  (void)opaque;
+  app_handleEnterEvent(entered);
+}
+
+static void inputFocus(void * opaque, bool focused)
+{
+  (void)opaque;
+  app_handleFocusEvent(focused);
+}
+
+static const LG_DSInputSink inputSink = {
+  .position  = inputPosition,
+  .relative  = inputRelative,
+  .button    = inputButton,
+  .wheel     = inputWheel,
+  .key       = inputKey,
+  .text      = inputText,
+  .modifiers = inputModifiers,
+  .leds      = inputLEDs,
+  .enter     = inputEnter,
+  .focus     = inputFocus,
+};
+
 static void x11SignalFrame(LG_DSWaitFrameResult result)
 {
   atomic_fetch_or_explicit(
@@ -354,6 +436,7 @@ static bool x11Init(const LG_DSInitParams params)
   XSetIOErrorHandler(x11IOErrorHandler);
 
   memset(&x11, 0, sizeof(x11));
+  x11InputInit(&x11.input, &inputSink, NULL);
   LG_LOCK_INIT(x11.pointerLock);
   atomic_init(&x11.captureActive, false);
   atomic_init(&x11.pointerGrabbed, false);
@@ -1117,10 +1200,10 @@ static int x11EventThread(void * unused)
               focused = true;
           }
 
-          if (x11.ewmhHasFocusEvent && x11.focused != focused)
+          if (x11.ewmhHasFocusEvent && x11.input.focused != focused)
           {
-            x11.focused = focused;
-            app_handleFocusEvent(focused);
+            x11.input.focused = focused;
+            inputFocus(x11.input.opaque, focused);
           }
 
           x11.fullscreen = fullscreen;
@@ -1181,12 +1264,12 @@ static enum Modifiers keySymToModifier(KeySym sym)
 
 static void updateModifiers(void)
 {
-  app_handleKeyboardModifiers(
+  x11InputKeyboardState(&x11.input,
     x11.modifiers[MOD_CTRL_LEFT] || x11.modifiers[MOD_CTRL_RIGHT],
     x11.modifiers[MOD_SHIFT_LEFT] || x11.modifiers[MOD_SHIFT_RIGHT],
     x11.modifiers[MOD_ALT_LEFT] || x11.modifiers[MOD_ALT_RIGHT],
-    x11.modifiers[MOD_SUPER_LEFT] || x11.modifiers[MOD_SUPER_RIGHT]
-  );
+    x11.modifiers[MOD_SUPER_LEFT] || x11.modifiers[MOD_SUPER_RIGHT],
+    false, false, false);
 }
 
 static void x11UpdateKeyboardGroup(void)
@@ -1196,29 +1279,15 @@ static void x11UpdateKeyboardGroup(void)
     atomic_store(&x11.keyboardGroup, state.group);
 }
 
-static int x11MapButton(unsigned int button)
-{
-  if (button >= 1 && button <= 5)
-    return button;
-
-  /* X11 reserves buttons 6 and 7 for horizontal scrolling. */
-  if (button >= 8 && button < 34)
-    return button - 2;
-
-  return 0;
-}
-
 static void setFocus(bool focused, double x, double y)
 {
-  if (x11.focused == focused)
+  if (x11.input.focused == focused)
     return;
 
   if (focused)
     x11UpdateKeyboardGroup();
 
-  x11.focused = focused;
-  app_updateCursorPos(x, y);
-  app_handleFocusEvent(focused);
+  x11InputFocus(&x11.input, focused, x, y, NULL, 0);
 }
 
 static bool x11GetKeyLabel(int sc, char * label, size_t size)
@@ -1238,8 +1307,6 @@ static bool x11GetKeyLabel(int sc, char * label, size_t size)
 
 static void x11XInputEvent(XGenericEventCookie *cookie)
 {
-  static uint32_t button_state = 0;
-
   switch(cookie->evtype)
   {
     case XI_FocusIn:
@@ -1254,7 +1321,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       }
 
       atomic_store(&x11.lastWMEvent, microtime());
-      if (x11.focused)
+      if (x11.input.focused)
         return;
 
       if (xie->mode != XINotifyNormal &&
@@ -1279,7 +1346,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       }
 
       atomic_store(&x11.lastWMEvent, microtime());
-      if (!x11.focused)
+      if (!x11.input.focused)
         return;
 
       if (xie->mode != XINotifyNormal &&
@@ -1295,13 +1362,8 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
     {
       atomic_store(&x11.lastWMEvent, microtime());
       XIEnterEvent *xie = cookie->data;
-      if (x11.entered || xie->event != x11.window ||
-          xie->mode != XINotifyNormal)
-        return;
-
-      app_updateCursorPos(xie->event_x, xie->event_y);
-      app_handleEnterEvent(true);
-      x11.entered = true;
+      x11InputPointerEnter(&x11.input, xie->event == x11.window,
+          xie->mode == XINotifyNormal, xie->event_x, xie->event_y);
       return;
     }
 
@@ -1310,14 +1372,10 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       atomic_store(&x11.lastWMEvent, microtime());
       XILeaveEvent *xie = cookie->data;
 
-      if (!x11.entered || xie->event != x11.window ||
-          button_state != 0 || app_isCaptureMode() ||
-          xie->mode == NotifyGrab)
+      if (!x11InputPointerLeave(&x11.input, xie->event == x11.window,
+          xie->mode != NotifyGrab, app_isCaptureMode(),
+          xie->event_x, xie->event_y))
         return;
-
-      app_updateCursorPos(xie->event_x, xie->event_y);
-      app_handleEnterEvent(false);
-      x11.entered = false;
 
       /**
        * Because there is a race with the pointer ungrab the enter event for the
@@ -1363,12 +1421,13 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_KeyPress:
     {
-      if (!x11.focused || x11.keyboardGrabbed)
+      if (!x11.input.focused || x11.keyboardGrabbed)
         return;
 
       XIDeviceEvent *device = cookie->data;
       atomic_store(&x11.keyboardGroup, device->group.effective);
-      app_handleKeyPress(device->detail - x11.minKeycode);
+      x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
+          true, false, true, NULL);
 
       if (!x11.xic || !app_isOverlayMode())
         return;
@@ -1397,7 +1456,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       if (status == XLookupChars || status == XLookupBoth)
       {
         buffer[count] = '\0';
-        app_handleKeyboardTyped(buffer);
+        inputText(x11.input.opaque, buffer);
       }
 
       if (status == XLookupKeySym || status == XLookupBoth)
@@ -1414,11 +1473,12 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_KeyRelease:
     {
-      if (!x11.focused || x11.keyboardGrabbed)
+      if (!x11.input.focused || x11.keyboardGrabbed)
         return;
 
       XIDeviceEvent *device = cookie->data;
-      app_handleKeyRelease(device->detail - x11.minKeycode);
+      x11InputKeyboardKey(&x11.input, device->detail, x11.minKeycode,
+          false, false, true, NULL);
 
       if (!x11.xic || !app_isOverlayMode())
         return;
@@ -1443,116 +1503,63 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
 
     case XI_RawKeyPress:
     {
-      if (!x11.focused)
-        return;
-
       XIRawEvent *raw = cookie->data;
-      app_handleKeyPress(raw->detail - x11.minKeycode);
+      x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
+          true, true, x11.input.focused, NULL);
       return;
     }
 
     case XI_RawKeyRelease:
     {
-      if (!x11.focused)
-        return;
-
       XIRawEvent *raw = cookie->data;
-      app_handleKeyRelease(raw->detail - x11.minKeycode);
+      x11InputKeyboardKey(&x11.input, raw->detail, x11.minKeycode,
+          false, true, x11.input.focused, NULL);
       return;
     }
 
     case XI_ButtonPress:
     {
-      if (!x11.focused || !x11.entered)
-        return;
-
       XIDeviceEvent *device = cookie->data;
-      const int button = x11MapButton(device->detail);
-      if (button == 4)
-        app_handleWheelMotion(-0.5);
-      else if (button == 5)
-        app_handleWheelMotion(0.5);
-      else if (button)
-        app_handleButtonPress(button);
-
+      x11InputPointerButton(&x11.input, device->detail, true, false,
+          device->time, true);
       return;
     }
 
     case XI_ButtonRelease:
     {
-      if (!x11.focused || !x11.entered)
-        return;
-
       XIDeviceEvent *device = cookie->data;
-      const int button = x11MapButton(device->detail);
-      if (button && button != 4 && button != 5)
-        app_handleButtonRelease(button);
+      x11InputPointerButton(&x11.input, device->detail, false, false,
+          device->time, true);
       return;
     }
 
     case XI_RawButtonPress:
     {
-      if (!x11.focused || !x11.entered)
-        return;
-
       XIRawEvent *raw = cookie->data;
-      const int button = x11MapButton(raw->detail);
-      if (!button)
-        return;
-
-      /* filter out duplicate events */
-      static Time         prev_time   = 0;
-      static unsigned int prev_detail = 0;
-      if (raw->time == prev_time && raw->detail == prev_detail)
-        return;
-
-      prev_time     = raw->time;
-      prev_detail   = raw->detail;
-      button_state |= UINT32_C(1) << button;
-
-      app_handleButtonPress(button);
+      x11InputPointerButton(&x11.input, raw->detail, true, true,
+          raw->time, x11.input.focused && x11.input.entered);
       return;
     }
 
     case XI_RawButtonRelease:
     {
-      if (!x11.focused || !x11.entered)
-        return;
-
       XIRawEvent *raw = cookie->data;
-      const int button = x11MapButton(raw->detail);
-      if (!button)
-        return;
-
-      /* filter out duplicate events */
-      static Time         prev_time   = 0;
-      static unsigned int prev_detail = 0;
-      if (raw->time == prev_time && raw->detail == prev_detail)
-        return;
-
-      prev_time     = raw->time;
-      prev_detail   = raw->detail;
-      button_state &= ~(UINT32_C(1) << button);
-
-      app_handleButtonRelease(button);
+      x11InputPointerButton(&x11.input, raw->detail, false, true,
+          raw->time, x11.input.focused && x11.input.entered);
       return;
     }
 
     case XI_Motion:
     {
       XIDeviceEvent *device = cookie->data;
-      app_updateCursorPos(device->event_x, device->event_y);
-
-      if (!atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
-        app_handleMouseRelative(0.0, 0.0, 0.0, 0.0);
+      x11InputPointerMotion(&x11.input, device->event_x, device->event_y,
+          atomic_load_explicit(&x11.pointerGrabbed,
+            memory_order_acquire));
       return;
     }
 
     case XI_RawMotion:
     {
-      if (!x11.focused || !x11.entered)
-        return;
-
       XIRawEvent *raw = cookie->data;
       double raw_axis[2] = { 0 };
       double axis[2] = { 0 };
@@ -1587,19 +1594,9 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       if (!has_axes)
         return;
 
-      /* filter out duplicate events */
-      static Time   prev_time    = 0;
-      static double prev_axis[2] = {0};
-      if (raw->time == prev_time &&
-          axis[0] == prev_axis[0] &&
-          axis[1] == prev_axis[1])
-        return;
-
-      prev_time = raw->time;
-      prev_axis[0] = axis[0];
-      prev_axis[1] = axis[1];
-
-      app_handleMouseRelative(axis[0], axis[1], raw_axis[0], raw_axis[1]);
+      x11InputRelativeMotion(&x11.input, raw->time, axis[0], axis[1],
+          raw_axis[0], raw_axis[1],
+          x11.input.focused && x11.input.entered);
       return;
     }
   }
@@ -1903,7 +1900,7 @@ static void x11StopWaitFrame(void)
 
 static void x11GuestPointerUpdated(double x, double y, double localX, double localY)
 {
-  if (app_isCaptureMode() || !x11.entered)
+  if (app_isCaptureMode() || !x11.input.entered)
     return;
 
   // avoid running too often

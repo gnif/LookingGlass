@@ -240,7 +240,7 @@ void waylandSetPointer(LG_DSPointer pointer)
   wlWm.cursorHotY = wlWm.cursorHot[pointer].y;
   MTRACE("set id=%d surface=%p hot=%d,%d scale=%d entered=%d",
       pointer, (void *)wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY,
-      wlWm.cursorScale, wlWm.pointerInSurface);
+      wlWm.cursorScale, wlWm.input.pointerInSurface);
   if (wlWm.pointer)
     wl_pointer_set_cursor(wlWm.pointer, wlWm.pointerEnterSerial, wlWm.cursor, wlWm.cursorHotX, wlWm.cursorHotY);
 }
