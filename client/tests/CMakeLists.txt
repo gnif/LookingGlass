@@ -126,6 +126,7 @@ set(MOUSE_CASES
   capture-revoked
   capture-release
   capture-align
+  x11-capture-exit
   capture-fallback
   rotate-scale
   geometry

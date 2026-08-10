@@ -67,6 +67,7 @@ static struct
   struct Trap           conf;
   struct Trap           lock;
   bool                  valid;
+  bool                  captureGrab;
   struct Ev             ev[256];
   unsigned int          count;
 }
@@ -152,6 +153,18 @@ static void capture(void)
     return;
   }
 
+  if (m.captureGrab)
+  {
+    m.conf.req = true;
+    if (!m.conf.hold)
+      m.conf.on = true;
+    m.lock.req = true;
+    if (!m.lock.hold)
+      m.lock.on = m.conf.on;
+    push(EV_CAPTURE, 0, 0, false);
+    return;
+  }
+
   m.conf.req = false;
   if (!m.conf.hold)
     m.conf.on = false;
@@ -171,6 +184,9 @@ static void uncapture(void)
   m.lock.req = false;
   if (!m.lock.hold)
     m.lock.on = false;
+
+  if (m.captureGrab)
+    ungrab();
 }
 
 static bool captured(void)
@@ -592,6 +608,38 @@ static void testCapAlign(void)
   CHECK(!m.ev[warp].exit);
 }
 
+static void testX11CapExit(void)
+{
+  reset();
+  setLocal(50, 50);
+  m.support     = LG_DS_WARP_SCREEN;
+  m.captureGrab = true;
+  m.conf.req    = false;
+  m.conf.on     = false;
+
+  core_setGrabQuiet(true);
+  CHECK(m.conf.on);
+  CHECK(m.lock.on);
+
+  g_cursor.guest.x += 10;
+  m.count = 0;
+  core_setGrabQuiet(false);
+
+  const int uncapture = first(EV_UNCAPTURE);
+  const int ungrab    = first(EV_UNGRAB);
+  const int warp      = first(EV_WARP);
+  CHECK(uncapture >= 0);
+  CHECK(ungrab > uncapture);
+  CHECK(warp > ungrab);
+  CHECK(m.ev[warp].x == 60);
+  CHECK(m.ev[warp].y == 50);
+  CHECK(!m.ev[warp].exit);
+  CHECK(!m.conf.req);
+  CHECK(!m.conf.on);
+  CHECK(!m.lock.req);
+  CHECK(!m.lock.on);
+}
+
 static void testCapFallback(void)
 {
   reset();
@@ -853,6 +901,7 @@ static const struct Test tests[] = {
   { "capture-revoked" , testCapRevoke    },
   { "capture-release" , testCapRelease   },
   { "capture-align"   , testCapAlign     },
+  { "x11-capture-exit", testX11CapExit   },
   { "capture-fallback", testCapFallback  },
   { "rotate-scale"    , testRotateScale  },
   { "geometry"        , testGeometry     },

@@ -2103,19 +2103,9 @@ static void x11CapturePointer(void)
 
 static void x11UncapturePointer(void)
 {
-  const bool ungrab = !app_isFormatValid() || app_isCaptureOnlyMode();
-
   LG_LOCK(x11.pointerLock);
   atomic_store_explicit(&x11.captureActive, false, memory_order_release);
-
-  /* we need to ungrab the pointer on the following conditions when exiting capture mode:
-   *   - if the format is invalid as we do not know where the guest cursor is,
-   *     which breaks edge detection as the cursor can not be warped out of the
-   *     window when we release it.
-   *   - if the user has opted to use captureInputOnly mode.
-   */
-  if (ungrab)
-    x11UngrabPointerLocked();
+  x11UngrabPointerLocked();
   LG_UNLOCK(x11.pointerLock);
 }
 
