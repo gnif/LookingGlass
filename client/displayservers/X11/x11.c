@@ -1373,8 +1373,7 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       XILeaveEvent *xie = cookie->data;
 
       if (!x11InputPointerLeave(&x11.input, xie->event == x11.window,
-          xie->mode != NotifyGrab, app_isCaptureMode(),
-          xie->event_x, xie->event_y))
+          xie->mode != NotifyGrab, app_isCaptureMode()))
         return;
 
       /**
@@ -1520,46 +1519,52 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
     case XI_ButtonPress:
     {
       XIDeviceEvent *device = cookie->data;
-      x11InputPointerButton(&x11.input, device->detail, true, false,
-          device->time, true);
+      x11InputPointerButton(&x11.input, device->detail, true, false);
       return;
     }
 
     case XI_ButtonRelease:
     {
       XIDeviceEvent *device = cookie->data;
-      x11InputPointerButton(&x11.input, device->detail, false, false,
-          device->time, true);
+      x11InputPointerButton(&x11.input, device->detail, false, false);
       return;
     }
 
     case XI_RawButtonPress:
     {
+      if (!x11.input.entered ||
+          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+        return;
+
       XIRawEvent *raw = cookie->data;
-      x11InputPointerButton(&x11.input, raw->detail, true, true,
-          raw->time, x11.input.focused && x11.input.entered);
+      x11InputPointerButton(&x11.input, raw->detail, true, true);
       return;
     }
 
     case XI_RawButtonRelease:
     {
+      if (!x11.input.entered ||
+          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+        return;
+
       XIRawEvent *raw = cookie->data;
-      x11InputPointerButton(&x11.input, raw->detail, false, true,
-          raw->time, x11.input.focused && x11.input.entered);
+      x11InputPointerButton(&x11.input, raw->detail, false, true);
       return;
     }
 
     case XI_Motion:
     {
       XIDeviceEvent *device = cookie->data;
-      x11InputPointerMotion(&x11.input, device->event_x, device->event_y,
-          atomic_load_explicit(&x11.pointerGrabbed,
-            memory_order_acquire));
+      x11InputPointerMotion(&x11.input, device->event_x, device->event_y);
       return;
     }
 
     case XI_RawMotion:
     {
+      if (!x11.input.entered ||
+          !atomic_load_explicit(&x11.pointerGrabbed, memory_order_acquire))
+        return;
+
       XIRawEvent *raw = cookie->data;
       double raw_axis[2] = { 0 };
       double axis[2] = { 0 };
@@ -1594,9 +1599,8 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
       if (!has_axes)
         return;
 
-      x11InputRelativeMotion(&x11.input, raw->time, axis[0], axis[1],
-          raw_axis[0], raw_axis[1],
-          x11.input.focused && x11.input.entered);
+      x11InputRelativeMotion(&x11.input, axis[0], axis[1],
+          raw_axis[0], raw_axis[1]);
       return;
     }
   }

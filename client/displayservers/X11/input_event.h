@@ -32,13 +32,6 @@ typedef struct X11Input
   const LG_DSInputSink * sink;
   void                 * opaque;
   uint32_t               buttons;
-  uint32_t               previousPressTime;
-  uint32_t               previousReleaseTime;
-  uint32_t               previousPressButton;
-  uint32_t               previousReleaseButton;
-  uint32_t               previousMotionTime;
-  double                 previousMotionX;
-  double                 previousMotionY;
   bool                   entered;
   bool                   focused;
 }
@@ -52,13 +45,12 @@ bool x11InputFocus(X11Input * input, bool focused, double x, double y,
 bool x11InputPointerEnter(X11Input * input, bool mainWindow,
     bool normal, double x, double y);
 bool x11InputPointerLeave(X11Input * input, bool mainWindow,
-    bool normal, bool captureMode, double x, double y);
-void x11InputPointerMotion(X11Input * input, double x, double y,
-    bool pointerGrabbed);
+    bool normal, bool captureMode);
+void x11InputPointerMotion(X11Input * input, double x, double y);
 void x11InputPointerButton(X11Input * input, unsigned int button,
-    bool pressed, bool raw, uint32_t time, bool inputActive);
-void x11InputRelativeMotion(X11Input * input, uint32_t time,
-    double x, double y, double rawX, double rawY, bool inputActive);
+    bool pressed, bool raw);
+void x11InputRelativeMotion(X11Input * input,
+    double x, double y, double rawX, double rawY);
 void x11InputKeyboardKey(X11Input * input, unsigned int keycode,
     int minKeycode, bool pressed, bool raw, bool inputActive,
     const char * text);

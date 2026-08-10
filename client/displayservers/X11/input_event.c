@@ -63,43 +63,33 @@ bool x11InputPointerEnter(X11Input * input, bool mainWindow,
   if (input->entered || !mainWindow || !normal)
     return false;
 
-  input->sink->position(input->opaque, x, y);
-  input->sink->enter(input->opaque, true);
   input->entered = true;
+  input->sink->enter(input->opaque, true);
+  input->sink->position(input->opaque, x, y);
   return true;
 }
 
 bool x11InputPointerLeave(X11Input * input, bool mainWindow,
-    bool normal, bool captureMode, double x, double y)
+    bool normal, bool captureMode)
 {
   if (!input->entered || !mainWindow || input->buttons || captureMode ||
       !normal)
     return false;
 
-  input->sink->position(input->opaque, x, y);
-  input->sink->enter(input->opaque, false);
   input->entered = false;
+  input->sink->enter(input->opaque, false);
   return true;
 }
 
-void x11InputPointerMotion(X11Input * input, double x, double y,
-    bool pointerGrabbed)
+void x11InputPointerMotion(X11Input * input, double x, double y)
 {
   input->sink->position(input->opaque, x, y);
-
-  if (!pointerGrabbed)
-    input->sink->relative(input->opaque, 0.0, 0.0, 0.0, 0.0);
 }
 
 void x11InputPointerButton(X11Input * input, unsigned int detail,
-    bool pressed, bool raw, uint32_t time, bool inputActive)
+    bool pressed, bool raw)
 {
-  if (raw)
-  {
-    if (!inputActive)
-      return;
-  }
-  else if (!input->focused || !input->entered)
+  if (!raw && !input->entered)
     return;
 
   const unsigned int button = mapButton(detail);
@@ -108,25 +98,17 @@ void x11InputPointerButton(X11Input * input, unsigned int detail,
 
   if (!raw)
   {
-    if (pressed && button == 4)
-      input->sink->wheel(input->opaque, -0.5);
-    else if (pressed && button == 5)
-      input->sink->wheel(input->opaque, 0.5);
-    else if (button != 4 && button != 5)
-      input->sink->button(input->opaque, button, pressed);
-    return;
+    if (button == 4 || button == 5)
+    {
+      if (pressed)
+      {
+        input->sink->button(input->opaque, button, true);
+        input->sink->button(input->opaque, button, false);
+        input->sink->wheel(input->opaque, button == 4 ? -1.0 : 1.0);
+      }
+      return;
+    }
   }
-
-  uint32_t * previousTime = pressed ?
-    &input->previousPressTime : &input->previousReleaseTime;
-  uint32_t * previousButton = pressed ?
-    &input->previousPressButton : &input->previousReleaseButton;
-
-  if (time == *previousTime && detail == *previousButton)
-    return;
-
-  *previousTime   = time;
-  *previousButton = detail;
 
   const uint32_t mask = UINT32_C(1) << button;
   if (pressed)
@@ -137,20 +119,9 @@ void x11InputPointerButton(X11Input * input, unsigned int detail,
   input->sink->button(input->opaque, button, pressed);
 }
 
-void x11InputRelativeMotion(X11Input * input, uint32_t time,
-    double x, double y, double rawX, double rawY, bool inputActive)
+void x11InputRelativeMotion(X11Input * input,
+    double x, double y, double rawX, double rawY)
 {
-  if (!inputActive)
-    return;
-
-  if (time == input->previousMotionTime &&
-      x == input->previousMotionX && y == input->previousMotionY)
-    return;
-
-  input->previousMotionTime = time;
-  input->previousMotionX    = x;
-  input->previousMotionY    = y;
-
   input->sink->relative(input->opaque, x, y, rawX, rawY);
 }
 

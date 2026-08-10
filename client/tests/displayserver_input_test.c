@@ -168,7 +168,6 @@ struct Fixture
 {
   enum Backend backend;
   struct TraceLog trace;
-  uint32_t time;
 
   union
   {
@@ -278,7 +277,6 @@ static void initFixture(struct Fixture * fixture, enum Backend backend)
 {
   memset(fixture, 0, sizeof(*fixture));
   fixture->backend = backend;
-  fixture->time    = 1;
 
   if (backend == BACKEND_WAYLAND)
     wlInputInit(&fixture->input.wayland, &sink, &fixture->trace);
@@ -455,14 +453,12 @@ static void pointerEnter(struct Fixture * fixture, bool mainSurface,
     x11InputPointerEnter(&fixture->input.x11, mainSurface, true, x, y);
 }
 
-static void pointerLeave(struct Fixture * fixture, bool mainSurface,
-    double x, double y)
+static void pointerLeave(struct Fixture * fixture, bool mainSurface)
 {
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputPointerLeave(&fixture->input.wayland, mainSurface);
   else
-    x11InputPointerLeave(&fixture->input.x11, mainSurface, true, false,
-        x, y);
+    x11InputPointerLeave(&fixture->input.x11, mainSurface, true, false);
 }
 
 static void pointerMotion(struct Fixture * fixture, double x, double y)
@@ -470,7 +466,7 @@ static void pointerMotion(struct Fixture * fixture, double x, double y)
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputPointerMotion(&fixture->input.wayland, x, y);
   else
-    x11InputPointerMotion(&fixture->input.x11, x, y, false);
+    x11InputPointerMotion(&fixture->input.x11, x, y);
 }
 
 static unsigned int nativeButton(enum Backend backend,
@@ -501,8 +497,7 @@ static void pointerButton(struct Fixture * fixture, unsigned int button,
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputPointerButton(&fixture->input.wayland, native, pressed);
   else
-    x11InputPointerButton(&fixture->input.x11, native, pressed, false,
-        fixture->time++, true);
+    x11InputPointerButton(&fixture->input.x11, native, pressed, false);
 }
 
 static void unmappedButton(struct Fixture * fixture)
@@ -510,8 +505,7 @@ static void unmappedButton(struct Fixture * fixture)
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputPointerButton(&fixture->input.wayland, BTN_STYLUS, true);
   else
-    x11InputPointerButton(&fixture->input.x11, 6, true, false,
-        fixture->time++, true);
+    x11InputPointerButton(&fixture->input.x11, 6, true, false);
 }
 
 static void wheelStep(struct Fixture * fixture, bool down)
@@ -520,18 +514,17 @@ static void wheelStep(struct Fixture * fixture, bool down)
     wlInputPointerAxis(&fixture->input.wayland, true, down ? 15.0 : -15.0);
   else
     x11InputPointerButton(&fixture->input.x11, down ? 5 : 4, true,
-        false, fixture->time++, true);
+        false);
 }
 
 static void relativeMotion(struct Fixture * fixture, bool active,
-    uint32_t time, double x, double y, double rawX, double rawY)
+    double x, double y, double rawX, double rawY)
 {
   if (fixture->backend == BACKEND_WAYLAND)
     wlInputRelativeMotion(&fixture->input.wayland, active,
         x, y, rawX, rawY);
-  else
-    x11InputRelativeMotion(&fixture->input.x11, time,
-        x, y, rawX, rawY, active);
+  else if (active)
+    x11InputRelativeMotion(&fixture->input.x11, x, y, rawX, rawY);
 }
 
 static void keyboardEnter(struct Fixture * fixture, bool mainSurface,
@@ -594,8 +587,8 @@ static void testPointerEvents(enum Backend backend)
   pointerEnter(&fixture, false, 1.0, 2.0);
   pointerEnter(&fixture, true, 10.0, 20.0);
   pointerMotion(&fixture, 11.5, 21.25);
-  pointerLeave(&fixture, false, 4.0, 5.0);
-  pointerLeave(&fixture, true, 12.0, 22.0);
+  pointerLeave(&fixture, false);
+  pointerLeave(&fixture, true);
 
   static const struct Trace expected[] =
   {
@@ -645,7 +638,7 @@ static void testPointerRelease(enum Backend backend)
 
   /* Wayland's implicit pointer grab suppresses this native leave. */
   if (backend == BACKEND_X11)
-    pointerLeave(&fixture, true, 100.0, 100.0);
+    pointerLeave(&fixture, true);
 
   pointerButton(&fixture, 1, false);
 
@@ -728,9 +721,9 @@ static void testRelativeMotion(enum Backend backend)
   initFixture(&fixture, backend);
   activateInput(&fixture);
 
-  relativeMotion(&fixture, false, 50, 1.0, 2.0, 3.0, 4.0);
-  relativeMotion(&fixture, true, 51, 1.0, 2.0, 3.0, 4.0);
-  relativeMotion(&fixture, true, 51, 1.0, 2.0, 3.0, 4.0);
+  relativeMotion(&fixture, false, 1.0, 2.0, 3.0, 4.0);
+  relativeMotion(&fixture, true, 1.0, 2.0, 3.0, 4.0);
+  relativeMotion(&fixture, true, 1.0, 2.0, 3.0, 4.0);
 
   static const struct Trace expected[] =
   {
