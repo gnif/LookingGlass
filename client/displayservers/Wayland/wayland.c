@@ -119,6 +119,8 @@ static bool waylandInit(const LG_DSInitParams params)
   atomic_init(&wlWm.cmCanDoHDR, false);
   atomic_init(&wlWm.hdrPQWhiteLevel, 203);
   atomic_init(&wlWm.hdrScRGBWhiteLevel, 80);
+  atomic_init(&wlWm.pendingResize, 0);
+  wlWm.resizeEventFd = -1;
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
@@ -184,7 +186,10 @@ static bool waylandInit(const LG_DSInitParams params)
 
   if (!waylandEGLInit(waylandScaleMulInt(wlWm.scale, width),
         waylandScaleMulInt(wlWm.scale, height)))
+  {
+    waylandWindowFree();
     return false;
+  }
 
   app_handleResizeEvent(width, height, waylandScaleToDouble(wlWm.scale),
       (struct Border) {0, 0, 0, 0});
@@ -193,7 +198,10 @@ static bool waylandInit(const LG_DSInitParams params)
 
 #ifdef ENABLE_OPENGL
   if (params.opengl && !waylandOpenGLInit())
+  {
+    waylandWindowFree();
     return false;
+  }
 #endif
 
   return true;

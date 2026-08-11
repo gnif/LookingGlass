@@ -148,6 +148,9 @@ struct WaylandDSState
   bool warpSupport;
   struct WlMotion motion;
 
+  _Atomic(uint64_t) pendingResize; // 0 = none, else (width << 32) | height
+  int resizeEventFd;               // wakes the event loop to apply it
+
 #if defined(ENABLE_EGL) || defined(ENABLE_OPENGL)
   struct wl_egl_window * eglWindow;
   struct SwapWithDamageData swapWithDamage;
