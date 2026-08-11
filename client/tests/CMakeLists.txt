@@ -199,6 +199,40 @@ foreach(name IN LISTS INPUT_CASES)
   )
 endforeach()
 
+add_executable(clipboard-tests
+  clipboard_test.c
+  ../src/clipboard.c
+)
+target_compile_definitions(clipboard-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(clipboard-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(clipboard-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(CLIPBOARD_CASES
+  preference
+  request
+  invalid
+  cancel
+  generation
+  local
+  reentrant
+)
+foreach(name IN LISTS CLIPBOARD_CASES)
+  add_test(NAME clipboard-${name}
+    COMMAND clipboard-tests ${name}
+  )
+  set_tests_properties(clipboard-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(transport-fallback-tests
   transport_fallback_test.c
   ../src/transport_fallback.c
