@@ -60,6 +60,35 @@ foreach(name IN LISTS LGMP_FRAME_CASES)
   )
 endforeach()
 
+add_executable(lgmp-input-tests
+  lgmp_input_test.c
+  ../transports/LGMP/input.c
+  ../src/kb_hid.c
+)
+target_include_directories(lgmp-input-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(lgmp-input-tests
+  ${EXE_FLAGS}
+  lg_common
+  lgmp
+)
+set(LGMP_INPUT_CASES
+  claim
+  blocked
+  restart
+  pressure
+  idle
+)
+foreach(name IN LISTS LGMP_INPUT_CASES)
+  add_test(NAME lgmp-input-${name}
+    COMMAND lgmp-input-tests ${name}
+  )
+  set_tests_properties(lgmp-input-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(wayland-motion-tests
   motion_test.c
 )
