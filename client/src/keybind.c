@@ -100,9 +100,9 @@ static void bind_ctrlAltFn(int sc, void * opaque)
   lgInput_keyDown(KEY_LEFTALT);
   lgInput_keyDown(sc);
 
-  lgInput_keyUp(KEY_LEFTCTRL);
-  lgInput_keyUp(KEY_LEFTALT);
   lgInput_keyUp(sc);
+  lgInput_keyUp(KEY_LEFTALT);
+  lgInput_keyUp(KEY_LEFTCTRL);
 }
 
 static void bind_passthrough(int sc, void * opaque)
