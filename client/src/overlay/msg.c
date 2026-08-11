@@ -75,10 +75,15 @@ static void freeMsg(struct Msg * msg)
 
 static void msg_free(void * udata)
 {
-  struct Msg * msg;
-  while(ll_shift(l_msg.messages, (void **)&msg))
-    freeMsg(msg);
-  ll_free(l_msg.messages);
+  if (l_msg.messages)
+  {
+    struct Msg * msg;
+    while(ll_shift(l_msg.messages, (void **)&msg))
+      freeMsg(msg);
+    ll_free(l_msg.messages);
+    l_msg.messages = NULL;
+  }
+
   l_msg.initialized = false;
 }
 

@@ -51,6 +51,9 @@ StringList stringlist_new(bool owns_strings)
 
 void stringlist_free(StringList * sl)
 {
+  if (!sl || !*sl)
+    return;
+
   stringlist_clear(*sl);
 
   vector_destroy(&(*sl)->vector);

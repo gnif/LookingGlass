@@ -38,7 +38,7 @@ struct LG_OverlayOps
   /* called when the overlay is registered */
   bool (*init)(void ** udata, const void * params);
 
-  /* final free */
+  /* final free; must be safe if init was not called or returned false */
   void (*free)(void * udata);
 
   /* return true if realtime rendering is required

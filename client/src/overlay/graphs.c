@@ -168,16 +168,26 @@ static bool graphs_init(void ** udata, const void * params)
 
 static void graphs_free(void * udata)
 {
-  struct OverlayGraph * graph;
-  while(ll_shift(gs.graphs, (void **)&graph))
-    graphFree(graph);
-  ll_free(gs.graphs);
-  gs.graphs = NULL;
+  if (gs.graphs)
+  {
+    struct OverlayGraph * graph;
+    while(ll_shift(gs.graphs, (void **)&graph))
+      graphFree(graph);
+    ll_free(gs.graphs);
+    gs.graphs = NULL;
+  }
 
-  ImPlotSpec_destroy(gs.plotSpec);
-  gs.plotSpec = NULL;
-  ImPlot_DestroyContext(gs.plotContext);
-  gs.plotContext = NULL;
+  if (gs.plotSpec)
+  {
+    ImPlotSpec_destroy(gs.plotSpec);
+    gs.plotSpec = NULL;
+  }
+
+  if (gs.plotContext)
+  {
+    ImPlot_DestroyContext(gs.plotContext);
+    gs.plotContext = NULL;
+  }
 }
 
 struct BufferMetrics

@@ -858,8 +858,6 @@ void app_registerOverlay(const struct LG_OverlayOps * ops, const void * params)
     ops->earlyInit();
 }
 
-static bool l_overlaysInitialized = false;
-
 void app_initOverlays(void)
 {
   struct Overlay * overlay;
@@ -870,12 +868,12 @@ void app_initOverlays(void)
     if (!overlay->ops->init(&overlay->udata, overlay->params))
     {
       DEBUG_ERROR("Overlay `%s` failed to initialize", overlay->ops->name);
+      overlay->ops->free(overlay->udata);
       ll_removeNL(g_state.overlays, item);
       free(item);
       free(overlay);
     }
   }
-  l_overlaysInitialized = true;
   ll_unlock(g_state.overlays);
 
   /* Do not seed ImGui's clock with absolute host uptime. ImGui stores the
@@ -1071,11 +1069,9 @@ void app_freeOverlays(void)
   struct Overlay * overlay;
   while(ll_shift(g_state.overlays, (void **)&overlay))
   {
-    if (l_overlaysInitialized)
-      overlay->ops->free(overlay->udata);
+    overlay->ops->free(overlay->udata);
     free(overlay);
   }
-  l_overlaysInitialized = false;
 }
 
 void app_setOverlay(bool enable)

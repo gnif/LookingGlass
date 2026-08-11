@@ -60,6 +60,9 @@ static bool config_init(void ** udata, const void * params)
 
 static void config_freeList(struct ll * list)
 {
+  if (!list)
+    return;
+
   ConfigCallback * cb;
   while(ll_shift(list, (void **)&cb))
   {
@@ -73,6 +76,8 @@ static void config_free(void * udata)
 {
   config_freeList(cfg.callbacks);
   config_freeList(cfg.tabCallbacks);
+  cfg.callbacks    = NULL;
+  cfg.tabCallbacks = NULL;
 }
 
 static void config_renderLGTab(void)

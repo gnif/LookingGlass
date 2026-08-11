@@ -124,7 +124,7 @@ static bool splash_init(void ** udata, const void * params)
 static void splash_free(void * udata)
 {
   overlayFreeImage(&l_logo);
-  stringlist_free(&l_tagline );
+  stringlist_free(&l_tagline);
   stringlist_free(&l_footline);
 }
 
