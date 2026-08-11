@@ -389,6 +389,94 @@ static void egl_onRestart(LG_Renderer * renderer)
   });
 }
 
+static void egl_getDesktopSize(
+    const struct Inst * this, int * width, int * height)
+{
+  if (this->showSwSurface)
+  {
+    *width  = this->swSurfaceWidth;
+    *height = this->swSurfaceHeight;
+    return;
+  }
+
+  *width  = this->formatValid ? this->format.frameWidth  : 0;
+  *height = this->formatValid ? this->format.frameHeight : 0;
+}
+
+static void egl_invalidateDesktopDamage(struct Inst * this)
+{
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    struct DesktopDamage * damage =
+      this->desktopDamage + this->desktopDamageIdx;
+    damage->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+    damage->count      = -1;
+  });
+}
+
+static void egl_update_pointer_scale(struct Inst * this)
+{
+  if (!this->scalePointer || this->width <= 0 || this->height <= 0)
+    return;
+
+  int width, height;
+  if (this->showSwSurface)
+  {
+    width  = this->swSurfaceWidth;
+    height = this->swSurfaceHeight;
+  }
+  else if (this->formatValid)
+  {
+    width  = this->format.screenWidth;
+    height = this->format.screenHeight;
+  }
+  else
+    return;
+
+  egl_cursorSetScale(this->cursor, max(1.0f, max(
+      (float)width  / this->width,
+      (float)height / this->height)));
+}
+
+static void egl_addSwSurfaceDamage(
+    struct Inst * this, int x, int y, int width, int height)
+{
+  if (width <= 0 || height <= 0 ||
+      this->swSurfaceWidth <= 0 || this->swSurfaceHeight <= 0)
+    return;
+
+  const int64_t right  = min(
+      (int64_t)x + width, (int64_t)this->swSurfaceWidth);
+  const int64_t bottom = min(
+      (int64_t)y + height, (int64_t)this->swSurfaceHeight);
+  x = max(x, 0);
+  y = max(y, 0);
+  if (right <= x || bottom <= y)
+    return;
+
+  const FrameDamageRect rect = {
+    .x      = (uint32_t)x,
+    .y      = (uint32_t)y,
+    .width  = (uint32_t)(right  - x),
+    .height = (uint32_t)(bottom - y),
+  };
+
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    if (this->showSwSurface)
+    {
+      struct DesktopDamage * damage =
+        this->desktopDamage + this->desktopDamageIdx;
+      damage->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+      if (damage->count >= 0)
+      {
+        if (damage->count + 1 >= LG_MAX_FRAME_DAMAGE_RECTS)
+          damage->count = -1;
+        else
+          damage->rects[damage->count++] = rect;
+      }
+    }
+  });
+}
+
 static void egl_calc_mouse_size(struct Inst * this)
 {
   if (this->showSwSurface)
@@ -499,21 +587,23 @@ static void egl_calc_mouse_state(struct Inst * this)
 
 static void egl_update_scale_type(struct Inst * this)
 {
-  int width = 0, height = 0;
+  int width, height;
+  egl_getDesktopSize(this, &width, &height);
 
   switch (this->rotate)
   {
     case LG_ROTATE_0:
     case LG_ROTATE_180:
-      width  = this->format.frameWidth;
-      height = this->format.frameHeight;
       break;
 
     case LG_ROTATE_90:
     case LG_ROTATE_270:
-      width  = this->format.frameHeight;
-      height = this->format.frameWidth;
+    {
+      const int swap = width;
+      width          = height;
+      height         = swap;
       break;
+    }
   }
 
   if (width == this->viewportWidth || height == this->viewportHeight)
@@ -565,16 +655,7 @@ static void egl_onResize(LG_Renderer * renderer, const int width, const int heig
   this->screenScaleY = 1.0f / this->height;
 
   egl_calc_mouse_state(this);
-  if (this->scalePointer)
-  {
-    float scale = max(1.0f,
-        this->formatValid ?
-        max(
-          (float)this->format.screenWidth  / this->width,
-          (float)this->format.screenHeight / this->height)
-        : 1.0f);
-    egl_cursorSetScale(this->cursor, scale);
-  }
+  egl_update_pointer_scale(this);
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
     this->desktopDamage[this->desktopDamageIdx].count = -1;
@@ -717,11 +798,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 
   egl_stateCheckShared();
 
-  if (likely(this->scalePointer))
-  {
-    float scale = max(1.0f, (float)format.screenWidth / this->width);
-    egl_cursorSetScale(this->cursor, scale);
-  }
+  egl_update_pointer_scale(this);
 
   // Track HDR state and warn if HDR frames arrive without any HDR path
   this->hdr = format.hdr;
@@ -741,12 +818,16 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   egl_updateHDRState(this, true);
 
   egl_update_scale_type(this);
-  egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
 
-  /* we need full screen damage when the format changes */
-  INTERLOCKED_SECTION(this->desktopDamageLock, {
-    this->desktopDamage[this->desktopDamageIdx].count = -1;
-  });
+  if (!this->showSwSurface)
+  {
+    egl_damageSetup(this->damage, format.frameWidth, format.frameHeight);
+
+    /* we need full screen damage when the format changes */
+    INTERLOCKED_SECTION(this->desktopDamageLock, {
+      this->desktopDamage[this->desktopDamageIdx].count = -1;
+    });
+  }
 
   return egl_desktopSetup(this->desktop, format);
 }
@@ -778,22 +859,25 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
       elapsed > waitTimeNs ? elapsed - waitTimeNs : 0, waitTimeNs);
 
   INTERLOCKED_SECTION(this->desktopDamageLock, {
-    struct DesktopDamage * damage =
-      this->desktopDamage + this->desktopDamageIdx;
-    if (unlikely(
-        damage->count                    == -1 ||
-        damageRectsCount                 == 0 ||
-        damage->count + damageRectsCount >= LG_MAX_FRAME_DAMAGE_RECTS))
+    if (!this->showSwSurface)
     {
-      damage->count = -1;
+      struct DesktopDamage * damage =
+        this->desktopDamage + this->desktopDamageIdx;
+      if (unlikely(
+          damage->count                    == -1 ||
+          damageRectsCount                 == 0 ||
+          damage->count + damageRectsCount >= LG_MAX_FRAME_DAMAGE_RECTS))
+      {
+        damage->count = -1;
+      }
+      else
+      {
+        memcpy(damage->rects + damage->count, damageRects,
+            damageRectsCount * sizeof(FrameDamageRect));
+        damage->count += damageRectsCount;
+      }
+      damage->frameToken = frameToken;
     }
-    else
-    {
-      memcpy(damage->rects + damage->count, damageRects,
-          damageRectsCount * sizeof(FrameDamageRect));
-      damage->count += damageRectsCount;
-    }
-    damage->frameToken = frameToken;
   });
 
   return true;
@@ -1246,13 +1330,16 @@ inline static EGLint egl_bufferAge(struct Inst * this)
 static FrameDamageRect egl_expandDesktopDamage(
     const struct Inst * this, const FrameDamageRect * rect)
 {
+  int width, height;
+  egl_getDesktopSize(this, &width, &height);
+
   const uint32_t x = rect->x > DESKTOP_DAMAGE_MARGIN ?
     rect->x - DESKTOP_DAMAGE_MARGIN : 0;
   const uint32_t y = rect->y > DESKTOP_DAMAGE_MARGIN ?
     rect->y - DESKTOP_DAMAGE_MARGIN : 0;
-  const uint32_t right = (uint32_t)min((uint64_t)this->format.frameWidth,
+  const uint32_t right = (uint32_t)min((uint64_t)width,
     (uint64_t)rect->x + rect->width + DESKTOP_DAMAGE_MARGIN);
-  const uint32_t bottom = (uint32_t)min((uint64_t)this->format.frameHeight,
+  const uint32_t bottom = (uint32_t)min((uint64_t)height,
     (uint64_t)rect->y + rect->height + DESKTOP_DAMAGE_MARGIN);
 
   return (FrameDamageRect) {
@@ -1406,8 +1493,10 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
       this->format.hdrPQ, mapCursorGain, mapCursorContentPeak);
   bool renderAll = hdrStateChanged ||
                    invalidateWindow || this->hadOverlay ||
-                   bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
-                   this->showSwSurface;
+                   bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE;
+
+  int desktopWidth, desktopHeight;
+  egl_getDesktopSize(this, &desktopWidth, &desktopHeight);
 
   bool                   hasOverlay      = false;
   struct CursorState     cursorState     = { .visible = false };
@@ -1472,7 +1561,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   {
     double matrix[6];
     egl_screenToDesktopMatrix(matrix,
-        this->format.frameWidth, this->format.frameHeight,
+        desktopWidth, desktopHeight,
         this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
         this->width, this->height);
 
@@ -1491,7 +1580,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
       for (int j = 0; j < count; ++j)
         accumulated->count += egl_screenToDesktop(
           accumulated->rects + accumulated->count, matrix, damage + j,
-          this->format.frameWidth, this->format.frameHeight
+          desktopWidth, desktopHeight
         );
     }
 
@@ -1545,7 +1634,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     if (desktopRendered)
     {
       cursorState = egl_cursorRender(this->cursor,
-          (this->format.rotate + rotate) % LG_ROTATE_MAX,
+          ((this->showSwSurface ? LG_ROTATE_0 : this->format.rotate) + rotate) %
+            LG_ROTATE_MAX,
           this->width, this->height,
           linearHDRComposition, &deferredLogicalCursor);
     }
@@ -1574,7 +1664,9 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
   hasOverlay |=
     egl_damageRender(
-        this->damage, rotate, frameConsumed ? desktopDamage : NULL) |
+        this->damage, rotate,
+        frameConsumed || (this->showSwSurface && damageRendered) ?
+          desktopDamage : NULL) |
     invalidateWindow;
 
   /* The diagnostics being displayed must not contribute to Compose. */
@@ -1634,7 +1726,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
     {
       double matrix[6];
       egl_desktopToScreenMatrix(matrix,
-          this->format.frameWidth, this->format.frameHeight,
+          desktopWidth, desktopHeight,
           this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
           this->width, this->height);
 
@@ -1666,7 +1758,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
     double matrix[6];
     egl_desktopToScreenMatrix(matrix,
-        this->format.frameWidth, this->format.frameHeight,
+        desktopWidth, desktopHeight,
         this->translateX, this->translateY, this->scaleX, this->scaleY, rotate,
         this->width, this->height);
     for (int i = 0; i < accumulated->count; ++i)
@@ -1682,7 +1774,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   egl_hdrComposeEnd(this->hdrCompose, encodeDamage, encodeDamageCount);
   if (deferredLogicalCursor && cursorState.visible)
     egl_cursorRender(this->cursor,
-        (this->format.rotate + rotate) % LG_ROTATE_MAX,
+        ((this->showSwSurface ? LG_ROTATE_0 : this->format.rotate) + rotate) %
+          LG_ROTATE_MAX,
         this->width, this->height, false, NULL);
   this->hadOverlay = hasOverlay;
   this->cursorLast = cursorState;
@@ -1813,6 +1906,16 @@ static void egl_swSurfaceConfigure(LG_Renderer * renderer,
   this->swSurfaceWidth  = width;
   this->swSurfaceHeight = height;
   egl_desktopSwSurfaceConfigure(this->desktop, width, height);
+
+  if (this->showSwSurface && width > 0 && height > 0)
+  {
+    egl_update_scale_type(this);
+    egl_calc_mouse_size(this);
+    egl_calc_mouse_state(this);
+    egl_update_pointer_scale(this);
+    egl_damageSetup(this->damage, width, height);
+    egl_invalidateDesktopDamage(this);
+  }
 }
 
 static void egl_swSurfaceDrawFill(LG_Renderer * renderer,
@@ -1822,6 +1925,7 @@ static void egl_swSurfaceDrawFill(LG_Renderer * renderer,
   egl_stateCheckShared();
   egl_desktopSwSurfaceDrawFill(
       this->desktop, x, y, width, height, color);
+  egl_addSwSurfaceDamage(this, x, y, width, height);
 }
 
 static void egl_swSurfaceDrawBitmap(LG_Renderer * renderer,
@@ -1832,13 +1936,29 @@ static void egl_swSurfaceDrawBitmap(LG_Renderer * renderer,
   egl_stateCheckShared();
   egl_desktopSwSurfaceDrawBitmap(
       this->desktop, x, y, width, height, stride, data, topDown);
+  egl_addSwSurfaceDamage(this, x, y, width, height);
 }
 
 static void egl_swSurfaceShow(LG_Renderer * renderer, bool show)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
-  this->showSwSurface = show;
+  INTERLOCKED_SECTION(this->desktopDamageLock, {
+    this->showSwSurface = show;
+    struct DesktopDamage * damage =
+      this->desktopDamage + this->desktopDamageIdx;
+    damage->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+    damage->count      = -1;
+  });
+
+  int width, height;
+  egl_getDesktopSize(this, &width, &height);
+  if (width > 0 && height > 0)
+    egl_damageSetup(this->damage, width, height);
+
+  egl_update_scale_type(this);
   egl_calc_mouse_size(this);
+  egl_calc_mouse_state(this);
+  egl_update_pointer_scale(this);
   egl_desktopSwSurfaceShow(this->desktop, show);
 }
 
