@@ -167,6 +167,37 @@ if(ENABLE_WAYLAND)
   endforeach()
 endif()
 
+if(ENABLE_X11)
+  add_executable(x11-clipboard-tests
+    x11_clipboard_test.c
+    ../displayservers/X11/clipboard.c
+  )
+  target_include_directories(x11-clipboard-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/X11"
+  )
+  target_link_libraries(x11-clipboard-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  set(X11_CLIPBOARD_CASES
+    targets
+    normal
+    incr
+    malformed
+    replace
+    source
+    teardown
+  )
+  foreach(name IN LISTS X11_CLIPBOARD_CASES)
+    add_test(NAME x11-clipboard-${name}
+      COMMAND x11-clipboard-tests ${name}
+    )
+    set_tests_properties(x11-clipboard-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
+
 add_executable(displayserver-input-tests
   displayserver_input_test.c
   ../displayservers/Wayland/input_event.c
