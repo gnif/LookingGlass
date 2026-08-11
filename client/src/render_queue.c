@@ -164,7 +164,8 @@ static void setCommandSource(RenderCommand * cmd, RenderQueueSource source,
 
 static bool copyCursorImage(RenderCommand * cmd, const void * data)
 {
-  if (!data || cmd->cursorImage.height <= 0 || cmd->cursorImage.pitch <= 0)
+  if (!data || cmd->cursorImage.width <= 0 ||
+      cmd->cursorImage.height <= 0 || cmd->cursorImage.pitch <= 0)
     return false;
 
   if ((size_t)cmd->cursorImage.height >
