@@ -406,8 +406,16 @@ static void testPayload(void)
 
   const uint64_t generation =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
-  uint8_t bitmap[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
-  const uint8_t bitmapExpected[] = { 1, 2, 3, 4, 5, 6, 7, 8 };
+  uint8_t bitmap[] =
+  {
+     1,  2,  3,  4,  5,  6,  7,  8,
+     9, 10, 11, 12, 13, 14, 15, 16,
+  };
+  const uint8_t bitmapExpected[] =
+  {
+     1,  2,  3,  4,  5,  6,  7,  8,
+     9, 10, 11, 12, 13, 14, 15, 16,
+  };
   uint8_t shape[] = { 11, 12, 13, 14, 15, 16, 17, 18 };
   const uint8_t shapeExpected[] = { 11, 12, 13, 14, 15, 16, 17, 18 };
   LGColorTransform color =
@@ -419,7 +427,7 @@ static void testPayload(void)
   };
 
   renderQueue_sourceSwSurfaceDrawBitmap(RENDER_QUEUE_SOURCE_PRIMARY,
-      generation, 5, 6, 2, 2, 4, bitmap, true);
+      generation, 5, 6, 2, 2, 8, bitmap, true);
   renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
       LG_CURSOR_COLOR, 2, 2, 4, shape);
   renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
@@ -442,7 +450,7 @@ static void testPayload(void)
   CHECK(f.bitmapY == 6);
   CHECK(f.bitmapWidth == 2);
   CHECK(f.bitmapHeight == 2);
-  CHECK(f.bitmapStride == 4);
+  CHECK(f.bitmapStride == 8);
   CHECK(f.bitmapTopDown);
   CHECK(f.bitmapSize == sizeof(bitmapExpected));
   CHECK(memcmp(f.bitmap, bitmapExpected, sizeof(bitmapExpected)) == 0);

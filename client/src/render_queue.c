@@ -22,13 +22,123 @@
 
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "common/debug.h"
-#include "common/ll.h"
+#include "common/locking.h"
 #include "main.h"
 
-struct ll * l_renderQueue = NULL;
+typedef struct RenderCommand
+{
+  struct RenderCommand * next;
+
+  RenderQueueSource source;
+  uint64_t          generation;
+  uint64_t          transitionSerial;
+
+  enum
+  {
+    SW_SURFACE_OP_CONFIGURE_TRANSITION,
+    SW_SURFACE_OP_DRAW_FILL,
+    SW_SURFACE_OP_DRAW_BITMAP,
+    SURFACE_OP_FORMAT,
+    CURSOR_OP_STATE,
+    CURSOR_OP_IMAGE,
+    CURSOR_OP_COLOR_TRANSFORM,
+    CURSOR_OP_WHITE_LEVEL,
+    SOURCE_OP_TRANSITION,
+  }
+  op;
+
+  union
+  {
+    struct
+    {
+      int width, height;
+    }
+    swSurfaceConfigureTransition;
+
+    struct
+    {
+      int      x, y;
+      int      width, height;
+      uint32_t color;
+    }
+    swSurfaceDrawFill;
+
+    struct
+    {
+      int       x    , y;
+      int       width, height;
+      int       stride;
+      uint8_t * data;
+      bool      topDown;
+    }
+    swSurfaceDrawBitmap;
+
+    struct
+    {
+      LG_RendererFormat format;
+      bool              rendererSupportsNativeHDR;
+    }
+    surfaceFormat;
+
+    struct
+    {
+      bool visible;
+      int  x;
+      int  y;
+      int  hx;
+      int  hy;
+    }
+    cursorState;
+
+    struct
+    {
+      LG_RendererCursor type;
+      int               width;
+      int               height;
+      int               pitch;
+      uint8_t         * data;
+    }
+    cursorImage;
+
+    struct
+    {
+      LGColorTransform * data;
+    }
+    cursorColorTransform;
+
+    struct
+    {
+      uint32_t value;
+    }
+    cursorWhiteLevel;
+
+    struct
+    {
+      bool swSurface;
+    }
+    sourceTransition;
+  };
+}
+RenderCommand;
+
+typedef enum RenderQueueInvalidate
+{
+  RENDER_QUEUE_INVALIDATE_NONE,
+  RENDER_QUEUE_INVALIDATE_PARTIAL,
+  RENDER_QUEUE_INVALIDATE_FULL,
+}
+RenderQueueInvalidate;
+
+static RenderCommand        * l_renderQueueHead;
+static RenderCommand        * l_renderQueueTail;
+static LG_Lock                l_renderQueueLock;
+static bool                   l_renderQueueInitialized;
+static RenderQueueInvalidate l_renderQueueInvalidate;
+
 static bool              l_showSwSurface;
 static bool              l_surfaceFormatValid;
 static bool              l_rendererSupportsNativeHDR;
@@ -136,10 +246,6 @@ static void freeCommand(RenderCommand * cmd)
 {
   switch (cmd->op)
   {
-    case SW_SURFACE_OP_DRAW_BITMAP:
-      free(cmd->swSurfaceDrawBitmap.data);
-      break;
-
     case CURSOR_OP_IMAGE:
       free(cmd->cursorImage.data);
       break;
@@ -153,6 +259,51 @@ static void freeCommand(RenderCommand * cmd)
   }
 
   free(cmd);
+}
+
+static bool queueCommand(RenderCommand * cmd,
+    RenderQueueInvalidate invalidate)
+{
+  bool wake = false;
+  cmd->next = NULL;
+
+  LG_LOCK(l_renderQueueLock);
+  if (l_renderQueueTail)
+    l_renderQueueTail->next = cmd;
+  else
+    l_renderQueueHead = cmd;
+  l_renderQueueTail = cmd;
+
+  if (invalidate > l_renderQueueInvalidate)
+  {
+    l_renderQueueInvalidate = invalidate;
+    wake = true;
+  }
+  LG_UNLOCK(l_renderQueueLock);
+  return wake;
+}
+
+static void wakeQueue(RenderQueueInvalidate invalidate, bool wake)
+{
+  if (wake)
+    app_invalidateWindow(invalidate == RENDER_QUEUE_INVALIDATE_FULL);
+}
+
+static void enqueueCommand(RenderCommand * cmd,
+    RenderQueueInvalidate invalidate)
+{
+  wakeQueue(invalidate, queueCommand(cmd, invalidate));
+}
+
+static RenderCommand * detachCommands(void)
+{
+  LG_LOCK(l_renderQueueLock);
+  RenderCommand * head    = l_renderQueueHead;
+  l_renderQueueHead       = NULL;
+  l_renderQueueTail       = NULL;
+  l_renderQueueInvalidate = RENDER_QUEUE_INVALIDATE_NONE;
+  LG_UNLOCK(l_renderQueueLock);
+  return head;
 }
 
 static void setCommandSource(RenderCommand * cmd, RenderQueueSource source,
@@ -231,7 +382,9 @@ static void updateSurfaceFormat(void)
 
 void renderQueue_init(void)
 {
-  l_renderQueue               = ll_new();
+  l_renderQueueHead           = NULL;
+  l_renderQueueTail           = NULL;
+  l_renderQueueInvalidate     = RENDER_QUEUE_INVALIDATE_NONE;
   l_showSwSurface             = false;
   l_surfaceFormatValid        = false;
   l_rendererSupportsNativeHDR = false;
@@ -249,13 +402,15 @@ void renderQueue_init(void)
   for (int i = 0; i < RENDER_QUEUE_SOURCE_COUNT; ++i)
     atomic_store_explicit(&l_sourceGeneration[i], 0, memory_order_relaxed);
   atomic_store_explicit(&l_transitionSerial, 0, memory_order_relaxed);
+  LG_LOCK_INIT(l_renderQueueLock);
   LG_LOCK_INIT(l_sourceLock);
   LG_LOCK_INIT(l_transitionLock);
+  l_renderQueueInitialized = true;
 }
 
 void renderQueue_free(void)
 {
-  if (!l_renderQueue)
+  if (!l_renderQueueInitialized)
     return;
 
   renderQueue_clear();
@@ -266,17 +421,21 @@ void renderQueue_free(void)
     l_cursor[i].data = NULL;
   }
 
-  ll_free(l_renderQueue);
-  l_renderQueue = NULL;
+  l_renderQueueInitialized = false;
+  LG_LOCK_FREE(l_renderQueueLock);
   LG_LOCK_FREE(l_sourceLock);
   LG_LOCK_FREE(l_transitionLock);
 }
 
 void renderQueue_clear(void)
 {
-  RenderCommand * cmd;
-  while(ll_shift(l_renderQueue, (void **)&cmd))
+  RenderCommand * cmd = detachCommands();
+  while(cmd)
+  {
+    RenderCommand * next = cmd->next;
     freeCommand(cmd);
+    cmd = next;
+  }
 }
 
 void renderQueue_setSourceFns(RenderQueueSourcePrepareFn prepare,
@@ -354,19 +513,13 @@ static uint64_t enqueueTransition(RenderCommand * cmd,
   const uint64_t serial = atomic_load_explicit(
       &l_transitionSerial, memory_order_relaxed) + 1;
   cmd->transitionSerial = serial;
-  if (!ll_push(l_renderQueue, cmd))
-  {
-    LG_UNLOCK(l_transitionLock);
-    free(cmd);
-    return 0;
-  }
+  const bool wake = queueCommand(cmd, RENDER_QUEUE_INVALIDATE_FULL);
   atomic_store_explicit(
       &l_transitionSerial, serial, memory_order_release);
   if (publishedSerial)
     atomic_store_explicit(publishedSerial, serial, memory_order_release);
   LG_UNLOCK(l_transitionLock);
-
-  app_invalidateWindow(true);
+  wakeQueue(RENDER_QUEUE_INVALIDATE_FULL, wake);
   return serial;
 }
 
@@ -431,13 +584,7 @@ void renderQueue_sourceSwSurfaceDrawFill(RenderQueueSource source,
   cmd->swSurfaceDrawFill.width  = width;
   cmd->swSurfaceDrawFill.height = height;
   cmd->swSurfaceDrawFill.color  = color;
-  if (!ll_push(l_renderQueue, cmd))
-  {
-    free(cmd);
-    return;
-  }
-
-  app_invalidateWindow(true);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
 }
 
 void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
@@ -462,32 +609,37 @@ void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
     return;
   }
 
-  if ((size_t)height > SIZE_MAX / (size_t)stride)
+  if (width > stride / 4)
+  {
+    DEBUG_ERROR("Software surface bitmap stride is too small: "
+        "width: %d, stride: %d", width, stride);
+    return;
+  }
+
+  const size_t rowSize = (size_t)width * 4;
+  if ((size_t)height > (SIZE_MAX - sizeof(RenderCommand)) / rowSize)
   {
     DEBUG_ERROR("Software surface bitmap size overflows: "
-        "height: %d, stride: %d",
-        height, stride);
+        "width: %d, height: %d", width, height);
     return;
   }
 
-  const size_t size = (size_t)height * (size_t)stride;
-  RenderCommand * cmd = malloc(sizeof(*cmd));
+  const size_t   size = (size_t)height * rowSize;
+  RenderCommand * cmd = malloc(sizeof(*cmd) + size);
   if (!cmd)
-  {
-    DEBUG_ERROR("Failed to allocate software surface bitmap command");
-    return;
-  }
-
-  uint8_t * copy = malloc(size);
-  if (!copy)
   {
     DEBUG_ERROR("Failed to allocate %zu bytes for software surface bitmap",
         size);
-    free(cmd);
     return;
   }
 
-  memcpy(copy, data, size);
+  uint8_t * copy = (uint8_t *)(cmd + 1);
+  if ((size_t)stride == rowSize)
+    memcpy(copy, data, size);
+  else
+    for(int row = 0; row < height; ++row)
+      memcpy(copy + (size_t)row * rowSize,
+          (const uint8_t *)data + (size_t)row * stride, rowSize);
 
   setCommandSource(cmd, source, generation);
   cmd->op                          = SW_SURFACE_OP_DRAW_BITMAP;
@@ -495,17 +647,10 @@ void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
   cmd->swSurfaceDrawBitmap.y       = y;
   cmd->swSurfaceDrawBitmap.width   = width;
   cmd->swSurfaceDrawBitmap.height  = height;
-  cmd->swSurfaceDrawBitmap.stride  = stride;
+  cmd->swSurfaceDrawBitmap.stride  = (int)rowSize;
   cmd->swSurfaceDrawBitmap.data    = copy;
   cmd->swSurfaceDrawBitmap.topDown = topDown;
-
-  if (!ll_push(l_renderQueue, cmd))
-  {
-    freeCommand(cmd);
-    return;
-  }
-
-  app_invalidateWindow(true);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
 }
 
 void renderQueue_sourceSurfaceFormat(RenderQueueSource source,
@@ -524,13 +669,7 @@ void renderQueue_sourceSurfaceFormat(RenderQueueSource source,
   cmd->surfaceFormat.format                    = format;
   cmd->surfaceFormat.rendererSupportsNativeHDR =
     rendererSupportsNativeHDR;
-  if (!ll_push(l_renderQueue, cmd))
-  {
-    free(cmd);
-    return;
-  }
-
-  app_invalidateWindow(true);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_FULL);
 }
 
 void renderQueue_sourceCursorState(RenderQueueSource source,
@@ -550,8 +689,7 @@ void renderQueue_sourceCursorState(RenderQueueSource source,
   cmd->cursorState.y       = y;
   cmd->cursorState.hx      = hx;
   cmd->cursorState.hy      = hy;
-  if (!ll_push(l_renderQueue, cmd))
-    free(cmd);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_NONE);
 }
 
 void renderQueue_sourceCursorImage(RenderQueueSource source,
@@ -572,8 +710,10 @@ void renderQueue_sourceCursorImage(RenderQueueSource source,
   cmd->cursorImage.height = height;
   cmd->cursorImage.pitch  = pitch;
   cmd->cursorImage.data   = NULL;
-  if (!copyCursorImage(cmd, data) || !ll_push(l_renderQueue, cmd))
+  if (!copyCursorImage(cmd, data))
     freeCommand(cmd);
+  else
+    enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_NONE);
 }
 
 void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
@@ -597,8 +737,7 @@ void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
   setCommandSource(cmd, source, generation);
   cmd->op                        = CURSOR_OP_COLOR_TRANSFORM;
   cmd->cursorColorTransform.data = copy;
-  if (!ll_push(l_renderQueue, cmd))
-    freeCommand(cmd);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_NONE);
 }
 
 void renderQueue_sourceCursorWhiteLevel(RenderQueueSource source,
@@ -614,8 +753,7 @@ void renderQueue_sourceCursorWhiteLevel(RenderQueueSource source,
   setCommandSource(cmd, source, generation);
   cmd->op                     = CURSOR_OP_WHITE_LEVEL;
   cmd->cursorWhiteLevel.value = sdrWhiteLevel;
-  if (!ll_push(l_renderQueue, cmd))
-    free(cmd);
+  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_NONE);
 }
 
 static void applyCursor(RenderQueueSource source, uint64_t generation)
@@ -692,9 +830,10 @@ static bool prepareSourceTransition(const RenderCommand * cmd)
 
 void renderQueue_process(void)
 {
-  RenderCommand * cmd;
-  while(ll_shift(l_renderQueue, (void **)&cmd))
+  RenderCommand * cmd = detachCommands();
+  while(cmd)
   {
+    RenderCommand * next = cmd->next;
     const bool transition = transitionCommand(cmd);
     if (transition)
       LG_LOCK(l_transitionLock);
@@ -706,6 +845,7 @@ void renderQueue_process(void)
       if (transition)
         LG_UNLOCK(l_transitionLock);
       freeCommand(cmd);
+      cmd = next;
       continue;
     }
 
@@ -736,8 +876,6 @@ void renderQueue_process(void)
             cmd->swSurfaceDrawBitmap.width , cmd->swSurfaceDrawBitmap.height,
             cmd->swSurfaceDrawBitmap.stride, cmd->swSurfaceDrawBitmap.data,
             cmd->swSurfaceDrawBitmap.topDown);
-        free(cmd->swSurfaceDrawBitmap.data);
-        cmd->swSurfaceDrawBitmap.data = NULL;
         break;
 
       case SURFACE_OP_FORMAT:
@@ -851,6 +989,7 @@ void renderQueue_process(void)
     if (transition)
       LG_UNLOCK(l_transitionLock);
     freeCommand(cmd);
+    cmd = next;
   }
 }
 

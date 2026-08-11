@@ -18,7 +18,6 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "common/ll.h"
 #include "interface/renderer.h"
 
 #include <stdatomic.h>
@@ -37,100 +36,6 @@ typedef void (*RenderQueueSourceAppliedFn)(void * opaque,
     bool swSurface);
 typedef bool (*RenderQueueSourcePrepareFn)(void * opaque,
     RenderQueueSource source, uint64_t generation, uint64_t serial);
-
-typedef struct
-{
-  RenderQueueSource source;
-  uint64_t          generation;
-  uint64_t          transitionSerial;
-
-  enum
-  {
-    SW_SURFACE_OP_CONFIGURE_TRANSITION,
-    SW_SURFACE_OP_DRAW_FILL,
-    SW_SURFACE_OP_DRAW_BITMAP,
-    SURFACE_OP_FORMAT,
-    CURSOR_OP_STATE,
-    CURSOR_OP_IMAGE,
-    CURSOR_OP_COLOR_TRANSFORM,
-    CURSOR_OP_WHITE_LEVEL,
-    SOURCE_OP_TRANSITION,
-  }
-  op;
-
-  union
-  {
-    struct
-    {
-      int width, height;
-    }
-    swSurfaceConfigureTransition;
-
-    struct
-    {
-      int      x, y;
-      int      width, height;
-      uint32_t color;
-    }
-    swSurfaceDrawFill;
-
-    struct
-    {
-      int       x    , y;
-      int       width, height;
-      int       stride;
-      uint8_t * data;
-      bool      topDown;
-    }
-    swSurfaceDrawBitmap;
-
-    struct
-    {
-      LG_RendererFormat format;
-      bool rendererSupportsNativeHDR;
-    }
-    surfaceFormat;
-
-    struct
-    {
-      bool visible;
-      int  x;
-      int  y;
-      int  hx;
-      int  hy;
-    }
-    cursorState;
-
-    struct
-    {
-      LG_RendererCursor type;
-      int               width;
-      int               height;
-      int               pitch;
-      uint8_t         * data;
-    }
-    cursorImage;
-
-    struct
-    {
-      LGColorTransform * data;
-    }
-    cursorColorTransform;
-
-    struct
-    {
-      uint32_t value;
-    }
-    cursorWhiteLevel;
-
-    struct
-    {
-      bool swSurface;
-    }
-    sourceTransition;
-  };
-}
-RenderCommand;
 
 void renderQueue_init(void);
 void renderQueue_free(void);

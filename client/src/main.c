@@ -1936,34 +1936,32 @@ static void swSurfaceDrawFill(LG_VideoSource source, int x, int y,
     int width, int height, uint32_t color)
 {
   LG_LOCK(g_state.videoSourceLock);
-  if (!swSurfaceEventAdmitted(source))
-  {
-    LG_UNLOCK(g_state.videoSourceLock);
-    return;
-  }
+  const bool     admitted = swSurfaceEventAdmitted(source);
+  const uint64_t generation = admitted ? atomic_load_explicit(
+      &g_state.videoSource[source].generation, memory_order_acquire) : 0;
+  LG_UNLOCK(g_state.videoSourceLock);
 
-  const uint64_t generation = atomic_load_explicit(
-      &g_state.videoSource[source].generation, memory_order_acquire);
+  if (!admitted)
+    return;
+
   renderQueue_sourceSwSurfaceDrawFill(renderQueueSource(source), generation,
       x, y, width, height, color);
-  LG_UNLOCK(g_state.videoSourceLock);
 }
 
 static void swSurfaceDrawBitmap(LG_VideoSource source, bool topDown,
     int x, int y, int width, int height, int stride, const void * data)
 {
   LG_LOCK(g_state.videoSourceLock);
-  if (!swSurfaceEventAdmitted(source))
-  {
-    LG_UNLOCK(g_state.videoSourceLock);
-    return;
-  }
+  const bool     admitted = swSurfaceEventAdmitted(source);
+  const uint64_t generation = admitted ? atomic_load_explicit(
+      &g_state.videoSource[source].generation, memory_order_acquire) : 0;
+  LG_UNLOCK(g_state.videoSourceLock);
 
-  const uint64_t generation = atomic_load_explicit(
-      &g_state.videoSource[source].generation, memory_order_acquire);
+  if (!admitted)
+    return;
+
   renderQueue_sourceSwSurfaceDrawBitmap(renderQueueSource(source), generation,
       x, y, width, height, stride, data, topDown);
-  LG_UNLOCK(g_state.videoSourceLock);
 }
 
 static void swSurfacePointer(LG_VideoSource source,
