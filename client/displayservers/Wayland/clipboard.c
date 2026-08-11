@@ -309,6 +309,10 @@ static void dataDeviceHandleSelection(void * opaque,
   struct DataOffer * extra = wl_data_offer_get_user_data(offer);
   if (!hasAnyMimetype(extra->mimetypes) || extra->isSelfCopy)
   {
+    wl_data_offer_set_user_data(offer, NULL);
+    for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+      free(extra->mimetypes[i]);
+    free(extra);
     waylandCBInvalidate();
     wl_data_offer_destroy(offer);
     return;
