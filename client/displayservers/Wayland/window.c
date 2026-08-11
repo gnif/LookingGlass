@@ -167,7 +167,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
   if (!wlWm.frameEvent)
   {
     DEBUG_ERROR("Failed to initialize event for waitFrame");
-    return false;
+    goto fail;
   }
 
   waylandSignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
@@ -176,7 +176,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
   if (wlWm.resizeEventFd < 0)
   {
     DEBUG_ERROR("Failed to create the resize eventfd: %s", strerror(errno));
-    return false;
+    goto fail;
   }
 
   if (!waylandPollRegister(wlWm.resizeEventFd, resizePollCallback, NULL,
@@ -185,22 +185,20 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     DEBUG_ERROR("Failed to register the resize eventfd");
     close(wlWm.resizeEventFd);
     wlWm.resizeEventFd = -1;
-    return false;
+    goto fail;
   }
 
   if (!wlWm.compositor)
   {
     DEBUG_ERROR("Compositor missing wl_compositor (version 3+), will not proceed");
-    resizeEventFdFree();
-    return false;
+    goto fail;
   }
 
   wlWm.surface = wl_compositor_create_surface(wlWm.compositor);
   if (!wlWm.surface)
   {
     DEBUG_ERROR("Failed to create wl_surface");
-    resizeEventFdFree();
-    return false;
+    goto fail;
   }
 
   wl_surface_add_listener(wlWm.surface, &wlSurfaceListener, NULL);
@@ -222,10 +220,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
   if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
         title, appId, fullscreen, maximize, borderless, resizable))
-  {
-    resizeEventFdFree();
-    return false;
-  }
+    goto fail;
 
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
@@ -239,12 +234,15 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     if (wl_display_roundtrip(wlWm.display) < 0)
     {
       DEBUG_ERROR("Failed waiting for the initial Wayland configure");
-      resizeEventFdFree();
-      return false;
+      goto fail;
     }
   }
 
   return true;
+
+fail:
+  waylandWindowFree();
+  return false;
 }
 
 void waylandWindowFree(void)
@@ -260,11 +258,28 @@ void waylandWindowFree(void)
   }
 
   if (wlWm.fractionalScaleInterface)
+  {
     wp_fractional_scale_v1_destroy(wlWm.fractionalScaleInterface);
+    wlWm.fractionalScaleInterface = NULL;
+  }
+
   if (wlWm.contentType)
+  {
     wp_content_type_v1_destroy(wlWm.contentType);
-  wl_surface_destroy(wlWm.surface);
-  lgFreeEvent(wlWm.frameEvent);
+    wlWm.contentType = NULL;
+  }
+
+  if (wlWm.surface)
+  {
+    wl_surface_destroy(wlWm.surface);
+    wlWm.surface = NULL;
+  }
+
+  if (wlWm.frameEvent)
+  {
+    lgFreeEvent(wlWm.frameEvent);
+    wlWm.frameEvent = NULL;
+  }
 }
 
 void waylandSetWindowSize(int x, int y)
