@@ -48,6 +48,7 @@ static struct
   bool              controlFaulted;
   bool              enqueueFaulted;
   bool              immediatePending;
+  bool              resetPending;
   _Atomic(uint32_t) generation;
   _Atomic(uint64_t) period;
   uint64_t          lastSend;
@@ -129,6 +130,14 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
   if (!controlReady(now))
     return false;
 
+  if (flags & LG_TRANSPORT_FRAME_SCHEDULE_ACTIVE)
+  {
+    if (l_frameScheduler.resetPending)
+      flags |= LG_TRANSPORT_FRAME_SCHEDULE_RESET;
+    if (l_frameScheduler.immediatePending)
+      flags |= LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE;
+  }
+
   int64_t  phaseError;
   uint32_t feedbackFrameSerial;
   uint32_t feedbackScheduleEpoch;
@@ -175,6 +184,8 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
     now + FRAME_SCHEDULER_CONTROL_RETRY_NS;
   l_frameScheduler.controlRetryDelay =
     FRAME_SCHEDULER_CONTROL_RETRY_NS;
+  if (flags & LG_TRANSPORT_FRAME_SCHEDULE_RESET)
+    l_frameScheduler.resetPending = false;
   if (flags & LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE)
     l_frameScheduler.immediatePending = false;
   LG_LOCK(l_frameScheduler.lock);
@@ -206,6 +217,7 @@ void frameScheduler_start(LG_TransportFeatureFlags features)
   l_frameScheduler.controlFaulted   = false;
   l_frameScheduler.enqueueFaulted   = false;
   l_frameScheduler.immediatePending = true;
+  l_frameScheduler.resetPending     = false;
   l_frameScheduler.lastSend         = 0;
   l_frameScheduler.nextControlCheck = 0;
   l_frameScheduler.controlRetryDelay =
@@ -240,6 +252,7 @@ void frameScheduler_stop(void)
   l_frameScheduler.controlFaulted   = false;
   l_frameScheduler.enqueueFaulted   = false;
   l_frameScheduler.immediatePending = false;
+  l_frameScheduler.resetPending     = false;
   l_frameScheduler.nextControlCheck = 0;
 }
 
@@ -297,6 +310,7 @@ void frameScheduler_update(void)
     l_frameScheduler.period = period;
     ++l_frameScheduler.generation;
     l_frameScheduler.immediatePending = true;
+    l_frameScheduler.resetPending     = true;
     LG_LOCK(l_frameScheduler.lock);
     l_frameScheduler.phaseError             = 0;
     l_frameScheduler.feedbackFrameSerial    = 0;
@@ -324,7 +338,7 @@ void frameScheduler_update(void)
 
   LG_TransportFrameScheduleFlags flags =
     LG_TRANSPORT_FRAME_SCHEDULE_ACTIVE;
-  if (reset)
+  if (l_frameScheduler.resetPending)
     flags |= LG_TRANSPORT_FRAME_SCHEDULE_RESET;
   if (l_frameScheduler.immediatePending)
     flags |= LG_TRANSPORT_FRAME_SCHEDULE_IMMEDIATE;
