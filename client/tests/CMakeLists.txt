@@ -203,6 +203,40 @@ foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
   )
 endforeach()
 
+add_executable(frame-scheduler-tests
+  frame_scheduler_test.c
+  ../src/frame_scheduler.c
+)
+target_compile_definitions(frame-scheduler-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(frame-scheduler-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(frame-scheduler-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(FRAME_SCHEDULER_CASES
+  absent
+  start
+  enqueue
+  ack
+  period
+  cadence
+  feedback
+)
+foreach(name IN LISTS FRAME_SCHEDULER_CASES)
+  add_test(NAME frame-scheduler-${name}
+    COMMAND frame-scheduler-tests ${name}
+  )
+  set_tests_properties(frame-scheduler-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 if(ENABLE_AUDIO)
   pkg_check_modules(AUDIO_TEST_SAMPLERATE REQUIRED IMPORTED_TARGET
     samplerate)
