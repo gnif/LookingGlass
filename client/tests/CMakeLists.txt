@@ -266,6 +266,43 @@ foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
   )
 endforeach()
 
+add_executable(spice-tests
+  spice_test.c
+  ../transports/SPICE/session.c
+  ../transports/SPICE/spice.c
+  ../transports/SPICE/surface.c
+)
+target_compile_definitions(spice-tests PRIVATE
+  ENABLE_AUDIO=0
+  ENABLE_USB_AUDIO=0
+)
+target_include_directories(spice-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
+  "${PROJECT_TOP}/repos/PureSpice/include"
+)
+target_link_libraries(spice-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(SPICE_CASES
+  connect-fail
+  pre-ready-drop
+  cancel
+  ready-drop
+  session-order
+  surface-active
+  surface-events
+  surface-detach
+)
+foreach(name IN LISTS SPICE_CASES)
+  add_test(NAME spice-${name}
+    COMMAND spice-tests ${name}
+  )
+  set_tests_properties(spice-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(frame-scheduler-tests
   frame_scheduler_test.c
   ../src/frame_scheduler.c
