@@ -187,6 +187,7 @@ static void applyView(bool active, bool force)
     (g_params.alwaysShowCursor || g_params.captureInputOnly)
     ? true : g_cursor.inView;
   g_cursor.redraw            = true;
+  app_invalidateWindow(false);
   g_cursor.motionValid       = false;
   g_cursor.autoCaptureActive = active && g_params.autoCapture &&
     !g_cursor.grab && !g_params.captureInputOnly;
@@ -984,6 +985,7 @@ void core_handleMouseNormal(double ex, double ey)
         g_cursor.realign    = false;
         g_cursor.realigning = false;
         g_cursor.redraw     = true;
+        app_invalidateWindow(false);
 
         if (!g_cursor.inWindow)
           return;

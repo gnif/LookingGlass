@@ -306,6 +306,7 @@ void app_handleEnterEvent(bool entered)
     if (!g_params.alwaysShowCursor)
       g_cursor.draw = false;
     g_cursor.redraw = true;
+    app_invalidateWindow(false);
   }
 }
 
@@ -1139,81 +1140,166 @@ void app_stopVideo(bool stop)
 
   if (stop)
   {
-    core_stopCursorThread();
-    core_stopFrameThread();
+    if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+    {
+      core_stopCursorThread();
+      core_stopFrameThread();
+    }
+    else
+      g_state.videoOps->swSurface->setActive(
+          g_state.transport.handle, false);
   }
   else
   {
-    core_startCursorThread();
-    core_startFrameThread();
+    if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+    {
+      core_startCursorThread();
+      core_startFrameThread();
+    }
+    else
+    {
+      g_state.videoOps->swSurface->setActive(
+          g_state.transport.handle, true);
+      app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
+    }
   }
 }
 
-bool app_useSpiceDisplay(bool enable)
+static RenderQueueSource renderSource(LG_VideoSource source)
 {
-  if (!g_params.useSpice || !g_state.fallback)
-    return false;
-
-  atomic_store_explicit(&g_state.fallbackDisplayRequested, enable,
-      memory_order_release);
-
-  // if the fallback is not yet ready, retain the requested state
-  if (!lgTransportFallback_ready(g_state.fallback))
-    return false;
-
-  bool active = atomic_load_explicit(&g_state.fallbackDisplayActive,
-      memory_order_acquire);
-  if (active == enable)
-    return active;
-
-  // do not allow stopping of the host app if not connected
-  if (!enable && !atomic_load_explicit(
-        &g_state.lgHostConnected, memory_order_acquire))
+  switch(source)
   {
-    atomic_store_explicit(&g_state.fallbackDisplayRequested, active,
-        memory_order_release);
-    return false;
+    case LG_VIDEO_SOURCE_NONE:
+      return RENDER_QUEUE_SOURCE_NONE;
+
+    case LG_VIDEO_SOURCE_PRIMARY:
+      return RENDER_QUEUE_SOURCE_PRIMARY;
+
+    case LG_VIDEO_SOURCE_FALLBACK:
+      return RENDER_QUEUE_SOURCE_FALLBACK;
+
+    case LG_VIDEO_SOURCE_COUNT:
+      break;
   }
 
-  bool expected = false;
-  if (!atomic_compare_exchange_strong_explicit(
-        &g_state.fallbackDisplayTransition, &expected, true,
-        memory_order_acquire, memory_order_relaxed))
-    return atomic_load_explicit(&g_state.fallbackDisplayActive,
-        memory_order_acquire);
+  return RENDER_QUEUE_SOURCE_NONE;
+}
 
-  active = atomic_load_explicit(&g_state.fallbackDisplayActive,
-      memory_order_relaxed);
-  if (active == enable)
-    goto done;
+static bool useVideoSourceLocked(LG_VideoSource source,
+    LG_VideoSource previousRequested, bool inputAvailable)
+{
+  const RenderQueueSource queueSource = renderSource(source);
+  if (source == LG_VIDEO_SOURCE_NONE)
+    return renderQueue_sourceTransition(
+        queueSource, 0, false, NULL) != 0;
 
-  if (!lgTransportFallback_setVideoActive(g_state.fallback, enable))
-    goto fail;
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  if (previousRequested != source)
+  {
+    atomic_store_explicit(
+        &state->transitionSerial, 0, memory_order_release);
+    atomic_store_explicit(
+        &state->transitionPending, false, memory_order_release);
+  }
 
-  renderQueue_swSurfaceShow(enable);
+  const uint64_t generation = atomic_load_explicit(
+      &state->generation, memory_order_acquire);
+  if (!generation || !atomic_load_explicit(
+        &state->ready, memory_order_acquire))
+    return false;
 
-  active = enable;
-  atomic_store_explicit(&g_state.fallbackDisplayActive, active,
-      memory_order_release);
-  lgInput_useTransport(!active);
-  overlayStatus_set(LG_USER_STATUS_SPICE, enable);
+  const LG_VideoSource applied = atomic_load_explicit(
+      &g_state.videoSourceApplied, memory_order_acquire);
+  const uint64_t appliedGeneration = atomic_load_explicit(
+      &g_state.videoSourceAppliedGeneration, memory_order_acquire);
+  const int width = atomic_load_explicit(
+      &state->width, memory_order_relaxed);
+  const int height = atomic_load_explicit(
+      &state->height, memory_order_relaxed);
+  const LG_RendererRotate rotate = atomic_load_explicit(
+      &state->rotate, memory_order_relaxed);
+  if (width <= 0 || height <= 0)
+    return false;
 
-done:
-  atomic_store_explicit(&g_state.fallbackDisplayTransition, false,
-      memory_order_release);
+  const LG_RendererRotate appliedRotate = atomic_load_explicit(
+      &state->appliedRotate, memory_order_acquire);
+  const bool geometryApplied =
+    atomic_load_explicit(&state->appliedWidth, memory_order_relaxed) ==
+      (unsigned int)width &&
+    atomic_load_explicit(&state->appliedHeight, memory_order_relaxed) ==
+      (unsigned int)height &&
+    appliedRotate == rotate;
+  if (applied == source && appliedGeneration == generation &&
+      previousRequested == source && geometryApplied)
+    return true;
 
-  enable = atomic_load_explicit(&g_state.fallbackDisplayRequested,
-      memory_order_acquire);
-  if (enable != active)
-    return app_useSpiceDisplay(enable);
+  if (previousRequested == source && atomic_load_explicit(
+        &state->transitionPending, memory_order_acquire))
+    return true;
 
-  return active;
+  if (state->cursorStateValid)
+    renderQueue_sourceCursorState(queueSource, generation,
+        state->cursorVisible &&
+          (source == LG_VIDEO_SOURCE_FALLBACK ||
+            g_cursor.draw || !inputAvailable),
+        state->cursorX, state->cursorY,
+        state->cursorHX, state->cursorHY);
 
-fail:
-  DEBUG_ERROR("Failed to %s the SPICE display",
-      enable ? "enable" : "disable");
-  lgTransportFallback_setVideoActive(g_state.fallback, active);
-  atomic_store_explicit(&g_state.fallbackDisplayRequested, active,
-      memory_order_release);
-  goto done;
+  const bool configure = state->swSurface && state->configurePending;
+  atomic_store_explicit(
+      &state->transitionPending, true, memory_order_release);
+  const uint64_t serial = configure ?
+    renderQueue_sourceSwSurfaceConfigureTransition(
+        queueSource, generation, width, height,
+        &state->transitionSerial) :
+    renderQueue_sourceTransition(
+        queueSource, generation, state->swSurface,
+        &state->transitionSerial);
+  if (!serial)
+  {
+    atomic_store_explicit(
+        &state->transitionPending, false, memory_order_release);
+    return false;
+  }
+  return true;
+}
+
+bool app_useVideoSource(LG_VideoSource source)
+{
+  if (source < LG_VIDEO_SOURCE_NONE || source >= LG_VIDEO_SOURCE_COUNT)
+    return false;
+
+  if (source == LG_VIDEO_SOURCE_PRIMARY && !atomic_load_explicit(
+        &g_state.lgHostConnected, memory_order_acquire))
+    return false;
+
+  if (source == LG_VIDEO_SOURCE_FALLBACK && !g_state.fallback)
+    return false;
+
+  const bool inputAvailable = lgInput_available();
+  LG_LOCK(g_state.videoSourceLock);
+  const LG_VideoSource previousRequested = atomic_load_explicit(
+      &g_state.videoSourceRequested, memory_order_acquire);
+  atomic_store_explicit(
+      &g_state.videoSourceRequested, source, memory_order_release);
+  if (source == LG_VIDEO_SOURCE_FALLBACK)
+    lgTransportFallback_requestVideoActive(g_state.fallback, true);
+  const bool result =
+    useVideoSourceLocked(source, previousRequested, inputAvailable);
+  LG_UNLOCK(g_state.videoSourceLock);
+  return result;
+}
+
+void app_refreshVideoSource(void)
+{
+  const bool inputAvailable = lgInput_available();
+  LG_LOCK(g_state.videoSourceLock);
+  const LG_VideoSource source = atomic_load_explicit(
+      &g_state.videoSourceRequested, memory_order_acquire);
+  if (source != LG_VIDEO_SOURCE_NONE &&
+      (source != LG_VIDEO_SOURCE_PRIMARY || atomic_load_explicit(
+        &g_state.lgHostConnected, memory_order_acquire)) &&
+      (source != LG_VIDEO_SOURCE_FALLBACK || g_state.fallback))
+    useVideoSourceLocked(source, source, inputAvailable);
+  LG_UNLOCK(g_state.videoSourceLock);
 }

@@ -83,6 +83,9 @@ _Static_assert((int)LG_CAPTURE_RGBA32F == (int)LG_TEST_CAPTURE_RGBA32F,
 
 // forwards
 static int renderThread(void * unused);
+static RenderQueueSource renderQueueSource(LG_VideoSource source);
+static bool videoSourceInvalidate(LG_VideoSource source);
+static void videoSourceShowSplashIfNeeded(void);
 
 static LGEvent  *e_startup       = NULL;
 static LGEvent  *e_cursorRepaint = NULL;
@@ -707,6 +710,51 @@ static void cursorRepaintRequest(void)
     lgSignalEvent(e_cursorRepaint);
 }
 
+static bool queueCursorRedraw(void)
+{
+  if (!atomic_load_explicit(&g_cursor.redraw, memory_order_acquire))
+    return false;
+
+  const bool inputAvailable = lgInput_available();
+  LG_LOCK(g_state.videoSourceLock);
+  if (!atomic_exchange_explicit(
+        &g_cursor.redraw, false, memory_order_acq_rel))
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return false;
+  }
+
+  const LG_VideoSource source = atomic_load_explicit(
+      &g_state.videoSourceApplied, memory_order_acquire);
+  const uint64_t generation = atomic_load_explicit(
+      &g_state.videoSourceAppliedGeneration, memory_order_acquire);
+  if (source <= LG_VIDEO_SOURCE_NONE || source >= LG_VIDEO_SOURCE_COUNT)
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return false;
+  }
+
+  const struct VideoSourceState * state = &g_state.videoSource[source];
+  const bool valid = state->cursorStateValid &&
+    atomic_load_explicit(&state->generation, memory_order_acquire) ==
+      generation;
+  const bool visible = state->cursorVisible &&
+    (source == LG_VIDEO_SOURCE_FALLBACK ||
+      g_cursor.draw || !inputAvailable);
+  const int x  = state->cursorX;
+  const int y  = state->cursorY;
+  const int hx = state->cursorHX;
+  const int hy = state->cursorHY;
+  LG_UNLOCK(g_state.videoSourceLock);
+
+  if (!valid)
+    return false;
+
+  renderQueue_sourceCursorState(renderQueueSource(source), generation,
+      visible, x, y, hx, hy);
+  return true;
+}
+
 static uint64_t cursorRepaintRenderBegin(bool * cursorWake)
 {
   LG_LOCK(l_cursorRepaint.lock);
@@ -930,12 +978,32 @@ static int renderThread(void * unused)
       atomic_compare_exchange_weak(&g_state.lgrResize, &resize, 0);
     }
 
-    const LG_RendererFrameToken frameTokenLimit = frameTimingQueuedToken();
-    const uint64_t              prepareStart    = nanotime();
+    const uint64_t prepareStart = nanotime();
+
+    queueCursorRedraw();
 
     LG_LOCK(g_state.lgrLock);
 
     renderQueue_process();
+
+    if (g_state.videoGeometryDirty)
+    {
+      g_state.videoGeometryDirty = false;
+      LG_UNLOCK(g_state.lgrLock);
+      core_updatePositionInfo();
+      LG_LOCK(g_state.lgrLock);
+    }
+
+    int sourceResize = atomic_load(&g_state.lgrResize);
+    if (unlikely(sourceResize))
+    {
+      RENDERER(onResize, g_state.windowW, g_state.windowH,
+          g_state.windowScale, g_state.dstRect, g_params.winRotate);
+      atomic_compare_exchange_weak(
+          &g_state.lgrResize, &sourceResize, 0);
+    }
+
+    const LG_RendererFrameToken frameTokenLimit = frameTimingQueuedToken();
 
     const bool     windowInvalid =
       atomic_exchange(&g_state.invalidateWindow, false);
@@ -956,6 +1024,7 @@ static int renderThread(void * unused)
     }
     const uint64_t renderEnd = nanotime();
     LG_UNLOCK(g_state.lgrLock);
+    renderQueue_presented();
     cursorRepaintRenderEnd(cursorSerial, renderStart, true,
         cursorWake &&
         rendererTiming.frameToken == LG_RENDERER_FRAME_TOKEN_NONE);
@@ -1035,8 +1104,16 @@ static int renderThread(void * unused)
   core_stopCursorThread();
   core_stopFrameThread();
 
-  if (g_state.videoOps && g_state.videoOps->frame->detachRenderer)
+  if (g_state.videoOps && g_state.videoOps->type == LG_VIDEO_TYPE_FRAME &&
+      g_state.videoOps->frame->detachRenderer)
     g_state.videoOps->frame->detachRenderer(g_state.transport.handle);
+  else if (g_state.videoOps &&
+      g_state.videoOps->type == LG_VIDEO_TYPE_SW_SURFACE)
+  {
+    g_state.videoOps->swSurface->setActive(
+        g_state.transport.handle, false);
+    g_state.videoOps->swSurface->detach(g_state.transport.handle);
+  }
 
   RENDERER(deinitialize);
   g_state.lgr = NULL;
@@ -1048,8 +1125,12 @@ static int renderThread(void * unused)
 
 int main_cursorThread(void * unused)
 {
-  LG_RendererCursor cursorType       = LG_CURSOR_COLOR;
-  uint32_t          cursorWhiteLevel = 0;
+  LG_RendererCursor        cursorType = LG_CURSOR_COLOR;
+  const uint64_t           sourceGeneration = atomic_load_explicit(
+      &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].generation,
+      memory_order_acquire);
+  struct VideoSourceState * source =
+    &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY];
 
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
@@ -1063,17 +1144,8 @@ int main_cursorThread(void * unused)
     {
       if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
       {
-        if (g_cursor.redraw && g_cursor.guest.valid)
-        {
-          g_cursor.redraw = false;
-          RENDERER(onMouseEvent,
-            g_cursor.guest.visible &&
-              (g_cursor.draw || !lgInput_available()),
-            g_cursor.guest.x, g_cursor.guest.y,
-            g_cursor.guest.hx, g_cursor.guest.hy);
-          if (!g_state.stopVideo)
-            cursorRepaintRequest();
-        }
+        if (!g_state.stopVideo && queueCursorRedraw())
+          cursorRepaintRequest();
         continue;
       }
 
@@ -1090,18 +1162,29 @@ int main_cursorThread(void * unused)
       break;
     }
 
-    const bool wasRendered = g_cursor.guest.visible &&
-      (g_cursor.draw || !lgInput_available());
+    const bool inputAvailable = lgInput_available();
+    LG_LOCK(g_state.videoSourceLock);
+    if (atomic_load_explicit(&source->generation, memory_order_acquire) !=
+        sourceGeneration)
+    {
+      LG_UNLOCK(g_state.videoSourceLock);
+      g_state.videoOps->frame->releasePointer(
+          g_state.transport.handle, &pointer);
+      continue;
+    }
+
+    const bool wasRendered = source->cursorStateValid &&
+      source->cursorVisible && (g_cursor.draw || !inputAvailable);
     bool hotspotChanged = false;
 
     if (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
-      g_cursor.guest.visible =
+      source->cursorVisible =
         pointer.flags & LG_TRANSPORT_POINTER_VISIBLE;
 
     if (pointer.flags & LG_TRANSPORT_POINTER_SHAPE)
     {
-      const int oldHX = g_cursor.guest.hx;
-      const int oldHY = g_cursor.guest.hy;
+      const int oldHX = source->cursorHX;
+      const int oldHY = source->cursorHY;
 
       switch (pointer.type)
       {
@@ -1109,6 +1192,7 @@ int main_cursorThread(void * unused)
         case CURSOR_TYPE_MONOCHROME  : cursorType = LG_CURSOR_MONOCHROME  ; break;
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
+          LG_UNLOCK(g_state.videoSourceLock);
           DEBUG_ERROR("Invalid cursor type");
           g_state.videoOps->frame->releasePointer(
               g_state.transport.handle, &pointer);
@@ -1116,68 +1200,93 @@ int main_cursorThread(void * unused)
       }
 
       hotspotChanged =
-        g_cursor.guest.hx != pointer.hx || g_cursor.guest.hy != pointer.hy;
-      if (!RENDERER(onMouseShape, cursorType, pointer.width, pointer.height,
-            pointer.pitch, pointer.shape))
-      {
-        DEBUG_ERROR("Failed to update mouse shape");
-        g_state.videoOps->frame->releasePointer(
-            g_state.transport.handle, &pointer);
-        continue;
-      }
-      g_cursor.guest.hx = pointer.hx;
-      g_cursor.guest.hy = pointer.hy;
+        source->cursorHX != pointer.hx || source->cursorHY != pointer.hy;
+      source->cursorHX = pointer.hx;
+      source->cursorHY = pointer.hy;
 
-      if (hotspotChanged && g_cursor.guest.valid &&
+      if (hotspotChanged && source->cursorStateValid &&
           !(pointer.flags & LG_TRANSPORT_POINTER_POSITION))
       {
-        g_cursor.guest.x += oldHX - pointer.hx;
-        g_cursor.guest.y += oldHY - pointer.hy;
+        source->cursorX += oldHX - pointer.hx;
+        source->cursorY += oldHY - pointer.hy;
       }
     }
-
-    if ((pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM) &&
-        g_state.lgr->ops.onMouseColorTransform)
-      g_state.lgr->ops.onMouseColorTransform(g_state.lgr,
-          pointer.colorTransform);
 
     const bool whiteLevelChanged =
       (pointer.flags & LG_TRANSPORT_POINTER_VISIBLE_VALID) &&
-      pointer.sdrWhiteLevel && pointer.sdrWhiteLevel != cursorWhiteLevel &&
-      g_state.lgr->ops.onMouseWhiteLevel;
+      pointer.sdrWhiteLevel &&
+      pointer.sdrWhiteLevel != source->cursorWhiteLevel;
     if (whiteLevelChanged)
-    {
-      g_state.lgr->ops.onMouseWhiteLevel(g_state.lgr,
-          pointer.sdrWhiteLevel);
-      cursorWhiteLevel = pointer.sdrWhiteLevel;
-    }
+      source->cursorWhiteLevel = pointer.sdrWhiteLevel;
 
     if (pointer.flags & LG_TRANSPORT_POINTER_POSITION)
     {
-      const bool wasValid = g_cursor.guest.valid;
-      g_cursor.guest.x     = pointer.x;
-      g_cursor.guest.y     = pointer.y;
-      g_cursor.guest.valid = true;
-      if (!wasValid && core_inputEnabled())
-        core_alignToGuest();
+      source->cursorX          = pointer.x;
+      source->cursorY          = pointer.y;
+      source->cursorStateValid = true;
     }
 
-    if ((pointer.flags & LG_TRANSPORT_POINTER_POSITION) || hotspotChanged)
-      core_handleGuestMouseUpdate();
+    const bool sourceApplied = atomic_load_explicit(
+        &g_state.videoSourceApplied, memory_order_acquire) ==
+      LG_VIDEO_SOURCE_PRIMARY && atomic_load_explicit(
+        &g_state.videoSourceAppliedGeneration, memory_order_acquire) ==
+      sourceGeneration;
+    if (sourceApplied)
+      atomic_exchange_explicit(
+          &g_cursor.redraw, false, memory_order_acq_rel);
 
-    app_updateMouseState();
-    g_cursor.redraw = false;
-    RENDERER(onMouseEvent,
-      g_cursor.guest.visible && (g_cursor.draw || !lgInput_available()),
-      g_cursor.guest.x, g_cursor.guest.y,
-      g_cursor.guest.hx, g_cursor.guest.hy);
+    const bool valid        = source->cursorStateValid;
+    const bool guestVisible = source->cursorVisible;
+    const bool visible      = guestVisible &&
+      (g_cursor.draw || !inputAvailable);
+    const int x  = source->cursorX;
+    const int y  = source->cursorY;
+    const int hx = source->cursorHX;
+    const int hy = source->cursorHY;
+    const bool isRendered = valid && visible;
+    bool wasValid = false;
+    if (sourceApplied)
+    {
+      wasValid               = g_cursor.guest.valid;
+      g_cursor.guest.visible = guestVisible;
+      g_cursor.guest.x       = x;
+      g_cursor.guest.y       = y;
+      g_cursor.guest.hx      = hx;
+      g_cursor.guest.hy      = hy;
+      g_cursor.guest.valid   = valid;
+    }
+    LG_UNLOCK(g_state.videoSourceLock);
 
-    const bool isRendered = g_cursor.guest.visible &&
-      (g_cursor.draw || !lgInput_available());
+    if (pointer.flags & LG_TRANSPORT_POINTER_SHAPE)
+      renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY,
+          sourceGeneration, cursorType, pointer.width, pointer.height,
+          pointer.pitch, pointer.shape);
+
+    if (pointer.flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM)
+      renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
+          sourceGeneration, pointer.colorTransform);
+
+    if (whiteLevelChanged)
+      renderQueue_sourceCursorWhiteLevel(RENDER_QUEUE_SOURCE_PRIMARY,
+          sourceGeneration, pointer.sdrWhiteLevel);
+
+    if (valid)
+      renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY,
+          sourceGeneration, visible, x, y, hx, hy);
+
+    if (sourceApplied)
+    {
+      if (!wasValid && valid && core_inputEnabled())
+        core_alignToGuest();
+      if ((pointer.flags & LG_TRANSPORT_POINTER_POSITION) || hotspotChanged)
+        core_handleGuestMouseUpdate();
+      app_updateMouseState();
+    }
+
     const bool contentChanged =
       (pointer.flags & (LG_TRANSPORT_POINTER_SHAPE |
         LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) || whiteLevelChanged;
-    if (!g_state.stopVideo &&
+    if (sourceApplied && !g_state.stopVideo &&
         (wasRendered != isRendered ||
          ((wasRendered || isRendered) &&
           (g_params.mouseRedraw || contentChanged))))
@@ -1198,6 +1307,9 @@ int main_frameThread(void * unused)
   uint64_t          frameSerial   = 0;
   uint32_t          formatVersion = 0;
   LG_RendererFormat rendererFormat;
+  const uint64_t    sourceGeneration = atomic_load_explicit(
+      &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].generation,
+      memory_order_acquire);
 
   if (g_state.useDMA)
     DEBUG_INFO("Using DMA buffer support");
@@ -1257,7 +1369,10 @@ int main_frameThread(void * unused)
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
-    if (!g_state.formatValid || format->version != formatVersion)
+    const bool formatChanged =
+      !g_state.formatValid || format->version != formatVersion;
+    bool rendererSupportsNativeHDR = false;
+    if (formatChanged)
     {
       memset(&rendererFormat, 0, sizeof(rendererFormat));
       rendererFormat.type          = format->type;
@@ -1310,8 +1425,6 @@ int main_frameThread(void * unused)
           rendererFormat.rotate = LG_ROTATE_0;
           break;
       }
-      g_state.rotate = rendererFormat.rotate;
-
       bool invalid = false;
       switch (format->type)
       {
@@ -1341,12 +1454,6 @@ int main_frameThread(void * unused)
         break;
       }
 
-      g_state.formatValid = true;
-      formatVersion       = format->version;
-#ifdef ENABLE_TESTS
-      atomic_store_explicit(&l_testFrameType, format->type,
-          memory_order_release);
-#endif
       DEBUG_INFO("Format: %s %ux%u (%ux%u) stride:%u pitch:%u rotation:%d hdr:%d pq:%d sdrWhite:%u nits",
           FrameTypeStr[format->type], format->frameWidth, format->frameHeight,
           format->dataWidth, format->dataHeight, format->stride, format->pitch,
@@ -1363,23 +1470,18 @@ int main_frameThread(void * unused)
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
-      const bool rendererSupportsNativeHDR = !rendererFormat.hdr ||
+      rendererSupportsNativeHDR = !rendererFormat.hdr ||
         !g_state.lgr->ops.supports || RENDERER(supports,
           rendererFormat.hdrPQ ? LG_SUPPORTS_HDR_PQ : LG_SUPPORTS_HDR_SCRGB);
-      // Publish the matching surface format before allowing the render thread
-      // to consume the renderer format. Otherwise it can present one frame in
-      // the new encoding while the display server still has the old image
-      // description attached.
-      renderQueue_surfaceFormat(rendererFormat, rendererSupportsNativeHDR);
-      LG_UNLOCK(g_state.lgrLock);
 
-      g_state.srcSize.x    = rendererFormat.screenWidth;
-      g_state.srcSize.y    = rendererFormat.screenHeight;
-      g_state.haveSrcSize = true;
-      if (g_params.autoResize)
-        g_state.ds->setWindowSize(rendererFormat.frameWidth,
-            rendererFormat.frameHeight);
-      core_updatePositionInfo();
+      struct VideoSourceState * source =
+        &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY];
+      atomic_store_explicit(
+          &source->width, rendererFormat.screenWidth, memory_order_relaxed);
+      atomic_store_explicit(
+          &source->height, rendererFormat.screenHeight, memory_order_relaxed);
+      atomic_store_explicit(
+          &source->rotate, rendererFormat.rotate, memory_order_release);
     }
 
     uint32_t damageCount = frame.damageRectsCount <=
@@ -1411,6 +1513,8 @@ int main_frameThread(void * unused)
           rendererOwnsFrame ? frame.releaseOpaque : NULL,
           rendererOwnsFrame ? frame.releaseHandle : 0))
     {
+      if (formatChanged)
+        LG_UNLOCK(g_state.lgrLock);
       frameTimingCancel(frameToken);
       g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       DEBUG_ERROR("Renderer onFrame returned failure");
@@ -1428,26 +1532,50 @@ int main_frameThread(void * unused)
 
     const uint64_t queueStart = nanotime();
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
+    frameTimingQueue(frameToken, frame.serial, &timing,
+        g_state.frameImportTime, g_state.frameImportWaitTime,
+        dispatchStart, queueStart);
+
+    if (formatChanged)
+    {
+      g_state.formatValid = true;
+      formatVersion       = format->version;
+#ifdef ENABLE_TESTS
+      atomic_store_explicit(&l_testFrameType, format->type,
+          memory_order_release);
+#endif
+      /* Publish the format only after accepting and timing its first frame.
+       * lgrLock prevents the render thread from consuming either update until
+       * both are ready. */
+      renderQueue_sourceSurfaceFormat(RENDER_QUEUE_SOURCE_PRIMARY,
+          sourceGeneration, rendererFormat, rendererSupportsNativeHDR);
+    }
 #ifdef ENABLE_TESTS
     atomic_store_explicit(&l_testFrameSerial, frame.serial,
         memory_order_release);
 #endif
-    frameTimingQueue(frameToken, frame.serial, &timing,
-        g_state.frameImportTime, g_state.frameImportWaitTime,
-        dispatchStart, queueStart);
+
+    atomic_store_explicit(
+        &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].ready, true,
+        memory_order_release);
+    app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
+
+    if (formatChanged)
+    {
+      LG_UNLOCK(g_state.lgrLock);
+      if (g_params.autoResize)
+        g_state.ds->setWindowSize(rendererFormat.frameWidth,
+            rendererFormat.frameHeight);
+    }
 
     if (g_state.jitRender)
     {
       if (atomic_load_explicit(&g_state.pendingCount, memory_order_acquire) < 10)
         atomic_fetch_add_explicit(&g_state.pendingCount, 1,
             memory_order_release);
-      overlaySplash_show(false);
     }
     else
-    {
-      overlaySplash_show(false);
       lgSignalEvent(g_state.frameEvent);
-    }
 
     if ((frame.flags & LG_TRANSPORT_FRAME_REQUEST_ACTIVATION) &&
         g_params.requestActivation)
@@ -1469,16 +1597,24 @@ int main_frameThread(void * unused)
 
     if (!rendererOwnsFrame)
       g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
-    app_useSpiceDisplay(false);
   }
 
   if (app_getState() != APP_STATE_SHUTDOWN)
-    if (!app_useSpiceDisplay(true))
-      overlaySplash_show(true);
+  {
+    if (app_getState() == APP_STATE_RESTART)
+      videoSourceInvalidate(LG_VIDEO_SOURCE_PRIMARY);
+    else
+      atomic_store_explicit(
+          &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].ready, false,
+          memory_order_release);
 
-  /* Queue the fallback source before clearing desktop snapshots. The render
-   * thread processes this transition under lgrLock before its next render, so
-   * restart cannot expose an empty desktop frame between the two operations. */
+    if (!app_useVideoSource(LG_VIDEO_SOURCE_FALLBACK))
+      videoSourceShowSplashIfNeeded();
+  }
+
+  /* Queue the replacement before releasing desktop snapshots. The existing
+   * front buffer remains visible until the render thread draws it or the
+   * splash requested above. */
   LG_LOCK(g_state.lgrLock);
   RENDERER(onRestart);
   LG_UNLOCK(g_state.lgrLock);
@@ -1491,55 +1627,329 @@ int main_frameThread(void * unused)
   return 0;
 }
 
-static void fallbackSurfaceConfigure(void * opaque,
+static RenderQueueSource renderQueueSource(LG_VideoSource source)
+{
+  switch(source)
+  {
+    case LG_VIDEO_SOURCE_PRIMARY:
+      return RENDER_QUEUE_SOURCE_PRIMARY;
+
+    case LG_VIDEO_SOURCE_FALLBACK:
+      return RENDER_QUEUE_SOURCE_FALLBACK;
+
+    case LG_VIDEO_SOURCE_NONE:
+    case LG_VIDEO_SOURCE_COUNT:
+      break;
+  }
+
+  return RENDER_QUEUE_SOURCE_NONE;
+}
+
+static void videoSourceBegin(LG_VideoSource source)
+{
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  const uint64_t generation =
+    renderQueue_sourceBegin(renderQueueSource(source));
+
+  LG_LOCK(g_state.videoSourceLock);
+  atomic_store_explicit(&state->ready, false, memory_order_release);
+  atomic_store_explicit(
+      &state->transitionSerial, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &state->transitionPending, false, memory_order_relaxed);
+  atomic_store_explicit(&state->appliedWidth, 0, memory_order_relaxed);
+  atomic_store_explicit(&state->appliedHeight, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &state->appliedRotate, LG_ROTATE_0, memory_order_relaxed);
+  atomic_store_explicit(
+      &state->generation, generation, memory_order_release);
+  state->configurePending = false;
+  LG_UNLOCK(g_state.videoSourceLock);
+}
+
+static bool videoSourceInvalidate(LG_VideoSource source)
+{
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  LG_LOCK(g_state.videoSourceLock);
+  const uint64_t generation = atomic_exchange_explicit(
+      &state->generation, 0, memory_order_acq_rel);
+  atomic_store_explicit(&state->ready, false, memory_order_release);
+  LG_UNLOCK(g_state.videoSourceLock);
+  if (generation)
+    renderQueue_sourceInvalidate(renderQueueSource(source), generation);
+  return generation != 0;
+}
+
+static void videoSourceShowSplashIfNeeded(void)
+{
+  LG_LOCK(g_state.videoSplashLock);
+  bool available;
+  for (;;)
+  {
+    available = false;
+    const LG_VideoSource source = atomic_load_explicit(
+        &g_state.videoSourceRequested, memory_order_acquire);
+    if (source <= LG_VIDEO_SOURCE_NONE || source >= LG_VIDEO_SOURCE_COUNT)
+      break;
+
+    const struct VideoSourceState * state = &g_state.videoSource[source];
+    const uint64_t generation = atomic_load_explicit(
+        &state->generation, memory_order_acquire);
+    const bool transitionPending = atomic_load_explicit(
+        &state->transitionPending, memory_order_acquire);
+    const LG_VideoSource applied = atomic_load_explicit(
+        &g_state.videoSourceApplied, memory_order_acquire);
+    const uint64_t appliedGeneration = atomic_load_explicit(
+        &g_state.videoSourceAppliedGeneration, memory_order_acquire);
+    available = generation &&
+      ((applied == source && appliedGeneration == generation) ||
+       (atomic_load_explicit(&state->ready, memory_order_acquire) &&
+        transitionPending));
+
+    if (source == atomic_load_explicit(
+          &g_state.videoSourceRequested, memory_order_acquire) &&
+        generation == atomic_load_explicit(
+          &state->generation, memory_order_acquire))
+      break;
+  }
+
+  if (!available)
+    overlaySplash_show(true);
+  LG_UNLOCK(g_state.videoSplashLock);
+}
+
+static void videoSourceClearCursor(LG_VideoSource source)
+{
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  LG_LOCK(g_state.videoSourceLock);
+  state->cursorStateValid = false;
+  state->cursorVisible    = false;
+  state->cursorWhiteLevel = 0;
+  if (atomic_load_explicit(
+        &g_state.videoSourceApplied, memory_order_acquire) == source)
+    g_cursor.guest.valid = false;
+  LG_UNLOCK(g_state.videoSourceLock);
+
+  renderQueue_sourceClearCursor(renderQueueSource(source));
+}
+
+static bool videoSourcePrepare(void * opaque, RenderQueueSource queueSource,
+    uint64_t generation, uint64_t serial)
+{
+  (void)opaque;
+
+  LG_VideoSource source = LG_VIDEO_SOURCE_NONE;
+  if (queueSource == RENDER_QUEUE_SOURCE_PRIMARY)
+    source = LG_VIDEO_SOURCE_PRIMARY;
+  else if (queueSource == RENDER_QUEUE_SOURCE_FALLBACK)
+    source = LG_VIDEO_SOURCE_FALLBACK;
+
+  if (source == LG_VIDEO_SOURCE_NONE)
+    return true;
+
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  if (atomic_load_explicit(&state->generation, memory_order_acquire) !=
+        generation ||
+      !atomic_load_explicit(&state->ready, memory_order_acquire) ||
+      atomic_load_explicit(
+        &g_state.videoSourceRequested, memory_order_acquire) != source)
+    goto reject;
+
+  const int width = atomic_load_explicit(
+      &state->width, memory_order_relaxed);
+  const int height = atomic_load_explicit(
+      &state->height, memory_order_relaxed);
+  const LG_RendererRotate rotate = atomic_load_explicit(
+      &state->rotate, memory_order_relaxed);
+  if (width <= 0 || height <= 0)
+    goto reject;
+
+  LG_LOCK(g_state.videoSplashLock);
+  if (atomic_load_explicit(&state->generation, memory_order_acquire) !=
+        generation ||
+      !atomic_load_explicit(&state->ready, memory_order_acquire) ||
+      atomic_load_explicit(
+        &g_state.videoSourceRequested, memory_order_acquire) != source)
+  {
+    LG_UNLOCK(g_state.videoSplashLock);
+    goto reject;
+  }
+
+  if (!g_state.haveSrcSize || g_state.srcSize.x != width ||
+      g_state.srcSize.y != height || g_state.rotate != rotate)
+  {
+    g_state.srcSize.x   = width;
+    g_state.srcSize.y   = height;
+    g_state.rotate      = rotate;
+    g_state.haveSrcSize        = true;
+    g_state.videoGeometryDirty = true;
+  }
+
+  atomic_store_explicit(
+      &g_state.videoSource[source].appliedWidth, width, memory_order_relaxed);
+  atomic_store_explicit(
+      &g_state.videoSource[source].appliedHeight, height,
+      memory_order_relaxed);
+  atomic_store_explicit(
+      &g_state.videoSource[source].appliedRotate, rotate,
+      memory_order_release);
+
+  overlaySplash_show(false);
+  LG_UNLOCK(g_state.videoSplashLock);
+
+  return true;
+
+reject:
+  if (atomic_compare_exchange_strong_explicit(&state->transitionSerial,
+        &serial, 0, memory_order_acq_rel, memory_order_relaxed))
+    atomic_store_explicit(
+        &state->transitionPending, false, memory_order_release);
+  return false;
+}
+
+static void videoSourceApplied(void * opaque, RenderQueueSource queueSource,
+    uint64_t generation, uint64_t serial, bool swSurface)
+{
+  (void)opaque;
+  (void)swSurface;
+
+  LG_VideoSource source = LG_VIDEO_SOURCE_NONE;
+  if (queueSource == RENDER_QUEUE_SOURCE_PRIMARY)
+    source = LG_VIDEO_SOURCE_PRIMARY;
+  else if (queueSource == RENDER_QUEUE_SOURCE_FALLBACK)
+    source = LG_VIDEO_SOURCE_FALLBACK;
+
+  bool cursorStateValid = false;
+  bool cursorVisible    = false;
+  int  cursorX          = 0;
+  int  cursorY          = 0;
+  int  cursorHX         = 0;
+  int  cursorHY         = 0;
+
+  LG_LOCK(g_state.videoSourceLock);
+  atomic_store_explicit(
+      &g_state.videoSourceApplied, source, memory_order_release);
+  atomic_store_explicit(
+      &g_state.videoSourceAppliedGeneration, generation,
+      memory_order_release);
+
+  if (source != LG_VIDEO_SOURCE_NONE)
+  {
+    struct VideoSourceState * state = &g_state.videoSource[source];
+    if (atomic_load_explicit(&state->generation, memory_order_acquire) ==
+        generation)
+    {
+      cursorStateValid = state->cursorStateValid;
+      cursorVisible    = state->cursorVisible;
+      cursorX          = state->cursorX;
+      cursorY          = state->cursorY;
+      cursorHX         = state->cursorHX;
+      cursorHY         = state->cursorHY;
+
+      uint64_t pendingSerial = serial;
+      if (atomic_compare_exchange_strong_explicit(&state->transitionSerial,
+            &pendingSerial, 0, memory_order_acq_rel, memory_order_relaxed))
+      {
+        atomic_store_explicit(
+            &state->transitionPending, false, memory_order_release);
+        state->configurePending = false;
+      }
+    }
+  }
+
+  const LG_VideoSource requested = atomic_load_explicit(
+      &g_state.videoSourceRequested, memory_order_acquire);
+  if (source == LG_VIDEO_SOURCE_PRIMARY &&
+      requested == LG_VIDEO_SOURCE_PRIMARY && g_state.fallback)
+    lgTransportFallback_requestVideoActive(g_state.fallback, false);
+
+  g_cursor.guest.valid = cursorStateValid;
+  if (cursorStateValid)
+  {
+    g_cursor.guest.visible = cursorVisible;
+    g_cursor.guest.x       = cursorX;
+    g_cursor.guest.y       = cursorY;
+    g_cursor.guest.hx      = cursorHX;
+    g_cursor.guest.hy      = cursorHY;
+  }
+  LG_UNLOCK(g_state.videoSourceLock);
+
+  const bool fallback = source == LG_VIDEO_SOURCE_FALLBACK;
+  lgInput_useTransport(!fallback);
+  overlayStatus_set(LG_USER_STATUS_SPICE, fallback);
+  atomic_store_explicit(&g_cursor.redraw, true, memory_order_release);
+  app_invalidateWindow(false);
+  app_updateMouseState();
+  app_refreshVideoSource();
+}
+
+static void swSurfaceConfigure(LG_VideoSource source,
     unsigned int width, unsigned int height)
 {
-  (void)opaque;
-  g_state.fallbackSurfaceValid = true;
-  g_state.srcSize.x            = width;
-  g_state.srcSize.y            = height;
-  g_state.haveSrcSize          = true;
-  core_updatePositionInfo();
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  videoSourceBegin(source);
+  atomic_store_explicit(&state->width, width, memory_order_relaxed);
+  atomic_store_explicit(&state->height, height, memory_order_relaxed);
+  atomic_store_explicit(&state->rotate, LG_ROTATE_0, memory_order_release);
+  LG_LOCK(g_state.videoSourceLock);
+  state->configurePending = true;
+  atomic_store_explicit(&state->ready, true, memory_order_release);
+  LG_UNLOCK(g_state.videoSourceLock);
 
-  renderQueue_swSurfaceConfigure(width, height);
+  if (source == LG_VIDEO_SOURCE_PRIMARY && g_params.autoResize)
+    g_state.ds->setWindowSize(width, height);
+
+  app_refreshVideoSource();
 }
 
-static void fallbackSurfaceDestroy(void * opaque)
+static void swSurfaceDestroy(LG_VideoSource source)
 {
-  (void)opaque;
-  g_state.fallbackSurfaceValid = false;
-  if (atomic_exchange_explicit(&g_state.fallbackDisplayActive, false,
-        memory_order_acq_rel))
-  {
-    renderQueue_swSurfaceShow(false);
-    lgInput_useTransport(true);
-    overlayStatus_set(LG_USER_STATUS_SPICE, false);
-  }
+  if (!videoSourceInvalidate(source))
+    return;
+  if (app_getState() == APP_STATE_SHUTDOWN)
+    return;
+
+  const LG_VideoSource applied = atomic_load_explicit(
+      &g_state.videoSourceApplied, memory_order_acquire);
+  const LG_VideoSource requested = atomic_load_explicit(
+      &g_state.videoSourceRequested, memory_order_acquire);
+  if (applied != source && requested != source)
+    return;
+
+  /* Retain the last presented surface until this source reconnects or a
+   * replacement becomes ready. */
+  videoSourceShowSplashIfNeeded();
 }
 
-static void fallbackSurfaceDrawFill(void * opaque, int x, int y,
+static void swSurfaceDrawFill(LG_VideoSource source, int x, int y,
     int width, int height, uint32_t color)
 {
-  (void)opaque;
-  renderQueue_swSurfaceDrawFill(x, y, width, height, color);
+  const uint64_t generation = atomic_load_explicit(
+      &g_state.videoSource[source].generation, memory_order_acquire);
+  renderQueue_sourceSwSurfaceDrawFill(renderQueueSource(source), generation,
+      x, y, width, height, color);
 }
 
-static void fallbackSurfaceDrawBitmap(void * opaque, bool topDown,
+static void swSurfaceDrawBitmap(LG_VideoSource source, bool topDown,
     int x, int y, int width, int height, int stride, const void * data)
 {
-  (void)opaque;
-  renderQueue_swSurfaceDrawBitmap(
+  const uint64_t generation = atomic_load_explicit(
+      &g_state.videoSource[source].generation, memory_order_acquire);
+  renderQueue_sourceSwSurfaceDrawBitmap(renderQueueSource(source), generation,
       x, y, width, height, stride, data, topDown);
 }
 
-static void fallbackSurfacePointer(void * opaque,
+static void swSurfacePointer(LG_VideoSource source,
     const LG_TransportPointer * pointer)
 {
-  (void)opaque;
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  const uint64_t generation = atomic_load_explicit(
+      &state->generation, memory_order_acquire);
+  if (!generation)
+    return;
 
+  LG_RendererCursor type = LG_CURSOR_COLOR;
   if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
-  {
-    LG_RendererCursor type;
     switch (pointer->type)
     {
       case CURSOR_TYPE_COLOR:
@@ -1558,50 +1968,180 @@ static void fallbackSurfacePointer(void * opaque,
         return;
     }
 
-    const size_t size = (size_t)pointer->pitch * pointer->height;
-    uint8_t * shape = malloc(size);
-    if (!shape)
-      return;
-    memcpy(shape, pointer->shape, size);
-    renderQueue_cursorImage(type, pointer->width, pointer->height,
-        pointer->pitch, shape);
+  const bool drawCursor = source != LG_VIDEO_SOURCE_PRIMARY ||
+    g_cursor.draw || !lgInput_available();
+  LG_LOCK(g_state.videoSourceLock);
+  if (atomic_load_explicit(&state->generation, memory_order_acquire) !=
+      generation)
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
   }
 
-  if ((pointer->flags & LG_TRANSPORT_POINTER_POSITION) &&
-      (pointer->flags & LG_TRANSPORT_POINTER_VISIBLE_VALID))
-    renderQueue_cursorState(
-        pointer->flags & LG_TRANSPORT_POINTER_VISIBLE,
-        pointer->x, pointer->y, pointer->hx, pointer->hy);
+  const bool wasRendered = state->cursorStateValid &&
+    state->cursorVisible && drawCursor;
+  bool hotspotChanged = false;
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
+  {
+    const int oldHX = state->cursorHX;
+    const int oldHY = state->cursorHY;
+    hotspotChanged =
+      state->cursorHX != pointer->hx || state->cursorHY != pointer->hy;
+    state->cursorHX = pointer->hx;
+    state->cursorHY = pointer->hy;
+    if (hotspotChanged && state->cursorStateValid &&
+        !(pointer->flags & LG_TRANSPORT_POINTER_POSITION))
+    {
+      state->cursorX += oldHX - pointer->hx;
+      state->cursorY += oldHY - pointer->hy;
+    }
+  }
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_POSITION)
+  {
+    state->cursorX          = pointer->x;
+    state->cursorY          = pointer->y;
+    state->cursorStateValid = true;
+  }
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_VISIBLE_VALID)
+    state->cursorVisible = pointer->flags & LG_TRANSPORT_POINTER_VISIBLE;
+
+  const bool whiteLevelChanged = pointer->sdrWhiteLevel &&
+    pointer->sdrWhiteLevel != state->cursorWhiteLevel;
+  if (whiteLevelChanged)
+    state->cursorWhiteLevel = pointer->sdrWhiteLevel;
+
+  const bool valid        = state->cursorStateValid;
+  const bool guestVisible = state->cursorVisible;
+  const bool visible      = guestVisible && drawCursor;
+  const int x  = state->cursorX;
+  const int y  = state->cursorY;
+  const int hx = state->cursorHX;
+  const int hy = state->cursorHY;
+  const bool isRendered = valid && visible;
+  const bool sourceApplied = atomic_load_explicit(
+      &g_state.videoSourceApplied, memory_order_acquire) == source &&
+    atomic_load_explicit(&g_state.videoSourceAppliedGeneration,
+        memory_order_acquire) == generation;
+  bool wasValid = false;
+  if (sourceApplied)
+  {
+    wasValid               = g_cursor.guest.valid;
+    g_cursor.guest.visible = guestVisible;
+    g_cursor.guest.x       = x;
+    g_cursor.guest.y       = y;
+    g_cursor.guest.hx      = hx;
+    g_cursor.guest.hy      = hy;
+    g_cursor.guest.valid   = valid;
+  }
+  LG_UNLOCK(g_state.videoSourceLock);
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
+    renderQueue_sourceCursorImage(renderQueueSource(source), generation,
+        type, pointer->width, pointer->height, pointer->pitch,
+        pointer->shape);
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_COLOR_TRANSFORM)
+    renderQueue_sourceCursorColorTransform(renderQueueSource(source),
+        generation, pointer->colorTransform);
+
+  if (whiteLevelChanged)
+    renderQueue_sourceCursorWhiteLevel(renderQueueSource(source),
+        generation, pointer->sdrWhiteLevel);
+
+  if (valid && (pointer->flags & (LG_TRANSPORT_POINTER_POSITION |
+      LG_TRANSPORT_POINTER_VISIBLE_VALID | LG_TRANSPORT_POINTER_SHAPE)))
+    renderQueue_sourceCursorState(renderQueueSource(source), generation,
+        visible, x, y, hx, hy);
+
+  if (sourceApplied)
+  {
+    if (!wasValid && valid && core_inputEnabled())
+      core_alignToGuest();
+    if (source == LG_VIDEO_SOURCE_PRIMARY &&
+        ((pointer->flags & LG_TRANSPORT_POINTER_POSITION) || hotspotChanged))
+      core_handleGuestMouseUpdate();
+    app_updateMouseState();
+  }
+
+  const bool contentChanged =
+    (pointer->flags & (LG_TRANSPORT_POINTER_SHAPE |
+      LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) || whiteLevelChanged;
+  if (sourceApplied && (wasRendered != isRendered ||
+       ((wasRendered || isRendered) &&
+        (g_params.mouseRedraw || contentChanged))))
+    cursorRepaintRequest();
 }
 
-static const LG_SwSurfaceEventOps fallbackSurfaceEvents =
+static LG_VideoSource swSurfaceSource(void * opaque)
 {
-  .configure  = fallbackSurfaceConfigure,
-  .destroy    = fallbackSurfaceDestroy,
-  .drawFill   = fallbackSurfaceDrawFill,
-  .drawBitmap = fallbackSurfaceDrawBitmap,
-  .pointer    = fallbackSurfacePointer,
+  return (LG_VideoSource)(uintptr_t)opaque;
+}
+
+static void swSurfaceEventConfigure(void * opaque,
+    unsigned int width, unsigned int height)
+{
+  swSurfaceConfigure(swSurfaceSource(opaque), width, height);
+}
+
+static void swSurfaceEventDestroy(void * opaque)
+{
+  swSurfaceDestroy(swSurfaceSource(opaque));
+}
+
+static void swSurfaceEventDrawFill(void * opaque, int x, int y,
+    int width, int height, uint32_t color)
+{
+  swSurfaceDrawFill(
+      swSurfaceSource(opaque), x, y, width, height, color);
+}
+
+static void swSurfaceEventDrawBitmap(void * opaque, bool topDown,
+    int x, int y, int width, int height, int stride, const void * data)
+{
+  swSurfaceDrawBitmap(swSurfaceSource(opaque), topDown,
+      x, y, width, height, stride, data);
+}
+
+static void swSurfaceEventPointer(void * opaque,
+    const LG_TransportPointer * pointer)
+{
+  swSurfacePointer(swSurfaceSource(opaque), pointer);
+}
+
+static const LG_SwSurfaceEventOps swSurfaceEvents =
+{
+  .configure  = swSurfaceEventConfigure,
+  .destroy    = swSurfaceEventDestroy,
+  .drawFill   = swSurfaceEventDrawFill,
+  .drawBitmap = swSurfaceEventDrawBitmap,
+  .pointer    = swSurfaceEventPointer,
 };
 
 static void fallbackConnected(void * opaque,
     const LG_TransportSession * session)
 {
   (void)opaque;
+  if (app_getState() == APP_STATE_SHUTDOWN)
+    return;
+
   if (session->name[0] && !atomic_load_explicit(
         &g_state.lgHostConnected, memory_order_acquire))
     core_setTitle(session->name);
 
-  if (atomic_load_explicit(&g_state.fallbackDisplayRequested,
-        memory_order_acquire))
-    app_useSpiceDisplay(true);
+  app_refreshVideoSource();
 }
 
 static void fallbackDisconnected(void * opaque)
 {
-  fallbackSurfaceDestroy(opaque);
-  if (!atomic_load_explicit(
+  (void)opaque;
+  swSurfaceDestroy(LG_VIDEO_SOURCE_FALLBACK);
+  videoSourceClearCursor(LG_VIDEO_SOURCE_FALLBACK);
+  if (app_getState() != APP_STATE_SHUTDOWN && !atomic_load_explicit(
         &g_state.lgHostConnected, memory_order_acquire))
-    overlaySplash_show(true);
+    videoSourceShowSplashIfNeeded();
 }
 
 static void fallbackUUIDMismatch(void * opaque, const uint8_t primary[16],
@@ -1627,7 +2167,8 @@ static bool fallbackStart(void)
   if (!g_params.useSpice || strcmp(g_params.transport, "spice") == 0)
     return true;
 
-  if (lgTransportFallback_start("spice", &fallbackSurfaceEvents, NULL,
+  if (lgTransportFallback_start("spice", &swSurfaceEvents,
+        (void *)(uintptr_t)LG_VIDEO_SOURCE_FALLBACK,
         &fallbackEvents, NULL, &g_state.fallback))
     return true;
 
@@ -1871,10 +2412,18 @@ static int lg_run(void)
 
   g_state.videoOps =
     g_state.transport.ops->getVideoOps(g_state.transport.handle);
-  if (!g_state.videoOps || g_state.videoOps->type != LG_VIDEO_TYPE_FRAME ||
-      !g_state.videoOps->frame)
+  if (!g_state.videoOps ||
+      (g_state.videoOps->type != LG_VIDEO_TYPE_FRAME &&
+       g_state.videoOps->type != LG_VIDEO_TYPE_SW_SURFACE) ||
+      (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME &&
+       !g_state.videoOps->frame) ||
+      (g_state.videoOps->type == LG_VIDEO_TYPE_SW_SURFACE &&
+       (!g_state.videoOps->swSurface ||
+        !g_state.videoOps->swSurface->attach ||
+        !g_state.videoOps->swSurface->detach ||
+        !g_state.videoOps->swSurface->setActive)))
   {
-    DEBUG_ERROR("Transport does not provide a frame source");
+    DEBUG_ERROR("Transport does not provide a usable video source");
     return -1;
   }
   DEBUG_INFO("Using Video: %s", g_state.videoOps->name);
@@ -1894,7 +2443,17 @@ static int lg_run(void)
   }
 
   //setup the render command queue
+  LG_LOCK_INIT(g_state.videoSourceLock);
+  LG_LOCK_INIT(g_state.videoSplashLock);
   renderQueue_init();
+  renderQueue_setSourceFns(videoSourcePrepare, videoSourceApplied, NULL);
+  atomic_store_explicit(&g_state.videoSourceRequested,
+      LG_VIDEO_SOURCE_PRIMARY, memory_order_relaxed);
+  atomic_store_explicit(&g_state.videoSourceApplied,
+      LG_VIDEO_SOURCE_NONE, memory_order_relaxed);
+  g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].swSurface =
+    g_state.videoOps->type == LG_VIDEO_TYPE_SW_SURFACE;
+  g_state.videoSource[LG_VIDEO_SOURCE_FALLBACK].swSurface = true;
   frameScheduler_init();
 
   g_state.micDefaultState = g_params.micDefaultState;
@@ -1932,7 +2491,7 @@ static int lg_run(void)
     return -1;
   }
 
-  g_state.useDMA =
+  g_state.useDMA = g_state.videoOps->type == LG_VIDEO_TYPE_FRAME &&
     g_state.videoOps->frame->supportsDMA(g_state.transport.handle);
 
   // initialize the window dimensions at init for renderers
@@ -2032,11 +2591,19 @@ static int lg_run(void)
   if (g_state.lgr->ops.getInterop &&
       g_state.lgr->ops.getInterop(g_state.lgr, &interop))
     interopPtr = &interop;
-  if (g_state.videoOps->frame->attachRenderer &&
-      !g_state.videoOps->frame->attachRenderer(
-        g_state.transport.handle, interopPtr))
+  bool videoAttached;
+  if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+    videoAttached = !g_state.videoOps->frame->attachRenderer ||
+      g_state.videoOps->frame->attachRenderer(
+          g_state.transport.handle, interopPtr);
+  else
+    videoAttached = g_state.videoOps->swSurface->attach(
+        g_state.transport.handle, &swSurfaceEvents,
+        (void *)(uintptr_t)LG_VIDEO_SOURCE_PRIMARY);
+
+  if (!videoAttached)
   {
-    DEBUG_ERROR("Failed to attach the renderer to the transport");
+    DEBUG_ERROR("Failed to attach the video source");
     return -1;
   }
 
@@ -2058,16 +2625,17 @@ restart:
   msgsCount = 0;
   memset(msgs, 0, sizeof(msgs));
 
-  uint64_t initialSpiceEnable = microtime() + 1000 * 1000;
+  uint64_t initialFallbackEnable = g_state.fallback ?
+    microtime() + 1000 * 1000 : 0;
 
   while(app_getState() == APP_STATE_RUNNING)
   {
     fallbackHandleEvents();
 
-    if (initialSpiceEnable && microtime() > initialSpiceEnable)
+    if (initialFallbackEnable && microtime() > initialFallbackEnable)
     {
-      app_useSpiceDisplay(true);
-      initialSpiceEnable = 0;
+      app_useVideoSource(LG_VIDEO_SOURCE_FALLBACK);
+      initialFallbackEnable = 0;
     }
 
     struct TransportSessionProbe probe = {
@@ -2102,7 +2670,7 @@ restart:
     if (probe.status == LG_TRANSPORT_OK)
     {
       session = probe.session;
-      initialSpiceEnable = 0;
+      initialFallbackEnable = 0;
       break;
     }
 
@@ -2237,10 +2805,22 @@ restart:
   atomic_store_explicit(
       &g_state.lgHostConnected, true, memory_order_release);
 
-  g_state.lgHostConnected = true;
-
-  if (!core_startCursorThread() || !core_startFrameThread())
-    return -1;
+  if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+  {
+    videoSourceBegin(LG_VIDEO_SOURCE_PRIMARY);
+    if (!core_startCursorThread() || !core_startFrameThread())
+      return -1;
+  }
+  else
+  {
+    if (!g_state.videoOps->swSurface->setActive(
+          g_state.transport.handle, true))
+    {
+      DEBUG_ERROR("Failed to activate the primary software surface");
+      return -1;
+    }
+    app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
+  }
 
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
@@ -2275,8 +2855,16 @@ restart:
     lgSignalEvent(e_startup);
     lgSignalEvent(g_state.frameEvent);
 
-    core_stopFrameThread();
-    core_stopCursorThread();
+    if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+    {
+      core_stopFrameThread();
+      core_stopCursorThread();
+    }
+    else
+      g_state.videoOps->swSurface->setActive(
+          g_state.transport.handle, false);
+    videoSourceInvalidate(LG_VIDEO_SOURCE_PRIMARY);
+    videoSourceClearCursor(LG_VIDEO_SOURCE_PRIMARY);
     lgInput_dropTransport();
     lgAudio_dropTransport();
     lgClipboard_dropTransport();
@@ -2365,7 +2953,10 @@ static void lg_shutdown(void)
   if (g_state.ds && g_state.dsInitialized)
     g_state.ds->free();
 
+  renderQueue_setSourceFns(NULL, NULL, NULL);
   renderQueue_free();
+  LG_LOCK_FREE(g_state.videoSourceLock);
+  LG_LOCK_FREE(g_state.videoSplashLock);
   frameScheduler_free();
 
   // free metrics ringbuffers

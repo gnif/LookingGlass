@@ -57,6 +57,30 @@ enum AudioResampler {
   AUDIO_RESAMPLER_BACKEND
 };
 
+struct VideoSourceState
+{
+  atomic_uint_least64_t generation;
+  atomic_uint_least64_t transitionSerial;
+  atomic_bool           transitionPending;
+  atomic_uint_least32_t width;
+  atomic_uint_least32_t height;
+  atomic_int            rotate;
+  atomic_uint_least32_t appliedWidth;
+  atomic_uint_least32_t appliedHeight;
+  atomic_int            appliedRotate;
+  atomic_bool           ready;
+  bool                  swSurface;
+  bool                  configurePending;
+
+  bool     cursorStateValid;
+  bool     cursorVisible;
+  int      cursorX;
+  int      cursorY;
+  int      cursorHX;
+  int      cursorHY;
+  uint32_t cursorWhiteLevel;
+};
+
 struct AppState
 {
   ImGuiIO        * io;
@@ -79,11 +103,15 @@ struct AppState
   bool                         dsInitialized;
   bool                         jitRender;
 
-  atomic_bool fallbackDisplayRequested;
-  atomic_bool fallbackDisplayActive;
-  atomic_bool fallbackDisplayTransition;
+  struct VideoSourceState videoSource[LG_VIDEO_SOURCE_COUNT];
+  atomic_int               videoSourceRequested;
+  atomic_int               videoSourceApplied;
+  atomic_uint_least64_t     videoSourceAppliedGeneration;
+  LG_Lock                   videoSourceLock;
+  LG_Lock                   videoSplashLock;
+  bool                      videoGeometryDirty;
+
   atomic_bool fallbackUUIDMismatch;
-  bool        fallbackSurfaceValid;
 
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
@@ -296,7 +324,7 @@ struct CursorState
   bool realigning;
 
   /* true if the cursor needs re-drawing/updating */
-  bool redraw;
+  atomic_bool redraw;
 
   /* true if the cursor movements should be scaled */
   bool useScale;

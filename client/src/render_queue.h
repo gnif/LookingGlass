@@ -21,17 +21,40 @@
 #include "common/ll.h"
 #include "interface/renderer.h"
 
+#include <stdatomic.h>
+
+typedef enum RenderQueueSource
+{
+  RENDER_QUEUE_SOURCE_NONE,
+  RENDER_QUEUE_SOURCE_PRIMARY,
+  RENDER_QUEUE_SOURCE_FALLBACK,
+  RENDER_QUEUE_SOURCE_COUNT,
+}
+RenderQueueSource;
+
+typedef void (*RenderQueueSourceAppliedFn)(void * opaque,
+    RenderQueueSource source, uint64_t generation, uint64_t serial,
+    bool swSurface);
+typedef bool (*RenderQueueSourcePrepareFn)(void * opaque,
+    RenderQueueSource source, uint64_t generation, uint64_t serial);
+
 typedef struct
 {
+  RenderQueueSource source;
+  uint64_t          generation;
+  uint64_t          transitionSerial;
+
   enum
   {
-    SW_SURFACE_OP_CONFIGURE,
+    SW_SURFACE_OP_CONFIGURE_TRANSITION,
     SW_SURFACE_OP_DRAW_FILL,
     SW_SURFACE_OP_DRAW_BITMAP,
-    SW_SURFACE_OP_SHOW,
     SURFACE_OP_FORMAT,
     CURSOR_OP_STATE,
     CURSOR_OP_IMAGE,
+    CURSOR_OP_COLOR_TRANSFORM,
+    CURSOR_OP_WHITE_LEVEL,
+    SOURCE_OP_TRANSITION,
   }
   op;
 
@@ -41,7 +64,7 @@ typedef struct
     {
       int width, height;
     }
-    swSurfaceConfigure;
+    swSurfaceConfigureTransition;
 
     struct
     {
@@ -60,12 +83,6 @@ typedef struct
       bool      topDown;
     }
     swSurfaceDrawBitmap;
-
-    struct
-    {
-      bool show;
-    }
-    swSurfaceShow;
 
     struct
     {
@@ -93,6 +110,24 @@ typedef struct
       uint8_t         * data;
     }
     cursorImage;
+
+    struct
+    {
+      LGColorTransform * data;
+    }
+    cursorColorTransform;
+
+    struct
+    {
+      uint32_t value;
+    }
+    cursorWhiteLevel;
+
+    struct
+    {
+      bool swSurface;
+    }
+    sourceTransition;
   };
 }
 RenderCommand;
@@ -101,22 +136,48 @@ void renderQueue_init(void);
 void renderQueue_free(void);
 void renderQueue_clear(void);
 void renderQueue_process(void);
+void renderQueue_presented(void);
 
-void renderQueue_swSurfaceConfigure(int width, int height);
+void renderQueue_setSourceFns(RenderQueueSourcePrepareFn prepare,
+    RenderQueueSourceAppliedFn applied, void * opaque);
 
-void renderQueue_swSurfaceDrawFill(int x, int y, int width, int height,
+/* Starting a source lifecycle makes commands from its prior generation stale.
+ * After a successful render, call renderQueue_presented on the render thread
+ * to acknowledge the newest applied transition. */
+uint64_t renderQueue_sourceBegin(RenderQueueSource source);
+void renderQueue_sourceInvalidate(RenderQueueSource source,
+    uint64_t generation);
+void renderQueue_sourceClearCursor(RenderQueueSource source);
+uint64_t renderQueue_sourceTransition(RenderQueueSource source,
+    uint64_t generation, bool swSurface,
+    atomic_uint_least64_t * publishedSerial);
+
+uint64_t renderQueue_sourceSwSurfaceConfigureTransition(
+    RenderQueueSource source, uint64_t generation, int width, int height,
+    atomic_uint_least64_t * publishedSerial);
+
+void renderQueue_sourceSwSurfaceDrawFill(RenderQueueSource source,
+    uint64_t generation, int x, int y, int width, int height,
     uint32_t color);
 
-void renderQueue_swSurfaceDrawBitmap(int x, int y, int width, int height,
-    int stride, const void * data, bool topDown);
+void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
+    uint64_t generation, int x, int y, int width, int height, int stride,
+    const void * data, bool topDown);
 
-void renderQueue_swSurfaceShow(bool show);
-
-void renderQueue_surfaceFormat(const LG_RendererFormat format,
+void renderQueue_sourceSurfaceFormat(RenderQueueSource source,
+    uint64_t generation, const LG_RendererFormat format,
     bool rendererSupportsNativeHDR);
 
-void renderQueue_cursorState(bool visible, int x, int y, int hx, int hy);
+void renderQueue_sourceCursorState(RenderQueueSource source,
+    uint64_t generation, bool visible, int x, int y, int hx, int hy);
 
-void renderQueue_cursorImage(LG_RendererCursor type,
-    int width, int height, int pitch,
-    uint8_t * data);
+/* Cursor payloads are copied before these calls return. */
+void renderQueue_sourceCursorImage(RenderQueueSource source,
+    uint64_t generation, LG_RendererCursor type,
+    int width, int height, int pitch, const void * data);
+
+void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
+    uint64_t generation, const LGColorTransform * transform);
+
+void renderQueue_sourceCursorWhiteLevel(RenderQueueSource source,
+    uint64_t generation, uint32_t sdrWhiteLevel);

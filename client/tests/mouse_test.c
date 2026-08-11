@@ -262,6 +262,11 @@ bool app_isRunning(void)
   return false;
 }
 
+void app_invalidateWindow(bool full)
+{
+  (void)full;
+}
+
 uint64_t app_mouseSeq(void)
 {
   return 0;

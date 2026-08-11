@@ -46,7 +46,7 @@ void lgTransportFallback_stop(LG_TransportFallback ** fallback);
 
 bool lgTransportFallback_ready(const LG_TransportFallback * fallback);
 /* The requested state is retained across reconnects. */
-bool lgTransportFallback_setVideoActive(
+void lgTransportFallback_requestVideoActive(
     LG_TransportFallback * fallback, bool active);
 
 void lgTransportFallback_setPrimaryUUID(

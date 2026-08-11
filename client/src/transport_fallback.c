@@ -49,7 +49,6 @@ struct LG_TransportFallback
 
   LGThread * thread;
   LGEvent  * wakeEvent;
-  LGEvent  * videoIdleEvent;
   LG_RWLock  lock;
 
   atomic_bool stop;
@@ -66,7 +65,6 @@ struct LG_TransportFallback
   bool                  closing;
   bool                  videoRequested;
   bool                  videoActive;
-  bool                  videoBusy;
 
   bool    primaryUUIDValid;
   uint8_t primaryUUID[16];
@@ -75,6 +73,8 @@ struct LG_TransportFallback
   uint8_t mismatchPrimary[16];
   uint8_t mismatchFallback[16];
 };
+
+static bool applyVideoRequest(LG_TransportFallback * fallback);
 
 static bool connectCancelled(void * opaque)
 {
@@ -139,26 +139,18 @@ static void unpublishProviders(LG_TransportFallback * fallback, bool live)
   fallback->providersPublished = false;
 }
 
-static void waitForVideoIdle(LG_TransportFallback * fallback)
+static void closeVideoAdmission(LG_TransportFallback * fallback)
 {
-  for (;;)
-  {
-    LG_LOCK_EXCLUSIVE(fallback->lock);
-    atomic_store_explicit(&fallback->ready, false, memory_order_release);
-    fallback->closing = true;
-    const bool busy = fallback->videoBusy;
-    LG_UNLOCK_EXCLUSIVE(fallback->lock);
-
-    if (!busy)
-      return;
-    lgWaitEvent(fallback->videoIdleEvent, TIMEOUT_INFINITE);
-  }
+  LG_LOCK_EXCLUSIVE(fallback->lock);
+  atomic_store_explicit(&fallback->ready, false, memory_order_release);
+  fallback->closing = true;
+  LG_UNLOCK_EXCLUSIVE(fallback->lock);
 }
 
 static bool cleanupConnection(LG_TransportFallback * fallback,
     bool knownDead)
 {
-  waitForVideoIdle(fallback);
+  closeVideoAdmission(fallback);
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
   const bool reportDisconnected = fallback->connectedReported;
@@ -352,6 +344,7 @@ static bool connectFallback(LG_TransportFallback * fallback)
   while (!atomic_load_explicit(&fallback->stop, memory_order_acquire))
   {
     lgWaitEvent(fallback->wakeEvent, SESSION_POLL_MS);
+    applyVideoRequest(fallback);
 
     LG_LOCK_EXCLUSIVE(fallback->lock);
     const bool reject = uuidMismatchLocked(fallback);
@@ -435,10 +428,6 @@ bool lgTransportFallback_start(const char * transportName,
   if (!fallback->wakeEvent)
     goto fail;
 
-  fallback->videoIdleEvent = lgCreateEvent(true, 0);
-  if (!fallback->videoIdleEvent)
-    goto fail;
-
   *result = fallback;
   if (!lgCreateThread("transportFallback", fallbackThread,
         fallback, &fallback->thread))
@@ -448,8 +437,6 @@ bool lgTransportFallback_start(const char * transportName,
 
 fail:
   *result = NULL;
-  if (fallback->videoIdleEvent)
-    lgFreeEvent(fallback->videoIdleEvent);
   if (fallback->wakeEvent)
     lgFreeEvent(fallback->wakeEvent);
   LG_RWLOCK_FREE(fallback->lock);
@@ -477,7 +464,6 @@ void lgTransportFallback_stop(LG_TransportFallback ** fallbackPtr)
     return;
   }
 
-  lgFreeEvent(fallback->videoIdleEvent);
   lgFreeEvent(fallback->wakeEvent);
   LG_RWLOCK_FREE(fallback->lock);
   free(fallback->transportName);
@@ -490,20 +476,16 @@ bool lgTransportFallback_ready(const LG_TransportFallback * fallback)
       &fallback->ready, memory_order_acquire);
 }
 
-bool lgTransportFallback_setVideoActive(
-    LG_TransportFallback * fallback, bool active)
+static bool applyVideoRequest(LG_TransportFallback * fallback)
 {
-  if (!fallback)
-    return false;
-
-  uint64_t connectionSerial;
-  LG_Transport * transport;
-  const LG_SwSurfaceOps * surfaceOps;
-
   for (;;)
   {
+    uint64_t connectionSerial;
+    LG_Transport * transport;
+    const LG_SwSurfaceOps * surfaceOps;
+    bool requested;
+
     LG_LOCK_EXCLUSIVE(fallback->lock);
-    fallback->videoRequested = active;
     if (!atomic_load_explicit(&fallback->ready, memory_order_acquire) ||
         fallback->closing)
     {
@@ -511,38 +493,44 @@ bool lgTransportFallback_setVideoActive(
       return false;
     }
 
-    if (fallback->videoActive == active)
+    requested = fallback->videoRequested;
+    if (fallback->videoActive == requested)
     {
       LG_UNLOCK_EXCLUSIVE(fallback->lock);
       return true;
     }
 
-    if (!fallback->videoBusy)
-    {
-      fallback->videoBusy = true;
-      connectionSerial    = fallback->connectionSerial;
-      transport           = fallback->transport.handle;
-      surfaceOps          = fallback->videoOps->swSurface;
-      LG_UNLOCK_EXCLUSIVE(fallback->lock);
-      break;
-    }
-
+    connectionSerial    = fallback->connectionSerial;
+    transport           = fallback->transport.handle;
+    surfaceOps          = fallback->videoOps->swSurface;
     LG_UNLOCK_EXCLUSIVE(fallback->lock);
-    lgWaitEvent(fallback->videoIdleEvent, TIMEOUT_INFINITE);
-  }
 
-  lgResetEvent(fallback->videoIdleEvent);
-  const bool result = surfaceOps->setActive(transport, active);
+    const bool result = surfaceOps->setActive(transport, requested);
+
+    LG_LOCK_EXCLUSIVE(fallback->lock);
+    const bool current = fallback->connectionSerial == connectionSerial;
+    if (current && result)
+      fallback->videoActive = requested;
+    const bool accepted = current && !fallback->closing && result;
+    const bool retry = current && !fallback->closing &&
+      fallback->videoRequested != requested;
+    LG_UNLOCK_EXCLUSIVE(fallback->lock);
+
+    if (!retry)
+      return accepted;
+  }
+}
+
+void lgTransportFallback_requestVideoActive(
+    LG_TransportFallback * fallback, bool active)
+{
+  if (!fallback)
+    return;
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
-  const bool current = fallback->connectionSerial == connectionSerial;
-  if (current && result)
-    fallback->videoActive = active;
-  const bool accepted = current && !fallback->closing && result;
-  fallback->videoBusy = false;
+  fallback->videoRequested = active;
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
-  lgSignalEvent(fallback->videoIdleEvent);
-  return accepted;
+  lgSignalEvent(fallback->wakeEvent);
 }
 
 void lgTransportFallback_setPrimaryUUID(

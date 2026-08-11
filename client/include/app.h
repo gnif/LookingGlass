@@ -227,8 +227,18 @@ bool app_guestIsOther(void);
 void app_stopVideo(bool stop);
 
 /**
- * Enable/disable the spice display
+ * Select the primary or fallback video source
  */
-bool app_useSpiceDisplay(bool enable);
+typedef enum LG_VideoSource
+{
+  LG_VIDEO_SOURCE_NONE,
+  LG_VIDEO_SOURCE_PRIMARY,
+  LG_VIDEO_SOURCE_FALLBACK,
+  LG_VIDEO_SOURCE_COUNT,
+}
+LG_VideoSource;
+
+bool app_useVideoSource(LG_VideoSource source);
+void app_refreshVideoSource(void);
 
 #endif
