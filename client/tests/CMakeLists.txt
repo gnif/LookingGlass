@@ -366,6 +366,44 @@ foreach(name IN LISTS FRAME_SCHEDULER_CASES)
   )
 endforeach()
 
+add_executable(config-message-tests
+  config_message_test.c
+  ../src/message.c
+  ../src/core.c
+  ../src/config.c
+)
+target_compile_definitions(config-message-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(config-message-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(config-message-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(CONFIG_MESSAGE_CASES
+  debounce
+  latest
+  equal
+  reinit
+  control
+  cfg-values
+  cfg-position
+  cfg-size
+  cfg-precedence
+)
+foreach(name IN LISTS CONFIG_MESSAGE_CASES)
+  add_test(NAME config-message-${name}
+    COMMAND config-message-tests ${name}
+  )
+  set_tests_properties(config-message-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 if(ENABLE_AUDIO)
   pkg_check_modules(AUDIO_TEST_SAMPLERATE REQUIRED IMPORTED_TARGET
     samplerate)
