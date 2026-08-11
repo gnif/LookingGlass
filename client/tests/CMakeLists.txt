@@ -338,6 +338,33 @@ foreach(name IN LISTS RENDER_QUEUE_CASES)
   )
 endforeach()
 
+if(ENABLE_EGL)
+  add_executable(desktop-rects-tests
+    desktop_rects_test.c
+  )
+  target_include_directories(desktop-rects-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
+  )
+  target_link_libraries(desktop-rects-tests
+    ${EXE_FLAGS}
+    renderer_EGL
+  )
+  set(DESKTOP_RECTS_CASES
+    rotations
+    fractional
+    round-trip
+    clipping
+  )
+  foreach(name IN LISTS DESKTOP_RECTS_CASES)
+    add_test(NAME desktop-rects-${name}
+      COMMAND desktop-rects-tests ${name}
+    )
+    set_tests_properties(desktop-rects-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
+
 find_package(GTest REQUIRED)
 find_program(WESTON_EXECUTABLE NAMES weston)
 if(NOT WESTON_EXECUTABLE)
