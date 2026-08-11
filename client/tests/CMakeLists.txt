@@ -399,6 +399,40 @@ foreach(name IN LISTS FRAME_SCHEDULER_CASES)
   )
 endforeach()
 
+add_executable(frame-timing-tests
+  frame_timing_test.c
+)
+target_compile_definitions(frame-timing-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(frame-timing-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(frame-timing-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(FRAME_TIMING_CASES
+  lifecycle
+  order
+  untracked
+  timeout
+  fifo
+  retire
+  feedback
+  wrap
+)
+foreach(name IN LISTS FRAME_TIMING_CASES)
+  add_test(NAME frame-timing-${name}
+    COMMAND frame-timing-tests ${name}
+  )
+  set_tests_properties(frame-timing-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(config-message-tests
   config_message_test.c
   ../src/message.c
