@@ -82,9 +82,9 @@ struct EGL_Desktop
   bool              hdrPQ;
   LG_RendererRotate rotate;
 
-  bool useSpice;
-  int spiceWidth, spiceHeight;
-  EGL_Texture * spiceTexture;
+  bool          useSwSurface;
+  int           swSurfaceWidth, swSurfaceHeight;
+  EGL_Texture * swSurfaceTexture;
 
   // scale algorithm
   int scaleAlgo;
@@ -251,7 +251,7 @@ void egl_desktopFree(EGL_Desktop ** desktop)
     return;
 
   egl_textureFree    (&(*desktop)->texture         );
-  egl_textureFree    (&(*desktop)->spiceTexture    );
+  egl_textureFree    (&(*desktop)->swSurfaceTexture);
   egl_shaderFree     (&(*desktop)->shader   .shader);
   egl_desktopRectsFree(&(*desktop)->mesh           );
   egl_postProcessFree(&(*desktop)->pp);
@@ -470,14 +470,15 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   EGL_Texture * tex;
   int width, height;
 
-  /* This also retires completed snapshots while the SPICE display is shown. */
+  /* This also retires completed snapshots while the software surface is
+   * shown. */
   egl_texturePoll(desktop->texture);
 
-  if (unlikely(desktop->useSpice))
+  if (unlikely(desktop->useSwSurface))
   {
-    tex    = desktop->spiceTexture;
-    width  = desktop->spiceWidth;
-    height = desktop->spiceHeight;
+    tex    = desktop->swSurfaceTexture;
+    width  = desktop->swSurfaceWidth;
+    height = desktop->swSurfaceHeight;
   }
   else
   {
@@ -519,7 +520,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       rects ? rects->rects : NULL, rects ? rects->count : -1,
       width, height);
 
-  const bool hdr = desktop->hdr && !desktop->useSpice;
+  const bool hdr = desktop->hdr && !desktop->useSwSurface;
   uint32_t hdrPeak = 0;
   if (hdr)
   {
@@ -579,7 +580,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   {
     if (bindStatus != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to bind the desktop texture");
-    if (!desktop->useSpice && desktop->useDMA && processFrame)
+    if (!desktop->useSwSurface && desktop->useDMA && processFrame)
       egl_textureMarkUsed(desktop->texture);
     return false;
   }
@@ -633,7 +634,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       desktop->linearComposition);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
-  if (!desktop->useSpice && desktop->useDMA &&
+  if (!desktop->useSwSurface && desktop->useDMA &&
       (processFrame || texture == tex))
     egl_textureMarkUsed(desktop->texture);
   return true;
@@ -649,25 +650,26 @@ void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR,
 void egl_desktopGetHDRMapping(EGL_Desktop * desktop, bool * enabled,
     float * gain, float * contentPeak)
 {
-  *enabled     = desktop->hdr && !desktop->useSpice &&
+  *enabled     = desktop->hdr && !desktop->useSwSurface &&
     desktop->mapHDRtoSDR && !desktop->nativeHDR;
   *gain        = (desktop->hdrPQ ? 10000.0f : 80.0f) /
     desktop->peakLuminance;
   *contentPeak = (float)desktop->maxCLL / desktop->peakLuminance;
 }
 
-void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)
+void egl_desktopSwSurfaceConfigure(EGL_Desktop * desktop,
+    int width, int height)
 {
-  if (!desktop->spiceTexture)
-    if (!egl_textureInit(&desktop->spiceTexture, desktop->display,
+  if (!desktop->swSurfaceTexture)
+    if (!egl_textureInit(&desktop->swSurfaceTexture, desktop->display,
           EGL_TEXTYPE_BUFFER_MAP))
     {
-      DEBUG_ERROR("Failed to initialize the spice desktop texture");
+      DEBUG_ERROR("Failed to initialize the software surface texture");
       return;
     }
 
   if (!egl_textureSetup(
-    desktop->spiceTexture,
+    desktop->swSurfaceTexture,
     EGL_PF_BGRA,
     width,
     height,
@@ -675,40 +677,41 @@ void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height)
     width * 4
   ))
   {
-    DEBUG_ERROR("Failed to setup the spice desktop texture");
+    DEBUG_ERROR("Failed to setup the software surface texture");
     return;
   }
 
-  desktop->spiceWidth  = width;
-  desktop->spiceHeight = height;
+  desktop->swSurfaceWidth  = width;
+  desktop->swSurfaceHeight = height;
 }
 
-void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
-    int height, uint32_t color)
+void egl_desktopSwSurfaceDrawFill(EGL_Desktop * desktop,
+    int x, int y, int width, int height, uint32_t color)
 {
-  if (!desktop->spiceTexture || width <= 0 || height <= 0)
+  if (!desktop->swSurfaceTexture || width <= 0 || height <= 0)
     return;
 
   const int64_t right  = (int64_t)x + width;
   const int64_t bottom = (int64_t)y + height;
-  if (x >= desktop->spiceWidth || y >= desktop->spiceHeight ||
+  if (x >= desktop->swSurfaceWidth ||
+      y >= desktop->swSurfaceHeight ||
       right <= 0 || bottom <= 0)
     return;
 
   x      = x < 0 ? 0 : x;
   y      = y < 0 ? 0 : y;
-  width  = (right  > desktop->spiceWidth  ?
-      desktop->spiceWidth  : (int)right ) - x;
-  height = (bottom > desktop->spiceHeight ?
-      desktop->spiceHeight : (int)bottom) - y;
+  width  = (right  > desktop->swSurfaceWidth  ?
+      desktop->swSurfaceWidth  : (int)right ) - x;
+  height = (bottom > desktop->swSurfaceHeight ?
+      desktop->swSurfaceHeight : (int)bottom) - y;
 
-  /* this is a fairly hacky way to do this, but since it's only for the fallback
-   * spice display it's not really an issue */
+  /* This is a fairly hacky way to update a software surface, but it preserves
+   * the existing incremental fill behavior. */
 
   uint32_t * line = malloc((size_t)width * sizeof(*line));
   if (!line)
   {
-    DEBUG_ERROR("Failed to allocate SPICE fill row");
+    DEBUG_ERROR("Failed to allocate software surface fill row");
     return;
   }
 
@@ -716,7 +719,7 @@ void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
     line[i] = color;
 
   for(int dy = 0; dy < height; ++dy)
-    egl_textureUpdateRect(desktop->spiceTexture,
+    egl_textureUpdateRect(desktop->swSurfaceTexture,
         x, y + dy, width, 1, width, width * sizeof(*line),
         (uint8_t *)line, false);
 
@@ -724,17 +727,19 @@ void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
   atomic_store(&desktop->processFrame, true);
 }
 
-void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
-    int height, int stride, uint8_t * data, bool topDown)
+void egl_desktopSwSurfaceDrawBitmap(EGL_Desktop * desktop,
+    int x, int y, int width, int height, int stride, uint8_t * data,
+    bool topDown)
 {
-  if (!desktop->spiceTexture || !data ||
+  if (!desktop->swSurfaceTexture || !data ||
       width <= 0 || height <= 0 || stride <= 0 || width > stride / 4)
     return;
 
   const int originalHeight = height;
   const int64_t right      = (int64_t)x + width;
   const int64_t bottom     = (int64_t)y + height;
-  if (x >= desktop->spiceWidth || y >= desktop->spiceHeight ||
+  if (x >= desktop->swSurfaceWidth ||
+      y >= desktop->swSurfaceHeight ||
       right <= 0 || bottom <= 0)
     return;
 
@@ -742,22 +747,22 @@ void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
   const int sourceY = y < 0 ? -y : 0;
   x      = x < 0 ? 0 : x;
   y      = y < 0 ? 0 : y;
-  width  = (right  > desktop->spiceWidth  ?
-      desktop->spiceWidth  : (int)right ) - x;
-  height = (bottom > desktop->spiceHeight ?
-      desktop->spiceHeight : (int)bottom) - y;
+  width  = (right  > desktop->swSurfaceWidth  ?
+      desktop->swSurfaceWidth  : (int)right ) - x;
+  height = (bottom > desktop->swSurfaceHeight ?
+      desktop->swSurfaceHeight : (int)bottom) - y;
 
   const int sourceRow = topDown ?
     sourceY : originalHeight - sourceY - height;
   data += (size_t)sourceRow * stride + (size_t)sourceX * 4;
 
-  egl_textureUpdateRect(desktop->spiceTexture,
+  egl_textureUpdateRect(desktop->swSurfaceTexture,
       x, y, width, height, stride / 4, stride, data, topDown);
   atomic_store(&desktop->processFrame, true);
 }
 
-void egl_desktopSpiceShow(EGL_Desktop * desktop, bool show)
+void egl_desktopSwSurfaceShow(EGL_Desktop * desktop, bool show)
 {
-  desktop->useSpice = show;
+  desktop->useSwSurface = show;
   atomic_store(&desktop->processFrame, true);
 }

@@ -124,8 +124,8 @@ struct Inst
   int          overlayHistoryCount[DESKTOP_DAMAGE_COUNT];
   unsigned int overlayHistoryIdx;
 
-  bool showSpice;
-  int  spiceWidth, spiceHeight;
+  bool showSwSurface;
+  int  swSurfaceWidth, swSurfaceHeight;
 
   bool surfaceSupportsPQ;
   bool surfaceSupportsSCRGB;
@@ -391,13 +391,15 @@ static void egl_onRestart(LG_Renderer * renderer)
 
 static void egl_calc_mouse_size(struct Inst * this)
 {
-  if (this->showSpice)
+  if (this->showSwSurface)
   {
-    this->mouseScaleX = 2.0f / this->spiceWidth;
-    this->mouseScaleY = 2.0f / this->spiceHeight;
+    this->mouseScaleX = 2.0f / this->swSurfaceWidth;
+    this->mouseScaleY = 2.0f / this->swSurfaceHeight;
     egl_cursorSetSize(this->cursor,
-      (this->mouseWidth  * (1.0f / this->spiceWidth )) * this->scaleX,
-      (this->mouseHeight * (1.0f / this->spiceHeight)) * this->scaleY
+      (this->mouseWidth  *
+        (1.0f / this->swSurfaceWidth )) * this->scaleX,
+      (this->mouseHeight *
+        (1.0f / this->swSurfaceHeight)) * this->scaleY
     );
     return;
   }
@@ -451,7 +453,7 @@ static void egl_calc_mouse_size(struct Inst * this)
 
 static void egl_calc_mouse_state(struct Inst * this)
 {
-  if (this->showSpice)
+  if (this->showSwSurface)
   {
     egl_cursorSetState(
       this->cursor,
@@ -648,7 +650,7 @@ static bool egl_updateHDRState(struct Inst * this, bool force)
     (this->surfaceSupportsPQ &&
       egl_hdrComposeIsConfigured(this->hdrCompose)) :
     this->surfaceSupportsSCRGB;
-  const bool useNativeHDR = !this->showSpice && this->format.hdr &&
+  const bool useNativeHDR = !this->showSwSurface && this->format.hdr &&
     surfaceCompatible && nativeHDR && !app_getHDRDescFailed();
 
   LG_DSHDRWhiteLevels whiteLevels =
@@ -1399,12 +1401,13 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   egl_desktopGetHDRMapping(this->desktop, &mapCursorHDR,
       &mapCursorGain, &mapCursorContentPeak);
   egl_cursorSetHDRState(this->cursor,
-      this->format.hdr && !this->showSpice, this->nativeHDR, mapCursorHDR,
+      this->format.hdr && !this->showSwSurface,
+      this->nativeHDR, mapCursorHDR,
       this->format.hdrPQ, mapCursorGain, mapCursorContentPeak);
   bool renderAll = hdrStateChanged ||
                    invalidateWindow || this->hadOverlay ||
                    bufferAge <= 0 || bufferAge > MAX_BUFFER_AGE ||
-                   this->showSpice;
+                   this->showSwSurface;
 
   bool                   hasOverlay      = false;
   struct CursorState     cursorState     = { .visible = false };
@@ -1802,38 +1805,41 @@ static void egl_freeTexture(LG_Renderer * renderer, void * texture)
   egl_stateInvalidateShared();
 }
 
-static void egl_spiceConfigure(LG_Renderer * renderer, int width, int height)
+static void egl_swSurfaceConfigure(LG_Renderer * renderer,
+    int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
-  this->spiceWidth   = width;
-  this->spiceHeight  = height;
-  egl_desktopSpiceConfigure(this->desktop, width, height);
+  this->swSurfaceWidth  = width;
+  this->swSurfaceHeight = height;
+  egl_desktopSwSurfaceConfigure(this->desktop, width, height);
 }
 
-static void egl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width,
-    int height, uint32_t color)
+static void egl_swSurfaceDrawFill(LG_Renderer * renderer,
+    int x, int y, int width, int height, uint32_t color)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
-  egl_desktopSpiceDrawFill(this->desktop, x, y, width, height, color);
+  egl_desktopSwSurfaceDrawFill(
+      this->desktop, x, y, width, height, color);
 }
 
-static void egl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
-    int height, int stride, uint8_t * data, bool topDown)
+static void egl_swSurfaceDrawBitmap(LG_Renderer * renderer,
+    int x, int y, int width, int height, int stride, uint8_t * data,
+    bool topDown)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_stateCheckShared();
-  egl_desktopSpiceDrawBitmap(this->desktop, x, y, width, height, stride,
-      data, topDown);
+  egl_desktopSwSurfaceDrawBitmap(
+      this->desktop, x, y, width, height, stride, data, topDown);
 }
 
-static void egl_spiceShow(LG_Renderer * renderer, bool show)
+static void egl_swSurfaceShow(LG_Renderer * renderer, bool show)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
-  this->showSpice = show;
+  this->showSwSurface = show;
   egl_calc_mouse_size(this);
-  egl_desktopSpiceShow(this->desktop, show);
+  egl_desktopSwSurfaceShow(this->desktop, show);
 }
 
 struct LG_RendererOps LGR_EGL =
@@ -1861,8 +1867,8 @@ struct LG_RendererOps LGR_EGL =
   .createTexture         = egl_createTexture,
   .freeTexture           = egl_freeTexture,
 
-  .spiceConfigure  = egl_spiceConfigure,
-  .spiceDrawFill   = egl_spiceDrawFill,
-  .spiceDrawBitmap = egl_spiceDrawBitmap,
-  .spiceShow       = egl_spiceShow
+  .swSurfaceConfigure    = egl_swSurfaceConfigure,
+  .swSurfaceDrawFill     = egl_swSurfaceDrawFill,
+  .swSurfaceDrawBitmap   = egl_swSurfaceDrawBitmap,
+  .swSurfaceShow         = egl_swSurfaceShow
 };

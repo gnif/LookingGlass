@@ -1202,7 +1202,7 @@ bool app_useSpiceDisplay(bool enable)
       goto fail;
     }
 
-    renderQueue_spiceShow(true);
+    renderQueue_swSurfaceShow(true);
   }
   else
   {
@@ -1215,7 +1215,7 @@ bool app_useSpiceDisplay(bool enable)
       goto fail;
     }
 
-    renderQueue_spiceShow(false);
+    renderQueue_swSurfaceShow(false);
   }
 
   active = enable;

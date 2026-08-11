@@ -25,10 +25,10 @@ typedef struct
 {
   enum
   {
-    SPICE_OP_CONFIGURE,
-    SPICE_OP_DRAW_FILL,
-    SPICE_OP_DRAW_BITMAP,
-    SPICE_OP_SHOW,
+    SW_SURFACE_OP_CONFIGURE,
+    SW_SURFACE_OP_DRAW_FILL,
+    SW_SURFACE_OP_DRAW_BITMAP,
+    SW_SURFACE_OP_SHOW,
     SURFACE_OP_FORMAT,
     CURSOR_OP_STATE,
     CURSOR_OP_IMAGE,
@@ -41,7 +41,7 @@ typedef struct
     {
       int width, height;
     }
-    spiceConfigure;
+    swSurfaceConfigure;
 
     struct
     {
@@ -49,7 +49,7 @@ typedef struct
       int      width, height;
       uint32_t color;
     }
-    spiceFillRect;
+    swSurfaceDrawFill;
 
     struct
     {
@@ -59,13 +59,13 @@ typedef struct
       uint8_t * data;
       bool      topDown;
     }
-    spiceDrawBitmap;
+    swSurfaceDrawBitmap;
 
     struct
     {
       bool show;
     }
-    spiceShow;
+    swSurfaceShow;
 
     struct
     {
@@ -102,15 +102,15 @@ void renderQueue_free(void);
 void renderQueue_clear(void);
 void renderQueue_process(void);
 
-void renderQueue_spiceConfigure(int width, int height);
+void renderQueue_swSurfaceConfigure(int width, int height);
 
-void renderQueue_spiceDrawFill(int x, int y, int width, int height,
+void renderQueue_swSurfaceDrawFill(int x, int y, int width, int height,
     uint32_t color);
 
-void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
-    void * data, bool topDown);
+void renderQueue_swSurfaceDrawBitmap(int x, int y, int width, int height,
+    int stride, void * data, bool topDown);
 
-void renderQueue_spiceShow(bool show);
+void renderQueue_swSurfaceShow(bool show);
 
 void renderQueue_surfaceFormat(const LG_RendererFormat format,
     bool rendererSupportsNativeHDR);

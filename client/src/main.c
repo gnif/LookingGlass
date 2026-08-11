@@ -1608,8 +1608,8 @@ static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
   g_state.haveSrcSize = true;
   core_updatePositionInfo();
 
-  renderQueue_spiceConfigure(width, height);
-  renderQueue_spiceDrawFill(0, 0, width, height, 0x0);
+  renderQueue_swSurfaceConfigure(width, height);
+  renderQueue_swSurfaceDrawFill(0, 0, width, height, 0x0);
 }
 
 static void spice_surfaceDestroy(unsigned int surfaceId)
@@ -1632,7 +1632,7 @@ static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
   if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
     return;
 
-  renderQueue_spiceDrawFill(x, y, width, height, color);
+  renderQueue_swSurfaceDrawFill(x, y, width, height, color);
 }
 
 static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
@@ -1652,7 +1652,7 @@ static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
       return;
   }
 
-  renderQueue_spiceDrawBitmap(x, y, width, height, stride, data, topDown);
+  renderQueue_swSurfaceDrawBitmap(x, y, width, height, stride, data, topDown);
 }
 
 static void spice_setCursorRGBAImage(int width, int height, int hx, int hy,

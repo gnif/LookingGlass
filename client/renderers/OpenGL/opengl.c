@@ -42,7 +42,7 @@
 
 #define FPS_TEXTURE        0
 #define MOUSE_TEXTURE      1
-#define SPICE_TEXTURE      2
+#define SW_SURFACE_TEXTURE 2
 #define TEXTURE_COUNT      3
 
 static struct Option opengl_options[] =
@@ -137,10 +137,10 @@ struct Inst
   int             texWIndex, texRIndex;
   int             texList;
   int             mouseList;
-  int             spiceList;
+  int             swSurfaceList;
   LG_RendererRect destRect;
-  struct IntPoint spiceSize;
-  bool            spiceShow;
+  struct IntPoint swSurfaceSize;
+  bool            showSwSurface;
 
   bool                  hasTextures, hasFrames;
   GLuint                frames[BUFFER_COUNT];
@@ -234,9 +234,9 @@ void opengl_deinitialize(LG_Renderer * renderer)
   {
     ImGui_ImplOpenGL2_Shutdown();
 
-    glDeleteLists(this->texList  , BUFFER_COUNT);
-    glDeleteLists(this->mouseList, 1);
-    glDeleteLists(this->spiceList, 1);
+    glDeleteLists(this->texList      , BUFFER_COUNT);
+    glDeleteLists(this->mouseList    , 1);
+    glDeleteLists(this->swSurfaceList, 1);
   }
 
   deconfigure(this);
@@ -277,10 +277,10 @@ static void setupModelView(struct Inst * this)
     return;
 
   int fw, fh;
-  if (this->spiceShow)
+  if (this->showSwSurface)
   {
-    fw = this->spiceSize.x;
-    fh = this->spiceSize.y;
+    fw = this->swSurfaceSize.x;
+    fh = this->swSurfaceSize.y;
   }
   else
   {
@@ -476,9 +476,9 @@ bool opengl_renderStartup(LG_Renderer * renderer, bool useDMA)
   glEnable(GL_MULTISAMPLE);
 
   // generate lists for drawing
-  this->texList   = glGenLists(BUFFER_COUNT);
-  this->mouseList = glGenLists(1);
-  this->spiceList = glGenLists(1);
+  this->texList       = glGenLists(BUFFER_COUNT);
+  this->mouseList     = glGenLists(1);
+  this->swSurfaceList = glGenLists(1);
 
   // create the overlay textures
   glGenTextures(TEXTURE_COUNT, this->textures);
@@ -527,8 +527,8 @@ bool opengl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   glClear(GL_COLOR_BUFFER_BIT);
 
   updateMouseShape(this);
-  if (this->spiceShow)
-    glCallList(this->spiceList);
+  if (this->showSwSurface)
+    glCallList(this->swSurfaceList);
   else
     glCallList(this->texList + this->texRIndex);
   drawMouse(this);
@@ -587,13 +587,14 @@ static void opengl_freeTexture(LG_Renderer * renderer, void * texture)
   glDeleteTextures(1, &tex);
 }
 
-static void opengl_spiceConfigure(LG_Renderer * renderer, int width, int height)
+static void opengl_swSurfaceConfigure(LG_Renderer * renderer,
+    int width, int height)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
-  this->spiceSize.x = width;
-  this->spiceSize.y = height;
+  this->swSurfaceSize.x = width;
+  this->swSurfaceSize.y = height;
 
-  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glBindTexture(GL_TEXTURE_2D, this->textures[SW_SURFACE_TEXTURE]);
   glTexImage2D
   (
     GL_TEXTURE_2D,
@@ -614,22 +615,26 @@ static void opengl_spiceConfigure(LG_Renderer * renderer, int width, int height)
   glBindTexture(GL_TEXTURE_2D, 0);
 
   // create the display lists
-  glNewList(this->spiceList, GL_COMPILE);
-    glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glNewList(this->swSurfaceList, GL_COMPILE);
+    glBindTexture(GL_TEXTURE_2D,
+        this->textures[SW_SURFACE_TEXTURE]);
     glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
     glBegin(GL_TRIANGLE_STRIP);
       glTexCoord2f(0.0f, 0.0f); glVertex2i(0, 0);
-      glTexCoord2f(1.0f, 0.0f); glVertex2i(this->spiceSize.x, 0);
-      glTexCoord2f(0.0f, 1.0f); glVertex2i(0, this->spiceSize.y);
+      glTexCoord2f(1.0f, 0.0f);
+      glVertex2i(this->swSurfaceSize.x, 0);
+      glTexCoord2f(0.0f, 1.0f);
+      glVertex2i(0, this->swSurfaceSize.y);
       glTexCoord2f(1.0f, 1.0f);
-      glVertex2i(this->spiceSize.x, this->spiceSize.y);
+      glVertex2i(
+          this->swSurfaceSize.x, this->swSurfaceSize.y);
     glEnd();
     glBindTexture(GL_TEXTURE_2D, 0);
   glEndList();
 }
 
-static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width,
-    int height, uint32_t color)
+static void opengl_swSurfaceDrawFill(LG_Renderer * renderer,
+    int x, int y, int width, int height, uint32_t color)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -638,31 +643,32 @@ static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width
 
   const int64_t right  = (int64_t)x + width;
   const int64_t bottom = (int64_t)y + height;
-  if (x >= this->spiceSize.x || y >= this->spiceSize.y ||
+  if (x >= this->swSurfaceSize.x ||
+      y >= this->swSurfaceSize.y ||
       right <= 0 || bottom <= 0)
     return;
 
   x      = x < 0 ? 0 : x;
   y      = y < 0 ? 0 : y;
-  width  = (right  > this->spiceSize.x ?
-      this->spiceSize.x : (int)right ) - x;
-  height = (bottom > this->spiceSize.y ?
-      this->spiceSize.y : (int)bottom) - y;
+  width  = (right  > this->swSurfaceSize.x ?
+      this->swSurfaceSize.x : (int)right ) - x;
+  height = (bottom > this->swSurfaceSize.y ?
+      this->swSurfaceSize.y : (int)bottom) - y;
 
-  /* this is a fairly hacky way to do this, but since it's only for the fallback
-   * spice display it's not really an issue */
+  /* This is a fairly hacky way to update a software surface, but it preserves
+   * the existing incremental fill behavior. */
 
   uint32_t * line = malloc((size_t)width * sizeof(*line));
   if (!line)
   {
-    DEBUG_ERROR("Failed to allocate SPICE fill row");
+    DEBUG_ERROR("Failed to allocate software surface fill row");
     return;
   }
 
   for(int i = 0; i < width; ++i)
     line[i] = color;
 
-  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glBindTexture(GL_TEXTURE_2D, this->textures[SW_SURFACE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
   glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
   for(int dy = 0; dy < height; ++dy)
@@ -682,8 +688,9 @@ static void opengl_spiceDrawFill(LG_Renderer * renderer, int x, int y, int width
   free(line);
 }
 
-static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int width,
-    int height, int stride, uint8_t * data, bool topDown)
+static void opengl_swSurfaceDrawBitmap(LG_Renderer * renderer,
+    int x, int y, int width, int height, int stride, uint8_t * data,
+    bool topDown)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
@@ -693,11 +700,11 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
 
   if (!topDown)
   {
-    // this is non-optimal but as spice is a fallback it's not too critical
+    // This is non-optimal, but the incremental surface is a fallback.
     uint8_t * line = malloc((size_t)stride);
     if (!line)
     {
-      DEBUG_ERROR("Failed to allocate SPICE bitmap row");
+      DEBUG_ERROR("Failed to allocate software surface bitmap row");
       return;
     }
 
@@ -714,7 +721,8 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
 
   const int64_t right  = (int64_t)x + width;
   const int64_t bottom = (int64_t)y + height;
-  if (x >= this->spiceSize.x || y >= this->spiceSize.y ||
+  if (x >= this->swSurfaceSize.x ||
+      y >= this->swSurfaceSize.y ||
       right <= 0 || bottom <= 0)
     return;
 
@@ -722,13 +730,13 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
   const int sourceY = y < 0 ? -y : 0;
   x      = x < 0 ? 0 : x;
   y      = y < 0 ? 0 : y;
-  width  = (right  > this->spiceSize.x ?
-      this->spiceSize.x : (int)right ) - x;
-  height = (bottom > this->spiceSize.y ?
-      this->spiceSize.y : (int)bottom) - y;
+  width  = (right  > this->swSurfaceSize.x ?
+      this->swSurfaceSize.x : (int)right ) - x;
+  height = (bottom > this->swSurfaceSize.y ?
+      this->swSurfaceSize.y : (int)bottom) - y;
   data  += (size_t)sourceY * stride + (size_t)sourceX * 4;
 
-  glBindTexture(GL_TEXTURE_2D, this->textures[SPICE_TEXTURE]);
+  glBindTexture(GL_TEXTURE_2D, this->textures[SW_SURFACE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
   glTexSubImage2D
@@ -746,36 +754,36 @@ static void opengl_spiceDrawBitmap(LG_Renderer * renderer, int x, int y, int wid
   glBindTexture(GL_TEXTURE_2D, 0);
 }
 
-static void opengl_spiceShow(LG_Renderer * renderer, bool show)
+static void opengl_swSurfaceShow(LG_Renderer * renderer, bool show)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
-  this->spiceShow = show;
+  this->showSwSurface = show;
 }
 
 const LG_RendererOps LGR_OpenGL =
 {
-  .getName       = opengl_getName,
-  .setup         = opengl_setup,
+  .getName             = opengl_getName,
+  .setup               = opengl_setup,
 
-  .create        = opengl_create,
-  .initialize    = opengl_initialize,
-  .deinitialize  = opengl_deinitialize,
-  .onRestart     = opengl_onRestart,
-  .onResize      = opengl_onResize,
-  .onFontUpdate  = opengl_onFontUpdate,
-  .onMouseShape  = opengl_onMouseShape,
-  .onMouseEvent  = opengl_onMouseEvent,
-  .onFrameFormat = opengl_onFrameFormat,
-  .onFrame       = opengl_onFrame,
-  .renderStartup = opengl_renderStartup,
-  .render        = opengl_render,
-  .createTexture = opengl_createTexture,
-  .freeTexture   = opengl_freeTexture,
+  .create              = opengl_create,
+  .initialize          = opengl_initialize,
+  .deinitialize        = opengl_deinitialize,
+  .onRestart           = opengl_onRestart,
+  .onResize            = opengl_onResize,
+  .onFontUpdate        = opengl_onFontUpdate,
+  .onMouseShape        = opengl_onMouseShape,
+  .onMouseEvent        = opengl_onMouseEvent,
+  .onFrameFormat       = opengl_onFrameFormat,
+  .onFrame             = opengl_onFrame,
+  .renderStartup       = opengl_renderStartup,
+  .render              = opengl_render,
+  .createTexture       = opengl_createTexture,
+  .freeTexture         = opengl_freeTexture,
 
-  .spiceConfigure  = opengl_spiceConfigure,
-  .spiceDrawFill   = opengl_spiceDrawFill,
-  .spiceDrawBitmap = opengl_spiceDrawBitmap,
-  .spiceShow       = opengl_spiceShow
+  .swSurfaceConfigure  = opengl_swSurfaceConfigure,
+  .swSurfaceDrawFill   = opengl_swSurfaceDrawFill,
+  .swSurfaceDrawBitmap = opengl_swSurfaceDrawBitmap,
+  .swSurfaceShow       = opengl_swSurfaceShow
 };
 
 static bool _checkGLError(unsigned int line, const char * name)

@@ -66,9 +66,11 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
     LG_RendererFrameToken * renderedFrameToken,
     uint64_t * effectsTime, EGL_Framebuffer * target);
 
-void egl_desktopSpiceConfigure(EGL_Desktop * desktop, int width, int height);
-void egl_desktopSpiceDrawFill(EGL_Desktop * desktop, int x, int y, int width,
-    int height, uint32_t color);
-void egl_desktopSpiceDrawBitmap(EGL_Desktop * desktop, int x, int y, int width,
-    int height, int stride, uint8_t * data, bool topDown);
-void egl_desktopSpiceShow(EGL_Desktop * desktop, bool show);
+void egl_desktopSwSurfaceConfigure(EGL_Desktop * desktop,
+    int width, int height);
+void egl_desktopSwSurfaceDrawFill(EGL_Desktop * desktop,
+    int x, int y, int width, int height, uint32_t color);
+void egl_desktopSwSurfaceDrawBitmap(EGL_Desktop * desktop,
+    int x, int y, int width, int height, int stride, uint8_t * data,
+    bool topDown);
+void egl_desktopSwSurfaceShow(EGL_Desktop * desktop, bool show);

@@ -29,7 +29,7 @@
 #include "overlays.h"
 
 struct ll * l_renderQueue = NULL;
-static bool l_showSpice;
+static bool l_showSwSurface;
 static bool l_surfaceFormatValid;
 static bool l_rendererSupportsNativeHDR;
 static LG_RendererFormat l_surfaceFormat;
@@ -43,10 +43,10 @@ static void updateSurfaceFormat(void)
   if (l_surfaceFormatValid)
     format = l_surfaceFormat;
 
-  if (l_showSpice)
+  if (l_showSwSurface)
   {
-    // The SPICE display is always 8-bit SDR, regardless of the last format
-    // received from the Looking Glass host.
+    // The software surface is always 8-bit SDR, regardless of the last frame
+    // format received from the active frame provider.
     format.hdr         = false;
     format.hdrPQ       = false;
     format.hdrMetadata = false;
@@ -80,7 +80,7 @@ static void updateSurfaceFormat(void)
 void renderQueue_init(void)
 {
   l_renderQueue               = ll_new();
-  l_showSpice                 = false;
+  l_showSwSurface             = false;
   l_surfaceFormatValid        = false;
   l_rendererSupportsNativeHDR = false;
   memset(&l_surfaceFormat, 0, sizeof(l_surfaceFormat));
@@ -100,56 +100,58 @@ void renderQueue_clear(void)
   RenderCommand * cmd;
   while(ll_shift(l_renderQueue, (void **)&cmd))
   {
-    if (cmd->op == SPICE_OP_DRAW_BITMAP)
-      free(cmd->spiceDrawBitmap.data);
+    if (cmd->op == SW_SURFACE_OP_DRAW_BITMAP)
+      free(cmd->swSurfaceDrawBitmap.data);
     free(cmd);
   }
 }
 
-void renderQueue_spiceConfigure(int width, int height)
+void renderQueue_swSurfaceConfigure(int width, int height)
 {
   RenderCommand * cmd = malloc(sizeof(*cmd));
-  cmd->op                    = SPICE_OP_CONFIGURE;
-  cmd->spiceConfigure.width  = width;
-  cmd->spiceConfigure.height = height;
+  cmd->op                        = SW_SURFACE_OP_CONFIGURE;
+  cmd->swSurfaceConfigure.width  = width;
+  cmd->swSurfaceConfigure.height = height;
   ll_push(l_renderQueue, cmd);
   app_invalidateWindow(true);
 }
 
-void renderQueue_spiceDrawFill(int x, int y, int width, int height,
+void renderQueue_swSurfaceDrawFill(int x, int y, int width, int height,
     uint32_t color)
 {
   RenderCommand * cmd = malloc(sizeof(*cmd));
-  cmd->op                   = SPICE_OP_DRAW_FILL;
-  cmd->spiceFillRect.x      = x;
-  cmd->spiceFillRect.y      = y;
-  cmd->spiceFillRect.width  = width;
-  cmd->spiceFillRect.height = height;
-  cmd->spiceFillRect.color  = color;
+  cmd->op                       = SW_SURFACE_OP_DRAW_FILL;
+  cmd->swSurfaceDrawFill.x      = x;
+  cmd->swSurfaceDrawFill.y      = y;
+  cmd->swSurfaceDrawFill.width  = width;
+  cmd->swSurfaceDrawFill.height = height;
+  cmd->swSurfaceDrawFill.color  = color;
   ll_push(l_renderQueue, cmd);
   app_invalidateWindow(true);
 }
 
-void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride,
-    void * data, bool topDown)
+void renderQueue_swSurfaceDrawBitmap(int x, int y, int width, int height,
+    int stride, void * data, bool topDown)
 {
   if (width <= 0 || height <= 0 || stride <= 0)
   {
     if (width < 0 || height < 0 || stride < 0)
-      DEBUG_ERROR("Invalid SPICE bitmap dimensions: %dx%d, stride: %d",
+      DEBUG_ERROR("Invalid software surface bitmap dimensions: "
+          "%dx%d, stride: %d",
           width, height, stride);
     return;
   }
 
   if (!data)
   {
-    DEBUG_ERROR("SPICE bitmap data is NULL");
+    DEBUG_ERROR("Software surface bitmap data is NULL");
     return;
   }
 
   if ((size_t)height > SIZE_MAX / (size_t)stride)
   {
-    DEBUG_ERROR("SPICE bitmap size overflows: height: %d, stride: %d",
+    DEBUG_ERROR("Software surface bitmap size overflows: "
+        "height: %d, stride: %d",
         height, stride);
     return;
   }
@@ -158,28 +160,29 @@ void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride
   RenderCommand * cmd = malloc(sizeof(*cmd));
   if (!cmd)
   {
-    DEBUG_ERROR("Failed to allocate SPICE bitmap command");
+    DEBUG_ERROR("Failed to allocate software surface bitmap command");
     return;
   }
 
   uint8_t * copy = malloc(size);
   if (!copy)
   {
-    DEBUG_ERROR("Failed to allocate %zu bytes for SPICE bitmap", size);
+    DEBUG_ERROR("Failed to allocate %zu bytes for software surface bitmap",
+        size);
     free(cmd);
     return;
   }
 
   memcpy(copy, data, size);
 
-  cmd->op                      = SPICE_OP_DRAW_BITMAP;
-  cmd->spiceDrawBitmap.x       = x;
-  cmd->spiceDrawBitmap.y       = y;
-  cmd->spiceDrawBitmap.width   = width;
-  cmd->spiceDrawBitmap.height  = height;
-  cmd->spiceDrawBitmap.stride  = stride;
-  cmd->spiceDrawBitmap.data    = copy;
-  cmd->spiceDrawBitmap.topDown = topDown;
+  cmd->op                          = SW_SURFACE_OP_DRAW_BITMAP;
+  cmd->swSurfaceDrawBitmap.x       = x;
+  cmd->swSurfaceDrawBitmap.y       = y;
+  cmd->swSurfaceDrawBitmap.width   = width;
+  cmd->swSurfaceDrawBitmap.height  = height;
+  cmd->swSurfaceDrawBitmap.stride  = stride;
+  cmd->swSurfaceDrawBitmap.data    = copy;
+  cmd->swSurfaceDrawBitmap.topDown = topDown;
 
   if (!ll_push(l_renderQueue, cmd))
   {
@@ -191,11 +194,11 @@ void renderQueue_spiceDrawBitmap(int x, int y, int width, int height, int stride
   app_invalidateWindow(true);
 }
 
-void renderQueue_spiceShow(bool show)
+void renderQueue_swSurfaceShow(bool show)
 {
   RenderCommand * cmd = malloc(sizeof(*cmd));
-  cmd->op             = SPICE_OP_SHOW;
-  cmd->spiceShow.show = show;
+  cmd->op                 = SW_SURFACE_OP_SHOW;
+  cmd->swSurfaceShow.show = show;
   ll_push(l_renderQueue, cmd);
   app_invalidateWindow(true);
 }
@@ -244,32 +247,33 @@ void renderQueue_process(void)
   {
     switch(cmd->op)
     {
-      case SPICE_OP_CONFIGURE:
-        RENDERER(spiceConfigure,
-            cmd->spiceConfigure.width, cmd->spiceConfigure.height);
+      case SW_SURFACE_OP_CONFIGURE:
+        RENDERER(swSurfaceConfigure,
+            cmd->swSurfaceConfigure.width,
+            cmd->swSurfaceConfigure.height);
         break;
 
-      case SPICE_OP_DRAW_FILL:
-        RENDERER(spiceDrawFill,
-            cmd->spiceFillRect.x    , cmd->spiceFillRect.y,
-            cmd->spiceFillRect.width, cmd->spiceFillRect.height,
-            cmd->spiceFillRect.color);
+      case SW_SURFACE_OP_DRAW_FILL:
+        RENDERER(swSurfaceDrawFill,
+            cmd->swSurfaceDrawFill.x    , cmd->swSurfaceDrawFill.y,
+            cmd->swSurfaceDrawFill.width, cmd->swSurfaceDrawFill.height,
+            cmd->swSurfaceDrawFill.color);
         break;
 
-      case SPICE_OP_DRAW_BITMAP:
-        RENDERER(spiceDrawBitmap,
-            cmd->spiceDrawBitmap.x     , cmd->spiceDrawBitmap.y,
-            cmd->spiceDrawBitmap.width , cmd->spiceDrawBitmap.height,
-            cmd->spiceDrawBitmap.stride, cmd->spiceDrawBitmap.data,
-            cmd->spiceDrawBitmap.topDown);
-        free(cmd->spiceDrawBitmap.data);
+      case SW_SURFACE_OP_DRAW_BITMAP:
+        RENDERER(swSurfaceDrawBitmap,
+            cmd->swSurfaceDrawBitmap.x     , cmd->swSurfaceDrawBitmap.y,
+            cmd->swSurfaceDrawBitmap.width , cmd->swSurfaceDrawBitmap.height,
+            cmd->swSurfaceDrawBitmap.stride, cmd->swSurfaceDrawBitmap.data,
+            cmd->swSurfaceDrawBitmap.topDown);
+        free(cmd->swSurfaceDrawBitmap.data);
         break;
 
-      case SPICE_OP_SHOW:
-        l_showSpice = cmd->spiceShow.show;
-        RENDERER(spiceShow, cmd->spiceShow.show);
+      case SW_SURFACE_OP_SHOW:
+        l_showSwSurface = cmd->swSurfaceShow.show;
+        RENDERER(swSurfaceShow, cmd->swSurfaceShow.show);
         updateSurfaceFormat();
-        if (cmd->spiceShow.show)
+        if (cmd->swSurfaceShow.show)
           overlaySplash_show(false);
         break;
 

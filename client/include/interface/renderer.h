@@ -28,23 +28,23 @@
 #include "common/framebuffer.h"
 
 #define IS_LG_RENDERER_VALID(x) \
-  ((x)->getName         && \
-   (x)->create          && \
-   (x)->initialize      && \
-   (x)->deinitialize    && \
-   (x)->onRestart       && \
-   (x)->onResize        && \
-   (x)->onFontUpdate    && \
-   (x)->onMouseShape    && \
-   (x)->onMouseEvent    && \
-   (x)->renderStartup   && \
-   (x)->render          && \
-   (x)->createTexture   && \
-   (x)->freeTexture     && \
-   (x)->spiceConfigure  && \
-   (x)->spiceDrawFill   && \
-   (x)->spiceDrawBitmap && \
-   (x)->spiceShow)
+  ((x)->getName             && \
+   (x)->create              && \
+   (x)->initialize          && \
+   (x)->deinitialize        && \
+   (x)->onRestart           && \
+   (x)->onResize            && \
+   (x)->onFontUpdate        && \
+   (x)->onMouseShape        && \
+   (x)->onMouseEvent        && \
+   (x)->renderStartup       && \
+   (x)->render              && \
+   (x)->createTexture       && \
+   (x)->freeTexture         && \
+   (x)->swSurfaceConfigure  && \
+   (x)->swSurfaceDrawFill   && \
+   (x)->swSurfaceDrawBitmap && \
+   (x)->swSurfaceShow)
 
 typedef struct LG_RendererParams
 {
@@ -300,19 +300,21 @@ typedef struct LG_RendererOps
    * Context: renderThread */
   void (*freeTexture)(LG_Renderer * renderer, void * texture);
 
-  /* setup the spice display */
-  void (*spiceConfigure)(LG_Renderer * renderer, int width, int height);
+  /* setup the incremental software surface */
+  void (*swSurfaceConfigure)(LG_Renderer * renderer,
+      int width, int height);
 
-  /* draw a filled rect on the spice display with the specified color */
-  void (*spiceDrawFill)(LG_Renderer * renderer, int x, int y, int width,
-      int height, uint32_t color);
+  /* draw a filled rect on the software surface with the specified color */
+  void (*swSurfaceDrawFill)(LG_Renderer * renderer,
+      int x, int y, int width, int height, uint32_t color);
 
-  /* draw an image on the spice display, data is RGBA32 */
-  void (*spiceDrawBitmap)(LG_Renderer * renderer, int x, int y, int width,
-      int height, int stride, uint8_t * data, bool topDown);
+  /* draw an image on the software surface, data is RGBA32 */
+  void (*swSurfaceDrawBitmap)(LG_Renderer * renderer,
+      int x, int y, int width, int height, int stride, uint8_t * data,
+      bool topDown);
 
-  /* show the spice display */
-  void (*spiceShow)(LG_Renderer * renderer, bool show);
+  /* show the incremental software surface */
+  void (*swSurfaceShow)(LG_Renderer * renderer, bool show);
 }
 LG_RendererOps;
 
