@@ -96,8 +96,8 @@ static bool controlReady(uint64_t now)
   if (now < l_frameScheduler.nextControlCheck)
     return false;
 
-  const LG_TransportStatus status = g_state.transportOps->controlStatus(
-      g_state.transport, l_frameScheduler.controlToken);
+  const LG_TransportStatus status = g_state.transport.ops->controlStatus(
+      g_state.transport.handle, l_frameScheduler.controlToken);
   if (status != LG_TRANSPORT_OK)
   {
     if (status != LG_TRANSPORT_UNAVAILABLE &&
@@ -155,8 +155,8 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
     },
   };
 
-  const LG_TransportStatus status = g_state.transportOps->sendControl(
-      g_state.transport, &control, &l_frameScheduler.controlToken);
+  const LG_TransportStatus status = g_state.transport.ops->sendControl(
+      g_state.transport.handle, &control, &l_frameScheduler.controlToken);
   if (status != LG_TRANSPORT_OK)
   {
     if (status != LG_TRANSPORT_UNAVAILABLE &&

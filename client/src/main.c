@@ -1027,8 +1027,8 @@ static int renderThread(void * unused)
   lgTimerDestroy(tickTimer);
   lgTimerDestroy(fpsTimer);
 
-  if (g_state.transport &&
-      g_state.transportOps->sessionValid(g_state.transport))
+  if (g_state.transport.handle &&
+      g_state.transport.ops->sessionValid(g_state.transport.handle))
   {
     lgInput_setTransport(NULL, NULL);
     lgAudio_setTransport(NULL, NULL);
@@ -1044,8 +1044,8 @@ static int renderThread(void * unused)
   core_stopCursorThread();
   core_stopFrameThread();
 
-  if (g_state.transportOps && g_state.transportOps->detachRenderer)
-    g_state.transportOps->detachRenderer(g_state.transport);
+  if (g_state.transport.ops && g_state.transport.ops->detachRenderer)
+    g_state.transport.ops->detachRenderer(g_state.transport.handle);
 
   RENDERER(deinitialize);
   g_state.lgr = NULL;
@@ -1066,8 +1066,8 @@ int main_cursorThread(void * unused)
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LG_TransportPointer pointer;
-    const LG_TransportStatus status = g_state.transportOps->nextPointer(
-        g_state.transport, &pointer);
+    const LG_TransportStatus status = g_state.transport.ops->nextPointer(
+        g_state.transport.handle, &pointer);
     if (status != LG_TRANSPORT_OK)
     {
       if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
@@ -1119,7 +1119,8 @@ int main_cursorThread(void * unused)
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
-          g_state.transportOps->releasePointer(g_state.transport, &pointer);
+          g_state.transport.ops->releasePointer(
+              g_state.transport.handle, &pointer);
           continue;
       }
 
@@ -1129,7 +1130,8 @@ int main_cursorThread(void * unused)
             pointer.pitch, pointer.shape))
       {
         DEBUG_ERROR("Failed to update mouse shape");
-        g_state.transportOps->releasePointer(g_state.transport, &pointer);
+        g_state.transport.ops->releasePointer(
+            g_state.transport.handle, &pointer);
         continue;
       }
       g_cursor.guest.hx = pointer.hx;
@@ -1190,11 +1192,11 @@ int main_cursorThread(void * unused)
           (g_params.mouseRedraw || contentChanged))))
       cursorRepaintRequest();
 
-    g_state.transportOps->releasePointer(g_state.transport, &pointer);
+    g_state.transport.ops->releasePointer(g_state.transport.handle, &pointer);
   }
 
-  if (g_state.transportOps->stopPointer)
-    g_state.transportOps->stopPointer(g_state.transport);
+  if (g_state.transport.ops->stopPointer)
+    g_state.transport.ops->stopPointer(g_state.transport.handle);
 
   return 0;
 }
@@ -1211,16 +1213,16 @@ int main_frameThread(void * unused)
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   if (app_getState() != APP_STATE_RUNNING)
   {
-    if (g_state.transportOps->stopFrame)
-      g_state.transportOps->stopFrame(g_state.transport);
+    if (g_state.transport.ops->stopFrame)
+      g_state.transport.ops->stopFrame(g_state.transport.handle);
     return 0;
   }
 
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LG_TransportFrame frame;
-    const LG_TransportStatus status = g_state.transportOps->nextFrame(
-        g_state.transport, g_state.useDMA, &frame);
+    const LG_TransportStatus status = g_state.transport.ops->nextFrame(
+        g_state.transport.handle, g_state.useDMA, &frame);
     if (status != LG_TRANSPORT_OK)
     {
       if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
@@ -1249,7 +1251,7 @@ int main_frameThread(void * unused)
     if (frame.serial == frameSerial && g_state.formatValid &&
         !frame.scheduleOwner)
     {
-      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
       continue;
     }
     frameSerial = frame.serial;
@@ -1259,7 +1261,7 @@ int main_frameThread(void * unused)
     if (!format)
     {
       DEBUG_ERROR("Transport returned a frame without format metadata");
-      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
@@ -1341,7 +1343,7 @@ int main_frameThread(void * unused)
       if (invalid)
       {
         DEBUG_ERROR("Unsupported frame type");
-        g_state.transportOps->releaseFrame(g_state.transport, &frame);
+        g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
@@ -1363,7 +1365,7 @@ int main_frameThread(void * unused)
       {
         LG_UNLOCK(g_state.lgrLock);
         DEBUG_ERROR("Renderer failed to configure format");
-        g_state.transportOps->releaseFrame(g_state.transport, &frame);
+        g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
@@ -1416,7 +1418,7 @@ int main_frameThread(void * unused)
           rendererOwnsFrame ? frame.releaseHandle : 0))
     {
       frameTimingCancel(frameToken);
-      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
       DEBUG_ERROR("Renderer onFrame returned failure");
       app_setState(APP_STATE_SHUTDOWN);
       break;
@@ -1426,9 +1428,9 @@ int main_frameThread(void * unused)
      * is signalled below, so sample producer timing while this lease is still
      * unambiguously owned by the frame thread. */
     LG_TransportFrameTiming timing = {};
-    if (g_state.transportOps->getFrameTiming)
-      g_state.transportOps->getFrameTiming(
-          g_state.transport, &frame, &timing);
+    if (g_state.transport.ops->getFrameTiming)
+      g_state.transport.ops->getFrameTiming(
+          g_state.transport.handle, &frame, &timing);
 
     const uint64_t queueStart = nanotime();
     atomic_fetch_add_explicit(&g_state.frameCount, 1, memory_order_relaxed);
@@ -1472,7 +1474,7 @@ int main_frameThread(void * unused)
     frameTimingFinishFrame(frameToken, &timing);
 
     if (!rendererOwnsFrame)
-      g_state.transportOps->releaseFrame(g_state.transport, &frame);
+      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
     app_useSpiceDisplay(false);
   }
 
@@ -1489,8 +1491,8 @@ int main_frameThread(void * unused)
 
   /* Renderer reset requests release for every asynchronous DMA snapshot.
    * Drain those requests before the transport unsubscribes or reconnects. */
-  if (g_state.transportOps->stopFrame)
-    g_state.transportOps->stopFrame(g_state.transport);
+  if (g_state.transport.ops->stopFrame)
+    g_state.transport.ops->stopFrame(g_state.transport.handle);
 
   return 0;
 }
@@ -2117,13 +2119,12 @@ static int lg_run(void)
   signal(SIGINT , intHandler);
   signal(SIGTERM, intHandler);
 
-  if (!lgTransport_create(g_params.transport, &g_state.transport,
-        &g_state.transportOps))
+  if (!lgTransport_create(g_params.transport, &g_state.transport))
   {
     DEBUG_ERROR("Failed to create transport: %s", g_params.transport);
     return -1;
   }
-  DEBUG_INFO("Using Transport: %s", g_state.transportOps->name);
+  DEBUG_INFO("Using Transport: %s", g_state.transport.ops->name);
 
   // setup the spice startup condition
   if (!(e_spice = lgCreateEvent(false, 0)))
@@ -2206,7 +2207,7 @@ static int lg_run(void)
     return -1;
   }
 
-  g_state.useDMA = g_state.transportOps->supportsDMA(g_state.transport);
+  g_state.useDMA = g_state.transport.ops->supportsDMA(g_state.transport.handle);
 
   // initialize the window dimensions at init for renderers
   g_state.windowW  = g_params.w;
@@ -2304,8 +2305,9 @@ static int lg_run(void)
   if (g_state.lgr->ops.getInterop &&
       g_state.lgr->ops.getInterop(g_state.lgr, &interop))
     interopPtr = &interop;
-  if (g_state.transportOps->attachRenderer &&
-      !g_state.transportOps->attachRenderer(g_state.transport, interopPtr))
+  if (g_state.transport.ops->attachRenderer &&
+      !g_state.transport.ops->attachRenderer(
+        g_state.transport.handle, interopPtr))
   {
     DEBUG_ERROR("Failed to attach the renderer to the transport");
     return -1;
@@ -2340,8 +2342,8 @@ restart:
     }
 
     struct TransportSessionProbe probe = {
-      .transport = g_state.transport,
-      .ops       = g_state.transportOps,
+      .transport = g_state.transport.handle,
+      .ops       = g_state.transport.ops,
       .done      = false,
     };
     LGThread * probeThread;
@@ -2475,20 +2477,22 @@ restart:
   frameScheduler_start(session.features);
 
   void              * inputOpaque = NULL;
-  const LG_InputOps * inputOps    = g_state.transportOps->getInputOps ?
-    g_state.transportOps->getInputOps(g_state.transport, &inputOpaque) : NULL;
+  const LG_InputOps * inputOps    = g_state.transport.ops->getInputOps ?
+    g_state.transport.ops->getInputOps(
+        g_state.transport.handle, &inputOpaque) : NULL;
   lgInput_setTransport(inputOps, inputOpaque);
 
   void              * audioOpaque = NULL;
-  const LG_AudioOps * audioOps    = g_state.transportOps->getAudioOps ?
-    g_state.transportOps->getAudioOps(g_state.transport, &audioOpaque) : NULL;
+  const LG_AudioOps * audioOps    = g_state.transport.ops->getAudioOps ?
+    g_state.transport.ops->getAudioOps(
+        g_state.transport.handle, &audioOpaque) : NULL;
   lgAudio_setTransport(audioOps, audioOpaque);
 
   void * clipboardOpaque = NULL;
   const LG_ClipboardOps * clipboardOps =
-    g_state.transportOps->getClipboardOps ?
-      g_state.transportOps->getClipboardOps(
-          g_state.transport, &clipboardOpaque) : NULL;
+    g_state.transport.ops->getClipboardOps ?
+      g_state.transport.ops->getClipboardOps(
+          g_state.transport.handle, &clipboardOpaque) : NULL;
   lgClipboard_setTransport(clipboardOps, clipboardOpaque);
 
   if (inputOps || lgInput_available())
@@ -2505,7 +2509,8 @@ restart:
 
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
-    if (unlikely(!g_state.transportOps->sessionValid(g_state.transport)))
+    if (unlikely(!g_state.transport.ops->sessionValid(
+          g_state.transport.handle)))
     {
       lgInput_dropTransport();
       lgAudio_dropTransport();
@@ -2533,7 +2538,7 @@ restart:
     lgInput_dropTransport();
     lgAudio_dropTransport();
     lgClipboard_dropTransport();
-    g_state.transportOps->disconnect(g_state.transport);
+    g_state.transport.ops->disconnect(g_state.transport.handle);
 
     app_setState(APP_STATE_RUNNING);
     lgInit();
@@ -2576,11 +2581,11 @@ static void lg_shutdown(void)
   }
   LG_LOCK_FREE(l_cursorRepaint.lock);
 
-  if (g_state.transportOps)
+  if (g_state.transport.ops)
   {
     lgInput_dropTransport();
-    if (g_state.transport &&
-        g_state.transportOps->sessionValid(g_state.transport))
+    if (g_state.transport.handle &&
+        g_state.transport.ops->sessionValid(g_state.transport.handle))
     {
       lgAudio_setTransport(NULL, NULL);
       lgClipboard_setTransport(NULL, NULL);
@@ -2590,7 +2595,7 @@ static void lg_shutdown(void)
       lgAudio_dropTransport();
       lgClipboard_dropTransport();
     }
-    g_state.transportOps->destroy(&g_state.transport);
+    lgTransport_destroy(&g_state.transport);
   }
 
   lgInput_free();

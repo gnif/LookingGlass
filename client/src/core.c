@@ -402,7 +402,7 @@ bool core_warpPointer(int x, int y, bool exiting)
 
 void core_onWindowSizeChanged(unsigned width, unsigned height)
 {
-  if (!g_state.transport ||
+  if (!g_state.transport.handle ||
       !(g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE))
     return;
 
@@ -416,8 +416,8 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
   };
 
   LG_TransportControlToken token;
-  const LG_TransportStatus status = g_state.transportOps->sendControl(
-      g_state.transport, &control, &token);
+  const LG_TransportStatus status = g_state.transport.ops->sendControl(
+      g_state.transport.handle, &control, &token);
   if (status != LG_TRANSPORT_OK && status != LG_TRANSPORT_UNAVAILABLE)
     DEBUG_WARN("Window-size control failed with status %d", status);
 }
@@ -940,8 +940,8 @@ void core_handleMouseNormal(double ex, double ey)
       };
 
       LG_TransportControlToken token;
-      LG_TransportStatus status = g_state.transportOps->sendControl(
-          g_state.transport, &control, &token);
+      LG_TransportStatus status = g_state.transport.ops->sendControl(
+          g_state.transport.handle, &control, &token);
       if (status != LG_TRANSPORT_OK)
       {
         DEBUG_WARN("Cursor-position control failed with status %d", status);
@@ -954,8 +954,8 @@ void core_handleMouseNormal(double ex, double ey)
         unsigned timeout = 200;
         do
         {
-          status = g_state.transportOps->controlStatus(g_state.transport,
-              token);
+          status = g_state.transport.ops->controlStatus(
+              g_state.transport.handle, token);
           if (status == LG_TRANSPORT_DISCONNECTED)
           {
             g_cursor.realigning = false;

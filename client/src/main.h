@@ -123,9 +123,8 @@ struct AppState
   LG_Lock              lgrLock;
   bool                 useDMA;
 
-  LG_Transport              * transport;
-  const LG_TransportOps     * transportOps;
-  LG_TransportFeatureFlags    transportFeatures;
+  LG_TransportInstance      transport;
+  LG_TransportFeatureFlags  transportFeatures;
 
   LGThread            * cursorThread;
   LGThread            * frameThread;

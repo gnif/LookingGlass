@@ -292,9 +292,16 @@ typedef struct LG_TransportOps
 }
 LG_TransportOps;
 
+typedef struct LG_TransportInstance
+{
+  LG_Transport          * handle;
+  const LG_TransportOps * ops;
+}
+LG_TransportInstance;
+
 void lgTransport_setup(void);
 bool lgTransport_isValid(const char * name);
-bool lgTransport_create(const char * name, LG_Transport ** transport,
-    const LG_TransportOps ** ops);
+bool lgTransport_create(const char * name, LG_TransportInstance * instance);
+void lgTransport_destroy(LG_TransportInstance * instance);
 
 #endif

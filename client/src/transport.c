@@ -40,20 +40,33 @@ bool lgTransport_isValid(const char * name)
   return false;
 }
 
-bool lgTransport_create(const char * name, LG_Transport ** transport,
-    const LG_TransportOps ** ops)
+bool lgTransport_create(const char * name, LG_TransportInstance * instance)
 {
+  if (!instance)
+    return false;
+
+  *instance = (LG_TransportInstance) { 0 };
   for (unsigned i = 0; i < LG_TRANSPORT_COUNT; ++i)
   {
     if (strcmp(LG_Transports[i]->name, name) != 0)
       continue;
 
-    if (!LG_Transports[i]->create(transport))
+    if (!LG_Transports[i]->create(&instance->handle))
       return false;
 
-    *ops = LG_Transports[i];
+    instance->ops = LG_Transports[i];
     return true;
   }
 
   return false;
+}
+
+void lgTransport_destroy(LG_TransportInstance * instance)
+{
+  if (!instance)
+    return;
+
+  if (instance->ops)
+    instance->ops->destroy(&instance->handle);
+  *instance = (LG_TransportInstance) { 0 };
 }
