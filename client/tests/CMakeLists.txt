@@ -102,6 +102,39 @@ set_tests_properties(wayland-motion-tests PROPERTIES
   TIMEOUT 10
 )
 
+if(ENABLE_WAYLAND)
+  add_executable(wayland-presentation-tests
+    wayland_presentation_test.c
+    ../displayservers/Wayland/presentation.c
+  )
+  add_dependencies(wayland-presentation-tests wayland_protocol)
+  target_include_directories(wayland-presentation-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/Wayland"
+    "${CMAKE_BINARY_DIR}/wayland"
+  )
+  target_link_libraries(wayland-presentation-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  set(WAYLAND_PRESENTATION_CASES
+    feedback-first
+    swap-first
+    discard
+    swap-fail
+    token-zero
+    invalid-time
+    free-pending
+  )
+  foreach(name IN LISTS WAYLAND_PRESENTATION_CASES)
+    add_test(NAME wayland-presentation-${name}
+      COMMAND wayland-presentation-tests ${name}
+    )
+    set_tests_properties(wayland-presentation-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
+
 add_executable(displayserver-input-tests
   displayserver_input_test.c
   ../displayservers/Wayland/input_event.c
