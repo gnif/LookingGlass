@@ -31,6 +31,118 @@ extern const EGL_TextureOps EGL_TextureBufferStream;
 
 // internal functions
 
+static uint64_t egl_texBufferDamageArea(const FrameDamageRect * rect)
+{
+  return (uint64_t)rect->width * rect->height;
+}
+
+static FrameDamageRect egl_texBufferDamageUnion(
+    const FrameDamageRect * a, const FrameDamageRect * b)
+{
+  const uint32_t left   = min(a->x, b->x);
+  const uint32_t top    = min(a->y, b->y);
+  const uint32_t right  = max(a->x + a->width, b->x + b->width);
+  const uint32_t bottom = max(a->y + a->height, b->y + b->height);
+
+  return (FrameDamageRect)
+  {
+    .x      = left,
+    .y      = top,
+    .width  = right  - left,
+    .height = bottom - top,
+  };
+}
+
+static bool egl_texBufferDamageTouches(const FrameDamageRect * a,
+    const FrameDamageRect * b)
+{
+  return a->x <= b->x + b->width  && b->x <= a->x + a->width &&
+         a->y <= b->y + b->height && b->y <= a->y + a->height;
+}
+
+static void egl_texBufferDamageAdd(TextureBuffer * this, int index,
+    const EGL_TexUpdate * update)
+{
+  EGL_TexBufferDamage * damage = &this->damage[index];
+  const EGL_TexFormat * format = &this->base.format;
+
+  if (damage->full)
+    return;
+
+  if (update->x == 0 && update->y == 0 &&
+      update->width  == format->width &&
+      update->height == format->height)
+  {
+    damage->full  = true;
+    damage->count = 0;
+    return;
+  }
+
+  FrameDamageRect rect =
+  {
+    .x      = update->x,
+    .y      = update->y,
+    .width  = update->width,
+    .height = update->height,
+  };
+
+  for (;;)
+  {
+    for (int i = 0; i < damage->count;)
+    {
+      if (!egl_texBufferDamageTouches(&rect, &damage->rects[i]))
+      {
+        ++i;
+        continue;
+      }
+
+      rect = egl_texBufferDamageUnion(&rect, &damage->rects[i]);
+      damage->rects[i] = damage->rects[--damage->count];
+      i = 0;
+    }
+
+    if (damage->count < EGL_TEX_BUFFER_DAMAGE_MAX)
+      break;
+
+    int      best     = 0;
+    uint64_t bestCost = UINT64_MAX;
+    for (int i = 0; i < damage->count; ++i)
+    {
+      const FrameDamageRect merged =
+        egl_texBufferDamageUnion(&rect, &damage->rects[i]);
+      const uint64_t cost = egl_texBufferDamageArea(&merged) -
+        egl_texBufferDamageArea(&damage->rects[i]);
+      if (cost < bestCost)
+      {
+        best     = i;
+        bestCost = cost;
+      }
+    }
+
+    rect = egl_texBufferDamageUnion(&rect, &damage->rects[best]);
+    damage->rects[best] = damage->rects[--damage->count];
+  }
+
+  damage->rects[damage->count++] = rect;
+
+  uint64_t area = 0;
+  for (int i = 0; i < damage->count; ++i)
+    area += egl_texBufferDamageArea(&damage->rects[i]);
+
+  const uint64_t fullArea = (uint64_t)format->width * format->height;
+  if (area * 4 >= fullArea * 3)
+  {
+    damage->full  = true;
+    damage->count = 0;
+  }
+}
+
+static void egl_texBufferDamageReset(EGL_TexBufferDamage * damage)
+{
+  damage->full  = false;
+  damage->count = 0;
+}
+
 static void egl_texBuffer_cleanup(TextureBuffer * this)
 {
   egl_texUtilFreeBuffers(this->buf, this->texCount);
@@ -116,6 +228,7 @@ bool egl_texBufferSetup(EGL_Texture * texture, const EGL_TexSetup * setup)
   {
     this->buf[i].updated = false;
     this->slotToken[i]   = LG_RENDERER_FRAME_TOKEN_NONE;
+    egl_texBufferDamageReset(&this->damage[i]);
   }
 
   return true;
@@ -271,6 +384,7 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
 
   this->slotToken[this->bufIndex]   = update->frameToken;
   this->buf[this->bufIndex].updated = true;
+  egl_texBufferDamageAdd(this, this->bufIndex, update);
   LG_UNLOCK(this->copyLock);
 
   return true;
@@ -314,13 +428,36 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
 
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, texture->format.stride);
-  glTexSubImage2D(GL_TEXTURE_2D,
-      0, 0, 0,
-      texture->format.width,
-      texture->format.height,
-      texture->format.format,
-      texture->format.dataType,
-      (const void *)0);
+
+  EGL_TexBufferDamage * damage = &this->damage[index];
+  if (this->texCount > 1 || damage->full || !damage->count)
+    glTexSubImage2D(GL_TEXTURE_2D,
+        0, 0, 0,
+        texture->format.width,
+        texture->format.height,
+        texture->format.format,
+        texture->format.dataType,
+        (const void *)0);
+  else
+    for (int i = 0; i < damage->count; ++i)
+    {
+      const FrameDamageRect * rect = &damage->rects[i];
+      const uintptr_t offset =
+        (uintptr_t)rect->y * texture->format.pitch +
+        (uintptr_t)rect->x * texture->format.bpp;
+      glTexSubImage2D(GL_TEXTURE_2D,
+          0,
+          rect->x,
+          rect->y,
+          rect->width,
+          rect->height,
+          texture->format.format,
+          texture->format.dataType,
+          (const void *)offset);
+    }
+
+  /* Keep damage intact until all of its upload commands have been issued. */
+  egl_texBufferDamageReset(damage);
   this->sync[index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   if (unlikely(!this->sync[index]))
   {

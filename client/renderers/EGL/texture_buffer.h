@@ -26,6 +26,15 @@
 #include "common/locking.h"
 
 #define EGL_TEX_BUFFER_MAX LGMP_Q_FRAME_BUFFER_LEN
+#define EGL_TEX_BUFFER_DAMAGE_MAX 16
+
+typedef struct EGL_TexBufferDamage
+{
+  bool            full;
+  int             count;
+  FrameDamageRect rects[EGL_TEX_BUFFER_DAMAGE_MAX];
+}
+EGL_TexBufferDamage;
 
 typedef struct TextureBuffer
 {
@@ -35,6 +44,7 @@ typedef struct TextureBuffer
   int                   texCount;
   GLuint                tex[EGL_TEX_BUFFER_MAX];
   EGL_TexBuffer         buf[EGL_TEX_BUFFER_MAX];
+  EGL_TexBufferDamage   damage[EGL_TEX_BUFFER_MAX];
   int                   bufFree;
   GLsync                sync[EGL_TEX_BUFFER_MAX];
   LG_RendererFrameToken slotToken[EGL_TEX_BUFFER_MAX];
