@@ -34,6 +34,32 @@ set_tests_properties(lgmp-transport-tests PROPERTIES
   TIMEOUT 10
 )
 
+add_executable(lgmp-frame-tests
+  lgmp_frame_test.c
+  ../src/kb_hid.c
+)
+target_link_libraries(lgmp-frame-tests
+  ${EXE_FLAGS}
+  transport_LGMP
+  lg_common
+  lgmp
+)
+set(LGMP_FRAME_CASES
+  malformed
+  serial-damage
+  lanes
+  leases
+  dma
+)
+foreach(name IN LISTS LGMP_FRAME_CASES)
+  add_test(NAME lgmp-frame-${name}
+    COMMAND lgmp-frame-tests ${name}
+  )
+  set_tests_properties(lgmp-frame-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(wayland-motion-tests
   motion_test.c
 )
