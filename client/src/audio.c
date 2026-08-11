@@ -2305,9 +2305,9 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   const int maxPeriodFrames =
     max(audio.playback.deviceMaxPeriodFrames, sourceData->devPeriodFrames);
   /* The device period, delivery jitter, packet phase, and resampler delay
-   * define the minimum viable latency. latencyOffset is strictly an additive
-   * user offset over that same minimum for both startup and steady state. */
-  const double latencyOffsetFrames =
+   * define the minimum viable latency. Provider feedback directly controls
+   * the source rate, so latencyOffset only applies to local rate control. */
+  const double latencyOffsetFrames = providerRateControl ? 0.0 :
     max(g_params.audioLatencyOffset, 0) *
       audio.playback.sampleRate / 1000.0;
   const double arrivalReserveFrames =

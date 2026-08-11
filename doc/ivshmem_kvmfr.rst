@@ -4,8 +4,8 @@
 IVSHMEM with the KVMFR module (Recommended)
 ###########################################
 
-The kernel module implements a basic interface to the IVSHMEM device
-for Looking Glass allowing DMA GPU transfers.
+The kernel module exposes IVSHMEM to Looking Glass and can export its frame
+buffers for direct GPU import.
 
 .. _ivshmem_kvmfr_prereq:
 
@@ -47,14 +47,14 @@ Using the value you should have already calculated as per
 
 .. code:: bash
 
-   modprobe kvmfr static_size_mb=32
+   modprobe kvmfr static_size_mb=64
 
 Alternatively you can make this setting permanent by creating the file
 ``/etc/modprobe.d/kvmfr.conf`` with the following content.
 
 .. code:: text
 
-   options kvmfr static_size_mb=32
+   options kvmfr static_size_mb=64
 
 After this has been done, simply running ``modprobe kvmfr`` is all that is
 required.
@@ -102,9 +102,11 @@ You should now also have the character device ``/dev/kvmfr0``
 
    If you start the VM prior to loading the module, QEMU will create the file
    ``/dev/kvmfr0`` as a regular file. You can confirm if this has happened by
-   running ``ls -l /dev/kvmfr0`` and checking if the file size is greater then
+   running ``ls -l /dev/kvmfr0`` and checking if the file size is greater than
    zero, or the permissions do not start with ``c``. If this has occurred, you
-   must delete the file and reload the module.
+   must stop the VM before deleting the regular file. Load the KVMFR module,
+   confirm that it recreated ``/dev/kvmfr0`` as a character device whose
+   permissions start with ``c``, then start the VM again.
 
 .. _ivhsmem_kvmfr_permissions:
 
@@ -165,7 +167,7 @@ should use this XML block to configure their VM for kvmfr:
      <qemu:arg value="-device"/>
      <qemu:arg value="{'driver':'ivshmem-plain','id':'shmem0','memdev':'looking-glass'}"/>
      <qemu:arg value="-object"/>
-     <qemu:arg value="{'qom-type':'memory-backend-file','id':'looking-glass','mem-path':'/dev/kvmfr0','size':33554432,'share':true}"/>
+     <qemu:arg value="{'qom-type':'memory-backend-file','id':'looking-glass','mem-path':'/dev/kvmfr0','size':67108864,'share':true}"/>
    </qemu:commandline>
 
 .. note::
@@ -186,7 +188,7 @@ legacy syntax for IVSHMEM setup:
      <qemu:arg value="-device"/>
      <qemu:arg value="ivshmem-plain,id=shmem0,memdev=looking-glass"/>
      <qemu:arg value="-object"/>
-     <qemu:arg value="memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes"/>
+     <qemu:arg value="memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=64M,share=yes"/>
    </qemu:commandline>
 
 .. note::
@@ -218,9 +220,9 @@ and add the following:
 cgroups
 ^^^^^^^
 
-Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the ``cgroup_device_acl``
-block, adding ``/dev/kvmfr0`` to the list. To make this change active you then
-must restart ``libvirtd``
+Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the
+``cgroup_device_acl`` block, adding ``/dev/kvmfr0`` to the list. Restart
+``libvirtd`` to apply it:
 
 .. code:: bash
 
@@ -235,10 +237,9 @@ If you are using QEMU directly without libvirt, add the following arguments to y
 ``qemu`` command line::
 
    -device ivshmem-plain,id=shmem0,memdev=looking-glass
-   -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=32M,share=yes
+   -object memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=64M,share=yes
 
 .. note::
 
    The ``size`` argument must be the same size you passed
    to the ``static_size_mb`` argument when loading the kernel module.
-

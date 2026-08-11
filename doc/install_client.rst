@@ -8,15 +8,21 @@ Client Application Installation
 For Linux
 ---------
 
-The Looking Glass client receives frames from the :ref:`host <host_install>` to
-display on your screen. It also handles input, and can optionally share the
-system clipboard with your guest OS through SPICE.
+The Looking Glass Client receives frames from the Windows producer and displays
+them on Linux. It also handles input, audio, overlays and optional SPICE
+services.
 
-First you must build the client from source, see :ref:`building`. Once you have
-built the client, you can install it. Run the following as root::
+There are currently no Linux distribution packages for the client. First
+:ref:`build it from source <build_client_section>`, then run the following from
+the client build directory as root::
 
    make install
 
-To install for the local user only, run::
+To install for the current user only, configure the build with a user-local
+prefix before installing::
 
-   cmake -DCMAKE_INSTALL_PREFIX=~/.local .. && make install
+   cmake -DCMAKE_INSTALL_PREFIX="$HOME/.local" ..
+   make install
+
+Ensure ``$HOME/.local/bin`` is in your ``PATH`` when using the user-local
+installation.

@@ -1,32 +1,49 @@
 # Debugging the Looking Glass Client
 
-If you are asked to provide debugging information to resolve an issue please
-follow the following procedure.
+Start by running `looking-glass-client` in a terminal and retain its complete
+output from startup through the fault. It records the selected transport,
+renderer, display server, import method and audio backend.
 
-## If you're experiencing a crash:
+## Crashes
 
-Run the program under the `gdb` debugger (you may need to install gdb), for
-example:
+Run the matching binary under `gdb`:
 
-    gdb ./looking-glass-client
+```text
+gdb ./looking-glass-client
+```
 
-If you need to set any arguments, do so now by running `set args ARGS`, for
-example:
+Set arguments when needed:
 
-    set args -F -k
+```text
+set args -F -k
+```
 
-Now start the program by typing `r`. When the application crashes you will be
-dumped back into the debugger, the application may appear to be frozen. Run
-the following command:
+Start with `run`. After the crash, collect every thread and local variable:
 
-    thread apply all bt
+```text
+thread apply all bt full
+```
 
-Once you have this information please pastebin the log from looking-glass as
-well as the information resulting from this command.
+Provide that output together with the complete client log. Keep
+`looking-glass-client.debug` from the same build; installed builds place it in
+the standard `bin/.debug` location.
 
-## If you're experencing high CPU load and/or poor performance.
+## Hangs or high CPU use
 
-The steps here are identical to the above, except instead of waiting for the
-program to crash, in the debugger press `CTRL+C` while the program is
-exhibiting the problem, then run `thread apply all bt` and pastebin your log
-and the results of the command.
+Run under `gdb` as above. While the fault is visible, press `Ctrl+C` in the
+debugger and collect:
+
+```text
+thread apply all bt full
+```
+
+For an intermittent stall, collect several samples rather than one. Include
+the frame-timing graph when it helps identify the affected stage.
+
+## IDD faults
+
+Use the Windows IDD helper to open
+`C:\ProgramData\Looking Glass (IDD)`. Collect the IDD, input, service and helper
+logs, including rotated `.1` through `.4` files when the fault happened before
+the latest restart. See the end-user IDD diagnostics page for the exact file
+names.

@@ -22,7 +22,7 @@ from lgrelease import release
 # -- Project information -----------------------------------------------------
 
 project = 'Looking Glass'
-copyright = '2024, Looking Glass team'
+copyright = '2026, Looking Glass team'
 author = 'Geoffrey McRae and the Looking Glass team'
 
 rst_prolog = """
@@ -55,7 +55,7 @@ else:
     spelling_word_list_filename = [os.path.join(os.path.dirname(__file__), 'words.txt')]
 
 # Add any paths that contain templates here, relative to this directory.
-# templates_path = ['_templates']
+templates_path = ['templates/']
 
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
@@ -78,10 +78,15 @@ html_unescape_onlyinclude = []
 # The theme to use for HTML and HTML Help pages.  See the documentation for
 # a list of builtin themes.
 #
-html_theme = 'sphinx_rtd_theme'
+html_theme = 'lookingglass'
+
+html_theme_path = [
+    'theme/',
+]
 
 html_theme_options = {
     'logo_only': True,
+    'prev_next_buttons_location': 'both',
     'style_nav_header_background': '#343131',
 }
 

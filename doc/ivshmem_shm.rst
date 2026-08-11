@@ -4,9 +4,9 @@
 IVSHMEM with standard shared memory
 ###################################
 
-This method is here for those that can not use the KVMFR kernel module. Please
-be aware that as a result you will not be able to take advantage of your GPUs
-ability to access memory via it's hardware DMA engine if you use this method.
+Use this method only when the KVMFR kernel module is unavailable. A standard
+shared-memory file cannot provide KVMFR's DMA-BUF export, so the client must
+copy the frame before uploading it to the host GPU.
 
 Add the following to your libvirt machine configuration inside the
 'devices' section by running ``virsh edit <VM>`` where ``<VM>`` is the name of
@@ -16,7 +16,7 @@ your virtual machine.
 
    <shmem name='looking-glass'>
      <model type='ivshmem-plain'/>
-     <size unit='M'>32</size>
+     <size unit='M'>64</size>
    </shmem>
 
 .. note::
@@ -29,18 +29,16 @@ your virtual machine.
   .. code:: bash
 
      -device ivshmem-plain,memdev=ivshmem,bus=pcie.0 \
-     -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=32M
+     -object memory-backend-file,id=ivshmem,share=on,mem-path=/dev/shm/looking-glass,size=64M
 
-The memory size (show as 32 in the example above) may need to be
-adjusted as per the :ref:`Determining memory <libvirt_determining_memory>`
-section.
+The example uses 64 MiB. Replace it with the value from
+:ref:`Determining memory <libvirt_determining_memory>` when using a larger
+resolution.
 
 .. warning::
-  If you change the size of this after starting your virtual machine you may
-  need to remove the file `/dev/shm/looking-glass` to allow QEMU to re-create
-  it with the correct size. If you do this the permissions of the file may be
-  incorrect for your user to be able to access it and you will need to correct
-  this. See :ref:`libvirt_shmfile_permissions`
+   Stop the VM before changing this size. You may need to remove the existing
+   ``/dev/shm/looking-glass`` file so QEMU can recreate it at the new size.
+   Check its permissions afterward; see :ref:`libvirt_shmfile_permissions`.
 
 .. _libvirt_shmfile_permissions:
 

@@ -1,66 +1,65 @@
-Technical FAQ
-#############
+Technical notes
+###############
 
-This FAQ is targeted at developers or technical people that want to
-know more about what's going on under the hood.
+This page explains a few implementation choices. It is not required for normal
+installation.
 
 .. _ivshmemshared_ram:
 
-IVSHMEM/Shared RAM
-------------------
+IVSHMEM and shared memory
+-------------------------
 
 .. _what_exactly_is_the_ivshmem_device:
 
-What exactly is the IVSHMEM device?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+What is the IVSHMEM device?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is a virtual device that maps a segment of shared memory into the
-guest via a BAR (Base Address Register). It also has additional features
-such as interrupt triggering for synchronization however we do not use
-these.
+IVSHMEM maps the same reserved memory into QEMU, the Windows guest and Linux.
+KVMFR provides the Linux character-device interface used by the client and OBS
+and can export regions for direct GPU import.
+
+The IDD stores frame queues, frame metadata, pointer updates and input protocol
+state in this region. It uses three frame buffers so a producer and multiple
+consumers can progress without overwriting a frame that is still in use.
 
 .. _what_is_the_ivshmem_device_being_used_for:
 
-What is the IVSHMEM device being used for?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Why is the allocation larger than one image?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-One might assume that we are simply using the device for the captured
-frames, this, however, is not entirely accurate. Looking Glass also
-needs to capture mouse shape changes (the mouse cursor), and mouse
-movement events and feed these back to the client to render. We need
-this additional information as we actually are rendering the cursor on
-the client-side, independent of the frame capture. This is why when you
-move your cursor around it doesn't affect the UPS, which is only
-counting frame updates.
+In addition to three aligned images, the region contains LGMP queues and GPU
+resource alignment. Use :ref:`libvirt_determining_memory` rather than
+multiplying width and height once.
 
 .. _why_do_you_need_the_mouse_positional_information:
 
-Why do you need the mouse positional information?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Why are there both absolute and relative mouse paths?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Windows has no notion of an absolute pointing device unless you are
-using a tablet, which does work, however, if you also want relative
-input for applications/games that require cursor capture, you need a
-relative input device such as a PS/2 mouse.
+Desktop interaction needs absolute positioning so the host and guest pointers
+stay aligned without capture. Games that lock the cursor need unbounded
+relative movement. The IDD exposes both and the client selects the appropriate
+path when capture mode changes.
 
-The problem is, due to the design of QEMU or the Windows mouse subsystem
-(not sure which), when the VM has both devices attached (which is the
-default for libvirt), mouse click events are always at the last location
-of the absolute positional device (tablet) even if the cursor has been
-moved with the relative input device.
-
-Because of this bug, we need to always operate in relative mouse input
-mode, and since factors like windows mouse acceleration, or cursor
-movement by a user application may occur in the guest, we need to pass
-this information back so the client can render the cursor in the correct
-location.
+SPICE fallback remains relative-only. Pointer position messages are also used
+to render the guest cursor independently from desktop frame updates.
 
 .. _why_does_lg_poll_for_updates_instead_of_using_interrupts:
 
-Why does LG poll for updates instead of using interrupts?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Why does Looking Glass poll for updates?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Initially, we were using interrupts in early designs however it became
-clear that the performance, especially for high update rate mice was
-extremely poor. This may have improved in recent QEMU versions and
-perhaps should be re-evaluated at some point.
+Polling avoids the high overhead and batching behavior seen with virtual
+interrupts, especially for high-rate pointer updates. The polling intervals
+are configurable for diagnosis, but lowering them without evidence increases
+CPU usage and does not guarantee lower latency.
+
+How does cadence reduce bandwidth?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Clients publish their presentation period and deadline in the shared protocol.
+The IDD prepares guest frames as they arrive, but transports only the newest
+frame needed for the fastest active consumer. Other consumers independently
+select the newest frame appropriate for their own rate. Clock-domain feedback
+is exchanged as periods and deadlines rather than comparing raw timestamps
+from Windows and Linux.

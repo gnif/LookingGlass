@@ -1,0 +1,20 @@
+{% extends "!footer.html" %}
+
+{% block extrafooter %}
+  {{ super() }}
+  {%- if hasdoc(pagename) and show_source %}
+    {%- if source_url_prefix %}
+      <p>
+        <a href="{{ source_url_prefix }}{{ pagename }}{{ page_source_suffix }}">
+          {{ _('View page source') }}
+        </a>
+      </p>
+    {%- elif has_source and sourcename %}
+      <p>
+        <a href="{{ pathto('_sources/' + sourcename, true)|e }}" rel="nofollow">
+          {{ _('View page source') }}
+        </a>
+      </p>
+    {%- endif %}
+  {%- endif %}
+{% endblock %}

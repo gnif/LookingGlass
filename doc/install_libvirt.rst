@@ -3,85 +3,64 @@
 libvirt/QEMU Installation
 #########################
 
-This article assumes you already have a fully functional `libvirt` domain with
-PCI passthrough working. If you use `virt-manager`, this guide also applies to
-you, since virt-manager uses `libvirt` as its back end.
+This article assumes you already have a working `libvirt` Windows virtual
+machine. If you use `virt-manager`, this guide also applies because
+`virt-manager` uses `libvirt` as its back end. A passed-through or virtual GPU
+is strongly recommended, but the IDD can start in software mode without one.
 
 .. _libvirt_determining_memory:
 
 Determining memory
 ^^^^^^^^^^^^^^^^^^
 
-You will first need to calculate the memory size to be suitable for your desired
-maximum resolution using the following formula:
+Calculate the base IVSHMEM requirement as:
 
 .. math::
 
-  \text{WIDTH} \times \text{HEIGHT} \times \text{BPP} \times 2 = \text{frame size in bytes}
+  \text{BASE SIZE} =
+  \left(\left\lceil\frac{\text{WIDTH} \times 4}{256}\right\rceil
+  \times 256\right) \times \text{HEIGHT} \times 3
 
-  \text{frame size in bytes} \div 1024 \div 1024 = \text{ frame size in MiB}
+Additional shared memory is required for protocol metadata and alignment. The
+values below include that requirement and are rounded up to a power of two.
 
-  \text{frame size in MiB} + 10 = \text{ required size in MiB}
-
-  2^{\lceil \log_2(\text {required size in MiB}) \rceil} = \text{ total MiB}
-
-Where `BPP` is 4 for 32-bit RGB (SDR) or 8 for 64-bit
-(HDR :ref:`* <libvirt_determining_memory_hdr>`).
-
-.. hint::
-  The final step in this calculation is simply rounding the value up to the
-  nearest power of two.
-
-For example, for a resolution of 1920x1080 (1080p) SDR:
-
-.. math::
-
-  1920 \times 1080 \times 4 \times 2 = 16,588,800 \text{ bytes}
-
-  16,588,800 \div 1024 \div 1024 = 15.82 \text{ MiB}
-
-  15.82 \text{ MiB} + 10 \text{ MiB} = 25.82 \text{ MiB}
-
-  2^{\lceil \log_2(25.82) \rceil} = 32 \text { MiB}
-
-
-Failure to provide enough memory will cause Looking Glass to truncate the
-bottom of the screen and will trigger a message popup to inform you of the size
-you need to increase the value to.
+If a configured mode does not fit, the IDD omits it from the Windows mode list.
+If a client-requested dynamic resolution does not fit, the helper refuses it
+and reports the minimum power-of-two size to configure. The current IDD does
+not publish a truncated frame.
 
 .. note::
-  Increasing this value beyond what you need does not yield any performance
-  improvements, it simply will block access to that RAM making it unusable by
-  your system.
+   Increasing this value beyond what you need does not improve performance. It
+   only reserves more host RAM for the VM.
 
-.. list-table:: Common Values
-  :widths: 50 25 25
-  :header-rows: 1
+.. list-table:: Common IDD values
+   :widths: 60 40
+   :header-rows: 1
 
-  * - Resolution
-    - Standard Dynamic Range
-    - High Dynamic Range (HDR) :ref:`* <libvirt_determining_memory_hdr>`
-  * - 1920x1080 (1080p)
-    - 32
-    - 64
-  * - 1920x1200 (1200p)
-    - 32
-    - 64
-  * - 2560x1440 (1440p)
-    - 64
-    - 128
-  * - 3840x2160 (2160p/4K)
-    - 128
-    - 256
+   * - Maximum resolution
+     - Total IVSHMEM size (MiB)
+   * - 1920x1080 (1080p)
+     - 64
+   * - 1920x1200
+     - 64
+   * - 2560x1440 (1440p)
+     - 128
+   * - 3440x1440
+     - 128
+   * - 3840x2160 (4K)
+     - 256
+   * - 5120x1440
+     - 128
+   * - 5120x2880 (5K)
+     - 256
+   * - 7680x4320 (8K)
+     - 512
 
 .. _libvirt_determining_memory_hdr:
 
-.. warning::
-  While Looking Glass can capture and display HDR, at the time of writing
-  neither Xorg or Wayland can make use of it and it will be converted by the
-  GPU drivers/hardware to SDR. Additionally using HDR doubles the amount of
-  memory, bandwidth, and CPU load and as such should generally not be used
-  unless you have a special reason to do so.
+HDR uses the same 32-bit IDD transport allocation as SDR, so it does not double
+the IVSHMEM requirement. Native Linux HDR presentation has separate compositor
+and display requirements; see :ref:`client_hdr`.
 
 .. _libvirt_ivshmem:
 
@@ -95,7 +74,7 @@ Looking Glass to use your GPUs DMA engine to transfer the frame data.
 
 .. toctree::
    :maxdepth: 1
-   
+
    ivshmem_kvmfr
    ivshmem_shm
 
@@ -109,36 +88,24 @@ Looking Glass to use your GPUs DMA engine to transfer the frame data.
 Keyboard/mouse/display/audio
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Looking Glass makes use of the SPICE protocol to provide keyboard and mouse
-input, audio input and output, and display fallback.
+The IDD provides the primary video, keyboard and mouse paths directly over
+LGMP. SPICE is optional, but is recommended for display fallback, clipboard
+and audio services.
 
 .. note::
-  The default configuration that libvirt uses is not optimal and must be
-  adjusted. Failure to perform these changes will cause input issues along
-  with failure to support 5 button mice.
+  The current client owns its SPICE connection and service settings. The
+  canonical options are ``spice:enable``, ``spice:input``,
+  ``spice:clipboard``, ``spice:audio`` and ``spice:usbAudio``.
 
-If you would like to use SPICE to give you keyboard and mouse input
-along with clipboard sync support, make sure you have a
-``<graphics type='spice'>`` device, then:
+Keep a ``<graphics type='spice'>`` device if you want these services. For a
+usable display fallback, set the VM's ``<video>`` model to ``vga``.
 
--  Find your ``<video>`` device, and set ``<model type='vga'/>``
+The direct IDD input path supports absolute desktop positioning, relative
+capture-mode input, keyboards, media keys and extended mouse buttons. SPICE
+fallback uses the VM's default PS/2 keyboard and mouse. Looking Glass does not
+require additional virtio keyboard, mouse or tablet devices for either path.
 
-   -  If you can't find it, make sure you have a ``<graphics>``
-      device, save and edit again.
-
--  Remove the ``<input type='tablet'/>`` device, if you have one.
--  Create an ``<input type='mouse' bus='virtio'/>`` device, if you don't
-   already have one.
--  Create an ``<input type='keyboard' bus='virtio'/>`` device to improve
-   keyboard usage.
-
-.. note::
-   Be sure to install the the *vioinput* driver from
-   `virtio-win <https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/>`_
-   in the guest
-
-To enable audio support add a standard Intel HDA audio device to your
-configuration as per below:
+For classic SPICE audio, add a standard Intel HDA audio device:
 
 .. code:: xml
 
@@ -147,8 +114,10 @@ configuration as per below:
   </sound>
   <audio id='1' type='spice'/>
 
-If you also want clipboard synchronization please see
-:ref:`libvirt_clipboard_synchronization`
+The recommended emulated USB audio path does not need this HDA device. It
+requires a SPICE USB channel and is covered in :ref:`client_usb_audio`. For
+clipboard synchronization, continue with
+:ref:`libvirt_clipboard_synchronization`.
 
 .. _libvirt_clipboard_synchronization:
 
@@ -191,7 +160,7 @@ need to add permissions for QEMU to access the shared memory file. This
 can be done by adding the following to
 ``/etc/apparmor.d/local/abstractions/libvirt-qemu``::
 
-   /dev/shm/looking-glass rw,
+   /dev/shm/looking-glass rw,
 
 then, restart AppArmor.
 
@@ -217,7 +186,7 @@ Find the ``<memballoon>`` tag and set its type to ``none``:
 
    <memballoon model="none"/>
 
-.. _host_install:
+.. _libvirt_additional_tuning:
 
 Additional tuning
 ^^^^^^^^^^^^^^^^^

@@ -1,23 +1,25 @@
 Looking Glass |release| documentation
 =====================================
 
-Looking Glass is an open-source application that allows the use of a KVM
-(Kernel-based Virtual Machine) configured for VGA PCI Pass-through
-without an attached physical monitor, keyboard or mouse. This is the
-final step required to move away from dual booting with other operating
-systems for legacy programs that require high-performance graphics.
+Looking Glass is an open-source, low-latency way to use a Windows virtual
+machine from Linux. The current setup uses a virtual display in the Windows
+guest, shared memory for frames, and a native Linux client for display and
+input.
 
 .. toctree::
    :maxdepth: 2
 
+   overview
    requirements
+   quickstart
+
    build
    install
+
    usage
    troubleshooting
    obs
    faq
-   tech_faq
 
 .. toctree::
    :hidden:
@@ -39,6 +41,20 @@ Donate:
 * `Ko-Fi <https://ko-fi.com/lookingglass>`_
 * `Patreon <https://www.patreon.com/gnif>`_
 * `PayPal <https://www.paypal.com/cgi-bin/webscr?cmd=_s-xclick&hosted_button_id=ESQ72XUPGKXRY>`_
-* BTC - 14ZFcYjsKPiVreHqcaekvHGL846u3ZuT13
-* ETH - 0x6f8aEe454384122bF9ed28f025FBCe2Bce98db85
-* XMR - 47xM4zG7b2tEj4mnSywHve4ydZzn3wzhf22snDRB7aSEcXrgUBpoT2Z4phTnyFMi1sMyQtHbdufMYRQ2PzMn3PGUJAE1dpc
+
+Expand a cryptocurrency address to copy it:
+
+.. raw:: html
+
+   <details class="donation-address">
+     <summary>Bitcoin (BTC)</summary>
+     <code>14ZFcYjsKPiVreHqcaekvHGL846u3ZuT13</code>
+   </details>
+   <details class="donation-address">
+     <summary>Ethereum (ETH)</summary>
+     <code>0x6f8aEe454384122bF9ed28f025FBCe2Bce98db85</code>
+   </details>
+   <details class="donation-address">
+     <summary>Monero (XMR)</summary>
+     <code>47xM4zG7b2tEj4mnSywHve4ydZzn3wzhf22snDRB7aSEcXrgUBpoT2Z4phTnyFMi1sMyQtHbdufMYRQ2PzMn3PGUJAE1dpc</code>
+   </details>

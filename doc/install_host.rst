@@ -1,17 +1,26 @@
 .. _installing_host:
+.. _host_install:
 
-Host Application Installation
-#############################
+Legacy Host Application installation
+####################################
 
-The Looking Glass Host application captures frames from the guest OS using a
+.. warning::
+
+   The Host Application is a legacy frame producer. New installations should
+   use the :doc:`Looking Glass IDD <install_idd>`.
+
+   B7 is the last recommended release when non-capture mouse input through the
+   Host Application is required. Use the matching B7 client and documentation
+   for that workflow. Do not combine a B7 Host with current components.
+
+The legacy Looking Glass Host Application captures frames from the guest using a
 capture API, and sends them to the
 :ref:`client <client_install>`—be it on the host OS (hypervisor) or another
 Virtual Machine—through a low-latency transfer protocol over shared memory.
 
 You can get the host program in two ways:
 
--  Download a pre-built binary from https://looking-glass.io/downloads
-   (**Recommended**)
+-  Download a matching legacy binary from https://looking-glass.io/downloads
 
 -  Download the source code as described in :ref:`building`, then
    :ref:`build the host <host_building>`.
@@ -79,3 +88,11 @@ Command line users can run ``looking-glass-host-setup.exe /S`` to execute a
 silent install with default options selected. Further configuration from the
 command line can be done with flags. You can list all available flags by
 running ``looking-glass-host-setup.exe /?``.
+
+Legacy configuration
+~~~~~~~~~~~~~~~~~~~~
+
+.. toctree::
+   :maxdepth: 1
+
+   host_usage

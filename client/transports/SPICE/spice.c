@@ -86,9 +86,9 @@ static void spiceSetup(void)
     {
       .module       = "spice",
       .name         = "usbAudio",
-      .description  = "Use USB redirection for SPICE audio playback",
+      .description  = "Use the emulated USB audio device",
       .type         = OPTION_TYPE_BOOL,
-      .value.x_bool = false
+      .value.x_bool = true
     },
     {0}
   };

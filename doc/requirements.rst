@@ -1,97 +1,103 @@
 .. _requirements:
 
-Requirements
-############
+Requirements and compatibility
+##############################
 
 .. _minimum:
 
-Minimum
--------
+Required
+--------
 
-The most basic requirement to make use of Looking Glass is to have a system
-with two GPUs, the following configurations are valid:
+Linux host
+   A Linux system capable of running KVM/QEMU and building the Looking Glass
+   Client. The client requires an EGL-capable graphics driver. X11 and Wayland
+   are supported. For a responsive passthrough setup, use at least six CPU
+   cores with twelve hardware threads.
 
-* Two discrete GPUs (dGPU)
-* A discrete GPU and an integrated (iGPU) such as is common in laptops.
-* A discrete GPU or iGPU and a virtual GPU (vGPU) as supported by some
-  hardware.
+Windows guest
+   A Windows 10 version 1803 or newer, or Windows 11, virtual machine. The
+   recommended IDD path can create its own virtual monitor and does not require
+   a physical monitor or dummy plug.
 
-.. note::
-  Please be aware that iGPU users may be limited in the resolution and refresh
-  rate possible with Looking Glass due to the memory bandwidth limitations
-  imposed due to the iGPU sharing system RAM for GPU usage.
+Shared memory
+   An IVSHMEM device large enough for the maximum guest resolution. The KVMFR
+   kernel module is recommended and is required for direct GPU imports.
 
-Looking Glass aims to achieve the lowest possible latency and as such it
-is important that you do not overload your system. The minimum recommended CPU
-to obtain a decent experience with Looking Glass is 6 cores or more, with
-Hyper-threading (>= 12 threads).
+Matching components
+   Use the current client, IDD and OBS plugin from the same Looking Glass
+   release. A protocol version mismatch is not supported. Legacy Host users
+   must use the complete matching B7 stack described below.
 
-PCIe bandwidth can also be a limiting factor, as such both GPUs should have a
-minimum of 8 lanes (x8) at PCIe3 speeds, or 4 lanes (x4) at PCIe4 speeds.
-
-.. _connected_display:
-
-Connected Display
-^^^^^^^^^^^^^^^^^
-
-The GPU used for the guest virtual machine must have either a physical monitor
-attached to it, or a cheap dummy plug. The guest operating system (most notably
-Windows) will disable the GPU output if there is nothing attached to it and
-Looking Glass will not be able to function. If you are using a vGPU the virtual
-device should already have a virtual monitor attached to it negating this
-requirement.
+The IDD can fall back to software processing if the Windows guest has no
+suitable render GPU. This is useful for compatibility, but hardware processing
+is strongly recommended for lower latency and higher frame rates. Software
+mode is SDR-only and does not provide the same performance as the GPU path.
 
 .. _recommended:
 
 Recommended
 -----------
 
-At this time the recommended configuration is as follows:
+For a responsive high-resolution setup, use:
 
-* CPU 8 cores (16 threads) or better @ 3.0GHz or faster (full cores, not
-  efficiency cores).
+* a host CPU with eight cores and sixteen threads or better, with full
+  performance cores around 3 GHz or faster;
+* KVMFR rather than a plain shared-memory file;
+* a host GPU and driver that support direct DMA imports;
+* a hardware render adapter in the Windows guest; and
+* enough memory bandwidth for the chosen resolution and refresh rate.
 
-* Two discrete GPUs consisting of:
+Do not assign every CPU core to the guest. Reserve at least two physical CPU
+cores, or four threads, for Linux. Looking Glass, QEMU, the Linux desktop and
+audio server all need host CPU time. High refresh rates also raise
+shared-memory and GPU bandwidth requirements.
 
-  * AMD or Intel brand GPU for the client application (usually your host system).
-  * NVIDIA brand GPU for the guest system (virtual machine).
+For a passed-through GPU, PCIe bandwidth can also limit performance. Use at
+least eight PCIe 3.0 lanes or four PCIe 4.0 lanes where practical.
 
-AMD or Intel for the client
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _connected_display:
 
-AMD and Intel both support the `DMABUF` feature which enables offloading memory
-transfers to the GPU hardware. Please note that making use of this feature
-requires :doc:`loading the KVMFR kernel module <ivshmem_kvmfr>`.
+Physical display and dummy plugs
+--------------------------------
 
-Additionally AMD GPUs suffer stability issues when operating as a passthrough
-device and as such we do not recommend their usage for such purposes. Models of
-note that have issues include but are not limited to the entire Polaris, Vega,
-Navi and BigNavi GPU series. Vega and Navi are notably the worst and should be
-avoided for virtualization usage.
+The recommended IDD does not require a physical display or dummy plug. It
+creates a virtual Windows monitor, including on systems without a
+passed-through display output.
 
-NVIDIA for the guest
-^^^^^^^^^^^^^^^^^^^^
-
-NVIDIA unlike AMD do not seem to suffer from the same stability issues as AMD
-GPUs when operating as a passthrough GPU, however due to the closed source
-nature of their drivers NVIDIA can not make use of the DMABUF feature in the
-Linux kernel unless you use the open source NVIDIA drivers.
+A physical display, dummy plug or another virtual monitor is only required
+when using the :doc:`legacy Host Application <install_host>`, because that
+application captures an existing Windows display.
 
 .. _igpu_kvmfr_recommended:
 
-iGPUs should use DMABUF
-^^^^^^^^^^^^^^^^^^^^^^^
+Host GPU notes
+--------------
 
-While `DMABUF` with the :doc:`KVMFR module <ivshmem_kvmfr>` offers performance
-benefits for all users, for the often bandwidth-starved users with an iGPU on
-their host it's considered a requirement for a decent experience.
+AMD and Intel host GPUs commonly support the DMA-BUF path used by KVMFR. This
+can reduce CPU work and avoid an extra system-memory copy. It is particularly
+important for integrated GPUs, which already share memory bandwidth with the
+CPU.
 
-When using a normal SHM file, many GPU drivers will copy incoming frames from
-shared memory to an intermediary buffer, then upload it from that buffer to the
-GPU's framebuffer. The KVMFR module will instead use Direct Memory Access (DMA)
-to download incoming frames directly from shared memory, which may depending on
-GPU design eliminate the intermediary buffer. This is especially helpful to iGPU
-users as it frees up RAM bandwidth, which an iGPU already uses extensively.
+NVIDIA host GPUs require a driver configuration that supports DMA-BUF import.
+If direct import is unavailable, the client falls back to a software copy.
+Looking Glass still works, but uses more CPU and memory bandwidth.
 
-An added benefit: since the upload is done with the iGPU, the CPU load is
-reduced as the upload does not use processor cores.
+Windows and HDR
+---------------
+
+Windows 10 remains supported. Current HDR and wide-color-gamut display features
+depend on newer IddCx interfaces that the driver checks at runtime, so they are
+normally available only on a compatible Windows 11 installation. The IDD
+continues to use its SDR-compatible path when those interfaces are unavailable.
+
+Native HDR presentation on Linux requires the EGL renderer, Wayland
+``color-management-v1`` support in the compositor, and an HDR-capable output.
+When native HDR is unavailable, the client can map HDR content to SDR.
+
+Legacy Host compatibility
+-------------------------
+
+The Windows Host Application is no longer the recommended producer. B7 is the
+last recommended version for users who require its non-capture mouse input
+workflow. Use the complete matching B7 stack for that workflow rather than
+mixing B7 and current components.

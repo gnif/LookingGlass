@@ -1,22 +1,39 @@
-/* Center content in the RTD theme */
-@media screen and (min-width: 1100px) {
+/* Align content with the navigation menu */
+@media screen and (min-width: 769px) {
   .wy-nav-content-wrap {
-    margin-left: auto;
-  }
-
-  .wy-nav-content {
-    margin: auto;
-  }
-}
-
-@media screen and (min-width:769px) and (max-width:1420px) {
-  .wy-nav-content-wrap {
+    background: #edf0f2;
     margin-left: 300px;
+    padding-left: 12px;
   }
 
   .wy-nav-content {
     margin: 0;
   }
+}
+
+/* Allow documentation tables to wrap long descriptions */
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+  white-space: normal;
+}
+
+/* Keep cryptocurrency donation addresses compact and copyable */
+.donation-address {
+  margin: .5em 0;
+}
+
+.donation-address summary {
+  cursor: pointer;
+}
+
+.donation-address code {
+  display: block;
+  margin-top: .5em;
+  overflow-wrap: anywhere;
+  padding: .5em;
+  user-select: all;
+  white-space: normal;
+  word-break: break-all;
 }
 
 /* Make <kbd> look like a key */
@@ -31,4 +48,341 @@ kbd {
   line-height: 1;
   padding: 2px 4px;
   white-space: nowrap;
+}
+
+/* Follow the system colour preference */
+@media screen and (prefers-color-scheme: dark) {
+  html {
+    color-scheme: dark;
+  }
+
+  body,
+  .wy-body-for-nav,
+  .wy-nav-content-wrap {
+    background: #0d1117;
+    color: #c9d1d9;
+  }
+
+  .wy-nav-content {
+    background: #161b22;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  .rst-content .toc-backref,
+  .rst-content code.xref,
+  .rst-content tt.xref {
+    color: #f0f6fc;
+  }
+
+  .rst-content a {
+    color: #58a6ff;
+  }
+
+  .rst-content a:visited {
+    color: #bc8cff;
+  }
+
+  .rst-content a:hover,
+  .rst-content a:focus {
+    color: #79c0ff;
+  }
+
+  hr {
+    border-color: #30363d;
+  }
+
+  footer,
+  .rst-content table.docutils.footnote,
+  html.writer-html4 .rst-content table.docutils.citation,
+  html.writer-html5 .rst-content aside.footnote,
+  html.writer-html5 .rst-content aside.footnote-list aside.footnote,
+  html.writer-html5 .rst-content div.citation-list > div.citation,
+  html.writer-html5 .rst-content dl.citation,
+  html.writer-html5 .rst-content dl.footnote {
+    color: #8b949e;
+  }
+
+  .btn-neutral,
+  .btn-neutral:visited {
+    background-color: #21262d !important;
+    color: #f0f6fc !important;
+  }
+
+  .btn-neutral:hover {
+    background-color: #30363d !important;
+    color: #fff !important;
+  }
+
+  label,
+  .wy-checkbox,
+  .wy-radio,
+  .wy-text-neutral {
+    color: #c9d1d9 !important;
+  }
+
+  input,
+  select,
+  textarea,
+  .wy-side-nav-search input[type="text"] {
+    background-color: #0d1117;
+    border-color: #484f58;
+    box-shadow: inset 0 1px 3px #010409;
+    color: #f0f6fc;
+  }
+
+  input[disabled],
+  input[readonly],
+  select[disabled],
+  select[readonly],
+  textarea[disabled],
+  textarea[readonly] {
+    background-color: #21262d !important;
+    color: #8b949e;
+  }
+
+  .wy-nav-side,
+  .wy-side-scroll {
+    background: #161b22;
+  }
+
+  .wy-menu-vertical li.current {
+    background: #21262d;
+  }
+
+  .wy-menu-vertical li.current a {
+    border-color: #30363d;
+    color: #c9d1d9;
+  }
+
+  .wy-menu-vertical li.current a:hover,
+  .wy-menu-vertical li.current > a,
+  .wy-menu-vertical li.on a,
+  .wy-menu-vertical li.current > a:hover,
+  .wy-menu-vertical li.on a:hover {
+    background: #30363d;
+    color: #f0f6fc;
+  }
+
+  .wy-menu-vertical li.toctree-l1.current > a {
+    border-color: #484f58;
+  }
+
+  .wy-menu-vertical li.toctree-l2.current > a,
+  .wy-menu-vertical li.toctree-l2.current li.toctree-l3 > a,
+  .wy-menu-vertical li.toctree-l3.current > a,
+  .wy-menu-vertical li.toctree-l3.current li.toctree-l4 > a {
+    background: #262c36;
+    color: #f0f6fc;
+  }
+
+  .wy-menu-vertical li.current > a button.toctree-expand,
+  .wy-menu-vertical li.on a button.toctree-expand,
+  .wy-menu-vertical li button.toctree-expand {
+    color: #8b949e;
+  }
+
+  .wy-dropdown-menu,
+  .wy-dropdown.wy-dropdown-bubble .wy-dropdown-menu {
+    background: #21262d;
+    border-color: #484f58;
+  }
+
+  .wy-dropdown-menu > dd > a {
+    color: #c9d1d9;
+  }
+
+  .wy-dropdown-menu > dd.call-to-action,
+  .wy-dropdown-menu > dd.call-to-action:hover {
+    background: #30363d;
+  }
+
+  .rst-content code,
+  .rst-content code.literal,
+  .rst-content tt,
+  code,
+  .donation-address code {
+    background: #0d1117;
+    border-color: #30363d;
+    color: #ff7b72;
+  }
+
+  .rst-content a code,
+  .rst-content a tt {
+    color: inherit;
+  }
+
+  .rst-content div[class^="highlight"],
+  .rst-content pre.literal-block {
+    background: #0d1117;
+    border-color: #30363d;
+  }
+
+  .rst-content div.highlight span.linenos {
+    border-color: #30363d;
+  }
+
+  .rst-content .admonition,
+  .rst-content .admonition-todo,
+  .rst-content .attention,
+  .rst-content .caution,
+  .rst-content .danger,
+  .rst-content .error,
+  .rst-content .hint,
+  .rst-content .important,
+  .rst-content .note,
+  .rst-content .seealso,
+  .rst-content .tip,
+  .rst-content .warning,
+  .wy-alert {
+    background: #21262d;
+  }
+
+  .rst-content .admonition-title,
+  .wy-alert-title {
+    background: #1f6feb;
+    color: #fff;
+  }
+
+  .rst-content .danger .admonition-title,
+  .rst-content .danger .wy-alert-title,
+  .rst-content .error .admonition-title,
+  .rst-content .error .wy-alert-title {
+    background: #b62324;
+  }
+
+  .rst-content .admonition-todo .admonition-title,
+  .rst-content .admonition-todo .wy-alert-title,
+  .rst-content .attention .admonition-title,
+  .rst-content .attention .wy-alert-title,
+  .rst-content .caution .admonition-title,
+  .rst-content .caution .wy-alert-title,
+  .rst-content .warning .admonition-title,
+  .rst-content .warning .wy-alert-title {
+    background: #9a6700;
+  }
+
+  .rst-content .hint .admonition-title,
+  .rst-content .hint .wy-alert-title,
+  .rst-content .important .admonition-title,
+  .rst-content .important .wy-alert-title,
+  .rst-content .tip .admonition-title,
+  .rst-content .tip .wy-alert-title {
+    background: #238636;
+  }
+
+  .rst-content .admonition table,
+  .rst-content .admonition table td,
+  .rst-content .admonition table th {
+    border-color: #484f58 !important;
+  }
+
+  .rst-content table.docutils caption,
+  .rst-content table.field-list caption,
+  .wy-table caption,
+  .rst-content table.docutils thead,
+  .rst-content table.field-list thead,
+  .wy-table thead {
+    color: #f0f6fc;
+  }
+
+  .rst-content table.docutils,
+  .rst-content table.docutils td,
+  .rst-content table.docutils th,
+  .wy-table-bordered,
+  .wy-table-bordered-all,
+  .wy-table-bordered-all td,
+  .wy-table-bordered-rows td,
+  .wy-table-horizontal td,
+  .wy-table-horizontal th,
+  html.writer-html5 .rst-content table.docutils th {
+    border-color: #30363d;
+  }
+
+  .rst-content table.docutils:not(.field-list) tr:nth-child(2n-1) td,
+  .wy-table-backed,
+  .wy-table-odd td,
+  .wy-table-striped tr:nth-child(2n-1) td {
+    background-color: #1c2128;
+  }
+
+  .rst-content .sidebar {
+    background: #21262d;
+    border-color: #30363d;
+  }
+
+  .rst-content .sidebar .sidebar-title {
+    background: #30363d;
+  }
+
+  #search-results .search li {
+    border-color: #30363d;
+  }
+
+  .rst-content .highlighted {
+    background: #9a6700;
+    box-shadow: 0 0 0 2px #9a6700;
+    color: #fff;
+  }
+
+  .rst-content .guilabel,
+  .rst-content .menuselection,
+  html.writer-html4 .rst-content dl:not(.docutils) > dt,
+  html.writer-html5 .rst-content dl[class]:not(.option-list):not(.field-list):not(.footnote):not(.citation):not(.glossary):not(.simple) > dt {
+    background: #21262d;
+    border-color: #388bfd;
+    color: #79c0ff;
+  }
+
+  html.writer-html4 .rst-content dl:not(.docutils) dl:not(.option-list):not(.field-list):not(.footnote):not(.citation):not(.glossary):not(.simple) > dt,
+  html.writer-html5 .rst-content dl[class]:not(.option-list):not(.field-list):not(.footnote):not(.citation):not(.glossary):not(.simple) dl:not(.option-list):not(.field-list):not(.footnote):not(.citation):not(.glossary):not(.simple) > dt {
+    background: #1c2128;
+    border-color: #484f58;
+    color: #c9d1d9;
+  }
+
+  .rst-content dl dt .headerlink,
+  .rst-content .descclassname,
+  .rst-content .descname,
+  .rst-content .sig-name,
+  .rst-content .optional {
+    color: #f0f6fc !important;
+  }
+
+  .rst-content table.docutils.footnote code,
+  .rst-content table.docutils.footnote tt,
+  html.writer-html4 .rst-content table.docutils.citation code,
+  html.writer-html4 .rst-content table.docutils.citation tt,
+  html.writer-html5 .rst-content aside.footnote code,
+  html.writer-html5 .rst-content aside.footnote tt,
+  html.writer-html5 .rst-content div.citation-list > div.citation code,
+  html.writer-html5 .rst-content div.citation-list > div.citation tt,
+  html.writer-html5 .rst-content dl.citation code,
+  html.writer-html5 .rst-content dl.citation tt,
+  html.writer-html5 .rst-content dl.footnote code,
+  html.writer-html5 .rst-content dl.footnote tt {
+    color: #8b949e;
+  }
+
+  .rst-content :not(dl.option-list) > :not(dt):not(kbd):not(.kbd) > .kbd,
+  .rst-content :not(dl.option-list) > :not(dt):not(kbd):not(.kbd) > kbd,
+  kbd {
+    background-color: #21262d;
+    border-color: #484f58;
+    box-shadow: 0 1px 0 #0d1117;
+    color: #f0f6fc;
+  }
+
+  span[id*="MathJax-Span"] {
+    color: #c9d1d9;
+  }
+
+  .breadcrumb-item:before,
+  .wy-breadcrumbs-extra {
+    color: #8b949e;
+  }
 }

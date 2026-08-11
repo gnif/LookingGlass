@@ -1,11 +1,11 @@
 .. _building:
 
-Building
-########
+Build the Linux client
+######################
 
-The following instructions will help you build Looking Glass from source code.
-Before attempting this, you should have a basic understanding of
-how to use the shell.
+The Looking Glass Client is currently distributed as source code. Building it
+is a normal part of installation, not an optional developer step. These
+instructions require basic familiarity with a Linux shell.
 
 .. _download_source:
 
@@ -32,8 +32,10 @@ Developers can clone the source code repo with ``git``.
 
 .. note::
 
-   When using the latest bleeding-edge client version,
-   you *MUST* download and install the corresponding host application.
+   The current client, IDD and OBS plugin must come from the same Looking Glass
+   release. Bleeding-edge builds must be paired with their matching
+   bleeding-edge components. Legacy Host users must instead use the complete
+   matching B7 stack described in :ref:`legacy_host_policy`.
 
 .. _build_client_section:
 
@@ -75,6 +77,7 @@ Required dependencies
 -  ``libfontconfig-dev``
 -  ``libgmp-dev``
 -  ``libspice-protocol-dev``
+-  ``libxkbcommon-dev``
 -  ``make``
 -  ``nettle-dev``
 -  ``pkg-config``
@@ -101,10 +104,10 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libxss-dev``
    -  ``libxcursor-dev``
    -  ``libxpresent-dev``
+   -  ``libxrandr-dev``
 
 -  Disable with ``cmake -DENABLE_WAYLAND=no ..``
 
-   -  ``libxkbcommon-dev``
    -  ``libwayland-bin``
    -  ``libwayland-dev``
 
@@ -113,6 +116,7 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libpipewire-0.3-dev``
    -  ``libpulse-dev``
    -  ``libsamplerate0-dev``
+   -  ``libusbredirparser-dev``
 
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
@@ -121,6 +125,10 @@ feature is disabled when running :ref:`cmake <client_building>`.
 -  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
 
    -  ``libpulse-dev``
+
+-  Disable USB audio with ``cmake -DENABLE_USB_AUDIO=no ..``
+
+   -  ``libusbredirparser-dev`` version 0.7.1 or newer
 
 ``libsamplerate0-dev`` is required whenever audio support remains enabled.
 
@@ -141,20 +149,21 @@ You can fetch these dependencies with the following command:
 
 .. warning::
 
-   Do not just blindly install the list below, check if you are using PipeWire
-   or PulseAudio and adjust the list accordingly. Installing PipeWire libraries
-   on a PulseAudio system will result in a broken partial PipeWire install.
-
-   If you are not already using PipeWire we highly recommend you upgrade,
-   Looking Glass does not support audio input (microphone) with PulseAudio.
+   The command below builds both PipeWire and PulseAudio playback backends.
+   Omit one development package only when also disabling its backend in CMake.
+   Microphone recording requires PipeWire; the current PulseAudio backend is
+   playback-only.
 
 .. code:: bash
 
-   apt-get install binutils cmake fonts-dejavu-core libdw-dev libfontconfig-dev \
-   libunwind-dev gcc g++ pkg-config libegl-dev libgl-dev libgles-dev \
-   libspice-protocol-dev nettle-dev libx11-dev libxcursor-dev libxi-dev libxinerama-dev \
-   libxpresent-dev libxss-dev libxkbcommon-dev libwayland-dev \
-   libpipewire-0.3-dev libpulse-dev libsamplerate0-dev
+   apt-get install binutils cmake make fonts-dejavu-core libdw-dev \
+   libfontconfig-dev libgmp-dev libunwind-dev gcc g++ pkg-config \
+   libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev \
+   libx11-dev libxcursor-dev libxfixes-dev libxi-dev libxinerama-dev \
+   libxpresent-dev libxrandr-dev libxss-dev libxkbcommon-dev \
+   libwayland-bin libwayland-dev \
+   libpipewire-0.3-dev libpulse-dev libsamplerate0-dev \
+   libusbredirparser-dev
 
 You may omit some dependencies if you disable the feature which requires them
 when running :ref:`cmake <client_building>`.
@@ -219,8 +228,15 @@ it directly from the build directory:
 
 .. _host_building:
 
-Host Application
-----------------
+Legacy Host Application build
+-----------------------------
+
+.. warning::
+
+   The Host Application is a legacy frame producer. New installations should
+   use the prebuilt :doc:`Looking Glass IDD <install_idd>`. These build
+   instructions are retained for the complete matching B7 stack described in
+   :ref:`legacy_host_policy`.
 
 .. note::
 
