@@ -74,6 +74,32 @@ struct StrideCase
   unsigned stride;
 };
 
+struct LaunchCase
+{
+  const char * renderer;
+  unsigned     width;
+  unsigned     height;
+  unsigned     rotate;
+  bool         capture;
+};
+
+struct GeometryCase
+{
+  const char * name;
+  unsigned     width;
+  unsigned     height;
+  unsigned     rotate;
+  unsigned     destX;
+  unsigned     destY;
+  unsigned     destWidth;
+  unsigned     destHeight;
+};
+
+constexpr LaunchCase kDefaultLaunch =
+{
+  "EGL", kWidth, kHeight, 0, true
+};
+
 struct Capture
 {
   LG_TestCaptureHeader header {};
@@ -110,25 +136,30 @@ std::filesystem::path makeTempDirectory()
 
 int runClient(const FormatCase & format, const char * damage,
     const std::filesystem::path & capture,
-    const std::filesystem::path & log, unsigned stride)
+    const std::filesystem::path & log, unsigned stride,
+    const LaunchCase & launch)
 {
-  const std::string size = std::to_string(kWidth) + "x" +
-    std::to_string(kHeight);
-  const std::string width = "test:width=" + std::to_string(kWidth);
-  const std::string height = "test:height=" + std::to_string(kHeight);
-  const std::string strideArg = "test:stride=" + std::to_string(stride);
-  const std::string formatArg = std::string("test:format=") + format.name;
-  const std::string damageArg = std::string("test:damage=") + damage;
-  const std::string count = "test:frameCount=" +
-    std::to_string(kFrameSerial);
-  const std::string captureFile = "test:captureFile=" + capture.string();
+  const std::string size         = std::to_string(launch.width) + "x" +
+    std::to_string(launch.height);
+  const std::string width        = "test:width=" + std::to_string(kWidth);
+  const std::string height       = "test:height=" + std::to_string(kHeight);
+  const std::string strideArg    = "test:stride=" + std::to_string(stride);
+  const std::string formatArg    = std::string("test:format=") + format.name;
+  const std::string damageArg    = std::string("test:damage=") + damage;
+  const std::string rendererArg  = std::string("app:renderer=") +
+    launch.renderer;
+  const std::string count        = "test:frameCount=" + std::to_string(
+      launch.capture ? kFrameSerial : 30);
+  const std::string captureFile  = "test:captureFile=" + capture.string();
   const std::string captureFrame = "test:captureFrame=" +
     std::to_string(kFrameSerial);
+  const std::string rotate       = "win:rotate=" +
+    std::to_string(launch.rotate);
 
   std::vector<std::string> args = {
     LG_CLIENT_PATH,
     "app:transport=test",
-    "app:renderer=EGL",
+    rendererArg,
     width,
     height,
     strideArg,
@@ -136,12 +167,10 @@ int runClient(const FormatCase & format, const char * damage,
     damageArg,
     "test:frameRate=60",
     count,
-    "test:holdLastFrame=yes",
-    "test:realtime=no",
-    captureFile,
-    captureFrame,
-    "test:captureDelay=1",
+    launch.capture ? "test:holdLastFrame=yes" : "test:holdLastFrame=no",
+    launch.capture ? "test:realtime=no" : "test:realtime=yes",
     "win:size=" + size,
+    rotate,
     "win:autoResize=no",
     "win:allowResize=no",
     "win:quickSplash=yes",
@@ -150,7 +179,17 @@ int runClient(const FormatCase & format, const char * damage,
     "spice:enable=no",
     "egl:multisample=no",
     "egl:scale=1",
+    "opengl:mipmap=no",
+    "opengl:vsync=no",
+    "opengl:amdPinnedMem=no",
+    "opengl:preventBuffer=yes",
   };
+  if (launch.capture)
+  {
+    args.push_back(captureFile);
+    args.push_back(captureFrame);
+    args.emplace_back("test:captureDelay=1");
+  }
 
   std::vector<char *> argv;
   argv.reserve(args.size() + 1);
@@ -196,7 +235,7 @@ int runClient(const FormatCase & format, const char * damage,
 }
 
 Capture produceCapture(const FormatCase & format, const char * damage,
-    unsigned stride = 0)
+    unsigned stride = 0, const LaunchCase & launch = kDefaultLaunch)
 {
   Capture result;
   result.directory = makeTempDirectory();
@@ -208,8 +247,8 @@ Capture produceCapture(const FormatCase & format, const char * damage,
   result.path = result.directory / (artifactName + ".lgcapture");
   result.log  = result.directory / (artifactName + ".log");
 
-  const int status =
-    runClient(format, damage, result.path, result.log, stride);
+  const int status = runClient(
+      format, damage, result.path, result.log, stride, launch);
   EXPECT_EQ(status, 0) << readText(result.log);
   if (status != 0)
     return result;
@@ -227,8 +266,8 @@ Capture produceCapture(const FormatCase & format, const char * damage,
   EXPECT_EQ(result.header.headerSize, sizeof(result.header));
   EXPECT_EQ(result.header.frameSerial, kFrameSerial);
   EXPECT_EQ(result.header.sourceType, static_cast<uint32_t>(format.type));
-  EXPECT_EQ(result.header.width, kWidth);
-  EXPECT_EQ(result.header.height, kHeight);
+  EXPECT_EQ(result.header.width, launch.width);
+  EXPECT_EQ(result.header.height, launch.height);
   EXPECT_EQ(result.header.flags & LG_TEST_CAPTURE_HDR,
       format.hdr ? static_cast<uint32_t>(LG_TEST_CAPTURE_HDR) : 0u);
   EXPECT_EQ(result.header.flags & LG_TEST_CAPTURE_HDR_PQ,
@@ -526,6 +565,94 @@ void compareReference(const FormatCase & format, const Capture & capture)
     << "\ncapture retained at: " << capture.path;
 }
 
+unsigned scaledCoordinate(unsigned coordinate, unsigned sourceSize,
+    unsigned destinationSize)
+{
+  return (static_cast<uint64_t>(coordinate) * 2 + 1) * sourceSize /
+    (static_cast<uint64_t>(destinationSize) * 2);
+}
+
+bool geometrySource(const GeometryCase & geometry, unsigned x, unsigned y,
+    unsigned & sourceX, unsigned & sourceY)
+{
+  if (x < geometry.destX || x >= geometry.destX + geometry.destWidth ||
+      y < geometry.destY || y >= geometry.destY + geometry.destHeight)
+    return false;
+
+  const unsigned localX = x - geometry.destX;
+  const unsigned localY = y - geometry.destY;
+  switch (geometry.rotate)
+  {
+    case 0:
+      sourceX = scaledCoordinate(localX, kWidth, geometry.destWidth);
+      sourceY = scaledCoordinate(localY, kHeight, geometry.destHeight);
+      return true;
+
+    case 90:
+      sourceX = scaledCoordinate(localY, kWidth, geometry.destHeight);
+      sourceY = kHeight - 1 -
+        scaledCoordinate(localX, kHeight, geometry.destWidth);
+      return true;
+
+    case 180:
+      sourceX = kWidth - 1 -
+        scaledCoordinate(localX, kWidth, geometry.destWidth);
+      sourceY = kHeight - 1 -
+        scaledCoordinate(localY, kHeight, geometry.destHeight);
+      return true;
+
+    case 270:
+      sourceX = kWidth - 1 -
+        scaledCoordinate(localY, kWidth, geometry.destHeight);
+      sourceY = scaledCoordinate(localX, kHeight, geometry.destWidth);
+      return true;
+  }
+
+  ADD_FAILURE() << "Unknown rotation: " << geometry.rotate;
+  return false;
+}
+
+void compareGeometry(const FormatCase & format, const GeometryCase & geometry,
+    const Capture & capture)
+{
+  float    maxError    = 0.0f;
+  unsigned maxX        = 0;
+  unsigned maxY        = 0;
+  RGB      maxActual   {};
+  RGB      maxExpected {};
+  for (unsigned y = 0; y < capture.header.height; ++y)
+    for (unsigned x = 0; x < capture.header.width; ++x)
+    {
+      unsigned sourceX;
+      unsigned sourceY;
+      const RGB actual = capturedColor(capture, x, y);
+      const RGB expected = geometrySource(
+          geometry, x, y, sourceX, sourceY) ?
+        expectedColor(format, capture, sourceX, sourceY) : RGB {};
+      const float error = std::max({
+        std::abs(actual.r - expected.r),
+        std::abs(actual.g - expected.g),
+        std::abs(actual.b - expected.b),
+      });
+      if (error > maxError)
+      {
+        maxError = error;
+        maxX = x;
+        maxY = y;
+        maxActual = actual;
+        maxExpected = expected;
+      }
+    }
+
+  EXPECT_LE(maxError, 0.006f)
+    << "max error at (" << maxX << ", " << maxY << ")"
+    << "\nactual:   " << maxActual.r << ", " << maxActual.g << ", "
+    << maxActual.b
+    << "\nexpected: " << maxExpected.r << ", " << maxExpected.g << ", "
+    << maxExpected.b
+    << "\ncapture retained at: " << capture.path;
+}
+
 using RenderCase = std::tuple<FormatCase, DamageCase>;
 
 class RenderPipelineTest : public testing::TestWithParam<RenderCase>
@@ -620,5 +747,93 @@ INSTANTIATE_TEST_SUITE_P(BGRAPaddedStride, StrideRenderPipelineTest,
       )
     ),
     strideRenderCaseName);
+
+class GeometryRenderPipelineTest :
+  public testing::TestWithParam<GeometryCase>
+{
+};
+
+TEST_P(GeometryRenderPipelineTest, MatchesReference)
+{
+  const GeometryCase & geometry = GetParam();
+  const FormatCase      format   =
+  {
+    "bgra", FRAME_TYPE_BGRA, false, false
+  };
+  const LaunchCase      launch   =
+  {
+    "EGL", geometry.width, geometry.height, geometry.rotate, true
+  };
+  Capture capture = produceCapture(format, "moving", 0, launch);
+  ASSERT_FALSE(capture.data.empty()) << "artifacts: " << capture.directory;
+
+  compareGeometry(format, geometry, capture);
+  if (!testing::Test::HasFailure())
+    std::filesystem::remove_all(capture.directory);
+}
+
+std::string geometryRenderCaseName(
+    const testing::TestParamInfo<GeometryCase> & info)
+{
+  return info.param.name;
+}
+
+INSTANTIATE_TEST_SUITE_P(ScaledRotated, GeometryRenderPipelineTest,
+    testing::Values(
+      GeometryCase {"scale2",             254, 190,   0,  0,  0, 254, 190},
+      GeometryCase {"letterbox",          254, 254,   0,  0, 32, 254, 190},
+      GeometryCase {"rotate90Scale2",     190, 254,  90,  0,  0, 190, 254},
+      GeometryCase {"rotate270Letterbox", 254, 254, 270, 32,  0, 190, 254}
+    ),
+    geometryRenderCaseName);
+
+class OpenGLRenderPipelineTest :
+  public testing::TestWithParam<FormatCase>
+{
+};
+
+TEST_P(OpenGLRenderPipelineTest, RendersFrames)
+{
+  const FormatCase & format = GetParam();
+  const LaunchCase   launch =
+  {
+    "OpenGL", 254, 254, 90, false
+  };
+  const std::filesystem::path directory = makeTempDirectory();
+  ASSERT_FALSE(directory.empty());
+  const std::filesystem::path log       =
+    directory / (std::string("opengl-") + format.name + ".log");
+
+  const int         status    = runClient(
+      format, "moving", directory / "unused", log, 0, launch);
+  const std::string clientLog = readText(log);
+  EXPECT_EQ(status, 0) << clientLog;
+  EXPECT_NE(clientLog.find("Using Renderer: OpenGL"), std::string::npos)
+    << clientLog;
+  EXPECT_NE(clientLog.find("Vendor  :"), std::string::npos) << clientLog;
+  EXPECT_NE(clientLog.find("Format:"), std::string::npos) << clientLog;
+  EXPECT_EQ(clientLog.find("configure failed"), std::string::npos)
+    << clientLog;
+
+  if (!testing::Test::HasFailure())
+    std::filesystem::remove_all(directory);
+}
+
+std::string openGLRenderCaseName(
+    const testing::TestParamInfo<FormatCase> & info)
+{
+  return info.param.name;
+}
+
+INSTANTIATE_TEST_SUITE_P(Formats, OpenGLRenderPipelineTest,
+    testing::Values(
+      FormatCase {"bgra",    FRAME_TYPE_BGRA,    false, false},
+      FormatCase {"rgba",    FRAME_TYPE_RGBA,    false, false},
+      FormatCase {"bgr32",   FRAME_TYPE_BGR_32,  false, false},
+      FormatCase {"rgb24",   FRAME_TYPE_RGB_24,  false, false},
+      FormatCase {"rgba10",  FRAME_TYPE_RGBA10,  true,  true },
+      FormatCase {"rgba16f", FRAME_TYPE_RGBA16F, true,  false}
+    ),
+    openGLRenderCaseName);
 
 } // namespace
