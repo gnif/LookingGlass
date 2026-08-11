@@ -31,9 +31,15 @@ void evdev_earlyInit(void);
 bool evdev_start(void);
 
 /**
- * stop the evdev layer
+ * join the evdev thread; device state stays valid for callbacks
  */
 void evdev_stop(void);
+
+/**
+ * restore the display server hooks and free the device state; only
+ * call once display server callbacks have stopped
+ */
+void evdev_free(void);
 
 /**
  * grab the keyboard for exclusive access

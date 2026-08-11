@@ -68,7 +68,7 @@ struct EvdevState
   pending;
 };
 
-static struct EvdevState state = {};
+static struct EvdevState state = { .epoll = -1 };
 
 static struct Option options[] =
 {
@@ -351,31 +351,51 @@ bool evdev_start(void)
 
 void evdev_stop(void)
 {
+  if (state.thread)
+  {
+    lgJoinThread(state.thread, NULL);
+    state.thread = NULL;
+  }
+}
+
+void evdev_free(void)
+{
+  evdev_stop();
+
+  // restore the display server grab methods
+  if (state.dsGrabKeyboard)
+  {
+    g_state.ds->grabKeyboard   = state.dsGrabKeyboard;
+    g_state.ds->ungrabKeyboard = state.dsUngrabKeyboard;
+    state.dsGrabKeyboard       = NULL;
+    state.dsUngrabKeyboard     = NULL;
+  }
+  state.grabbed = false;
+
+  // the thread and grab callbacks reference the device state
   if (state.deviceList)
   {
     free(state.deviceList);
     state.deviceList = NULL;
   }
 
-  if (state.thread)
-  {
-    lgJoinThread(state.thread, NULL);
-    state.thread = NULL;
-  }
-
   if (state.epoll >= 0)
   {
     close(state.epoll);
-    state.epoll = 0;
+    state.epoll = -1;
   }
 
-  for(EvdevDevice * device = state.devices; device->path; ++device)
+  if (state.devices)
   {
-    if (device->fd <= 0)
-      continue;
-
-    close(device->fd);
-    device->fd = 0;
+    for(int i = 0; i < state.deviceCount; ++i)
+    {
+      EvdevDevice * device = &state.devices[i];
+      if (device->fd > 0)
+        close(device->fd);
+    }
+    free(state.devices);
+    state.devices     = NULL;
+    state.deviceCount = 0;
   }
 }
 
@@ -395,8 +415,9 @@ void evdev_grabKeyboard(void)
 
 //  state.dsGrabKeyboard();
 
-  for(EvdevDevice * device = state.devices; device->path; ++device)
+  for(int i = 0; i < state.deviceCount; ++i)
   {
+    EvdevDevice * device = &state.devices[i];
     if (device->fd > 0)
       evdev_grabDevice(device);
   }
@@ -418,8 +439,9 @@ void evdev_ungrabKeyboard(void)
       return;
     }
 
-  for(EvdevDevice * device = state.devices; device->path; ++device)
+  for(int i = 0; i < state.deviceCount; ++i)
   {
+    EvdevDevice * device = &state.devices[i];
     if (device->fd <= 0 || !device->grabbed)
       continue;
 
