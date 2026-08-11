@@ -568,6 +568,32 @@ if(ENABLE_EGL)
       TIMEOUT 10
     )
   endforeach()
+
+  add_executable(texture-dmabuf-tests
+    texture_dmabuf_test.c
+  )
+  add_dependencies(texture-dmabuf-tests renderer_EGL)
+  target_include_directories(texture-dmabuf-tests PRIVATE
+    "${CMAKE_BINARY_DIR}/renderers/EGL/shader"
+  )
+  target_link_libraries(texture-dmabuf-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  set(TEXTURE_DMABUF_CASES
+    select
+    poll
+    saturation
+    release
+  )
+  foreach(name IN LISTS TEXTURE_DMABUF_CASES)
+    add_test(NAME texture-dmabuf-${name}
+      COMMAND texture-dmabuf-tests ${name}
+    )
+    set_tests_properties(texture-dmabuf-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
 endif()
 
 find_package(GTest REQUIRED)
