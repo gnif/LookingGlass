@@ -182,5 +182,9 @@ void overlayFreeImage(OverlayImage * image)
   if (!image->tex)
     return;
 
-  RENDERER(freeTexture, image->tex);
+  // During shutdown the renderer is freed first, taking all textures with it
+  if (g_state.lgr)
+    RENDERER(freeTexture, image->tex);
+
+  image->tex = NULL;
 }
