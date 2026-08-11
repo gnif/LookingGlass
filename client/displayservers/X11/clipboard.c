@@ -582,7 +582,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
 
   const LG_ClipboardRequest request = x11cb.read.request;
   const bool valid = dataType != LG_CLIPBOARD_DATA_NONE &&
-    dataType == x11cb.read.type && format == 8;
+    dataType == x11cb.read.type && format == 8 && (!itemCount || data);
   cancelReadNL();
   LG_UNLOCK(x11cb.lock);
 
