@@ -413,15 +413,17 @@ void app_handleKeyPressInternal(int sc)
   {
     if (sc == g_params.escapeKey && !g_state.escapeActive)
     {
-      g_state.escapeActive = true;
-      g_state.escapeTime   = microtime();
-      g_state.escapeAction = -1;
+      g_state.escapeActive   = true;
+      g_state.escapeTime     = microtime();
+      g_state.escapeAction   = -1;
+      g_state.escapeKeys[sc] = true;
       return;
     }
 
     if (g_state.escapeActive)
     {
-      g_state.escapeAction = sc;
+      g_state.escapeAction   = sc;
+      g_state.escapeKeys[sc] = true;
       KeybindHandle handle;
       ll_forEachNL(g_state.bindings, item, handle)
       {
@@ -434,6 +436,8 @@ void app_handleKeyPressInternal(int sc)
       return;
     }
   }
+
+  g_state.escapeKeys[sc] = false;
 
   if (app_isOverlayMode())
   {
@@ -459,7 +463,7 @@ void app_handleKeyPressInternal(int sc)
 
 void app_handleKeyReleaseInternal(int sc)
 {
-  if (g_state.escapeActive)
+  if (g_state.escapeActive && sc == g_params.escapeKey)
   {
     if (g_state.escapeAction == -1)
     {
@@ -468,8 +472,13 @@ void app_handleKeyReleaseInternal(int sc)
         core_setGrab(!g_cursor.grab);
     }
 
-    if (sc == g_params.escapeKey)
-      g_state.escapeActive = false;
+    g_state.escapeActive = false;
+  }
+
+  if (g_state.escapeKeys[sc])
+  {
+    g_state.escapeKeys[sc] = false;
+    return;
   }
 
   if (app_isOverlayMode())
@@ -759,6 +768,12 @@ void app_showRecord(bool show)
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
     const char * description)
 {
+  if (!callback)
+  {
+    DEBUG_ERROR("invalid keybind callback");
+    return NULL;
+  }
+
   if (sc <= KEY_RESERVED || sc >= KEY_MAX || !linux_to_display[sc])
   {
     DEBUG_ERROR("invalid keybind keycode: %d", sc);

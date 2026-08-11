@@ -124,6 +124,7 @@ struct AppState
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;
+  bool                 escapeKeys[KEY_MAX];
   bool                 escapeHelp;
   struct ll          * bindings;
   bool                 haveSrcSize;
