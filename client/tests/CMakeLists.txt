@@ -203,6 +203,44 @@ foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
   )
 endforeach()
 
+if(ENABLE_AUDIO)
+  pkg_check_modules(AUDIO_TEST_SAMPLERATE REQUIRED IMPORTED_TARGET
+    samplerate)
+  add_executable(audio-tests
+    audio_test.c
+  )
+  target_compile_definitions(audio-tests PRIVATE
+    CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+    ENABLE_AUDIO
+  )
+  target_include_directories(audio-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+    "${PROJECT_TOP}/repos/gui/cimgui"
+    "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+  )
+  target_link_libraries(audio-tests
+    ${EXE_FLAGS}
+    lg_common
+    PkgConfig::AUDIO_TEST_SAMPLERATE
+  )
+  set(AUDIO_CASES
+    format
+    convert
+    provider
+    playback-retry
+    consent
+    quiesce
+  )
+  foreach(name IN LISTS AUDIO_CASES)
+    add_test(NAME audio-${name}
+      COMMAND audio-tests ${name}
+    )
+    set_tests_properties(audio-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
+
 add_executable(render-queue-tests
   render_queue_test.c
   ../src/render_queue.c
