@@ -140,6 +140,8 @@ struct Inst
   int             swSurfaceList;
   LG_RendererRect destRect;
   struct IntPoint swSurfaceSize;
+  uint8_t       * swSurfaceBuffer;
+  size_t          swSurfaceBufferSize;
   bool            showSwSurface;
 
   bool                  hasTextures, hasFrames;
@@ -180,6 +182,24 @@ static bool drawFrame(struct Inst * this,
     LG_RendererFrameToken frameTokenLimit,
     LG_RendererFrameToken * consumedFrameToken);
 static void drawMouse(struct Inst * this);
+
+static bool swSurfaceEnsureBuffer(struct Inst * this, size_t size)
+{
+  if (size <= this->swSurfaceBufferSize)
+    return true;
+
+  uint8_t * buffer = realloc(this->swSurfaceBuffer, size);
+  if (!buffer)
+  {
+    DEBUG_ERROR("Failed to allocate %zu bytes for software surface upload",
+        size);
+    return false;
+  }
+
+  this->swSurfaceBuffer     = buffer;
+  this->swSurfaceBufferSize = size;
+  return true;
+}
 
 const char * opengl_getName(void)
 {
@@ -249,6 +269,8 @@ void opengl_deinitialize(LG_Renderer * renderer)
 
   if (this->mouseData)
     free(this->mouseData);
+
+  free(this->swSurfaceBuffer);
 
   if (this->glContext)
   {
@@ -655,37 +677,31 @@ static void opengl_swSurfaceDrawFill(LG_Renderer * renderer,
   height = (bottom > this->swSurfaceSize.y ?
       this->swSurfaceSize.y : (int)bottom) - y;
 
-  /* This is a fairly hacky way to update a software surface, but it preserves
-   * the existing incremental fill behavior. */
-
-  uint32_t * line = malloc((size_t)width * sizeof(*line));
-  if (!line)
-  {
-    DEBUG_ERROR("Failed to allocate software surface fill row");
+  const size_t pixels = (size_t)width * (size_t)height;
+  const size_t size   = pixels * sizeof(uint32_t);
+  if (!swSurfaceEnsureBuffer(this, size))
     return;
-  }
 
-  for(int i = 0; i < width; ++i)
-    line[i] = color;
+  uint32_t * pixelsData = (uint32_t *)this->swSurfaceBuffer;
+  for(size_t i = 0; i < pixels; ++i)
+    pixelsData[i] = color;
 
   glBindTexture(GL_TEXTURE_2D, this->textures[SW_SURFACE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
   glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
-  for(int dy = 0; dy < height; ++dy)
-    glTexSubImage2D
-    (
-      GL_TEXTURE_2D,
-      0      ,
-      x      ,
-      y + dy ,
-      width  ,
-      1      ,
-      GL_BGRA,
-      GL_UNSIGNED_BYTE,
-      line
-    );
+  glTexSubImage2D
+  (
+    GL_TEXTURE_2D,
+    0      ,
+    x      ,
+    y      ,
+    width  ,
+    height ,
+    GL_BGRA,
+    GL_UNSIGNED_BYTE,
+    pixelsData
+  );
   glBindTexture(GL_TEXTURE_2D, 0);
-  free(line);
 }
 
 static void opengl_swSurfaceDrawBitmap(LG_Renderer * renderer,
@@ -698,27 +714,6 @@ static void opengl_swSurfaceDrawBitmap(LG_Renderer * renderer,
       stride <= 0 || width > stride / 4)
     return;
 
-  if (!topDown)
-  {
-    // This is non-optimal, but the incremental surface is a fallback.
-    uint8_t * line = malloc((size_t)stride);
-    if (!line)
-    {
-      DEBUG_ERROR("Failed to allocate software surface bitmap row");
-      return;
-    }
-
-    for(int y = 0; y < height / 2; ++y)
-    {
-      uint8_t * top = data + y                * stride;
-      uint8_t * btm = data + (height - y - 1) * stride;
-      memcpy(line, top , stride);
-      memcpy(top , btm , stride);
-      memcpy(btm , line, stride);
-    }
-    free(line);
-  }
-
   const int64_t right  = (int64_t)x + width;
   const int64_t bottom = (int64_t)y + height;
   if (x >= this->swSurfaceSize.x ||
@@ -726,19 +721,43 @@ static void opengl_swSurfaceDrawBitmap(LG_Renderer * renderer,
       right <= 0 || bottom <= 0)
     return;
 
-  const int sourceX = x < 0 ? -x : 0;
-  const int sourceY = y < 0 ? -y : 0;
+  const int sourceX      = x < 0 ? -x : 0;
+  const int sourceY      = y < 0 ? -y : 0;
+  const int sourceHeight = height;
   x      = x < 0 ? 0 : x;
   y      = y < 0 ? 0 : y;
   width  = (right  > this->swSurfaceSize.x ?
       this->swSurfaceSize.x : (int)right ) - x;
   height = (bottom > this->swSurfaceSize.y ?
       this->swSurfaceSize.y : (int)bottom) - y;
-  data  += (size_t)sourceY * stride + (size_t)sourceX * 4;
+  int uploadStride;
+  if (topDown)
+  {
+    data += (size_t)sourceY * stride + (size_t)sourceX * 4;
+    uploadStride = stride;
+  }
+  else
+  {
+    const size_t rowSize = (size_t)width * 4;
+    const size_t size    = rowSize * (size_t)height;
+    if (!swSurfaceEnsureBuffer(this, size))
+      return;
+
+    for(int dy = 0; dy < height; ++dy)
+    {
+      const int sourceRow = sourceHeight - sourceY - dy - 1;
+      memcpy(this->swSurfaceBuffer + (size_t)dy * rowSize,
+          data + (size_t)sourceRow * stride + (size_t)sourceX * 4,
+          rowSize);
+    }
+
+    data         = this->swSurfaceBuffer;
+    uploadStride = width * 4;
+  }
 
   glBindTexture(GL_TEXTURE_2D, this->textures[SW_SURFACE_TEXTURE]);
   glPixelStorei(GL_UNPACK_ALIGNMENT , 4         );
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, uploadStride / 4);
   glTexSubImage2D
   (
     GL_TEXTURE_2D,
