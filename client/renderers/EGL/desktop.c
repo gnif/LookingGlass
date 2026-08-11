@@ -28,6 +28,7 @@
 
 #include "app.h"
 #include "texture.h"
+#include "texture_buffer.h"
 #include "shader.h"
 #include "desktop_rects.h"
 #include "cimgui.h"
@@ -705,26 +706,9 @@ void egl_desktopSwSurfaceDrawFill(EGL_Desktop * desktop,
   height = (bottom > desktop->swSurfaceHeight ?
       desktop->swSurfaceHeight : (int)bottom) - y;
 
-  /* This is a fairly hacky way to update a software surface, but it preserves
-   * the existing incremental fill behavior. */
-
-  uint32_t * line = malloc((size_t)width * sizeof(*line));
-  if (!line)
-  {
-    DEBUG_ERROR("Failed to allocate software surface fill row");
-    return;
-  }
-
-  for(int i = 0; i < width; ++i)
-    line[i] = color;
-
-  for(int dy = 0; dy < height; ++dy)
-    egl_textureUpdateRect(desktop->swSurfaceTexture,
-        x, y + dy, width, 1, width, width * sizeof(*line),
-        (uint8_t *)line, false);
-
-  free(line);
-  atomic_store(&desktop->processFrame, true);
+  if (egl_texBufferStreamFill(
+        desktop->swSurfaceTexture, x, y, width, height, color))
+    atomic_store(&desktop->processFrame, true);
 }
 
 void egl_desktopSwSurfaceDrawBitmap(EGL_Desktop * desktop,

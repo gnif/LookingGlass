@@ -199,11 +199,7 @@ void spiceSurface_create(SpiceSurface * surface, unsigned int surfaceId,
 
   LG_LOCK_SHARED(surface->eventsLock);
   if (surface->events)
-  {
     surface->events->configure(surface->eventOpaque, width, height);
-    surface->events->drawFill(
-        surface->eventOpaque, 0, 0, width, height, 0);
-  }
   LG_UNLOCK_SHARED(surface->eventsLock);
 }
 

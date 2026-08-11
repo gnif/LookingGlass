@@ -721,11 +721,11 @@ static void testSurfaceEvents(void)
   CHECK(f.log.configN == 1);
   CHECK(f.log.width == 2);
   CHECK(f.log.height == 1);
-  CHECK(f.log.fillN == 1);
+  CHECK(f.log.fillN == 0);
 
   spiceSurface_drawFill(
       f.transport.surface, 0, 1, 2, 3, 4, 0xaabbccdd);
-  CHECK(f.log.fillN == 2);
+  CHECK(f.log.fillN == 1);
   CHECK(f.log.x == 1);
   CHECK(f.log.y == 2);
   CHECK(f.log.w == 3);
@@ -776,7 +776,7 @@ static void testSurfaceEvents(void)
   spiceSurface_destroy(f.transport.surface, 0);
   CHECK(f.log.destroyN == 1);
   spiceSurface_drawFill(f.transport.surface, 0, 0, 0, 1, 1, 0);
-  CHECK(f.log.fillN == 2);
+  CHECK(f.log.fillN == 1);
   sw->detach(&f.transport);
   freeFixture(&f);
 }
@@ -844,9 +844,9 @@ static void testSurfaceDetach(void)
   CHECK(pthread_join(detachThread, NULL) == 0);
   CHECK(atomic_load(&detach.done));
   CHECK(f.log.configN == 1);
-  CHECK(f.log.fillN == 1);
+  CHECK(f.log.fillN == 0);
   spiceSurface_drawFill(f.transport.surface, 0, 0, 0, 1, 1, 0);
-  CHECK(f.log.fillN == 1);
+  CHECK(f.log.fillN == 0);
   freeFixture(&f);
 }
 

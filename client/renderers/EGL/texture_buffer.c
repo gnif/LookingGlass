@@ -390,6 +390,44 @@ static bool egl_texBufferStreamUpdate(EGL_Texture * texture,
   return true;
 }
 
+bool egl_texBufferStreamFill(EGL_Texture * texture,
+    int x, int y, int width, int height, uint32_t color)
+{
+  TextureBuffer * this = UPCAST(TextureBuffer, texture);
+
+  DEBUG_ASSERT(texture->format.bpp == sizeof(color));
+  if (texture->format.bpp != sizeof(color))
+    return false;
+
+  if (!egl_texBufferStreamLock(this))
+    return false;
+
+  uint8_t * row = this->buf[this->bufIndex].map +
+    texture->format.pitch * y + x * texture->format.bpp;
+  for (int dy = 0; dy < height; ++dy)
+  {
+    uint32_t * dst = (uint32_t *)row;
+    for (int dx = 0; dx < width; ++dx)
+      dst[dx] = color;
+    row += texture->format.pitch;
+  }
+
+  const EGL_TexUpdate update =
+  {
+    .x      = x,
+    .y      = y,
+    .width  = width,
+    .height = height,
+  };
+
+  this->slotToken[this->bufIndex]   = LG_RENDERER_FRAME_TOKEN_NONE;
+  this->buf[this->bufIndex].updated = true;
+  egl_texBufferDamageAdd(this, this->bufIndex, &update);
+  LG_UNLOCK(this->copyLock);
+
+  return true;
+}
+
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
     LG_RendererFrameToken frameTokenLimit)
 {

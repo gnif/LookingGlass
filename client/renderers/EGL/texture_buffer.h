@@ -70,6 +70,8 @@ bool egl_texBufferStreamSetup(EGL_Texture * texture_,
     const EGL_TexSetup * setup);
 /* Returns with copyLock held when the current upload buffer is safe to write. */
 bool egl_texBufferStreamLock(TextureBuffer * texture);
+bool egl_texBufferStreamFill(EGL_Texture * texture,
+    int x, int y, int width, int height, uint32_t color);
 EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture_,
     LG_RendererFrameToken frameTokenLimit);
 EGL_TexStatus egl_texBufferStreamGet(EGL_Texture * texture_, GLuint * tex,
