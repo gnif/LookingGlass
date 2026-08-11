@@ -4335,12 +4335,7 @@ void lgAudio_setFallback(const LG_AudioOps * ops, void * opaque)
   setBinding(&audio.fallback, ops, opaque, fallbackStatusChanged);
 }
 
-void lgAudio_setTransport(const LG_AudioOps * ops, void * opaque)
-{
-  setBinding(&audio.transport, ops, opaque, transportStatusChanged);
-}
-
-void lgAudio_dropTransport(void)
+static void dropBinding(AudioBinding * target)
 {
   LG_LOCK(audio.bindingLock);
   if (!atomic_load_explicit(&audio.ready, memory_order_acquire))
@@ -4351,16 +4346,27 @@ void lgAudio_dropTransport(void)
 
   LG_LOCK(audio.providerLock);
   LG_LOCK_EXCLUSIVE(audio.activeLock);
-  const AudioBinding old = audio.transport;
-  const bool wasActive = bindingActiveNL(&audio.transport);
-  audio.transport = (AudioBinding) { 0 };
+  const bool wasActive = bindingActiveNL(target);
+  *target = (AudioBinding) { 0 };
   LG_UNLOCK_EXCLUSIVE(audio.activeLock);
   updateActive(wasActive);
   LG_UNLOCK(audio.providerLock);
-
-  if (old.ops && old.ops->setStatusListener)
-    old.ops->setStatusListener(old.opaque, NULL, NULL);
   LG_UNLOCK(audio.bindingLock);
+}
+
+void lgAudio_dropFallback(void)
+{
+  dropBinding(&audio.fallback);
+}
+
+void lgAudio_setTransport(const LG_AudioOps * ops, void * opaque)
+{
+  setBinding(&audio.transport, ops, opaque, transportStatusChanged);
+}
+
+void lgAudio_dropTransport(void)
+{
+  dropBinding(&audio.transport);
 }
 
 #endif

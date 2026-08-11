@@ -29,6 +29,8 @@ void lgInput_init(void);
 void lgInput_free(void);
 
 void lgInput_setFallback(const LG_InputOps * ops, void * opaque);
+/* Drop functions remove a dead endpoint without invoking it. */
+void lgInput_dropFallback(void);
 void lgInput_setTransport(const LG_InputOps * ops, void * opaque);
 void lgInput_dropTransport(void);
 void lgInput_useTransport(bool enable);

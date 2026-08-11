@@ -32,12 +32,14 @@ struct InputBinding
   void              * opaque;
   bool                available;
   bool                mouseAbsolute;
-  uint32_t            generation;
+  uint32_t            epoch;
 };
 
 static struct
 {
+  LG_Lock   bindingLock;
   LG_RWLock activeLock;
+  uint32_t  nextBindingEpoch;
 
   struct InputBinding fallback;
   struct InputBinding transport;
@@ -66,6 +68,14 @@ static struct InputBinding makeBinding(const LG_InputOps * ops,
     void * opaque)
 {
   const bool available = ops && !ops->setStatusListener;
+  uint32_t epoch = 0;
+  if (ops)
+  {
+    epoch = ++l_input.nextBindingEpoch;
+    if (!epoch)
+      epoch = ++l_input.nextBindingEpoch;
+  }
+
   return (struct InputBinding)
   {
     .ops           = ops,
@@ -73,8 +83,16 @@ static struct InputBinding makeBinding(const LG_InputOps * ops,
     .available     = available,
     .mouseAbsolute = available && ops->mousePosition &&
       ops->supports(opaque, LG_INPUT_SUPPORT_MOUSE_ABSOLUTE),
-    .generation    = 0,
+    .epoch         = epoch,
   };
+}
+
+static bool bindingEqual(const struct InputBinding * a,
+    const struct InputBinding * b)
+{
+  return a->ops        == b->ops &&
+    a->opaque          == b->opaque &&
+    a->epoch           == b->epoch;
 }
 
 static void releaseKeysNL(void)
@@ -114,7 +132,7 @@ static void clearStateNL(void)
   atomic_store_explicit(&l_input.buttons, 0, memory_order_relaxed);
 }
 
-static void updateActiveNL(void)
+static void updateActiveNL(bool dropActive)
 {
   const struct InputBinding next =
     l_input.useTransport && l_input.transport.available ?
@@ -122,14 +140,16 @@ static void updateActiveNL(void)
     l_input.fallback.available ? l_input.fallback :
       (struct InputBinding) { 0 };
 
-  if (next.ops == l_input.active.ops &&
-      next.opaque == l_input.active.opaque)
+  if (bindingEqual(&next, &l_input.active))
   {
     l_input.active = next;
     return;
   }
 
-  resetActiveNL();
+  if (dropActive)
+    clearStateNL();
+  else
+    resetActiveNL();
   l_input.active = next;
 
   if (l_input.active.ops)
@@ -145,9 +165,7 @@ static void updateActiveNL(void)
 static void updateStatusNL(struct InputBinding * binding,
     const LG_InputStatus * status)
 {
-  const bool wasActive =
-    l_input.active.ops    == binding->ops &&
-    l_input.active.opaque == binding->opaque;
+  const bool wasActive = bindingEqual(&l_input.active, binding);
 
   if (wasActive && !status->available)
   {
@@ -160,8 +178,7 @@ static void updateStatusNL(struct InputBinding * binding,
     binding->ops->mousePosition &&
     binding->ops->supports(binding->opaque,
       LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
-  binding->generation    = status->generation;
-  updateActiveNL();
+  updateActiveNL(false);
 }
 
 static void fallbackStatusChanged(void * opaque,
@@ -171,7 +188,8 @@ static void fallbackStatusChanged(void * opaque,
     return;
 
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  if (l_input.fallback.ops && l_input.fallback.opaque == opaque)
+  if (l_input.fallback.ops &&
+      l_input.fallback.epoch == (uint32_t)(uintptr_t)opaque)
     updateStatusNL(&l_input.fallback, status);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
 }
@@ -183,7 +201,8 @@ static void transportStatusChanged(void * opaque,
     return;
 
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  if (l_input.transport.ops && l_input.transport.opaque == opaque)
+  if (l_input.transport.ops &&
+      l_input.transport.epoch == (uint32_t)(uintptr_t)opaque)
     updateStatusNL(&l_input.transport, status);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
 }
@@ -199,6 +218,7 @@ void lgInput_init(void)
     atomic_init(&l_input.keys[key], false);
   atomic_init(&l_input.buttons, 0);
 
+  LG_LOCK_INIT(l_input.bindingLock);
   LG_RWLOCK_INIT(l_input.activeLock);
 }
 
@@ -207,6 +227,7 @@ void lgInput_free(void)
   struct InputBinding fallback;
   struct InputBinding transport;
 
+  LG_LOCK(l_input.bindingLock);
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   resetActiveNL();
   fallback             = l_input.fallback;
@@ -221,85 +242,79 @@ void lgInput_free(void)
   if (transport.ops && transport.ops->setStatusListener)
     transport.ops->setStatusListener(transport.opaque, NULL, NULL);
 
+  LG_UNLOCK(l_input.bindingLock);
   LG_RWLOCK_FREE(l_input.activeLock);
+  LG_LOCK_FREE(l_input.bindingLock);
+}
+
+static void setBinding(struct InputBinding * target,
+    const LG_InputOps * ops, void * opaque, LG_InputStatusFn statusFn)
+{
+  if (ops && !validOps(ops))
+  {
+    DEBUG_ERROR("Invalid input operations");
+    ops    = NULL;
+    opaque = NULL;
+  }
+
+  struct InputBinding old;
+
+  LG_LOCK(l_input.bindingLock);
+  LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  old = *target;
+  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (old.ops && old.ops->setStatusListener)
+    old.ops->setStatusListener(old.opaque, NULL, NULL);
+
+  const struct InputBinding next = makeBinding(ops, opaque);
+  LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  *target = next;
+  updateActiveNL(false);
+  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (next.ops && next.ops->setStatusListener)
+    next.ops->setStatusListener(next.opaque, statusFn,
+        (void *)(uintptr_t)next.epoch);
+  LG_UNLOCK(l_input.bindingLock);
+}
+
+static void dropBinding(struct InputBinding * target)
+{
+  LG_LOCK(l_input.bindingLock);
+  LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  const bool wasActive = bindingEqual(&l_input.active, target);
+  *target = (struct InputBinding) { 0 };
+  updateActiveNL(wasActive);
+  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  LG_UNLOCK(l_input.bindingLock);
 }
 
 void lgInput_setFallback(const LG_InputOps * ops, void * opaque)
 {
-  if (ops && !validOps(ops))
-  {
-    DEBUG_ERROR("Invalid fallback input operations");
-    ops    = NULL;
-    opaque = NULL;
-  }
+  setBinding(&l_input.fallback, ops, opaque, fallbackStatusChanged);
+}
 
-  const struct InputBinding next = makeBinding(ops, opaque);
-  struct InputBinding old;
-
-  LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  old              = l_input.fallback;
-  l_input.fallback = next;
-  updateActiveNL();
-  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
-
-  if (old.ops && old.ops->setStatusListener)
-    old.ops->setStatusListener(old.opaque, NULL, NULL);
-  if (next.ops && next.ops->setStatusListener)
-    next.ops->setStatusListener(next.opaque,
-        fallbackStatusChanged, next.opaque);
+void lgInput_dropFallback(void)
+{
+  dropBinding(&l_input.fallback);
 }
 
 void lgInput_setTransport(const LG_InputOps * ops, void * opaque)
 {
-  if (ops && !validOps(ops))
-  {
-    DEBUG_ERROR("Invalid transport input operations");
-    ops    = NULL;
-    opaque = NULL;
-  }
-
-  const struct InputBinding next = makeBinding(ops, opaque);
-  struct InputBinding old;
-
-  LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  old               = l_input.transport;
-  l_input.transport = next;
-  updateActiveNL();
-  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
-
-  if (old.ops && old.ops->setStatusListener)
-    old.ops->setStatusListener(old.opaque, NULL, NULL);
-  if (next.ops && next.ops->setStatusListener)
-    next.ops->setStatusListener(next.opaque,
-        transportStatusChanged, next.opaque);
+  setBinding(&l_input.transport, ops, opaque, transportStatusChanged);
 }
 
 void lgInput_dropTransport(void)
 {
-  struct InputBinding old;
-
-  LG_LOCK_EXCLUSIVE(l_input.activeLock);
-  old = l_input.transport;
-  if (l_input.useTransport && l_input.active.ops == l_input.transport.ops &&
-      l_input.active.opaque == l_input.transport.opaque)
-  {
-    l_input.active = (struct InputBinding) { 0 };
-    clearStateNL();
-  }
-
-  l_input.transport = (struct InputBinding) { 0 };
-  updateActiveNL();
-  LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
-
-  if (old.ops && old.ops->setStatusListener)
-    old.ops->setStatusListener(old.opaque, NULL, NULL);
+  dropBinding(&l_input.transport);
 }
 
 void lgInput_useTransport(bool enable)
 {
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   l_input.useTransport = enable;
-  updateActiveNL();
+  updateActiveNL(false);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
 }
 

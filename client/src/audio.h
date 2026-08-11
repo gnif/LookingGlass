@@ -29,6 +29,8 @@ void lgAudio_init(void);
 void lgAudio_free(void);
 
 void lgAudio_setFallback(const LG_AudioOps * ops, void * opaque);
+/* Drop functions remove a dead endpoint without invoking it. */
+void lgAudio_dropFallback(void);
 void lgAudio_setTransport(const LG_AudioOps * ops, void * opaque);
 void lgAudio_dropTransport(void);
 
@@ -42,6 +44,7 @@ static inline void lgAudio_init(void) {}
 static inline void lgAudio_free(void) {}
 static inline void lgAudio_setFallback(
     const LG_AudioOps * ops, void * opaque) {}
+static inline void lgAudio_dropFallback(void) {}
 static inline void lgAudio_setTransport(
     const LG_AudioOps * ops, void * opaque) {}
 static inline void lgAudio_dropTransport(void) {}

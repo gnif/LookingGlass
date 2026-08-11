@@ -482,8 +482,8 @@ static const LG_ClipboardEventOps eventOps =
   .request = eventRequest,
 };
 
-/* providerLock must be held. dropActive suppresses remote release when the
- * endpoint has already disappeared; detach must always quiesce local events. */
+/* providerLock must be held. dropActive suppresses all calls into an endpoint
+ * which has already disappeared. */
 static void updateActive(bool dropActive)
 {
   for (;;)
@@ -501,9 +501,9 @@ static void updateActive(bool dropActive)
     clipboard.active = (ClipboardBinding) { 0 };
     LG_UNLOCK_EXCLUSIVE(clipboard.activeLock);
 
-    if (old.ops)
+    if (old.ops && !dropActive)
     {
-      if (!dropActive && !old.ops->release(old.opaque))
+      if (!old.ops->release(old.opaque))
         DEBUG_WARN("Failed to release Clipboard provider: %s",
             old.ops->name);
       old.ops->detach(old.opaque);
@@ -687,6 +687,24 @@ void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque)
       ops, opaque, fallbackStatusChanged);
 }
 
+static void dropBinding(ClipboardBinding * target)
+{
+  LG_LOCK(clipboard.registrationLock);
+  LG_LOCK(clipboard.providerLock);
+  LG_LOCK_EXCLUSIVE(clipboard.activeLock);
+  const bool wasActive = bindingActiveNL(target);
+  *target = (ClipboardBinding) { 0 };
+  LG_UNLOCK_EXCLUSIVE(clipboard.activeLock);
+  updateActive(wasActive);
+  LG_UNLOCK(clipboard.providerLock);
+  LG_UNLOCK(clipboard.registrationLock);
+}
+
+void lgClipboard_dropFallback(void)
+{
+  dropBinding(&clipboard.fallback);
+}
+
 void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque)
 {
   setBinding(&clipboard.transport,
@@ -695,22 +713,7 @@ void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque)
 
 void lgClipboard_dropTransport(void)
 {
-  LG_LOCK(clipboard.registrationLock);
-  LG_LOCK(clipboard.providerLock);
-  const ClipboardBinding old = clipboard.transport;
-  LG_UNLOCK(clipboard.providerLock);
-
-  if (old.ops && old.ops->setStatusListener)
-    old.ops->setStatusListener(old.opaque, NULL, NULL);
-
-  LG_LOCK(clipboard.providerLock);
-  LG_LOCK_EXCLUSIVE(clipboard.activeLock);
-  const bool wasActive = bindingActiveNL(&clipboard.transport);
-  clipboard.transport = (ClipboardBinding) { 0 };
-  LG_UNLOCK_EXCLUSIVE(clipboard.activeLock);
-  updateActive(wasActive);
-  LG_UNLOCK(clipboard.providerLock);
-  LG_UNLOCK(clipboard.registrationLock);
+  dropBinding(&clipboard.transport);
 }
 
 void lgClipboard_release(void)

@@ -28,6 +28,8 @@ void lgClipboard_free(void);
 void lgClipboard_setLocalAvailable(bool available);
 
 void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque);
+/* Drop functions remove a dead endpoint without invoking it. */
+void lgClipboard_dropFallback(void);
 void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque);
 void lgClipboard_dropTransport(void);
 
