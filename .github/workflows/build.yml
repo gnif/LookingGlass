@@ -21,7 +21,7 @@ jobs:
     - name: Install client dependencies
       run: |
         sudo apt-get install \
-          weston libgtest-dev libgl1-mesa-dri \
+          weston xvfb libgtest-dev libgl1-mesa-dri \
           libdw-dev libunwind-dev \
           libspice-protocol-dev nettle-dev \
           libgl-dev libgles-dev \
