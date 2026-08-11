@@ -633,6 +633,12 @@ find_program(WESTON_EXECUTABLE NAMES weston)
 if(NOT WESTON_EXECUTABLE)
   message(FATAL_ERROR "weston is required to run framebuffer rendering tests")
 endif()
+if(ENABLE_X11)
+  find_program(XVFB_RUN_EXECUTABLE NAMES xvfb-run)
+  if(NOT XVFB_RUN_EXECUTABLE)
+    message(FATAL_ERROR "xvfb-run is required to run X11 rendering tests")
+  endif()
+endif()
 
 add_executable(render-tests
   render_test.cpp
@@ -668,8 +674,27 @@ add_test(NAME render-tests
     "${CMAKE_CURRENT_SOURCE_DIR}/run-with-weston.sh"
     "${WESTON_EXECUTABLE}"
     "$<TARGET_FILE:render-tests>"
+    "--gtest_filter=-X11*"
 )
 
 set_tests_properties(render-tests PROPERTIES
   TIMEOUT 120
 )
+
+if(ENABLE_X11)
+  add_test(NAME render-x11-tests
+    COMMAND "${CMAKE_COMMAND}" -E env
+      --unset=WAYLAND_DISPLAY
+      LIBGL_ALWAYS_SOFTWARE=1
+      "${XVFB_RUN_EXECUTABLE}"
+      -a
+      -e /dev/stderr
+      -s "-screen 0 1024x768x24 +extension GLX"
+      "$<TARGET_FILE:render-tests>"
+      "--gtest_filter=X11*"
+  )
+
+  set_tests_properties(render-x11-tests PROPERTIES
+    TIMEOUT 120
+  )
+endif()

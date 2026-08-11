@@ -124,6 +124,11 @@ std::string readText(const std::filesystem::path & path)
       std::istreambuf_iterator<char>());
 }
 
+void expectX11Log(const std::string & clientLog)
+{
+  EXPECT_NE(clientLog.find("X11 XInput"), std::string::npos) << clientLog;
+}
+
 std::filesystem::path makeTempDirectory()
 {
   std::array<char, 64> value {};
@@ -753,23 +758,29 @@ class GeometryRenderPipelineTest :
 {
 };
 
-TEST_P(GeometryRenderPipelineTest, MatchesReference)
+void runGeometryCase(const GeometryCase & geometry, bool x11)
 {
-  const GeometryCase & geometry = GetParam();
-  const FormatCase      format   =
+  const FormatCase format =
   {
     "bgra", FRAME_TYPE_BGRA, false, false
   };
-  const LaunchCase      launch   =
+  const LaunchCase launch =
   {
     "EGL", geometry.width, geometry.height, geometry.rotate, true
   };
   Capture capture = produceCapture(format, "moving", 0, launch);
   ASSERT_FALSE(capture.data.empty()) << "artifacts: " << capture.directory;
 
+  if (x11)
+    expectX11Log(readText(capture.log));
   compareGeometry(format, geometry, capture);
   if (!testing::Test::HasFailure())
     std::filesystem::remove_all(capture.directory);
+}
+
+TEST_P(GeometryRenderPipelineTest, MatchesReference)
+{
+  runGeometryCase(GetParam(), false);
 }
 
 std::string geometryRenderCaseName(
@@ -792,22 +803,24 @@ class OpenGLRenderPipelineTest :
 {
 };
 
-TEST_P(OpenGLRenderPipelineTest, RendersFrames)
+void runOpenGLCase(const FormatCase & format, bool x11)
 {
-  const FormatCase & format = GetParam();
-  const LaunchCase   launch =
+  const LaunchCase launch =
   {
     "OpenGL", 254, 254, 90, false
   };
   const std::filesystem::path directory = makeTempDirectory();
   ASSERT_FALSE(directory.empty());
   const std::filesystem::path log       =
-    directory / (std::string("opengl-") + format.name + ".log");
+    directory / (std::string(x11 ? "x11-opengl-" : "opengl-") +
+        format.name + ".log");
 
   const int         status    = runClient(
       format, "moving", directory / "unused", log, 0, launch);
   const std::string clientLog = readText(log);
   EXPECT_EQ(status, 0) << clientLog;
+  if (x11)
+    expectX11Log(clientLog);
   EXPECT_NE(clientLog.find("Using Renderer: OpenGL"), std::string::npos)
     << clientLog;
   EXPECT_NE(clientLog.find("Vendor  :"), std::string::npos) << clientLog;
@@ -817,6 +830,11 @@ TEST_P(OpenGLRenderPipelineTest, RendersFrames)
 
   if (!testing::Test::HasFailure())
     std::filesystem::remove_all(directory);
+}
+
+TEST_P(OpenGLRenderPipelineTest, Runs)
+{
+  runOpenGLCase(GetParam(), false);
 }
 
 std::string openGLRenderCaseName(
@@ -835,5 +853,35 @@ INSTANTIATE_TEST_SUITE_P(Formats, OpenGLRenderPipelineTest,
       FormatCase {"rgba16f", FRAME_TYPE_RGBA16F, true,  false}
     ),
     openGLRenderCaseName);
+
+class X11EGLRenderPipelineTest :
+  public testing::TestWithParam<GeometryCase>
+{
+};
+
+TEST_P(X11EGLRenderPipelineTest, MatchesReference)
+{
+  ASSERT_FALSE(std::getenv("WAYLAND_DISPLAY"));
+  ASSERT_TRUE(std::getenv("DISPLAY"));
+  runGeometryCase(GetParam(), true);
+}
+
+INSTANTIATE_TEST_SUITE_P(X11Geometry, X11EGLRenderPipelineTest,
+    testing::Values(
+      GeometryCase {"letterbox",      254, 254,  0,  0, 32, 254, 190},
+      GeometryCase {"rotate90Scale2", 190, 254, 90,  0,  0, 190, 254}
+    ),
+    geometryRenderCaseName);
+
+TEST(X11OpenGLRenderPipelineTest, Runs)
+{
+  const FormatCase format =
+  {
+    "bgra", FRAME_TYPE_BGRA, false, false
+  };
+  ASSERT_FALSE(std::getenv("WAYLAND_DISPLAY"));
+  ASSERT_TRUE(std::getenv("DISPLAY"));
+  runOpenGLCase(format, true);
+}
 
 } // namespace
