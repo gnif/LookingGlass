@@ -137,6 +137,34 @@ bool core_inputEnabled(void)
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
+static void updateKeyboardGrab(void)
+{
+  const bool capture   = g_cursor.grab && g_params.grabKeyboard;
+  const bool view      = g_cursor.inView && g_params.grabKeyboardOnFocus;
+  const bool automatic = !g_cursor.grab &&
+    g_cursor.autoCaptureActive && !g_params.captureInputOnly;
+  const bool active    = g_state.focused && core_inputEnabled() &&
+    !app_isOverlayMode() && (capture || view || automatic);
+
+  if (active)
+    g_state.ds->grabKeyboard();
+  else
+    g_state.ds->ungrabKeyboard();
+}
+
+static void setAutoCapture(bool active)
+{
+  active = active && g_params.autoCapture && g_cursor.inView &&
+    !g_cursor.grab && !g_params.captureInputOnly;
+  if (g_cursor.autoCaptureActive == active)
+    return;
+
+  MTRACE("auto capture active=%d old=%d", active,
+      g_cursor.autoCaptureActive);
+  g_cursor.autoCaptureActive = active;
+  updateKeyboardGrab();
+}
+
 static void applyView(bool active, bool force)
 {
   if (active && !g_cursor.viewReq)
@@ -146,33 +174,36 @@ static void applyView(bool active, bool force)
   }
 
   if (!force && g_cursor.inView == active)
+  {
+    updateKeyboardGrab();
     return;
+  }
 
   MTRACE("view active=%d old=%d req=%d force=%d", active,
       g_cursor.inView, g_cursor.viewReq, force);
 
-  g_cursor.inView = active;
-  g_cursor.draw = (g_params.alwaysShowCursor || g_params.captureInputOnly)
+  g_cursor.inView            = active;
+  g_cursor.draw              =
+    (g_params.alwaysShowCursor || g_params.captureInputOnly)
     ? true : g_cursor.inView;
-  g_cursor.redraw = true;
+  g_cursor.redraw            = true;
+  g_cursor.motionValid       = false;
+  g_cursor.autoCaptureActive = active && g_params.autoCapture &&
+    !g_cursor.grab && !g_params.captureInputOnly;
 
   g_cursor.warpState = g_cursor.inView ? WARP_STATE_ON : WARP_STATE_OFF;
   if (g_cursor.inView)
   {
     if (g_params.hideMouse)
       g_state.ds->setPointer(LG_POINTER_NONE);
-
-    if (g_params.grabKeyboardOnFocus)
-      g_state.ds->grabKeyboard();
   }
   else
   {
     if (g_params.hideMouse)
       g_state.ds->setPointer(LG_POINTER_SQUARE);
-
-    g_state.ds->ungrabKeyboard();
   }
 
+  updateKeyboardGrab();
   g_cursor.warpState = WARP_STATE_ON;
 }
 
@@ -277,9 +308,9 @@ void core_setGrabQuiet(bool enable)
     return;
 
   cancelSurfaceExit("capture");
-  g_cursor.grab = enable;
-  g_cursor.acc.x = 0.0;
-  g_cursor.acc.y = 0.0;
+  g_cursor.acc.x       = 0.0;
+  g_cursor.acc.y       = 0.0;
+  g_cursor.motionValid = false;
 
   /* if the display server does not support warp we need to ungrab the pointer
    * here instead of in the move handler */
@@ -288,8 +319,11 @@ void core_setGrabQuiet(bool enable)
 
   if (enable)
   {
+    g_state.ignoreInput          = false;
+    g_cursor.grab                = true;
+    g_cursor.autoCaptureActive   = false;
+    updateKeyboardGrab();
     core_setCursorInView(true);
-    g_state.ignoreInput = false;
 
     /* ensure the local mouse is inside the window before we capture, this fixes
      * odd UI behaviour if the user is using focus follows mouse and the window
@@ -302,29 +336,21 @@ void core_setGrabQuiet(bool enable)
       core_warpPointer(local.x, local.y, true);
     }
 
-    if (g_params.grabKeyboard)
-      g_state.ds->grabKeyboard();
-
     g_state.ds->capturePointer();
   }
   else
   {
-    if (g_params.grabKeyboard)
-    {
-      if (!g_params.grabKeyboardOnFocus ||
-          !g_state.focused || g_params.captureInputOnly)
-        g_state.ds->ungrabKeyboard();
-    }
-
     g_state.ds->uncapturePointer();
+    g_cursor.grab              = false;
+    g_cursor.autoCaptureActive = g_params.autoCapture &&
+      g_cursor.inView && !g_params.captureInputOnly;
+    updateKeyboardGrab();
 
     if (warpSupport == LG_DS_WARP_NONE)
       core_handleMouseAbsolute();
     else
     {
-      if (!g_params.captureInputOnly)
-        applyView(g_state.ds->isPointerGrabbed(), false);
-
+      g_cursor.warpState = WARP_STATE_ON;
       core_alignToGuest();
     }
   }
@@ -369,6 +395,7 @@ bool core_warpPointer(int x, int y, bool exiting)
 
   MTRACE("warp send target=%d,%d exit=%d pos=%.3f,%.3f",
       x, y, exiting, g_cursor.pos.x, g_cursor.pos.y);
+  g_cursor.motionValid = false;
   g_state.ds->warpPointer(x, y, exiting);
   return true;
 }
@@ -397,6 +424,7 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
 
 void core_updatePositionInfo(void)
 {
+  g_cursor.motionValid = false;
   cancelExit("geometry");
 
   if (g_params.setGuestRes &&
@@ -679,13 +707,12 @@ void core_handleGuestMouseUpdate(void)
   );
 }
 
-void core_handleMouseAbsolute(void)
+static void handleMouseAbsolute(bool inputEnabled, bool absolute)
 {
   if (g_cursor.grab || !g_cursor.inWindow || !g_cursor.valid ||
       !g_state.haveSrcSize || !g_state.posInfoValid ||
       !g_state.focused || g_cursor.realigning ||
-      app_isOverlayMode() || !core_inputEnabled() ||
-      !lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
+      app_isOverlayMode() || !inputEnabled || !absolute)
     return;
 
   const bool inView = isInView();
@@ -709,6 +736,79 @@ void core_handleMouseAbsolute(void)
     DEBUG_ERROR("failed to send absolute mouse position message");
   else
     g_cursor.realign = false;
+}
+
+void core_handleMouseAbsolute(void)
+{
+  const bool inputEnabled = core_inputEnabled();
+  const bool absolute     = inputEnabled &&
+    lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
+  handleMouseAbsolute(inputEnabled, absolute);
+}
+
+void core_handleMousePosition(double x, double y)
+{
+  bool allowPrediction = g_cursor.motionValid && !g_cursor.realign;
+  const double ex = allowPrediction ? x - g_cursor.pos.x : 0.0;
+  const double ey = allowPrediction ? y - g_cursor.pos.y : 0.0;
+
+  g_cursor.pos.x       = x;
+  g_cursor.pos.y       = y;
+  g_cursor.valid       = true;
+  g_cursor.motionValid = true;
+
+  const bool inputEnabled = core_inputEnabled();
+  const bool absolute     = inputEnabled &&
+    lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
+  const bool canTrack     = !g_cursor.grab && g_cursor.inWindow &&
+    g_state.haveSrcSize && g_state.posInfoValid &&
+    g_state.dstRect.valid && g_state.focused &&
+    !app_isOverlayMode() && inputEnabled;
+  if (canTrack && !g_cursor.realigning)
+  {
+    const bool inView = isInView();
+    if (g_cursor.viewReq != inView || g_cursor.inView != inView)
+    {
+      core_setCursorInView(inView);
+      allowPrediction = false;
+      g_cursor.motionValid = true;
+    }
+  }
+
+  handleMouseAbsolute(inputEnabled, absolute);
+
+  if (!canTrack)
+  {
+    g_cursor.motionValid = false;
+    setAutoCapture(false);
+    return;
+  }
+
+  if (g_cursor.realigning)
+  {
+    g_cursor.motionValid = false;
+    return;
+  }
+
+  bool active = g_cursor.inView && g_cursor.viewReq;
+  if (!allowPrediction || !g_params.autoCapture ||
+      !active || g_cursor.buttons)
+  {
+    setAutoCapture(active);
+    return;
+  }
+
+  const double nextX = x + ex;
+  const double nextY = y + ey;
+  active =
+    nextX >= g_state.dstRect.x &&
+    nextX <  g_state.dstRect.x + g_state.dstRect.w &&
+    nextY >= g_state.dstRect.y &&
+    nextY <  g_state.dstRect.y + g_state.dstRect.h;
+
+  MTRACE("auto capture move=%.3f,%.3f next=%.3f,%.3f inView=%d",
+      ex, ey, nextX, nextY, active);
+  setAutoCapture(active);
 }
 
 void core_handleMouseGrabbed(double ex, double ey)
@@ -911,11 +1011,6 @@ fallback:
     testExit = false;
   }
 
-  /* if we are in "autoCapture" and the delta was large don't test for exit */
-  if (g_params.autoCapture &&
-      (fabs(ex) > 20.0 / g_cursor.scale.x || fabs(ey) > 20.0 / g_cursor.scale.y))
-    testExit = false;
-
   /* if any buttons are held we should not allow exit to happen */
   if (g_cursor.buttons)
     testExit = false;
@@ -989,6 +1084,9 @@ fallback:
     }
   }
 
+  if (g_params.autoCapture && testExit)
+    setAutoCapture(!didExit);
+
   if (absolute)
     return;
 
@@ -998,25 +1096,11 @@ fallback:
   if (x == 0 && y == 0)
     return;
 
-  if (g_params.autoCapture)
-  {
-    g_cursor.delta.x += x;
-    g_cursor.delta.y += y;
-
-    if (fabs(g_cursor.delta.x) > 50.0 || fabs(g_cursor.delta.y) > 50.0)
-    {
-      g_cursor.delta.x = 0;
-      g_cursor.delta.y = 0;
-    }
-  }
-  else
-  {
-    /* assume the mouse will move to the location we attempt to move it to so we
-     * avoid warp out of window issues. The cursorThread will correct this if
-     * wrong after the movement has ocurred on the guest */
-    g_cursor.guest.x += x;
-    g_cursor.guest.y += y;
-  }
+  /* assume the mouse will move to the location we attempt to move it to so we
+   * avoid warp out of window issues. The cursorThread will correct this if
+   * wrong after the movement has ocurred on the guest */
+  g_cursor.guest.x += x;
+  g_cursor.guest.y += y;
 
   MTRACE("motion delta=%d,%d guest=%d,%d exit=%d test=%d warp=%d",
       x, y, g_cursor.guest.x, g_cursor.guest.y, didExit, testExit,

@@ -40,6 +40,7 @@ bool core_startFrameThread(void);
 void core_stopFrameThread(void);
 void core_handleGuestMouseUpdate(void);
 void core_handleMouseAbsolute(void);
+void core_handleMousePosition(double x, double y);
 void core_handleMouseGrabbed(double ex, double ey);
 void core_handleMouseNormal(double ex, double ey);
 void core_resetOverlayInputState(void);

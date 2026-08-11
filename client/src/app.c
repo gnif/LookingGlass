@@ -130,17 +130,22 @@ bool app_isOverlayMode(void)
 
 void app_updateCursorPos(double x, double y)
 {
-  g_cursor.pos.x = x;
-  g_cursor.pos.y = y;
-  g_cursor.valid = true;
+  const bool overlay = app_isOverlayMode();
+  if (overlay)
+  {
+    g_cursor.pos.x       = x;
+    g_cursor.pos.y       = y;
+    g_cursor.valid       = true;
+    g_cursor.motionValid = false;
+  }
+  else
+    core_handleMousePosition(x, y);
 
   MTRACE("pos pos=%.3f,%.3f inWin=%d inView=%d grab=%d",
       x, y, g_cursor.inWindow, g_cursor.inView, g_cursor.grab);
 
-  if (app_isOverlayMode())
+  if (overlay)
     g_state.io->MousePos = (ImVec2) { x, y };
-  else
-    core_handleMouseAbsolute();
 }
 
 void app_updateMouseState(void)
@@ -220,13 +225,21 @@ void app_handleFocusEvent(bool focused)
   if (g_state.focused == focused)
     return;
 
-  g_state.focused = focused;
+  g_state.focused       = focused;
+  g_cursor.motionValid  = false;
+  const bool inputEnabled = core_inputEnabled();
 
   // release any imgui buttons/keys if we lost focus
   if (!focused && app_isOverlayMode())
     core_resetOverlayInputState();
 
-  if (!core_inputEnabled())
+  if (!focused)
+  {
+    core_setGrabQuiet(false);
+    core_setCursorInView(false);
+  }
+
+  if (!inputEnabled)
   {
     if (!focused && g_params.minimizeOnFocusLoss && app_getFullscreen())
       g_state.ds->minimize();
@@ -235,9 +248,6 @@ void app_handleFocusEvent(bool focused)
 
   if (!focused)
   {
-    core_setGrabQuiet(false);
-    core_setCursorInView(false);
-
     if (g_params.releaseKeysOnFocusLoss)
       lgInput_releaseKeys();
 
@@ -261,6 +271,8 @@ void app_handleEnterEvent(bool entered)
 {
   MTRACE("enter set=%d inWin=%d inView=%d grab=%d",
       entered, g_cursor.inWindow, g_cursor.inView, g_cursor.grab);
+
+  g_cursor.motionValid = false;
 
   if (entered)
   {

@@ -316,11 +316,14 @@ struct CursorState
   /* true if the position is valid */
   bool valid;
 
+  /* true if the last local position can be used to predict motion */
+  bool motionValid;
+
+  /* true if auto capture currently requests the keyboard */
+  bool autoCaptureActive;
+
   /* the button state */
   unsigned int buttons;
-
-  /* the delta since last warp when in auto capture mode */
-  struct DoublePoint delta;
 
   /* the scale factor for the mouse sensitiviy */
   int sens;

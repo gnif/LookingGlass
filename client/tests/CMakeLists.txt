@@ -121,6 +121,7 @@ set(MOUSE_CASES
   exit-immediate
   exit-guest
   absolute-sync
+  auto-capture
   exit-reentry
   view-immediate
   capture-pending

@@ -381,6 +381,7 @@ void evdev_stop(void)
 
 void evdev_grabKeyboard(void)
 {
+  state.pending = PENDING_NONE;
   if (state.grabbed)
     return;
 
@@ -405,6 +406,7 @@ void evdev_grabKeyboard(void)
 
 void evdev_ungrabKeyboard(void)
 {
+  state.pending = PENDING_NONE;
   if (!state.grabbed)
     return;
 

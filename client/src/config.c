@@ -412,7 +412,7 @@ static struct Option options[] =
   {
     .module         = "input",
     .name           = "autoCapture",
-    .description    = "Try to keep the mouse captured when needed",
+    .description    = "Grab the keyboard in the guest view and release it before exit",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },

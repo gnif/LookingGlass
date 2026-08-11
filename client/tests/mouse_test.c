@@ -42,6 +42,8 @@ enum EvType
   EV_GUEST,
   EV_MOTION,
   EV_VALID,
+  EV_KEY_GRAB,
+  EV_KEY_UNGRAB,
 };
 
 struct Ev
@@ -68,6 +70,7 @@ static struct
   struct Trap           lock;
   bool                  valid;
   bool                  captureGrab;
+  bool                  keyboardGrabbed;
   struct Ev             ev[256];
   unsigned int          count;
 }
@@ -119,8 +122,22 @@ static void setPointer(LG_DSPointer pointer)
   (void)pointer;
 }
 
-static void keyNoop(void)
+static void keyGrab(void)
 {
+  if (m.keyboardGrabbed)
+    return;
+
+  m.keyboardGrabbed = true;
+  push(EV_KEY_GRAB, 0, 0, false);
+}
+
+static void keyUngrab(void)
+{
+  if (!m.keyboardGrabbed)
+    return;
+
+  m.keyboardGrabbed = false;
+  push(EV_KEY_UNGRAB, 0, 0, false);
 }
 
 static void grab(void)
@@ -209,8 +226,8 @@ static struct LG_DisplayServerOps ds = {
   .name                = "test",
   .guestPointerUpdated = guest,
   .setPointer          = setPointer,
-  .grabKeyboard        = keyNoop,
-  .ungrabKeyboard      = keyNoop,
+  .grabKeyboard        = keyGrab,
+  .ungrabKeyboard      = keyUngrab,
   .grabPointer         = grab,
   .ungrabPointer       = ungrab,
   .isPointerGrabbed    = grabbed,
@@ -511,6 +528,141 @@ static void testAbsoluteSync(void)
   lgInput_setFallback(&inputOps, NULL);
 }
 
+static void testAutoCapture(void)
+{
+  static const enum LG_DSWarpSupport supports[] = {
+    LG_DS_WARP_SURFACE,
+    LG_DS_WARP_SCREEN,
+  };
+
+  for (unsigned int i = 0; i < sizeof(supports) / sizeof(supports[0]); ++i)
+  {
+    reset();
+    m.support = supports[i];
+    g_params.autoCapture = true;
+    g_cursor.inView      = false;
+    g_cursor.viewReq     = false;
+    setLocal(50, 50);
+
+    core_invalidatePointer(true);
+    CHECK(m.keyboardGrabbed);
+    CHECK(count(EV_KEY_GRAB) == 1);
+
+    setLocal(109, 50);
+    m.count = 0;
+    core_handleMouseNormal(1, 0);
+    CHECK(!m.keyboardGrabbed);
+    CHECK(count(EV_KEY_UNGRAB) == 1);
+    CHECK(g_cursor.exit);
+    CHECK(!g_cursor.inView);
+    CHECK(!g_cursor.viewReq);
+
+    setLocal(108, 50);
+    m.count = 0;
+    core_handleMouseNormal(-1, 0);
+    CHECK(m.keyboardGrabbed);
+    CHECK(count(EV_KEY_GRAB) == 1);
+    CHECK(!g_cursor.exit);
+    CHECK(g_cursor.inView);
+    CHECK(g_cursor.viewReq);
+  }
+
+  bool absolute = true;
+  lgInput_setFallback(&inputOps, &absolute);
+  reset();
+  g_params.autoCapture = true;
+  g_cursor.inView      = false;
+  g_cursor.viewReq     = false;
+  g_cursor.valid       = true;
+  setLocal(50, 50);
+
+  core_handleMousePosition(50, 50);
+  CHECK(m.keyboardGrabbed);
+  CHECK(count(EV_KEY_GRAB) == 1);
+
+  g_cursor.motionValid = false;
+  core_handleMousePosition(108, 50);
+  m.count = 0;
+  core_handleMousePosition(109, 50);
+  CHECK(!m.keyboardGrabbed);
+  CHECK(count(EV_KEY_UNGRAB) == 1);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.viewReq);
+
+  m.count = 0;
+  core_handleMousePosition(108, 50);
+  CHECK(m.keyboardGrabbed);
+  CHECK(count(EV_KEY_GRAB) == 1);
+  CHECK(g_cursor.inView);
+  CHECK(g_cursor.viewReq);
+
+  reset();
+  g_params.autoCapture = true;
+  g_cursor.inView      = false;
+  g_cursor.viewReq     = false;
+  g_cursor.valid       = true;
+  g_cursor.motionValid = true;
+  setLocal(9, 50);
+
+  core_handleMousePosition(109, 50);
+  CHECK(m.keyboardGrabbed);
+  CHECK(count(EV_KEY_GRAB) == 1);
+  CHECK(g_cursor.motionValid);
+
+  m.count = 0;
+  core_handleMousePosition(109.5, 50);
+  CHECK(!m.keyboardGrabbed);
+  CHECK(count(EV_KEY_UNGRAB) == 1);
+
+  reset();
+  g_params.autoCapture   = true;
+  g_cursor.inView        = false;
+  g_cursor.viewReq       = false;
+  g_cursor.valid         = true;
+  g_state.posInfoValid   = false;
+  setLocal(50, 50);
+
+  core_handleMousePosition(50, 50);
+  CHECK(!m.keyboardGrabbed);
+  CHECK(!g_cursor.inView);
+  CHECK(!g_cursor.viewReq);
+
+  g_state.posInfoValid = true;
+  g_cursor.realigning  = true;
+  core_handleMousePosition(50, 50);
+  CHECK(!m.keyboardGrabbed);
+  CHECK(!g_cursor.inView);
+  CHECK(!g_cursor.viewReq);
+
+  lgInput_setFallback(&inputOps, NULL);
+
+  reset();
+  g_params.grabKeyboard = true;
+  g_state.ignoreInput   = true;
+
+  core_setGrabQuiet(true);
+  CHECK(!g_state.ignoreInput);
+  CHECK(m.keyboardGrabbed);
+  CHECK(count(EV_KEY_GRAB) == 1);
+
+  reset();
+  m.support                  = LG_DS_WARP_SCREEN;
+  m.captureGrab              = true;
+  m.conf.req                 = false;
+  m.conf.on                  = false;
+  g_params.autoCapture       = true;
+  g_params.grabKeyboard      = true;
+  g_cursor.autoCaptureActive = true;
+  keyGrab();
+
+  core_setGrabQuiet(true);
+  m.count = 0;
+  core_setGrabQuiet(false);
+  CHECK(m.keyboardGrabbed);
+  CHECK(count(EV_KEY_GRAB) == 0);
+  CHECK(count(EV_KEY_UNGRAB) == 0);
+}
+
 static void testExitReentry(void)
 {
   startExit();
@@ -624,7 +776,6 @@ static void testCapAlign(void)
 
   m.lock.on = true;
   g_cursor.guest.x += 10;
-  g_cursor.warpState = WARP_STATE_ON;
   m.count = 0;
   core_setGrabQuiet(false);
 
@@ -925,6 +1076,7 @@ static const struct Test tests[] = {
   { "exit-immediate"  , testExitImmediate},
   { "exit-guest"      , testExitGuest    },
   { "absolute-sync"   , testAbsoluteSync },
+  { "auto-capture"    , testAutoCapture  },
   { "exit-reentry"    , testExitReentry  },
   { "view-immediate"  , testViewImmediate},
   { "capture-pending" , testCapWait      },
