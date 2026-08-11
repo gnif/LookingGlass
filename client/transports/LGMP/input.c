@@ -1375,7 +1375,10 @@ static bool updateMouseButton(void * opaque, unsigned int button,
     result = reset;
   }
   if (result && !reset)
+  {
     input->mouseButtons = buttons;
+    input->mouseMode    = mode;
+  }
   LG_UNLOCK(input->lock);
 
   if (wake)
