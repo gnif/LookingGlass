@@ -144,6 +144,40 @@ foreach(name IN LISTS MOUSE_CASES)
   )
 endforeach()
 
+add_executable(render-queue-tests
+  render_queue_test.c
+  ../src/render_queue.c
+)
+target_compile_definitions(render-queue-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(render-queue-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(render-queue-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(RENDER_QUEUE_CASES
+  generation
+  latest
+  prepare
+  presented
+  payload
+  validation
+  cache
+)
+foreach(name IN LISTS RENDER_QUEUE_CASES)
+  add_test(NAME render-queue-${name}
+    COMMAND render-queue-tests ${name}
+  )
+  set_tests_properties(render-queue-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 find_package(GTest REQUIRED)
 find_program(WESTON_EXECUTABLE NAMES weston)
 if(NOT WESTON_EXECUTABLE)
