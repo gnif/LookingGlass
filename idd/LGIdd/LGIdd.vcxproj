@@ -62,6 +62,7 @@
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp" />
     <ClCompile Include="transport\TransportFactory.cpp" />
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
+    <ClCompile Include="transport\lgmp\CRecovery.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPHost.cpp" />
@@ -114,6 +115,7 @@
     <ClInclude Include="transport\PreparedFrameBuffer.h" />
     <ClInclude Include="transport\TransportFactory.h" />
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />
+    <ClInclude Include="transport\lgmp\CRecovery.h" />
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPHost.h" />

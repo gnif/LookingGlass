@@ -75,7 +75,7 @@ private:
   std::atomic<LONG> m_replugQueued = 0;
 
 public:
-  void Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
+  bool Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
     std::vector<BYTE> edid, CDeviceContext * owner);
   ReplugAction Replug();
   void RequestMode(const CSettings::DisplayMode& mode);

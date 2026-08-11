@@ -51,7 +51,8 @@ private:
   CDisplayConfiguration       m_displayConfiguration;
   CMonitorManager             m_monitorManager;
 
-  WDFTIMER m_transportTimer = nullptr;
+  WDFTIMER m_transportTimer     = nullptr;
+  bool     m_recoveryHandlerSet = false;
 
   UINT m_iddCxVersion    = 0;
   bool m_hasIddCx110DDIs = false;
@@ -67,6 +68,8 @@ private:
   void TransportTimer();
   void OnSetCursorPos(int32_t x, int32_t y) override;
   void OnSetResolution(uint32_t width, uint32_t height) override;
+  void OnRecoveryRequest(
+    uint64_t session, uint32_t serial, bool active) override;
   void SetResolution(uint32_t width, uint32_t height);
 
 public:

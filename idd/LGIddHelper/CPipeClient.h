@@ -33,17 +33,25 @@ private:
   CPipeEndpoint m_endpoint;
   CSRWLock      m_displayLock;
 
+  bool      m_recoveryActive    = false;
+  bool      m_hasRecoveryStatus = false;
+  LGPipeMsg m_recoveryStatus    = {};
+
   void WriteMsg(const LGPipeMsg& msg);
 
   void SetActiveDesktop();
 
   bool EnsureOnlyDisplayLocked();
-  
+  uint32_t RestoreSavedTopologyLocked() const;
+  uint32_t RestoreLGTopologyLocked();
+
   void HandleSetCursorPos(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
+  void HandleSetRecovery(const LGPipeMsg& msg);
 
+  void OnPipeConnected() override;
   bool ShouldReconnect() override;
   bool OnPipeMessage(const void * message, size_t size) override;
 

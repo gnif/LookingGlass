@@ -33,18 +33,30 @@ class CDeviceContext;
 
 class CPipeServer : private IPipeEndpointHandler
 {
+  public:
+    using RecoveryHandler = void (*)(void * opaque,
+      uint64_t session, uint32_t serial, bool active,
+      LGPipeMsg::Type result);
+
   private:
     CPipeEndpoint          m_endpoint;
     CSRWLock               m_queueLock;
     std::vector<LGPipeMsg> m_queue;
+    bool                   m_recoveryValid   = false;
+    LGPipeMsg              m_recoveryRequest = {};
 
     CSRWLock         m_deviceContextLock;
-    CDeviceContext * m_deviceContext     = nullptr;
+    CDeviceContext * m_deviceContext = nullptr;
+
+    CSRWLock        m_recoveryLock;
+    RecoveryHandler m_recoveryHandler = nullptr;
+    void *          m_recoveryOpaque  = nullptr;
 
     void WriteMsg(const LGPipeMsg & msg);
     void QueueMsgLocked(const LGPipeMsg & msg);
 
     void HandleReloadSettings();
+    void HandleRecovery(const LGPipeMsg & msg);
 
     void OnPipeConnected() override;
     bool OnPipeMessage(const void * message, size_t size) override;
@@ -56,6 +68,8 @@ class CPipeServer : private IPipeEndpointHandler
     void DeInit();
 
     void SetDeviceContext(CDeviceContext * context);
+    void SetRecoveryHandler(RecoveryHandler handler, void * opaque);
+    void ClearRecoveryHandler(void * opaque);
 
     void SetCursorPos(uint32_t x, uint32_t y);
     void SetDisplayMode(
@@ -63,6 +77,8 @@ class CPipeServer : private IPipeEndpointHandler
     void SetGPUStatus(bool software);
     void ResolutionRejected(uint32_t width, uint32_t height,
       uint32_t requiredSizeMiB);
+    void SetRecovery(
+      void * owner, uint64_t session, uint32_t serial, bool active);
 };
 
 extern CPipeServer g_pipe;

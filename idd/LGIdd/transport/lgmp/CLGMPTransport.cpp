@@ -22,6 +22,7 @@
 
 #include "CDebug.h"
 #include "common/KVMFR.h"
+#include "common/KVMFRRecovery.h"
 
 static bool TranslateFrameScheduleFlags(
   uint32_t source, uint32_t& destination)
@@ -67,6 +68,9 @@ ITransport::OpenResult CLGMPTransport::Open()
 
 bool CLGMPTransport::Initialize()
 {
+  if (!m_recovery.Initialize(m_ivshmem))
+    return false;
+
   if (!m_host.Initialize(m_ivshmem))
     return false;
 
@@ -82,11 +86,26 @@ bool CLGMPTransport::Initialize()
 
 bool CLGMPTransport::Setup(size_t alignment)
 {
-  return m_frames.Setup(alignment);
+  if (!m_frames.Setup(alignment))
+    return false;
+
+  m_ready.store(true, std::memory_order_release);
+  return true;
 }
 
 void CLGMPTransport::Process(ITransportEvents& events)
 {
+  const CRecovery::Request recovery = m_recovery.Process();
+  if (recovery.valid)
+    events.OnRecoveryRequest(
+      recovery.session, recovery.serial, recovery.active);
+
+  // Before the swap chain establishes the frame-buffer alignment, service
+  // only the protocol-independent recovery channel. This preserves the old
+  // transport startup boundary while keeping recovery available immediately.
+  if (!m_ready.load(std::memory_order_acquire))
+    return;
+
   const LGMP_STATUS processStatus = m_host.Process();
   if (processStatus != LGMP_OK)
   {
@@ -172,6 +191,39 @@ void CLGMPTransport::Process(ITransportEvents& events)
 
   if (m_control.HasNewSubscribers())
     m_control.ResendState();
+}
+
+void CLGMPTransport::SyncRecovery()
+{
+  m_recovery.Sync();
+}
+
+void CLGMPTransport::RecoveryStatus(
+  uint64_t session, uint32_t serial, bool active,
+  Recovery state, uint32_t error)
+{
+  uint32_t wireState = KVMFR_R_STATE_FAILED;
+  uint32_t wireError = KVMFR_R_ERR_NONE;
+  switch (state)
+  {
+    case Recovery::NORMAL:
+      wireState = KVMFR_R_STATE_NORMAL;
+      break;
+
+    case Recovery::ACTIVE:
+      wireState = KVMFR_R_STATE_ACTIVE;
+      break;
+
+    case Recovery::FAILED:
+      wireState = KVMFR_R_STATE_FAILED;
+      wireError = error == ERROR_NOT_FOUND ?
+        KVMFR_R_ERR_NO_FALLBACK_DISPLAY :
+        KVMFR_R_ERR_TOPOLOGY_FAILED;
+      break;
+  }
+
+  m_recovery.SetStatus(
+    session, serial, active, wireState, wireError);
 }
 
 FrameMemoryLimits CLGMPTransport::GetMemoryLimits() const

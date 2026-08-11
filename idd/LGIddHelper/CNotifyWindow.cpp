@@ -30,6 +30,7 @@
 #define WM_CLEAN_UP_CONFIG     (WM_USER+1)
 #define WM_NO_GPU              (WM_USER+2)
 #define WM_RESOLUTION_REJECTED (WM_USER+3)
+#define WM_RECOVERY_STATE      (WM_USER+4)
 
 #define ID_MENU_SHOW_LOG 3000
 #define ID_MENU_SHOW_CONFIG 3001
@@ -66,7 +67,7 @@ bool CNotifyWindow::registerClass()
 }
 
 CNotifyWindow::CNotifyWindow() : m_iconData({ 0 }), m_iconRegistered(false),
-  m_menu(CreatePopupMenu()), closeRequested(false)
+  m_menu(CreatePopupMenu()), closeRequested(false), m_recoveryActive(false)
 {
   CreateWindowEx(0, MAKEINTATOM(s_atom), NULL,
     0, 0, 0, 0, 0, NULL, NULL, hInstance, this);
@@ -112,8 +113,16 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     return 0;
   }
 
+  case WM_RECOVERY_STATE:
+    m_recoveryActive = wParam;
+    KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+    if (!m_recoveryActive)
+      scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+    return 0;
+
   case WM_DISPLAYCHANGE:
-    scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+    if (!m_recoveryActive)
+      scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
     return 0;
 
   case WM_TIMER:
@@ -121,6 +130,8 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     {
     case ID_DISPLAY_CHECK_TIMER:
       KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+      if (m_recoveryActive)
+        break;
       if (m_onEnsureOnlyDisplay && m_onEnsureOnlyDisplay())
         DEBUG_INFO("Enforced Looking Glass as the only display");
       else
@@ -293,6 +304,12 @@ void CNotifyWindow::notifyResolutionRejected(uint32_t width, uint32_t height,
   }
 }
 
+void CNotifyWindow::setRecoveryMode(bool active)
+{
+  if (!PostMessage(m_hwnd, WM_RECOVERY_STATE, active, 0))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to update recovery state");
+}
+
 void CNotifyWindow::handleResolutionRejected(uint32_t width, uint32_t height,
   uint32_t requiredSizeMiB)
 {
@@ -326,7 +343,7 @@ void CNotifyWindow::close()
 
 void CNotifyWindow::scheduleDisplayCheck(UINT delay)
 {
-  if (!m_onEnsureOnlyDisplay)
+  if (m_recoveryActive || !m_onEnsureOnlyDisplay)
     return;
 
   CRegistrySettings settings;

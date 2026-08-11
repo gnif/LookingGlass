@@ -52,6 +52,12 @@ void CPipeServer::OnPipeConnected()
         QueueMsgLocked(queued[i]);
       break;
     }
+
+  // Recovery is latched state rather than a one-shot command. Reapply the
+  // latest request whenever the helper reconnects so a helper restart cannot
+  // silently restore the IDD-only topology while recovery is active.
+  if (m_recoveryValid)
+    m_endpoint.Send(&m_recoveryRequest, sizeof(m_recoveryRequest));
 }
 
 bool CPipeServer::OnPipeMessage(const void * message, size_t size)
@@ -67,6 +73,13 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
   {
     case LGPipeMsg::RELOADSETTINGS:
       HandleReloadSettings();
+      return true;
+
+    case LGPipeMsg::RECOVERY_OFF:
+    case LGPipeMsg::RECOVERY_ON:
+    case LGPipeMsg::RECOVERY_FAILED:
+    case LGPipeMsg::RECOVERY_NO_DISPLAY:
+      HandleRecovery(msg);
       return true;
 
     default:
@@ -103,10 +116,57 @@ void CPipeServer::HandleReloadSettings()
     m_deviceContext->ReloadSettings();
 }
 
+void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
+{
+  CSRWSharedLock queueLock(m_queueLock);
+  if (!m_recoveryValid ||
+      msg.recovery.session != m_recoveryRequest.recovery.session ||
+      msg.recovery.request != m_recoveryRequest.recovery.request)
+  {
+    DEBUG_WARN("Ignoring stale recovery status");
+    return;
+  }
+
+  const uint32_t serial =
+    msg.recovery.request & ~LGPipeMsg::RECOVERY_ACTIVE;
+  const bool     active =
+    (msg.recovery.request & LGPipeMsg::RECOVERY_ACTIVE) != 0;
+
+  CSRWSharedLock recoveryLock(m_recoveryLock);
+  queueLock.Unlock();
+  if (m_recoveryHandler)
+    m_recoveryHandler(m_recoveryOpaque,
+      msg.recovery.session, serial, active, msg.type);
+}
+
 void CPipeServer::SetDeviceContext(CDeviceContext * context)
 {
   CSRWExclusiveLock lock(m_deviceContextLock);
   m_deviceContext = context;
+}
+
+void CPipeServer::SetRecoveryHandler(
+  RecoveryHandler handler, void * opaque)
+{
+  CSRWExclusiveLock queueLock(m_queueLock);
+  CSRWExclusiveLock recoveryLock(m_recoveryLock);
+  m_recoveryValid   = false;
+  m_recoveryRequest = {};
+  m_recoveryHandler = handler;
+  m_recoveryOpaque  = opaque;
+}
+
+void CPipeServer::ClearRecoveryHandler(void * opaque)
+{
+  CSRWExclusiveLock queueLock(m_queueLock);
+  CSRWExclusiveLock recoveryLock(m_recoveryLock);
+  if (m_recoveryOpaque != opaque)
+    return;
+
+  m_recoveryValid   = false;
+  m_recoveryRequest = {};
+  m_recoveryHandler = nullptr;
+  m_recoveryOpaque  = nullptr;
 }
 
 void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
@@ -129,8 +189,8 @@ void CPipeServer::SetDisplayMode(
   uint32_t width, uint32_t height, uint32_t refreshMilliHz)
 {
   LGPipeMsg msg = {};
-  msg.size                = sizeof(msg);
-  msg.type                = LGPipeMsg::SETDISPLAYMODE;
+  msg.size                       = sizeof(msg);
+  msg.type                       = LGPipeMsg::SETDISPLAYMODE;
   msg.displayMode.width          = width;
   msg.displayMode.height         = height;
   msg.displayMode.refreshMilliHz = refreshMilliHz;
@@ -150,10 +210,37 @@ void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   uint32_t requiredSizeMiB)
 {
   LGPipeMsg msg = {};
-  msg.size = sizeof(msg);
-  msg.type = LGPipeMsg::RESOLUTIONREJECTED;
-  msg.resolutionRejected.width = width;
-  msg.resolutionRejected.height = height;
+  msg.size                               = sizeof(msg);
+  msg.type                               = LGPipeMsg::RESOLUTIONREJECTED;
+  msg.resolutionRejected.width           = width;
+  msg.resolutionRejected.height          = height;
   msg.resolutionRejected.requiredSizeMiB = requiredSizeMiB;
   WriteMsg(msg);
+}
+
+void CPipeServer::SetRecovery(
+  void * owner, uint64_t session, uint32_t serial, bool active)
+{
+  if (!session || !serial ||
+      (serial & LGPipeMsg::RECOVERY_ACTIVE))
+  {
+    DEBUG_ERROR("Invalid recovery request correlation");
+    return;
+  }
+
+  LGPipeMsg msg = {};
+  msg.size             = sizeof(msg);
+  msg.type             = LGPipeMsg::SET_RECOVERY;
+  msg.recovery.session = session;
+  msg.recovery.request = serial |
+    (active ? LGPipeMsg::RECOVERY_ACTIVE : 0U);
+
+  CSRWExclusiveLock queueLock(m_queueLock);
+  CSRWSharedLock recoveryLock(m_recoveryLock);
+  if (!m_recoveryHandler || m_recoveryOpaque != owner)
+    return;
+
+  m_recoveryValid   = true;
+  m_recoveryRequest = msg;
+  m_endpoint.Send(&msg, sizeof(msg));
 }

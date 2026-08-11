@@ -44,8 +44,14 @@ CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
 
 CDeviceContext::~CDeviceContext()
 {
-  // Both callbacks dereference this context. Drain them before the subsystem
+  // These callbacks dereference this context. Drain them before the subsystem
   // members are destroyed in frame, control, host order.
+  if (m_recoveryHandlerSet)
+  {
+    g_pipe.ClearRecoveryHandler(this);
+    m_recoveryHandlerSet = false;
+  }
+
   if (m_initTimer)
   {
     WdfTimerStop(m_initTimer, TRUE);
@@ -379,8 +385,9 @@ void CDeviceContext::FinishInit(UINT connectorIndex)
 {
   CDisplayConfiguration::Description description =
     m_displayConfiguration.GetDescription();
-  m_monitorManager.Create(
-    connectorIndex, m_adapter, std::move(description.edid), this);
+  if (m_monitorManager.Create(
+      connectorIndex, m_adapter, std::move(description.edid), this))
+    m_transport->SyncRecovery();
 }
 
 void CDeviceContext::ReplugMonitor()
@@ -460,7 +467,90 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
 
 bool CDeviceContext::InitializeTransport()
 {
-  return m_transport && m_transport->Initialize();
+  if (!m_transport)
+    return false;
+
+  if (m_transportTimer)
+    return true;
+
+  g_pipe.SetRecoveryHandler(
+    [](void * opaque, uint64_t session, uint32_t serial, bool active,
+       LGPipeMsg::Type result)
+    {
+      CDeviceContext * context =
+        static_cast<CDeviceContext *>(opaque);
+
+      ITransport::Recovery state = ITransport::Recovery::FAILED;
+      uint32_t error = ERROR_SUCCESS;
+      switch (result)
+      {
+        case LGPipeMsg::RECOVERY_OFF:
+          state = ITransport::Recovery::NORMAL;
+          break;
+
+        case LGPipeMsg::RECOVERY_ON:
+          state = ITransport::Recovery::ACTIVE;
+          break;
+
+        case LGPipeMsg::RECOVERY_FAILED:
+          error = ERROR_GEN_FAILURE;
+          break;
+
+        case LGPipeMsg::RECOVERY_NO_DISPLAY:
+          error = ERROR_NOT_FOUND;
+          break;
+
+        default:
+          return;
+      }
+
+      context->m_transport->RecoveryStatus(
+        session, serial, active, state, error);
+    },
+    this);
+  m_recoveryHandlerSet = true;
+
+  // Claim the pipe recovery channel before initializing the producer session
+  // so no request cached by a prior device context can cross the handoff.
+  if (!m_transport->Initialize())
+  {
+    g_pipe.ClearRecoveryHandler(this);
+    m_recoveryHandlerSet = false;
+    return false;
+  }
+
+  WDF_TIMER_CONFIG config;
+  WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
+    [](WDFTIMER timer) -> void
+    {
+      WDFOBJECT parent = WdfTimerGetParentObject(timer);
+      auto wrapper = WdfObjectGet_CDeviceContextWrapper(parent);
+      wrapper->context->TransportTimer();
+    },
+    10);
+  config.AutomaticSerialization = FALSE;
+
+  /**
+   * Documentation states that Dispatch is not available under UMDF,
+   * however using Passive returns a not-supported error and Dispatch works.
+   */
+  WDF_OBJECT_ATTRIBUTES attribs;
+  WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
+  attribs.ParentObject   = m_wdfDevice;
+  attribs.ExecutionLevel = WdfExecutionLevelDispatch;
+
+  NTSTATUS status = WdfTimerCreate(
+    &config, &attribs, &m_transportTimer);
+  if (!NT_SUCCESS(status))
+  {
+    g_pipe.ClearRecoveryHandler(this);
+    m_recoveryHandlerSet = false;
+    DEBUG_ERROR_HR(status, "Transport timer creation failed");
+    return false;
+  }
+
+  WdfTimerStart(m_transportTimer, WDF_REL_TIMEOUT_IN_MS(10));
+  return true;
 }
 
 bool CDeviceContext::SetupTransport(size_t alignSize)
@@ -471,36 +561,6 @@ bool CDeviceContext::SetupTransport(size_t alignSize)
   {
     if (!InitializeTransport() || !m_transport->Setup(alignSize))
       return false;
-
-    WDF_TIMER_CONFIG config;
-    WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
-      [](WDFTIMER timer) -> void
-      {
-        WDFOBJECT parent = WdfTimerGetParentObject(timer);
-        auto wrapper = WdfObjectGet_CDeviceContextWrapper(parent);
-        wrapper->context->TransportTimer();
-      },
-      10);
-    config.AutomaticSerialization = FALSE;
-
-    /**
-     * Documentation states that Dispatch is not available under UMDF,
-     * however using Passive returns a not-supported error and Dispatch works.
-     */
-    WDF_OBJECT_ATTRIBUTES attribs;
-    WDF_OBJECT_ATTRIBUTES_INIT(&attribs);
-    attribs.ParentObject   = m_wdfDevice;
-    attribs.ExecutionLevel = WdfExecutionLevelDispatch;
-
-    NTSTATUS status = WdfTimerCreate(
-      &config, &attribs, &m_transportTimer);
-    if (!NT_SUCCESS(status))
-    {
-      DEBUG_ERROR_HR(status, "Timer creation failed");
-      return false;
-    }
-
-    WdfTimerStart(m_transportTimer, WDF_REL_TIMEOUT_IN_MS(10));
   }
 
   IInputTransport * input = m_transport->Input();
@@ -541,4 +601,10 @@ void CDeviceContext::OnSetCursorPos(int32_t x, int32_t y)
 void CDeviceContext::OnSetResolution(uint32_t width, uint32_t height)
 {
   SetResolution(width, height);
+}
+
+void CDeviceContext::OnRecoveryRequest(
+  uint64_t session, uint32_t serial, bool active)
+{
+  g_pipe.SetRecovery(this, session, serial, active);
 }

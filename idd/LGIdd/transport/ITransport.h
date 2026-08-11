@@ -37,6 +37,8 @@ public:
 
   virtual void OnSetCursorPos(int32_t x, int32_t y) = 0;
   virtual void OnSetResolution(uint32_t width, uint32_t height) = 0;
+  virtual void OnRecoveryRequest(
+    uint64_t session, uint32_t serial, bool active) = 0;
 };
 
 class ITransport
@@ -49,12 +51,22 @@ public:
     FAILURE,
   };
 
+  enum class Recovery
+  {
+    NORMAL,
+    ACTIVE,
+    FAILED,
+  };
+
   virtual ~ITransport() = default;
 
   virtual OpenResult Open() = 0;
   virtual bool Initialize() = 0;
   virtual bool Setup(size_t alignment) = 0;
   virtual void Process(ITransportEvents& events) = 0;
+  virtual void SyncRecovery() {}
+  virtual void RecoveryStatus(
+    uint64_t, uint32_t, bool, Recovery, uint32_t) {}
 
   virtual FrameMemoryLimits GetMemoryLimits() const = 0;
   virtual DirectFrameBufferMemory GetDirectMemory() const = 0;

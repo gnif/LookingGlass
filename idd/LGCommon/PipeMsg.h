@@ -24,18 +24,30 @@
 
 static constexpr wchar_t LG_PIPE_NAME[] = L"\\\\.\\pipe\\LookingGlassIDD";
 
+#pragma pack(push, 4)
 struct LGPipeMsg
 {
   unsigned size;
-  enum
+  enum Type : uint32_t
   {
     SETCURSORPOS,
     SETDISPLAYMODE,
     GPUSTATUS,
     RELOADSETTINGS,
-    RESOLUTIONREJECTED
+    RESOLUTIONREJECTED,
+    SET_RECOVERY,
+    RECOVERY_OFF,
+    RECOVERY_ON,
+    RECOVERY_FAILED,
+    RECOVERY_NO_DISPLAY
   }
   type;
+
+  enum : uint32_t
+  {
+    RECOVERY_ACTIVE = 0x1U
+  };
+
   union
   {
     struct
@@ -66,7 +78,15 @@ struct LGPipeMsg
       uint32_t requiredSizeMiB;
     }
     resolutionRejected;
+
+    struct
+    {
+      uint64_t session;
+      uint32_t request;
+    }
+    recovery;
   };
 };
+#pragma pack(pop)
 
 static_assert(sizeof(LGPipeMsg) == 20, "LGPipeMsg wire layout changed");

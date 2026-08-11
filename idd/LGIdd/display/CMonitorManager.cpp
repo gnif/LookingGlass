@@ -23,7 +23,7 @@
 #include "display/CMonitorContext.h"
 #include "CDebug.h"
 
-void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
+bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   std::vector<BYTE> edid, CDeviceContext * owner)
 {
   DEBUG_INFO("Creating monitor on connector %u", connectorIndex);
@@ -38,7 +38,7 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   if (haveMonitor)
   {
     DEBUG_WARN("FinishInit skipped: a monitor already exists");
-    return;
+    return false;
   }
 
   WDF_OBJECT_ATTRIBUTES attr;
@@ -61,7 +61,7 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to create the monitor container ID");
-    return;
+    return false;
   }
 
   IDARG_IN_MONITORCREATE create = {};
@@ -73,7 +73,7 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxMonitorCreate Failed");
-    return;
+    return false;
   }
 
   DEBUG_INFO("Monitor object created (%p)", createOut.MonitorObject);
@@ -91,10 +91,11 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   if (FAILED(status))
   {
     DEBUG_ERROR_HR(status, "IddCxMonitorArrival Failed");
-    return;
+    return false;
   }
 
   DEBUG_INFO("Monitor arrival reported successfully");
+  return true;
 }
 
 CMonitorManager::ReplugAction CMonitorManager::Replug()

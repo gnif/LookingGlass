@@ -37,6 +37,7 @@ class CNotifyWindow : public CWindow
   std::optional<bool> m_gpuQueue;
   HMENU m_menu;
   bool closeRequested;
+  bool m_recoveryActive;
   std::unique_ptr<CConfigWindow> m_config;
 
   std::function<void()> m_onSettingChange;
@@ -76,6 +77,7 @@ public:
   void setGPU(bool hasGPU);
   void notifyResolutionRejected(uint32_t width, uint32_t height,
     uint32_t requiredSizeMiB);
+  void setRecoveryMode(bool active);
 
   HWND hwndDialog();
   void close();

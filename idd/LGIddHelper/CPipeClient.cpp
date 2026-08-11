@@ -22,6 +22,7 @@
 #include "CDebug.h"
 #include "CSRWLock.h"
 #include "CNotifyWindow.h"
+#include "CRegistrySettings.h"
 
 #include <setupapi.h>
 #include <tchar.h>
@@ -29,6 +30,11 @@
 
 namespace
 {
+  static const unsigned RECOVERY_VERIFY_ATTEMPTS = 20;
+  static const unsigned RECOVERY_PATH_ATTEMPTS   = 20;
+  static const size_t   RECOVERY_MAX_PATHS       = 4;
+  static const DWORD    RECOVERY_VERIFY_DELAY_MS = 100;
+
   struct DisplayState
   {
     DISPLAY_DEVICE device;
@@ -65,6 +71,90 @@ namespace
     return false;
   }
 
+  bool ContainsNoCase(LPCTSTR text, LPCTSTR value)
+  {
+    const size_t length = _tcslen(value);
+    for (; *text; ++text)
+      if (_tcsnicmp(text, value, length) == 0)
+        return true;
+
+    return false;
+  }
+
+  bool IsLGPath(const DISPLAYCONFIG_PATH_INFO& path)
+  {
+    DISPLAYCONFIG_TARGET_DEVICE_NAME target = {};
+    target.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME;
+    target.header.size      = sizeof(target);
+    target.header.adapterId = path.targetInfo.adapterId;
+    target.header.id        = path.targetInfo.id;
+    if (DisplayConfigGetDeviceInfo(&target.header) == ERROR_SUCCESS &&
+        (_tcsicmp(target.monitorFriendlyDeviceName,
+           _T("Looking Glass")) == 0 ||
+         ContainsNoCase(target.monitorDevicePath, _T("LGD1DDD")) ||
+         ContainsNoCase(target.monitorDevicePath, _T("ROOT#LGIDD"))))
+      return true;
+
+    DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
+    source.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+    source.header.size      = sizeof(source);
+    source.header.adapterId = path.sourceInfo.adapterId;
+    source.header.id        = path.sourceInfo.id;
+    if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
+        !source.viewGdiDeviceName[0])
+      return false;
+
+    DISPLAY_DEVICE device = {};
+    device.cb = sizeof(device);
+    for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+    {
+      if (_tcsicmp(device.DeviceName, source.viewGdiDeviceName) == 0)
+        return IsLGDisplay(device);
+
+      device = {};
+      device.cb = sizeof(device);
+    }
+
+    return false;
+  }
+
+  bool SameTarget(const DISPLAYCONFIG_PATH_INFO& a,
+    const DISPLAYCONFIG_PATH_INFO& b)
+  {
+    return a.targetInfo.adapterId.HighPart ==
+        b.targetInfo.adapterId.HighPart &&
+      a.targetInfo.adapterId.LowPart ==
+        b.targetInfo.adapterId.LowPart &&
+      a.targetInfo.id == b.targetInfo.id;
+  }
+
+  uint32_t QueryAllPaths(std::vector<DISPLAYCONFIG_PATH_INFO>& paths)
+  {
+    for (unsigned int attempt = 0; attempt < 3; ++attempt)
+    {
+      UINT32 pathCount = 0;
+      UINT32 modeCount = 0;
+      LONG result = GetDisplayConfigBufferSizes(
+        QDC_ALL_PATHS, &pathCount, &modeCount);
+      if (result != ERROR_SUCCESS)
+        return static_cast<uint32_t>(result);
+
+      paths.resize(pathCount);
+      std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+      result = QueryDisplayConfig(QDC_ALL_PATHS,
+        &pathCount, paths.data(), &modeCount, modes.data(), NULL);
+      if (result == ERROR_INSUFFICIENT_BUFFER)
+        continue;
+      if (result != ERROR_SUCCESS)
+        return static_cast<uint32_t>(result);
+
+      paths.resize(pathCount);
+      return ERROR_SUCCESS;
+    }
+
+    return ERROR_INSUFFICIENT_BUFFER;
+  }
+
   bool GetDisplayStates(std::vector<DisplayState>& displays, size_t& lgIndex)
   {
     lgIndex = SIZE_MAX;
@@ -77,9 +167,9 @@ namespace
         !(device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER))
       {
         DisplayState state = {};
-        state.device = device;
+        state.device      = device;
         state.mode.dmSize = sizeof(state.mode);
-        state.isLG = IsLGDisplay(device);
+        state.isLG        = IsLGDisplay(device);
 
         if (!EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS,
           &state.mode, 0))
@@ -100,6 +190,191 @@ namespace
     }
 
     return lgIndex != SIZE_MAX;
+  }
+
+  bool HasActiveDisplay(bool lg)
+  {
+    DISPLAY_DEVICE device = {};
+    device.cb = sizeof(device);
+    for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+    {
+      if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) &&
+        !(device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) &&
+        IsLGDisplay(device) == lg)
+        return true;
+
+      device = {};
+      device.cb = sizeof(device);
+    }
+
+    return false;
+  }
+
+  bool WaitForDisplay(bool lg,
+    unsigned int attempts = RECOVERY_VERIFY_ATTEMPTS)
+  {
+    for (unsigned int attempt = 0;
+         attempt < attempts;
+         ++attempt)
+    {
+      if (HasActiveDisplay(lg))
+        return true;
+
+      if (attempt + 1 < attempts)
+        Sleep(RECOVERY_VERIFY_DELAY_MS);
+    }
+
+    return false;
+  }
+
+  bool HasOnlyLGDisplay()
+  {
+    bool found = false;
+    DISPLAY_DEVICE device = {};
+    device.cb = sizeof(device);
+    for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+    {
+      if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) &&
+          !(device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER))
+      {
+        if (!IsLGDisplay(device))
+          return false;
+        found = true;
+      }
+
+      device = {};
+      device.cb = sizeof(device);
+    }
+
+    return found;
+  }
+
+  bool WaitForOnlyLGDisplay()
+  {
+    for (unsigned int attempt = 0;
+         attempt < RECOVERY_VERIFY_ATTEMPTS;
+         ++attempt)
+    {
+      if (HasOnlyLGDisplay())
+        return true;
+
+      if (attempt + 1 < RECOVERY_VERIFY_ATTEMPTS)
+        Sleep(RECOVERY_VERIFY_DELAY_MS);
+    }
+
+    return false;
+  }
+
+  uint32_t ActivateDisplay(bool lg)
+  {
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths;
+    const uint32_t queryError = QueryAllPaths(paths);
+    if (queryError != ERROR_SUCCESS)
+    {
+      DEBUG_ERROR("Failed to enumerate display paths (%u)", queryError);
+      return queryError;
+    }
+
+    std::vector<DISPLAYCONFIG_PATH_INFO> attempted;
+    uint32_t lastError = ERROR_NOT_FOUND;
+    for (const DISPLAYCONFIG_PATH_INFO& path : paths)
+    {
+      if (!path.targetInfo.targetAvailable || IsLGPath(path) != lg)
+        continue;
+
+      bool duplicate = false;
+      for (const DISPLAYCONFIG_PATH_INFO& previous : attempted)
+        if (SameTarget(path, previous))
+        {
+          duplicate = true;
+          break;
+        }
+      if (duplicate)
+        continue;
+
+      if (attempted.size() >= RECOVERY_MAX_PATHS)
+        break;
+      attempted.emplace_back(path);
+
+      DISPLAYCONFIG_PATH_INFO candidate = path;
+      candidate.flags |= DISPLAYCONFIG_PATH_ACTIVE;
+      candidate.sourceInfo.modeInfoIdx =
+        DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
+      candidate.targetInfo.modeInfoIdx =
+        DISPLAYCONFIG_PATH_MODE_IDX_INVALID;
+
+      LONG result = SetDisplayConfig(1, &candidate, 0, NULL,
+        SDC_APPLY | SDC_TOPOLOGY_SUPPLIED | SDC_ALLOW_CHANGES);
+      if (result == ERROR_SUCCESS &&
+          WaitForDisplay(lg, RECOVERY_PATH_ATTEMPTS))
+      {
+        DEBUG_INFO("Activated a saved %s topology",
+          lg ? "Looking Glass" : "non-Looking Glass");
+        return ERROR_SUCCESS;
+      }
+
+      // The connected display may not yet have a database entry. Ask CCD's
+      // best-mode logic for a temporary configuration without saving it.
+      result = SetDisplayConfig(1, &candidate, 0, NULL,
+        SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES);
+      if (result == ERROR_SUCCESS &&
+          WaitForDisplay(lg, RECOVERY_PATH_ATTEMPTS))
+      {
+        DEBUG_INFO("Activated a fallback %s display",
+          lg ? "Looking Glass" : "non-Looking Glass");
+        return ERROR_SUCCESS;
+      }
+
+      lastError = result == ERROR_SUCCESS ?
+        ERROR_NOT_FOUND : static_cast<uint32_t>(result);
+    }
+
+    if (attempted.empty())
+      DEBUG_ERROR("No connected %s display path was found",
+        lg ? "Looking Glass" : "non-Looking Glass");
+    else
+      DEBUG_ERROR("No %s display path could be activated",
+        lg ? "Looking Glass" : "non-Looking Glass");
+    return lastError;
+  }
+
+  uint32_t ActivateFallbackDisplay()
+  {
+    return ActivateDisplay(false);
+  }
+
+  uint32_t RestoreNonExclusiveTopology()
+  {
+    if (HasActiveDisplay(true))
+      return ERROR_SUCCESS;
+
+    LONG result = SetDisplayConfig(0, NULL, 0, NULL,
+      SDC_APPLY | SDC_USE_DATABASE_CURRENT | SDC_ALLOW_CHANGES);
+    if (result == ERROR_SUCCESS && WaitForDisplay(true))
+    {
+      DEBUG_INFO("Saved non-exclusive display topology restored");
+      return ERROR_SUCCESS;
+    }
+
+    if (result == ERROR_SUCCESS)
+      DEBUG_WARN("The saved display topology does not activate Looking Glass");
+    else
+      DEBUG_WARN("Failed to restore the saved display topology (%ld)", result);
+
+    // If the current database topology omits LG, use Windows' most recently
+    // saved clone or extended topology. No persistence flag is supplied, so
+    // this does not replace the user's saved display configuration.
+    result = SetDisplayConfig(0, NULL, 0, NULL,
+      SDC_APPLY | SDC_TOPOLOGY_CLONE | SDC_TOPOLOGY_EXTEND |
+      SDC_ALLOW_CHANGES);
+    if (result == ERROR_SUCCESS && WaitForDisplay(true))
+    {
+      DEBUG_INFO("Non-exclusive Looking Glass topology activated");
+      return ERROR_SUCCESS;
+    }
+
+    return result == ERROR_SUCCESS ?
+      ERROR_NOT_FOUND : static_cast<uint32_t>(result);
   }
 }
 
@@ -197,6 +472,20 @@ void CPipeClient::WriteMsg(const LGPipeMsg& msg)
   m_endpoint.Send(&msg, sizeof(msg));
 }
 
+void CPipeClient::OnPipeConnected()
+{
+  bool hasStatus;
+  LGPipeMsg status;
+  {
+    CSRWSharedLock lock(m_displayLock);
+    hasStatus = m_hasRecoveryStatus;
+    status    = m_recoveryStatus;
+  }
+
+  if (hasStatus)
+    WriteMsg(status);
+}
+
 void CPipeClient::ReloadSettings()
 {
   if (!m_endpoint.IsConnected())
@@ -218,6 +507,9 @@ bool CPipeClient::ShouldReconnect()
 
 bool CPipeClient::EnsureOnlyDisplayLocked()
 {
+  if (m_recoveryActive)
+    return true;
+
   std::vector<DisplayState> displays;
   size_t lgIndex;
   if (!GetDisplayStates(displays, lgIndex))
@@ -322,6 +614,95 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
   return false;
 }
 
+uint32_t CPipeClient::RestoreSavedTopologyLocked() const
+{
+  const LONG result = SetDisplayConfig(0, NULL, 0, NULL,
+    SDC_APPLY | SDC_USE_DATABASE_CURRENT | SDC_ALLOW_CHANGES);
+  if (result == ERROR_SUCCESS)
+  {
+    if (WaitForDisplay(false))
+    {
+      DEBUG_INFO("Recovery display topology activated");
+      return ERROR_SUCCESS;
+    }
+
+    DEBUG_WARN("The saved topology has no active non-Looking Glass display");
+  }
+  else
+  {
+    DEBUG_WARN("Failed to restore the saved display topology (%ld)", result);
+  }
+
+  return ActivateFallbackDisplay();
+}
+
+uint32_t CPipeClient::RestoreLGTopologyLocked()
+{
+  uint32_t error = ERROR_SUCCESS;
+  bool exclusive = false;
+
+  CRegistrySettings settings;
+  const LSTATUS settingsError = settings.open();
+  if (settingsError != ERROR_SUCCESS)
+  {
+    DEBUG_ERROR_HR(settingsError, "Failed to load settings");
+    error = static_cast<uint32_t>(settingsError);
+  }
+  else
+  {
+    const std::optional<bool> value = settings.getExclusiveMonitor();
+    if (!value.has_value())
+      error = ERROR_INVALID_DATA;
+    else
+      exclusive = value.value();
+  }
+
+  if (error == ERROR_SUCCESS)
+  {
+    if (!exclusive)
+    {
+      error = RestoreNonExclusiveTopology();
+      if (error == ERROR_SUCCESS)
+      {
+        m_recoveryActive = false;
+        DEBUG_INFO("Looking Glass display topology restored");
+        return ERROR_SUCCESS;
+      }
+    }
+    else
+    {
+      if (!HasActiveDisplay(true))
+        error = ActivateDisplay(true);
+
+      if (error == ERROR_SUCCESS)
+      {
+        // Keep notification-driven display enforcement suppressed until the
+        // LG path is active. This explicit call owns the transition back to
+        // the temporary LG-only topology.
+        m_recoveryActive = false;
+        if (EnsureOnlyDisplayLocked() && WaitForOnlyLGDisplay())
+        {
+          DEBUG_INFO("Looking Glass display topology restored");
+          return ERROR_SUCCESS;
+        }
+
+        error = ERROR_GEN_FAILURE;
+      }
+    }
+  }
+
+  // A failed exit must leave a usable recovery display rather than a blank
+  // desktop if a partial CCD transition disabled the physical path.
+  m_recoveryActive = true;
+  if (!HasActiveDisplay(false))
+  {
+    const uint32_t fallbackError = ActivateFallbackDisplay();
+    if (fallbackError != ERROR_SUCCESS)
+      DEBUG_ERROR("Failed to restore a recovery display (%u)", fallbackError);
+  }
+  return error;
+}
+
 bool CPipeClient::EnsureOnlyDisplay()
 {
   CSRWExclusiveLock lock(m_displayLock);
@@ -353,6 +734,10 @@ bool CPipeClient::OnPipeMessage(const void * message, size_t size)
 
     case LGPipeMsg::RESOLUTIONREJECTED:
       HandleResolutionRejected(msg);
+      return true;
+
+    case LGPipeMsg::SET_RECOVERY:
+      HandleSetRecovery(msg);
       return true;
 
     default:
@@ -410,4 +795,71 @@ void CPipeClient::HandleResolutionRejected(const LGPipeMsg& msg)
     msg.resolutionRejected.width,
     msg.resolutionRejected.height,
     msg.resolutionRejected.requiredSizeMiB);
+}
+
+void CPipeClient::HandleSetRecovery(const LGPipeMsg& msg)
+{
+  const bool active =
+    (msg.recovery.request & LGPipeMsg::RECOVERY_ACTIVE) != 0;
+  bool      cached = false;
+  LGPipeMsg status = {};
+  status.size       = sizeof(status);
+  status.type       = LGPipeMsg::RECOVERY_FAILED;
+  status.recovery   = msg.recovery;
+
+  {
+    CSRWExclusiveLock lock(m_displayLock);
+    cached = m_hasRecoveryStatus &&
+      m_recoveryStatus.recovery.session == msg.recovery.session &&
+      m_recoveryStatus.recovery.request == msg.recovery.request;
+    if (cached)
+      status = m_recoveryStatus;
+    else if (active)
+    {
+      m_recoveryActive = true;
+      CNotifyWindow::instance().setRecoveryMode(true);
+
+      const uint32_t error = RestoreSavedTopologyLocked();
+      if (error == ERROR_SUCCESS)
+        status.type = LGPipeMsg::RECOVERY_ON;
+      else if (error == ERROR_NOT_FOUND)
+        status.type = LGPipeMsg::RECOVERY_NO_DISPLAY;
+      else
+        status.type = LGPipeMsg::RECOVERY_FAILED;
+    }
+    else
+    {
+      m_recoveryActive = true;
+      CNotifyWindow::instance().setRecoveryMode(true);
+
+      if (RestoreLGTopologyLocked() == ERROR_SUCCESS)
+      {
+        CNotifyWindow::instance().setRecoveryMode(false);
+        status.type = LGPipeMsg::RECOVERY_OFF;
+      }
+    }
+
+    if (!cached)
+    {
+      m_hasRecoveryStatus = true;
+      m_recoveryStatus    = status;
+    }
+  }
+
+  if (cached)
+  {
+    DEBUG_TRACE("Replaying cached recovery status");
+    WriteMsg(status);
+    return;
+  }
+
+  if (active)
+    DEBUG_INFO("Recovery mode %s", status.type == LGPipeMsg::RECOVERY_ON ?
+      "active" : "failed");
+  else if (status.type == LGPipeMsg::RECOVERY_OFF)
+    DEBUG_INFO("Recovery mode disabled");
+  else
+    DEBUG_INFO("Recovery mode exit failed");
+
+  WriteMsg(status);
 }

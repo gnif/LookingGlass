@@ -26,6 +26,9 @@
 #include "transport/lgmp/CLGMPFrameTransport.h"
 #include "transport/lgmp/CLGMPHost.h"
 #include "transport/lgmp/CLGMPInputTransport.h"
+#include "transport/lgmp/CRecovery.h"
+
+#include <atomic>
 
 class CLGMPTransport final : public ITransport
 {
@@ -37,6 +40,8 @@ private:
   CLGMPControl        m_control;
   CLGMPFrameTransport m_frames;
   CLGMPInputTransport m_input;
+  CRecovery           m_recovery;
+  std::atomic<bool>   m_ready = false;
 
 public:
   CLGMPTransport();
@@ -49,6 +54,10 @@ public:
   bool Initialize() override;
   bool Setup(size_t alignment) override;
   void Process(ITransportEvents& events) override;
+  void SyncRecovery() override;
+  void RecoveryStatus(
+    uint64_t session, uint32_t serial, bool active,
+    Recovery state, uint32_t error) override;
 
   FrameMemoryLimits GetMemoryLimits() const override;
   DirectFrameBufferMemory GetDirectMemory() const override;
