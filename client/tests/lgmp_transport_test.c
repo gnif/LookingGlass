@@ -82,6 +82,7 @@ int main(void)
   PLGMPMemory frameMemory = NULL;
   PLGMPMemory pointerMemory = NULL;
   LG_Transport * transport = NULL;
+  const LG_FrameOps * frameOps = NULL;
 
   debug_init();
 
@@ -155,6 +156,11 @@ int main(void)
   option_set_int("lgmp", "framePollInterval", 0);
   option_set_int("lgmp", "cursorPollInterval", 0);
   CHECK(LGT_LGMP.create(&transport));
+  const LG_VideoOps * videoOps = LGT_LGMP.getVideoOps(transport);
+  CHECK(videoOps);
+  CHECK(videoOps->type == LG_VIDEO_TYPE_FRAME);
+  CHECK(videoOps->frame);
+  frameOps = videoOps->frame;
 
   CHECK(unlink(path) == 0);
   pathExists = false;
@@ -167,8 +173,8 @@ int main(void)
 
   LG_TransportFrame frame;
   LG_TransportPointer pointer;
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
   CHECK(lgmpHostQueueHasSubs(frameQueue));
   CHECK(lgmpHostQueueHasSubs(pointerQueue));
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
@@ -177,16 +183,16 @@ int main(void)
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
   LG_TransportFrameTiming timing;
-  LGT_LGMP.getFrameTiming(transport, &frame, &timing);
+  frameOps->getFrameTiming(transport, &frame, &timing);
   CHECK(timing.captureTime == wireFrame->captureTime);
   CHECK(timing.postProcessTime == wireFrame->postProcessTime);
   CHECK(timing.copyTime == wireFrame->copyTime);
   CHECK(timing.readyTime == wireFrame->readyTime);
-  LGT_LGMP.releaseFrame(transport, &frame);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
-  LGT_LGMP.releasePointer(transport, &pointer);
+  frameOps->releaseFrame(transport, &frame);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
+  frameOps->releasePointer(transport, &pointer);
 
   /*
    * Stop with messages pending. Unsubscribing before the host timeout is the
@@ -195,10 +201,10 @@ int main(void)
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
-  CHECK(LGT_LGMP.stopFrame);
-  CHECK(LGT_LGMP.stopPointer);
-  LGT_LGMP.stopFrame(transport);
-  LGT_LGMP.stopPointer(transport);
+  CHECK(frameOps->stopFrame);
+  CHECK(frameOps->stopPointer);
+  frameOps->stopFrame(transport);
+  frameOps->stopPointer(transport);
   CHECK(!lgmpHostQueueHasSubs(frameQueue));
   CHECK(!lgmpHostQueueHasSubs(pointerQueue));
 
@@ -206,8 +212,8 @@ int main(void)
   CHECK(lgmpHostQueuePending(frameQueue) == 0);
   CHECK(lgmpHostQueuePending(pointerQueue) == 0);
 
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
   CHECK(lgmpHostQueueNewSubs(pointerQueue) == 1);
 
@@ -215,10 +221,10 @@ int main(void)
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
-  LGT_LGMP.releaseFrame(transport, &frame);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
-  LGT_LGMP.releasePointer(transport, &pointer);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
+  frameOps->releaseFrame(transport, &frame);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
+  frameOps->releasePointer(transport, &pointer);
 
   /*
    * Also recover when the host has already marked the cached handles bad.
@@ -229,15 +235,15 @@ int main(void)
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
   CHECK(waitForQueuesEmpty(host, frameQueue, pointerQueue));
   CHECK(lgmpHostQueueHasSubs(frameQueue));
   CHECK(lgmpHostQueueHasSubs(pointerQueue));
 
-  LGT_LGMP.stopFrame(transport);
-  LGT_LGMP.stopPointer(transport);
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
+  frameOps->stopFrame(transport);
+  frameOps->stopPointer(transport);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
   CHECK(lgmpHostQueueNewSubs(pointerQueue) == 1);
 
@@ -245,10 +251,10 @@ int main(void)
   CHECK(lgmpHostQueuePost(frameQueue, 0, frameMemory) == LGMP_OK);
   CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
         pointerMemory) == LGMP_OK);
-  CHECK(LGT_LGMP.nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
-  LGT_LGMP.releaseFrame(transport, &frame);
-  CHECK(LGT_LGMP.nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
-  LGT_LGMP.releasePointer(transport, &pointer);
+  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_OK);
+  frameOps->releaseFrame(transport, &frame);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
+  frameOps->releasePointer(transport, &pointer);
 
   result = 0;
 

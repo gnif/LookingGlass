@@ -1044,8 +1044,8 @@ static int renderThread(void * unused)
   core_stopCursorThread();
   core_stopFrameThread();
 
-  if (g_state.transport.ops && g_state.transport.ops->detachRenderer)
-    g_state.transport.ops->detachRenderer(g_state.transport.handle);
+  if (g_state.videoOps && g_state.videoOps->frame->detachRenderer)
+    g_state.videoOps->frame->detachRenderer(g_state.transport.handle);
 
   RENDERER(deinitialize);
   g_state.lgr = NULL;
@@ -1066,7 +1066,7 @@ int main_cursorThread(void * unused)
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LG_TransportPointer pointer;
-    const LG_TransportStatus status = g_state.transport.ops->nextPointer(
+    const LG_TransportStatus status = g_state.videoOps->frame->nextPointer(
         g_state.transport.handle, &pointer);
     if (status != LG_TRANSPORT_OK)
     {
@@ -1119,7 +1119,7 @@ int main_cursorThread(void * unused)
         case CURSOR_TYPE_MASKED_COLOR: cursorType = LG_CURSOR_MASKED_COLOR; break;
         default:
           DEBUG_ERROR("Invalid cursor type");
-          g_state.transport.ops->releasePointer(
+          g_state.videoOps->frame->releasePointer(
               g_state.transport.handle, &pointer);
           continue;
       }
@@ -1130,7 +1130,7 @@ int main_cursorThread(void * unused)
             pointer.pitch, pointer.shape))
       {
         DEBUG_ERROR("Failed to update mouse shape");
-        g_state.transport.ops->releasePointer(
+        g_state.videoOps->frame->releasePointer(
             g_state.transport.handle, &pointer);
         continue;
       }
@@ -1192,11 +1192,12 @@ int main_cursorThread(void * unused)
           (g_params.mouseRedraw || contentChanged))))
       cursorRepaintRequest();
 
-    g_state.transport.ops->releasePointer(g_state.transport.handle, &pointer);
+    g_state.videoOps->frame->releasePointer(
+        g_state.transport.handle, &pointer);
   }
 
-  if (g_state.transport.ops->stopPointer)
-    g_state.transport.ops->stopPointer(g_state.transport.handle);
+  if (g_state.videoOps->frame->stopPointer)
+    g_state.videoOps->frame->stopPointer(g_state.transport.handle);
 
   return 0;
 }
@@ -1213,15 +1214,15 @@ int main_frameThread(void * unused)
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
   if (app_getState() != APP_STATE_RUNNING)
   {
-    if (g_state.transport.ops->stopFrame)
-      g_state.transport.ops->stopFrame(g_state.transport.handle);
+    if (g_state.videoOps->frame->stopFrame)
+      g_state.videoOps->frame->stopFrame(g_state.transport.handle);
     return 0;
   }
 
   while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
   {
     LG_TransportFrame frame;
-    const LG_TransportStatus status = g_state.transport.ops->nextFrame(
+    const LG_TransportStatus status = g_state.videoOps->frame->nextFrame(
         g_state.transport.handle, g_state.useDMA, &frame);
     if (status != LG_TRANSPORT_OK)
     {
@@ -1251,7 +1252,7 @@ int main_frameThread(void * unused)
     if (frame.serial == frameSerial && g_state.formatValid &&
         !frame.scheduleOwner)
     {
-      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       continue;
     }
     frameSerial = frame.serial;
@@ -1261,7 +1262,7 @@ int main_frameThread(void * unused)
     if (!format)
     {
       DEBUG_ERROR("Transport returned a frame without format metadata");
-      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       app_setState(APP_STATE_SHUTDOWN);
       break;
     }
@@ -1343,7 +1344,8 @@ int main_frameThread(void * unused)
       if (invalid)
       {
         DEBUG_ERROR("Unsupported frame type");
-        g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+        g_state.videoOps->frame->releaseFrame(
+            g_state.transport.handle, &frame);
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
@@ -1365,7 +1367,8 @@ int main_frameThread(void * unused)
       {
         LG_UNLOCK(g_state.lgrLock);
         DEBUG_ERROR("Renderer failed to configure format");
-        g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+        g_state.videoOps->frame->releaseFrame(
+            g_state.transport.handle, &frame);
         app_setState(APP_STATE_SHUTDOWN);
         break;
       }
@@ -1418,7 +1421,7 @@ int main_frameThread(void * unused)
           rendererOwnsFrame ? frame.releaseHandle : 0))
     {
       frameTimingCancel(frameToken);
-      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       DEBUG_ERROR("Renderer onFrame returned failure");
       app_setState(APP_STATE_SHUTDOWN);
       break;
@@ -1428,8 +1431,8 @@ int main_frameThread(void * unused)
      * is signalled below, so sample producer timing while this lease is still
      * unambiguously owned by the frame thread. */
     LG_TransportFrameTiming timing = {};
-    if (g_state.transport.ops->getFrameTiming)
-      g_state.transport.ops->getFrameTiming(
+    if (g_state.videoOps->frame->getFrameTiming)
+      g_state.videoOps->frame->getFrameTiming(
           g_state.transport.handle, &frame, &timing);
 
     const uint64_t queueStart = nanotime();
@@ -1474,7 +1477,7 @@ int main_frameThread(void * unused)
     frameTimingFinishFrame(frameToken, &timing);
 
     if (!rendererOwnsFrame)
-      g_state.transport.ops->releaseFrame(g_state.transport.handle, &frame);
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
     app_useSpiceDisplay(false);
   }
 
@@ -1491,8 +1494,8 @@ int main_frameThread(void * unused)
 
   /* Renderer reset requests release for every asynchronous DMA snapshot.
    * Drain those requests before the transport unsubscribes or reconnects. */
-  if (g_state.transport.ops->stopFrame)
-    g_state.transport.ops->stopFrame(g_state.transport.handle);
+  if (g_state.videoOps->frame->stopFrame)
+    g_state.videoOps->frame->stopFrame(g_state.transport.handle);
 
   return 0;
 }
@@ -2126,6 +2129,16 @@ static int lg_run(void)
   }
   DEBUG_INFO("Using Transport: %s", g_state.transport.ops->name);
 
+  g_state.videoOps =
+    g_state.transport.ops->getVideoOps(g_state.transport.handle);
+  if (!g_state.videoOps || g_state.videoOps->type != LG_VIDEO_TYPE_FRAME ||
+      !g_state.videoOps->frame)
+  {
+    DEBUG_ERROR("Transport does not provide a frame source");
+    return -1;
+  }
+  DEBUG_INFO("Using Video: %s", g_state.videoOps->name);
+
   // setup the spice startup condition
   if (!(e_spice = lgCreateEvent(false, 0)))
   {
@@ -2207,7 +2220,8 @@ static int lg_run(void)
     return -1;
   }
 
-  g_state.useDMA = g_state.transport.ops->supportsDMA(g_state.transport.handle);
+  g_state.useDMA =
+    g_state.videoOps->frame->supportsDMA(g_state.transport.handle);
 
   // initialize the window dimensions at init for renderers
   g_state.windowW  = g_params.w;
@@ -2305,8 +2319,8 @@ static int lg_run(void)
   if (g_state.lgr->ops.getInterop &&
       g_state.lgr->ops.getInterop(g_state.lgr, &interop))
     interopPtr = &interop;
-  if (g_state.transport.ops->attachRenderer &&
-      !g_state.transport.ops->attachRenderer(
+  if (g_state.videoOps->frame->attachRenderer &&
+      !g_state.videoOps->frame->attachRenderer(
         g_state.transport.handle, interopPtr))
   {
     DEBUG_ERROR("Failed to attach the renderer to the transport");

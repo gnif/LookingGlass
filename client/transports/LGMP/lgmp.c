@@ -1360,17 +1360,9 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
   return lgmpInput_getOps();
 }
 
-const LG_TransportOps LGT_LGMP =
+static const LG_FrameOps lgmpFrameOps =
 {
-  .name           = "lgmp",
-  .setup          = lgmp_setup,
-  .create         = lgmp_create,
-  .destroy        = lgmp_destroy,
-  .connect        = lgmp_connect,
-  .disconnect     = lgmp_disconnect,
-  .sessionValid   = lgmp_sessionValid,
   .supportsDMA    = lgmp_supportsDMA,
-  .getInputOps    = lgmp_getInputOps,
   .attachRenderer = lgmp_attachRenderer,
   .detachRenderer = lgmp_detachRenderer,
   .nextFrame      = lgmp_nextFrame,
@@ -1380,6 +1372,31 @@ const LG_TransportOps LGT_LGMP =
   .nextPointer    = lgmp_nextPointer,
   .releasePointer = lgmp_releasePointer,
   .stopPointer    = lgmp_stopPointer,
-  .sendControl    = lgmp_sendControl,
-  .controlStatus  = lgmp_controlStatus,
+};
+
+static const LG_VideoOps lgmpVideoOps =
+{
+  .name  = "LGMP",
+  .type  = LG_VIDEO_TYPE_FRAME,
+  .frame = &lgmpFrameOps,
+};
+
+static const LG_VideoOps * lgmp_getVideoOps(LG_Transport * this)
+{
+  return &lgmpVideoOps;
+}
+
+const LG_TransportOps LGT_LGMP =
+{
+  .name          = "lgmp",
+  .setup         = lgmp_setup,
+  .create        = lgmp_create,
+  .destroy       = lgmp_destroy,
+  .connect       = lgmp_connect,
+  .disconnect    = lgmp_disconnect,
+  .sessionValid  = lgmp_sessionValid,
+  .getVideoOps   = lgmp_getVideoOps,
+  .getInputOps   = lgmp_getInputOps,
+  .sendControl   = lgmp_sendControl,
+  .controlStatus = lgmp_controlStatus,
 };

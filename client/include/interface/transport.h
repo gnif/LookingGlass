@@ -236,31 +236,9 @@ LG_TransportControl;
 
 typedef uint64_t LG_TransportControlToken;
 
-typedef struct LG_TransportOps
+typedef struct LG_FrameOps
 {
-  const char * name;
-  void (*setup)(void);
-  bool (*create)(LG_Transport ** transport);
-  void (*destroy)(LG_Transport ** transport);
-
-  LG_TransportStatus (*connect)(LG_Transport * transport,
-      LG_TransportSession * session);
-  void (*disconnect)(LG_Transport * transport);
-  bool (*sessionValid)(LG_Transport * transport);
   bool (*supportsDMA)(LG_Transport * transport);
-  /* Queried after connect. The returned operations and opaque value remain
-   * valid until disconnect; NULL indicates that this session has no input. */
-  const LG_InputOps *(*getInputOps)(LG_Transport * transport,
-      void ** opaque);
-  /* Queried after connect. The returned operations and opaque value remain
-   * valid until disconnect; NULL indicates that this session has no audio. */
-  const LG_AudioOps *(*getAudioOps)(LG_Transport * transport,
-      void ** opaque);
-  /* Queried after connect. The returned operations and opaque value remain
-   * valid until disconnect; NULL indicates that this session has no
-   * clipboard. */
-  const LG_ClipboardOps *(*getClipboardOps)(LG_Transport * transport,
-      void ** opaque);
   bool (*attachRenderer)(LG_Transport * transport,
       const LG_RendererInterop * interop);
   void (*detachRenderer)(LG_Transport * transport);
@@ -274,16 +252,62 @@ typedef struct LG_TransportOps
       const LG_TransportFrame * frame, LG_TransportFrameTiming * timing);
   void (*releaseFrame)(LG_Transport * transport, LG_TransportFrame * frame);
   /* Called by the frame consumer as it exits. A backend may release transient
-   * stream resources; nextFrame must reacquire them when the consumer restarts. */
+   * stream resources; nextFrame must reacquire them when the consumer
+   * restarts. */
   void (*stopFrame)(LG_Transport * transport);
 
   LG_TransportStatus (*nextPointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
   void (*releasePointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
-  /* Called by the pointer consumer as it exits. A backend may release transient
-   * stream resources; nextPointer must reacquire them when the consumer restarts. */
+  /* Called by the pointer consumer as it exits. A backend may release
+   * transient stream resources; nextPointer must reacquire them when the
+   * consumer restarts. */
   void (*stopPointer)(LG_Transport * transport);
+}
+LG_FrameOps;
+
+typedef enum LG_VideoType
+{
+  LG_VIDEO_TYPE_FRAME,
+}
+LG_VideoType;
+
+typedef struct LG_VideoOps
+{
+  const char       * name;
+  LG_VideoType       type;
+  const LG_FrameOps * frame;
+}
+LG_VideoOps;
+
+typedef struct LG_TransportOps
+{
+  const char * name;
+  void (*setup)(void);
+  bool (*create)(LG_Transport ** transport);
+  void (*destroy)(LG_Transport ** transport);
+
+  LG_TransportStatus (*connect)(LG_Transport * transport,
+      LG_TransportSession * session);
+  void (*disconnect)(LG_Transport * transport);
+  bool (*sessionValid)(LG_Transport * transport);
+  /* Queried after create. The returned operations remain valid until the
+   * transport is destroyed. NULL indicates that this transport has no video. */
+  const LG_VideoOps *(*getVideoOps)(LG_Transport * transport);
+  /* Queried after connect. The returned operations and opaque value remain
+   * valid until disconnect; NULL indicates that this session has no input. */
+  const LG_InputOps *(*getInputOps)(LG_Transport * transport,
+      void ** opaque);
+  /* Queried after connect. The returned operations and opaque value remain
+   * valid until disconnect; NULL indicates that this session has no audio. */
+  const LG_AudioOps *(*getAudioOps)(LG_Transport * transport,
+      void ** opaque);
+  /* Queried after connect. The returned operations and opaque value remain
+   * valid until disconnect; NULL indicates that this session has no
+   * clipboard. */
+  const LG_ClipboardOps *(*getClipboardOps)(LG_Transport * transport,
+      void ** opaque);
 
   LG_TransportStatus (*sendControl)(LG_Transport * transport,
       const LG_TransportControl * control, LG_TransportControlToken * token);

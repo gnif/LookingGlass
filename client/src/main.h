@@ -124,6 +124,7 @@ struct AppState
   bool                 useDMA;
 
   LG_TransportInstance      transport;
+  const LG_VideoOps       * videoOps;
   LG_TransportFeatureFlags  transportFeatures;
 
   LGThread            * cursorThread;

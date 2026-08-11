@@ -734,23 +734,40 @@ static const LG_InputOps * test_getInputOps(LG_Transport * this,
   return NULL;
 }
 
-const LG_TransportOps LGT_Test =
+static const LG_FrameOps testFrameOps =
 {
-  .name           = "test",
-  .setup          = test_setup,
-  .create         = test_create,
-  .destroy        = test_destroy,
-  .connect        = test_connect,
-  .disconnect     = test_disconnect,
-  .sessionValid   = test_sessionValid,
   .supportsDMA    = test_supportsDMA,
-  .getInputOps    = test_getInputOps,
   .attachRenderer = test_attachRenderer,
   .detachRenderer = test_detachRenderer,
   .nextFrame      = test_nextFrame,
   .releaseFrame   = test_releaseFrame,
   .nextPointer    = test_nextPointer,
   .releasePointer = test_releasePointer,
-  .sendControl    = test_sendControl,
-  .controlStatus  = test_controlStatus,
+};
+
+static const LG_VideoOps testVideoOps =
+{
+  .name  = "test",
+  .type  = LG_VIDEO_TYPE_FRAME,
+  .frame = &testFrameOps,
+};
+
+static const LG_VideoOps * test_getVideoOps(LG_Transport * this)
+{
+  return &testVideoOps;
+}
+
+const LG_TransportOps LGT_Test =
+{
+  .name          = "test",
+  .setup         = test_setup,
+  .create        = test_create,
+  .destroy       = test_destroy,
+  .connect       = test_connect,
+  .disconnect    = test_disconnect,
+  .sessionValid  = test_sessionValid,
+  .getVideoOps   = test_getVideoOps,
+  .getInputOps   = test_getInputOps,
+  .sendControl   = test_sendControl,
+  .controlStatus = test_controlStatus,
 };
