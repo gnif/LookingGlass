@@ -50,6 +50,7 @@ static struct MsgState this = {0};
 
 bool lgMessage_init(void)
 {
+  memset(&this.lastWindowSize, 0, sizeof(this.lastWindowSize));
   this.list = ll_new();
   if (!this.list)
   {
@@ -70,6 +71,8 @@ void lgMessage_deinit(void)
     ll_free(this.list);
     this.list = NULL;
   }
+
+  memset(&this.lastWindowSize, 0, sizeof(this.lastWindowSize));
 }
 
 void lgMessage_post(const LGMsg * msg)
@@ -102,7 +105,7 @@ void lgMessage_process(void)
       case LG_MSG_WINDOWSIZE:
       {
         // retain the last/latest windowsize event
-        if (!windowSize || event->timestamp > windowSize->timestamp)
+        if (!windowSize || event->timestamp >= windowSize->timestamp)
         {
           free(windowSize);
           windowSize = event;
