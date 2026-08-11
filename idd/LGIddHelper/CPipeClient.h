@@ -24,13 +24,14 @@
 #include <stdint.h>
 
 #include "CPipeEndpoint.h"
+#include "CSRWLock.h"
 #include "PipeMsg.h"
 
 class CPipeClient : private IPipeEndpointHandler
 {
 private:
   CPipeEndpoint m_endpoint;
-  SRWLOCK m_displayLock = SRWLOCK_INIT;
+  CSRWLock      m_displayLock;
 
   void WriteMsg(const LGPipeMsg& msg);
 

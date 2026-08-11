@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 
 #include <stddef.h>
@@ -34,8 +36,8 @@ class CIVSHMEM;
 class CLGMPHost
 {
 private:
-  PLGMPHost m_host        = nullptr;
-  SRWLOCK   m_processLock = SRWLOCK_INIT;
+  PLGMPHost m_host = nullptr;
+  CSRWLock  m_processLock;
 
 public:
   CLGMPHost() = default;

@@ -224,13 +224,14 @@ bool CPipeEndpoint::Start(
     DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe thread");
     m_running.store(false);
 
-    AcquireSRWLockExclusive(&m_pipeLock);
-    if (m_pipe != INVALID_HANDLE_VALUE)
     {
-      CloseHandle(m_pipe);
-      m_pipe = INVALID_HANDLE_VALUE;
+      CSRWExclusiveLock lock(m_pipeLock);
+      if (m_pipe != INVALID_HANDLE_VALUE)
+      {
+        CloseHandle(m_pipe);
+        m_pipe = INVALID_HANDLE_VALUE;
+      }
     }
-    ReleaseSRWLockExclusive(&m_pipeLock);
 
     CloseHandle(m_stopEvent);
     m_stopEvent = nullptr;
@@ -249,10 +250,11 @@ void CPipeEndpoint::Stop()
   if (m_stopEvent)
     SetEvent(m_stopEvent);
 
-  AcquireSRWLockShared(&m_pipeLock);
-  if (m_pipe != INVALID_HANDLE_VALUE)
-    CancelIoEx(m_pipe, nullptr);
-  ReleaseSRWLockShared(&m_pipeLock);
+  {
+    CSRWSharedLock lock(m_pipeLock);
+    if (m_pipe != INVALID_HANDLE_VALUE)
+      CancelIoEx(m_pipe, nullptr);
+  }
 
   if (m_thread)
   {
@@ -261,13 +263,14 @@ void CPipeEndpoint::Stop()
     m_thread = nullptr;
   }
 
-  AcquireSRWLockExclusive(&m_pipeLock);
-  if (m_pipe != INVALID_HANDLE_VALUE)
   {
-    CloseHandle(m_pipe);
-    m_pipe = INVALID_HANDLE_VALUE;
+    CSRWExclusiveLock lock(m_pipeLock);
+    if (m_pipe != INVALID_HANDLE_VALUE)
+    {
+      CloseHandle(m_pipe);
+      m_pipe = INVALID_HANDLE_VALUE;
+    }
   }
-  ReleaseSRWLockExclusive(&m_pipeLock);
 
   if (m_stopEvent)
   {
@@ -290,7 +293,7 @@ bool CPipeEndpoint::Send(const void * message, size_t size)
     return false;
 
   bool success = false;
-  AcquireSRWLockExclusive(&m_pipeLock);
+  CSRWExclusiveLock lock(m_pipeLock);
   if (m_pipe != INVALID_HANDLE_VALUE && IsConnected())
   {
     const PipeIoResult result = WriteMessage(
@@ -304,7 +307,6 @@ bool CPipeEndpoint::Send(const void * message, size_t size)
       CancelIoEx(m_pipe, nullptr);
     }
   }
-  ReleaseSRWLockExclusive(&m_pipeLock);
   return success;
 }
 
@@ -350,18 +352,21 @@ void CPipeEndpoint::RunServer()
   if (!ioEvent)
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe I/O event");
-    AcquireSRWLockShared(&m_pipeLock);
-    const HANDLE pipe = m_pipe;
-    ReleaseSRWLockShared(&m_pipeLock);
+    HANDLE pipe;
+    {
+      CSRWSharedLock lock(m_pipeLock);
+      pipe = m_pipe;
+    }
     if (pipe != INVALID_HANDLE_VALUE)
       ClosePipe(pipe);
     return;
   }
 
   HANDLE pipe = INVALID_HANDLE_VALUE;
-  AcquireSRWLockShared(&m_pipeLock);
-  pipe = m_pipe;
-  ReleaseSRWLockShared(&m_pipeLock);
+  {
+    CSRWSharedLock lock(m_pipeLock);
+    pipe = m_pipe;
+  }
 
   while (IsRunning())
   {
@@ -581,16 +586,14 @@ bool CPipeEndpoint::WaitForRetry(DWORD delayMs)
 
 void CPipeEndpoint::PublishPipe(HANDLE pipe)
 {
-  AcquireSRWLockExclusive(&m_pipeLock);
+  CSRWExclusiveLock lock(m_pipeLock);
   m_pipe = pipe;
-  ReleaseSRWLockExclusive(&m_pipeLock);
 }
 
 void CPipeEndpoint::ClosePipe(HANDLE pipe)
 {
-  AcquireSRWLockExclusive(&m_pipeLock);
+  CSRWExclusiveLock lock(m_pipeLock);
   if (m_pipe == pipe)
     m_pipe = INVALID_HANDLE_VALUE;
   CloseHandle(pipe);
-  ReleaseSRWLockExclusive(&m_pipeLock);
 }

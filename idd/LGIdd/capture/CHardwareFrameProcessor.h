@@ -67,8 +67,8 @@ private:
 
   FrameCandidate      m_candidates[CAPTURE_PIPELINE_SLOTS];
   CandidateDamageTail m_candidateDamageTail[CAPTURE_PIPELINE_SLOTS];
-  mutable SRWLOCK     m_candidateLock      = SRWLOCK_INIT;
-  SRWLOCK             m_copySubmitLock     = SRWLOCK_INIT;
+  mutable CSRWLock    m_candidateLock;
+  CSRWLock            m_copySubmitLock;
   uint64_t            m_candidateSequence  = 0;
   bool                m_publishPending     = false;
   Wrappers::Event     m_candidateAvailableEvent;
@@ -92,7 +92,7 @@ public:
   CHardwareFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
+    CSRWLock * pipelineLock, HANDLE terminateEvent);
 
   bool IsValid() const override;
   bool Submit(const FrameSubmission& submission) override;

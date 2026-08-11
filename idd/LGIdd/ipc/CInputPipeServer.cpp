@@ -95,7 +95,7 @@ void CInputPipeServer::DeInit()
     m_stopEvent = nullptr;
   }
 
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   m_queueHead       = 0;
   m_queueCount      = 0;
   m_mouseMode       = MouseMode::NONE;
@@ -269,7 +269,7 @@ bool CInputPipeServer::SendMouseRelative(
   payload.mouseRelative.deltaY  = deltaY;
   payload.mouseRelative.wheel   = wheel;
 
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   const bool pureMotion = wheel == 0 && buttons == m_relativeButtons;
   const bool switching  = m_mouseMode == MouseMode::ABSOLUTE_INPUT;
   bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
@@ -316,7 +316,7 @@ bool CInputPipeServer::SendMouseAbsolute(
   payload.mouseAbsolute.y       = y;
   payload.mouseAbsolute.wheel   = wheel;
 
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   const bool pureMotion = wheel == 0 && buttons == m_absoluteButtons;
   const bool switching  = m_mouseMode == MouseMode::RELATIVE_INPUT;
   bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
@@ -360,7 +360,7 @@ bool CInputPipeServer::SendKeyboard(
     payload.keyboard.keys[i] = keys[i];
   }
 
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   const bool queued = (m_state.load(std::memory_order_relaxed) & 1) &&
     QueueLocked(LG_INPUT_PIPE_MESSAGE_KEYBOARD, payload, false);
   if (!queued)
@@ -373,7 +373,7 @@ bool CInputPipeServer::Reset()
   if (!(m_state.load(std::memory_order_acquire) & 1))
     return false;
 
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
   if (queued)
     queued = QueueResetLocked();
@@ -384,7 +384,7 @@ bool CInputPipeServer::Reset()
 
 bool CInputPipeServer::Pop(QueueItem& item)
 {
-  CSRWExclusiveLock lock(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   if (!m_queueCount)
     return false;
 
@@ -411,7 +411,7 @@ bool CInputPipeServer::Send(const QueueItem& item)
   LARGE_INTEGER start = {};
   LARGE_INTEGER end   = {};
   {
-    CSRWSharedLock lock(&m_connectionLock);
+    CSRWSharedLock lock(m_connectionLock);
     const uint64_t state = m_state.load(std::memory_order_acquire);
     current = (state & 1) && item.state == state;
     if (current)
@@ -465,7 +465,7 @@ void CInputPipeServer::LogStatistics()
   uint64_t resyncDiscarded;
   size_t   queueHighWater;
   {
-    CSRWExclusiveLock lock(&m_queueLock);
+    CSRWExclusiveLock lock(m_queueLock);
     enqueued          = m_statEnqueued;
     relativeCoalesced = m_statRelativeCoalesced;
     absoluteCoalesced = m_statAbsoluteCoalesced;
@@ -526,7 +526,7 @@ void CInputPipeServer::LogStatistics()
 
 void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
 {
-  CSRWExclusiveLock connectionLock(&m_connectionLock);
+  CSRWExclusiveLock connectionLock(m_connectionLock);
   uint64_t current = m_state.load(std::memory_order_relaxed);
   for (;;)
   {
@@ -537,7 +537,7 @@ void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
       break;
   }
 
-  CSRWExclusiveLock queueLock(&m_queueLock);
+  CSRWExclusiveLock queueLock(m_queueLock);
   m_queueHead  = 0;
   m_queueCount = 0;
 }
@@ -578,8 +578,8 @@ void CInputPipeServer::Thread()
 
 void CInputPipeServer::OnPipeConnected()
 {
-  CSRWExclusiveLock connectionLock(&m_connectionLock);
-  CSRWExclusiveLock queueLock(&m_queueLock);
+  CSRWExclusiveLock connectionLock(m_connectionLock);
+  CSRWExclusiveLock queueLock(m_queueLock);
 
   uint64_t state = m_state.load(std::memory_order_relaxed);
   if (state & 1)

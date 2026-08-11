@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 #include <atomic>
 #include <stdint.h>
@@ -97,7 +99,7 @@ private:
   LONG              m_deferredOwnerFrameIndex = -1;
   std::atomic<bool> m_frameInFlight[LGMP_Q_FRAME_BUFFER_LEN] = {};
   bool              m_frameCompleted[LGMP_Q_FRAME_BUFFER_LEN] = {};
-  SRWLOCK           m_framePublishLock     = SRWLOCK_INIT;
+  CSRWLock          m_framePublishLock;
   uint64_t          m_framePublishSequence = 0;
   uint64_t          m_frameLastPublishSequence[LGMP_Q_FRAME_BUFFER_LEN] = {};
 

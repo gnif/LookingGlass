@@ -30,7 +30,7 @@
 CSoftwareFrameProcessor::CSoftwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent) :
+    CSRWLock * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent)
 {
@@ -112,7 +112,7 @@ void CSoftwareFrameProcessor::CompletionFunction(
 
 bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
 {
-  CSRWSharedLock pipelineLock(m_pipelineLock);
+  CSRWSharedLock pipelineLock(*m_pipelineLock);
   CPostProcessor&       postProcessor = m_postProcessors[0];
   const D12FrameFormat& dstFormat     = postProcessor.GetOutputFormat();
 

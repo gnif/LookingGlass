@@ -62,10 +62,10 @@ NTSTATUS CMonitorContext::AssignSwapChain(
     return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
 
-  AcquireSRWLockExclusive(&m_lock);
+  CSRWExclusiveLock lock(m_lock);
   if (!IsAssignmentCurrent(assignmentGeneration))
   {
-    ReleaseSRWLockExclusive(&m_lock);
+    lock.Unlock();
     DEBUG_INFO("Swap chain assignment canceled before processor startup");
     return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
@@ -82,13 +82,12 @@ NTSTATUS CMonitorContext::AssignSwapChain(
   {
     auto processor = std::move(m_swapChain);
     dx11Device      = std::move(m_dx11Device);
-    ReleaseSRWLockExclusive(&m_lock);
+    lock.Unlock();
     processor.reset();
     dx11Device.reset();
     m_devContext->OnSwapChainReleased();
     return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
-  ReleaseSRWLockExclusive(&m_lock);
   return STATUS_SUCCESS;
 }
 
@@ -105,10 +104,11 @@ void CMonitorContext::DetachSwapChain()
   std::unique_ptr<CSwapChainProcessor> processor;
   std::shared_ptr<CD3D11Device>        dx11Device;
 
-  AcquireSRWLockExclusive(&m_lock);
-  processor  = std::move(m_swapChain);
-  dx11Device = std::move(m_dx11Device);
-  ReleaseSRWLockExclusive(&m_lock);
+  {
+    CSRWExclusiveLock lock(m_lock);
+    processor  = std::move(m_swapChain);
+    dx11Device = std::move(m_dx11Device);
+  }
 
   const bool hadSwapChain = !!processor;
   processor.reset();

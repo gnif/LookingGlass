@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
@@ -40,7 +42,7 @@ private:
   // Guards the swap chain and device pointers. Assign and unassign can run
   // concurrently (an unassign triggered by the worker's WdfObjectDelete can
   // race the next assign), and shared_ptr copy/reset is not thread safe.
-  SRWLOCK m_lock = SRWLOCK_INIT;
+  CSRWLock m_lock;
 
   // IddCx can issue a replacement assignment before an earlier assignment
   // has finished creating its devices. Serialize those expensive setup paths

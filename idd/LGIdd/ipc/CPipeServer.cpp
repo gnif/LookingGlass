@@ -20,6 +20,7 @@
 
 #include "ipc/CPipeServer.h"
 #include "CDebug.h"
+#include "CSRWLock.h"
 #include "display/CDeviceContext.h"
 
 CPipeServer g_pipe;
@@ -40,7 +41,7 @@ void CPipeServer::DeInit()
 
 void CPipeServer::OnPipeConnected()
 {
-  AcquireSRWLockExclusive(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   std::vector<LGPipeMsg> queued;
   queued.swap(m_queue);
 
@@ -51,7 +52,6 @@ void CPipeServer::OnPipeConnected()
         QueueMsgLocked(queued[i]);
       break;
     }
-  ReleaseSRWLockExclusive(&m_queueLock);
 }
 
 bool CPipeServer::OnPipeMessage(const void * message, size_t size)
@@ -89,27 +89,24 @@ void CPipeServer::QueueMsgLocked(const LGPipeMsg & msg)
 
 void CPipeServer::WriteMsg(const LGPipeMsg & msg)
 {
-  AcquireSRWLockExclusive(&m_queueLock);
+  CSRWExclusiveLock lock(m_queueLock);
   if (!m_endpoint.Send(&msg, sizeof(msg)))
     QueueMsgLocked(msg);
-  ReleaseSRWLockExclusive(&m_queueLock);
 }
 
 void CPipeServer::HandleReloadSettings()
 {
   DEBUG_INFO("Reloading settings");
 
-  AcquireSRWLockShared(&m_deviceContextLock);
+  CSRWSharedLock lock(m_deviceContextLock);
   if (m_deviceContext)
     m_deviceContext->ReloadSettings();
-  ReleaseSRWLockShared(&m_deviceContextLock);
 }
 
 void CPipeServer::SetDeviceContext(CDeviceContext * context)
 {
-  AcquireSRWLockExclusive(&m_deviceContextLock);
+  CSRWExclusiveLock lock(m_deviceContextLock);
   m_deviceContext = context;
-  ReleaseSRWLockExclusive(&m_deviceContextLock);
 }
 
 void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)

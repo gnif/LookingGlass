@@ -21,6 +21,7 @@
 #pragma once
 
 #include "CPipeEndpoint.h"
+#include "CSRWLock.h"
 #include "InputPipeProtocol.h"
 #include "input/IInputSink.h"
 
@@ -55,11 +56,11 @@ private:
   // Odd states are available. Endpoint changes and resyncs advance the state.
   std::atomic<uint64_t> m_state { 0 };
 
-  SRWLOCK m_queueLock      = SRWLOCK_INIT;
-  SRWLOCK m_connectionLock = SRWLOCK_INIT;
-  HANDLE  m_stopEvent      = nullptr;
-  HANDLE  m_queueEvent     = nullptr;
-  HANDLE  m_thread         = nullptr;
+  CSRWLock m_queueLock;
+  CSRWLock m_connectionLock;
+  HANDLE   m_stopEvent  = nullptr;
+  HANDLE   m_queueEvent = nullptr;
+  HANDLE   m_thread     = nullptr;
 
   QueueItem m_queue[QUEUE_LENGTH] = {};
   size_t    m_queueHead            = 0;

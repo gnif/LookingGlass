@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "CSRWLock.h"
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
@@ -58,7 +59,7 @@ private:
 
   // Guards the monitor/replug/swap-chain state. These values are touched by
   // IddCx callback threads, the swap-chain thread, and the transport timer.
-  SRWLOCK m_lock = SRWLOCK_INIT;
+  CSRWLock m_lock;
 
   bool m_replugMonitor           = false;
   bool m_replugPending           = false;

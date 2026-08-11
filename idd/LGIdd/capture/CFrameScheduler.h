@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 #include <stdint.h>
 
@@ -100,12 +102,12 @@ private:
   static const unsigned PUBLICATION_HISTORY_SIZE  = 128;
   static const unsigned WORK_TIMING_HISTORY_SIZE  = 32;
 
-  mutable SRWLOCK m_lock                 = SRWLOCK_INIT;
-  HANDLE          m_wakeEvent            = nullptr;
-  Client          m_clients[MAX_CLIENTS] = {};
-  Schedule        m_schedule             = {};
-  bool            m_scheduling           = false;
-  uint32_t        m_epoch                = 0;
+  mutable CSRWLock m_lock;
+  HANDLE           m_wakeEvent            = nullptr;
+  Client           m_clients[MAX_CLIENTS] = {};
+  Schedule         m_schedule             = {};
+  bool             m_scheduling           = false;
+  uint32_t         m_epoch                = 0;
 
   // A result acknowledges only the request tickets captured by its attempt.
   uint64_t m_forceRequestTicket     = 0;

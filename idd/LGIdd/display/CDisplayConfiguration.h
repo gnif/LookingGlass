@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include "config/CSettings.h"
 #include "display/CEdid.h"
 #include "display/IddCxCompat.h"
@@ -59,8 +61,8 @@ private:
 
   // Registry-backed changes are serialized before publishing a replacement
   // mode list. Readers only hold m_modeLock long enough to take a snapshot.
-  SRWLOCK         m_reloadLock = SRWLOCK_INIT;
-  mutable SRWLOCK m_modeLock   = SRWLOCK_INIT;
+  CSRWLock         m_reloadLock;
+  mutable CSRWLock m_modeLock;
 
   CSettings::DisplayModes m_modes;
   CEdid                   m_edid;

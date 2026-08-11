@@ -21,6 +21,7 @@
 #include "CRGB24Effect.h"
 
 #include "CDebug.h"
+#include "CSRWLock.h"
 #include "config/CSettings.h"
 #include "capture/FramePipeline.h"
 
@@ -65,7 +66,7 @@ struct CRGB24Effect::State
   static const unsigned SampleCount = 64;
   static const unsigned TrimCount   = SampleCount / 8;
 
-  SRWLOCK    lock                 = SRWLOCK_INIT;
+  CSRWLock   lock;
   Phase      phase                = Phase::DISABLED;
   FormatKey  format               = {};
   bool       formatValid          = false;
@@ -125,7 +126,7 @@ struct CRGB24Effect::State
 
   void Update(const D12FrameFormat& next)
   {
-    AcquireSRWLockExclusive(&lock);
+    CSRWExclusiveLock guard(lock);
 
     const bool formatChanged = !formatValid ||
       format.resourceDimension != next.desc.Dimension        ||
@@ -218,51 +219,46 @@ struct CRGB24Effect::State
         break;
     }
 
-    ReleaseSRWLockExclusive(&lock);
   }
 
   bool WantsPacked()
   {
-    AcquireSRWLockShared(&lock);
+    CSRWSharedLock guard(lock);
     const bool result = WantsPackedLocked();
-    ReleaseSRWLockShared(&lock);
     return result;
   }
 
   bool IsBenchmarking()
   {
-    AcquireSRWLockShared(&lock);
+    CSRWSharedLock guard(lock);
     const bool result = IsBenchmarkingLocked();
-    ReleaseSRWLockShared(&lock);
     return result;
   }
 
   uint64_t GetTimingToken(bool packed)
   {
-    AcquireSRWLockShared(&lock);
+    CSRWSharedLock guard(lock);
 
     const uint64_t result = IsBenchmarkingLocked() &&
       packed == WantsPackedLocked() ? generation : 0;
 
-    ReleaseSRWLockShared(&lock);
     return result;
   }
 
   void Reject()
   {
-    AcquireSRWLockExclusive(&lock);
+    CSRWExclusiveLock guard(lock);
     if (WantsPackedLocked())
     {
       phase = Phase::LOCKED_NATIVE;
       ++generation;
       ResetStageLocked();
     }
-    ReleaseSRWLockExclusive(&lock);
   }
 
   void RecordTiming(uint64_t token, bool fullCopy, uint64_t totalTime)
   {
-    AcquireSRWLockExclusive(&lock);
+    CSRWExclusiveLock guard(lock);
 
     if (token == generation && fullCopy)
       switch (phase)
@@ -282,7 +278,6 @@ struct CRGB24Effect::State
           break;
       }
 
-    ReleaseSRWLockExclusive(&lock);
   }
 };
 

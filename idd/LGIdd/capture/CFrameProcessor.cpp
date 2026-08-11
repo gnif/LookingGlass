@@ -30,7 +30,7 @@
 CFrameProcessor::CFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent) :
+    CSRWLock * pipelineLock, HANDLE terminateEvent) :
   m_transport(transport),
   m_dx12(std::move(dx12)),
   m_postProcessors(postProcessors),
@@ -53,12 +53,11 @@ void CFrameProcessor::Reset()
 
 void CFrameProcessor::Invalidate()
 {
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   m_previousDamageCount = 0;
   m_hasPendingDamage    = true;
   m_pendingDamageCount  = 0;
   SetFullDamageLocked();
-  ReleaseSRWLockExclusive(&m_damageLock);
 }
 
 void CFrameProcessor::ResetPipeline()
@@ -69,21 +68,19 @@ void CFrameProcessor::ResetPipeline()
 void CFrameProcessor::AccumulateDamage(
   const RECT dirtyRects[], unsigned count)
 {
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   CFrameProcessorUtil::AccumulateDamage(
     m_pendingDamage, &m_pendingDamageCount, &m_hasPendingDamage,
     dirtyRects, count);
   AccumulateDamageLocked(dirtyRects, count);
-  ReleaseSRWLockExclusive(&m_damageLock);
 }
 
 void CFrameProcessor::SetFullDamage()
 {
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   m_hasPendingDamage   = true;
   m_pendingDamageCount = 0;
   SetFullDamageLocked();
-  ReleaseSRWLockExclusive(&m_damageLock);
 }
 
 void CFrameProcessor::AccumulateDamageLocked(
@@ -97,16 +94,15 @@ void CFrameProcessor::SetFullDamageLocked()
 
 bool CFrameProcessor::HasPendingDamage() const
 {
-  AcquireSRWLockShared(&m_damageLock);
+  CSRWSharedLock lock(m_damageLock);
   const bool result = m_hasPendingDamage;
-  ReleaseSRWLockShared(&m_damageLock);
   return result;
 }
 
 bool CFrameProcessor::TakePendingDamage(
   RECT dirtyRects[], unsigned * count)
 {
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   const bool hasDamage = m_hasPendingDamage;
   *count = hasDamage ? m_pendingDamageCount : 0;
   if (*count)
@@ -114,7 +110,6 @@ bool CFrameProcessor::TakePendingDamage(
       *count * sizeof(*dirtyRects));
   m_hasPendingDamage   = false;
   m_pendingDamageCount = 0;
-  ReleaseSRWLockExclusive(&m_damageLock);
   return hasDamage;
 }
 
@@ -124,40 +119,37 @@ void CFrameProcessor::RestorePendingDamage(
   if (!hasDamage)
     return;
 
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   CFrameProcessorUtil::AccumulateDamage(
     m_pendingDamage, &m_pendingDamageCount, &m_hasPendingDamage,
     dirtyRects, count);
-  ReleaseSRWLockExclusive(&m_damageLock);
 }
 
 void CFrameProcessor::CommitDamage(
   const RECT dirtyRects[], unsigned count)
 {
-  AcquireSRWLockExclusive(&m_damageLock);
+  CSRWExclusiveLock lock(m_damageLock);
   m_previousDamageCount = count;
   if (count)
     memcpy(m_previousDamage, dirtyRects,
       count * sizeof(*m_previousDamage));
-  ReleaseSRWLockExclusive(&m_damageLock);
 }
 
 void CFrameProcessor::GetPreviousDamage(
   RECT dirtyRects[], unsigned * count) const
 {
-  AcquireSRWLockShared(&m_damageLock);
+  CSRWSharedLock lock(m_damageLock);
   *count = m_previousDamageCount;
   if (*count)
     memcpy(dirtyRects, m_previousDamage,
       *count * sizeof(*dirtyRects));
-  ReleaseSRWLockShared(&m_damageLock);
 }
 
 std::unique_ptr<CFrameProcessor> CreateFrameProcessor(
   bool software, IFrameTransport * transport,
   std::shared_ptr<CD3D12Device> dx12,
   CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-  SRWLOCK * pipelineLock, HANDLE terminateEvent)
+  CSRWLock * pipelineLock, HANDLE terminateEvent)
 {
   std::unique_ptr<CFrameProcessor> processor;
   if (software)

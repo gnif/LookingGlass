@@ -20,6 +20,7 @@
 
 #include "CPipeClient.h"
 #include "CDebug.h"
+#include "CSRWLock.h"
 #include "CNotifyWindow.h"
 
 #include <setupapi.h>
@@ -323,10 +324,8 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
 
 bool CPipeClient::EnsureOnlyDisplay()
 {
-  AcquireSRWLockExclusive(&m_displayLock);
-  const bool result = EnsureOnlyDisplayLocked();
-  ReleaseSRWLockExclusive(&m_displayLock);
-  return result;
+  CSRWExclusiveLock lock(m_displayLock);
+  return EnsureOnlyDisplayLocked();
 }
 
 bool CPipeClient::OnPipeMessage(const void * message, size_t size)
@@ -370,31 +369,31 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
-  AcquireSRWLockExclusive(&m_displayLock);
-
-  std::vector<DisplayState> displays;
-  size_t lgIndex;
-  if (!GetDisplayStates(displays, lgIndex))
+  LONG result;
   {
-    ReleaseSRWLockExclusive(&m_displayLock);
-    DEBUG_ERROR("Looking Glass display not found while setting its mode");
-    return;
+    CSRWExclusiveLock lock(m_displayLock);
+
+    std::vector<DisplayState> displays;
+    size_t lgIndex;
+    if (!GetDisplayStates(displays, lgIndex))
+    {
+      DEBUG_ERROR("Looking Glass display not found while setting its mode");
+      return;
+    }
+
+    DEVMODE dm = displays[lgIndex].mode;
+    dm.dmPelsWidth        = msg.displayMode.width;
+    dm.dmPelsHeight       = msg.displayMode.height;
+    dm.dmDisplayFrequency =
+      (msg.displayMode.refreshMilliHz + 500) / 1000;
+    dm.dmFields           =
+      DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+
+    result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
+      &dm, NULL, CDS_UPDATEREGISTRY, NULL);
+    if (result != DISP_CHANGE_SUCCESSFUL)
+      DEBUG_ERROR("ChangeDisplaySettingsEx Failed (0x%08x)", result);
   }
-
-  DEVMODE dm = displays[lgIndex].mode;
-  dm.dmPelsWidth        = msg.displayMode.width;
-  dm.dmPelsHeight       = msg.displayMode.height;
-  dm.dmDisplayFrequency =
-    (msg.displayMode.refreshMilliHz + 500) / 1000;
-  dm.dmFields           =
-    DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-
-  LONG result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
-    &dm, NULL, CDS_UPDATEREGISTRY, NULL);
-  if (result != DISP_CHANGE_SUCCESSFUL)
-    DEBUG_ERROR("ChangeDisplaySettingsEx Failed (0x%08x)", result);
-
-  ReleaseSRWLockExclusive(&m_displayLock);
 
   if (result == DISP_CHANGE_SUCCESSFUL)
     EnsureOnlyDisplay();

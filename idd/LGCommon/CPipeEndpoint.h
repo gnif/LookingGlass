@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 
 #include <atomic>
@@ -124,7 +126,7 @@ private:
   std::atomic<bool> m_running { false };
   std::atomic<bool> m_connected { false };
 
-  SRWLOCK m_pipeLock = SRWLOCK_INIT;
+  CSRWLock m_pipeLock;
   HANDLE m_pipe = INVALID_HANDLE_VALUE;
   HANDLE m_thread = nullptr;
   HANDLE m_stopEvent = nullptr;

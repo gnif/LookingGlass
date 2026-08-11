@@ -655,7 +655,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   unsigned timingEffectIndex    = 0;
   uint64_t timingToken          = 0;
   {
-    CSRWExclusiveLock pipelineLock(&m_pipelineLock);
+    CSRWExclusiveLock pipelineLock(m_pipelineLock);
     m_postProcessors[0].Update(srcFormat);
 
     frameMetadataChanged = noImageUpdate &&

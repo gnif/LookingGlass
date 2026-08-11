@@ -216,19 +216,20 @@ void CLGMPFrameTransport::DeInit()
 {
   m_frameScheduler.Reset();
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
-  m_submittedFrameIndex.store(-1, std::memory_order_release);
-  m_readyFrameIndex.store(-1, std::memory_order_release);
-  m_deferredOwnerFrameIndex = -1;
-  m_framePublishSequence = 0;
-  memset(m_frameLastPublishSequence, 0,
-    sizeof(m_frameLastPublishSequence));
-  memset(m_frameCompleted, 0, sizeof(m_frameCompleted));
-  for (FrameDelivery& delivery : m_frameDelivery)
-    delivery = {};
-  for (OwnerDelivery& delivery : m_ownerDelivery)
-    delivery = {};
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  {
+    CSRWExclusiveLock lock(m_framePublishLock);
+    m_submittedFrameIndex.store(-1, std::memory_order_release);
+    m_readyFrameIndex.store(-1, std::memory_order_release);
+    m_deferredOwnerFrameIndex = -1;
+    m_framePublishSequence = 0;
+    memset(m_frameLastPublishSequence, 0,
+      sizeof(m_frameLastPublishSequence));
+    memset(m_frameCompleted, 0, sizeof(m_frameCompleted));
+    for (FrameDelivery& delivery : m_frameDelivery)
+      delivery = {};
+    for (OwnerDelivery& delivery : m_ownerDelivery)
+      delivery = {};
+  }
 
   for (int i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
   {
@@ -444,7 +445,7 @@ void CLGMPFrameTransport::ProcessFrameDeliveries()
     if (!m_frameOwnerQueue[i])
       return;
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
 
   bool released = false;
   for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
@@ -482,7 +483,7 @@ void CLGMPFrameTransport::ProcessFrameDeliveries()
     owner = {};
     released = true;
   }
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  lock.Unlock();
 
   if (released)
     m_frameScheduler.NotifyPublisher();
@@ -632,7 +633,7 @@ bool CLGMPFrameTransport::FrameBufferAvailable(
     if (!m_frameOwnerQueue[i])
       return false;
 
-  AcquireSRWLockShared(&m_framePublishLock);
+  CSRWSharedLock lock(m_framePublishLock);
   bool allowReady = false;
   // Pipeline one frame through each independent owner lane. Count the shared
   // fallback against the same limit so it cannot become a third delivery for
@@ -647,15 +648,11 @@ bool CLGMPFrameTransport::FrameBufferAvailable(
       (ownerBlocked || ownerQueuesBlocked);
   }
   else if (lgmpHostQueuePending(m_frameQueue) != 0)
-  {
-    ReleaseSRWLockShared(&m_framePublishLock);
     return false;
-  }
 
   // With no owner delivery lane available, a copy can still replace an
   // unreferenced retained frame and be republished when a lane clears.
   const bool available = FindAvailableFrameBuffer(allowReady) >= 0;
-  ReleaseSRWLockShared(&m_framePublishLock);
   return available;
 }
 
@@ -679,16 +676,13 @@ bool CLGMPFrameTransport::GetPendingDeliveryTarget(uint64_t now,
   if (!m_frameQueue)
     return false;
 
-  AcquireSRWLockShared(&m_framePublishLock);
+  CSRWSharedLock lock(m_framePublishLock);
   const LONG frameIndex =
     m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
-  {
-    ReleaseSRWLockShared(&m_framePublishLock);
     return false;
-  }
 
   uint32_t blockedClientIDs[LGMP_Q_FRAME_LEN] = {};
   unsigned blockedCount = 0;
@@ -699,7 +693,6 @@ bool CLGMPFrameTransport::GetPendingDeliveryTarget(uint64_t now,
   const bool result = m_frameScheduler.GetSecondaryTarget(
     m_frame[frameIndex]->frameSerial, now,
     blockedClientIDs, blockedCount, target);
-  ReleaseSRWLockShared(&m_framePublishLock);
   return result;
 }
 
@@ -709,20 +702,17 @@ bool CLGMPFrameTransport::RetryPendingDelivery(uint64_t now, bool& retry)
   if (!m_frameQueue)
     return false;
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   const LONG frameIndex =
     m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
-  {
-    ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
-  }
 
   const SharedFramePostResult result = PostSharedFrame(
     static_cast<unsigned>(frameIndex), 0, now);
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  lock.Unlock();
   retry = result == SHARED_FRAME_FAILED;
   return result == SHARED_FRAME_POSTED;
 }
@@ -746,7 +736,7 @@ PreparedFrameBuffer CLGMPFrameTransport::PrepareFrameBuffer(
     return result;
   }
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   const bool ownerBlocked = schedule.clientID &&
     CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN;
   const bool allowReady = allowReadyReplacement &&
@@ -774,7 +764,7 @@ PreparedFrameBuffer CLGMPFrameTransport::PrepareFrameBuffer(
     (!m_frameLastPublishSequence[availableFrameIndex] ||
       m_framePublishSequence >
         m_frameLastPublishSequence[availableFrameIndex] + 1);
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  lock.Unlock();
   if (!acquired)
     return result;
   const unsigned frameIndex = static_cast<unsigned>(availableFrameIndex);
@@ -939,16 +929,13 @@ bool CLGMPFrameTransport::PublishFrameBuffer(unsigned frameIndex,
     return false;
 
   const uint64_t now = CFrameScheduler::Nanotime();
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   CFrameScheduler::Schedule currentSchedule = {};
   const bool scheduling =
     m_frameScheduler.GetSchedule(currentSchedule);
   if (scheduling != (schedule.clientID != 0) ||
       (scheduling && !FrameScheduleMatches(schedule, currentSchedule)))
-  {
-    ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
-  }
 
   KVMFRFrame * frame            = m_frame[frameIndex];
   frame->timingFlags            = 0;
@@ -1023,7 +1010,7 @@ bool CLGMPFrameTransport::PublishFrameBuffer(unsigned frameIndex,
     m_submittedFrameIndex.store(
       static_cast<LONG>(frameIndex), std::memory_order_release);
   }
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  lock.Unlock();
 
   if (!published)
   {
@@ -1042,14 +1029,11 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
   if (!schedule.clientID)
     return false;
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   CFrameScheduler::Schedule currentSchedule = {};
   if (!m_frameScheduler.GetSchedule(currentSchedule) ||
       !FrameScheduleMatches(schedule, currentSchedule))
-  {
-    ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
-  }
 
   LONG frameIndex = m_deferredOwnerFrameIndex;
   if (frameIndex >= 0 &&
@@ -1063,10 +1047,7 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
     frameIndex = m_readyFrameIndex.load(std::memory_order_acquire);
   if (frameIndex < 0 ||
       m_frameInFlight[frameIndex].load(std::memory_order_acquire))
-  {
-    ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
-  }
 
   CFrameScheduler::Schedule deliverySchedule = schedule;
   deliverySchedule.deliveryDeadlineSerial = 0;
@@ -1078,16 +1059,13 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
   {
     if (m_deferredOwnerFrameIndex == frameIndex)
       m_deferredOwnerFrameIndex = -1;
-    ReleaseSRWLockExclusive(&m_framePublishLock);
+    lock.Unlock();
     m_frameScheduler.FrameRepublished(schedule, frameSerial);
     return true;
   }
 
   if (CountOwnerDeliveries(schedule.clientID) >= LGMP_Q_FRAME_LEN)
-  {
-    ReleaseSRWLockExclusive(&m_framePublishLock);
     return false;
-  }
 
   const int ownerQueueIndex =
     FindAvailableOwnerQueue(static_cast<unsigned>(frameIndex));
@@ -1097,7 +1075,7 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
       static_cast<unsigned>(frameIndex), deliverySchedule);
     if (published && m_deferredOwnerFrameIndex == frameIndex)
       m_deferredOwnerFrameIndex = -1;
-    ReleaseSRWLockExclusive(&m_framePublishLock);
+    lock.Unlock();
     if (published)
       m_frameScheduler.FrameRepublished(schedule, frameSerial);
     return published;
@@ -1123,7 +1101,7 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
     if (m_deferredOwnerFrameIndex == frameIndex)
       m_deferredOwnerFrameIndex = -1;
   }
-  ReleaseSRWLockExclusive(&m_framePublishLock);
+  lock.Unlock();
 
   if (status != LGMP_OK || !recipientCount)
   {
@@ -1201,7 +1179,7 @@ void CLGMPFrameTransport::AbortFrameBuffer(unsigned frameIndex)
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   m_frameBuffer[frameIndex]->wp = 0;
   InterlockedExchange(
     (volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
@@ -1209,7 +1187,6 @@ void CLGMPFrameTransport::AbortFrameBuffer(unsigned frameIndex)
   if (m_deferredOwnerFrameIndex == static_cast<LONG>(frameIndex))
     m_deferredOwnerFrameIndex = -1;
   m_frameInFlight[frameIndex].store(false, std::memory_order_release);
-  ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
 void CLGMPFrameTransport::FailFrameBuffer(unsigned frameIndex)
@@ -1229,7 +1206,7 @@ void CLGMPFrameTransport::CompleteFrameBuffer(
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
-  AcquireSRWLockExclusive(&m_framePublishLock);
+  CSRWExclusiveLock lock(m_framePublishLock);
   m_frameCompleted[frameIndex] = succeeded;
   if (!succeeded &&
       m_deferredOwnerFrameIndex == static_cast<LONG>(frameIndex))
@@ -1248,7 +1225,6 @@ void CLGMPFrameTransport::CompleteFrameBuffer(
         static_cast<LONG>(frameIndex), std::memory_order_release);
   }
   m_frameInFlight[frameIndex].store(false, std::memory_order_release);
-  ReleaseSRWLockExclusive(&m_framePublishLock);
 }
 
 void CLGMPFrameTransport::SetFrameTiming(unsigned frameIndex,

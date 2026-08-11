@@ -35,21 +35,20 @@ static_assert(CAPTURE_PIPELINE_SLOTS == 2,
 class CPublishPending
 {
 private:
-  SRWLOCK * m_lock;
+  CSRWLock& m_lock;
   bool    * m_pending;
   HANDLE    m_event;
   bool      m_active = true;
 
 public:
-  CPublishPending(SRWLOCK * lock, bool * pending, HANDLE event) :
-    m_lock(lock),
+  CPublishPending(CSRWLock& stateLock, bool * pending, HANDLE event) :
+    m_lock(stateLock),
     m_pending(pending),
     m_event(event)
   {
-    AcquireSRWLockExclusive(m_lock);
+    CSRWExclusiveLock guard(m_lock);
     *m_pending = true;
     ResetEvent(m_event);
-    ReleaseSRWLockExclusive(m_lock);
   }
 
   ~CPublishPending()
@@ -62,10 +61,11 @@ public:
     if (!m_active)
       return;
 
-    AcquireSRWLockExclusive(m_lock);
-    *m_pending = false;
-    SetEvent(m_event);
-    ReleaseSRWLockExclusive(m_lock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      *m_pending = false;
+      SetEvent(m_event);
+    }
     m_active = false;
   }
 };
@@ -73,7 +73,7 @@ public:
 CHardwareFrameProcessor::CHardwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent) :
+    CSRWLock * pipelineLock, HANDLE terminateEvent) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent)
 {
@@ -116,15 +116,17 @@ void CHardwareFrameProcessor::AccumulateDamageLocked(
 
 void CHardwareFrameProcessor::ResetCandidates()
 {
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (FrameCandidate& candidate : m_candidates)
-    candidate = {};
-  ReleaseSRWLockExclusive(&m_candidateLock);
+  {
+    CSRWExclusiveLock lock(m_candidateLock);
+    for (FrameCandidate& candidate : m_candidates)
+      candidate = {};
+  }
 
-  AcquireSRWLockExclusive(&m_damageLock);
-  for (CandidateDamageTail& tail : m_candidateDamageTail)
-    tail = {};
-  ReleaseSRWLockExclusive(&m_damageLock);
+  {
+    CSRWExclusiveLock lock(m_damageLock);
+    for (CandidateDamageTail& tail : m_candidateDamageTail)
+      tail = {};
+  }
   SignalCandidateState();
 }
 
@@ -143,14 +145,13 @@ void CHardwareFrameProcessor::ResetPipeline()
 bool CHardwareFrameProcessor::HasReadyFrame() const
 {
   bool ready = false;
-  AcquireSRWLockShared(&m_candidateLock);
+  CSRWSharedLock lock(m_candidateLock);
   for (const FrameCandidate& candidate : m_candidates)
     if (candidate.state == CANDIDATE_READY)
     {
       ready = true;
       break;
     }
-  ReleaseSRWLockShared(&m_candidateLock);
   return ready;
 }
 
@@ -163,46 +164,47 @@ int CHardwareFrameProcessor::AcquireCandidate(
   bool     idle       = true;
   bool     publishing = false;
 
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
   {
-    if (m_candidates[i].state != CANDIDATE_FREE)
-    {
-      idle = false;
-      if (m_candidates[i].state == CANDIDATE_PUBLISHING)
-        publishing = true;
-    }
-    else if (selected < 0)
-      selected = static_cast<int>(i);
-  }
-
-  if (exclusiveSample && !idle)
-    selected = -1;
-
-  unsigned readyCount = 0;
-  for (const FrameCandidate& candidate : m_candidates)
-    if (candidate.state == CANDIDATE_READY)
-      ++readyCount;
-
-  if (allowSupersede && !exclusiveSample && selected < 0 &&
-      readyCount > (publishing ? 0U : 1U))
+    CSRWExclusiveLock lock(m_candidateLock);
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-      if (m_candidates[i].state == CANDIDATE_READY &&
-          m_candidates[i].sequence < oldest)
+    {
+      if (m_candidates[i].state != CANDIDATE_FREE)
       {
-        selected = static_cast<int>(i);
-        oldest   = m_candidates[i].sequence;
+        idle = false;
+        if (m_candidates[i].state == CANDIDATE_PUBLISHING)
+          publishing = true;
       }
+      else if (selected < 0)
+        selected = static_cast<int>(i);
+    }
 
-  if (selected >= 0)
-  {
-    FrameCandidate& candidate =
-      m_candidates[static_cast<unsigned>(selected)];
-    superseded         = candidate.state == CANDIDATE_READY;
-    candidate.state    = CANDIDATE_PREPARING;
-    candidate.sequence = ++m_candidateSequence;
+    if (exclusiveSample && !idle)
+      selected = -1;
+
+    unsigned readyCount = 0;
+    for (const FrameCandidate& candidate : m_candidates)
+      if (candidate.state == CANDIDATE_READY)
+        ++readyCount;
+
+    if (allowSupersede && !exclusiveSample && selected < 0 &&
+        readyCount > (publishing ? 0U : 1U))
+      for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+        if (m_candidates[i].state == CANDIDATE_READY &&
+            m_candidates[i].sequence < oldest)
+        {
+          selected = static_cast<int>(i);
+          oldest   = m_candidates[i].sequence;
+        }
+
+    if (selected >= 0)
+    {
+      FrameCandidate& candidate =
+        m_candidates[static_cast<unsigned>(selected)];
+      superseded         = candidate.state == CANDIDATE_READY;
+      candidate.state    = CANDIDATE_PREPARING;
+      candidate.sequence = ++m_candidateSequence;
+    }
   }
-  ReleaseSRWLockExclusive(&m_candidateLock);
 
   if (superseded)
     m_transport->FrameSuperseded();
@@ -214,9 +216,10 @@ void CHardwareFrameProcessor::ReleaseCandidate(unsigned candidateIndex)
   if (candidateIndex >= ARRAYSIZE(m_candidates))
     return;
 
-  AcquireSRWLockExclusive(&m_candidateLock);
-  m_candidates[candidateIndex].state = CANDIDATE_FREE;
-  ReleaseSRWLockExclusive(&m_candidateLock);
+  {
+    CSRWExclusiveLock lock(m_candidateLock);
+    m_candidates[candidateIndex].state = CANDIDATE_FREE;
+  }
   SignalCandidateState();
 }
 
@@ -280,14 +283,11 @@ bool CHardwareFrameProcessor::ExecuteCandidateCopy(
 
   for (;;)
   {
-    AcquireSRWLockExclusive(&m_copySubmitLock);
-    if (!m_publishPending)
     {
-      const bool result = copySlot->Execute();
-      ReleaseSRWLockExclusive(&m_copySubmitLock);
-      return result;
+      CSRWExclusiveLock lock(m_copySubmitLock);
+      if (!m_publishPending)
+        return copySlot->Execute();
     }
-    ReleaseSRWLockExclusive(&m_copySubmitLock);
 
     const DWORD result = WaitForMultipleObjects(
       ARRAYSIZE(waitHandles), waitHandles, FALSE, INFINITE);
@@ -313,18 +313,19 @@ void CHardwareFrameProcessor::CandidateCompletionFunction(
   const bool timingValid = result && slot->GetGPUTimes(gpuStart, gpuEnd);
 
   bool forceFrame = false;
-  AcquireSRWLockExclusive(&processor->m_candidateLock);
-  if (candidate->state == CANDIDATE_PREPARING)
   {
-    candidate->prepareReady       = CFrameScheduler::Nanotime();
-    candidate->prepareGPUStart    = gpuStart;
-    candidate->prepareGPUEnd      = gpuEnd;
-    candidate->prepareTimingValid = timingValid;
-    candidate->state              =
-      result ? CANDIDATE_READY : CANDIDATE_FREE;
-    forceFrame = result && candidate->timingToken != 0;
+    CSRWExclusiveLock lock(processor->m_candidateLock);
+    if (candidate->state == CANDIDATE_PREPARING)
+    {
+      candidate->prepareReady       = CFrameScheduler::Nanotime();
+      candidate->prepareGPUStart    = gpuStart;
+      candidate->prepareGPUEnd      = gpuEnd;
+      candidate->prepareTimingValid = timingValid;
+      candidate->state              =
+        result ? CANDIDATE_READY : CANDIDATE_FREE;
+      forceFrame = result && candidate->timingToken != 0;
+    }
   }
-  ReleaseSRWLockExclusive(&processor->m_candidateLock);
 
   if (!result)
   {
@@ -358,16 +359,17 @@ void CHardwareFrameProcessor::CompletionFunction(
   uint64_t prepareGPUEnd;
   uint64_t timingStart;
   bool     prepareTimingValid;
-  AcquireSRWLockShared(&processor->m_candidateLock);
-  const FrameCandidate& candidate =
-    processor->m_candidates[candidateIndex];
-  prepareCopyStart   = candidate.prepareCopyStart;
-  prepareReady       = candidate.prepareReady;
-  prepareGPUStart    = candidate.prepareGPUStart;
-  prepareGPUEnd      = candidate.prepareGPUEnd;
-  timingStart        = candidate.timingStart;
-  prepareTimingValid = candidate.prepareTimingValid;
-  ReleaseSRWLockShared(&processor->m_candidateLock);
+  {
+    CSRWSharedLock lock(processor->m_candidateLock);
+    const FrameCandidate& candidate =
+      processor->m_candidates[candidateIndex];
+    prepareCopyStart   = candidate.prepareCopyStart;
+    prepareReady       = candidate.prepareReady;
+    prepareGPUStart    = candidate.prepareGPUStart;
+    prepareGPUEnd      = candidate.prepareGPUEnd;
+    timingStart        = candidate.timingStart;
+    prepareTimingValid = candidate.prepareTimingValid;
+  }
 
   const uint64_t publishStart = fbRes->GetCopyStart();
   uint64_t       gpuCopyStart     = 0;
@@ -443,26 +445,27 @@ bool CHardwareFrameProcessor::Publish(
   uint64_t publishStart)
 {
   CPublishPending publishPending(
-    &m_copySubmitLock, &m_publishPending, m_copySubmitEvent.Get());
-  CSRWSharedLock pipelineLock(m_pipelineLock);
+    m_copySubmitLock, &m_publishPending, m_copySubmitEvent.Get());
+  CSRWSharedLock pipelineLock(*m_pipelineLock);
 
   int      selectedCandidate = -1;
   uint64_t newestSequence    = 0;
 
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
-    if (m_candidates[i].state == CANDIDATE_READY &&
-        (selectedCandidate < 0 ||
-          m_candidates[i].sequence > newestSequence))
-    {
-      selectedCandidate = static_cast<int>(i);
-      newestSequence    = m_candidates[i].sequence;
-    }
+  {
+    CSRWExclusiveLock lock(m_candidateLock);
+    for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+      if (m_candidates[i].state == CANDIDATE_READY &&
+          (selectedCandidate < 0 ||
+            m_candidates[i].sequence > newestSequence))
+      {
+        selectedCandidate = static_cast<int>(i);
+        newestSequence    = m_candidates[i].sequence;
+      }
 
-  if (selectedCandidate >= 0)
-    m_candidates[static_cast<unsigned>(selectedCandidate)].state =
-      CANDIDATE_PUBLISHING;
-  ReleaseSRWLockExclusive(&m_candidateLock);
+    if (selectedCandidate >= 0)
+      m_candidates[static_cast<unsigned>(selectedCandidate)].state =
+        CANDIDATE_PUBLISHING;
+  }
 
   if (selectedCandidate < 0)
     return false;
@@ -471,18 +474,21 @@ bool CHardwareFrameProcessor::Publish(
 
   const auto restoreCandidate = [this, candidateIndex]()
   {
-    AcquireSRWLockExclusive(&m_candidateLock);
-    if (m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING)
-      m_candidates[candidateIndex].state = CANDIDATE_READY;
-    ReleaseSRWLockExclusive(&m_candidateLock);
+    {
+      CSRWExclusiveLock lock(m_candidateLock);
+      if (m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING)
+        m_candidates[candidateIndex].state = CANDIDATE_READY;
+    }
     SignalCandidateState();
   };
 
-  AcquireSRWLockShared(&m_candidateLock);
-  const bool candidateValid =
-    m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING &&
-    m_candidates[candidateIndex].resource.Get();
-  ReleaseSRWLockShared(&m_candidateLock);
+  bool candidateValid;
+  {
+    CSRWSharedLock lock(m_candidateLock);
+    candidateValid =
+      m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING &&
+      m_candidates[candidateIndex].resource.Get();
+  }
   if (!candidateValid)
   {
     restoreCandidate();
@@ -564,33 +570,35 @@ bool CHardwareFrameProcessor::Publish(
     frameSchedule.phaseEligible = false;
   fbRes->SetSchedule(frameSchedule);
 
-  AcquireSRWLockExclusive(&m_damageLock);
-  if (candidate.nbDirtyRects)
-    memcpy(m_previousDamage, candidate.dirtyRects,
-      candidate.nbDirtyRects * sizeof(*m_previousDamage));
-  m_previousDamageCount = candidate.nbDirtyRects;
-  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
-  if (tail.active && tail.ownerSequence == candidateSequence)
   {
-    m_hasPendingDamage   = tail.hasDamage;
-    m_pendingDamageCount = tail.nbDirtyRects;
-    if (tail.hasDamage && tail.nbDirtyRects)
-      memcpy(m_pendingDamage, tail.dirtyRects,
-        tail.nbDirtyRects * sizeof(*m_pendingDamage));
-    tail.ownerSequence = 0;
-    tail.active        = false;
+    CSRWExclusiveLock lock(m_damageLock);
+    if (candidate.nbDirtyRects)
+      memcpy(m_previousDamage, candidate.dirtyRects,
+        candidate.nbDirtyRects * sizeof(*m_previousDamage));
+    m_previousDamageCount = candidate.nbDirtyRects;
+    CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
+    if (tail.active && tail.ownerSequence == candidateSequence)
+    {
+      m_hasPendingDamage   = tail.hasDamage;
+      m_pendingDamageCount = tail.nbDirtyRects;
+      if (tail.hasDamage && tail.nbDirtyRects)
+        memcpy(m_pendingDamage, tail.dirtyRects,
+          tail.nbDirtyRects * sizeof(*m_pendingDamage));
+      tail.ownerSequence = 0;
+      tail.active        = false;
+    }
   }
-  ReleaseSRWLockExclusive(&m_damageLock);
 
   const bool submitted = copySlot->Execute();
   publishPending.Clear();
   if (!submitted)
   {
     SetFullDamage();
-    AcquireSRWLockShared(&m_candidateLock);
-    const bool callbackPending =
-      candidate.state == CANDIDATE_PUBLISHING;
-    ReleaseSRWLockShared(&m_candidateLock);
+    bool callbackPending;
+    {
+      CSRWSharedLock lock(m_candidateLock);
+      callbackPending = candidate.state == CANDIDATE_PUBLISHING;
+    }
     if (callbackPending && !copySlot->HasSubmittedWork())
     {
       m_transport->FailFrameBuffer(buffer.frameIndex);
@@ -605,15 +613,16 @@ bool CHardwareFrameProcessor::Publish(
     buffer.frameIndex, schedule, periodic, deliveredToOwner);
 
   unsigned superseded = 0;
-  AcquireSRWLockExclusive(&m_candidateLock);
-  for (FrameCandidate& ready : m_candidates)
-    if (ready.state == CANDIDATE_READY &&
-        ready.sequence < candidateSequence)
-    {
-      ready.state = CANDIDATE_FREE;
-      ++superseded;
-    }
-  ReleaseSRWLockExclusive(&m_candidateLock);
+  {
+    CSRWExclusiveLock lock(m_candidateLock);
+    for (FrameCandidate& ready : m_candidates)
+      if (ready.state == CANDIDATE_READY &&
+          ready.sequence < candidateSequence)
+      {
+        ready.state = CANDIDATE_FREE;
+        ++superseded;
+      }
+  }
   for (unsigned i = 0; i < superseded; ++i)
     m_transport->FrameSuperseded();
   SignalCandidateState();
@@ -654,26 +663,27 @@ bool CHardwareFrameProcessor::Submit(const FrameSubmission& submission)
     static_cast<unsigned>(selectedCandidate);
   FrameCandidate& candidate = m_candidates[candidateIndex];
 
-  CSRWSharedLock pipelineLock(m_pipelineLock);
+  CSRWSharedLock pipelineLock(*m_pipelineLock);
   CPostProcessor& postProcessor = m_postProcessors[candidateIndex];
   const D12FrameFormat& dstFormat = postProcessor.GetOutputFormat();
 
   RECT     currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
   unsigned nbDirtyRects                          = 0;
-  AcquireSRWLockExclusive(&m_damageLock);
-  if (m_hasPendingDamage)
   {
-    nbDirtyRects = m_pendingDamageCount;
-    if (nbDirtyRects)
-      memcpy(currentDirtyRects, m_pendingDamage,
-        nbDirtyRects * sizeof(*currentDirtyRects));
+    CSRWExclusiveLock lock(m_damageLock);
+    if (m_hasPendingDamage)
+    {
+      nbDirtyRects = m_pendingDamageCount;
+      if (nbDirtyRects)
+        memcpy(currentDirtyRects, m_pendingDamage,
+          nbDirtyRects * sizeof(*currentDirtyRects));
+    }
+    CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
+    tail.ownerSequence = candidate.sequence;
+    tail.nbDirtyRects  = 0;
+    tail.hasDamage     = false;
+    tail.active        = true;
   }
-  CandidateDamageTail& tail = m_candidateDamageTail[candidateIndex];
-  tail.ownerSequence = candidate.sequence;
-  tail.nbDirtyRects  = 0;
-  tail.hasDamage     = false;
-  tail.active        = true;
-  ReleaseSRWLockExclusive(&m_damageLock);
 
   CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot(candidateIndex);
   if (!copySlot)

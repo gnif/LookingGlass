@@ -26,6 +26,7 @@
 #include <vector>
 
 #include "CPipeEndpoint.h"
+#include "CSRWLock.h"
 #include "PipeMsg.h"
 
 class CDeviceContext;
@@ -34,10 +35,10 @@ class CPipeServer : private IPipeEndpointHandler
 {
   private:
     CPipeEndpoint          m_endpoint;
-    SRWLOCK               m_queueLock = SRWLOCK_INIT;
+    CSRWLock               m_queueLock;
     std::vector<LGPipeMsg> m_queue;
 
-    SRWLOCK          m_deviceContextLock = SRWLOCK_INIT;
+    CSRWLock         m_deviceContextLock;
     CDeviceContext * m_deviceContext     = nullptr;
 
     void WriteMsg(const LGPipeMsg & msg);

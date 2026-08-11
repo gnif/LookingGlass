@@ -30,9 +30,11 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
 
   // We support a single monitor; never create a second one if one already
   // exists (a replug must clear m_monitor via departure first).
-  AcquireSRWLockExclusive(&m_lock);
-  const bool haveMonitor = m_monitor != WDF_NO_HANDLE;
-  ReleaseSRWLockExclusive(&m_lock);
+  bool haveMonitor;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    haveMonitor = m_monitor != WDF_NO_HANDLE;
+  }
   if (haveMonitor)
   {
     DEBUG_WARN("FinishInit skipped: a monitor already exists");
@@ -76,9 +78,10 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
 
   DEBUG_INFO("Monitor object created (%p)", createOut.MonitorObject);
 
-  AcquireSRWLockExclusive(&m_lock);
-  m_monitor = createOut.MonitorObject;
-  ReleaseSRWLockExclusive(&m_lock);
+  {
+    CSRWExclusiveLock lock(m_lock);
+    m_monitor = createOut.MonitorObject;
+  }
 
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(m_monitor);
   wrapper->context = new CMonitorContext(m_monitor, owner);
@@ -96,56 +99,65 @@ void CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
 
 CMonitorManager::ReplugAction CMonitorManager::Replug()
 {
-  AcquireSRWLockExclusive(&m_lock);
-
-  if (m_replugMonitor || (m_swapChainAssigned && !m_swapChainReady))
+  IDDCX_MONITOR monitor;
   {
-    // Coalesce changes received while a swap chain is being initialized, the
-    // old one is draining, or its replacement is being initialized.
-    m_replugPending = true;
-    ReleaseSRWLockExclusive(&m_lock);
-    return ReplugAction::NONE;
+    CSRWExclusiveLock lock(m_lock);
+
+    if (m_replugMonitor || (m_swapChainAssigned && !m_swapChainReady))
+    {
+      // Coalesce changes received while a swap chain is being initialized,
+      // the old one is draining, or its replacement is being initialized.
+      m_replugPending = true;
+      return ReplugAction::NONE;
+    }
+
+    monitor = m_monitor;
+    if (monitor == WDF_NO_HANDLE)
+    {
+      m_replugMonitor   = true;
+      m_monitorDeparted = true;
+    }
+    else
+    {
+      // Clear the handle before departing so nothing calls an IddCx monitor
+      // API on a departing/destroyed handle. Create publishes the new one.
+      m_replugMonitor           = true;
+      m_monitorDeparted         = false;
+      m_waitForSwapChainRelease = m_swapChainAssigned;
+      m_monitor                 = nullptr;
+    }
   }
 
-  IDDCX_MONITOR monitor = m_monitor;
   if (monitor == WDF_NO_HANDLE)
   {
-    m_replugMonitor   = true;
-    m_monitorDeparted = true;
-    ReleaseSRWLockExclusive(&m_lock);
     // Either no monitor yet, or one is already pending; build it now and
     // cancel any queued rebuild so we do not create two.
     m_createQueued.store(0);
     return ReplugAction::CREATE;
   }
 
-  // Clear the handle before departing so nothing calls an IddCx monitor API
-  // on a departing/destroyed handle. Create publishes the new one.
-  m_replugMonitor           = true;
-  m_monitorDeparted         = false;
-  m_waitForSwapChainRelease = m_swapChainAssigned;
-  m_monitor                 = nullptr;
-  ReleaseSRWLockExclusive(&m_lock);
-
   DEBUG_TRACE("ReplugMonitor");
   NTSTATUS status = IddCxMonitorDeparture(monitor);
   if (!NT_SUCCESS(status))
   {
-    AcquireSRWLockExclusive(&m_lock);
-    m_replugMonitor           = false;
-    m_replugPending           = false;
-    m_monitorDeparted         = false;
-    m_waitForSwapChainRelease = false;
-    m_monitor                 = monitor;
-    ReleaseSRWLockExclusive(&m_lock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      m_replugMonitor           = false;
+      m_replugPending           = false;
+      m_monitorDeparted         = false;
+      m_waitForSwapChainRelease = false;
+      m_monitor                 = monitor;
+    }
     DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
     return ReplugAction::NONE;
   }
 
-  AcquireSRWLockExclusive(&m_lock);
-  m_monitorDeparted = true;
-  const bool rebuild = !m_waitForSwapChainRelease;
-  ReleaseSRWLockExclusive(&m_lock);
+  bool rebuild;
+  {
+    CSRWExclusiveLock departedLock(m_lock);
+    m_monitorDeparted = true;
+    rebuild = !m_waitForSwapChainRelease;
+  }
 
   // If there was no swap chain there will be no unassign callback to queue
   // the rebuild. Otherwise OnSwapChainReleased does so after teardown drains.
@@ -157,41 +169,39 @@ CMonitorManager::ReplugAction CMonitorManager::Replug()
 
 void CMonitorManager::RequestMode(const CSettings::DisplayMode& mode)
 {
-  AcquireSRWLockExclusive(&m_lock);
+  CSRWExclusiveLock lock(m_lock);
   m_setMode   = mode;
   m_doSetMode = true;
-  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CMonitorManager::OnDestroyed(IDDCX_MONITOR monitor)
 {
-  AcquireSRWLockExclusive(&m_lock);
+  CSRWExclusiveLock lock(m_lock);
   if (m_monitor == monitor)
     m_monitor = nullptr;
-  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CMonitorManager::OnSwapChainAssigned()
 {
-  AcquireSRWLockExclusive(&m_lock);
+  CSRWExclusiveLock lock(m_lock);
   m_swapChainAssigned = true;
   m_swapChainReady    = false;
-  ReleaseSRWLockExclusive(&m_lock);
 }
 
 void CMonitorManager::OnSwapChainReleased()
 {
   bool rebuild = false;
 
-  AcquireSRWLockExclusive(&m_lock);
-  m_swapChainAssigned = false;
-  m_swapChainReady    = false;
-  if (m_replugMonitor && m_waitForSwapChainRelease)
   {
-    m_waitForSwapChainRelease = false;
-    rebuild = m_monitorDeparted;
+    CSRWExclusiveLock lock(m_lock);
+    m_swapChainAssigned = false;
+    m_swapChainReady    = false;
+    if (m_replugMonitor && m_waitForSwapChainRelease)
+    {
+      m_waitForSwapChainRelease = false;
+      rebuild = m_monitorDeparted;
+    }
   }
-  ReleaseSRWLockExclusive(&m_lock);
 
   if (rebuild)
     m_createQueued.store(1);
@@ -202,33 +212,34 @@ CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
   ReadyAction action = {};
   bool replug = false;
 
-  AcquireSRWLockExclusive(&m_lock);
-  m_swapChainReady = true;
-  if (m_replugMonitor)
   {
-    m_replugMonitor   = false;
-    m_monitorDeparted = false;
-    if (m_replugPending)
+    CSRWExclusiveLock lock(m_lock);
+    m_swapChainReady = true;
+    if (m_replugMonitor)
+    {
+      m_replugMonitor   = false;
+      m_monitorDeparted = false;
+      if (m_replugPending)
+      {
+        m_replugPending = false;
+        replug = true;
+      }
+    }
+    else if (m_replugPending)
     {
       m_replugPending = false;
       replug = true;
     }
-  }
-  else if (m_replugPending)
-  {
-    m_replugPending = false;
-    replug = true;
-  }
 
-  // Do not consume the requested mode on an intermediate replacement swap
-  // chain. The last coalesced replug must be the one that applies it.
-  if (!replug && m_doSetMode)
-  {
-    action.mode    = m_setMode;
-    m_doSetMode    = false;
-    action.setMode = true;
+    // Do not consume the requested mode on an intermediate replacement swap
+    // chain. The last coalesced replug must be the one that applies it.
+    if (!replug && m_doSetMode)
+    {
+      action.mode    = m_setMode;
+      m_doSetMode    = false;
+      action.setMode = true;
+    }
   }
-  ReleaseSRWLockExclusive(&m_lock);
 
   action.replug = replug;
 

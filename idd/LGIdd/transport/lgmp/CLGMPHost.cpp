@@ -137,9 +137,8 @@ void CLGMPHost::DeInit()
 
 LGMP_STATUS CLGMPHost::Process()
 {
-  AcquireSRWLockExclusive(&m_processLock);
+  CSRWExclusiveLock lock(m_processLock);
   const LGMP_STATUS status = lgmpHostProcess(m_host);
-  ReleaseSRWLockExclusive(&m_processLock);
   return status;
 }
 

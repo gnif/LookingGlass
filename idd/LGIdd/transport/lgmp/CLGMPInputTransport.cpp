@@ -179,7 +179,7 @@ void CLGMPInputTransport::PublishStatus()
 
 bool CLGMPInputTransport::Start(IInputSink& sink)
 {
-  CSRWExclusiveLock lock(&m_lifecycleLock);
+  CSRWExclusiveLock lock(m_lifecycleLock);
   if (m_thread)
   {
     const DWORD state = WaitForSingleObject(m_thread, 0);
@@ -249,7 +249,7 @@ bool CLGMPInputTransport::Start(IInputSink& sink)
 
 void CLGMPInputTransport::Stop()
 {
-  CSRWExclusiveLock lock(&m_lifecycleLock);
+  CSRWExclusiveLock lock(m_lifecycleLock);
 
   if (m_stopEvent)
     SetEvent(m_stopEvent);

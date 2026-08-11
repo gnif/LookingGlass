@@ -207,18 +207,18 @@ void CLGMPControl::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
 void CLGMPControl::SetColorTransform(
   std::shared_ptr<const D12ColorTransform> transform)
 {
-  AcquireSRWLockExclusive(&m_colorTransformLock);
-  m_colorTransform = std::move(transform);
-  ReleaseSRWLockExclusive(&m_colorTransformLock);
+  {
+    CSRWExclusiveLock lock(m_colorTransformLock);
+    m_colorTransform = std::move(transform);
+  }
   SendColorTransform();
 }
 
 std::shared_ptr<const D12ColorTransform>
 CLGMPControl::GetColorTransform() const
 {
-  AcquireSRWLockShared(&m_colorTransformLock);
+  CSRWSharedLock lock(m_colorTransformLock);
   std::shared_ptr<const D12ColorTransform> transform = m_colorTransform;
-  ReleaseSRWLockShared(&m_colorTransformLock);
   return transform;
 }
 

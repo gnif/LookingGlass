@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "CSRWLock.h"
 #include "d3d/CD3D12Device.h"
 #include "capture/CFrameBufferPool.h"
 #include "d3d/CInteropResource.h"
@@ -51,17 +52,17 @@ protected:
   IFrameTransport               * m_transport;
   std::shared_ptr<CD3D12Device>   m_dx12;
   CPostProcessor                * m_postProcessors;
-  SRWLOCK                       * m_pipelineLock;
+  CSRWLock                      * m_pipelineLock;
   HANDLE                          m_terminateEvent;
   CFrameBufferPool                m_frameBuffers;
   Wrappers::Event                 m_readyEvent;
 
-  mutable SRWLOCK m_damageLock                           = SRWLOCK_INIT;
-  RECT            m_previousDamage[LG_MAX_DIRTY_RECTS]   = {};
-  unsigned        m_previousDamageCount                  = 0;
-  RECT            m_pendingDamage[LG_MAX_DIRTY_RECTS]    = {};
-  unsigned        m_pendingDamageCount                   = 0;
-  bool            m_hasPendingDamage                     = true;
+  mutable CSRWLock m_damageLock;
+  RECT             m_previousDamage[LG_MAX_DIRTY_RECTS]  = {};
+  unsigned         m_previousDamageCount                 = 0;
+  RECT             m_pendingDamage[LG_MAX_DIRTY_RECTS]   = {};
+  unsigned         m_pendingDamageCount                  = 0;
+  bool             m_hasPendingDamage                    = true;
 
   bool HasPendingDamage() const;
   bool TakePendingDamage(RECT dirtyRects[], unsigned * count);
@@ -77,7 +78,7 @@ public:
   CFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    SRWLOCK * pipelineLock, HANDLE terminateEvent);
+    CSRWLock * pipelineLock, HANDLE terminateEvent);
   virtual ~CFrameProcessor() = default;
 
   virtual bool IsValid() const;
@@ -99,4 +100,4 @@ std::unique_ptr<CFrameProcessor> CreateFrameProcessor(
   bool software, IFrameTransport * transport,
   std::shared_ptr<CD3D12Device> dx12,
   CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-  SRWLOCK * pipelineLock, HANDLE terminateEvent);
+  CSRWLock * pipelineLock, HANDLE terminateEvent);

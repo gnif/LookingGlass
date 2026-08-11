@@ -64,8 +64,8 @@ struct HIDDeviceContext
   HID_DEVICE_ATTRIBUTES attributes;
   HID_DESCRIPTOR        descriptor;
   UCHAR                 keyboardLeds;
-  SRWLOCK               lifecycleLock;
-  SRWLOCK               reportLock;
+  CSRWLock              lifecycleLock;
+  CSRWLock              reportLock;
   bool                  active;
   bool                  stopping;
   UCHAR                 mouseMode;
@@ -83,8 +83,8 @@ struct HIDDeviceContext
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(HIDDeviceContext, HIDGetDeviceContext);
 
-static SRWLOCK            s_deviceLock = SRWLOCK_INIT;
-static HIDDeviceContext * s_device     = nullptr;
+static CSRWLock           s_deviceLock;
+static HIDDeviceContext * s_device = nullptr;
 
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HIDEvtIoDeviceControl;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP HIDEvtReportQueueCleanup;
@@ -312,7 +312,7 @@ static NTSTATUS ReadReport(
 
   NTSTATUS status;
   {
-    CSRWExclusiveLock lock(&context->reportLock);
+    CSRWExclusiveLock lock(context->reportLock);
     if (context->stopping || !context->active)
       status = STATUS_DEVICE_NOT_READY;
     else if (context->reportCount)
@@ -335,8 +335,8 @@ static NTSTATUS ReadReport(
 
 static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
 {
-  CSRWExclusiveLock lifecycleLock(&context->lifecycleLock);
-  CSRWExclusiveLock lock(&context->reportLock);
+  CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
+  CSRWExclusiveLock lock(context->reportLock);
   if (context->stopping)
     return STATUS_DEVICE_NOT_READY;
 
@@ -347,9 +347,9 @@ static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
 
 static NTSTATUS DeactivateDevice(_Inout_ HIDDeviceContext * context)
 {
-  CSRWExclusiveLock lifecycleLock(&context->lifecycleLock);
+  CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
   {
-    CSRWExclusiveLock lock(&context->reportLock);
+    CSRWExclusiveLock lock(context->reportLock);
     if (context->stopping)
       return STATUS_DEVICE_NOT_READY;
 
@@ -412,10 +412,8 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
     return status;
 
   HIDDeviceContext * context = HIDGetDeviceContext(device);
-  RtlZeroMemory(context, sizeof(*context));
-  InitializeSRWLock(&context->lifecycleLock);
-  InitializeSRWLock(&context->reportLock);
-  context->active = true;
+  new (context) HIDDeviceContext {};
+  context->active    = true;
   context->inputPipe = new (std::nothrow) CInputPipeClient;
   if (!context->inputPipe)
     return STATUS_INSUFFICIENT_RESOURCES;
@@ -442,7 +440,7 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
     return status;
 
   {
-    CSRWExclusiveLock lock(&s_deviceLock);
+    CSRWExclusiveLock lock(s_deviceLock);
     if (s_device)
     {
       DEBUG_ERROR("Only one LGInput device instance is supported");
@@ -464,7 +462,7 @@ NTSTATUS CHIDDevice::SubmitReport(
   if (HIDGetInputReportSize(reportId) != size)
     return STATUS_INVALID_PARAMETER;
 
-  CSRWSharedLock deviceLock(&s_deviceLock);
+  CSRWSharedLock deviceLock(s_deviceLock);
   HIDDeviceContext * context = s_device;
   if (!context)
     return STATUS_DEVICE_NOT_READY;
@@ -472,7 +470,7 @@ NTSTATUS CHIDDevice::SubmitReport(
   WDFREQUEST request = nullptr;
   NTSTATUS   status;
   {
-    CSRWExclusiveLock reportLock(&context->reportLock);
+    CSRWExclusiveLock reportLock(context->reportLock);
     if (context->stopping || !context->active)
       status = STATUS_DEVICE_NOT_READY;
     else
@@ -574,12 +572,12 @@ NTSTATUS CHIDDevice::ResetReports()
   uint16_t absoluteX    = 0;
   uint16_t absoluteY    = 0;
   {
-    CSRWSharedLock deviceLock(&s_deviceLock);
+    CSRWSharedLock deviceLock(s_deviceLock);
     HIDDeviceContext * context = s_device;
     if (!context)
       return STATUS_DEVICE_NOT_READY;
 
-    CSRWExclusiveLock reportLock(&context->reportLock);
+    CSRWExclusiveLock reportLock(context->reportLock);
     if (context->stopping)
       return STATUS_DEVICE_NOT_READY;
 
@@ -655,12 +653,12 @@ void CHIDDevice::LogStatistics()
 {
   HIDStatistics statistics = {};
   {
-    CSRWSharedLock deviceLock(&s_deviceLock);
+    CSRWSharedLock deviceLock(s_deviceLock);
     HIDDeviceContext * context = s_device;
     if (!context)
       return;
 
-    CSRWExclusiveLock reportLock(&context->reportLock);
+    CSRWExclusiveLock reportLock(context->reportLock);
     statistics = context->statistics;
     context->statistics = {};
     context->statistics.queueHighWater = context->reportCount;
@@ -752,12 +750,12 @@ VOID HIDEvtReportQueueCleanup(_In_ WDFOBJECT object)
   HIDDeviceContext * context =
     HIDGetDeviceContext(WdfIoQueueGetDevice((WDFQUEUE)object));
 
-  CSRWExclusiveLock deviceLock(&s_deviceLock);
+  CSRWExclusiveLock deviceLock(s_deviceLock);
   if (s_device == context)
     s_device = nullptr;
 
   {
-    CSRWExclusiveLock reportLock(&context->reportLock);
+    CSRWExclusiveLock reportLock(context->reportLock);
     context->stopping    = true;
     context->reportHead  = 0;
     context->reportCount = 0;
@@ -774,7 +772,7 @@ VOID HIDEvtDeviceCleanup(_In_ WDFOBJECT object)
     context->inputPipe = nullptr;
   }
 
-  CSRWExclusiveLock deviceLock(&s_deviceLock);
+  CSRWExclusiveLock deviceLock(s_deviceLock);
   if (s_device == context)
     s_device = nullptr;
 }

@@ -575,7 +575,7 @@ void CD3D12CommandQueue::WaitForIdle()
 bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
 {
   bool result = false;
-  AcquireSRWLockExclusive(&m_submitLock);
+  CSRWExclusiveLock lock(m_submitLock);
 
   do
   {
@@ -636,7 +636,6 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
   }
   while (false);
 
-  ReleaseSRWLockExclusive(&m_submitLock);
   return result;
 }
 

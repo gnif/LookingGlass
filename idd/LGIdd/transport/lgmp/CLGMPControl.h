@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include "transport/lgmp/CLGMPHost.h"
 #include "transport/IControlTransport.h"
 
@@ -55,7 +57,7 @@ private:
   int  m_cursorX               = 0;
   int  m_cursorY               = 0;
 
-  mutable SRWLOCK                         m_colorTransformLock = SRWLOCK_INIT;
+  mutable CSRWLock                        m_colorTransformLock;
   std::shared_ptr<const D12ColorTransform> m_colorTransform;
 
   void SendColorTransform();

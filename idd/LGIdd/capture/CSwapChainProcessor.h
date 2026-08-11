@@ -59,7 +59,7 @@ private:
   CPostProcessor                   m_postProcessors[CAPTURE_PIPELINE_SLOTS];
   std::unique_ptr<CFrameProcessor> m_frameProcessor;
   // Reconfiguration is exclusive while per-candidate recording is shared.
-  SRWLOCK                          m_pipelineLock = SRWLOCK_INIT;
+  CSRWLock                         m_pipelineLock;
 
   Wrappers::HandleT<Wrappers::HandleTraits::HANDLENullTraits> m_thread[3];
   Wrappers::Event m_terminateEvent;

@@ -178,7 +178,7 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
   if (!hasPreferred)
     newModes.front().preferred = true;
 
-  CSRWExclusiveLock lock(&m_modeLock);
+  CSRWExclusiveLock lock(m_modeLock);
   m_modes = std::move(newModes);
   return true;
 }
@@ -193,7 +193,7 @@ bool CDisplayConfiguration::ReloadSettings(
 {
   bool modesLoaded = false;
   {
-    CSRWExclusiveLock reloadLock(&m_reloadLock);
+    CSRWExclusiveLock reloadLock(m_reloadLock);
 
     bool settingsUpdated = true;
     CSettings::DisplayMode extraMode = {};
@@ -252,7 +252,7 @@ CDisplayConfiguration::SetResolution(
   mode.preferred      = true;
 
   {
-    CSRWExclusiveLock reloadLock(&m_reloadLock);
+    CSRWExclusiveLock reloadLock(m_reloadLock);
     if (!m_settings.SetExtraMode(mode))
       result.status = ResolutionStatus::SETTINGS_FAILED;
     else if (!LoadModes(limits))
@@ -271,7 +271,7 @@ CDisplayConfiguration::SetResolution(
 
 void CDisplayConfiguration::InitializeEdid(bool hdr)
 {
-  CSRWExclusiveLock lock(&m_modeLock);
+  CSRWExclusiveLock lock(m_modeLock);
   if (m_edid.Size())
     return;
 
@@ -281,7 +281,7 @@ void CDisplayConfiguration::InitializeEdid(bool hdr)
 
 void CDisplayConfiguration::RebuildEdid(bool hdr)
 {
-  CSRWExclusiveLock lock(&m_modeLock);
+  CSRWExclusiveLock lock(m_modeLock);
   m_edid.Build(hdr);
   m_hdrEnabled = hdr;
 }
@@ -290,7 +290,7 @@ CDisplayConfiguration::Description
 CDisplayConfiguration::GetDescription() const
 {
   Description result;
-  CSRWSharedLock lock(&m_modeLock);
+  CSRWSharedLock lock(m_modeLock);
   result.modeCount = m_modes.size();
   if (m_edid.Size())
     result.edid.assign(m_edid.Data(), m_edid.Data() + m_edid.Size());
@@ -300,7 +300,7 @@ CDisplayConfiguration::GetDescription() const
 CSettings::DisplayModes CDisplayConfiguration::SnapshotModes(
   bool * hdrEnabled) const
 {
-  CSRWSharedLock lock(&m_modeLock);
+  CSRWSharedLock lock(m_modeLock);
   if (hdrEnabled)
     *hdrEnabled = m_hdrEnabled;
   return m_modes;

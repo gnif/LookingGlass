@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "CSRWLock.h"
+
 #include <Windows.h>
 #include <wdf.h>
 #include <wrl.h>
@@ -147,7 +149,7 @@ class CD3D12CommandQueue
     ComPtr<ID3D12CommandQueue> m_queue;
     ComPtr<ID3D12Fence       > m_fence;
     UINT64                     m_fenceValue     = 0;
-    SRWLOCK                    m_submitLock     = SRWLOCK_INIT;
+    CSRWLock                   m_submitLock;
     std::atomic<bool>          m_failed         = false;
 
     CD3D12CommandSlot m_slots[MAX_SLOTS];

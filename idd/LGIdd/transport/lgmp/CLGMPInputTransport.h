@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "CSRWLock.h"
 #include "transport/IInputTransport.h"
 #include "common/LGMPConfig.h"
 
@@ -64,10 +65,10 @@ private:
   PLGMPMemory    m_statusMemory[LGMP_Q_INPUT_LEN] = {};
   IInputSink   * m_sink                           = nullptr;
 
-  SRWLOCK m_lifecycleLock = SRWLOCK_INIT;
-  HANDLE  m_stopEvent     = nullptr;
-  HANDLE  m_pollTimer     = nullptr;
-  HANDLE  m_thread        = nullptr;
+  CSRWLock m_lifecycleLock;
+  HANDLE   m_stopEvent = nullptr;
+  HANDLE   m_pollTimer = nullptr;
+  HANDLE   m_thread    = nullptr;
 
   uint32_t   m_ownerClientID       = 0;
   uint32_t   m_ownerGeneration     = 0;

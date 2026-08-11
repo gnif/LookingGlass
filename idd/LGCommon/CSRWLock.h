@@ -22,42 +22,110 @@
 
 #include <Windows.h>
 
+class CSRWSharedLock;
+class CSRWExclusiveLock;
+
+class CSRWLock
+{
+private:
+  friend class CSRWSharedLock;
+  friend class CSRWExclusiveLock;
+
+  SRWLOCK m_lock = SRWLOCK_INIT;
+
+public:
+  CSRWLock() = default;
+
+  CSRWLock(const CSRWLock&) = delete;
+  CSRWLock& operator=(const CSRWLock&) = delete;
+};
+
 class CSRWSharedLock
 {
 private:
   SRWLOCK * m_lock;
 
 public:
-  explicit CSRWSharedLock(SRWLOCK * lock) : m_lock(lock)
+  explicit CSRWSharedLock(CSRWLock& lock) : m_lock(&lock.m_lock)
   {
     AcquireSRWLockShared(m_lock);
   }
 
   ~CSRWSharedLock()
   {
+    Unlock();
+  }
+
+  void Unlock()
+  {
+    if (!m_lock)
+      return;
+
     ReleaseSRWLockShared(m_lock);
+    m_lock = nullptr;
   }
 
   CSRWSharedLock(const CSRWSharedLock&) = delete;
   CSRWSharedLock& operator=(const CSRWSharedLock&) = delete;
+
+  CSRWSharedLock(CSRWSharedLock&& other) noexcept : m_lock(other.m_lock)
+  {
+    other.m_lock = nullptr;
+  }
+
+  CSRWSharedLock& operator=(CSRWSharedLock&&) = delete;
 };
 
 class CSRWExclusiveLock
 {
 private:
+  struct TryTag {};
+
   SRWLOCK * m_lock;
 
+  CSRWExclusiveLock(CSRWLock& lock, TryTag) :
+    m_lock(TryAcquireSRWLockExclusive(&lock.m_lock) ? &lock.m_lock : nullptr)
+  {
+  }
+
 public:
-  explicit CSRWExclusiveLock(SRWLOCK * lock) : m_lock(lock)
+  explicit CSRWExclusiveLock(CSRWLock& lock) : m_lock(&lock.m_lock)
   {
     AcquireSRWLockExclusive(m_lock);
   }
 
   ~CSRWExclusiveLock()
   {
+    Unlock();
+  }
+
+  static CSRWExclusiveLock Try(CSRWLock& lock)
+  {
+    return CSRWExclusiveLock(lock, TryTag {});
+  }
+
+  explicit operator bool() const
+  {
+    return m_lock != nullptr;
+  }
+
+  void Unlock()
+  {
+    if (!m_lock)
+      return;
+
     ReleaseSRWLockExclusive(m_lock);
+    m_lock = nullptr;
   }
 
   CSRWExclusiveLock(const CSRWExclusiveLock&) = delete;
   CSRWExclusiveLock& operator=(const CSRWExclusiveLock&) = delete;
+
+  CSRWExclusiveLock(CSRWExclusiveLock&& other) noexcept :
+    m_lock(other.m_lock)
+  {
+    other.m_lock = nullptr;
+  }
+
+  CSRWExclusiveLock& operator=(CSRWExclusiveLock&&) = delete;
 };
