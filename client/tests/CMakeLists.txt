@@ -133,6 +133,38 @@ if(ENABLE_WAYLAND)
       TIMEOUT 10
     )
   endforeach()
+
+  add_executable(wayland-clipboard-tests
+    wayland_clipboard_test.c
+    ../displayservers/Wayland/clipboard.c
+  )
+  add_dependencies(wayland-clipboard-tests wayland_protocol)
+  target_include_directories(wayland-clipboard-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/Wayland"
+    "${CMAKE_BINARY_DIR}/wayland"
+  )
+  target_link_libraries(wayland-clipboard-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  set(WAYLAND_CLIPBOARD_CASES
+    mime
+    replace
+    read-eof
+    read-error
+    source
+    teardown
+    self-copy
+    dnd
+  )
+  foreach(name IN LISTS WAYLAND_CLIPBOARD_CASES)
+    add_test(NAME wayland-clipboard-${name}
+      COMMAND wayland-clipboard-tests ${name}
+    )
+    set_tests_properties(wayland-clipboard-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
 endif()
 
 add_executable(displayserver-input-tests
