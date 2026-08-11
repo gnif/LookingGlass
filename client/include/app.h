@@ -182,6 +182,10 @@ void app_alert(LG_MsgAlert type, const char * fmt, ...);
 typedef struct MsgBoxHandle * MsgBoxHandle;
 MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...);
 
+typedef void (*MsgBoxCloseCallback)(MsgBoxHandle handle, void * opaque);
+MsgBoxHandle app_msgBoxWithClose(const char * caption,
+    MsgBoxCloseCallback callback, void * opaque, const char * fmt, ...);
+
 typedef void (*MsgBoxConfirmCallback)(bool yes, void * opaque);
 MsgBoxHandle app_confirmMsgBox(const char * caption,
     MsgBoxConfirmCallback callback, void * opaque, const char * fmt, ...);

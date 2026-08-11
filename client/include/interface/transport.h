@@ -70,6 +70,79 @@ enum
 
 typedef uint32_t LG_TransportFeatureFlags;
 
+typedef struct LG_VersionMismatch
+{
+  bool     valid;
+  char     component[16];
+  uint32_t expectedVersion;
+  uint32_t currentVersion;
+}
+LG_VersionMismatch;
+
+#define LG_RECOVERY_MAX_VERSIONS 4
+
+enum
+{
+  LG_RECOVERY_CAP_DISPLAY = 0x1,
+};
+
+typedef uint32_t LG_RecoveryCaps;
+
+typedef enum LG_RecoveryRequest
+{
+  LG_RECOVERY_REQ_NONE,
+  LG_RECOVERY_REQ_NORMAL,
+  LG_RECOVERY_REQ_RECOVERY,
+}
+LG_RecoveryRequest;
+
+typedef enum LG_RecoveryState
+{
+  LG_RECOVERY_STATE_UNKNOWN,
+  LG_RECOVERY_STATE_NORMAL,
+  LG_RECOVERY_STATE_SWITCHING,
+  LG_RECOVERY_STATE_ACTIVE,
+  LG_RECOVERY_STATE_FAILED,
+}
+LG_RecoveryState;
+
+typedef enum LG_RecoveryError
+{
+  LG_RECOVERY_ERR_NONE,
+  LG_RECOVERY_ERR_UNSUPPORTED,
+  LG_RECOVERY_ERR_HELPER_UNAVAILABLE,
+  LG_RECOVERY_ERR_TOPOLOGY_FAILED,
+  LG_RECOVERY_ERR_NO_FALLBACK_DISPLAY,
+}
+LG_RecoveryError;
+
+typedef struct LG_RecoveryVersion
+{
+  char     component[16];
+  uint32_t version;
+}
+LG_RecoveryVersion;
+
+typedef struct LG_RecoveryInfo
+{
+  uint32_t            abiVersion;
+  LG_RecoveryCaps     capabilities;
+  uint64_t            instance;
+  uint32_t            heartbeat;
+  bool                uuidValid;
+  uint8_t             uuid[16];
+  char                producerVersion[64];
+  uint32_t            versionCount;
+  LG_RecoveryVersion  versions[LG_RECOVERY_MAX_VERSIONS];
+  uint32_t            requestSerial;
+  LG_RecoveryRequest  request;
+  uint32_t            ackSerial;
+  LG_RecoveryRequest  ackRequest;
+  LG_RecoveryState    state;
+  LG_RecoveryError    error;
+}
+LG_RecoveryInfo;
+
 typedef struct LG_TransportSession
 {
   char version[32];
@@ -87,7 +160,7 @@ typedef struct LG_TransportSession
   uint8_t cores;
   uint8_t sockets;
 
-  uint32_t remoteVersion;
+  LG_VersionMismatch versionMismatch;
 }
 LG_TransportSession;
 
@@ -345,6 +418,13 @@ typedef struct LG_TransportOps
    * clipboard. */
   const LG_ClipboardOps *(*getClipboardOps)(LG_Transport * transport,
       void ** opaque);
+
+  /* Recovery operations are independent of a transport session and may be
+   * used after create whenever the backing transport advertises them. */
+  LG_TransportStatus (*getRecoveryInfo)(LG_Transport * transport,
+      LG_RecoveryInfo * info);
+  LG_TransportStatus (*requestRecovery)(LG_Transport * transport,
+      LG_RecoveryRequest request, uint32_t * serial);
 
   LG_TransportStatus (*sendControl)(LG_Transport * transport,
       const LG_TransportControl * control, LG_TransportControlToken * token);

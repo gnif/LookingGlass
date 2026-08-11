@@ -23,12 +23,14 @@
 #include "input.h"
 
 #include "common/KVMFR.h"
+#include "common/KVMFRRecovery.h"
 #include "common/LGMPConfig.h"
 #include "common/debug.h"
 #include "common/ivshmem.h"
 #include "common/locking.h"
 #include "common/option.h"
 #include "common/stringutils.h"
+#include "common/time.h"
 
 #include <lgmp/client.h>
 
@@ -39,6 +41,11 @@
 #include <unistd.h>
 
 #define LGMP_TIMING_SPIN_COUNT 4096
+#define LGMP_RECOVERY_PROBE_INTERVAL_US 10000U
+#define LGMP_RECOVERY_PROBE_TIMEOUT_US \
+  ((KVMFR_R_HEARTBEAT_MS * 3U) * 1000U)
+#define LGMP_RECOVERY_LIVE_TIMEOUT_US \
+  ((KVMFR_R_HEARTBEAT_MS * 4U) * 1000U)
 
 struct DMAFrameInfo
 {
@@ -91,6 +98,16 @@ struct LG_Transport
   struct DMAFrameInfo dma[LGMP_Q_FRAME_BUFFER_LEN];
   uint8_t            * pointerData;
   size_t               pointerDataSize;
+
+  size_t      lgmpSize;
+  KVMFRR    * recovery;
+  LG_Lock     recoveryLock;
+  uint64_t    recoveryCandidateSession;
+  uint64_t    recoverySession;
+  uint64_t    recoveryHeartbeatTime;
+  uint32_t    recoveryCandidateHeartbeat;
+  uint32_t    recoveryLGMPVersion;
+  bool        recoveryLive;
 };
 
 static bool lgmp_deviceValidator(struct Option * opt, const char ** error)
@@ -186,6 +203,130 @@ static void lgmp_setup(void)
   option_register(options);
 }
 
+static bool lgmp_recoveryMagic(const KVMFRR * recovery)
+{
+  return recovery && memcmp(recovery->header.magic, KVMFR_R_MAGIC,
+      sizeof(recovery->header.magic)) == 0;
+}
+
+static bool lgmp_recoverySnapshot(const struct LG_Transport * this,
+    KVMFRRHeader * header, KVMFRRInfo * info)
+{
+  const KVMFRR * recovery = this->recovery;
+  if (!recovery ||
+      __atomic_load_n(&recovery->header.ready, __ATOMIC_ACQUIRE) !=
+        KVMFR_R_READY)
+    return false;
+
+  memcpy(header, &recovery->header, sizeof(*header));
+  memcpy(info, &recovery->info, sizeof(*info));
+  header->heartbeat = __atomic_load_n(&recovery->header.heartbeat,
+      __ATOMIC_ACQUIRE);
+
+  if (__atomic_load_n(&recovery->header.ready, __ATOMIC_ACQUIRE) !=
+        KVMFR_R_READY ||
+      memcmp(header->magic, KVMFR_R_MAGIC,
+        sizeof(header->magic)) != 0 ||
+      header->abiVersion != KVMFR_R_VERSION ||
+      header->structSize < sizeof(KVMFRR) ||
+      header->session == 0)
+    return false;
+
+  return true;
+}
+
+static bool lgmp_refreshRecoveryLocked(struct LG_Transport * this, bool wait)
+{
+  const uint64_t deadline = wait ?
+    microtime() + LGMP_RECOVERY_PROBE_TIMEOUT_US : 0;
+
+  do
+  {
+    KVMFRRHeader header;
+    KVMFRRInfo info;
+    const bool valid = lgmp_recoverySnapshot(this, &header, &info);
+    const uint64_t now = microtime();
+
+    if (valid)
+    {
+      if (this->recoveryCandidateSession != header.session)
+      {
+        this->recoveryCandidateSession   = header.session;
+        this->recoveryCandidateHeartbeat = header.heartbeat;
+        this->recoveryLive               = false;
+        this->lgmpSize                   = this->shm.size;
+      }
+      else if (this->recoveryCandidateHeartbeat != header.heartbeat)
+      {
+        this->recoveryCandidateHeartbeat = header.heartbeat;
+        this->recoverySession            = header.session;
+        this->recoveryHeartbeatTime      = now;
+        this->recoveryLive               = true;
+        this->lgmpSize = this->shm.size - KVMFR_R_REGION_SIZE;
+      }
+
+      if (this->recoveryLive && this->recoverySession == header.session &&
+          now - this->recoveryHeartbeatTime <=
+            LGMP_RECOVERY_LIVE_TIMEOUT_US)
+      {
+        this->recoveryLGMPVersion = header.lgmpVersion;
+        return true;
+      }
+    }
+    else
+    {
+      this->recoveryLive = false;
+      this->lgmpSize     = this->shm.size;
+    }
+
+    if (!wait || now >= deadline)
+      break;
+    usleep(LGMP_RECOVERY_PROBE_INTERVAL_US);
+  }
+  while (true);
+
+  this->recoveryLive = false;
+  this->lgmpSize     = this->shm.size;
+  return false;
+}
+
+static bool lgmp_recoveryVersions(struct LG_Transport * this,
+    uint32_t * lgmpVersion, uint32_t * kvmfrVersion)
+{
+  LG_LOCK(this->recoveryLock);
+  const bool live = lgmp_refreshRecoveryLocked(this,
+      lgmp_recoveryMagic(this->recovery));
+  KVMFRRHeader header;
+  KVMFRRInfo info;
+  const bool valid = live && lgmp_recoverySnapshot(this, &header, &info) &&
+    header.session == this->recoverySession;
+  if (valid)
+  {
+    if (lgmpVersion)
+      *lgmpVersion = header.lgmpVersion;
+    if (kvmfrVersion)
+      *kvmfrVersion = header.kvmfrVersion;
+  }
+  LG_UNLOCK(this->recoveryLock);
+  return valid;
+}
+
+static LGMP_STATUS lgmp_initializeClient(struct LG_Transport * this)
+{
+  LGMP_STATUS status = lgmpClientInit(this->shm.mem, this->lgmpSize,
+      &this->client);
+  if (status != LGMP_OK)
+    return status;
+
+  if (!lgmpInput_create(this->client, &this->input))
+  {
+    lgmpClientFree(&this->client);
+    return LGMP_ERR_NO_MEM;
+  }
+
+  return LGMP_OK;
+}
+
 static bool lgmp_create(LG_Transport ** result)
 {
   struct LG_Transport * this = calloc(1, sizeof(*this));
@@ -209,6 +350,7 @@ static bool lgmp_create(LG_Transport ** result)
 
   LG_LOCK_INIT(this->frameLock);
   LG_LOCK_INIT(this->pointerLock);
+  LG_LOCK_INIT(this->recoveryLock);
 
   this->frameGeneration = 1;
   this->frameLease[0].subscription = &this->frameQueue;
@@ -220,28 +362,43 @@ static bool lgmp_create(LG_Transport ** result)
   {
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
+    LG_LOCK_FREE(this->recoveryLock);
     free(this);
     return false;
   }
 
-  LGMP_STATUS status = lgmpClientInit(this->shm.mem, this->shm.size,
-      &this->client);
+  this->lgmpSize = this->shm.size;
+  if (this->shm.size >= KVMFR_R_REGION_SIZE + sizeof(KVMFRR))
+  {
+    this->recovery = (KVMFRR *)((uint8_t *)this->shm.mem +
+        this->shm.size - KVMFR_R_REGION_SIZE);
+    if (lgmp_recoveryMagic(this->recovery))
+    {
+      LG_LOCK(this->recoveryLock);
+      lgmp_refreshRecoveryLocked(this, true);
+      LG_UNLOCK(this->recoveryLock);
+    }
+  }
+
+  LGMP_STATUS status = lgmp_initializeClient(this);
   if (status != LGMP_OK)
   {
+    if (this->recoveryLive &&
+        (status == LGMP_ERR_INVALID_MAGIC ||
+         status == LGMP_ERR_INVALID_VERSION))
+    {
+      DEBUG_WARN("LGMP is unavailable (%s), recovery remains available",
+          lgmpStatusString(status));
+      lgmpClientFree(&this->client);
+      *result = this;
+      return true;
+    }
+
     DEBUG_ERROR("lgmpClientInit failed: %s", lgmpStatusString(status));
     ivshmemClose(&this->shm);
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
-    free(this);
-    return false;
-  }
-
-  if (!lgmpInput_create(this->client, &this->input))
-  {
-    lgmpClientFree(&this->client);
-    ivshmemClose(&this->shm);
-    LG_LOCK_FREE(this->frameLock);
-    LG_LOCK_FREE(this->pointerLock);
+    LG_LOCK_FREE(this->recoveryLock);
     free(this);
     return false;
   }
@@ -371,29 +528,66 @@ static void lgmp_destroy(LG_Transport ** transport)
     return;
 
   struct LG_Transport * this = *transport;
-  lgmpInput_destroy(&this->input);
-  lgmp_closeQueues(this);
+  if (this->client)
+  {
+    lgmpInput_destroy(&this->input);
+    lgmp_closeQueues(this);
+    lgmpClientFree(&this->client);
+  }
   lgmp_closeDMA(this);
   free(this->pointerData);
-  lgmpClientFree(&this->client);
   ivshmemClose(&this->shm);
   LG_LOCK_FREE(this->frameLock);
   LG_LOCK_FREE(this->pointerLock);
+  LG_LOCK_FREE(this->recoveryLock);
   free(this);
   *transport = NULL;
 }
 
-static bool lgmp_parseSession(const uint8_t * data, uint32_t size,
-    LG_TransportSession * session)
+static void lgmp_setVersionMismatch(LG_TransportSession * session,
+    const char * component, uint32_t expected, uint32_t current)
 {
-  if (size < sizeof(KVMFR))
+  session->versionMismatch.valid           = true;
+  session->versionMismatch.expectedVersion = expected;
+  session->versionMismatch.currentVersion  = current;
+  str_copy(session->versionMismatch.component,
+      sizeof(session->versionMismatch.component), component,
+      strlen(component));
+}
+
+static bool lgmp_parseSession(struct LG_Transport * this,
+    const uint8_t * data, uint32_t size, LG_TransportSession * session)
+{
+  if (!data || size < sizeof(KVMFR))
+  {
+    uint32_t current = 0;
+    bool currentValid = data &&
+      size >= offsetof(KVMFR, version) + sizeof(uint32_t);
+    if (currentValid)
+    {
+      memcpy(&current, data + offsetof(KVMFR, version), sizeof(current));
+    }
+    else
+      currentValid = lgmp_recoveryVersions(this, NULL, &current);
+    if (currentValid && current != KVMFR_VERSION)
+      lgmp_setVersionMismatch(session, "KVMFR", KVMFR_VERSION, current);
     return false;
+  }
 
   const KVMFR * header = (const KVMFR *)data;
-  if (memcmp(header->magic, KVMFR_MAGIC, sizeof(header->magic)) != 0 ||
-      header->version != KVMFR_VERSION)
+  if (memcmp(header->magic, KVMFR_MAGIC, sizeof(header->magic)) != 0)
   {
-    session->remoteVersion = header->version;
+    uint32_t current;
+    if (lgmp_recoveryVersions(this, NULL, &current) &&
+        current != KVMFR_VERSION)
+      lgmp_setVersionMismatch(session, "KVMFR", KVMFR_VERSION, current);
+    return false;
+  }
+
+  if (header->version != KVMFR_VERSION)
+  {
+    lgmp_setVersionMismatch(session, "KVMFR", KVMFR_VERSION,
+        header->version);
     return false;
   }
 
@@ -466,16 +660,43 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
   memset(session, 0, sizeof(*session));
   session->os = LG_TRANSPORT_OS_OTHER;
 
+  if (!this->client)
+  {
+    LG_LOCK(this->recoveryLock);
+    lgmp_refreshRecoveryLocked(this,
+        lgmp_recoveryMagic(this->recovery));
+    LG_UNLOCK(this->recoveryLock);
+
+    const LGMP_STATUS status = lgmp_initializeClient(this);
+    if (status != LGMP_OK)
+    {
+      uint32_t remoteVersion = 0;
+      const bool versionKnown =
+        lgmp_recoveryVersions(this, &remoteVersion, NULL);
+      if (status == LGMP_ERR_INVALID_VERSION ||
+          (status == LGMP_ERR_INVALID_MAGIC && versionKnown &&
+           remoteVersion != LGMP_PROTOCOL_VERSION))
+      {
+        if (versionKnown && remoteVersion != LGMP_PROTOCOL_VERSION)
+          lgmp_setVersionMismatch(session, "LGMP",
+              LGMP_PROTOCOL_VERSION, remoteVersion);
+        return LG_TRANSPORT_INVALID_VERSION;
+      }
+
+      return status == LGMP_ERR_INVALID_MAGIC ?
+        LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_ERROR;
+    }
+  }
+
   uint32_t size;
   uint8_t * data;
-  uint32_t remoteVersion;
+  uint32_t remoteVersion = 0;
   LGMP_STATUS status = lgmpClientSessionInit(this->client, &size, &data,
       &this->clientID, &remoteVersion);
-  session->remoteVersion = remoteVersion;
   switch (status)
   {
     case LGMP_OK:
-      if (!lgmp_parseSession(data, size, session))
+      if (!lgmp_parseSession(this, data, size, session))
         return LG_TRANSPORT_INVALID_VERSION;
 
       LG_LOCK(this->frameLock);
@@ -494,10 +715,23 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
       return LG_TRANSPORT_OK;
 
     case LGMP_ERR_INVALID_VERSION:
+      if (!remoteVersion)
+        lgmp_recoveryVersions(this, &remoteVersion, NULL);
+      lgmp_setVersionMismatch(session, "LGMP", LGMP_PROTOCOL_VERSION,
+          remoteVersion);
       return LG_TRANSPORT_INVALID_VERSION;
 
     case LGMP_ERR_INVALID_SESSION:
+      return LG_TRANSPORT_UNAVAILABLE;
+
     case LGMP_ERR_INVALID_MAGIC:
+      if (lgmp_recoveryVersions(this, &remoteVersion, NULL) &&
+          remoteVersion != LGMP_PROTOCOL_VERSION)
+      {
+        lgmp_setVersionMismatch(session, "LGMP", LGMP_PROTOCOL_VERSION,
+            remoteVersion);
+        return LG_TRANSPORT_INVALID_VERSION;
+      }
       return LG_TRANSPORT_UNAVAILABLE;
 
     default:
@@ -508,6 +742,9 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
 
 static void lgmp_disconnect(LG_Transport * this)
 {
+  if (!this->client)
+    return;
+
   lgmpInput_disconnect(this->input);
   lgmp_closeQueues(this);
 
@@ -528,12 +765,295 @@ static void lgmp_disconnect(LG_Transport * this)
 
 static bool lgmp_sessionValid(LG_Transport * this)
 {
-  return this->connected && lgmpClientSessionValid(this->client);
+  return this->client && this->connected &&
+    lgmpClientSessionValid(this->client);
+}
+
+static LG_RecoveryRequest lgmp_recoveryRequestType(uint32_t request)
+{
+  switch (request)
+  {
+    case KVMFR_R_REQ_NORMAL:
+      return LG_RECOVERY_REQ_NORMAL;
+    case KVMFR_R_REQ_RECOVERY:
+      return LG_RECOVERY_REQ_RECOVERY;
+    default:
+      return LG_RECOVERY_REQ_NONE;
+  }
+}
+
+static LG_RecoveryState lgmp_recoveryState(uint32_t state)
+{
+  switch (state)
+  {
+    case KVMFR_R_STATE_NORMAL:
+      return LG_RECOVERY_STATE_NORMAL;
+    case KVMFR_R_STATE_SWITCHING:
+      return LG_RECOVERY_STATE_SWITCHING;
+    case KVMFR_R_STATE_ACTIVE:
+      return LG_RECOVERY_STATE_ACTIVE;
+    case KVMFR_R_STATE_FAILED:
+      return LG_RECOVERY_STATE_FAILED;
+    default:
+      return LG_RECOVERY_STATE_UNKNOWN;
+  }
+}
+
+static LG_RecoveryError lgmp_recoveryError(uint32_t error)
+{
+  switch (error)
+  {
+    case KVMFR_R_ERR_NONE:
+      return LG_RECOVERY_ERR_NONE;
+    case KVMFR_R_ERR_UNSUPPORTED:
+      return LG_RECOVERY_ERR_UNSUPPORTED;
+    case KVMFR_R_ERR_HELPER_UNAVAILABLE:
+      return LG_RECOVERY_ERR_HELPER_UNAVAILABLE;
+    case KVMFR_R_ERR_TOPOLOGY_FAILED:
+      return LG_RECOVERY_ERR_TOPOLOGY_FAILED;
+    case KVMFR_R_ERR_NO_FALLBACK_DISPLAY:
+      return LG_RECOVERY_ERR_NO_FALLBACK_DISPLAY;
+    default:
+      return LG_RECOVERY_ERR_UNSUPPORTED;
+  }
+}
+
+static bool lgmp_recoveryRequestSnapshot(const KVMFRRRequest * source,
+    KVMFRRRequest * result)
+{
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    const uint32_t serial = __atomic_load_n(&source->serial,
+        __ATOMIC_ACQUIRE);
+    if (serial & KVMFR_R_REQ_WRITING)
+      continue;
+
+    result->request = source->request;
+    result->session = source->session;
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&source->serial, __ATOMIC_RELAXED) == serial)
+    {
+      result->serial = serial;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool lgmp_recoveryStatusSnapshot(const KVMFRRStatus * source,
+    KVMFRRStatus * result)
+{
+  for (unsigned i = 0; i < 4; ++i)
+  {
+    const uint32_t serial = __atomic_load_n(&source->serial,
+        __ATOMIC_ACQUIRE);
+    if (!serial || (serial & 1U))
+      continue;
+
+    result->ackSerial  = source->ackSerial;
+    result->ackRequest = source->ackRequest;
+    result->state      = source->state;
+    result->error      = source->error;
+    result->session    = source->session;
+    __atomic_thread_fence(__ATOMIC_ACQUIRE);
+    if (__atomic_load_n(&source->serial, __ATOMIC_RELAXED) == serial)
+    {
+      result->serial = serial;
+      return true;
+    }
+  }
+
+  return false;
+}
+
+static bool lgmp_recoverySerialNewer(uint32_t serial, uint32_t reference)
+{
+  const uint32_t difference = serial - reference;
+  return difference && difference < 0x80000000U;
+}
+
+static bool lgmp_recoveryLatestRequest(const KVMFRR * recovery,
+    uint64_t session, KVMFRRRequest * result)
+{
+  bool found = false;
+  for (unsigned i = 0; i < KVMFR_R_REQ_SLOTS; ++i)
+  {
+    KVMFRRRequest request;
+    if (!lgmp_recoveryRequestSnapshot(&recovery->requests[i], &request) ||
+        !request.serial || request.session != session)
+      continue;
+
+    if (!found || lgmp_recoverySerialNewer(request.serial, result->serial))
+    {
+      *result = request;
+      found   = true;
+    }
+  }
+
+  return found;
+}
+
+static LG_TransportStatus lgmp_getRecoveryInfo(LG_Transport * this,
+    LG_RecoveryInfo * info)
+{
+  if (!info)
+    return LG_TRANSPORT_ERROR;
+
+  memset(info, 0, sizeof(*info));
+  LG_LOCK(this->recoveryLock);
+  const bool live = lgmp_refreshRecoveryLocked(this,
+      lgmp_recoveryMagic(this->recovery));
+  if (!live)
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  KVMFRRHeader header;
+  KVMFRRInfo wireInfo;
+  if (!lgmp_recoverySnapshot(this, &header, &wireInfo) ||
+      header.session != this->recoverySession)
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  info->abiVersion   = header.abiVersion;
+  info->instance     = header.session;
+  info->heartbeat    = header.heartbeat;
+  if (header.capabilities & KVMFR_R_CAP_DISPLAY)
+    info->capabilities |= LG_RECOVERY_CAP_DISPLAY;
+
+  memcpy(info->uuid, header.uuid, sizeof(info->uuid));
+  for (unsigned i = 0; i < sizeof(info->uuid); ++i)
+    info->uuidValid |= info->uuid[i] != 0;
+  str_copy(info->producerVersion, sizeof(info->producerVersion),
+      wireInfo.version, sizeof(wireInfo.version));
+
+  info->versionCount = 2;
+  str_copy(info->versions[0].component,
+      sizeof(info->versions[0].component), "LGMP", sizeof("LGMP"));
+  info->versions[0].version = header.lgmpVersion;
+  str_copy(info->versions[1].component,
+      sizeof(info->versions[1].component), "KVMFR", sizeof("KVMFR"));
+  info->versions[1].version = header.kvmfrVersion;
+
+  KVMFRRRequest request = {0};
+  if (lgmp_recoveryLatestRequest(this->recovery, header.session, &request))
+  {
+    info->requestSerial = request.serial;
+    info->request       = lgmp_recoveryRequestType(request.request);
+  }
+
+  KVMFRRStatus status;
+  if (lgmp_recoveryStatusSnapshot(&this->recovery->status, &status) &&
+      status.session == header.session)
+  {
+    info->ackSerial  = status.ackSerial;
+    info->ackRequest = lgmp_recoveryRequestType(status.ackRequest);
+    info->state      = lgmp_recoveryState(status.state);
+    info->error      = lgmp_recoveryError(status.error);
+  }
+
+  LG_UNLOCK(this->recoveryLock);
+  return LG_TRANSPORT_OK;
+}
+
+static LG_TransportStatus lgmp_requestRecovery(LG_Transport * this,
+    LG_RecoveryRequest request, uint32_t * serial)
+{
+  uint32_t wireRequest;
+  switch (request)
+  {
+    case LG_RECOVERY_REQ_NORMAL:
+      wireRequest = KVMFR_R_REQ_NORMAL;
+      break;
+    case LG_RECOVERY_REQ_RECOVERY:
+      wireRequest = KVMFR_R_REQ_RECOVERY;
+      break;
+    default:
+      return LG_TRANSPORT_ERROR;
+  }
+
+  LG_LOCK(this->recoveryLock);
+  if (!lgmp_refreshRecoveryLocked(this,
+        lgmp_recoveryMagic(this->recovery)))
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  KVMFRRHeader header;
+  KVMFRRInfo wireInfo;
+  if (!lgmp_recoverySnapshot(this, &header, &wireInfo) ||
+      header.session != this->recoverySession ||
+      !(header.capabilities & KVMFR_R_CAP_DISPLAY))
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  uint32_t ticket = __atomic_add_fetch(&this->recovery->req.ticket, 2U,
+      __ATOMIC_RELAXED);
+  if (!ticket)
+    ticket = __atomic_add_fetch(&this->recovery->req.ticket, 2U,
+        __ATOMIC_RELAXED);
+  if (!ticket || (ticket & KVMFR_R_REQ_WRITING))
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  KVMFRRRequest * destination = NULL;
+  const uint32_t claimed = ticket | KVMFR_R_REQ_WRITING;
+  for (unsigned i = 0; i < KVMFR_R_REQ_SLOTS; ++i)
+  {
+    uint32_t expected = 0;
+    if (__atomic_compare_exchange_n(&this->recovery->requests[i].serial,
+          &expected, claimed, false, __ATOMIC_ACQ_REL, __ATOMIC_RELAXED))
+    {
+      destination = &this->recovery->requests[i];
+      break;
+    }
+  }
+  if (!destination)
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_TIMEOUT;
+  }
+
+  destination->request = wireRequest;
+  destination->session = header.session;
+
+  KVMFRRHeader currentHeader;
+  if (!lgmp_recoverySnapshot(this, &currentHeader, &wireInfo) ||
+      currentHeader.session != header.session)
+  {
+    uint32_t expected = claimed;
+    __atomic_compare_exchange_n(&destination->serial, &expected, 0, false,
+        __ATOMIC_RELEASE, __ATOMIC_RELAXED);
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  uint32_t expected = claimed;
+  if (!__atomic_compare_exchange_n(&destination->serial, &expected, ticket,
+        false, __ATOMIC_RELEASE, __ATOMIC_RELAXED))
+  {
+    LG_UNLOCK(this->recoveryLock);
+    return LG_TRANSPORT_TIMEOUT;
+  }
+  if (serial)
+    *serial = ticket;
+
+  LG_UNLOCK(this->recoveryLock);
+  return LG_TRANSPORT_OK;
 }
 
 static bool lgmp_supportsDMA(LG_Transport * this)
 {
-  return this->allowDMA && ivshmemHasDMA(&this->shm);
+  return this->client && this->allowDMA && ivshmemHasDMA(&this->shm);
 }
 
 static bool lgmp_attachRenderer(LG_Transport * this,
@@ -801,10 +1321,23 @@ static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
   if (dma->fd >= 0)
     return dma->fd;
 
-  const uintptr_t position = (uintptr_t)frame - (uintptr_t)this->shm.mem;
-  const uintptr_t offset = frame->offset + sizeof(FrameBuffer);
+  const uintptr_t base = (uintptr_t)this->shm.mem;
+  const uintptr_t address = (uintptr_t)frame;
+  if (address < base)
+    return -1;
+
+  const size_t position = address - base;
+  if (position > this->lgmpSize ||
+      frame->offset > this->lgmpSize - position ||
+      sizeof(FrameBuffer) > this->lgmpSize - position - frame->offset)
+    return -1;
+
+  const size_t offset = position + frame->offset + sizeof(FrameBuffer);
+  if (dataSize > this->lgmpSize - offset)
+    return -1;
+
   dma->dataSize = dataSize;
-  dma->fd       = ivshmemGetDMABuf(&this->shm, position + offset, dataSize);
+  dma->fd       = ivshmemGetDMABuf(&this->shm, offset, dataSize);
   return dma->fd;
 }
 
@@ -1388,15 +1921,17 @@ static const LG_VideoOps * lgmp_getVideoOps(LG_Transport * this)
 
 const LG_TransportOps LGT_LGMP =
 {
-  .name          = "lgmp",
-  .setup         = lgmp_setup,
-  .create        = lgmp_create,
-  .destroy       = lgmp_destroy,
-  .connect       = lgmp_connect,
-  .disconnect    = lgmp_disconnect,
-  .sessionValid  = lgmp_sessionValid,
-  .getVideoOps   = lgmp_getVideoOps,
-  .getInputOps   = lgmp_getInputOps,
-  .sendControl   = lgmp_sendControl,
-  .controlStatus = lgmp_controlStatus,
+  .name             = "lgmp",
+  .setup            = lgmp_setup,
+  .create           = lgmp_create,
+  .destroy          = lgmp_destroy,
+  .connect          = lgmp_connect,
+  .disconnect       = lgmp_disconnect,
+  .sessionValid     = lgmp_sessionValid,
+  .getVideoOps      = lgmp_getVideoOps,
+  .getInputOps      = lgmp_getInputOps,
+  .getRecoveryInfo  = lgmp_getRecoveryInfo,
+  .requestRecovery  = lgmp_requestRecovery,
+  .sendControl      = lgmp_sendControl,
+  .controlStatus    = lgmp_controlStatus,
 };

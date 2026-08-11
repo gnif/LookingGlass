@@ -33,11 +33,13 @@
 
 struct Msg
 {
-  char * caption;
-  char * message;
-  StringList lines;
+  char                 * caption;
+  char                 * message;
+  StringList             lines;
   MsgBoxConfirmCallback confirm;
-  void * opaque;
+  void                 * confirmOpaque;
+  MsgBoxCloseCallback   close;
+  void                 * closeOpaque;
 };
 
 struct MsgState
@@ -62,6 +64,9 @@ static bool msg_init(void ** udata, const void * params)
 
 static void freeMsg(struct Msg * msg)
 {
+  if (msg->close)
+    msg->close((MsgBoxHandle)msg, msg->closeOpaque);
+
   free(msg->caption);
   free(msg->message);
   stringlist_free(&msg->lines);
@@ -144,14 +149,14 @@ static int msg_render(void * udata, bool interactive, struct Rect * windowRects,
     if (igButton("Yes", textSize))
     {
       destroy = true;
-      msg->confirm(true, msg->opaque);
+      msg->confirm(true, msg->confirmOpaque);
     }
 
     igSameLine(0.0f, -1.0f);
     if (igButton("No", textSize))
     {
       destroy = true;
-      msg->confirm(false, msg->opaque);
+      msg->confirm(false, msg->confirmOpaque);
     }
   }
   else
@@ -202,7 +207,9 @@ bool overlayMsg_modal(void)
 }
 
 MsgBoxHandle overlayMsg_show(
-    const char * caption, MsgBoxConfirmCallback confirm, void * opaque,
+    const char * caption,
+    MsgBoxConfirmCallback confirm, void * confirmOpaque,
+    MsgBoxCloseCallback close, void * closeOpaque,
     const char * fmt, va_list args)
 {
   struct Msg * msg = calloc(1, sizeof(*msg));
@@ -228,8 +235,6 @@ MsgBoxHandle overlayMsg_show(
     return NULL;
   }
 
-  msg->confirm = confirm;
-  msg->opaque  = opaque;
   if (valloc_sprintf(&msg->message, fmt ? fmt : "", args) < 0)
   {
     DEBUG_ERROR("failed to format message");
@@ -256,6 +261,10 @@ MsgBoxHandle overlayMsg_show(
     }
   }
 
+  msg->confirm       = confirm;
+  msg->confirmOpaque = confirmOpaque;
+  msg->close         = close;
+  msg->closeOpaque   = closeOpaque;
   ll_push(l_msg.messages, msg);
   app_invalidateOverlay(false);
 

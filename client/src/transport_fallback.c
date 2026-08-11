@@ -50,9 +50,12 @@ struct LG_TransportFallback
   LGThread * thread;
   LGEvent  * wakeEvent;
   LG_RWLock  lock;
+  LG_Lock    providerLock;
+  LG_Lock    eventLock;
 
   atomic_bool stop;
   atomic_bool ready;
+  atomic_bool admitted;
 
   LG_TransportInstance  transport;
   LG_TransportSession   session;
@@ -62,6 +65,7 @@ struct LG_TransportFallback
   bool                  connected;
   bool                  providersPublished;
   bool                  connectedReported;
+  bool                  disconnectedReported;
   bool                  closing;
   bool                  videoRequested;
   bool                  videoActive;
@@ -87,6 +91,11 @@ static bool uuidMismatchLocked(const LG_TransportFallback * fallback)
   return fallback->primaryUUIDValid && fallback->session.uuidValid &&
     memcmp(fallback->primaryUUID, fallback->session.uuid,
         sizeof(fallback->primaryUUID)) != 0;
+}
+
+static bool uuidAdmittedLocked(const LG_TransportFallback * fallback)
+{
+  return !uuidMismatchLocked(fallback);
 }
 
 static bool recordMismatchLocked(LG_TransportFallback * fallback,
@@ -119,10 +128,50 @@ static bool sessionLive(const LG_TransportFallback * fallback)
     fallback->transport.ops->sessionValid(fallback->transport.handle);
 }
 
+static void notifyConnected(LG_TransportFallback * fallback)
+{
+  LG_LOCK(fallback->eventLock);
+  LG_LOCK_EXCLUSIVE(fallback->lock);
+  const bool report =
+    atomic_load_explicit(&fallback->ready, memory_order_acquire) &&
+    atomic_load_explicit(&fallback->admitted, memory_order_acquire) &&
+    uuidAdmittedLocked(fallback) && !fallback->closing &&
+    !fallback->disconnectedReported;
+  fallback->connectedReported = report;
+  const LG_TransportSession session = fallback->session;
+  LG_UNLOCK_EXCLUSIVE(fallback->lock);
+
+  if (report && fallback->eventOps.connected)
+    fallback->eventOps.connected(fallback->eventOpaque, &session);
+  LG_UNLOCK(fallback->eventLock);
+}
+
+static void notifyDisconnected(
+    LG_TransportFallback * fallback, bool requested)
+{
+  if (!requested)
+    return;
+
+  LG_LOCK(fallback->eventLock);
+  LG_LOCK_EXCLUSIVE(fallback->lock);
+  const bool report = !fallback->disconnectedReported;
+  if (report)
+    fallback->disconnectedReported = true;
+  LG_UNLOCK_EXCLUSIVE(fallback->lock);
+
+  if (report && fallback->eventOps.disconnected)
+    fallback->eventOps.disconnected(fallback->eventOpaque);
+  LG_UNLOCK(fallback->eventLock);
+}
+
 static void unpublishProviders(LG_TransportFallback * fallback, bool live)
 {
+  LG_LOCK(fallback->providerLock);
   if (!fallback->providersPublished)
+  {
+    LG_UNLOCK(fallback->providerLock);
     return;
+  }
 
   if (live)
   {
@@ -137,12 +186,14 @@ static void unpublishProviders(LG_TransportFallback * fallback, bool live)
     lgClipboard_dropFallback();
   }
   fallback->providersPublished = false;
+  LG_UNLOCK(fallback->providerLock);
 }
 
 static void closeVideoAdmission(LG_TransportFallback * fallback)
 {
   LG_LOCK_EXCLUSIVE(fallback->lock);
   atomic_store_explicit(&fallback->ready, false, memory_order_release);
+  atomic_store_explicit(&fallback->admitted, false, memory_order_release);
   fallback->closing = true;
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
 }
@@ -184,8 +235,20 @@ static bool cleanupConnection(LG_TransportFallback * fallback,
   return reportDisconnected;
 }
 
-static void publishProviders(LG_TransportFallback * fallback)
+static bool publishProviders(LG_TransportFallback * fallback)
 {
+  LG_LOCK(fallback->providerLock);
+  LG_LOCK_SHARED(fallback->lock);
+  const bool admitted = atomic_load_explicit(
+      &fallback->admitted, memory_order_acquire) &&
+    uuidAdmittedLocked(fallback) && !fallback->closing;
+  if (!admitted)
+  {
+    LG_UNLOCK_SHARED(fallback->lock);
+    LG_UNLOCK(fallback->providerLock);
+    return false;
+  }
+
   void * inputOpaque = NULL;
   const LG_InputOps * inputOps = fallback->transport.ops->getInputOps ?
     fallback->transport.ops->getInputOps(
@@ -205,9 +268,12 @@ static void publishProviders(LG_TransportFallback * fallback)
           fallback->transport.handle, &clipboardOpaque) : NULL;
   lgClipboard_setFallback(clipboardOps, clipboardOpaque);
   fallback->providersPublished = true;
+  LG_UNLOCK_SHARED(fallback->lock);
+  LG_UNLOCK(fallback->providerLock);
+  return true;
 }
 
-static bool publishConnection(LG_TransportFallback * fallback,
+static bool admitConnection(LG_TransportFallback * fallback,
     bool * reportMismatch, uint8_t primaryUUID[16],
     uint8_t fallbackUUID[16])
 {
@@ -218,11 +284,24 @@ static bool publishConnection(LG_TransportFallback * fallback,
         fallback, primaryUUID, fallbackUUID);
   const bool stop = atomic_load_explicit(
       &fallback->stop, memory_order_acquire);
+  const bool admitted = !reject && !stop && !fallback->closing;
+  if (admitted)
+    atomic_store_explicit(
+        &fallback->admitted, true, memory_order_release);
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
-  if (reject || stop)
+  return admitted;
+}
+
+static bool publishConnection(LG_TransportFallback * fallback,
+    bool * reportMismatch, uint8_t primaryUUID[16],
+    uint8_t fallbackUUID[16])
+{
+  if (!admitConnection(fallback, reportMismatch,
+        primaryUUID, fallbackUUID))
     return false;
 
-  publishProviders(fallback);
+  if (!publishProviders(fallback))
+    return false;
 
   for (;;)
   {
@@ -231,12 +310,14 @@ static bool publishConnection(LG_TransportFallback * fallback,
     if (reject)
       *reportMismatch = recordMismatchLocked(
           fallback, primaryUUID, fallbackUUID);
+    const bool admitted = uuidAdmittedLocked(fallback);
     const bool stop = atomic_load_explicit(
         &fallback->stop, memory_order_acquire);
+    const bool closing = fallback->closing;
     const bool requested = fallback->videoRequested;
     LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
-    if (reject || stop)
+    if (reject || !admitted || stop || closing)
       return false;
     if (requested == fallback->videoActive)
       break;
@@ -252,15 +333,18 @@ static bool publishConnection(LG_TransportFallback * fallback,
   if (finalReject)
     *reportMismatch = recordMismatchLocked(
         fallback, primaryUUID, fallbackUUID);
+  const bool finalAdmitted = uuidAdmittedLocked(fallback);
   const bool finalStop = atomic_load_explicit(
       &fallback->stop, memory_order_acquire);
-  if (!finalReject && !finalStop)
+  if (!finalReject && finalAdmitted && !finalStop && !fallback->closing)
   {
     fallback->mismatchReported = false;
     atomic_store_explicit(&fallback->ready, true, memory_order_release);
   }
+  const bool published = !finalReject && finalAdmitted && !finalStop &&
+    !fallback->closing;
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
-  return !finalReject && !finalStop;
+  return published;
 }
 
 static bool connectFallback(LG_TransportFallback * fallback)
@@ -315,8 +399,9 @@ static bool connectFallback(LG_TransportFallback * fallback)
   }
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
-  fallback->connected = true;
-  fallback->session   = session;
+  fallback->connected            = true;
+  fallback->session              = session;
+  fallback->disconnectedReported = false;
   ++fallback->connectionSerial;
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
@@ -333,13 +418,7 @@ static bool connectFallback(LG_TransportFallback * fallback)
     return false;
   }
 
-  LG_LOCK_EXCLUSIVE(fallback->lock);
-  fallback->connectedReported = true;
-  const LG_TransportSession reportedSession = fallback->session;
-  LG_UNLOCK_EXCLUSIVE(fallback->lock);
-  if (fallback->eventOps.connected)
-    fallback->eventOps.connected(
-        fallback->eventOpaque, &reportedSession);
+  notifyConnected(fallback);
 
   while (!atomic_load_explicit(&fallback->stop, memory_order_acquire))
   {
@@ -351,8 +430,10 @@ static bool connectFallback(LG_TransportFallback * fallback)
     if (reject)
       reportMismatch = recordMismatchLocked(
           fallback, primaryUUID, fallbackUUID);
+    const bool admitted = uuidAdmittedLocked(fallback);
+    const bool closing = fallback->closing;
     LG_UNLOCK_EXCLUSIVE(fallback->lock);
-    if (reject)
+    if (reject || !admitted || closing)
       break;
     if (!sessionLive(fallback))
       break;
@@ -365,8 +446,7 @@ static bool connectFallback(LG_TransportFallback * fallback)
   if (reportMismatch && fallback->eventOps.uuidMismatch)
     fallback->eventOps.uuidMismatch(
         fallback->eventOpaque, primaryUUID, fallbackUUID);
-  if (reportDisconnect && fallback->eventOps.disconnected)
-    fallback->eventOps.disconnected(fallback->eventOpaque);
+  notifyDisconnected(fallback, reportDisconnect);
   return true;
 }
 
@@ -388,14 +468,14 @@ static int fallbackThread(void * opaque)
   }
 
   const bool reportDisconnect = cleanupConnection(fallback, false);
-  if (reportDisconnect && fallback->eventOps.disconnected)
-    fallback->eventOps.disconnected(fallback->eventOpaque);
+  notifyDisconnected(fallback, reportDisconnect);
   return 0;
 }
 
 bool lgTransportFallback_start(const char * transportName,
     const LG_SwSurfaceEventOps * surfaceEvents, void * surfaceOpaque,
     const LG_TransportFallbackEventOps * eventOps, void * eventOpaque,
+    const uint8_t primaryUUID[16],
     LG_TransportFallback ** result)
 {
   if (!result)
@@ -411,8 +491,11 @@ bool lgTransportFallback_start(const char * transportName,
     return false;
 
   LG_RWLOCK_INIT(fallback->lock);
+  LG_LOCK_INIT(fallback->providerLock);
+  LG_LOCK_INIT(fallback->eventLock);
   atomic_init(&fallback->stop, false);
   atomic_init(&fallback->ready, false);
+  atomic_init(&fallback->admitted, false);
 
   fallback->transportName = strdup(transportName);
   if (!fallback->transportName)
@@ -423,6 +506,12 @@ bool lgTransportFallback_start(const char * transportName,
   if (eventOps)
     fallback->eventOps = *eventOps;
   fallback->eventOpaque = eventOpaque;
+  if (primaryUUID)
+  {
+    memcpy(fallback->primaryUUID, primaryUUID,
+        sizeof(fallback->primaryUUID));
+    fallback->primaryUUIDValid = true;
+  }
 
   fallback->wakeEvent = lgCreateEvent(true, 0);
   if (!fallback->wakeEvent)
@@ -439,6 +528,8 @@ fail:
   *result = NULL;
   if (fallback->wakeEvent)
     lgFreeEvent(fallback->wakeEvent);
+  LG_LOCK_FREE(fallback->eventLock);
+  LG_LOCK_FREE(fallback->providerLock);
   LG_RWLOCK_FREE(fallback->lock);
   free(fallback->transportName);
   free(fallback);
@@ -465,6 +556,8 @@ void lgTransportFallback_stop(LG_TransportFallback ** fallbackPtr)
   }
 
   lgFreeEvent(fallback->wakeEvent);
+  LG_LOCK_FREE(fallback->eventLock);
+  LG_LOCK_FREE(fallback->providerLock);
   LG_RWLOCK_FREE(fallback->lock);
   free(fallback->transportName);
   free(fallback);
@@ -474,6 +567,24 @@ bool lgTransportFallback_ready(const LG_TransportFallback * fallback)
 {
   return fallback && atomic_load_explicit(
       &fallback->ready, memory_order_acquire);
+}
+
+bool lgTransportFallback_admitted(const LG_TransportFallback * fallback)
+{
+  return fallback && atomic_load_explicit(
+      &fallback->admitted, memory_order_acquire);
+}
+
+bool lgTransportFallback_videoRequested(
+    LG_TransportFallback * fallback)
+{
+  if (!fallback)
+    return false;
+
+  LG_LOCK_SHARED(fallback->lock);
+  const bool requested = fallback->videoRequested;
+  LG_UNLOCK_SHARED(fallback->lock);
+  return requested;
 }
 
 static bool applyVideoRequest(LG_TransportFallback * fallback)
@@ -533,11 +644,29 @@ void lgTransportFallback_requestVideoActive(
   lgSignalEvent(fallback->wakeEvent);
 }
 
+static bool revokeAdmissionLocked(LG_TransportFallback * fallback)
+{
+  atomic_store_explicit(&fallback->ready, false, memory_order_release);
+  atomic_store_explicit(&fallback->admitted, false, memory_order_release);
+  if (!fallback->connected)
+    return false;
+
+  fallback->connectedReported = false;
+  fallback->closing           = true;
+  return true;
+}
+
 void lgTransportFallback_setPrimaryUUID(
     LG_TransportFallback * fallback, const uint8_t uuid[16])
 {
   if (!fallback || !uuid)
     return;
+
+  bool revoked          = false;
+  bool notifyDisconnect = false;
+  bool reportMismatch   = false;
+  uint8_t primaryUUID[16];
+  uint8_t fallbackUUID[16];
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
   const bool changed = !fallback->primaryUUIDValid ||
@@ -547,11 +676,24 @@ void lgTransportFallback_setPrimaryUUID(
   {
     memcpy(fallback->primaryUUID, uuid, sizeof(fallback->primaryUUID));
     fallback->primaryUUIDValid = true;
+    if (uuidMismatchLocked(fallback))
+    {
+      revoked = true;
+      notifyDisconnect = revokeAdmissionLocked(fallback);
+      reportMismatch = recordMismatchLocked(
+          fallback, primaryUUID, fallbackUUID);
+    }
   }
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
   if (changed)
     lgSignalEvent(fallback->wakeEvent);
+  if (revoked)
+    unpublishProviders(fallback, false);
+  notifyDisconnected(fallback, notifyDisconnect);
+  if (reportMismatch && fallback->eventOps.uuidMismatch)
+    fallback->eventOps.uuidMismatch(
+        fallback->eventOpaque, primaryUUID, fallbackUUID);
 }
 
 void lgTransportFallback_clearPrimaryUUID(
@@ -562,7 +704,11 @@ void lgTransportFallback_clearPrimaryUUID(
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
   const bool changed = fallback->primaryUUIDValid;
-  fallback->primaryUUIDValid = false;
+  if (changed)
+  {
+    fallback->primaryUUIDValid = false;
+    fallback->mismatchReported = false;
+  }
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
   if (changed)

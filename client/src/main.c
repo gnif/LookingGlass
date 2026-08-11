@@ -86,6 +86,7 @@ static int renderThread(void * unused);
 static RenderQueueSource renderQueueSource(LG_VideoSource source);
 static bool videoSourceInvalidate(LG_VideoSource source);
 static void videoSourceShowSplashIfNeeded(void);
+static bool fallbackRequestVideo(void);
 
 static LGEvent  *e_startup       = NULL;
 static LGEvent  *e_cursorRepaint = NULL;
@@ -1608,7 +1609,7 @@ int main_frameThread(void * unused)
           &g_state.videoSource[LG_VIDEO_SOURCE_PRIMARY].ready, false,
           memory_order_release);
 
-    if (!app_useVideoSource(LG_VIDEO_SOURCE_FALLBACK))
+    if (!fallbackRequestVideo())
       videoSourceShowSplashIfNeeded();
   }
 
@@ -1645,13 +1646,12 @@ static RenderQueueSource renderQueueSource(LG_VideoSource source)
   return RENDER_QUEUE_SOURCE_NONE;
 }
 
-static void videoSourceBegin(LG_VideoSource source)
+static void videoSourceBeginLocked(LG_VideoSource source)
 {
   struct VideoSourceState * state = &g_state.videoSource[source];
   const uint64_t generation =
     renderQueue_sourceBegin(renderQueueSource(source));
 
-  LG_LOCK(g_state.videoSourceLock);
   atomic_store_explicit(&state->ready, false, memory_order_release);
   atomic_store_explicit(
       &state->transitionSerial, 0, memory_order_relaxed);
@@ -1664,6 +1664,12 @@ static void videoSourceBegin(LG_VideoSource source)
   atomic_store_explicit(
       &state->generation, generation, memory_order_release);
   state->configurePending = false;
+}
+
+static void videoSourceBegin(LG_VideoSource source)
+{
+  LG_LOCK(g_state.videoSourceLock);
+  videoSourceBeginLocked(source);
   LG_UNLOCK(g_state.videoSourceLock);
 }
 
@@ -1883,15 +1889,27 @@ static void videoSourceApplied(void * opaque, RenderQueueSource queueSource,
   app_refreshVideoSource();
 }
 
+static bool swSurfaceEventAdmitted(LG_VideoSource source)
+{
+  return source != LG_VIDEO_SOURCE_FALLBACK ||
+    lgTransportFallback_admitted(g_state.fallback);
+}
+
 static void swSurfaceConfigure(LG_VideoSource source,
     unsigned int width, unsigned int height)
 {
   struct VideoSourceState * state = &g_state.videoSource[source];
-  videoSourceBegin(source);
+  LG_LOCK(g_state.videoSourceLock);
+  if (!swSurfaceEventAdmitted(source))
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
+  }
+
+  videoSourceBeginLocked(source);
   atomic_store_explicit(&state->width, width, memory_order_relaxed);
   atomic_store_explicit(&state->height, height, memory_order_relaxed);
   atomic_store_explicit(&state->rotate, LG_ROTATE_0, memory_order_release);
-  LG_LOCK(g_state.videoSourceLock);
   state->configurePending = true;
   atomic_store_explicit(&state->ready, true, memory_order_release);
   LG_UNLOCK(g_state.videoSourceLock);
@@ -1924,30 +1942,41 @@ static void swSurfaceDestroy(LG_VideoSource source)
 static void swSurfaceDrawFill(LG_VideoSource source, int x, int y,
     int width, int height, uint32_t color)
 {
+  LG_LOCK(g_state.videoSourceLock);
+  if (!swSurfaceEventAdmitted(source))
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
+  }
+
   const uint64_t generation = atomic_load_explicit(
       &g_state.videoSource[source].generation, memory_order_acquire);
   renderQueue_sourceSwSurfaceDrawFill(renderQueueSource(source), generation,
       x, y, width, height, color);
+  LG_UNLOCK(g_state.videoSourceLock);
 }
 
 static void swSurfaceDrawBitmap(LG_VideoSource source, bool topDown,
     int x, int y, int width, int height, int stride, const void * data)
 {
+  LG_LOCK(g_state.videoSourceLock);
+  if (!swSurfaceEventAdmitted(source))
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
+  }
+
   const uint64_t generation = atomic_load_explicit(
       &g_state.videoSource[source].generation, memory_order_acquire);
   renderQueue_sourceSwSurfaceDrawBitmap(renderQueueSource(source), generation,
       x, y, width, height, stride, data, topDown);
+  LG_UNLOCK(g_state.videoSourceLock);
 }
 
 static void swSurfacePointer(LG_VideoSource source,
     const LG_TransportPointer * pointer)
 {
   struct VideoSourceState * state = &g_state.videoSource[source];
-  const uint64_t generation = atomic_load_explicit(
-      &state->generation, memory_order_acquire);
-  if (!generation)
-    return;
-
   LG_RendererCursor type = LG_CURSOR_COLOR;
   if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
     switch (pointer->type)
@@ -1971,8 +2000,15 @@ static void swSurfacePointer(LG_VideoSource source,
   const bool drawCursor = source != LG_VIDEO_SOURCE_PRIMARY ||
     g_cursor.draw || !lgInput_available();
   LG_LOCK(g_state.videoSourceLock);
-  if (atomic_load_explicit(&state->generation, memory_order_acquire) !=
-      generation)
+  if (!swSurfaceEventAdmitted(source))
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
+  }
+
+  const uint64_t generation = atomic_load_explicit(
+      &state->generation, memory_order_acquire);
+  if (!generation)
   {
     LG_UNLOCK(g_state.videoSourceLock);
     return;
@@ -2036,7 +2072,6 @@ static void swSurfacePointer(LG_VideoSource source,
     g_cursor.guest.hy      = hy;
     g_cursor.guest.valid   = valid;
   }
-  LG_UNLOCK(g_state.videoSourceLock);
 
   if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
     renderQueue_sourceCursorImage(renderQueueSource(source), generation,
@@ -2055,6 +2090,7 @@ static void swSurfacePointer(LG_VideoSource source,
       LG_TRANSPORT_POINTER_VISIBLE_VALID | LG_TRANSPORT_POINTER_SHAPE)))
     renderQueue_sourceCursorState(renderQueueSource(source), generation,
         visible, x, y, hx, hy);
+  LG_UNLOCK(g_state.videoSourceLock);
 
   if (sourceApplied)
   {
@@ -2094,8 +2130,7 @@ static void swSurfaceEventDestroy(void * opaque)
 static void swSurfaceEventDrawFill(void * opaque, int x, int y,
     int width, int height, uint32_t color)
 {
-  swSurfaceDrawFill(
-      swSurfaceSource(opaque), x, y, width, height, color);
+  swSurfaceDrawFill(swSurfaceSource(opaque), x, y, width, height, color);
 }
 
 static void swSurfaceEventDrawBitmap(void * opaque, bool topDown,
@@ -2120,6 +2155,18 @@ static const LG_SwSurfaceEventOps swSurfaceEvents =
   .pointer    = swSurfaceEventPointer,
 };
 
+static bool fallbackRequestVideo(void)
+{
+  if (!g_state.fallback)
+    return false;
+
+  lgTransportFallback_requestVideoActive(g_state.fallback, true);
+  if (!lgTransportFallback_admitted(g_state.fallback))
+    return false;
+
+  return app_useVideoSource(LG_VIDEO_SOURCE_FALLBACK);
+}
+
 static void fallbackConnected(void * opaque,
     const LG_TransportSession * session)
 {
@@ -2131,7 +2178,10 @@ static void fallbackConnected(void * opaque,
         &g_state.lgHostConnected, memory_order_acquire))
     core_setTitle(session->name);
 
-  app_refreshVideoSource();
+  if (lgTransportFallback_videoRequested(g_state.fallback))
+    fallbackRequestVideo();
+  else
+    app_refreshVideoSource();
 }
 
 static void fallbackDisconnected(void * opaque)
@@ -2162,7 +2212,7 @@ static const LG_TransportFallbackEventOps fallbackEvents =
   .uuidMismatch = fallbackUUIDMismatch,
 };
 
-static bool fallbackStart(void)
+static bool fallbackStart(const uint8_t primaryUUID[16])
 {
   if (!option_get_bool("spice", "enable") ||
       strcmp(g_params.transport, "spice") == 0)
@@ -2170,7 +2220,7 @@ static bool fallbackStart(void)
 
   if (lgTransportFallback_start("spice", &swSurfaceEvents,
         (void *)(uintptr_t)LG_VIDEO_SOURCE_FALLBACK,
-        &fallbackEvents, NULL, &g_state.fallback))
+        &fallbackEvents, NULL, primaryUUID, &g_state.fallback))
     return true;
 
   DEBUG_ERROR("Failed to start the SPICE fallback transport");
@@ -2251,12 +2301,522 @@ static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
   return true;
 }
 
-static void reportBadVersion(void)
+static void reportBadVersion(const LG_VersionMismatch * mismatch)
 {
   DEBUG_BREAK();
-  DEBUG_ERROR("The host application is not compatible with this client");
-  DEBUG_ERROR("This is not a Looking Glass error, do not report this");
-  DEBUG_ERROR("Please install the matching host application for this client");
+  if (mismatch->valid)
+  {
+    DEBUG_ERROR("Incompatible %s version", mismatch->component);
+    DEBUG_ERROR("Expected version: %u", mismatch->expectedVersion);
+    DEBUG_ERROR("Current version : %u", mismatch->currentVersion);
+  }
+  else
+    DEBUG_ERROR("The transport is not compatible with this client");
+  DEBUG_ERROR("Please install matching Looking Glass components");
+}
+
+static const int RECOVERY_PENDING = -1;
+static const int RECOVERY_NO      = 0;
+static const int RECOVERY_YES     = 1;
+
+struct RecoveryPrompt
+{
+  atomic_int       choice;
+  atomic_uintptr_t handle;
+  atomic_uintptr_t message;
+  atomic_bool      messageClosed;
+  uint64_t         instance;
+  uint32_t         serial;
+  uint32_t         failedSerial;
+  LG_RecoveryState reportedState;
+  bool             shown;
+  bool             requested;
+  bool             owned;
+  bool             retryPrompt;
+  bool             retryDeclined;
+};
+
+static bool recoveryGetInfo(LG_RecoveryInfo * info)
+{
+  if (!g_state.transport.ops->getRecoveryInfo)
+    return false;
+
+  return g_state.transport.ops->getRecoveryInfo(
+      g_state.transport.handle, info) == LG_TRANSPORT_OK;
+}
+
+static void recoveryConfirm(bool yes, void * opaque)
+{
+  struct RecoveryPrompt * prompt = opaque;
+  atomic_store_explicit(&prompt->choice,
+      yes ? RECOVERY_YES : RECOVERY_NO, memory_order_release);
+}
+
+static void recoveryClosePrompt(struct RecoveryPrompt * prompt)
+{
+  if (atomic_load_explicit(
+        &prompt->choice, memory_order_acquire) != RECOVERY_PENDING)
+  {
+    atomic_store_explicit(&prompt->handle, 0, memory_order_relaxed);
+    return;
+  }
+
+  MsgBoxHandle handle = (MsgBoxHandle)atomic_exchange_explicit(
+      &prompt->handle, 0, memory_order_acq_rel);
+  app_msgBoxClose(handle);
+}
+
+static void recoveryCloseMessage(struct RecoveryPrompt * prompt)
+{
+  MsgBoxHandle handle = (MsgBoxHandle)atomic_exchange_explicit(
+      &prompt->message, 0, memory_order_acq_rel);
+  app_msgBoxClose(handle);
+}
+
+static void recoveryMessageClosed(MsgBoxHandle handle, void * opaque)
+{
+  struct RecoveryPrompt * prompt = opaque;
+  atomic_store_explicit(
+      &prompt->messageClosed, true, memory_order_release);
+
+  uintptr_t expected = (uintptr_t)handle;
+  atomic_compare_exchange_strong_explicit(&prompt->message,
+      &expected, 0, memory_order_acq_rel, memory_order_acquire);
+}
+
+static void recoveryBeginMessage(struct RecoveryPrompt * prompt)
+{
+  recoveryCloseMessage(prompt);
+  atomic_store_explicit(
+      &prompt->messageClosed, false, memory_order_relaxed);
+}
+
+static void recoveryStoreMessage(struct RecoveryPrompt * prompt,
+    MsgBoxHandle handle)
+{
+  atomic_store_explicit(
+      &prompt->message, (uintptr_t)handle, memory_order_release);
+  if (!atomic_load_explicit(
+        &prompt->messageClosed, memory_order_acquire))
+    return;
+
+  uintptr_t expected = (uintptr_t)handle;
+  atomic_compare_exchange_strong_explicit(&prompt->message,
+      &expected, 0, memory_order_acq_rel, memory_order_acquire);
+}
+
+static void recoveryClose(struct RecoveryPrompt * prompt)
+{
+  recoveryClosePrompt(prompt);
+  recoveryCloseMessage(prompt);
+}
+
+static int recoveryExit(struct RecoveryPrompt * prompt, int result)
+{
+  recoveryClose(prompt);
+  return result;
+}
+
+static void retainMessage(MsgBoxHandle * messages, size_t capacity,
+    int * count, MsgBoxHandle message)
+{
+  if (!message)
+    return;
+
+  if ((size_t)*count >= capacity)
+  {
+    app_msgBoxClose(message);
+    return;
+  }
+
+  messages[(*count)++] = message;
+}
+
+static void recoveryShowPrompt(struct RecoveryPrompt * prompt,
+    const LG_VersionMismatch * mismatch, bool hasFallback)
+{
+  const char * fallback = hasFallback ?
+    "The client will then switch to its SPICE fallback." :
+    "SPICE is disabled in this client, so use another SPICE viewer.";
+
+  recoveryCloseMessage(prompt);
+  prompt->shown       = true;
+  prompt->retryPrompt = false;
+  atomic_store_explicit(
+      &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  MsgBoxHandle handle;
+  if (mismatch->valid)
+  {
+    const char * component = mismatch->component[0] ?
+      mismatch->component : "transport";
+    handle = app_confirmMsgBox(
+        "Incompatible Transport Version", recoveryConfirm, prompt,
+        "Expected %s version: %u\n"
+        "Current %s version: %u\n"
+        "\n"
+        "Enable recovery mode to restore the guest display topology?\n"
+        "%s",
+        component, mismatch->expectedVersion,
+        component, mismatch->currentVersion, fallback);
+  }
+  else
+  {
+    handle = app_confirmMsgBox(
+        "Incompatible Transport Version", recoveryConfirm, prompt,
+        "The transport is not compatible with this client.\n"
+        "\n"
+        "Enable recovery mode to restore the guest display topology?\n"
+        "%s", fallback);
+  }
+  atomic_store_explicit(
+      &prompt->handle, (uintptr_t)handle, memory_order_release);
+  if (atomic_load_explicit(
+        &prompt->choice, memory_order_acquire) != RECOVERY_PENDING)
+    atomic_store_explicit(&prompt->handle, 0, memory_order_relaxed);
+}
+
+static const char * recoveryErrorText(LG_RecoveryError error)
+{
+  switch (error)
+  {
+    case LG_RECOVERY_ERR_HELPER_UNAVAILABLE:
+      return "The IDD helper is unavailable";
+
+    case LG_RECOVERY_ERR_TOPOLOGY_FAILED:
+      return "Windows could not restore the saved display topology";
+
+    case LG_RECOVERY_ERR_NO_FALLBACK_DISPLAY:
+      return "No fallback display became active";
+
+    case LG_RECOVERY_ERR_UNSUPPORTED:
+      return "Recovery is not supported by the guest driver";
+
+    case LG_RECOVERY_ERR_NONE:
+      break;
+  }
+
+  return "The guest could not enter recovery mode";
+}
+
+static int recoveryTakeChoice(struct RecoveryPrompt * prompt)
+{
+  const int choice = atomic_exchange_explicit(
+      &prompt->choice, RECOVERY_PENDING, memory_order_acq_rel);
+  if (choice != RECOVERY_PENDING)
+    atomic_store_explicit(&prompt->handle, 0, memory_order_relaxed);
+  return choice;
+}
+
+static void recoveryShowRetry(struct RecoveryPrompt * prompt,
+    const char * reason, uint32_t failedSerial)
+{
+  recoveryClose(prompt);
+  if (failedSerial)
+    prompt->failedSerial = failedSerial;
+  prompt->serial        = 0;
+  prompt->reportedState = LG_RECOVERY_STATE_FAILED;
+  prompt->shown         = true;
+  prompt->requested     = false;
+  prompt->owned         = false;
+  prompt->retryPrompt   = true;
+  atomic_store_explicit(
+      &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  MsgBoxHandle handle = app_confirmMsgBox(
+      "Recovery Failed", recoveryConfirm, prompt,
+      "%s.\n\nRetry guest display recovery?", reason);
+  atomic_store_explicit(
+      &prompt->handle, (uintptr_t)handle, memory_order_release);
+  if (atomic_load_explicit(
+        &prompt->choice, memory_order_acquire) != RECOVERY_PENDING)
+    atomic_store_explicit(&prompt->handle, 0, memory_order_relaxed);
+}
+
+static void recoveryShowPending(struct RecoveryPrompt * prompt,
+    const LG_VersionMismatch * mismatch)
+{
+  prompt->shown         = true;
+  prompt->reportedState = LG_RECOVERY_STATE_SWITCHING;
+  prompt->retryPrompt   = false;
+  if (mismatch->valid)
+  {
+    const char * component = mismatch->component[0] ?
+      mismatch->component : "transport";
+    recoveryBeginMessage(prompt);
+    recoveryStoreMessage(prompt, app_msgBoxWithClose(
+          "Incompatible Transport Version",
+          recoveryMessageClosed, prompt,
+          "Expected %s version: %u\n"
+          "Current %s version: %u\n"
+          "\n"
+          "Recovery mode is pending. Waiting for the guest driver.",
+          component, mismatch->expectedVersion,
+          component, mismatch->currentVersion));
+  }
+  else
+  {
+    recoveryBeginMessage(prompt);
+    recoveryStoreMessage(prompt, app_msgBoxWithClose(
+          "Incompatible Transport Version",
+          recoveryMessageClosed, prompt,
+          "The transport is not compatible with this client.\n"
+          "\n"
+          "Recovery mode is pending. Waiting for the guest driver."));
+  }
+}
+
+static bool recoverySerialNewer(uint32_t serial, uint32_t reference)
+{
+  const uint32_t difference = serial - reference;
+  return difference && difference < 0x80000000U;
+}
+
+static void recoveryHandleMismatch(struct RecoveryPrompt * prompt,
+    const LG_VersionMismatch * mismatch)
+{
+  LG_RecoveryInfo info = { 0 };
+  const bool available = recoveryGetInfo(&info) &&
+    (info.capabilities & LG_RECOVERY_CAP_DISPLAY);
+  if (!available)
+  {
+    if (prompt->requested && !prompt->retryPrompt &&
+        !prompt->retryDeclined)
+    {
+      recoveryShowRetry(prompt,
+          "The guest recovery channel is unavailable", 0);
+      return;
+    }
+
+    if (prompt->shown)
+      return;
+
+    prompt->shown = true;
+    if (mismatch->valid)
+    {
+      const char * component = mismatch->component[0] ?
+        mismatch->component : "transport";
+      recoveryBeginMessage(prompt);
+      recoveryStoreMessage(prompt, app_msgBoxWithClose(
+            "Incompatible Transport Version",
+            recoveryMessageClosed, prompt,
+            "Expected %s version: %u\n"
+            "Current %s version: %u\n"
+            "\n"
+            "This guest driver does not support remote recovery.\n"
+            "Use a guest console to install matching components.",
+            component, mismatch->expectedVersion,
+            component, mismatch->currentVersion));
+    }
+    else
+    {
+      recoveryBeginMessage(prompt);
+      recoveryStoreMessage(prompt, app_msgBoxWithClose(
+            "Incompatible Transport Version",
+            recoveryMessageClosed, prompt,
+            "The transport is not compatible with this client.\n"
+            "\n"
+            "This guest driver does not support remote recovery.\n"
+            "Use a guest console to install matching components."));
+    }
+    return;
+  }
+
+  if (prompt->instance != info.instance)
+  {
+    recoveryClose(prompt);
+    prompt->instance      = info.instance;
+    prompt->serial        = 0;
+    prompt->failedSerial  = 0;
+    prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+    prompt->shown         = false;
+    prompt->requested     = false;
+    prompt->owned         = false;
+    prompt->retryPrompt   = false;
+    prompt->retryDeclined = false;
+    atomic_store_explicit(
+        &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  }
+
+  if (info.uuidValid)
+    lgTransportFallback_setPrimaryUUID(g_state.fallback, info.uuid);
+  else
+    lgTransportFallback_clearPrimaryUUID(g_state.fallback);
+
+  const bool requestNewer = info.requestSerial != 0 &&
+    (info.ackSerial == 0 ||
+     recoverySerialNewer(info.requestSerial, info.ackSerial));
+  const LG_RecoveryRequest globalRequest = requestNewer ?
+    info.request : info.ackRequest;
+  const uint32_t globalSerial = requestNewer ?
+    info.requestSerial : info.ackSerial;
+  if (prompt->requested && globalSerial &&
+      globalRequest == LG_RECOVERY_REQ_NORMAL &&
+      (globalSerial == prompt->serial ||
+       recoverySerialNewer(globalSerial, prompt->serial)))
+  {
+    recoveryClose(prompt);
+    prompt->serial        = 0;
+    prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+    prompt->shown         = prompt->retryDeclined;
+    prompt->requested     = false;
+    prompt->owned         = false;
+    prompt->retryPrompt   = false;
+    atomic_store_explicit(
+        &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  }
+
+  const bool pendingRecovery = requestNewer &&
+    info.request == LG_RECOVERY_REQ_RECOVERY;
+  const bool failedRecovery = !requestNewer && info.ackSerial != 0 &&
+    info.ackRequest == LG_RECOVERY_REQ_RECOVERY &&
+    info.state == LG_RECOVERY_STATE_FAILED;
+  const bool statusRecovery = !requestNewer && info.ackSerial != 0 &&
+    info.ackRequest == LG_RECOVERY_REQ_RECOVERY &&
+    (info.state == LG_RECOVERY_STATE_SWITCHING ||
+     info.state == LG_RECOVERY_STATE_ACTIVE);
+  if (failedRecovery && prompt->requested &&
+      prompt->failedSerial != info.ackSerial &&
+      (info.ackSerial == prompt->serial ||
+       recoverySerialNewer(info.ackSerial, prompt->serial)))
+  {
+    if (prompt->owned && info.ackSerial == prompt->serial)
+    {
+      recoveryShowRetry(prompt, recoveryErrorText(info.error),
+          info.ackSerial);
+      return;
+    }
+
+    recoveryClose(prompt);
+    prompt->serial        = 0;
+    prompt->failedSerial  = info.ackSerial;
+    prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+    prompt->shown         = prompt->retryDeclined;
+    prompt->requested     = false;
+    prompt->owned         = false;
+    prompt->retryPrompt   = false;
+    atomic_store_explicit(
+        &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  }
+
+  if (pendingRecovery)
+  {
+    if (!prompt->requested || prompt->serial != info.requestSerial)
+    {
+      recoveryClose(prompt);
+      prompt->requested     = true;
+      prompt->serial        = info.requestSerial;
+      prompt->failedSerial  = 0;
+      prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+      prompt->shown         = false;
+      prompt->owned         = false;
+      prompt->retryPrompt   = false;
+      atomic_store_explicit(
+          &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+    }
+  }
+  else if (statusRecovery &&
+      (!prompt->requested || prompt->serial != info.ackSerial))
+  {
+    recoveryClose(prompt);
+    prompt->requested     = true;
+    prompt->serial        = info.ackSerial;
+    prompt->failedSerial  = 0;
+    prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+    prompt->shown         = false;
+    prompt->owned         = false;
+    prompt->retryPrompt   = false;
+    atomic_store_explicit(
+        &prompt->choice, RECOVERY_PENDING, memory_order_relaxed);
+  }
+
+  const bool retryChoice = prompt->retryPrompt;
+  const int choice = recoveryTakeChoice(prompt);
+  if (choice == RECOVERY_NO)
+  {
+    prompt->retryPrompt = false;
+    if (retryChoice)
+      prompt->retryDeclined = true;
+    return;
+  }
+
+  if (choice == RECOVERY_YES)
+  {
+    prompt->retryPrompt   = false;
+    prompt->retryDeclined = false;
+    const LG_TransportStatus status =
+      g_state.transport.ops->requestRecovery ?
+        g_state.transport.ops->requestRecovery(g_state.transport.handle,
+            LG_RECOVERY_REQ_RECOVERY, &prompt->serial) :
+        LG_TRANSPORT_UNAVAILABLE;
+    prompt->requested     = status == LG_TRANSPORT_OK;
+    prompt->owned         = prompt->requested;
+    prompt->reportedState = LG_RECOVERY_STATE_UNKNOWN;
+    if (!prompt->requested)
+    {
+      recoveryShowRetry(prompt,
+          "The recovery request could not be sent to the guest driver", 0);
+      return;
+    }
+
+    prompt->failedSerial = 0;
+    fallbackRequestVideo();
+    recoveryShowPending(prompt, mismatch);
+    app_alert(LG_ALERT_INFO, "Guest display recovery requested");
+    return;
+  }
+
+  const bool matchingAck = prompt->requested && statusRecovery &&
+    info.ackSerial == prompt->serial;
+  if (matchingAck && info.state == LG_RECOVERY_STATE_ACTIVE)
+  {
+    fallbackRequestVideo();
+    if (prompt->reportedState != LG_RECOVERY_STATE_ACTIVE)
+    {
+      prompt->shown         = true;
+      prompt->reportedState = LG_RECOVERY_STATE_ACTIVE;
+      if (mismatch->valid)
+      {
+        const char * component = mismatch->component[0] ?
+          mismatch->component : "transport";
+        recoveryBeginMessage(prompt);
+        recoveryStoreMessage(prompt, app_msgBoxWithClose(
+              "Incompatible Transport Version",
+              recoveryMessageClosed, prompt,
+              "Expected %s version: %u\n"
+              "Current %s version: %u\n"
+              "\n"
+              "Recovery mode is active. SPICE video is available.",
+              component, mismatch->expectedVersion,
+              component, mismatch->currentVersion));
+      }
+      else
+      {
+        recoveryBeginMessage(prompt);
+        recoveryStoreMessage(prompt, app_msgBoxWithClose(
+              "Incompatible Transport Version",
+              recoveryMessageClosed, prompt,
+              "The transport is not compatible with this client.\n"
+              "\n"
+              "Recovery mode is active. SPICE video is available."));
+      }
+      app_alert(LG_ALERT_SUCCESS, "Guest display recovery is active");
+    }
+    return;
+  }
+
+  const bool pending = prompt->requested &&
+    ((pendingRecovery &&
+      info.requestSerial == prompt->serial) ||
+     (matchingAck && info.state == LG_RECOVERY_STATE_SWITCHING));
+  if (pending)
+  {
+    fallbackRequestVideo();
+    if (prompt->reportedState != LG_RECOVERY_STATE_SWITCHING)
+      recoveryShowPending(prompt, mismatch);
+    return;
+  }
+
+  if (!prompt->shown)
+    recoveryShowPrompt(prompt, mismatch, g_state.fallback != NULL);
 }
 
 static MsgBoxHandle showSpiceInputHelp(void)
@@ -2412,6 +2972,9 @@ static int lg_run(void)
   }
   DEBUG_INFO("Using Transport: %s", g_state.transport.ops->name);
 
+  LG_RecoveryInfo initialRecovery = { 0 };
+  const bool initialRecoveryValid = recoveryGetInfo(&initialRecovery);
+
   g_state.videoOps =
     g_state.transport.ops->getVideoOps(g_state.transport.handle);
   if (!g_state.videoOps ||
@@ -2460,7 +3023,9 @@ static int lg_run(void)
 
   g_state.micDefaultState = g_params.micDefaultState;
 
-  if (!fallbackStart())
+  const uint8_t * fallbackUUID = initialRecoveryValid &&
+    initialRecovery.uuidValid ? initialRecovery.uuid : NULL;
+  if (!fallbackStart(fallbackUUID))
     return -1;
 
   // select and init a renderer
@@ -2621,6 +3186,11 @@ static int lg_run(void)
   LG_TransportSession session;
   MsgBoxHandle msgs[10];
   int msgsCount;
+  struct RecoveryPrompt recoveryPrompt = { 0 };
+  atomic_init(&recoveryPrompt.choice, RECOVERY_PENDING);
+  atomic_init(&recoveryPrompt.handle, 0);
+  atomic_init(&recoveryPrompt.message, 0);
+  atomic_init(&recoveryPrompt.messageClosed, false);
 
 restart:
   frameTimingReset();
@@ -2636,8 +3206,8 @@ restart:
 
     if (initialFallbackEnable && microtime() > initialFallbackEnable)
     {
-      app_useVideoSource(LG_VIDEO_SOURCE_FALLBACK);
-      initialFallbackEnable = 0;
+      if (fallbackRequestVideo())
+        initialFallbackEnable = 0;
     }
 
     struct TransportSessionProbe probe = {
@@ -2650,7 +3220,7 @@ restart:
           &probeThread))
     {
       DEBUG_ERROR("Failed to create transport session probe thread");
-      return -1;
+      return recoveryExit(&recoveryPrompt, -1);
     }
 
     while (app_getState() == APP_STATE_RUNNING &&
@@ -2663,11 +3233,11 @@ restart:
     if (!lgJoinThread(probeThread, NULL))
     {
       DEBUG_ERROR("Failed to join transport session probe thread");
-      return -1;
+      return recoveryExit(&recoveryPrompt, -1);
     }
 
     if (app_getState() != APP_STATE_RUNNING)
-      return -1;
+      return recoveryExit(&recoveryPrompt, -1);
 
     if (probe.status == LG_TRANSPORT_OK)
     {
@@ -2679,14 +3249,10 @@ restart:
     if (probe.status == LG_TRANSPORT_INVALID_VERSION)
     {
       if (waitCount++ == 0)
-      {
-        reportBadVersion();
-        msgs[msgsCount++] = app_msgBox(
-            "Incompatible Transport Version",
-            "The selected transport source is not compatible with this client.\n"
-            "Please install matching versions.");
-        DEBUG_INFO("Remote transport version: %u", probe.session.remoteVersion);
-      }
+        reportBadVersion(&probe.session.versionMismatch);
+
+      recoveryHandleMismatch(
+          &recoveryPrompt, &probe.session.versionMismatch);
 
       g_state.ds->wait(1000);
       continue;
@@ -2703,22 +3269,50 @@ restart:
       }
       if (waitCount == 30 && !g_params.disableWaitingMessage)
       {
-        msgs[msgsCount++] = app_msgBox(
-            "Transport Source Not Available",
-            "The selected transport source is not available.\n"
-            "Continuing to wait...");
-        msgs[msgsCount++] = showSpiceInputHelp();
+        const size_t msgCapacity = sizeof(msgs) / sizeof(*msgs);
+        retainMessage(msgs, msgCapacity, &msgsCount,
+            app_msgBox("Transport Source Not Available",
+              "The selected transport source is not available.\n"
+              "Continuing to wait..."));
+        retainMessage(msgs, msgCapacity, &msgsCount,
+            showSpiceInputHelp());
       }
       g_state.ds->wait(1000);
       continue;
     }
 
     DEBUG_ERROR("Transport connection failed with status %d", probe.status);
-    return -1;
+    return recoveryExit(&recoveryPrompt, -1);
   }
 
   if (app_getState() != APP_STATE_RUNNING)
-    return -1;
+    return recoveryExit(&recoveryPrompt, -1);
+
+  recoveryClose(&recoveryPrompt);
+  LG_RecoveryInfo recoveryInfo = { 0 };
+  if (recoveryGetInfo(&recoveryInfo) &&
+      (recoveryInfo.state == LG_RECOVERY_STATE_ACTIVE ||
+       recoveryInfo.state == LG_RECOVERY_STATE_SWITCHING ||
+       recoveryInfo.request == LG_RECOVERY_REQ_RECOVERY ||
+       recoveryInfo.ackRequest == LG_RECOVERY_REQ_RECOVERY) &&
+      g_state.transport.ops->requestRecovery)
+  {
+    const LG_TransportStatus status =
+      g_state.transport.ops->requestRecovery(g_state.transport.handle,
+          LG_RECOVERY_REQ_NORMAL, NULL);
+    if (status != LG_TRANSPORT_OK)
+      DEBUG_WARN("Failed to leave recovery mode: %d", status);
+  }
+  recoveryPrompt.serial        = 0;
+  recoveryPrompt.failedSerial  = 0;
+  recoveryPrompt.reportedState = LG_RECOVERY_STATE_UNKNOWN;
+  recoveryPrompt.shown         = false;
+  recoveryPrompt.requested     = false;
+  recoveryPrompt.owned         = false;
+  recoveryPrompt.retryPrompt   = false;
+  recoveryPrompt.retryDeclined = false;
+  atomic_store_explicit(
+      &recoveryPrompt.choice, RECOVERY_PENDING, memory_order_relaxed);
 
   waitCount = 100;
   for (int i = 0; i < msgsCount; ++i)
@@ -2811,7 +3405,7 @@ restart:
   {
     videoSourceBegin(LG_VIDEO_SOURCE_PRIMARY);
     if (!core_startCursorThread() || !core_startFrameThread())
-      return -1;
+      return recoveryExit(&recoveryPrompt, -1);
   }
   else
   {
@@ -2819,7 +3413,7 @@ restart:
           g_state.transport.handle, true))
     {
       DEBUG_ERROR("Failed to activate the primary software surface");
-      return -1;
+      return recoveryExit(&recoveryPrompt, -1);
     }
     app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
   }
@@ -2852,7 +3446,6 @@ restart:
     atomic_store_explicit(
         &g_state.lgHostConnected, false, memory_order_release);
     g_state.guestUUIDValid = false;
-    lgTransportFallback_clearPrimaryUUID(g_state.fallback);
 
     lgSignalEvent(e_startup);
     lgSignalEvent(g_state.frameEvent);
@@ -2877,7 +3470,7 @@ restart:
     goto restart;
   }
 
-  return 0;
+  return recoveryExit(&recoveryPrompt, 0);
 }
 
 static void lg_shutdown(void)

@@ -29,7 +29,9 @@
 bool overlayMsg_modal(void);
 
 MsgBoxHandle overlayMsg_show(
-    const char * caption, MsgBoxConfirmCallback confirm, void * opaque,
+    const char * caption,
+    MsgBoxConfirmCallback confirm, void * confirmOpaque,
+    MsgBoxCloseCallback close, void * closeOpaque,
     const char * fmt, va_list args);
 
 void overlayMsg_close(MsgBoxHandle handle);

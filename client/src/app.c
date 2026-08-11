@@ -712,7 +712,20 @@ MsgBoxHandle app_msgBox(const char * caption, const char * fmt, ...)
 {
   va_list args;
   va_start(args, fmt);
-  MsgBoxHandle handle = overlayMsg_show(caption, NULL, NULL, fmt, args);
+  MsgBoxHandle handle = overlayMsg_show(
+      caption, NULL, NULL, NULL, NULL, fmt, args);
+  va_end(args);
+
+  return handle;
+}
+
+MsgBoxHandle app_msgBoxWithClose(const char * caption,
+    MsgBoxCloseCallback callback, void * opaque, const char * fmt, ...)
+{
+  va_list args;
+  va_start(args, fmt);
+  MsgBoxHandle handle = overlayMsg_show(
+      caption, NULL, NULL, callback, opaque, fmt, args);
   va_end(args);
 
   return handle;
@@ -723,7 +736,8 @@ MsgBoxHandle app_confirmMsgBox(const char * caption,
 {
   va_list args;
   va_start(args, fmt);
-  MsgBoxHandle handle = overlayMsg_show(caption, callback, opaque, fmt, args);
+  MsgBoxHandle handle = overlayMsg_show(
+      caption, callback, opaque, NULL, NULL, fmt, args);
   va_end(args);
 
   return handle;

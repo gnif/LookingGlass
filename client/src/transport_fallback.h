@@ -41,10 +41,14 @@ LG_TransportFallbackEventOps;
 bool lgTransportFallback_start(const char * transportName,
     const LG_SwSurfaceEventOps * surfaceEvents, void * surfaceOpaque,
     const LG_TransportFallbackEventOps * eventOps, void * eventOpaque,
+    const uint8_t primaryUUID[16],
     LG_TransportFallback ** result);
 void lgTransportFallback_stop(LG_TransportFallback ** fallback);
 
 bool lgTransportFallback_ready(const LG_TransportFallback * fallback);
+bool lgTransportFallback_admitted(const LG_TransportFallback * fallback);
+bool lgTransportFallback_videoRequested(
+    LG_TransportFallback * fallback);
 /* The requested state is retained across reconnects. */
 void lgTransportFallback_requestVideoActive(
     LG_TransportFallback * fallback, bool active);
