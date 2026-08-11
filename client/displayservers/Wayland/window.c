@@ -23,6 +23,10 @@
 #include <stdbool.h>
 #include <string.h>
 
+#include <errno.h>
+#include <sys/epoll.h>
+#include <sys/eventfd.h>
+#include <unistd.h>
 #include <wayland-client.h>
 
 #include "app.h"
@@ -132,6 +136,29 @@ static const struct wp_fractional_scale_v1_listener fractionalScaleListener = {
   .preferred_scale = fractionalScalePreferredScale,
 };
 
+static void resizePollCallback(uint32_t events, void * opaque)
+{
+  eventfd_t value;
+  eventfd_read(wlWm.resizeEventFd, &value);
+
+  const uint64_t pending = atomic_exchange_explicit(&wlWm.pendingResize, 0,
+      memory_order_acquire);
+  if (!pending || !app_isRunning())
+    return;
+
+  wlWm.desktop->shellResize((int)(pending >> 32), (int)(uint32_t)pending);
+}
+
+static void resizeEventFdFree(void)
+{
+  if (wlWm.resizeEventFd < 0)
+    return;
+
+  waylandPollUnregister(wlWm.resizeEventFd);
+  close(wlWm.resizeEventFd);
+  wlWm.resizeEventFd = -1;
+}
+
 bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, bool maximize, bool borderless, bool resizable)
 {
   wlWm.scale = waylandScaleFromInt(1);
@@ -142,11 +169,29 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     DEBUG_ERROR("Failed to initialize event for waitFrame");
     return false;
   }
+
   waylandSignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
+
+  wlWm.resizeEventFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  if (wlWm.resizeEventFd < 0)
+  {
+    DEBUG_ERROR("Failed to create the resize eventfd: %s", strerror(errno));
+    return false;
+  }
+
+  if (!waylandPollRegister(wlWm.resizeEventFd, resizePollCallback, NULL,
+        EPOLLIN))
+  {
+    DEBUG_ERROR("Failed to register the resize eventfd");
+    close(wlWm.resizeEventFd);
+    wlWm.resizeEventFd = -1;
+    return false;
+  }
 
   if (!wlWm.compositor)
   {
     DEBUG_ERROR("Compositor missing wl_compositor (version 3+), will not proceed");
+    resizeEventFdFree();
     return false;
   }
 
@@ -154,6 +199,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
   if (!wlWm.surface)
   {
     DEBUG_ERROR("Failed to create wl_surface");
+    resizeEventFdFree();
     return false;
   }
 
@@ -176,7 +222,10 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
   if (!wlWm.desktop->shellInit(wlWm.display, wlWm.surface,
         title, appId, fullscreen, maximize, borderless, resizable))
+  {
+    resizeEventFdFree();
     return false;
+  }
 
   INTERLOCKED_SECTION(wlWm.surfaceLock,
   {
@@ -190,6 +239,7 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
     if (wl_display_roundtrip(wlWm.display) < 0)
     {
       DEBUG_ERROR("Failed waiting for the initial Wayland configure");
+      resizeEventFdFree();
       return false;
     }
   }
@@ -199,6 +249,8 @@ bool waylandWindowInit(const char * title, const char * appId, bool fullscreen, 
 
 void waylandWindowFree(void)
 {
+  resizeEventFdFree();
+
   struct SurfaceOutput * output;
   struct SurfaceOutput * temp;
   wl_list_for_each_safe(output, temp, &wlWm.surfaceOutputs, link)
@@ -217,7 +269,10 @@ void waylandWindowFree(void)
 
 void waylandSetWindowSize(int x, int y)
 {
-    wlWm.desktop->shellResize(x, y);
+  // The shell resize must run on the event-loop thread; see resizePollCallback
+  atomic_store_explicit(&wlWm.pendingResize,
+      (uint64_t)(uint32_t)x << 32 | (uint32_t)y, memory_order_release);
+  eventfd_write(wlWm.resizeEventFd, 1);
 }
 
 bool waylandIsValidPointerPos(int x, int y)
