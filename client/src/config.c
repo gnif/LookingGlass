@@ -27,10 +27,12 @@
 #include "common/paths.h"
 #include "common/stringutils.h"
 
-#include <sys/stat.h>
+#include <errno.h>
+#include <limits.h>
 #include <pwd.h>
-#include <unistd.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // forwards
 static bool       optRendererParse     (struct Option * opt, const char * str);
@@ -813,6 +815,28 @@ static char * optRendererToString(struct Option * opt)
   return strdup(LG_Renderers[g_params.forceRendererIndex]->getName());
 }
 
+static bool parsePair(const char * str, long long * first, long long * second)
+{
+  if (!str)
+    return false;
+
+  char * end;
+  errno = 0;
+  const long long x = strtoll(str, &end, 10);
+  if (errno == ERANGE || end == str || *end != 'x')
+    return false;
+
+  const char * next = end + 1;
+  errno = 0;
+  const long long y = strtoll(next, &end, 10);
+  if (errno == ERANGE || end == next || *end != '\0')
+    return false;
+
+  *first  = x;
+  *second = y;
+  return true;
+}
+
 static bool optPosParse(struct Option * opt, const char * str)
 {
   if (!str)
@@ -824,13 +848,16 @@ static bool optPosParse(struct Option * opt, const char * str)
     return true;
   }
 
-  if (sscanf(str, "%dx%d", &g_params.x, &g_params.y) == 2)
-  {
-    g_params.center = false;
-    return true;
-  }
+  long long x;
+  long long y;
+  if (!parsePair(str, &x, &y) ||
+      x < INT_MIN || x > INT_MAX || y < INT_MIN || y > INT_MAX)
+    return false;
 
-  return false;
+  g_params.x      = (int)x;
+  g_params.y      = (int)y;
+  g_params.center = false;
+  return true;
 }
 
 static StringList optPosValues(struct Option * opt)
@@ -863,17 +890,15 @@ static char * optPosToString(struct Option * opt)
 
 static bool optSizeParse(struct Option * opt, const char * str)
 {
-  if (!str)
+  long long width;
+  long long height;
+  if (!parsePair(str, &width, &height) ||
+      width < 1 || width > UINT_MAX || height < 1 || height > UINT_MAX)
     return false;
 
-  if (sscanf(str, "%ux%u", &g_params.w, &g_params.h) == 2)
-  {
-    if (g_params.w < 1 || g_params.h < 1)
-      return false;
-    return true;
-  }
-
-  return false;
+  g_params.w = (unsigned int)width;
+  g_params.h = (unsigned int)height;
+  return true;
 }
 
 static StringList optSizeValues(struct Option * opt)
