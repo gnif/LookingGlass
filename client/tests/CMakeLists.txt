@@ -355,6 +355,41 @@ foreach(name IN LISTS KEYBIND_CASES)
   )
 endforeach()
 
+add_executable(app-keybind-tests
+  app_keybind_test.c
+  ../src/app.c
+)
+target_compile_definitions(app-keybind-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(app-keybind-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(app-keybind-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(APP_KEYBIND_CASES
+  invalid
+  null-callback
+  duplicate
+  normal
+  dispatch
+  release-all
+  focus
+  reentrant
+)
+foreach(name IN LISTS APP_KEYBIND_CASES)
+  add_test(NAME app-keybind-${name}
+    COMMAND app-keybind-tests ${name}
+  )
+  set_tests_properties(app-keybind-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(clipboard-tests
   clipboard_test.c
   ../src/clipboard.c
