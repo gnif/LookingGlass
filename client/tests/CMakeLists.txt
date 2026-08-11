@@ -144,6 +144,39 @@ foreach(name IN LISTS MOUSE_CASES)
   )
 endforeach()
 
+add_executable(transport-fallback-tests
+  transport_fallback_test.c
+  ../src/transport_fallback.c
+)
+target_include_directories(transport-fallback-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(transport-fallback-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+if(ENABLE_AUDIO)
+  target_compile_definitions(transport-fallback-tests PRIVATE
+    ENABLE_AUDIO
+  )
+endif()
+set(TRANSPORT_FALLBACK_CASES
+  graceful
+  dead
+  mismatch
+  revoke
+  retry
+  cancel
+)
+foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
+  add_test(NAME transport-fallback-${name}
+    COMMAND transport-fallback-tests ${name}
+  )
+  set_tests_properties(transport-fallback-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(render-queue-tests
   render_queue_test.c
   ../src/render_queue.c
