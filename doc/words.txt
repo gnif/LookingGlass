@@ -1,13 +1,16 @@
 Anime4K
 backend
+backends
 backtrace
 BigNavi
 borderless
 Brindus
 cadence
 cgroups
+checkboxes
 clang
 cmake
+codec
 compositor
 config
 CopySleep
@@ -24,6 +27,7 @@ downsample
 downsampling
 downscaler
 downscaling
+EGL
 evdev
 ExtraMode
 Flatpak
@@ -33,6 +37,7 @@ gcc
 globalFullScreen
 gnif
 Guanzhong
+HDR
 hypervisor
 i3
 IddCx
@@ -56,6 +61,7 @@ microstutters
 mingw
 mipmapping
 modprobe
+mpv
 msys
 multisampling
 namespace
@@ -64,6 +70,7 @@ NvFBC
 Nvidia
 overlayed
 overrun
+oversized
 pacman
 passthrough
 performant
@@ -73,6 +80,7 @@ protanope
 QEMU
 quadraphonic
 Quadro
+queueing
 radeon
 realtime
 renderer
@@ -83,6 +91,8 @@ runtime
 scanout
 Scream
 scRGB
+SDR
+shaders
 shm
 spencercw
 submodule
@@ -100,13 +110,16 @@ UEFI
 uncheck
 uncomment
 underrun
+underruns
 Unigine
 unix
 upscaled
 upscaler
 upscales
 upscaling
+viewport
 VirtIO
+virtio
 VM
 vsync
 wayland
