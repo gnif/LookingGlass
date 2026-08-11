@@ -170,6 +170,35 @@ foreach(name IN LISTS MOUSE_CASES)
   )
 endforeach()
 
+add_executable(input-tests
+  input_test.c
+  ../src/input.c
+)
+target_include_directories(input-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(input-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+set(INPUT_CASES
+  preference
+  handoff
+  stale
+  dead-drop
+  rollback
+  duplicate
+  absolute
+)
+foreach(name IN LISTS INPUT_CASES)
+  add_test(NAME input-${name}
+    COMMAND input-tests ${name}
+  )
+  set_tests_properties(input-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(transport-fallback-tests
   transport_fallback_test.c
   ../src/transport_fallback.c
