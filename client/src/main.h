@@ -33,7 +33,6 @@
 #include "common/event.h"
 #include "common/ll.h"
 
-#include <purespice.h>
 #include "cimgui.h"
 #include "interface/transport.h"
 
@@ -79,12 +78,11 @@ struct AppState
   bool                         dsInitialized;
   bool                         jitRender;
 
-  uint8_t     spiceUUID[16];
-  atomic_bool spiceReady;
-  atomic_bool spiceDisplayRequested;
-  atomic_bool spiceDisplayActive;
-  atomic_bool spiceDisplayTransition;
-  bool        spicePrimarySurfaceValid;
+  atomic_bool fallbackReady;
+  atomic_bool fallbackDisplayRequested;
+  atomic_bool fallbackDisplayActive;
+  atomic_bool fallbackDisplayTransition;
+  bool        fallbackSurfaceValid;
 
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
@@ -112,8 +110,6 @@ struct AppState
   LG_RendererRect      dstRect;
   bool                 posInfoValid;
   bool                 alignToGuest;
-  atomic_bool          spiceClose;
-
   atomic_uint_least64_t shaderMousePosition;
   atomic_uint_least32_t shaderMouseState;
 
@@ -126,6 +122,10 @@ struct AppState
   LG_TransportInstance      transport;
   const LG_VideoOps       * videoOps;
   LG_TransportFeatureFlags  transportFeatures;
+
+  LG_TransportInstance fallbackTransport;
+  LG_TransportSession  fallbackSession;
+  const LG_VideoOps  * fallbackVideoOps;
 
   LGThread            * cursorThread;
   LGThread            * frameThread;
@@ -151,8 +151,6 @@ struct AppState
   bool     autoIdleInhibitState;
 
   enum MicDefaultState micDefaultState;
-
-  int spiceHotX, spiceHotY;
 
   // Set to true when setHDRImageDesc() returns false, indicating
   // the display server could not apply the HDR image description.

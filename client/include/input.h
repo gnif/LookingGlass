@@ -23,8 +23,6 @@
 
 #include "interface/input.h"
 
-extern const LG_InputOps LGI_Spice;
-
 void lgInput_init(void);
 void lgInput_free(void);
 

@@ -71,6 +71,7 @@ typedef uint32_t LG_TransportFeatureFlags;
 typedef struct LG_TransportSession
 {
   char version[32];
+  char name[256];
   LG_TransportFeatureFlags features;
 
   bool uuidValid;
@@ -181,8 +182,8 @@ typedef struct LG_TransportPointer
   int16_t x;
   int16_t y;
   CursorType type;
-  int8_t hx;
-  int8_t hy;
+  int16_t hx;
+  int16_t hy;
   uint32_t width;
   uint32_t height;
   uint32_t pitch;
@@ -267,9 +268,34 @@ typedef struct LG_FrameOps
 }
 LG_FrameOps;
 
+typedef struct LG_SwSurfaceEventOps
+{
+  void (*configure)(void * opaque, unsigned int width, unsigned int height);
+  void (*destroy)(void * opaque);
+  void (*drawFill)(void * opaque, int x, int y, int width, int height,
+      uint32_t color);
+  /* Bitmap data is BGRA32 and remains valid only for the callback. */
+  void (*drawBitmap)(void * opaque, bool topDown, int x, int y,
+      int width, int height, int stride, const void * data);
+  /* Pointer payloads remain valid only for the callback. */
+  void (*pointer)(void * opaque, const LG_TransportPointer * pointer);
+}
+LG_SwSurfaceEventOps;
+
+typedef struct LG_SwSurfaceOps
+{
+  /* detach synchronously quiesces all event callbacks. */
+  bool (*attach)(LG_Transport * transport,
+      const LG_SwSurfaceEventOps * events, void * opaque);
+  void (*detach)(LG_Transport * transport);
+  bool (*setActive)(LG_Transport * transport, bool active);
+}
+LG_SwSurfaceOps;
+
 typedef enum LG_VideoType
 {
   LG_VIDEO_TYPE_FRAME,
+  LG_VIDEO_TYPE_SW_SURFACE,
 }
 LG_VideoType;
 
@@ -277,7 +303,11 @@ typedef struct LG_VideoOps
 {
   const char       * name;
   LG_VideoType       type;
-  const LG_FrameOps * frame;
+  union
+  {
+    const LG_FrameOps     * frame;
+    const LG_SwSurfaceOps * swSurface;
+  };
 }
 LG_VideoOps;
 

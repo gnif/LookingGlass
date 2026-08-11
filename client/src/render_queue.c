@@ -131,7 +131,7 @@ void renderQueue_swSurfaceDrawFill(int x, int y, int width, int height,
 }
 
 void renderQueue_swSurfaceDrawBitmap(int x, int y, int width, int height,
-    int stride, void * data, bool topDown)
+    int stride, const void * data, bool topDown)
 {
   if (width <= 0 || height <= 0 || stride <= 0)
   {

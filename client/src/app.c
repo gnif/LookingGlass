@@ -1151,17 +1151,19 @@ void app_stopVideo(bool stop)
 
 bool app_useSpiceDisplay(bool enable)
 {
-  if (!g_params.useSpice)
+  if (!g_params.useSpice || !g_state.fallbackVideoOps ||
+      g_state.fallbackVideoOps->type != LG_VIDEO_TYPE_SW_SURFACE ||
+      !g_state.fallbackVideoOps->swSurface)
     return false;
 
-  atomic_store_explicit(&g_state.spiceDisplayRequested, enable,
+  atomic_store_explicit(&g_state.fallbackDisplayRequested, enable,
       memory_order_release);
 
-  // if spice is not yet ready, flag the state we want for when it is
-  if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire))
+  // if the fallback is not yet ready, retain the requested state
+  if (!atomic_load_explicit(&g_state.fallbackReady, memory_order_acquire))
     return false;
 
-  bool active = atomic_load_explicit(&g_state.spiceDisplayActive,
+  bool active = atomic_load_explicit(&g_state.fallbackDisplayActive,
       memory_order_acquire);
   if (active == enable)
     return active;
@@ -1170,65 +1172,40 @@ bool app_useSpiceDisplay(bool enable)
   if (!enable && !atomic_load_explicit(
         &g_state.lgHostConnected, memory_order_acquire))
   {
-    atomic_store_explicit(&g_state.spiceDisplayRequested, active,
+    atomic_store_explicit(&g_state.fallbackDisplayRequested, active,
         memory_order_release);
     return false;
   }
 
   bool expected = false;
   if (!atomic_compare_exchange_strong_explicit(
-        &g_state.spiceDisplayTransition, &expected, true,
+        &g_state.fallbackDisplayTransition, &expected, true,
         memory_order_acquire, memory_order_relaxed))
-    return atomic_load_explicit(&g_state.spiceDisplayActive,
+    return atomic_load_explicit(&g_state.fallbackDisplayActive,
         memory_order_acquire);
 
-  active = atomic_load_explicit(&g_state.spiceDisplayActive,
+  active = atomic_load_explicit(&g_state.fallbackDisplayActive,
       memory_order_relaxed);
   if (active == enable)
     goto done;
 
-  if (enable)
-  {
-    if (!purespice_hasChannel(PS_CHANNEL_DISPLAY) ||
-        !purespice_hasChannel(PS_CHANNEL_CURSOR))
-      goto fail;
+  if (!g_state.fallbackVideoOps->swSurface->setActive(
+        g_state.fallbackTransport.handle, enable))
+    goto fail;
 
-    if (!purespice_connectChannel(PS_CHANNEL_DISPLAY))
-      goto fail;
-
-    if (!purespice_connectChannel(PS_CHANNEL_CURSOR))
-    {
-      purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
-      goto fail;
-    }
-
-    renderQueue_swSurfaceShow(true);
-  }
-  else
-  {
-    if (!purespice_disconnectChannel(PS_CHANNEL_DISPLAY))
-      goto fail;
-
-    if (!purespice_disconnectChannel(PS_CHANNEL_CURSOR))
-    {
-      purespice_connectChannel(PS_CHANNEL_DISPLAY);
-      goto fail;
-    }
-
-    renderQueue_swSurfaceShow(false);
-  }
+  renderQueue_swSurfaceShow(enable);
 
   active = enable;
-  atomic_store_explicit(&g_state.spiceDisplayActive, active,
+  atomic_store_explicit(&g_state.fallbackDisplayActive, active,
       memory_order_release);
   lgInput_useTransport(!active);
   overlayStatus_set(LG_USER_STATUS_SPICE, enable);
 
 done:
-  atomic_store_explicit(&g_state.spiceDisplayTransition, false,
+  atomic_store_explicit(&g_state.fallbackDisplayTransition, false,
       memory_order_release);
 
-  enable = atomic_load_explicit(&g_state.spiceDisplayRequested,
+  enable = atomic_load_explicit(&g_state.fallbackDisplayRequested,
       memory_order_acquire);
   if (enable != active)
     return app_useSpiceDisplay(enable);
@@ -1238,7 +1215,7 @@ done:
 fail:
   DEBUG_ERROR("Failed to %s the SPICE display",
       enable ? "enable" : "disable");
-  atomic_store_explicit(&g_state.spiceDisplayRequested, active,
+  atomic_store_explicit(&g_state.fallbackDisplayRequested, active,
       memory_order_release);
   goto done;
 }

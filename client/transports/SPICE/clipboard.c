@@ -18,12 +18,13 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "clipboard_spice.h"
+#include "clipboard.h"
 
 #include "common/debug.h"
 #include "common/locking.h"
 
 #include <stdatomic.h>
+#include <stdlib.h>
 
 typedef struct ClipboardEventTarget
 {
@@ -40,7 +41,7 @@ typedef struct PendingRequest
 }
 PendingRequest;
 
-static struct
+struct SpiceClipboard
 {
   LG_Lock stateLock;
   LG_Lock eventDispatch;
@@ -60,14 +61,9 @@ static struct
   PendingRequest   write;
 
   LG_ClipboardRequest requestSerial;
-}
-l_spice =
-{
-  .stateLock      = ATOMIC_FLAG_INIT,
-  .eventDispatch  = ATOMIC_FLAG_INIT,
-  .statusDispatch = ATOMIC_FLAG_INIT,
-  .remoteType     = LG_CLIPBOARD_DATA_NONE,
 };
+
+static _Atomic(SpiceClipboard *) l_callbackTarget;
 
 static uint32_t nextGeneration(uint32_t generation)
 {
@@ -76,11 +72,11 @@ static uint32_t nextGeneration(uint32_t generation)
   return generation;
 }
 
-static LG_ClipboardRequest nextRequestNL(void)
+static LG_ClipboardRequest nextRequestNL(SpiceClipboard * clipboard)
 {
-  if (++l_spice.requestSerial == LG_CLIPBOARD_REQUEST_INVALID)
-    ++l_spice.requestSerial;
-  return l_spice.requestSerial;
+  if (++clipboard->requestSerial == LG_CLIPBOARD_REQUEST_INVALID)
+    ++clipboard->requestSerial;
+  return clipboard->requestSerial;
 }
 
 static bool spiceType(PSDataType source, LG_ClipboardData * type)
@@ -116,76 +112,76 @@ static bool lgType(LG_ClipboardData source, PSDataType * type)
 static void spiceSetStatusListener(void * opaque,
     LG_ClipboardStatusFn callback, void * callbackOpaque)
 {
-  (void)opaque;
-  LG_LOCK(l_spice.statusDispatch);
+  SpiceClipboard * clipboard = opaque;
+  LG_LOCK(clipboard->statusDispatch);
 
-  LG_LOCK(l_spice.stateLock);
-  l_spice.statusCallback = callback;
-  l_spice.statusOpaque   = callbackOpaque;
+  LG_LOCK(clipboard->stateLock);
+  clipboard->statusCallback = callback;
+  clipboard->statusOpaque   = callbackOpaque;
   const LG_ClipboardStatus status =
   {
-    .available  = l_spice.available,
-    .generation = l_spice.statusGeneration,
+    .available  = clipboard->available,
+    .generation = clipboard->statusGeneration,
   };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   if (callback)
     callback(callbackOpaque, &status);
-  LG_UNLOCK(l_spice.statusDispatch);
+  LG_UNLOCK(clipboard->statusDispatch);
 }
 
 static bool spiceAttach(void * opaque,
     const LG_ClipboardEventOps * events, void * eventOpaque)
 {
-  (void)opaque;
+  SpiceClipboard * clipboard = opaque;
   if (!events)
     return false;
 
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  if (!l_spice.available)
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  if (!clipboard->available)
   {
-    LG_UNLOCK(l_spice.stateLock);
-    LG_UNLOCK(l_spice.eventDispatch);
+    LG_UNLOCK(clipboard->stateLock);
+    LG_UNLOCK(clipboard->eventDispatch);
     return false;
   }
 
-  l_spice.events      = events;
-  l_spice.eventOpaque = eventOpaque;
-  const bool             notice = l_spice.remoteNotice;
-  const LG_ClipboardData type   = l_spice.remoteType;
-  LG_UNLOCK(l_spice.stateLock);
+  clipboard->events      = events;
+  clipboard->eventOpaque = eventOpaque;
+  const bool             notice = clipboard->remoteNotice;
+  const LG_ClipboardData type   = clipboard->remoteType;
+  LG_UNLOCK(clipboard->stateLock);
 
   if (notice && events->notice)
     events->notice(eventOpaque, &type, 1);
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
   return true;
 }
 
 static void spiceDetach(void * opaque)
 {
-  (void)opaque;
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  const bool failWrite = l_spice.available && l_spice.write.pending;
-  l_spice.events      = NULL;
-  l_spice.eventOpaque = NULL;
-  l_spice.read        = (PendingRequest) { 0 };
-  l_spice.write       = (PendingRequest) { 0 };
-  LG_UNLOCK(l_spice.stateLock);
+  SpiceClipboard * clipboard = opaque;
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  const bool failWrite = clipboard->available && clipboard->write.pending;
+  clipboard->events      = NULL;
+  clipboard->eventOpaque = NULL;
+  clipboard->read        = (PendingRequest) { 0 };
+  clipboard->write       = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
   if (failWrite)
     purespice_clipboardDataStart(SPICE_DATA_NONE, 0);
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
 }
 
 static bool spiceRelease(void * opaque)
 {
-  (void)opaque;
-  LG_LOCK(l_spice.stateLock);
-  const bool available  = l_spice.available;
-  const bool failWrite  = l_spice.write.pending;
-  l_spice.write = (PendingRequest) { 0 };
-  LG_UNLOCK(l_spice.stateLock);
+  SpiceClipboard * clipboard = opaque;
+  LG_LOCK(clipboard->stateLock);
+  const bool available = clipboard->available;
+  const bool failWrite = clipboard->write.pending;
+  clipboard->write = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
 
   if (!available)
     return false;
@@ -198,9 +194,9 @@ static bool spiceRelease(void * opaque)
 static bool spiceNotifyTypes(void * opaque,
     const LG_ClipboardData types[], size_t count)
 {
-  (void)opaque;
+  SpiceClipboard * clipboard = opaque;
   if (count == 0)
-    return spiceRelease(NULL);
+    return spiceRelease(clipboard);
   if (!types || count > LG_CLIPBOARD_DATA_NONE)
     return false;
 
@@ -210,11 +206,11 @@ static bool spiceNotifyTypes(void * opaque,
         !lgType(types[i], &converted[i]))
       return false;
 
-  LG_LOCK(l_spice.stateLock);
-  const bool available = l_spice.available;
-  const bool failWrite = l_spice.write.pending;
-  l_spice.write = (PendingRequest) { 0 };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_LOCK(clipboard->stateLock);
+  const bool available = clipboard->available;
+  const bool failWrite = clipboard->write.pending;
+  clipboard->write = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
 
   if (!available)
     return false;
@@ -227,20 +223,20 @@ static bool spiceNotifyTypes(void * opaque,
 static bool spiceData(void * opaque, LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size)
 {
-  (void)opaque;
+  SpiceClipboard * clipboard = opaque;
   PSDataType converted;
   if (request == LG_CLIPBOARD_REQUEST_INVALID || !lgType(type, &converted) ||
       (type == LG_CLIPBOARD_DATA_NONE && size != 0) ||
       (size && !data))
     return false;
 
-  LG_LOCK(l_spice.stateLock);
-  const bool valid = l_spice.available && l_spice.write.pending &&
-    l_spice.write.request == request &&
-    (type == LG_CLIPBOARD_DATA_NONE || l_spice.write.type == type);
+  LG_LOCK(clipboard->stateLock);
+  const bool valid = clipboard->available && clipboard->write.pending &&
+    clipboard->write.request == request &&
+    (type == LG_CLIPBOARD_DATA_NONE || clipboard->write.type == type);
   if (valid)
-    l_spice.write = (PendingRequest) { 0 };
-  LG_UNLOCK(l_spice.stateLock);
+    clipboard->write = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
 
   if (!valid || !purespice_clipboardDataStart(converted, size))
     return false;
@@ -252,23 +248,23 @@ static bool spiceData(void * opaque, LG_ClipboardRequest request,
 static bool spiceRequest(void * opaque, LG_ClipboardRequest request,
     LG_ClipboardData type)
 {
-  (void)opaque;
+  SpiceClipboard * clipboard = opaque;
   PSDataType converted;
   if (request == LG_CLIPBOARD_REQUEST_INVALID ||
       type == LG_CLIPBOARD_DATA_NONE || !lgType(type, &converted))
     return false;
 
-  LG_LOCK(l_spice.stateLock);
-  const bool valid = l_spice.available && l_spice.events &&
-    !l_spice.read.pending;
+  LG_LOCK(clipboard->stateLock);
+  const bool valid = clipboard->available && clipboard->events &&
+    !clipboard->read.pending;
   if (valid)
-    l_spice.read = (PendingRequest)
+    clipboard->read = (PendingRequest)
     {
-      .pending    = true,
-      .request    = request,
-      .type       = type,
+      .pending = true,
+      .request = request,
+      .type    = type,
     };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   if (!valid)
     return false;
@@ -276,18 +272,18 @@ static bool spiceRequest(void * opaque, LG_ClipboardRequest request,
   if (purespice_clipboardRequest(converted))
     return true;
 
-  LG_LOCK(l_spice.stateLock);
-  if (!l_spice.read.pending || l_spice.read.request != request)
+  LG_LOCK(clipboard->stateLock);
+  if (!clipboard->read.pending || clipboard->read.request != request)
   {
-    LG_UNLOCK(l_spice.stateLock);
+    LG_UNLOCK(clipboard->stateLock);
     return true;
   }
-  l_spice.read = (PendingRequest) { 0 };
-  LG_UNLOCK(l_spice.stateLock);
+  clipboard->read = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
   return false;
 }
 
-const LG_ClipboardOps LGC_Spice =
+static const LG_ClipboardOps l_clipboardOps =
 {
   .name              = "SPICE",
   .setStatusListener = spiceSetStatusListener,
@@ -299,99 +295,152 @@ const LG_ClipboardOps LGC_Spice =
   .request           = spiceRequest,
 };
 
-void lgcSpice_setAvailable(bool available)
+bool spiceClipboard_init(SpiceClipboard ** clipboard)
 {
-  LG_LOCK(l_spice.statusDispatch);
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
+  *clipboard = calloc(1, sizeof(**clipboard));
+  if (!*clipboard)
+    return false;
 
-  const bool changed = l_spice.available != available;
+  LG_LOCK_INIT((*clipboard)->stateLock);
+  LG_LOCK_INIT((*clipboard)->eventDispatch);
+  LG_LOCK_INIT((*clipboard)->statusDispatch);
+  (*clipboard)->remoteType = LG_CLIPBOARD_DATA_NONE;
+  return true;
+}
+
+void spiceClipboard_free(SpiceClipboard ** clipboard)
+{
+  if (!clipboard || !*clipboard)
+    return;
+
+  SpiceClipboard * expected = *clipboard;
+  atomic_compare_exchange_strong_explicit(&l_callbackTarget,
+      &expected, NULL, memory_order_acq_rel, memory_order_acquire);
+
+  LG_LOCK_FREE((*clipboard)->statusDispatch);
+  LG_LOCK_FREE((*clipboard)->eventDispatch);
+  LG_LOCK_FREE((*clipboard)->stateLock);
+  free(*clipboard);
+  *clipboard = NULL;
+}
+
+const LG_ClipboardOps * spiceClipboard_getOps(void)
+{
+  return &l_clipboardOps;
+}
+
+void spiceClipboard_setAvailable(SpiceClipboard * clipboard, bool available)
+{
+  LG_LOCK(clipboard->statusDispatch);
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+
+  const bool changed = clipboard->available != available;
   if (changed)
   {
-    l_spice.available        = available;
-    l_spice.statusGeneration = nextGeneration(
-        l_spice.statusGeneration);
+    clipboard->available        = available;
+    clipboard->statusGeneration = nextGeneration(
+        clipboard->statusGeneration);
   }
   if (!available)
   {
-    l_spice.remoteNotice = false;
-    l_spice.remoteType   = LG_CLIPBOARD_DATA_NONE;
-    l_spice.read         = (PendingRequest) { 0 };
-    l_spice.write        = (PendingRequest) { 0 };
+    clipboard->remoteNotice = false;
+    clipboard->remoteType   = LG_CLIPBOARD_DATA_NONE;
+    clipboard->read         = (PendingRequest) { 0 };
+    clipboard->write        = (PendingRequest) { 0 };
   }
 
-  const LG_ClipboardStatusFn callback       = l_spice.statusCallback;
-  void                     * callbackOpaque = l_spice.statusOpaque;
+  const LG_ClipboardStatusFn callback       = clipboard->statusCallback;
+  void                     * callbackOpaque = clipboard->statusOpaque;
   const LG_ClipboardStatus status =
   {
     .available  = available,
-    .generation = l_spice.statusGeneration,
+    .generation = clipboard->statusGeneration,
   };
-  LG_UNLOCK(l_spice.stateLock);
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->stateLock);
+  LG_UNLOCK(clipboard->eventDispatch);
 
   if (changed && callback)
     callback(callbackOpaque, &status);
-  LG_UNLOCK(l_spice.statusDispatch);
+  LG_UNLOCK(clipboard->statusDispatch);
 }
 
-void lgcSpice_notice(PSDataType source)
+void spiceClipboard_setCallbackTarget(SpiceClipboard * clipboard)
 {
+  atomic_store_explicit(
+      &l_callbackTarget, clipboard, memory_order_release);
+}
+
+static SpiceClipboard * callbackTarget(void)
+{
+  return atomic_load_explicit(&l_callbackTarget, memory_order_acquire);
+}
+
+void spiceClipboard_notice(PSDataType source)
+{
+  SpiceClipboard * clipboard = callbackTarget();
+  if (!clipboard)
+    return;
+
   LG_ClipboardData type;
   if (!spiceType(source, &type))
   {
     if (source != SPICE_DATA_NONE)
       DEBUG_ERROR("Invalid SPICE clipboard notice type: %d", source);
-    lgcSpice_release();
+    spiceClipboard_release();
     return;
   }
 
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  const bool failWrite = l_spice.write.pending;
-  l_spice.remoteNotice = true;
-  l_spice.remoteType   = type;
-  l_spice.read         = (PendingRequest) { 0 };
-  l_spice.write        = (PendingRequest) { 0 };
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  const bool failWrite = clipboard->write.pending;
+  clipboard->remoteNotice = true;
+  clipboard->remoteType   = type;
+  clipboard->read         = (PendingRequest) { 0 };
+  clipboard->write        = (PendingRequest) { 0 };
   const ClipboardEventTarget target =
   {
-    .events = l_spice.available ? l_spice.events : NULL,
-    .opaque = l_spice.eventOpaque,
+    .events = clipboard->available ? clipboard->events : NULL,
+    .opaque = clipboard->eventOpaque,
   };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   if (failWrite)
     purespice_clipboardDataStart(SPICE_DATA_NONE, 0);
   if (target.events && target.events->notice)
     target.events->notice(target.opaque, &type, 1);
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
 }
 
-void lgcSpice_data(PSDataType source, uint8_t * buffer, uint32_t size)
+void spiceClipboard_data(PSDataType source, uint8_t * buffer, uint32_t size)
 {
+  SpiceClipboard * clipboard = callbackTarget();
+  if (!clipboard)
+    return;
+
   LG_ClipboardData type      = LG_CLIPBOARD_DATA_NONE;
   const bool       converted = spiceType(source, &type);
   const bool       validData = source == SPICE_DATA_NONE ||
     (converted && (!size || buffer));
 
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  if (!l_spice.read.pending)
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  if (!clipboard->read.pending)
   {
-    LG_UNLOCK(l_spice.stateLock);
-    LG_UNLOCK(l_spice.eventDispatch);
+    LG_UNLOCK(clipboard->stateLock);
+    LG_UNLOCK(clipboard->eventDispatch);
     DEBUG_WARN("Ignoring unsolicited SPICE clipboard data");
     return;
   }
 
-  const PendingRequest request = l_spice.read;
-  l_spice.read = (PendingRequest) { 0 };
+  const PendingRequest request = clipboard->read;
+  clipboard->read = (PendingRequest) { 0 };
   const ClipboardEventTarget target =
   {
-    .events = l_spice.available ? l_spice.events : NULL,
-    .opaque = l_spice.eventOpaque,
+    .events = clipboard->available ? clipboard->events : NULL,
+    .opaque = clipboard->eventOpaque,
   };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   if (target.events && target.events->data)
   {
@@ -416,30 +465,41 @@ void lgcSpice_data(PSDataType source, uint8_t * buffer, uint32_t size)
           type, buffer, size);
     }
   }
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
 }
 
-void lgcSpice_release(void)
+void spiceClipboard_release(void)
 {
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  l_spice.remoteNotice = false;
-  l_spice.remoteType   = LG_CLIPBOARD_DATA_NONE;
-  l_spice.read         = (PendingRequest) { 0 };
+  SpiceClipboard * clipboard = callbackTarget();
+  if (!clipboard)
+    return;
+
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  clipboard->remoteNotice = false;
+  clipboard->remoteType   = LG_CLIPBOARD_DATA_NONE;
+  clipboard->read         = (PendingRequest) { 0 };
   const ClipboardEventTarget target =
   {
-    .events = l_spice.available ? l_spice.events : NULL,
-    .opaque = l_spice.eventOpaque,
+    .events = clipboard->available ? clipboard->events : NULL,
+    .opaque = clipboard->eventOpaque,
   };
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   if (target.events && target.events->release)
     target.events->release(target.opaque);
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
 }
 
-void lgcSpice_request(PSDataType source)
+void spiceClipboard_request(PSDataType source)
 {
+  SpiceClipboard * clipboard = callbackTarget();
+  if (!clipboard)
+  {
+    purespice_clipboardDataStart(SPICE_DATA_NONE, 0);
+    return;
+  }
+
   LG_ClipboardData type;
   if (!spiceType(source, &type))
   {
@@ -448,44 +508,51 @@ void lgcSpice_request(PSDataType source)
     return;
   }
 
-  LG_LOCK(l_spice.eventDispatch);
-  LG_LOCK(l_spice.stateLock);
-  const bool busy = l_spice.write.pending;
+  LG_LOCK(clipboard->eventDispatch);
+  LG_LOCK(clipboard->stateLock);
+  const bool busy = clipboard->write.pending;
   const ClipboardEventTarget target =
   {
-    .events = l_spice.available && !busy ?
-      l_spice.events : NULL,
-    .opaque = l_spice.eventOpaque,
+    .events = clipboard->available && !busy ?
+      clipboard->events : NULL,
+    .opaque = clipboard->eventOpaque,
   };
   LG_ClipboardRequest request = LG_CLIPBOARD_REQUEST_INVALID;
   if (target.events)
   {
-    request = nextRequestNL();
-    l_spice.write = (PendingRequest)
+    request = nextRequestNL(clipboard);
+    clipboard->write = (PendingRequest)
     {
-      .pending    = true,
-      .request    = request,
-      .type       = type,
+      .pending = true,
+      .request = request,
+      .type    = type,
     };
   }
-  LG_UNLOCK(l_spice.stateLock);
+  LG_UNLOCK(clipboard->stateLock);
 
   const bool accepted = target.events && target.events->request &&
     target.events->request(target.opaque, request, type);
   if (!accepted)
   {
     bool fail = !busy && request == LG_CLIPBOARD_REQUEST_INVALID;
-    LG_LOCK(l_spice.stateLock);
-    if (l_spice.write.pending && l_spice.write.request == request)
+    LG_LOCK(clipboard->stateLock);
+    if (clipboard->write.pending && clipboard->write.request == request)
     {
-      l_spice.write = (PendingRequest) { 0 };
+      clipboard->write = (PendingRequest) { 0 };
       fail = true;
     }
-    LG_UNLOCK(l_spice.stateLock);
+    LG_UNLOCK(clipboard->stateLock);
     if (fail)
       purespice_clipboardDataStart(SPICE_DATA_NONE, 0);
     else if (busy)
       DEBUG_WARN("Ignoring overlapping SPICE clipboard request");
   }
-  LG_UNLOCK(l_spice.eventDispatch);
+  LG_UNLOCK(clipboard->eventDispatch);
+}
+
+void spiceClipboard_status(bool available)
+{
+  SpiceClipboard * clipboard = callbackTarget();
+  if (clipboard)
+    spiceClipboard_setAvailable(clipboard, available);
 }

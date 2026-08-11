@@ -177,7 +177,6 @@ set(SOURCES
   src/font.c
   src/util.c
   src/clipboard.c
-  src/clipboard_spice.c
   src/kb.c
   src/kb_hid.c
   src/gl_dynprocs.c
@@ -189,7 +188,6 @@ set(SOURCES
   src/evdev.c
   src/transport.c
   src/input.c
-  src/input_spice.c
 
   src/overlay/splash.c
   src/overlay/alert.c
@@ -210,15 +208,6 @@ endif()
 if(ENABLE_AUDIO)
   list(APPEND SOURCES
     src/audio.c
-    src/audio_spice.c
-  )
-endif()
-
-if(ENABLE_USB_AUDIO)
-  list(APPEND SOURCES
-    src/audio_usb.c
-    src/usb_audio.c
-    src/usbredir.c
   )
 endif()
 
@@ -265,7 +254,6 @@ target_link_libraries(looking-glass-client
   lg_resources
   lg_common
   displayservers
-  purespice
   renderers
   transports
   audiodevs
@@ -288,9 +276,6 @@ endif()
 
 if(ENABLE_USB_AUDIO)
   target_compile_definitions(looking-glass-client PRIVATE ENABLE_USB_AUDIO)
-  target_link_libraries(looking-glass-client
-    PkgConfig::USBREDIRPARSER
-  )
 endif()
 
 install(TARGETS looking-glass-client

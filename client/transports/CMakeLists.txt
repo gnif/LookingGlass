@@ -20,6 +20,7 @@ endfunction()
 
 # Add/remove transports here!
 add_transport(LGMP)
+add_transport(SPICE)
 if(ENABLE_TESTS)
   add_transport(Test)
 endif()

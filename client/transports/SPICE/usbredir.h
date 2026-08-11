@@ -21,35 +21,18 @@
 #ifndef _H_LG_CLIENT_USBREDIR_
 #define _H_LG_CLIENT_USBREDIR_
 
+#include "interface/usbredir.h"
+
 #include <purespice.h>
 
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
-struct usbredirparser;
-
 typedef struct LG_USBRedir LG_USBRedir;
 
 /* Availability transitions are delivered on the PureSpice process thread. */
 typedef void (*LG_USBRedirStatusFn)(void * opaque, bool available);
-
-typedef struct LG_USBRedirDeviceOps
-{
-  /* Install the device packet callbacks on a newly-created parser. */
-  void (*setup)(void * opaque, struct usbredirparser * parser);
-
-  /* Queue the device descriptors and connection announcement. */
-  void (*plug)(void * opaque, struct usbredirparser * parser);
-
-  /* Queue time-sensitive device data. This runs on the PureSpice processing
-   * thread immediately before parser output is flushed. */
-  void (*process)(void * opaque);
-
-  /* Stop all device activity. The bridge sends the disconnect packet. */
-  void (*unplug)(void * opaque);
-}
-LG_USBRedirDeviceOps;
 
 LG_USBRedir * lgUsbRedir_create(
     const LG_USBRedirDeviceOps * deviceOps, void * deviceOpaque,
@@ -73,8 +56,5 @@ void lgUsbRedir_state(PSUSBRedirChannel * channel,
     PSUSBRedirState state, void * opaque);
 bool lgUsbRedir_data(PSUSBRedirChannel * channel,
     const uint8_t * data, size_t size, void * opaque);
-
-/* Parser callbacks receive the bridge as their opaque value. */
-void * lgUsbRedir_device(void * parserOpaque);
 
 #endif

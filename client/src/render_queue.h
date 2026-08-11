@@ -108,7 +108,7 @@ void renderQueue_swSurfaceDrawFill(int x, int y, int width, int height,
     uint32_t color);
 
 void renderQueue_swSurfaceDrawBitmap(int x, int y, int width, int height,
-    int stride, void * data, bool topDown);
+    int stride, const void * data, bool topDown);
 
 void renderQueue_swSurfaceShow(bool show);
 

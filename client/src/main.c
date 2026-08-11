@@ -58,15 +58,8 @@
 #include "core.h"
 #include "app.h"
 #include "audio.h"
-#if ENABLE_AUDIO
-#include "audio_spice.h"
-#endif
-#if ENABLE_USB_AUDIO
-#include "audio_usb.h"
-#endif
 #include "keybind.h"
 #include "clipboard.h"
-#include "clipboard_spice.h"
 #include "kb.h"
 #include "egl_dynprocs.h"
 #include "gl_dynprocs.h"
@@ -92,9 +85,7 @@ _Static_assert((int)LG_CAPTURE_RGBA32F == (int)LG_TEST_CAPTURE_RGBA32F,
 static int renderThread(void * unused);
 
 static LGEvent  *e_startup       = NULL;
-static LGEvent  *e_spice         = NULL;
 static LGEvent  *e_cursorRepaint = NULL;
-static LGThread *t_spice         = NULL;
 static LGThread *t_render        = NULL;
 static LGThread *t_cursorRepaint = NULL;
 
@@ -1500,416 +1491,231 @@ int main_frameThread(void * unused)
   return 0;
 }
 
-static void checkUUID(void)
+static void fallbackSurfaceConfigure(void * opaque,
+    unsigned int width, unsigned int height)
 {
-  if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire) ||
-      !g_state.guestUUIDValid)
+  (void)opaque;
+  g_state.fallbackSurfaceValid = true;
+  g_state.srcSize.x            = width;
+  g_state.srcSize.y            = height;
+  g_state.haveSrcSize          = true;
+  core_updatePositionInfo();
+
+  renderQueue_swSurfaceConfigure(width, height);
+}
+
+static void fallbackSurfaceDestroy(void * opaque)
+{
+  (void)opaque;
+  g_state.fallbackSurfaceValid = false;
+  atomic_store_explicit(&g_state.fallbackDisplayRequested, false,
+      memory_order_release);
+  if (atomic_exchange_explicit(&g_state.fallbackDisplayActive, false,
+        memory_order_acq_rel))
+  {
+    renderQueue_swSurfaceShow(false);
+    lgInput_useTransport(true);
+    overlayStatus_set(LG_USER_STATUS_SPICE, false);
+  }
+}
+
+static void fallbackSurfaceDrawFill(void * opaque, int x, int y,
+    int width, int height, uint32_t color)
+{
+  (void)opaque;
+  renderQueue_swSurfaceDrawFill(x, y, width, height, color);
+}
+
+static void fallbackSurfaceDrawBitmap(void * opaque, bool topDown,
+    int x, int y, int width, int height, int stride, const void * data)
+{
+  (void)opaque;
+  renderQueue_swSurfaceDrawBitmap(
+      x, y, width, height, stride, data, topDown);
+}
+
+static void fallbackSurfacePointer(void * opaque,
+    const LG_TransportPointer * pointer)
+{
+  (void)opaque;
+
+  if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
+  {
+    LG_RendererCursor type;
+    switch(pointer->type)
+    {
+      case CURSOR_TYPE_COLOR:
+        type = LG_CURSOR_COLOR;
+        break;
+
+      case CURSOR_TYPE_MONOCHROME:
+        type = LG_CURSOR_MONOCHROME;
+        break;
+
+      case CURSOR_TYPE_MASKED_COLOR:
+        type = LG_CURSOR_MASKED_COLOR;
+        break;
+
+      default:
+        return;
+    }
+
+    const size_t size = (size_t)pointer->pitch * pointer->height;
+    uint8_t * shape = malloc(size);
+    if (!shape)
+      return;
+    memcpy(shape, pointer->shape, size);
+    renderQueue_cursorImage(type, pointer->width, pointer->height,
+        pointer->pitch, shape);
+  }
+
+  if ((pointer->flags & LG_TRANSPORT_POINTER_POSITION) &&
+      (pointer->flags & LG_TRANSPORT_POINTER_VISIBLE_VALID))
+    renderQueue_cursorState(
+        pointer->flags & LG_TRANSPORT_POINTER_VISIBLE,
+        pointer->x, pointer->y, pointer->hx, pointer->hy);
+}
+
+static const LG_SwSurfaceEventOps fallbackSurfaceEvents =
+{
+  .configure  = fallbackSurfaceConfigure,
+  .destroy    = fallbackSurfaceDestroy,
+  .drawFill   = fallbackSurfaceDrawFill,
+  .drawBitmap = fallbackSurfaceDrawBitmap,
+  .pointer    = fallbackSurfacePointer,
+};
+
+static void fallbackDisconnect(void)
+{
+  if (!g_state.fallbackTransport.ops)
     return;
 
-  if (memcmp(g_state.spiceUUID, g_state.guestUUID,
-        sizeof(g_state.spiceUUID)) == 0)
+  const bool connected = g_state.fallbackTransport.handle &&
+    g_state.fallbackTransport.ops->sessionValid(
+        g_state.fallbackTransport.handle);
+
+  atomic_store_explicit(
+      &g_state.fallbackReady, false, memory_order_release);
+
+  if (connected)
+  {
+    lgInput_setFallback(NULL, NULL);
+    lgAudio_setFallback(NULL, NULL);
+    lgClipboard_setFallback(NULL, NULL);
+  }
+  else
+  {
+    lgInput_dropFallback();
+    lgAudio_dropFallback();
+    lgClipboard_dropFallback();
+  }
+
+  if (g_state.fallbackVideoOps &&
+      g_state.fallbackVideoOps->type == LG_VIDEO_TYPE_SW_SURFACE &&
+      g_state.fallbackVideoOps->swSurface)
+  {
+    if (connected)
+      g_state.fallbackVideoOps->swSurface->setActive(
+          g_state.fallbackTransport.handle, false);
+    g_state.fallbackVideoOps->swSurface->detach(
+        g_state.fallbackTransport.handle);
+  }
+
+  if (atomic_exchange_explicit(&g_state.fallbackDisplayActive, false,
+        memory_order_acq_rel))
+  {
+    renderQueue_swSurfaceShow(false);
+    lgInput_useTransport(true);
+    overlayStatus_set(LG_USER_STATUS_SPICE, false);
+  }
+
+  g_state.fallbackTransport.ops->disconnect(
+      g_state.fallbackTransport.handle);
+  lgTransport_destroy(&g_state.fallbackTransport);
+  g_state.fallbackVideoOps     = NULL;
+  g_state.fallbackSurfaceValid = false;
+}
+
+static bool fallbackConnect(void)
+{
+  if (!g_params.useSpice || strcmp(g_params.transport, "spice") == 0)
+    return true;
+
+  if (!lgTransport_create("spice", &g_state.fallbackTransport))
+  {
+    DEBUG_ERROR("Failed to create the SPICE fallback transport");
+    return false;
+  }
+
+  g_state.fallbackVideoOps =
+    g_state.fallbackTransport.ops->getVideoOps(
+        g_state.fallbackTransport.handle);
+  if (!g_state.fallbackVideoOps ||
+      g_state.fallbackVideoOps->type != LG_VIDEO_TYPE_SW_SURFACE ||
+      !g_state.fallbackVideoOps->swSurface ||
+      !g_state.fallbackVideoOps->swSurface->attach(
+        g_state.fallbackTransport.handle, &fallbackSurfaceEvents, NULL))
+  {
+    DEBUG_ERROR("SPICE does not provide a software surface");
+    fallbackDisconnect();
+    return false;
+  }
+
+  const LG_TransportStatus status =
+    g_state.fallbackTransport.ops->connect(
+        g_state.fallbackTransport.handle, &g_state.fallbackSession);
+  if (status != LG_TRANSPORT_OK)
+  {
+    DEBUG_ERROR("Failed to connect the SPICE fallback transport: %d", status);
+    fallbackDisconnect();
+    return false;
+  }
+
+  void * inputOpaque = NULL;
+  const LG_InputOps * inputOps =
+    g_state.fallbackTransport.ops->getInputOps ?
+      g_state.fallbackTransport.ops->getInputOps(
+          g_state.fallbackTransport.handle, &inputOpaque) : NULL;
+  lgInput_setFallback(inputOps, inputOpaque);
+
+  void * audioOpaque = NULL;
+  const LG_AudioOps * audioOps =
+    g_state.fallbackTransport.ops->getAudioOps ?
+      g_state.fallbackTransport.ops->getAudioOps(
+          g_state.fallbackTransport.handle, &audioOpaque) : NULL;
+  lgAudio_setFallback(audioOps, audioOpaque);
+
+  void * clipboardOpaque = NULL;
+  const LG_ClipboardOps * clipboardOps =
+    g_state.fallbackTransport.ops->getClipboardOps ?
+      g_state.fallbackTransport.ops->getClipboardOps(
+          g_state.fallbackTransport.handle, &clipboardOpaque) : NULL;
+  lgClipboard_setFallback(clipboardOps, clipboardOpaque);
+
+  atomic_store_explicit(
+      &g_state.fallbackReady, true, memory_order_release);
+  if (g_state.fallbackSession.name[0])
+    core_setTitle(g_state.fallbackSession.name);
+  if (inputOps)
+    keybind_inputRegister();
+  return true;
+}
+
+static void checkUUID(void)
+{
+  if (!atomic_load_explicit(&g_state.fallbackReady, memory_order_acquire) ||
+      !g_state.fallbackSession.uuidValid || !g_state.guestUUIDValid)
+    return;
+
+  if (memcmp(g_state.fallbackSession.uuid, g_state.guestUUID,
+        sizeof(g_state.guestUUID)) == 0)
     return;
 
   app_msgBox(
       "SPICE Configuration Error",
       "You have connected SPICE to the wrong guest.\n"
-      "SPICE input will not function until this is corrected.");
-
-  g_params.useSpiceInput = false;
-  lgInput_setFallback(NULL, NULL);
-  lgcSpice_setAvailable(false);
-  lgClipboard_setFallback(NULL, NULL);
-  atomic_store_explicit(&g_state.spiceClose, true, memory_order_release);
-}
-
-void spiceReady(void)
-{
-  atomic_store_explicit(&g_state.spiceReady, true, memory_order_release);
-  if (g_params.useSpiceInput)
-    lgInput_setFallback(&LGI_Spice, NULL);
-#if ENABLE_AUDIO
-  if (g_params.useSpiceAudio && !g_params.useSpiceUSBAudio)
-  {
-    lgaSpice_setAvailable(true);
-    lgAudio_setFallback(&LGA_Spice, NULL);
-  }
-#endif
-
-  if (atomic_load_explicit(&g_state.spiceDisplayRequested,
-        memory_order_acquire))
-    app_useSpiceDisplay(true);
-
-  // set the intial mouse mode
-  purespice_mouseMode(true);
-
-  PSServerInfo info;
-  if (purespice_getServerInfo(&info))
-  {
-    core_setTitle(info.name);
-
-    bool uuidValid = false;
-    for(int i = 0; i < sizeof(info.uuid); ++i)
-      if (info.uuid[i])
-      {
-        uuidValid = true;
-        break;
-      }
-
-    if (uuidValid)
-    {
-      memcpy(g_state.spiceUUID, info.uuid, sizeof(g_state.spiceUUID));
-      checkUUID();
-    }
-    purespice_freeServerInfo(&info);
-  }
-  else
-    DEBUG_WARN("Failed to obtain SPICE server information");
-
-  if (g_params.useSpiceClipboard &&
-      !atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
-    lgClipboard_setFallback(&LGC_Spice, NULL);
-
-  if (g_params.useSpiceInput)
-    keybind_inputRegister();
-
-  lgSignalEvent(e_spice);
-}
-
-static void spice_surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
-    unsigned int width, unsigned int height)
-{
-  if (surfaceId != 0)
-  {
-    DEBUG_INFO("Ignoring secondary SPICE surface: id: %u, size: %ux%u",
-        surfaceId, width, height);
-    return;
-  }
-
-  switch(format)
-  {
-    case PS_SURFACE_FMT_32_xRGB:
-    case PS_SURFACE_FMT_32_ARGB:
-      break;
-
-    default:
-      DEBUG_ERROR("Unsupported primary SPICE surface format: %d", format);
-      g_state.spicePrimarySurfaceValid = false;
-      app_useSpiceDisplay(false);
-      return;
-  }
-
-  DEBUG_INFO("Create primary SPICE surface: id: %u, size: %ux%u",
-      surfaceId, width, height);
-
-  g_state.spicePrimarySurfaceValid = true;
-
-  g_state.srcSize.x   = width;
-  g_state.srcSize.y   = height;
-  g_state.haveSrcSize = true;
-  core_updatePositionInfo();
-
-  renderQueue_swSurfaceConfigure(width, height);
-  renderQueue_swSurfaceDrawFill(0, 0, width, height, 0x0);
-}
-
-static void spice_surfaceDestroy(unsigned int surfaceId)
-{
-  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
-  {
-    DEBUG_INFO("Ignoring destruction of inactive or secondary SPICE surface %u",
-        surfaceId);
-    return;
-  }
-
-  DEBUG_INFO("Destroy primary SPICE surface %u", surfaceId);
-  g_state.spicePrimarySurfaceValid = false;
-  app_useSpiceDisplay(false);
-}
-
-static void spice_drawFill(unsigned int surfaceId, int x, int y, int width,
-    int height, uint32_t color)
-{
-  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
-    return;
-
-  renderQueue_swSurfaceDrawFill(x, y, width, height, color);
-}
-
-static void spice_drawBitmap(unsigned int surfaceId, PSBitmapFormat format,
-    bool topDown, int x, int y, int width, int height, int stride, void * data)
-{
-  if (!g_state.spicePrimarySurfaceValid || surfaceId != 0)
-    return;
-
-  switch(format)
-  {
-    case PS_BITMAP_FMT_32BIT:
-    case PS_BITMAP_FMT_RGBA:
-      break;
-
-    default:
-      DEBUG_ERROR("Unsupported SPICE bitmap format: %d", format);
-      return;
-  }
-
-  renderQueue_swSurfaceDrawBitmap(x, y, width, height, stride, data, topDown);
-}
-
-static void spice_setCursorRGBAImage(int width, int height, int hx, int hy,
-    const void * data)
-{
-  g_state.spiceHotX = hx;
-  g_state.spiceHotY = hy;
-
-  const uint8_t * rgba = data;
-  uint8_t * bgra = malloc(width * height * 4);
-  for (int i = 0; i < width * height; ++i)
-  {
-    bgra[i * 4 + 0] = rgba[i * 4 + 2];
-    bgra[i * 4 + 1] = rgba[i * 4 + 1];
-    bgra[i * 4 + 2] = rgba[i * 4 + 0];
-    bgra[i * 4 + 3] = rgba[i * 4 + 3];
-  }
-  renderQueue_cursorImage(
-      LG_CURSOR_COLOR, width, height, width * 4, bgra);
-}
-
-static void spice_setCursorMonoImage(int width, int height, int hx, int hy,
-    const void * xorMask, const void * andMask)
-{
-  g_state.spiceHotX = hx;
-  g_state.spiceHotY = hy;
-
-  int stride = (width + 7) / 8;
-  uint8_t * buffer = malloc(stride * height * 2);
-  memcpy(buffer, andMask, stride * height);
-  memcpy(buffer + stride * height, xorMask, stride * height);
-  renderQueue_cursorImage(
-      LG_CURSOR_MONOCHROME, width, height * 2, stride, buffer);
-}
-
-static void spice_setCursorColorImage(int width, int height, int hx, int hy,
-    const void * data, const void * maskData)
-{
-  g_state.spiceHotX = hx;
-  g_state.spiceHotY = hy;
-
-  const uint8_t * rgba = data;
-  const uint8_t * andMask = maskData;
-  const int maskStride = (width + 7) / 8;
-  uint8_t * bgra = malloc(width * height * 4);
-  for (int y = 0; y < height; ++y)
-  {
-    for (int x = 0; x < width; ++x)
-    {
-      const int i = y * width + x;
-      bgra[i * 4 + 0] = rgba[i * 4 + 2];
-      bgra[i * 4 + 1] = rgba[i * 4 + 1];
-      bgra[i * 4 + 2] = rgba[i * 4 + 0];
-      bgra[i * 4 + 3] =
-        andMask[y * maskStride + x / 8] & (0x80U >> (x % 8)) ? 255 : 0;
-    }
-  }
-
-  renderQueue_cursorImage(
-      LG_CURSOR_MASKED_COLOR, width, height, width * 4, bgra);
-}
-
-static void spice_setCursorState(bool visible, int x, int y)
-{
-  renderQueue_cursorState(visible, x, y, g_state.spiceHotX, g_state.spiceHotY);
-}
-
-int spiceThread(void * arg)
-{
-#if ENABLE_USB_AUDIO
-  LGA_USBState * usbAudio = NULL;
-  LG_USBRedir   * usbRedir = NULL;
-
-  if (g_params.useSpiceAudio && g_params.useSpiceUSBAudio)
-  {
-    if (!lgAudio_supportsPlayback())
-    {
-      DEBUG_WARN("USB audio requires a playback backend, using SPICE audio");
-      g_params.useSpiceUSBAudio = false;
-    }
-    else if (!(usbAudio = lgaUsb_create(g_params.audioDebug)))
-    {
-      DEBUG_WARN("Failed to initialize USB audio, using SPICE audio");
-      g_params.useSpiceUSBAudio = false;
-    }
-    else
-      usbRedir = lgaUsb_redir(usbAudio);
-  }
-#endif
-
-  const struct PSConfig config =
-  {
-    .host      = g_params.spiceHost,
-    .port      = g_params.spicePort,
-    .password  = "",
-    .ready     = spiceReady,
-    .inputs    =
-    {
-      .enable      = g_params.useSpiceInput,
-      .autoConnect = true
-    },
-    .clipboard =
-    {
-      .enable  = g_params.useSpiceClipboard,
-      .notice  = lgcSpice_notice,
-      .data    = lgcSpice_data,
-      .release = lgcSpice_release,
-      .request = lgcSpice_request,
-      .status  = lgcSpice_setAvailable,
-    },
-    .display  =
-    {
-      .enable         = true,
-      .autoConnect    = false,
-      .surfaceCreate  = spice_surfaceCreate,
-      .surfaceDestroy = spice_surfaceDestroy,
-      .drawFill       = spice_drawFill,
-      .drawBitmap     = spice_drawBitmap
-    },
-    .cursor   =
-    {
-      .enable        = true,
-      .autoConnect   = false,
-      .setRGBAImage  = spice_setCursorRGBAImage,
-      .setMonoImage  = spice_setCursorMonoImage,
-      .setColorImage = spice_setCursorColorImage,
-      .setState      = spice_setCursorState,
-    },
-#if ENABLE_AUDIO
-    .playback =
-    {
-      .enable      = g_params.useSpiceAudio &&
-        !g_params.useSpiceUSBAudio && lgAudio_supportsPlayback(),
-      .autoConnect = true,
-      .start       = lgaSpice_playbackStart,
-      .volume      = lgaSpice_playbackVolume,
-      .mute        = lgaSpice_playbackMute,
-      .stop        = lgaSpice_playbackStop,
-      .data        = lgaSpice_playbackData
-    },
-    .record =
-    {
-      .enable      = g_params.useSpiceAudio &&
-        !g_params.useSpiceUSBAudio && lgAudio_supportsRecord(),
-      .autoConnect = true,
-      .start       = lgaSpice_recordStart,
-      .volume      = lgaSpice_recordVolume,
-      .mute        = lgaSpice_recordMute,
-      .stop        = lgaSpice_recordStop
-    },
-#endif
-#if ENABLE_USB_AUDIO
-    .usbRedir =
-    {
-      .enable      = usbAudio != NULL,
-      .autoConnect = false,
-      .opaque      = usbRedir,
-      .state       = lgUsbRedir_state,
-      .data        = lgUsbRedir_data,
-    },
-#endif
-  };
-
-  bool     connected = false;
-  PSStatus status    = PS_STATUS_SHUTDOWN;
-  if (!purespice_connect(&config))
-  {
-    DEBUG_ERROR("Failed to connect to spice server");
-    lgSignalEvent(e_spice);
-    goto end;
-  }
-  connected = true;
-  status    = PS_STATUS_RUN;
-
-  int processTimeout = 100;
-#if ENABLE_USB_AUDIO
-  if (usbAudio)
-  {
-    lgAudio_setFallback(&LGA_USB, usbAudio);
-    processTimeout = 10;
-  }
-#endif
-
-  // process all spice messages
-  while(app_getState() != APP_STATE_SHUTDOWN &&
-      !atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
-  {
-#if ENABLE_USB_AUDIO
-    if (usbRedir && !lgUsbRedir_process(usbRedir))
-      DEBUG_WARN("Failed to process USB audio redirection");
-    if (usbAudio)
-    {
-      const uint64_t delay = lgaUsb_processDelayNs(usbAudio);
-      if (delay == UINT64_MAX)
-        processTimeout = 10;
-      else
-      {
-        const uint64_t timeout = delay / UINT64_C(1000000) +
-          (delay % UINT64_C(1000000) != 0);
-        processTimeout = (int)min(timeout, UINT64_C(10));
-      }
-    }
-#endif
-
-    if ((status = purespice_process(processTimeout)) != PS_STATUS_RUN)
-    {
-      if (status != PS_STATUS_SHUTDOWN)
-        DEBUG_ERROR("failed to process spice messages");
-      goto end;
-    }
-  }
-
-end:
-
-  lgInput_setFallback(NULL, NULL);
-  lgAudio_setFallback(NULL, NULL);
-  lgcSpice_setAvailable(false);
-  lgClipboard_setFallback(NULL, NULL);
-#if ENABLE_AUDIO
-  lgaSpice_setAvailable(false);
-#endif
-#if ENABLE_USB_AUDIO
-  if (connected && status == PS_STATUS_RUN && usbRedir)
-  {
-    if (!lgUsbRedir_process(usbRedir))
-      DEBUG_WARN("Failed to disconnect USB audio device");
-    else
-    {
-      const uint64_t deadline =
-        microtime() + USB_REDIR_DISCONNECT_TIMEOUT_US;
-      while (lgUsbRedir_disconnectPending(usbRedir) &&
-          microtime() < deadline)
-      {
-        status = purespice_process(10);
-        if (status != PS_STATUS_RUN)
-          break;
-      }
-
-      if (status == PS_STATUS_RUN &&
-          lgUsbRedir_disconnectPending(usbRedir))
-        DEBUG_WARN("Timed out disconnecting USB audio device");
-    }
-  }
-#endif
-  if (connected)
-    purespice_disconnect();
-#if ENABLE_USB_AUDIO
-  lgaUsb_destroy(usbAudio);
-#endif
-
-  // if the connection was disconnected intentionally we don't want to shutdown
-  // so that the user can see the message box and take action
-  if (!atomic_load_explicit(&g_state.spiceClose, memory_order_acquire))
-    app_setState(APP_STATE_SHUTDOWN);
-
-  lgSignalEvent(e_spice);
-  return 0;
+      "SPICE fallback services will not function until this is corrected.");
+  fallbackDisconnect();
 }
 
 void intHandler(int sig)
@@ -2139,13 +1945,6 @@ static int lg_run(void)
   }
   DEBUG_INFO("Using Video: %s", g_state.videoOps->name);
 
-  // setup the spice startup condition
-  if (!(e_spice = lgCreateEvent(false, 0)))
-  {
-    DEBUG_ERROR("failed to create the spice startup event");
-    return -1;
-  }
-
   // setup the startup condition
   if (!(e_startup = lgCreateEvent(false, 0)))
   {
@@ -2164,31 +1963,10 @@ static int lg_run(void)
   renderQueue_init();
   frameScheduler_init();
 
-  const PSInit psInit =
-  {
-    .log =
-    {
-      .info  = debug_info,
-      .warn  = debug_warn,
-      .error = debug_error,
-    }
-  };
-  purespice_init(&psInit);
-
   g_state.micDefaultState = g_params.micDefaultState;
 
-  if (g_params.useSpice)
-  {
-    if (!lgCreateThread("spiceThread", spiceThread, NULL, &t_spice))
-    {
-      DEBUG_ERROR("spice create thread failed");
-      return -1;
-    }
-
-    lgWaitEvent(e_spice, TIMEOUT_INFINITE);
-    if (!atomic_load_explicit(&g_state.spiceReady, memory_order_acquire))
-      return -1;
-  }
+  if (!fallbackConnect())
+    return -1;
 
   // select and init a renderer
   bool needsOpenGL = false;
@@ -2349,6 +2127,16 @@ restart:
 
   while(app_getState() == APP_STATE_RUNNING)
   {
+    if (atomic_load_explicit(
+          &g_state.fallbackReady, memory_order_acquire) &&
+        !g_state.fallbackTransport.ops->sessionValid(
+          g_state.fallbackTransport.handle))
+    {
+      DEBUG_ERROR("SPICE fallback transport disconnected");
+      app_setState(APP_STATE_SHUTDOWN);
+      break;
+    }
+
     if (initialSpiceEnable && microtime() > initialSpiceEnable)
     {
       app_useSpiceDisplay(true);
@@ -2523,6 +2311,16 @@ restart:
 
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
+    if (atomic_load_explicit(
+          &g_state.fallbackReady, memory_order_acquire) &&
+        !g_state.fallbackTransport.ops->sessionValid(
+          g_state.fallbackTransport.handle))
+    {
+      DEBUG_ERROR("SPICE fallback transport disconnected");
+      app_setState(APP_STATE_SHUTDOWN);
+      break;
+    }
+
     if (unlikely(!g_state.transport.ops->sessionValid(
           g_state.transport.handle)))
     {
@@ -2570,8 +2368,7 @@ static void lg_shutdown(void)
   if (e_cursorRepaint)
     lgSignalEvent(e_cursorRepaint);
 
-  if (t_spice)
-    lgJoinThread(t_spice, NULL);
+  fallbackDisconnect();
 
   if (t_render)
   {
@@ -2625,12 +2422,6 @@ static void lg_shutdown(void)
   if (e_startup)
   {
     lgFreeEvent(e_startup);
-    e_startup = NULL;
-  }
-
-  if (e_spice)
-  {
-    lgFreeEvent(e_spice);
     e_startup = NULL;
   }
 

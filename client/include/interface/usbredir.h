@@ -18,28 +18,29 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_CLIENT_AUDIO_SPICE_
-#define _H_LG_CLIENT_AUDIO_SPICE_
+#ifndef _H_LG_CLIENT_USBREDIR_INTERFACE_
+#define _H_LG_CLIENT_USBREDIR_INTERFACE_
 
-#include "interface/audio.h"
+struct usbredirparser;
 
-#include <purespice.h>
+typedef struct LG_USBRedirDeviceOps
+{
+  /* Install the device packet callbacks on a newly-created parser. */
+  void (*setup)(void * opaque, struct usbredirparser * parser);
 
-extern const LG_AudioOps LGA_Spice;
+  /* Queue the device descriptors and connection announcement. */
+  void (*plug)(void * opaque, struct usbredirparser * parser);
 
-void lgaSpice_setAvailable(bool available);
+  /* Queue time-sensitive device data immediately before parser output is
+   * flushed. */
+  void (*process)(void * opaque);
 
-void lgaSpice_playbackStart(int channels, int sampleRate,
-    PSAudioFormat format, uint32_t time);
-void lgaSpice_playbackStop(void);
-void lgaSpice_playbackVolume(int channels, const uint16_t volume[]);
-void lgaSpice_playbackMute(bool mute);
-void lgaSpice_playbackData(uint8_t * data, size_t size, uint32_t time);
+  /* Stop all device activity. The bridge sends the disconnect packet. */
+  void (*unplug)(void * opaque);
+}
+LG_USBRedirDeviceOps;
 
-void lgaSpice_recordStart(int channels, int sampleRate,
-    PSAudioFormat format);
-void lgaSpice_recordStop(void);
-void lgaSpice_recordVolume(int channels, const uint16_t volume[]);
-void lgaSpice_recordMute(bool mute);
+/* Parser callbacks receive the bridge as their opaque value. */
+void * lgUsbRedir_device(void * parserOpaque);
 
 #endif

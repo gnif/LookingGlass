@@ -18,20 +18,17 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_CLIENT_CLIPBOARD_SPICE_
-#define _H_LG_CLIENT_CLIPBOARD_SPICE_
+#ifndef _H_LG_CLIENT_TRANSPORT_SPICE_INPUT_
+#define _H_LG_CLIENT_TRANSPORT_SPICE_INPUT_
 
-#include "interface/clipboard.h"
+#include "interface/input.h"
 
-#include <purespice.h>
+typedef struct SpiceInput SpiceInput;
 
-extern const LG_ClipboardOps LGC_Spice;
+bool spiceInput_init(SpiceInput ** input);
+void spiceInput_free(SpiceInput ** input);
 
-void lgcSpice_setAvailable(bool available);
-
-void lgcSpice_notice(PSDataType type);
-void lgcSpice_data(PSDataType type, uint8_t * buffer, uint32_t size);
-void lgcSpice_release(void);
-void lgcSpice_request(PSDataType type);
+const LG_InputOps * spiceInput_getOps(void);
+void spiceInput_setAvailable(SpiceInput * input, bool available);
 
 #endif

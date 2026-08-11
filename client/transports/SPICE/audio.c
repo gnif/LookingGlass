@@ -18,13 +18,14 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "audio_spice.h"
+#include "audio.h"
 
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
 
 #include <stdatomic.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SPICE_AUDIO_TIMESTAMP_DISCONTINUITY_MS 2000
@@ -67,7 +68,7 @@ typedef struct SpiceAudioCallbackWaitQueue
 }
 SpiceAudioCallbackWaitQueue;
 
-static struct
+struct SpiceAudio
 {
   LG_RWLock lock;
 
@@ -92,27 +93,6 @@ static struct
   int64_t  playbackTime;
   uint64_t playbackPosition;
   LG_AudioClock playbackClock;
-}
-l_spice =
-{
-  .lock =
-  {
-    .readers = ATOMIC_VAR_INIT(0),
-    .writers = ATOMIC_VAR_INIT(0),
-    .writer  = ATOMIC_FLAG_INIT,
-  },
-  .statusInFlight = ATOMIC_VAR_INIT(0),
-  .statusWait =
-  {
-    .lock  = ATOMIC_FLAG_INIT,
-    .count = ATOMIC_VAR_INIT(0),
-  },
-  .inFlight       = ATOMIC_VAR_INIT(0),
-  .eventWait =
-  {
-    .lock  = ATOMIC_FLAG_INIT,
-    .count = ATOMIC_VAR_INIT(0),
-  },
 };
 
 static _Thread_local unsigned int l_eventDepth;
@@ -215,53 +195,55 @@ static void waitCallbacks(atomic_uint * inFlight,
   lgFreeEvent(waiter.event);
 }
 
-/* l_spice.lock must be held exclusively while admitting a callback so detach
- * cannot invalidate the target between the snapshot and in-flight increment. */
-static bool beginEventNL(SpiceAudioEventTarget * target)
+/* The instance lock must be held exclusively while admitting a callback so
+ * detach cannot invalidate the target between the snapshot and in-flight
+ * increment. */
+static bool beginEventNL(SpiceAudio * audio,
+    SpiceAudioEventTarget * target)
 {
-  if (!l_spice.events)
+  if (!audio->events)
     return false;
 
-  target->events     = l_spice.events;
-  target->opaque     = l_spice.eventOpaque;
-  target->generation = l_spice.eventGeneration;
-  atomic_fetch_add_explicit(&l_spice.inFlight, 1, memory_order_relaxed);
+  target->events     = audio->events;
+  target->opaque     = audio->eventOpaque;
+  target->generation = audio->eventGeneration;
+  atomic_fetch_add_explicit(&audio->inFlight, 1, memory_order_relaxed);
   ++l_eventDepth;
   return true;
 }
 
-static bool playbackEventCurrent(const SpiceAudioEventTarget * target,
-    uint32_t generation, bool active)
+static bool playbackEventCurrent(SpiceAudio * audio,
+    const SpiceAudioEventTarget * target, uint32_t generation, bool active)
 {
-  LG_LOCK_SHARED(l_spice.lock);
+  LG_LOCK_SHARED(audio->lock);
   const bool result =
-    target->events              == l_spice.events &&
-    target->opaque              == l_spice.eventOpaque &&
-    target->generation          == l_spice.eventGeneration &&
-    l_spice.playback.generation == generation &&
-    l_spice.playback.active     == active;
-  LG_UNLOCK_SHARED(l_spice.lock);
+    target->events             == audio->events &&
+    target->opaque             == audio->eventOpaque &&
+    target->generation         == audio->eventGeneration &&
+    audio->playback.generation == generation &&
+    audio->playback.active     == active;
+  LG_UNLOCK_SHARED(audio->lock);
   return result;
 }
 
-static bool recordEventCurrent(const SpiceAudioEventTarget * target,
-    uint32_t generation, bool active)
+static bool recordEventCurrent(SpiceAudio * audio,
+    const SpiceAudioEventTarget * target, uint32_t generation, bool active)
 {
-  LG_LOCK_SHARED(l_spice.lock);
+  LG_LOCK_SHARED(audio->lock);
   const bool result =
-    target->events            == l_spice.events &&
-    target->opaque            == l_spice.eventOpaque &&
-    target->generation        == l_spice.eventGeneration &&
-    l_spice.record.generation == generation &&
-    l_spice.record.active     == active;
-  LG_UNLOCK_SHARED(l_spice.lock);
+    target->events           == audio->events &&
+    target->opaque           == audio->eventOpaque &&
+    target->generation       == audio->eventGeneration &&
+    audio->record.generation == generation &&
+    audio->record.active     == active;
+  LG_UNLOCK_SHARED(audio->lock);
   return result;
 }
 
-static void endEvent(void)
+static void endEvent(SpiceAudio * audio)
 {
   --l_eventDepth;
-  endCallback(&l_spice.inFlight, &l_spice.eventWait);
+  endCallback(&audio->inFlight, &audio->eventWait);
 }
 
 static bool sampleFormat(PSAudioFormat source,
@@ -378,75 +360,77 @@ static size_t sampleSize(LG_AudioSampleFormat format)
   return 0;
 }
 
-static LG_AudioClock playbackClockNL(uint32_t time)
+static LG_AudioClock playbackClockNL(SpiceAudio * audio, uint32_t time)
 {
   bool discontinuity = false;
 
-  if (!l_spice.playbackClockValid)
+  if (!audio->playbackClockValid)
   {
-    l_spice.playbackClockValid = true;
-    l_spice.playbackMediaTime  = time;
-    l_spice.playbackTime       = 0;
+    audio->playbackClockValid = true;
+    audio->playbackMediaTime  = time;
+    audio->playbackTime       = 0;
   }
   else
   {
-    const int32_t delta = (int32_t)(time - l_spice.playbackMediaTime);
-    l_spice.playbackMediaTime = time;
+    const int32_t delta = (int32_t)(time - audio->playbackMediaTime);
+    audio->playbackMediaTime = time;
     if (delta < 0 || delta > SPICE_AUDIO_TIMESTAMP_DISCONTINUITY_MS)
     {
-      l_spice.playbackTime = 0;
+      audio->playbackTime = 0;
       discontinuity = true;
     }
     else
-      l_spice.playbackTime += (int64_t)delta * 1000000;
+      audio->playbackTime += (int64_t)delta * 1000000;
   }
 
-  l_spice.playbackClock = (LG_AudioClock)
+  audio->playbackClock = (LG_AudioClock)
   {
-    .position      = l_spice.playbackPosition,
-    .time          = l_spice.playbackTime,
+    .position      = audio->playbackPosition,
+    .time          = audio->playbackTime,
     .rate          = 0.0,
     .stable        = !discontinuity,
     .discontinuity = discontinuity,
   };
-  return l_spice.playbackClock;
+  return audio->playbackClock;
 }
 
 static void spiceSetStatusListener(void * opaque,
     LG_AudioStatusFn callback, void * callbackOpaque)
 {
+  SpiceAudio * audio = opaque;
   LG_AudioStatus status;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  l_spice.statusCallback = callback;
-  l_spice.statusOpaque   = callbackOpaque;
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  audio->statusCallback = callback;
+  audio->statusOpaque   = callbackOpaque;
   status = (LG_AudioStatus)
   {
-    .available  = l_spice.available,
-    .generation = l_spice.statusGeneration,
+    .available  = audio->available,
+    .generation = audio->statusGeneration,
   };
   if (callback)
   {
     atomic_fetch_add_explicit(
-        &l_spice.statusInFlight, 1, memory_order_relaxed);
+        &audio->statusInFlight, 1, memory_order_relaxed);
     ++l_statusDepth;
   }
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (callback)
   {
     callback(callbackOpaque, &status);
     --l_statusDepth;
-    endCallback(&l_spice.statusInFlight, &l_spice.statusWait);
+    endCallback(&audio->statusInFlight, &audio->statusWait);
   }
   else
-    waitCallbacks(&l_spice.statusInFlight,
-        &l_spice.statusWait, l_statusDepth);
+    waitCallbacks(&audio->statusInFlight,
+        &audio->statusWait, l_statusDepth);
 }
 
 static bool spiceAttach(void * opaque, const LG_AudioEventOps * events,
     void * eventOpaque)
 {
+  SpiceAudio * audio = opaque;
   if (!events)
     return false;
 
@@ -456,41 +440,41 @@ static bool spiceAttach(void * opaque, const LG_AudioEventOps * events,
   LG_AudioClock playbackClock;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return false;
   }
 
-  l_spice.events          = events;
-  l_spice.eventOpaque     = eventOpaque;
-  l_spice.eventGeneration =
-    nextGeneration(l_spice.eventGeneration);
-  playback      = l_spice.playback;
-  record        = l_spice.record;
-  playbackClock = l_spice.playbackClock;
-  dispatch      = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  audio->events          = events;
+  audio->eventOpaque     = eventOpaque;
+  audio->eventGeneration =
+    nextGeneration(audio->eventGeneration);
+  playback      = audio->playback;
+  record        = audio->record;
+  playbackClock = audio->playbackClock;
+  dispatch      = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return true;
 
   if (playback.active)
   {
-    if (playbackEventCurrent(&target, playback.generation, true) &&
+    if (playbackEventCurrent(audio, &target, playback.generation, true) &&
         target.events->playbackStart)
     {
       target.events->playbackStart(target.opaque,
           playback.generation, &playback.format, &playbackClock);
       if (playback.volumeValid &&
-          playbackEventCurrent(&target, playback.generation, true) &&
+          playbackEventCurrent(audio, &target, playback.generation, true) &&
           target.events->playbackVolume)
         target.events->playbackVolume(target.opaque,
             playback.generation,
             playback.volumeChannels, playback.volume);
       if (playback.muteValid &&
-          playbackEventCurrent(&target, playback.generation, true) &&
+          playbackEventCurrent(audio, &target, playback.generation, true) &&
           target.events->playbackMute)
         target.events->playbackMute(target.opaque,
             playback.generation, playback.mute);
@@ -499,53 +483,55 @@ static bool spiceAttach(void * opaque, const LG_AudioEventOps * events,
 
   if (record.active)
   {
-    if (recordEventCurrent(&target, record.generation, true) &&
+    if (recordEventCurrent(audio, &target, record.generation, true) &&
         target.events->recordStart)
     {
       target.events->recordStart(target.opaque,
           record.generation, &record.format);
       if (record.volumeValid &&
-          recordEventCurrent(&target, record.generation, true) &&
+          recordEventCurrent(audio, &target, record.generation, true) &&
           target.events->recordVolume)
         target.events->recordVolume(target.opaque, record.generation,
             record.volumeChannels, record.volume);
       if (record.muteValid &&
-          recordEventCurrent(&target, record.generation, true) &&
+          recordEventCurrent(audio, &target, record.generation, true) &&
           target.events->recordMute)
         target.events->recordMute(target.opaque,
             record.generation, record.mute);
     }
   }
 
-  endEvent();
+  endEvent(audio);
   return true;
 }
 
 static void spiceDetach(void * opaque)
 {
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  l_spice.events          = NULL;
-  l_spice.eventOpaque     = NULL;
-  l_spice.eventGeneration =
-    nextGeneration(l_spice.eventGeneration);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  SpiceAudio * audio = opaque;
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  audio->events          = NULL;
+  audio->eventOpaque     = NULL;
+  audio->eventGeneration =
+    nextGeneration(audio->eventGeneration);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
-  waitCallbacks(&l_spice.inFlight, &l_spice.eventWait, l_eventDepth);
+  waitCallbacks(&audio->inFlight, &audio->eventWait, l_eventDepth);
 }
 
 static bool spiceRecordData(void * opaque, uint32_t generation,
     const void * data, size_t frames, const LG_AudioClock * sourceClock)
 {
+  SpiceAudio * audio = opaque;
   size_t size  = 0;
   bool   valid = false;
 
-  LG_LOCK_SHARED(l_spice.lock);
-  if (l_spice.available && l_spice.events && l_spice.record.active &&
-      generation == l_spice.record.generation)
+  LG_LOCK_SHARED(audio->lock);
+  if (audio->available && audio->events && audio->record.active &&
+      generation == audio->record.generation)
   {
     const size_t bytesPerSample =
-      sampleSize(l_spice.record.format.sampleFormat);
-    const size_t channels = l_spice.record.format.channelCount;
+      sampleSize(audio->record.format.sampleFormat);
+    const size_t channels = audio->record.format.channelCount;
     if (bytesPerSample && frames <= SIZE_MAX / bytesPerSample / channels &&
         (frames == 0 || data))
     {
@@ -553,12 +539,12 @@ static bool spiceRecordData(void * opaque, uint32_t generation,
       valid = true;
     }
   }
-  LG_UNLOCK_SHARED(l_spice.lock);
+  LG_UNLOCK_SHARED(audio->lock);
 
   return valid && purespice_writeAudio((void *)data, size, 0);
 }
 
-const LG_AudioOps LGA_Spice =
+static const LG_AudioOps l_spiceAudioOps =
 {
   .name              = "SPICE",
   .setStatusListener = spiceSetStatusListener,
@@ -568,60 +554,106 @@ const LG_AudioOps LGA_Spice =
   .clockFeedback     = NULL,
 };
 
-void lgaSpice_setAvailable(bool available)
+bool spiceAudio_init(SpiceAudio ** result)
+{
+  if (!result)
+    return false;
+
+  SpiceAudio * audio = calloc(1, sizeof(*audio));
+  if (!audio)
+    return false;
+
+  LG_RWLOCK_INIT(audio->lock);
+  atomic_init(&audio->statusInFlight, 0);
+  LG_LOCK_INIT(audio->statusWait.lock);
+  atomic_init(&audio->statusWait.count, 0);
+  atomic_init(&audio->inFlight, 0);
+  LG_LOCK_INIT(audio->eventWait.lock);
+  atomic_init(&audio->eventWait.count, 0);
+
+  *result = audio;
+  return true;
+}
+
+void spiceAudio_free(SpiceAudio ** audio)
+{
+  if (!audio || !*audio)
+    return;
+
+  SpiceAudio * instance = *audio;
+  spiceAudio_setAvailable(instance, false);
+  spiceSetStatusListener(instance, NULL, NULL);
+  spiceDetach(instance);
+
+  LG_LOCK_FREE(instance->statusWait.lock);
+  LG_LOCK_FREE(instance->eventWait.lock);
+  LG_RWLOCK_FREE(instance->lock);
+  free(instance);
+  *audio = NULL;
+}
+
+const LG_AudioOps * spiceAudio_getOps(void)
+{
+  return &l_spiceAudioOps;
+}
+
+void spiceAudio_setAvailable(SpiceAudio * audio, bool available)
 {
   LG_AudioStatusFn callback;
   void * callbackOpaque;
   LG_AudioStatus status;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (l_spice.available == available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (audio->available == available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  l_spice.available = available;
-  l_spice.statusGeneration =
-    nextGeneration(l_spice.statusGeneration);
+  audio->available = available;
+  audio->statusGeneration =
+    nextGeneration(audio->statusGeneration);
   if (!available)
   {
-    l_spice.playback.active      = false;
-    l_spice.record.active        = false;
-    l_spice.playbackClockValid = false;
-    l_spice.playbackPosition   = 0;
-    l_spice.playbackClock      = (LG_AudioClock) { 0 };
-    l_spice.playback.volumeValid = false;
-    l_spice.playback.muteValid   = false;
-    l_spice.record.volumeValid   = false;
-    l_spice.record.muteValid     = false;
+    audio->playback.active = false;
+    audio->record.active   = false;
+
+    audio->playbackClockValid = false;
+    audio->playbackPosition   = 0;
+    audio->playbackClock      = (LG_AudioClock) { 0 };
+
+    audio->playback.volumeValid = false;
+    audio->playback.muteValid   = false;
+
+    audio->record.volumeValid = false;
+    audio->record.muteValid   = false;
   }
 
-  callback       = l_spice.statusCallback;
-  callbackOpaque = l_spice.statusOpaque;
+  callback       = audio->statusCallback;
+  callbackOpaque = audio->statusOpaque;
   status = (LG_AudioStatus)
   {
     .available  = available,
-    .generation = l_spice.statusGeneration,
+    .generation = audio->statusGeneration,
   };
   if (callback)
   {
     atomic_fetch_add_explicit(
-        &l_spice.statusInFlight, 1, memory_order_relaxed);
+        &audio->statusInFlight, 1, memory_order_relaxed);
     ++l_statusDepth;
   }
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (callback)
   {
     callback(callbackOpaque, &status);
     --l_statusDepth;
-    endCallback(&l_spice.statusInFlight, &l_spice.statusWait);
+    endCallback(&audio->statusInFlight, &audio->statusWait);
   }
 }
 
-void lgaSpice_playbackStart(int channels, int sampleRate,
-    PSAudioFormat sourceFormat, uint32_t time)
+void spiceAudio_playbackStart(SpiceAudio * audio,
+    int channels, int sampleRate, PSAudioFormat sourceFormat, uint32_t time)
 {
   LG_AudioFormat format;
   if (!makeFormat(channels, sampleRate, sourceFormat, &format))
@@ -636,78 +668,79 @@ void lgaSpice_playbackStart(int channels, int sampleRate,
   LG_AudioClock clock;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  l_spice.playback.active = true;
-  l_spice.playback.generation =
-    nextGeneration(l_spice.playback.generation);
-  l_spice.playback.format = format;
-  l_spice.playbackClockValid = false;
-  l_spice.playbackPosition   = 0;
-  clock = playbackClockNL(time);
+  audio->playback.active     = true;
+  audio->playback.generation =
+    nextGeneration(audio->playback.generation);
+  audio->playback.format     = format;
+  audio->playbackClockValid = false;
+  audio->playbackPosition   = 0;
+  clock = playbackClockNL(audio, time);
   clock.stable        = false;
   clock.discontinuity = true;
-  l_spice.playbackClock = clock;
-  playback = l_spice.playback;
-  dispatch = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  audio->playbackClock = clock;
+  playback = audio->playback;
+  dispatch = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
-  if (playbackEventCurrent(&target, playback.generation, true) &&
+  if (playbackEventCurrent(audio, &target, playback.generation, true) &&
       target.events->playbackStart)
   {
     target.events->playbackStart(target.opaque,
         playback.generation, &playback.format, &clock);
     if (playback.volumeValid &&
-        playbackEventCurrent(&target, playback.generation, true) &&
+        playbackEventCurrent(audio, &target, playback.generation, true) &&
         target.events->playbackVolume)
       target.events->playbackVolume(target.opaque,
           playback.generation, playback.volumeChannels, playback.volume);
     if (playback.muteValid &&
-        playbackEventCurrent(&target, playback.generation, true) &&
+        playbackEventCurrent(audio, &target, playback.generation, true) &&
         target.events->playbackMute)
       target.events->playbackMute(target.opaque,
           playback.generation, playback.mute);
   }
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_playbackStop(void)
+void spiceAudio_playbackStop(SpiceAudio * audio)
 {
   SpiceAudioEventTarget target;
   uint32_t generation;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.playback.active)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->playback.active)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  generation                 = l_spice.playback.generation;
-  l_spice.playback.active    = false;
-  l_spice.playbackClockValid = false;
-  dispatch = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  generation                = audio->playback.generation;
+  audio->playback.active    = false;
+  audio->playbackClockValid = false;
+  dispatch = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->playbackStop &&
-      playbackEventCurrent(&target, generation, false))
+      playbackEventCurrent(audio, &target, generation, false))
     target.events->playbackStop(target.opaque, generation);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_playbackVolume(int channels, const uint16_t volume[])
+void spiceAudio_playbackVolume(SpiceAudio * audio,
+    int channels, const uint16_t volume[])
 {
   if (channels < 1 || channels > LG_AUDIO_MAX_CHANNELS || !volume)
     return;
@@ -717,61 +750,62 @@ void lgaSpice_playbackVolume(int channels, const uint16_t volume[])
   uint16_t snapshot[LG_AUDIO_MAX_CHANNELS];
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  memcpy(l_spice.playback.volume, volume,
+  memcpy(audio->playback.volume, volume,
       (size_t)channels * sizeof(*volume));
-  l_spice.playback.volumeChannels = channels;
-  l_spice.playback.volumeValid    = true;
-  generation = l_spice.playback.generation;
+  audio->playback.volumeChannels = channels;
+  audio->playback.volumeValid    = true;
+  generation = audio->playback.generation;
   memcpy(snapshot, volume, (size_t)channels * sizeof(*volume));
-  dispatch   = l_spice.playback.active && beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  dispatch   = audio->playback.active && beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->playbackVolume &&
-      playbackEventCurrent(&target, generation, true))
+      playbackEventCurrent(audio, &target, generation, true))
     target.events->playbackVolume(
         target.opaque, generation, channels, snapshot);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_playbackMute(bool mute)
+void spiceAudio_playbackMute(SpiceAudio * audio, bool mute)
 {
   SpiceAudioEventTarget target;
   uint32_t generation;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  l_spice.playback.mute      = mute;
-  l_spice.playback.muteValid = true;
-  generation = l_spice.playback.generation;
-  dispatch   = l_spice.playback.active && beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  audio->playback.mute      = mute;
+  audio->playback.muteValid = true;
+  generation = audio->playback.generation;
+  dispatch   = audio->playback.active && beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->playbackMute &&
-      playbackEventCurrent(&target, generation, true))
+      playbackEventCurrent(audio, &target, generation, true))
     target.events->playbackMute(target.opaque, generation, mute);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_playbackData(uint8_t * data, size_t size, uint32_t time)
+void spiceAudio_playbackData(SpiceAudio * audio,
+    uint8_t * data, size_t size, uint32_t time)
 {
   SpiceAudioEventTarget target;
   uint32_t generation;
@@ -779,43 +813,43 @@ void lgaSpice_playbackData(uint8_t * data, size_t size, uint32_t time)
   LG_AudioClock clock;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available || !l_spice.playback.active)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available || !audio->playback.active)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
   const size_t bytesPerSample =
-    sampleSize(l_spice.playback.format.sampleFormat);
+    sampleSize(audio->playback.format.sampleFormat);
   const size_t stride =
-    bytesPerSample * l_spice.playback.format.channelCount;
+    bytesPerSample * audio->playback.format.channelCount;
   if (!stride || !size || !data || size % stride)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     DEBUG_ERROR("Invalid SPICE playback packet size: %zu", size);
     return;
   }
 
   frames = size / stride;
-  generation = l_spice.playback.generation;
-  clock = playbackClockNL(time);
-  l_spice.playbackPosition += frames;
-  dispatch = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  generation = audio->playback.generation;
+  clock = playbackClockNL(audio, time);
+  audio->playbackPosition += frames;
+  dispatch = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->playbackData &&
-      playbackEventCurrent(&target, generation, true))
+      playbackEventCurrent(audio, &target, generation, true))
     target.events->playbackData(target.opaque, generation,
         data, frames, &clock);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_recordStart(int channels, int sampleRate,
-    PSAudioFormat sourceFormat)
+void spiceAudio_recordStart(SpiceAudio * audio,
+    int channels, int sampleRate, PSAudioFormat sourceFormat)
 {
   LG_AudioFormat format;
   if (!makeFormat(channels, sampleRate, sourceFormat, &format))
@@ -829,70 +863,71 @@ void lgaSpice_recordStart(int channels, int sampleRate,
   SpiceAudioStream record;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  l_spice.record.active = true;
-  l_spice.record.generation = nextGeneration(l_spice.record.generation);
-  l_spice.record.format = format;
-  record   = l_spice.record;
-  dispatch = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  audio->record.active     = true;
+  audio->record.generation = nextGeneration(audio->record.generation);
+  audio->record.format     = format;
+  record   = audio->record;
+  dispatch = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
-  if (recordEventCurrent(&target, record.generation, true) &&
+  if (recordEventCurrent(audio, &target, record.generation, true) &&
       target.events->recordStart)
   {
     target.events->recordStart(
         target.opaque, record.generation, &record.format);
     if (record.volumeValid &&
-        recordEventCurrent(&target, record.generation, true) &&
+        recordEventCurrent(audio, &target, record.generation, true) &&
         target.events->recordVolume)
       target.events->recordVolume(target.opaque, record.generation,
           record.volumeChannels, record.volume);
     if (record.muteValid &&
-        recordEventCurrent(&target, record.generation, true) &&
+        recordEventCurrent(audio, &target, record.generation, true) &&
         target.events->recordMute)
       target.events->recordMute(
           target.opaque, record.generation, record.mute);
   }
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_recordStop(void)
+void spiceAudio_recordStop(SpiceAudio * audio)
 {
   SpiceAudioEventTarget target;
   uint32_t generation;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.record.active)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->record.active)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  generation            = l_spice.record.generation;
-  l_spice.record.active = false;
-  dispatch = beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  generation           = audio->record.generation;
+  audio->record.active = false;
+  dispatch = beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->recordStop &&
-      recordEventCurrent(&target, generation, false))
+      recordEventCurrent(audio, &target, generation, false))
     target.events->recordStop(target.opaque, generation);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_recordVolume(int channels, const uint16_t volume[])
+void spiceAudio_recordVolume(SpiceAudio * audio,
+    int channels, const uint16_t volume[])
 {
   if (channels < 1 || channels > LG_AUDIO_MAX_CHANNELS || !volume)
     return;
@@ -902,56 +937,56 @@ void lgaSpice_recordVolume(int channels, const uint16_t volume[])
   uint16_t snapshot[LG_AUDIO_MAX_CHANNELS];
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  memcpy(l_spice.record.volume, volume,
+  memcpy(audio->record.volume, volume,
       (size_t)channels * sizeof(*volume));
-  l_spice.record.volumeChannels = channels;
-  l_spice.record.volumeValid    = true;
-  generation = l_spice.record.generation;
+  audio->record.volumeChannels = channels;
+  audio->record.volumeValid    = true;
+  generation = audio->record.generation;
   memcpy(snapshot, volume, (size_t)channels * sizeof(*volume));
-  dispatch   = l_spice.record.active && beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  dispatch   = audio->record.active && beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->recordVolume &&
-      recordEventCurrent(&target, generation, true))
+      recordEventCurrent(audio, &target, generation, true))
     target.events->recordVolume(
         target.opaque, generation, channels, snapshot);
-  endEvent();
+  endEvent(audio);
 }
 
-void lgaSpice_recordMute(bool mute)
+void spiceAudio_recordMute(SpiceAudio * audio, bool mute)
 {
   SpiceAudioEventTarget target;
   uint32_t generation;
   bool dispatch;
 
-  LG_LOCK_EXCLUSIVE(l_spice.lock);
-  if (!l_spice.available)
+  LG_LOCK_EXCLUSIVE(audio->lock);
+  if (!audio->available)
   {
-    LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+    LG_UNLOCK_EXCLUSIVE(audio->lock);
     return;
   }
 
-  l_spice.record.mute      = mute;
-  l_spice.record.muteValid = true;
-  generation = l_spice.record.generation;
-  dispatch   = l_spice.record.active && beginEventNL(&target);
-  LG_UNLOCK_EXCLUSIVE(l_spice.lock);
+  audio->record.mute      = mute;
+  audio->record.muteValid = true;
+  generation = audio->record.generation;
+  dispatch   = audio->record.active && beginEventNL(audio, &target);
+  LG_UNLOCK_EXCLUSIVE(audio->lock);
 
   if (!dispatch)
     return;
 
   if (target.events->recordMute &&
-      recordEventCurrent(&target, generation, true))
+      recordEventCurrent(audio, &target, generation, true))
     target.events->recordMute(target.opaque, generation, mute);
-  endEvent();
+  endEvent(audio);
 }

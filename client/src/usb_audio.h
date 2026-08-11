@@ -22,7 +22,7 @@
 #define _H_LG_CLIENT_USB_AUDIO_
 
 #include "interface/audio.h"
-#include "usbredir.h"
+#include "interface/usbredir.h"
 
 #include <stddef.h>
 #include <stdint.h>
