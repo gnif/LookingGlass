@@ -1732,6 +1732,27 @@ static void videoSourceClearCursor(LG_VideoSource source)
   renderQueue_sourceClearCursor(renderQueueSource(source));
 }
 
+static void videoSourceReject(void * opaque, RenderQueueSource queueSource,
+    uint64_t serial)
+{
+  (void)opaque;
+
+  LG_VideoSource source = LG_VIDEO_SOURCE_NONE;
+  if (queueSource == RENDER_QUEUE_SOURCE_PRIMARY)
+    source = LG_VIDEO_SOURCE_PRIMARY;
+  else if (queueSource == RENDER_QUEUE_SOURCE_FALLBACK)
+    source = LG_VIDEO_SOURCE_FALLBACK;
+
+  if (source == LG_VIDEO_SOURCE_NONE)
+    return;
+
+  struct VideoSourceState * state = &g_state.videoSource[source];
+  if (atomic_compare_exchange_strong_explicit(&state->transitionSerial,
+        &serial, 0, memory_order_acq_rel, memory_order_relaxed))
+    atomic_store_explicit(
+        &state->transitionPending, false, memory_order_release);
+}
+
 static bool videoSourcePrepare(void * opaque, RenderQueueSource queueSource,
     uint64_t generation, uint64_t serial)
 {
@@ -1799,10 +1820,7 @@ static bool videoSourcePrepare(void * opaque, RenderQueueSource queueSource,
   return true;
 
 reject:
-  if (atomic_compare_exchange_strong_explicit(&state->transitionSerial,
-        &serial, 0, memory_order_acq_rel, memory_order_relaxed))
-    atomic_store_explicit(
-        &state->transitionPending, false, memory_order_release);
+  videoSourceReject(opaque, queueSource, serial);
   return false;
 }
 
@@ -1892,6 +1910,7 @@ static void swSurfaceConfigure(LG_VideoSource source,
     unsigned int width, unsigned int height)
 {
   struct VideoSourceState * state = &g_state.videoSource[source];
+  uint64_t generation;
   LG_LOCK(g_state.videoSourceLock);
   if (!swSurfaceEventAdmitted(source))
   {
@@ -1900,10 +1919,25 @@ static void swSurfaceConfigure(LG_VideoSource source,
   }
 
   videoSourceBeginLocked(source);
+  generation = atomic_load_explicit(
+      &state->generation, memory_order_acquire);
   atomic_store_explicit(&state->width, width, memory_order_relaxed);
   atomic_store_explicit(&state->height, height, memory_order_relaxed);
   atomic_store_explicit(&state->rotate, LG_ROTATE_0, memory_order_release);
   state->configurePending = true;
+  LG_UNLOCK(g_state.videoSourceLock);
+
+  if (!renderQueue_sourceSwSurfaceConfigure(renderQueueSource(source),
+        generation, width, height))
+    return;
+
+  LG_LOCK(g_state.videoSourceLock);
+  if (atomic_load_explicit(
+        &state->generation, memory_order_acquire) != generation)
+  {
+    LG_UNLOCK(g_state.videoSourceLock);
+    return;
+  }
   atomic_store_explicit(&state->ready, true, memory_order_release);
   LG_UNLOCK(g_state.videoSourceLock);
 
@@ -3002,7 +3036,8 @@ static int lg_run(void)
   LG_LOCK_INIT(g_state.videoSourceLock);
   LG_LOCK_INIT(g_state.videoSplashLock);
   renderQueue_init();
-  renderQueue_setSourceFns(videoSourcePrepare, videoSourceApplied, NULL);
+  renderQueue_setSourceFns(
+      videoSourcePrepare, videoSourceReject, videoSourceApplied, NULL);
   atomic_store_explicit(&g_state.videoSourceRequested,
       LG_VIDEO_SOURCE_PRIMARY, memory_order_relaxed);
   atomic_store_explicit(&g_state.videoSourceApplied,
@@ -3552,7 +3587,7 @@ static void lg_shutdown(void)
     g_state.overlays = NULL;
   }
 
-  renderQueue_setSourceFns(NULL, NULL, NULL);
+  renderQueue_setSourceFns(NULL, NULL, NULL, NULL);
   renderQueue_free();
   LG_LOCK_FREE(g_state.videoSourceLock);
   LG_LOCK_FREE(g_state.videoSplashLock);

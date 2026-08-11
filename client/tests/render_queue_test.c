@@ -243,12 +243,12 @@ static void start(void)
   g_state.ds                           = &f.ds;
 
   renderQueue_init();
-  renderQueue_setSourceFns(prep, applied, &f);
+  renderQueue_setSourceFns(prep, NULL, applied, &f);
 }
 
 static void stop(void)
 {
-  renderQueue_setSourceFns(NULL, NULL, NULL);
+  renderQueue_setSourceFns(NULL, NULL, NULL, NULL);
   renderQueue_free();
 }
 
@@ -296,6 +296,8 @@ static void testLatest(void)
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
   const uint64_t fallback =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_FALLBACK);
+  CHECK(renderQueue_sourceSwSurfaceConfigure(
+        RENDER_QUEUE_SOURCE_FALLBACK, fallback, 2, 1));
   atomic_uint_least64_t published;
   atomic_init(&published, 0);
 
@@ -332,9 +334,11 @@ static void testPrepare(void)
 
   const uint64_t generation =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
+  CHECK(renderQueue_sourceSwSurfaceConfigure(
+        RENDER_QUEUE_SOURCE_PRIMARY, generation, 4, 4));
   f.prepResult = false;
   CHECK(renderQueue_sourceSwSurfaceConfigureTransition(
-        RENDER_QUEUE_SOURCE_PRIMARY, generation, 640, 480, NULL) != 0);
+        RENDER_QUEUE_SOURCE_PRIMARY, generation, 4, 4, NULL) != 0);
   renderQueue_process();
   renderQueue_presented();
 
@@ -345,19 +349,23 @@ static void testPrepare(void)
   CHECK(f.appliedCount == 0);
 
   f.prepResult = true;
+  CHECK(renderQueue_sourceSwSurfaceConfigure(
+        RENDER_QUEUE_SOURCE_PRIMARY, generation, 3, 2));
   const uint64_t serial = renderQueue_sourceSwSurfaceConfigureTransition(
-      RENDER_QUEUE_SOURCE_PRIMARY, generation, 320, 200, NULL);
+      RENDER_QUEUE_SOURCE_PRIMARY, generation, 3, 2, NULL);
   CHECK(serial != 0);
   renderQueue_process();
   CHECK(f.configCount == 1);
-  CHECK(f.configWidth == 320);
-  CHECK(f.configHeight == 200);
-  CHECK(f.fillCount == 1);
-  CHECK(f.fillX == 0);
-  CHECK(f.fillY == 0);
-  CHECK(f.fillWidth == 320);
-  CHECK(f.fillHeight == 200);
-  CHECK(f.fillColor == 0);
+  CHECK(f.configWidth == 3);
+  CHECK(f.configHeight == 2);
+  CHECK(f.fillCount == 0);
+  CHECK(f.bitmapCount == 1);
+  CHECK(f.bitmapX == 0);
+  CHECK(f.bitmapY == 0);
+  CHECK(f.bitmapWidth == 3);
+  CHECK(f.bitmapHeight == 2);
+  CHECK(f.bitmapStride == 12);
+  CHECK(f.bitmapTopDown);
   CHECK(f.showCount == 1);
   CHECK(f.show);
 
@@ -406,6 +414,8 @@ static void testPayload(void)
 
   const uint64_t generation =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
+  CHECK(renderQueue_sourceSwSurfaceConfigure(
+        RENDER_QUEUE_SOURCE_PRIMARY, generation, 2, 2));
   uint8_t bitmap[] =
   {
      1,  2,  3,  4,  5,  6,  7,  8,
@@ -427,7 +437,7 @@ static void testPayload(void)
   };
 
   renderQueue_sourceSwSurfaceDrawBitmap(RENDER_QUEUE_SOURCE_PRIMARY,
-      generation, 5, 6, 2, 2, 8, bitmap, true);
+      generation, 0, 0, 2, 2, 8, bitmap, true);
   renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
       LG_CURSOR_COLOR, 2, 2, 4, shape);
   renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
@@ -435,7 +445,7 @@ static void testPayload(void)
   renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, generation,
       true, 20, 21, 1, 2);
   CHECK(renderQueue_sourceTransition(RENDER_QUEUE_SOURCE_PRIMARY,
-        generation, false, NULL) != 0);
+        generation, true, NULL) != 0);
 
   memset(bitmap, 0, sizeof(bitmap));
   memset(shape, 0, sizeof(shape));
@@ -446,8 +456,8 @@ static void testPayload(void)
   renderQueue_process();
 
   CHECK(f.bitmapCount == 1);
-  CHECK(f.bitmapX == 5);
-  CHECK(f.bitmapY == 6);
+  CHECK(f.bitmapX == 0);
+  CHECK(f.bitmapY == 0);
   CHECK(f.bitmapWidth == 2);
   CHECK(f.bitmapHeight == 2);
   CHECK(f.bitmapStride == 8);

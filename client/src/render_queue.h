@@ -36,6 +36,8 @@ typedef void (*RenderQueueSourceAppliedFn)(void * opaque,
     bool swSurface);
 typedef bool (*RenderQueueSourcePrepareFn)(void * opaque,
     RenderQueueSource source, uint64_t generation, uint64_t serial);
+typedef void (*RenderQueueSourceRejectFn)(void * opaque,
+    RenderQueueSource source, uint64_t serial);
 
 void renderQueue_init(void);
 void renderQueue_free(void);
@@ -44,6 +46,7 @@ void renderQueue_process(void);
 void renderQueue_presented(void);
 
 void renderQueue_setSourceFns(RenderQueueSourcePrepareFn prepare,
+    RenderQueueSourceRejectFn reject,
     RenderQueueSourceAppliedFn applied, void * opaque);
 
 /* Starting a source lifecycle makes commands from its prior generation stale.
@@ -56,6 +59,9 @@ void renderQueue_sourceClearCursor(RenderQueueSource source);
 uint64_t renderQueue_sourceTransition(RenderQueueSource source,
     uint64_t generation, bool swSurface,
     atomic_uint_least64_t * publishedSerial);
+
+bool renderQueue_sourceSwSurfaceConfigure(RenderQueueSource source,
+    uint64_t generation, int width, int height);
 
 uint64_t renderQueue_sourceSwSurfaceConfigureTransition(
     RenderQueueSource source, uint64_t generation, int width, int height,

@@ -20,6 +20,7 @@
 
 #include "render_queue.h"
 
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -40,8 +41,7 @@ typedef struct RenderCommand
   enum
   {
     SW_SURFACE_OP_CONFIGURE_TRANSITION,
-    SW_SURFACE_OP_DRAW_FILL,
-    SW_SURFACE_OP_DRAW_BITMAP,
+    SW_SURFACE_OP_UPDATE,
     SURFACE_OP_FORMAT,
     CURSOR_OP_STATE,
     CURSOR_OP_IMAGE,
@@ -56,26 +56,15 @@ typedef struct RenderCommand
     struct
     {
       int width, height;
+      uint64_t epoch;
     }
     swSurfaceConfigureTransition;
 
     struct
     {
-      int      x, y;
-      int      width, height;
-      uint32_t color;
+      uint64_t epoch;
     }
-    swSurfaceDrawFill;
-
-    struct
-    {
-      int       x    , y;
-      int       width, height;
-      int       stride;
-      uint8_t * data;
-      bool      topDown;
-    }
-    swSurfaceDrawBitmap;
+    swSurfaceUpdate;
 
     struct
     {
@@ -139,6 +128,44 @@ static LG_Lock                l_renderQueueLock;
 static bool                   l_renderQueueInitialized;
 static RenderQueueInvalidate l_renderQueueInvalidate;
 
+typedef struct RenderQueueSwSurface
+{
+  LG_Lock lock;
+
+  /* Transport bitmap storage is borrowed, so callbacks compose it into this
+   * persistent image before returning. The renderer consumes it synchronously
+   * while lock is held. */
+  uint64_t generation;
+  uint64_t epoch;
+  int      width;
+  int      height;
+  int      pitch;
+  uint8_t * data;
+
+  bool            damageFull;
+  int             damageCount;
+  FrameDamageRect damage[LG_MAX_FRAME_DAMAGE_RECTS];
+
+  bool          updateQueued;
+  RenderCommand updateCommand;
+}
+RenderQueueSwSurface;
+
+static RenderQueueSwSurface l_swSurface[RENDER_QUEUE_SOURCE_COUNT];
+static RenderQueueSource    l_swSurfaceResidentSource;
+static uint64_t             l_swSurfaceResidentGeneration;
+static uint64_t             l_swSurfaceResidentEpoch;
+
+static RenderQueueSwSurface * swSurfaceFromUpdateCommand(
+    const RenderCommand * cmd)
+{
+  for (int i = 0; i < RENDER_QUEUE_SOURCE_COUNT; ++i)
+    if (cmd == &l_swSurface[i].updateCommand)
+      return &l_swSurface[i];
+
+  return NULL;
+}
+
 static bool              l_showSwSurface;
 static bool              l_surfaceFormatValid;
 static bool              l_rendererSupportsNativeHDR;
@@ -154,6 +181,7 @@ static uint64_t          l_appliedGeneration;
 static bool              l_appliedSwSurface;
 
 static RenderQueueSourcePrepareFn l_sourcePrepareFn;
+static RenderQueueSourceRejectFn  l_sourceRejectFn;
 static RenderQueueSourceAppliedFn l_sourceAppliedFn;
 static void                     * l_sourceCallbackOpaque;
 
@@ -242,8 +270,119 @@ static bool commandValid(const RenderCommand * cmd)
   return generationValid(cmd->source, cmd->generation);
 }
 
+static uint64_t swSurfaceDamageArea(const FrameDamageRect * rect)
+{
+  return (uint64_t)rect->width * rect->height;
+}
+
+static FrameDamageRect swSurfaceDamageUnion(
+    const FrameDamageRect * a, const FrameDamageRect * b)
+{
+  const uint32_t left   = min(a->x, b->x);
+  const uint32_t top    = min(a->y, b->y);
+  const uint32_t right  = max(a->x + a->width, b->x + b->width);
+  const uint32_t bottom = max(a->y + a->height, b->y + b->height);
+
+  return (FrameDamageRect)
+  {
+    .x      = left,
+    .y      = top,
+    .width  = right  - left,
+    .height = bottom - top,
+  };
+}
+
+static bool swSurfaceDamageTouches(
+    const FrameDamageRect * a, const FrameDamageRect * b)
+{
+  return a->x <= b->x + b->width  && b->x <= a->x + a->width &&
+         a->y <= b->y + b->height && b->y <= a->y + a->height;
+}
+
+static void swSurfaceDamageReset(RenderQueueSwSurface * surface)
+{
+  surface->damageFull  = false;
+  surface->damageCount = 0;
+}
+
+static bool swSurfaceDamagePending(const RenderQueueSwSurface * surface)
+{
+  return surface->damageFull || surface->damageCount;
+}
+
+static void swSurfaceDamageAdd(RenderQueueSwSurface * surface,
+    const FrameDamageRect * damage)
+{
+  if (surface->damageFull)
+    return;
+
+  if (damage->x == 0 && damage->y == 0 &&
+      damage->width  == (uint32_t)surface->width &&
+      damage->height == (uint32_t)surface->height)
+  {
+    surface->damageFull  = true;
+    surface->damageCount = 0;
+    return;
+  }
+
+  FrameDamageRect rect = *damage;
+  for (;;)
+  {
+    for (int i = 0; i < surface->damageCount;)
+    {
+      if (!swSurfaceDamageTouches(&rect, &surface->damage[i]))
+      {
+        ++i;
+        continue;
+      }
+
+      rect = swSurfaceDamageUnion(&rect, &surface->damage[i]);
+      surface->damage[i] = surface->damage[--surface->damageCount];
+      i = 0;
+    }
+
+    if (surface->damageCount < LG_MAX_FRAME_DAMAGE_RECTS)
+      break;
+
+    int      best     = 0;
+    uint64_t bestCost = UINT64_MAX;
+    for (int i = 0; i < surface->damageCount; ++i)
+    {
+      const FrameDamageRect merged =
+        swSurfaceDamageUnion(&rect, &surface->damage[i]);
+      const uint64_t cost = swSurfaceDamageArea(&merged) -
+        swSurfaceDamageArea(&surface->damage[i]);
+      if (cost < bestCost)
+      {
+        best     = i;
+        bestCost = cost;
+      }
+    }
+
+    rect = swSurfaceDamageUnion(&rect, &surface->damage[best]);
+    surface->damage[best] = surface->damage[--surface->damageCount];
+  }
+
+  surface->damage[surface->damageCount++] = rect;
+
+  uint64_t area = 0;
+  for (int i = 0; i < surface->damageCount; ++i)
+    area += swSurfaceDamageArea(&surface->damage[i]);
+
+  const uint64_t fullArea =
+    (uint64_t)surface->width * surface->height;
+  if (area >= fullArea - fullArea / 4)
+  {
+    surface->damageFull  = true;
+    surface->damageCount = 0;
+  }
+}
+
 static void freeCommand(RenderCommand * cmd)
 {
+  if (cmd->op == SW_SURFACE_OP_UPDATE)
+    return;
+
   switch (cmd->op)
   {
     case CURSOR_OP_IMAGE:
@@ -281,6 +420,23 @@ static bool queueCommand(RenderCommand * cmd,
   }
   LG_UNLOCK(l_renderQueueLock);
   return wake;
+}
+
+/* The surface lock must be held while its embedded command is queued. */
+static bool queueSwSurfaceUpdate(RenderQueueSource source,
+    RenderQueueSwSurface * surface)
+{
+  if (surface->updateQueued || !surface->data ||
+      !swSurfaceDamagePending(surface))
+    return false;
+
+  RenderCommand * cmd = &surface->updateCommand;
+  cmd->source                = source;
+  cmd->generation            = surface->generation;
+  cmd->op                    = SW_SURFACE_OP_UPDATE;
+  cmd->swSurfaceUpdate.epoch = surface->epoch;
+  surface->updateQueued      = true;
+  return queueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
 }
 
 static void wakeQueue(RenderQueueInvalidate invalidate, bool wake)
@@ -391,16 +547,26 @@ void renderQueue_init(void)
   l_appliedSource             = RENDER_QUEUE_SOURCE_NONE;
   l_appliedGeneration         = 0;
   l_appliedSwSurface          = false;
+
+  l_swSurfaceResidentSource     = RENDER_QUEUE_SOURCE_NONE;
+  l_swSurfaceResidentGeneration = 0;
+  l_swSurfaceResidentEpoch      = 0;
+
   l_sourcePrepareFn           = NULL;
+  l_sourceRejectFn            = NULL;
   l_sourceAppliedFn           = NULL;
   l_sourceCallbackOpaque      = NULL;
   l_pendingTransition         = (RenderQueueTransition) {};
   memset(&l_surfaceFormat, 0, sizeof(l_surfaceFormat));
   memset(l_cursor, 0, sizeof(l_cursor));
   memset(l_format, 0, sizeof(l_format));
+  memset(l_swSurface, 0, sizeof(l_swSurface));
 
   for (int i = 0; i < RENDER_QUEUE_SOURCE_COUNT; ++i)
+  {
     atomic_store_explicit(&l_sourceGeneration[i], 0, memory_order_relaxed);
+    LG_LOCK_INIT(l_swSurface[i].lock);
+  }
   atomic_store_explicit(&l_transitionSerial, 0, memory_order_relaxed);
   LG_LOCK_INIT(l_renderQueueLock);
   LG_LOCK_INIT(l_sourceLock);
@@ -419,6 +585,9 @@ void renderQueue_free(void)
   {
     free(l_cursor[i].data);
     l_cursor[i].data = NULL;
+    free(l_swSurface[i].data);
+    l_swSurface[i].data = NULL;
+    LG_LOCK_FREE(l_swSurface[i].lock);
   }
 
   l_renderQueueInitialized = false;
@@ -433,15 +602,25 @@ void renderQueue_clear(void)
   while(cmd)
   {
     RenderCommand * next = cmd->next;
-    freeCommand(cmd);
+    RenderQueueSwSurface * surface = swSurfaceFromUpdateCommand(cmd);
+    if (surface)
+    {
+      LG_LOCK(surface->lock);
+      surface->updateQueued = false;
+      LG_UNLOCK(surface->lock);
+    }
+    else
+      freeCommand(cmd);
     cmd = next;
   }
 }
 
 void renderQueue_setSourceFns(RenderQueueSourcePrepareFn prepare,
+    RenderQueueSourceRejectFn reject,
     RenderQueueSourceAppliedFn applied, void * opaque)
 {
   l_sourcePrepareFn      = prepare;
+  l_sourceRejectFn       = reject;
   l_sourceAppliedFn      = applied;
   l_sourceCallbackOpaque = opaque;
 }
@@ -452,6 +631,7 @@ uint64_t renderQueue_sourceBegin(RenderQueueSource source)
     return 0;
 
   LG_LOCK(l_sourceLock);
+  LG_LOCK(l_swSurface[source].lock);
   const uint64_t previous   = atomic_load_explicit(
       &l_sourceGeneration[source], memory_order_relaxed);
   const uint64_t generation = previous + 1;
@@ -467,6 +647,7 @@ uint64_t renderQueue_sourceBegin(RenderQueueSource source)
     cursor->colorGeneration = generation;
   if (cursor->whiteValid && cursor->whiteGeneration == previous)
     cursor->whiteGeneration = generation;
+  LG_UNLOCK(l_swSurface[source].lock);
   LG_UNLOCK(l_sourceLock);
   return generation;
 }
@@ -477,6 +658,7 @@ void renderQueue_sourceInvalidate(RenderQueueSource source,
   if (!sourceValid(source) || !generation)
     return;
   LG_LOCK(l_sourceLock);
+  LG_LOCK(l_swSurface[source].lock);
   const uint64_t invalidGeneration = generation + 1;
   if (atomic_compare_exchange_strong_explicit(&l_sourceGeneration[source],
         &generation, invalidGeneration, memory_order_acq_rel,
@@ -492,6 +674,7 @@ void renderQueue_sourceInvalidate(RenderQueueSource source,
     if (cursor->whiteValid && cursor->whiteGeneration == generation)
       cursor->whiteGeneration = invalidGeneration;
   }
+  LG_UNLOCK(l_swSurface[source].lock);
   LG_UNLOCK(l_sourceLock);
 }
 
@@ -504,6 +687,99 @@ void renderQueue_sourceClearCursor(RenderQueueSource source)
   free(l_cursor[source].data);
   memset(&l_cursor[source], 0, sizeof(l_cursor[source]));
   LG_UNLOCK(l_sourceLock);
+}
+
+static bool configureSwSurface(RenderQueueSource source,
+    uint64_t generation, int width, int height, uint64_t * epoch)
+{
+  if (width <= 0 || height <= 0 || width > INT_MAX / 4)
+  {
+    DEBUG_ERROR("Invalid software surface dimensions: %dx%d", width, height);
+    return false;
+  }
+
+  const int pitch = width * 4;
+  if ((size_t)height > SIZE_MAX / (size_t)pitch)
+  {
+    DEBUG_ERROR("Software surface size overflows: %dx%d", width, height);
+    return false;
+  }
+
+  RenderQueueSwSurface * surface = &l_swSurface[source];
+  LG_LOCK(surface->lock);
+  if (generationValid(source, generation) && surface->data &&
+      surface->generation == generation &&
+      surface->width == width && surface->height == height)
+  {
+    *epoch = surface->epoch;
+    LG_UNLOCK(surface->lock);
+    return true;
+  }
+  LG_UNLOCK(surface->lock);
+
+  uint8_t * data = calloc((size_t)height, (size_t)pitch);
+  if (!data)
+  {
+    DEBUG_ERROR("Failed to allocate software surface: %dx%d", width, height);
+    return false;
+  }
+
+  LG_LOCK(surface->lock);
+  if (!generationValid(source, generation))
+  {
+    LG_UNLOCK(surface->lock);
+    free(data);
+    return false;
+  }
+
+  if (surface->data && surface->generation == generation &&
+      surface->width == width && surface->height == height)
+  {
+    *epoch = surface->epoch;
+    LG_UNLOCK(surface->lock);
+    free(data);
+    return true;
+  }
+
+  uint64_t nextEpoch = surface->epoch + 1;
+  if (!nextEpoch)
+    ++nextEpoch;
+
+  free(surface->data);
+  surface->generation = generation;
+  surface->epoch      = nextEpoch;
+  surface->width      = width;
+  surface->height     = height;
+  surface->pitch      = pitch;
+  surface->data       = data;
+  swSurfaceDamageReset(surface);
+  *epoch = nextEpoch;
+  LG_UNLOCK(surface->lock);
+  return true;
+}
+
+bool renderQueue_sourceSwSurfaceConfigure(RenderQueueSource source,
+    uint64_t generation, int width, int height)
+{
+  if (!generationValid(source, generation))
+    return false;
+
+  uint64_t epoch;
+  return configureSwSurface(source, generation, width, height, &epoch);
+}
+
+static bool getSwSurfaceConfiguration(RenderQueueSource source,
+    uint64_t generation, int width, int height, uint64_t * epoch)
+{
+  RenderQueueSwSurface * surface = &l_swSurface[source];
+  LG_LOCK(surface->lock);
+  const bool valid = generationValid(source, generation) && surface->data &&
+    surface->generation == generation &&
+    surface->width == width && surface->height == height;
+  if (valid)
+    *epoch = surface->epoch;
+  LG_UNLOCK(surface->lock);
+  return valid;
 }
 
 static uint64_t enqueueTransition(RenderCommand * cmd,
@@ -558,33 +834,86 @@ uint64_t renderQueue_sourceSwSurfaceConfigureTransition(
   if (!cmd)
     return 0;
 
+  uint64_t epoch;
+  if (!getSwSurfaceConfiguration(
+        source, generation, width, height, &epoch))
+  {
+    free(cmd);
+    return 0;
+  }
+
   setCommandSource(cmd, source, generation);
   cmd->op                                  =
     SW_SURFACE_OP_CONFIGURE_TRANSITION;
   cmd->swSurfaceConfigureTransition.width  = width;
   cmd->swSurfaceConfigureTransition.height = height;
+  cmd->swSurfaceConfigureTransition.epoch  = epoch;
   return enqueueTransition(cmd, publishedSerial);
+}
+
+static bool clipSwSurfaceRect(const RenderQueueSwSurface * surface,
+    int * x, int * y, int * width, int * height,
+    int * sourceX, int * sourceY)
+{
+  const int64_t left   = max((int64_t)*x, 0);
+  const int64_t top    = max((int64_t)*y, 0);
+  const int64_t right  = min((int64_t)*x + *width,
+      (int64_t)surface->width);
+  const int64_t bottom = min((int64_t)*y + *height,
+      (int64_t)surface->height);
+  if (right <= left || bottom <= top)
+    return false;
+
+  if (sourceX)
+    *sourceX = (int)(left - *x);
+  if (sourceY)
+    *sourceY = (int)(top - *y);
+  *x      = (int)left;
+  *y      = (int)top;
+  *width  = (int)(right  - left);
+  *height = (int)(bottom - top);
+  return true;
 }
 
 void renderQueue_sourceSwSurfaceDrawFill(RenderQueueSource source,
     uint64_t generation, int x, int y, int width, int height,
     uint32_t color)
 {
-  if (!generationValid(source, generation))
+  if (!generationValid(source, generation) || width <= 0 || height <= 0)
     return;
 
-  RenderCommand * cmd = malloc(sizeof(*cmd));
-  if (!cmd)
+  RenderQueueSwSurface * surface = &l_swSurface[source];
+  LG_LOCK(surface->lock);
+  if (surface->generation != generation ||
+      !generationValid(source, generation) ||
+      !clipSwSurfaceRect(surface,
+        &x, &y, &width, &height, NULL, NULL))
+  {
+    LG_UNLOCK(surface->lock);
     return;
+  }
 
-  setCommandSource(cmd, source, generation);
-  cmd->op                       = SW_SURFACE_OP_DRAW_FILL;
-  cmd->swSurfaceDrawFill.x      = x;
-  cmd->swSurfaceDrawFill.y      = y;
-  cmd->swSurfaceDrawFill.width  = width;
-  cmd->swSurfaceDrawFill.height = height;
-  cmd->swSurfaceDrawFill.color  = color;
-  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
+  uint8_t * row = surface->data +
+    (size_t)y * surface->pitch + (size_t)x * 4;
+  for (int dy = 0; dy < height; ++dy)
+  {
+    uint32_t * dst = (uint32_t *)row;
+    for (int dx = 0; dx < width; ++dx)
+      dst[dx] = color;
+    row += surface->pitch;
+  }
+
+  const FrameDamageRect damage =
+  {
+    .x      = (uint32_t)x,
+    .y      = (uint32_t)y,
+    .width  = (uint32_t)width,
+    .height = (uint32_t)height,
+  };
+  swSurfaceDamageAdd(surface, &damage);
+  const bool wake = queueSwSurfaceUpdate(source, surface);
+  LG_UNLOCK(surface->lock);
+  wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
 }
 
 void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
@@ -616,41 +945,51 @@ void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
     return;
   }
 
-  const size_t rowSize = (size_t)width * 4;
-  if ((size_t)height > (SIZE_MAX - sizeof(RenderCommand)) / rowSize)
+  if ((size_t)height > SIZE_MAX / (size_t)stride)
   {
     DEBUG_ERROR("Software surface bitmap size overflows: "
-        "width: %d, height: %d", width, height);
+        "height: %d, stride: %d", height, stride);
     return;
   }
 
-  const size_t   size = (size_t)height * rowSize;
-  RenderCommand * cmd = malloc(sizeof(*cmd) + size);
-  if (!cmd)
+  RenderQueueSwSurface * surface = &l_swSurface[source];
+  LG_LOCK(surface->lock);
+  int sourceX;
+  int sourceY;
+  const int sourceHeight = height;
+  if (surface->generation != generation ||
+      !generationValid(source, generation) ||
+      !clipSwSurfaceRect(surface,
+        &x, &y, &width, &height, &sourceX, &sourceY))
   {
-    DEBUG_ERROR("Failed to allocate %zu bytes for software surface bitmap",
-        size);
+    LG_UNLOCK(surface->lock);
     return;
   }
 
-  uint8_t * copy = (uint8_t *)(cmd + 1);
-  if ((size_t)stride == rowSize)
-    memcpy(copy, data, size);
-  else
-    for(int row = 0; row < height; ++row)
-      memcpy(copy + (size_t)row * rowSize,
-          (const uint8_t *)data + (size_t)row * stride, rowSize);
+  const size_t copySize = (size_t)width * 4;
+  uint8_t * dst = surface->data +
+    (size_t)y * surface->pitch + (size_t)x * 4;
+  for (int dy = 0; dy < height; ++dy)
+  {
+    const int sourceRow = topDown ?
+      sourceY + dy : sourceHeight - sourceY - dy - 1;
+    const uint8_t * src = (const uint8_t *)data +
+      (size_t)sourceRow * stride + (size_t)sourceX * 4;
+    memcpy(dst, src, copySize);
+    dst += surface->pitch;
+  }
 
-  setCommandSource(cmd, source, generation);
-  cmd->op                          = SW_SURFACE_OP_DRAW_BITMAP;
-  cmd->swSurfaceDrawBitmap.x       = x;
-  cmd->swSurfaceDrawBitmap.y       = y;
-  cmd->swSurfaceDrawBitmap.width   = width;
-  cmd->swSurfaceDrawBitmap.height  = height;
-  cmd->swSurfaceDrawBitmap.stride  = (int)rowSize;
-  cmd->swSurfaceDrawBitmap.data    = copy;
-  cmd->swSurfaceDrawBitmap.topDown = topDown;
-  enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
+  const FrameDamageRect damage =
+  {
+    .x      = (uint32_t)x,
+    .y      = (uint32_t)y,
+    .width  = (uint32_t)width,
+    .height = (uint32_t)height,
+  };
+  swSurfaceDamageAdd(surface, &damage);
+  const bool wake = queueSwSurfaceUpdate(source, surface);
+  LG_UNLOCK(surface->lock);
+  wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
 }
 
 void renderQueue_sourceSurfaceFormat(RenderQueueSource source,
@@ -756,6 +1095,135 @@ void renderQueue_sourceCursorWhiteLevel(RenderQueueSource source,
   enqueueCommand(cmd, RENDER_QUEUE_INVALIDATE_NONE);
 }
 
+static bool swSurfaceCommandMatches(const RenderQueueSwSurface * surface,
+    const RenderCommand * cmd, uint64_t epoch)
+{
+  return surface->data && surface->generation == cmd->generation &&
+    surface->epoch == epoch;
+}
+
+static void uploadSwSurfaceFull(RenderQueueSource source,
+    RenderQueueSwSurface * surface)
+{
+  RENDERER(swSurfaceConfigure, surface->width, surface->height);
+  RENDERER(swSurfaceDrawBitmap,
+      0, 0, surface->width, surface->height,
+      surface->pitch, surface->data, true);
+  swSurfaceDamageReset(surface);
+  l_swSurfaceResidentSource     = source;
+  l_swSurfaceResidentGeneration = surface->generation;
+  l_swSurfaceResidentEpoch      = surface->epoch;
+}
+
+static bool swSurfaceResident(RenderQueueSource source,
+    const RenderQueueSwSurface * surface)
+{
+  return l_swSurfaceResidentSource == source &&
+    l_swSurfaceResidentGeneration == surface->generation &&
+    l_swSurfaceResidentEpoch == surface->epoch;
+}
+
+static void uploadSwSurfaceDamage(RenderQueueSource source,
+    RenderQueueSwSurface * surface)
+{
+  if (!swSurfaceResident(source, surface))
+  {
+    uploadSwSurfaceFull(source, surface);
+    return;
+  }
+
+  if (surface->damageFull)
+    RENDERER(swSurfaceDrawBitmap,
+        0, 0, surface->width, surface->height,
+        surface->pitch, surface->data, true);
+  else
+    for (int i = 0; i < surface->damageCount; ++i)
+    {
+      const FrameDamageRect * damage = &surface->damage[i];
+      uint8_t * data = surface->data +
+        (size_t)damage->y * surface->pitch + (size_t)damage->x * 4;
+      RENDERER(swSurfaceDrawBitmap,
+          damage->x, damage->y, damage->width, damage->height,
+          surface->pitch, data, true);
+    }
+
+  swSurfaceDamageReset(surface);
+}
+
+static bool swSurfaceTransitionMatches(
+    const RenderQueueSwSurface * surface, const RenderCommand * cmd,
+    bool configure)
+{
+  const uint64_t epoch = configure ?
+    cmd->swSurfaceConfigureTransition.epoch : surface->epoch;
+  return swSurfaceCommandMatches(surface, cmd, epoch) &&
+    (!configure ||
+      (surface->width  == cmd->swSurfaceConfigureTransition.width &&
+       surface->height == cmd->swSurfaceConfigureTransition.height));
+}
+
+static bool prepareSwSurfaceTransition(const RenderCommand * cmd,
+    bool configure)
+{
+  RenderQueueSwSurface * surface = &l_swSurface[cmd->source];
+  LG_LOCK(surface->lock);
+
+  const bool valid = swSurfaceTransitionMatches(surface, cmd, configure);
+  if (valid)
+  {
+    if (configure || !swSurfaceResident(cmd->source, surface))
+      uploadSwSurfaceFull(cmd->source, surface);
+    else
+      uploadSwSurfaceDamage(cmd->source, surface);
+  }
+
+  LG_UNLOCK(surface->lock);
+  return valid;
+}
+
+static bool swSurfaceTransitionReady(const RenderCommand * cmd,
+    bool configure)
+{
+  RenderQueueSwSurface * surface = &l_swSurface[cmd->source];
+  LG_LOCK(surface->lock);
+  const bool ready = swSurfaceTransitionMatches(surface, cmd, configure);
+  LG_UNLOCK(surface->lock);
+  return ready;
+}
+
+/* Called with l_sourceLock held. The marker may be recycled into the live
+ * queue after an older generation was detached from it. */
+static bool processSwSurfaceUpdate(RenderCommand * cmd, bool commandValid)
+{
+  RenderQueueSwSurface * surface = &l_swSurface[cmd->source];
+  LG_LOCK(surface->lock);
+
+  if (!surface->updateQueued)
+  {
+    LG_UNLOCK(surface->lock);
+    return false;
+  }
+
+  surface->updateQueued = false;
+  const bool matches = commandValid &&
+    swSurfaceCommandMatches(surface, cmd, cmd->swSurfaceUpdate.epoch);
+  const bool active = l_appliedSwSurface &&
+    l_appliedSource == cmd->source &&
+    l_appliedGeneration == cmd->generation;
+  if (matches && active)
+    uploadSwSurfaceDamage(cmd->source, surface);
+
+  bool wake = false;
+  if (swSurfaceDamagePending(surface) &&
+      l_appliedSwSurface && l_appliedSource == cmd->source &&
+      l_appliedGeneration == surface->generation &&
+      generationValid(cmd->source, surface->generation))
+    wake = queueSwSurfaceUpdate(cmd->source, surface);
+
+  LG_UNLOCK(surface->lock);
+  return wake;
+}
+
 static void applyCursor(RenderQueueSource source, uint64_t generation)
 {
   RenderQueueCursor * cursor = &l_cursor[source];
@@ -828,6 +1296,13 @@ static bool prepareSourceTransition(const RenderCommand * cmd)
       cmd->source, cmd->generation, cmd->transitionSerial);
 }
 
+static void rejectSourceTransition(const RenderCommand * cmd)
+{
+  if (l_sourceRejectFn)
+    l_sourceRejectFn(l_sourceCallbackOpaque,
+        cmd->source, cmd->transitionSerial);
+}
+
 void renderQueue_process(void)
 {
   RenderCommand * cmd = detachCommands();
@@ -835,16 +1310,21 @@ void renderQueue_process(void)
   {
     RenderCommand * next = cmd->next;
     const bool transition = transitionCommand(cmd);
+    bool wake = false;
     if (transition)
       LG_LOCK(l_transitionLock);
     LG_LOCK(l_sourceLock);
 
-    if (!commandValid(cmd))
+    const bool validCommand = commandValid(cmd);
+    if (!validCommand)
     {
+      if (cmd->op == SW_SURFACE_OP_UPDATE)
+        wake = processSwSurfaceUpdate(cmd, false);
       LG_UNLOCK(l_sourceLock);
       if (transition)
         LG_UNLOCK(l_transitionLock);
       freeCommand(cmd);
+      wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
       cmd = next;
       continue;
     }
@@ -852,30 +1332,24 @@ void renderQueue_process(void)
     switch(cmd->op)
     {
       case SW_SURFACE_OP_CONFIGURE_TRANSITION:
+        if (!swSurfaceTransitionReady(cmd, true))
+        {
+          DEBUG_ERROR("Software surface configuration is unavailable");
+          rejectSourceTransition(cmd);
+          break;
+        }
         if (!prepareSourceTransition(cmd))
           break;
-        RENDERER(swSurfaceConfigure,
-            cmd->swSurfaceConfigureTransition.width,
-            cmd->swSurfaceConfigureTransition.height);
-        RENDERER(swSurfaceDrawFill, 0, 0,
-            cmd->swSurfaceConfigureTransition.width,
-            cmd->swSurfaceConfigureTransition.height, 0);
+        if (!prepareSwSurfaceTransition(cmd, true))
+        {
+          rejectSourceTransition(cmd);
+          break;
+        }
         applySourceTransition(cmd, true);
         break;
 
-      case SW_SURFACE_OP_DRAW_FILL:
-        RENDERER(swSurfaceDrawFill,
-            cmd->swSurfaceDrawFill.x    , cmd->swSurfaceDrawFill.y,
-            cmd->swSurfaceDrawFill.width, cmd->swSurfaceDrawFill.height,
-            cmd->swSurfaceDrawFill.color);
-        break;
-
-      case SW_SURFACE_OP_DRAW_BITMAP:
-        RENDERER(swSurfaceDrawBitmap,
-            cmd->swSurfaceDrawBitmap.x     , cmd->swSurfaceDrawBitmap.y,
-            cmd->swSurfaceDrawBitmap.width , cmd->swSurfaceDrawBitmap.height,
-            cmd->swSurfaceDrawBitmap.stride, cmd->swSurfaceDrawBitmap.data,
-            cmd->swSurfaceDrawBitmap.topDown);
+      case SW_SURFACE_OP_UPDATE:
+        wake = processSwSurfaceUpdate(cmd, true);
         break;
 
       case SURFACE_OP_FORMAT:
@@ -978,17 +1452,32 @@ void renderQueue_process(void)
       }
 
       case SOURCE_OP_TRANSITION:
+      {
+        const bool swSurface =
+          cmd->source != RENDER_QUEUE_SOURCE_NONE &&
+          cmd->sourceTransition.swSurface;
+        if (swSurface && !swSurfaceTransitionReady(cmd, false))
+        {
+          DEBUG_ERROR("Software surface source is unavailable");
+          rejectSourceTransition(cmd);
+          break;
+        }
         if (!prepareSourceTransition(cmd))
           break;
-        applySourceTransition(cmd,
-            cmd->source != RENDER_QUEUE_SOURCE_NONE &&
-              cmd->sourceTransition.swSurface);
+        if (swSurface && !prepareSwSurfaceTransition(cmd, false))
+        {
+          rejectSourceTransition(cmd);
+          break;
+        }
+        applySourceTransition(cmd, swSurface);
         break;
+      }
     }
     LG_UNLOCK(l_sourceLock);
     if (transition)
       LG_UNLOCK(l_transitionLock);
     freeCommand(cmd);
+    wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
     cmd = next;
   }
 }
