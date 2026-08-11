@@ -36,6 +36,8 @@
 typedef struct LG_Transport LG_Transport;
 typedef struct LG_RendererInterop LG_RendererInterop;
 
+typedef bool (*LG_TransportCancelledFn)(void * opaque);
+
 typedef enum LG_TransportStatus
 {
   LG_TRANSPORT_OK,
@@ -320,6 +322,11 @@ typedef struct LG_TransportOps
 
   LG_TransportStatus (*connect)(LG_Transport * transport,
       LG_TransportSession * session);
+  /* Optional cancellable form used by transports which may wait while
+   * establishing a session. */
+  LG_TransportStatus (*connectCancellable)(LG_Transport * transport,
+      LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+      void * opaque);
   void (*disconnect)(LG_Transport * transport);
   bool (*sessionValid)(LG_Transport * transport);
   /* Queried after create. The returned operations remain valid until the

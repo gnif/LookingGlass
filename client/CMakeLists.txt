@@ -187,6 +187,7 @@ set(SOURCES
   src/render_queue.c
   src/evdev.c
   src/transport.c
+  src/transport_fallback.c
   src/input.c
 
   src/overlay/splash.c

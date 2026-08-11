@@ -157,8 +157,9 @@ static void spiceDestroy(LG_Transport ** transport)
   *transport = NULL;
 }
 
-static LG_TransportStatus spiceConnect(LG_Transport * transport,
-    LG_TransportSession * session)
+static LG_TransportStatus spiceConnectCancellable(LG_Transport * transport,
+    LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+    void * opaque)
 {
   if (transport->thread)
     return LG_TRANSPORT_ERROR;
@@ -174,7 +175,24 @@ static LG_TransportStatus spiceConnect(LG_Transport * transport,
         "spiceProcess", spiceSession_thread, transport, &transport->thread))
     return LG_TRANSPORT_ERROR;
 
-  lgWaitEvent(transport->connectEvent, TIMEOUT_INFINITE);
+  bool cancel = false;
+  while (!lgWaitEvent(transport->connectEvent, 100))
+    if (cancelled && cancelled(opaque))
+    {
+      cancel = true;
+      atomic_store_explicit(&transport->stop, true, memory_order_release);
+      lgWaitEvent(transport->connectEvent, TIMEOUT_INFINITE);
+      break;
+    }
+
+  if (cancel || (cancelled && cancelled(opaque)))
+  {
+    atomic_store_explicit(&transport->stop, true, memory_order_release);
+    lgJoinThread(transport->thread, NULL);
+    transport->thread = NULL;
+    return LG_TRANSPORT_DISCONNECTED;
+  }
+
   if (transport->connectStatus != LG_TRANSPORT_OK)
   {
     lgJoinThread(transport->thread, NULL);
@@ -184,6 +202,12 @@ static LG_TransportStatus spiceConnect(LG_Transport * transport,
 
   *session = transport->session;
   return LG_TRANSPORT_OK;
+}
+
+static LG_TransportStatus spiceConnect(LG_Transport * transport,
+    LG_TransportSession * session)
+{
+  return spiceConnectCancellable(transport, session, NULL, NULL);
 }
 
 static void spiceDisconnect(LG_Transport * transport)
@@ -261,17 +285,18 @@ static LG_TransportStatus spiceControlStatus(LG_Transport * transport,
 
 const LG_TransportOps LGT_SPICE =
 {
-  .name            = "spice",
-  .setup           = spiceSetup,
-  .create          = spiceCreate,
-  .destroy         = spiceDestroy,
-  .connect         = spiceConnect,
-  .disconnect      = spiceDisconnect,
-  .sessionValid    = spiceSessionValid,
-  .getVideoOps     = spiceGetVideoOps,
-  .getInputOps     = spiceGetInputOps,
-  .getAudioOps     = spiceGetAudioOps,
-  .getClipboardOps = spiceGetClipboardOps,
-  .sendControl     = spiceSendControl,
-  .controlStatus   = spiceControlStatus,
+  .name               = "spice",
+  .setup              = spiceSetup,
+  .create             = spiceCreate,
+  .destroy            = spiceDestroy,
+  .connect            = spiceConnect,
+  .connectCancellable = spiceConnectCancellable,
+  .disconnect         = spiceDisconnect,
+  .sessionValid       = spiceSessionValid,
+  .getVideoOps        = spiceGetVideoOps,
+  .getInputOps        = spiceGetInputOps,
+  .getAudioOps        = spiceGetAudioOps,
+  .getClipboardOps    = spiceGetClipboardOps,
+  .sendControl        = spiceSendControl,
+  .controlStatus      = spiceControlStatus,
 };

@@ -1151,16 +1151,14 @@ void app_stopVideo(bool stop)
 
 bool app_useSpiceDisplay(bool enable)
 {
-  if (!g_params.useSpice || !g_state.fallbackVideoOps ||
-      g_state.fallbackVideoOps->type != LG_VIDEO_TYPE_SW_SURFACE ||
-      !g_state.fallbackVideoOps->swSurface)
+  if (!g_params.useSpice || !g_state.fallback)
     return false;
 
   atomic_store_explicit(&g_state.fallbackDisplayRequested, enable,
       memory_order_release);
 
   // if the fallback is not yet ready, retain the requested state
-  if (!atomic_load_explicit(&g_state.fallbackReady, memory_order_acquire))
+  if (!lgTransportFallback_ready(g_state.fallback))
     return false;
 
   bool active = atomic_load_explicit(&g_state.fallbackDisplayActive,
@@ -1189,8 +1187,7 @@ bool app_useSpiceDisplay(bool enable)
   if (active == enable)
     goto done;
 
-  if (!g_state.fallbackVideoOps->swSurface->setActive(
-        g_state.fallbackTransport.handle, enable))
+  if (!lgTransportFallback_setVideoActive(g_state.fallback, enable))
     goto fail;
 
   renderQueue_swSurfaceShow(enable);
@@ -1215,6 +1212,7 @@ done:
 fail:
   DEBUG_ERROR("Failed to %s the SPICE display",
       enable ? "enable" : "disable");
+  lgTransportFallback_setVideoActive(g_state.fallback, active);
   atomic_store_explicit(&g_state.fallbackDisplayRequested, active,
       memory_order_release);
   goto done;

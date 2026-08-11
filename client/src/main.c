@@ -1508,8 +1508,6 @@ static void fallbackSurfaceDestroy(void * opaque)
 {
   (void)opaque;
   g_state.fallbackSurfaceValid = false;
-  atomic_store_explicit(&g_state.fallbackDisplayRequested, false,
-      memory_order_release);
   if (atomic_exchange_explicit(&g_state.fallbackDisplayActive, false,
         memory_order_acq_rel))
   {
@@ -1542,7 +1540,7 @@ static void fallbackSurfacePointer(void * opaque,
   if (pointer->flags & LG_TRANSPORT_POINTER_SHAPE)
   {
     LG_RendererCursor type;
-    switch(pointer->type)
+    switch (pointer->type)
     {
       case CURSOR_TYPE_COLOR:
         type = LG_CURSOR_COLOR;
@@ -1585,137 +1583,73 @@ static const LG_SwSurfaceEventOps fallbackSurfaceEvents =
   .pointer    = fallbackSurfacePointer,
 };
 
-static void fallbackDisconnect(void)
+static void fallbackConnected(void * opaque,
+    const LG_TransportSession * session)
 {
-  if (!g_state.fallbackTransport.ops)
-    return;
+  (void)opaque;
+  if (session->name[0] && !atomic_load_explicit(
+        &g_state.lgHostConnected, memory_order_acquire))
+    core_setTitle(session->name);
 
-  const bool connected = g_state.fallbackTransport.handle &&
-    g_state.fallbackTransport.ops->sessionValid(
-        g_state.fallbackTransport.handle);
-
-  atomic_store_explicit(
-      &g_state.fallbackReady, false, memory_order_release);
-
-  if (connected)
-  {
-    lgInput_setFallback(NULL, NULL);
-    lgAudio_setFallback(NULL, NULL);
-    lgClipboard_setFallback(NULL, NULL);
-  }
-  else
-  {
-    lgInput_dropFallback();
-    lgAudio_dropFallback();
-    lgClipboard_dropFallback();
-  }
-
-  if (g_state.fallbackVideoOps &&
-      g_state.fallbackVideoOps->type == LG_VIDEO_TYPE_SW_SURFACE &&
-      g_state.fallbackVideoOps->swSurface)
-  {
-    if (connected)
-      g_state.fallbackVideoOps->swSurface->setActive(
-          g_state.fallbackTransport.handle, false);
-    g_state.fallbackVideoOps->swSurface->detach(
-        g_state.fallbackTransport.handle);
-  }
-
-  if (atomic_exchange_explicit(&g_state.fallbackDisplayActive, false,
-        memory_order_acq_rel))
-  {
-    renderQueue_swSurfaceShow(false);
-    lgInput_useTransport(true);
-    overlayStatus_set(LG_USER_STATUS_SPICE, false);
-  }
-
-  g_state.fallbackTransport.ops->disconnect(
-      g_state.fallbackTransport.handle);
-  lgTransport_destroy(&g_state.fallbackTransport);
-  g_state.fallbackVideoOps     = NULL;
-  g_state.fallbackSurfaceValid = false;
+  if (atomic_load_explicit(&g_state.fallbackDisplayRequested,
+        memory_order_acquire))
+    app_useSpiceDisplay(true);
 }
 
-static bool fallbackConnect(void)
+static void fallbackDisconnected(void * opaque)
+{
+  fallbackSurfaceDestroy(opaque);
+  if (!atomic_load_explicit(
+        &g_state.lgHostConnected, memory_order_acquire))
+    overlaySplash_show(true);
+}
+
+static void fallbackUUIDMismatch(void * opaque, const uint8_t primary[16],
+    const uint8_t fallback[16])
+{
+  (void)opaque;
+  (void)primary;
+  (void)fallback;
+  atomic_store_explicit(
+      &g_state.fallbackUUIDMismatch, true, memory_order_release);
+  app_invalidateWindow(false);
+}
+
+static const LG_TransportFallbackEventOps fallbackEvents =
+{
+  .connected    = fallbackConnected,
+  .disconnected = fallbackDisconnected,
+  .uuidMismatch = fallbackUUIDMismatch,
+};
+
+static bool fallbackStart(void)
 {
   if (!g_params.useSpice || strcmp(g_params.transport, "spice") == 0)
     return true;
 
-  if (!lgTransport_create("spice", &g_state.fallbackTransport))
-  {
-    DEBUG_ERROR("Failed to create the SPICE fallback transport");
-    return false;
-  }
+  if (lgTransportFallback_start("spice", &fallbackSurfaceEvents, NULL,
+        &fallbackEvents, NULL, &g_state.fallback))
+    return true;
 
-  g_state.fallbackVideoOps =
-    g_state.fallbackTransport.ops->getVideoOps(
-        g_state.fallbackTransport.handle);
-  if (!g_state.fallbackVideoOps ||
-      g_state.fallbackVideoOps->type != LG_VIDEO_TYPE_SW_SURFACE ||
-      !g_state.fallbackVideoOps->swSurface ||
-      !g_state.fallbackVideoOps->swSurface->attach(
-        g_state.fallbackTransport.handle, &fallbackSurfaceEvents, NULL))
-  {
-    DEBUG_ERROR("SPICE does not provide a software surface");
-    fallbackDisconnect();
-    return false;
-  }
-
-  const LG_TransportStatus status =
-    g_state.fallbackTransport.ops->connect(
-        g_state.fallbackTransport.handle, &g_state.fallbackSession);
-  if (status != LG_TRANSPORT_OK)
-  {
-    DEBUG_ERROR("Failed to connect the SPICE fallback transport: %d", status);
-    fallbackDisconnect();
-    return false;
-  }
-
-  void * inputOpaque = NULL;
-  const LG_InputOps * inputOps =
-    g_state.fallbackTransport.ops->getInputOps ?
-      g_state.fallbackTransport.ops->getInputOps(
-          g_state.fallbackTransport.handle, &inputOpaque) : NULL;
-  lgInput_setFallback(inputOps, inputOpaque);
-
-  void * audioOpaque = NULL;
-  const LG_AudioOps * audioOps =
-    g_state.fallbackTransport.ops->getAudioOps ?
-      g_state.fallbackTransport.ops->getAudioOps(
-          g_state.fallbackTransport.handle, &audioOpaque) : NULL;
-  lgAudio_setFallback(audioOps, audioOpaque);
-
-  void * clipboardOpaque = NULL;
-  const LG_ClipboardOps * clipboardOps =
-    g_state.fallbackTransport.ops->getClipboardOps ?
-      g_state.fallbackTransport.ops->getClipboardOps(
-          g_state.fallbackTransport.handle, &clipboardOpaque) : NULL;
-  lgClipboard_setFallback(clipboardOps, clipboardOpaque);
-
-  atomic_store_explicit(
-      &g_state.fallbackReady, true, memory_order_release);
-  if (g_state.fallbackSession.name[0])
-    core_setTitle(g_state.fallbackSession.name);
-  if (inputOps)
-    keybind_inputRegister();
-  return true;
+  DEBUG_ERROR("Failed to start the SPICE fallback transport");
+  return false;
 }
 
-static void checkUUID(void)
+static void fallbackStop(void)
 {
-  if (!atomic_load_explicit(&g_state.fallbackReady, memory_order_acquire) ||
-      !g_state.fallbackSession.uuidValid || !g_state.guestUUIDValid)
-    return;
+  lgTransportFallback_stop(&g_state.fallback);
+}
 
-  if (memcmp(g_state.fallbackSession.uuid, g_state.guestUUID,
-        sizeof(g_state.guestUUID)) == 0)
+static void fallbackHandleEvents(void)
+{
+  if (!atomic_exchange_explicit(
+        &g_state.fallbackUUIDMismatch, false, memory_order_acq_rel))
     return;
 
   app_msgBox(
       "SPICE Configuration Error",
       "You have connected SPICE to the wrong guest.\n"
       "SPICE fallback services will not function until this is corrected.");
-  fallbackDisconnect();
 }
 
 void intHandler(int sig)
@@ -1965,7 +1899,7 @@ static int lg_run(void)
 
   g_state.micDefaultState = g_params.micDefaultState;
 
-  if (!fallbackConnect())
+  if (!fallbackStart())
     return -1;
 
   // select and init a renderer
@@ -2072,6 +2006,7 @@ static int lg_run(void)
   }
 
   keybind_commonRegister();
+  keybind_inputRegister();
 
   if (g_state.jitRender)
     DEBUG_INFO("Using JIT render mode");
@@ -2127,15 +2062,7 @@ restart:
 
   while(app_getState() == APP_STATE_RUNNING)
   {
-    if (atomic_load_explicit(
-          &g_state.fallbackReady, memory_order_acquire) &&
-        !g_state.fallbackTransport.ops->sessionValid(
-          g_state.fallbackTransport.handle))
-    {
-      DEBUG_ERROR("SPICE fallback transport disconnected");
-      app_setState(APP_STATE_SHUTDOWN);
-      break;
-    }
+    fallbackHandleEvents();
 
     if (initialSpiceEnable && microtime() > initialSpiceEnable)
     {
@@ -2158,7 +2085,10 @@ restart:
 
     while (app_getState() == APP_STATE_RUNNING &&
         !atomic_load_explicit(&probe.done, memory_order_acquire))
+    {
       g_state.ds->wait(100);
+      fallbackHandleEvents();
+    }
 
     if (!lgJoinThread(probeThread, NULL))
     {
@@ -2274,7 +2204,13 @@ restart:
   g_state.guestOS        = session.os;
   g_state.guestUUIDValid = session.uuidValid;
   if (session.uuidValid)
+  {
     memcpy(g_state.guestUUID, session.uuid, sizeof(g_state.guestUUID));
+    lgTransportFallback_setPrimaryUUID(
+        g_state.fallback, g_state.guestUUID);
+  }
+  else
+    lgTransportFallback_clearPrimaryUUID(g_state.fallback);
   g_state.transportFeatures = session.features;
   frameScheduler_start(session.features);
 
@@ -2297,9 +2233,6 @@ restart:
           g_state.transport.handle, &clipboardOpaque) : NULL;
   lgClipboard_setTransport(clipboardOps, clipboardOpaque);
 
-  if (inputOps || lgInput_available())
-    keybind_inputRegister();
-  checkUUID();
   DEBUG_INFO("Starting session");
   atomic_store_explicit(
       &g_state.lgHostConnected, true, memory_order_release);
@@ -2311,15 +2244,7 @@ restart:
 
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
-    if (atomic_load_explicit(
-          &g_state.fallbackReady, memory_order_acquire) &&
-        !g_state.fallbackTransport.ops->sessionValid(
-          g_state.fallbackTransport.handle))
-    {
-      DEBUG_ERROR("SPICE fallback transport disconnected");
-      app_setState(APP_STATE_SHUTDOWN);
-      break;
-    }
+    fallbackHandleEvents();
 
     if (unlikely(!g_state.transport.ops->sessionValid(
           g_state.transport.handle)))
@@ -2342,6 +2267,11 @@ restart:
 
   if (app_getState() == APP_STATE_RESTART)
   {
+    atomic_store_explicit(
+        &g_state.lgHostConnected, false, memory_order_release);
+    g_state.guestUUIDValid = false;
+    lgTransportFallback_clearPrimaryUUID(g_state.fallback);
+
     lgSignalEvent(e_startup);
     lgSignalEvent(g_state.frameEvent);
 
@@ -2368,8 +2298,6 @@ static void lg_shutdown(void)
   if (e_cursorRepaint)
     lgSignalEvent(e_cursorRepaint);
 
-  fallbackDisconnect();
-
   if (t_render)
   {
     if (g_state.jitRender && g_state.ds->stopWaitFrame)
@@ -2378,6 +2306,8 @@ static void lg_shutdown(void)
     lgSignalEvent(g_state.frameEvent);
     lgJoinThread(t_render, NULL);
   }
+
+  fallbackStop();
 
   if (t_cursorRepaint)
   {

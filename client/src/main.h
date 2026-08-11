@@ -35,6 +35,7 @@
 
 #include "cimgui.h"
 #include "interface/transport.h"
+#include "transport_fallback.h"
 
 enum RunState
 {
@@ -78,10 +79,10 @@ struct AppState
   bool                         dsInitialized;
   bool                         jitRender;
 
-  atomic_bool fallbackReady;
   atomic_bool fallbackDisplayRequested;
   atomic_bool fallbackDisplayActive;
   atomic_bool fallbackDisplayTransition;
+  atomic_bool fallbackUUIDMismatch;
   bool        fallbackSurfaceValid;
 
   uint8_t guestUUID[16];
@@ -123,9 +124,7 @@ struct AppState
   const LG_VideoOps       * videoOps;
   LG_TransportFeatureFlags  transportFeatures;
 
-  LG_TransportInstance fallbackTransport;
-  LG_TransportSession  fallbackSession;
-  const LG_VideoOps  * fallbackVideoOps;
+  LG_TransportFallback * fallback;
 
   LGThread            * cursorThread;
   LGThread            * frameThread;
