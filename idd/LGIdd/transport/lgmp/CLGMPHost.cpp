@@ -119,7 +119,8 @@ bool CLGMPHost::Initialize(CIVSHMEM& ivshmem)
   LGMP_STATUS status;
   std::string udata = ss.str();
 
-  if ((status = lgmpHostInit(ivshmem.GetMem(), (uint32_t)ivshmem.GetSize(),
+  if ((status = lgmpHostInit(ivshmem.GetMem(),
+    (uint32_t)ivshmem.GetUsableSize(),
     &m_host, (uint32_t)udata.size(), (uint8_t*)&udata[0])) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));

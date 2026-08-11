@@ -119,7 +119,7 @@ bool CLGMPFrameTransport::Initialize()
 void CLGMPFrameTransport::SealMemoryLayout()
 {
   m_frameMemoryOffset =
-    m_ivshmem.GetSize() - m_host.Available();
+    m_ivshmem.GetUsableSize() - m_host.Available();
 }
 
 bool CLGMPFrameTransport::Setup(size_t alignSize)
@@ -246,7 +246,7 @@ void CLGMPFrameTransport::DeInit()
 FrameMemoryLimits CLGMPFrameTransport::GetMemoryLimits() const
 {
   FrameMemoryLimits limits;
-  limits.capacity          = m_ivshmem.GetSize();
+  limits.capacity          = m_ivshmem.GetUsableSize();
   limits.frameMemoryOffset = m_frameMemoryOffset;
   limits.alignment         = m_alignSize;
   limits.maxFrameSize      = m_maxFrameSize;

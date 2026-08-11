@@ -24,6 +24,8 @@
 #include <SetupAPI.h>
 #include <vector>
 
+#include "common/KVMFRRecovery.h"
+
 class CIVSHMEM
 {
 private:
@@ -46,6 +48,21 @@ public:
   bool Open();
   void Close();
 
-  size_t GetSize() const { return m_size; }
-  void * GetMem () const { return m_mem;  }
+  size_t GetFullSize    () const { return m_size; }
+  size_t GetUsableSize  () const
+  {
+    if (m_size < KVMFR_R_REGION_SIZE)
+      return 0;
+
+    return m_size - KVMFR_R_REGION_SIZE;
+  }
+
+  void * GetMem         () const { return m_mem; }
+  void * GetRecoveryMem () const
+  {
+    if (!m_mem || m_size < KVMFR_R_REGION_SIZE)
+      return nullptr;
+
+    return static_cast<uint8_t *>(m_mem) + GetUsableSize();
+  }
 };

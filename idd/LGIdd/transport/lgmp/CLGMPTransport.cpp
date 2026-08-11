@@ -181,5 +181,5 @@ FrameMemoryLimits CLGMPTransport::GetMemoryLimits() const
 
 DirectFrameBufferMemory CLGMPTransport::GetDirectMemory() const
 {
-  return {m_ivshmem.GetMem(), m_ivshmem.GetSize()};
+  return {m_ivshmem.GetMem(), m_ivshmem.GetFullSize()};
 }
