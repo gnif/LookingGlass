@@ -1078,13 +1078,6 @@ static int renderThread(void * unused)
 
   app_setState(APP_STATE_SHUTDOWN);
 
-  if (g_state.overlays)
-  {
-    app_freeOverlays();
-    ll_free(g_state.overlays);
-    g_state.overlays = NULL;
-  }
-
   lgTimerDestroy(tickTimer);
   lgTimerDestroy(fpsTimer);
 
@@ -3505,6 +3498,9 @@ static void lg_shutdown(void)
   }
   LG_LOCK_FREE(l_cursorRepaint.lock);
 
+  // An evdev batch may call input handlers; join before input teardown
+  evdev_stop();
+
   if (g_state.transport.ops)
   {
     lgInput_dropTransport();
@@ -3540,6 +3536,7 @@ static void lg_shutdown(void)
 
   if (g_state.ds)
     g_state.ds->shutdown();
+
   lgClipboard_free();
 
   app_releaseAllKeybinds();
@@ -3547,6 +3544,16 @@ static void lg_shutdown(void)
 
   if (g_state.ds && g_state.dsInitialized)
     g_state.ds->free();
+
+  // Input callbacks have stopped; the evdev state and overlays can go
+  evdev_free();
+
+  if (g_state.overlays)
+  {
+    app_freeOverlays();
+    ll_free(g_state.overlays);
+    g_state.overlays = NULL;
+  }
 
   renderQueue_setSourceFns(NULL, NULL, NULL);
   renderQueue_free();
