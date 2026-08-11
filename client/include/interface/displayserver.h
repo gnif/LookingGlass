@@ -146,7 +146,7 @@ struct LG_DisplayServerOps
   /* called when it's time to create and show the application window */
   bool (*init)(const LG_DSInitParams params);
 
-  /* called at startup after window creation, renderer and SPICE is ready */
+  /* called after window creation, renderer, and input providers are ready */
   void (*startup)(void);
 
   /* called just before final window destruction, before final free */

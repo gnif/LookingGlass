@@ -2164,7 +2164,8 @@ static const LG_TransportFallbackEventOps fallbackEvents =
 
 static bool fallbackStart(void)
 {
-  if (!g_params.useSpice || strcmp(g_params.transport, "spice") == 0)
+  if (!option_get_bool("spice", "enable") ||
+      strcmp(g_params.transport, "spice") == 0)
     return true;
 
   if (lgTransportFallback_start("spice", &swSurfaceEvents,
@@ -2261,7 +2262,8 @@ static void reportBadVersion(void)
 static MsgBoxHandle showSpiceInputHelp(void)
 {
   static bool done = false;
-  if (!g_params.useSpiceInput || done)
+  if (!option_get_bool("spice", "enable") ||
+      !option_get_bool("spice", "input") || done)
     return NULL;
 
   done = true;

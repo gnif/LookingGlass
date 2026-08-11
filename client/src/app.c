@@ -339,15 +339,15 @@ bool app_clipboardRequest(LG_ClipboardData type,
   return lgClipboard_request(type, replyFn, opaque);
 }
 
-static int mapSpiceToImGuiButton(uint32_t button)
+static int mapInputToImGuiButton(uint32_t button)
 {
   switch (button)
   {
-    case 1:  // SPICE_MOUSE_BUTTON_LEFT
+    case 1: // left
       return ImGuiMouseButton_Left;
-    case 2:  // SPICE_MOUSE_BUTTON_MIDDLE
+    case 2: // middle
       return ImGuiMouseButton_Middle;
-    case 3:  // SPICE_MOUSE_BUTTON_RIGHT
+    case 3: // right
       return ImGuiMouseButton_Right;
   }
 
@@ -364,7 +364,7 @@ void app_handleButtonPress(int button)
 
   if (app_isOverlayMode())
   {
-    int igButton = mapSpiceToImGuiButton(button);
+    int igButton = mapInputToImGuiButton(button);
     if (igButton != -1)
       g_state.io->MouseDown[igButton] = true;
     return;
@@ -388,7 +388,7 @@ void app_handleButtonRelease(int button)
 
   if (app_isOverlayMode())
   {
-    int igButton = mapSpiceToImGuiButton(button);
+    int igButton = mapInputToImGuiButton(button);
     if (igButton != -1)
       g_state.io->MouseDown[igButton] = false;
     return;

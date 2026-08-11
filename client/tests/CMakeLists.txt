@@ -107,7 +107,6 @@ target_compile_definitions(mouse-tests PRIVATE
 )
 target_include_directories(mouse-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-  "${PROJECT_TOP}/repos/PureSpice/include"
   "${PROJECT_TOP}/repos/gui/cimgui"
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )

@@ -430,109 +430,71 @@ static struct Option options[] =
     .type           = OPTION_TYPE_INT,
     .value.x_int    = 200
   },
-
-  // spice options
   {
-    .module         = "spice",
-    .name           = "enable",
-    .description    = "Enable the built in SPICE client for input and/or clipboard support",
-    .shortopt       = 's',
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "host",
-    .description    = "The SPICE server host or UNIX socket",
-    .shortopt       = 'c',
-    .type           = OPTION_TYPE_STRING,
-    .value.x_string = "127.0.0.1"
-  },
-  {
-    .module         = "spice",
-    .name           = "port",
-    .description    = "The SPICE server port (0 = unix socket)",
-    .shortopt       = 'p',
-    .type           = OPTION_TYPE_INT,
-    .value.x_int    = 5900
-  },
-  {
-    .module         = "spice",
-    .name           = "input",
-    .description    = "Use SPICE to send keyboard and mouse input events to the guest",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "clipboard",
-    .description    = "Use SPICE to synchronize the clipboard contents with the guest",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "clipboardToVM",
-    .description    = "Allow the clipboard to be synchronized TO the VM",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "clipboardToLocal",
-    .description    = "Allow the clipboard to be synchronized FROM the VM",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "audio",
-    .description    = "Enable SPICE audio support",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = true
-  },
-  {
-    .module         = "spice",
-    .name           = "usbAudio",
-    .description    = "Use USB redirection for SPICE audio playback",
-    .type           = OPTION_TYPE_BOOL,
-    .value.x_bool   = false
-  },
-  {
-    .module         = "spice",
+    .module         = "input",
     .name           = "scaleCursor",
+    .old_module     = "spice",
+    .old_name       = "scaleCursor",
     .description    = "Scale cursor input position to screen size when up/down scaled",
     .shortopt       = 'j',
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true
   },
   {
-    .module         = "spice",
+    .module         = "input",
     .name           = "captureOnStart",
+    .old_module     = "spice",
+    .old_name       = "captureOnStart",
     .description    = "Capture mouse and keyboard on start",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
   {
-    .module         = "spice",
+    .module         = "input",
     .name           = "alwaysShowCursor",
+    .old_module     = "spice",
+    .old_name       = "alwaysShowCursor",
     .description    = "Always show host cursor",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = false
   },
   {
-    .module        = "spice",
-    .name          = "showCursorDot",
-    .description   = "Use a \"dot\" cursor when the window does not have focus",
-    .type          = OPTION_TYPE_BOOL,
-    .value.x_bool  = true
+    .module         = "input",
+    .name           = "showCursorDot",
+    .old_module     = "spice",
+    .old_name       = "showCursorDot",
+    .description    = "Use a \"dot\" cursor when the window does not have focus",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
   },
   {
-    .module        = "spice",
-    .name          = "largeCursorDot",
-    .description   = "Use a larger version of the \"dot\" cursor",
-    .type          = OPTION_TYPE_BOOL,
-    .value.x_bool  = false
+    .module         = "input",
+    .name           = "largeCursorDot",
+    .old_module     = "spice",
+    .old_name       = "largeCursorDot",
+    .description    = "Use a larger version of the \"dot\" cursor",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+
+  // clipboard options
+  {
+    .module         = "clipboard",
+    .name           = "toVM",
+    .old_module     = "spice",
+    .old_name       = "clipboardToVM",
+    .description    = "Allow the clipboard to be synchronized TO the VM",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "clipboard",
+    .name           = "toLocal",
+    .old_module     = "spice",
+    .old_name       = "clipboardToLocal",
+    .description    = "Allow the clipboard to be synchronized FROM the VM",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
   },
 
   // audio options
@@ -753,44 +715,23 @@ bool config_load(int argc, char * argv[])
 
   g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
 
-  g_params.scaleMouseInput  = option_get_bool("spice", "scaleCursor");
-  g_params.captureOnStart   = option_get_bool("spice", "captureOnStart");
-  g_params.alwaysShowCursor = option_get_bool("spice", "alwaysShowCursor");
-  g_params.showCursorDot    = option_get_bool("spice", "showCursorDot");
-  g_params.largeCursorDot   = option_get_bool("spice", "largeCursorDot");
+  g_params.scaleMouseInput  = option_get_bool("input", "scaleCursor");
+  g_params.captureOnStart   = option_get_bool("input", "captureOnStart");
+  g_params.alwaysShowCursor = option_get_bool("input", "alwaysShowCursor");
+  g_params.showCursorDot    = option_get_bool("input", "showCursorDot");
+  g_params.largeCursorDot   = option_get_bool("input", "largeCursorDot");
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
   g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
 
-  g_params.clipboardToVM    = option_get_bool("spice", "clipboardToVM"   );
-  g_params.clipboardToLocal = option_get_bool("spice", "clipboardToLocal");
+  g_params.clipboardToVM    = option_get_bool("clipboard", "toVM"   );
+  g_params.clipboardToLocal = option_get_bool("clipboard", "toLocal");
 
-  if ((g_params.useSpice = option_get_bool("spice", "enable")))
-  {
-    g_params.spiceHost            = option_get_string("spice", "host");
-    g_params.spicePort            = option_get_int   ("spice", "port");
-
-    g_params.useSpiceInput        = option_get_bool("spice", "input"    );
-    g_params.useSpiceClipboard    =
-      option_get_bool("spice", "clipboard") &&
-      (g_params.clipboardToVM || g_params.clipboardToLocal);
-    g_params.useSpiceAudio        = option_get_bool("spice", "audio"   );
-    g_params.useSpiceUSBAudio     = option_get_bool("spice", "usbAudio");
-
-#if !ENABLE_USB_AUDIO
-    if (g_params.useSpiceAudio && g_params.useSpiceUSBAudio)
-    {
-      DEBUG_WARN("USB audio is unavailable in this build, using SPICE audio");
-      g_params.useSpiceUSBAudio = false;
-    }
-#endif
-  }
-
-  g_params.audioDebug = option_get_bool("audio", "debug");
-  g_params.audioPeriodSize = option_get_int("audio", "periodSize");
-  g_params.audioLatencyOffset = option_get_int("audio", "latencyOffset");
+  g_params.audioDebug         = option_get_bool("audio", "debug"           );
+  g_params.audioPeriodSize    = option_get_int ("audio", "periodSize"      );
+  g_params.audioLatencyOffset = option_get_int ("audio", "latencyOffset"   );
   g_params.micShowIndicator   = option_get_bool("audio", "micShowIndicator");
-  g_params.audioSyncVolume = option_get_bool("audio", "syncVolume");
+  g_params.audioSyncVolume    = option_get_bool("audio", "syncVolume"      );
 
   return true;
 }
@@ -1030,11 +971,20 @@ static bool optRotateValidate(struct Option * opt, const char ** error)
 
 static bool optTransportValidate(struct Option * opt, const char ** error)
 {
-  if (lgTransport_isValid(opt->value.x_string))
-    return true;
+  if (!lgTransport_isValid(opt->value.x_string))
+  {
+    *error = "Unknown transport";
+    return false;
+  }
 
-  *error = "Unknown transport (expected lgmp or test)";
-  return false;
+  if (strcmp(opt->value.x_string, "spice") == 0 &&
+      !option_get_bool("spice", "enable"))
+  {
+    *error = "The SPICE transport is disabled by spice:enable";
+    return false;
+  }
+
+  return true;
 }
 
 static bool optMicDefaultParse(struct Option * opt, const char * str)

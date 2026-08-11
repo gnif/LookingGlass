@@ -67,7 +67,7 @@ bool lgUsbAudio_recordData(
     const LG_AudioClock * sourceClock);
 
 /* Return the time until ISO-IN processing is needed. This must be queried on
- * the PureSpice processing thread. */
+ * the transport processing thread. */
 uint64_t lgUsbAudio_processDelayNs(const LG_USBAudio * audio);
 
 const LG_USBRedirDeviceOps * lgUsbAudio_deviceOps(void);

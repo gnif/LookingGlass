@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(transport_SPICE LANGUAGES C)
 
+add_subdirectory(
+  "${PROJECT_TOP}/repos/PureSpice"
+  "${CMAKE_BINARY_DIR}/PureSpice"
+)
+
 set(SOURCES
   clipboard.c
   input.c
@@ -29,7 +34,7 @@ target_include_directories(transport_SPICE PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../src
 )
 
-target_link_libraries(transport_SPICE
+target_link_libraries(transport_SPICE PRIVATE
   lg_common
   purespice
 )
@@ -40,7 +45,7 @@ endif()
 
 if(ENABLE_USB_AUDIO)
   target_compile_definitions(transport_SPICE PRIVATE ENABLE_USB_AUDIO)
-  target_link_libraries(transport_SPICE
+  target_link_libraries(transport_SPICE PRIVATE
     PkgConfig::USBREDIRPARSER
   )
 endif()

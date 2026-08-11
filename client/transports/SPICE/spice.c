@@ -36,6 +36,65 @@ static void spiceDisconnect(LG_Transport * transport);
 
 static void spiceSetup(void)
 {
+  static struct Option options[] =
+  {
+    {
+      .module         = "spice",
+      .name           = "enable",
+      .description    = "Enable the built-in SPICE transport",
+      .shortopt       = 's',
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
+    {
+      .module         = "spice",
+      .name           = "host",
+      .description    = "The SPICE server host or UNIX socket",
+      .shortopt       = 'c',
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = "127.0.0.1"
+    },
+    {
+      .module         = "spice",
+      .name           = "port",
+      .description    = "The SPICE server port (0 = unix socket)",
+      .shortopt       = 'p',
+      .type           = OPTION_TYPE_INT,
+      .value.x_int    = 5900
+    },
+    {
+      .module       = "spice",
+      .name         = "input",
+      .description  = "Enable SPICE keyboard and mouse input",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = true
+    },
+    {
+      .module       = "spice",
+      .name         = "clipboard",
+      .description  = "Enable SPICE clipboard synchronization",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = true
+    },
+    {
+      .module       = "spice",
+      .name         = "audio",
+      .description  = "Enable SPICE audio support",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = true
+    },
+    {
+      .module       = "spice",
+      .name         = "usbAudio",
+      .description  = "Use USB redirection for SPICE audio playback",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false
+    },
+    {0}
+  };
+
+  option_register(options);
+
   const PSInit init =
   {
     .log =
@@ -60,11 +119,19 @@ static bool spiceCreate(LG_Transport ** result)
   transport->host             = option_get_string("spice", "host");
   transport->port             = option_get_int("spice", "port");
   transport->inputEnabled     = option_get_bool("spice", "input");
-  transport->clipboardEnabled = option_get_bool("spice", "clipboard");
+  transport->clipboardEnabled =
+    option_get_bool("spice", "clipboard") &&
+    (option_get_bool("clipboard", "toVM") ||
+      option_get_bool("clipboard", "toLocal"));
   transport->audioEnabled     = option_get_bool("spice", "audio");
   transport->usbAudioEnabled  =
     option_get_bool("spice", "usbAudio");
   transport->audioDebug       = option_get_bool("audio", "debug");
+
+#if !ENABLE_USB_AUDIO
+  if (transport->audioEnabled && transport->usbAudioEnabled)
+    DEBUG_WARN("USB audio is unavailable in this build, using SPICE audio");
+#endif
 
 #if ENABLE_AUDIO
   transport->playbackEnabled =

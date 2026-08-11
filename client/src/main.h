@@ -204,13 +204,6 @@ struct AppParams
   bool                 setGuestRes;
   int                  fpsMin;
   LG_RendererRotate    winRotate;
-  bool                 useSpice;
-  bool                 useSpiceInput;
-  bool                 useSpiceClipboard;
-  bool                 useSpiceAudio;
-  bool                 useSpiceUSBAudio;
-  const char *         spiceHost;
-  unsigned int         spicePort;
   bool                 clipboardToVM;
   bool                 clipboardToLocal;
   bool                 scaleMouseInput;

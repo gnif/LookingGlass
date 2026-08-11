@@ -215,7 +215,6 @@ endif()
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
-add_subdirectory("${PROJECT_TOP}/repos/PureSpice" "${CMAKE_BINARY_DIR}/PureSpice")
 add_subdirectory("${PROJECT_TOP}/repos/gui"       "${CMAKE_BINARY_DIR}/gui"      EXCLUDE_FROM_ALL)
 
 add_subdirectory(displayservers)
@@ -273,10 +272,6 @@ if(ENABLE_AUDIO)
   target_link_libraries(looking-glass-client
     PkgConfig::SAMPLERATE
   )
-endif()
-
-if(ENABLE_USB_AUDIO)
-  target_compile_definitions(looking-glass-client PRIVATE ENABLE_USB_AUDIO)
 endif()
 
 install(TARGETS looking-glass-client
