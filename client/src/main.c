@@ -3483,6 +3483,11 @@ static void lg_shutdown(void)
     lgJoinThread(t_render, NULL);
   }
 
+  // Stop external input callbacks before tearing down shared client state
+  evdev_stop();
+  if (g_state.ds && g_state.dsInitialized)
+    g_state.ds->shutdown();
+
   fallbackStop();
 
   if (t_cursorRepaint)
@@ -3497,9 +3502,6 @@ static void lg_shutdown(void)
     e_cursorRepaint = NULL;
   }
   LG_LOCK_FREE(l_cursorRepaint.lock);
-
-  // An evdev batch may call input handlers; join before input teardown
-  evdev_stop();
 
   if (g_state.transport.ops)
   {
@@ -3533,9 +3535,6 @@ static void lg_shutdown(void)
     lgFreeEvent(e_startup);
     e_startup = NULL;
   }
-
-  if (g_state.ds)
-    g_state.ds->shutdown();
 
   lgClipboard_free();
 

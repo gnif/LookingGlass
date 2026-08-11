@@ -149,10 +149,10 @@ struct LG_DisplayServerOps
   /* called after window creation, renderer, and input providers are ready */
   void (*startup)(void);
 
-  /* called just before final window destruction, before final free */
+  /* stop all callbacks before application subsystems are destroyed */
   void (*shutdown)(void);
 
-  /* final free */
+  /* final resource destruction after shutdown */
   void (*free)(void);
 
   /*

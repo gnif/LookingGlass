@@ -967,13 +967,19 @@ static void x11Startup(void)
 
 static void x11Shutdown(void)
 {
-  if (x11.jitRender)
+  if (x11.frameEvent)
     x11SignalFrame(LG_DS_WAIT_FRAME_INTERRUPTED);
+
+  if (x11.eventThread)
+  {
+    lgJoinThread(x11.eventThread, NULL);
+    x11.eventThread = NULL;
+  }
 }
 
 static void x11Free(void)
 {
-  lgJoinThread(x11.eventThread, NULL);
+  x11Shutdown();
 
   if (x11.jitRender)
   {
