@@ -439,22 +439,24 @@ static bool queueSwSurfaceUpdate(RenderQueueSource source,
   return queueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
 }
 
-static void wakeQueue(RenderQueueInvalidate invalidate, bool wake)
+static void wakeQueue(bool wake)
 {
   if (wake)
-    app_invalidateWindow(invalidate == RENDER_QUEUE_INVALIDATE_FULL);
+    app_invalidateWindow(false);
 }
 
 static void enqueueCommand(RenderCommand * cmd,
     RenderQueueInvalidate invalidate)
 {
-  wakeQueue(invalidate, queueCommand(cmd, invalidate));
+  wakeQueue(queueCommand(cmd, invalidate));
 }
 
-static RenderCommand * detachCommands(void)
+static RenderCommand * detachCommands(RenderQueueInvalidate * invalidate)
 {
   LG_LOCK(l_renderQueueLock);
   RenderCommand * head    = l_renderQueueHead;
+  if (invalidate)
+    *invalidate = l_renderQueueInvalidate;
   l_renderQueueHead       = NULL;
   l_renderQueueTail       = NULL;
   l_renderQueueInvalidate = RENDER_QUEUE_INVALIDATE_NONE;
@@ -598,7 +600,7 @@ void renderQueue_free(void)
 
 void renderQueue_clear(void)
 {
-  RenderCommand * cmd = detachCommands();
+  RenderCommand * cmd = detachCommands(NULL);
   while(cmd)
   {
     RenderCommand * next = cmd->next;
@@ -795,7 +797,7 @@ static uint64_t enqueueTransition(RenderCommand * cmd,
   if (publishedSerial)
     atomic_store_explicit(publishedSerial, serial, memory_order_release);
   LG_UNLOCK(l_transitionLock);
-  wakeQueue(RENDER_QUEUE_INVALIDATE_FULL, wake);
+  wakeQueue(wake);
   return serial;
 }
 
@@ -913,7 +915,7 @@ void renderQueue_sourceSwSurfaceDrawFill(RenderQueueSource source,
   swSurfaceDamageAdd(surface, &damage);
   const bool wake = queueSwSurfaceUpdate(source, surface);
   LG_UNLOCK(surface->lock);
-  wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
+  wakeQueue(wake);
 }
 
 void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
@@ -989,7 +991,7 @@ void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
   swSurfaceDamageAdd(surface, &damage);
   const bool wake = queueSwSurfaceUpdate(source, surface);
   LG_UNLOCK(surface->lock);
-  wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
+  wakeQueue(wake);
 }
 
 void renderQueue_sourceSurfaceFormat(RenderQueueSource source,
@@ -1303,9 +1305,10 @@ static void rejectSourceTransition(const RenderCommand * cmd)
         cmd->source, cmd->transitionSerial);
 }
 
-void renderQueue_process(void)
+bool renderQueue_process(void)
 {
-  RenderCommand * cmd = detachCommands();
+  RenderQueueInvalidate invalidate;
+  RenderCommand * cmd = detachCommands(&invalidate);
   while(cmd)
   {
     RenderCommand * next = cmd->next;
@@ -1324,7 +1327,7 @@ void renderQueue_process(void)
       if (transition)
         LG_UNLOCK(l_transitionLock);
       freeCommand(cmd);
-      wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
+      wakeQueue(wake);
       cmd = next;
       continue;
     }
@@ -1477,9 +1480,11 @@ void renderQueue_process(void)
     if (transition)
       LG_UNLOCK(l_transitionLock);
     freeCommand(cmd);
-    wakeQueue(RENDER_QUEUE_INVALIDATE_PARTIAL, wake);
+    wakeQueue(wake);
     cmd = next;
   }
+
+  return invalidate == RENDER_QUEUE_INVALIDATE_FULL;
 }
 
 void renderQueue_presented(void)

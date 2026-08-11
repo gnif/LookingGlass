@@ -42,7 +42,7 @@ typedef void (*RenderQueueSourceRejectFn)(void * opaque,
 void renderQueue_init(void);
 void renderQueue_free(void);
 void renderQueue_clear(void);
-void renderQueue_process(void);
+bool renderQueue_process(void);
 void renderQueue_presented(void);
 
 void renderQueue_setSourceFns(RenderQueueSourcePrepareFn prepare,

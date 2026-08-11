@@ -985,7 +985,7 @@ static int renderThread(void * unused)
 
     LG_LOCK(g_state.lgrLock);
 
-    renderQueue_process();
+    const bool queueFull = renderQueue_process();
 
     if (g_state.videoGeometryDirty)
     {
@@ -1009,7 +1009,7 @@ static int renderThread(void * unused)
     const bool     windowInvalid =
       atomic_exchange(&g_state.invalidateWindow, false);
     const bool     overlayFull   = app_overlayNeedsFullRender();
-    const bool     invalidate    = windowInvalid || overlayFull;
+    const bool     invalidate    = queueFull || windowInvalid || overlayFull;
     const uint64_t prepareTime   = nanotime() - prepareStart;
 
     if (unlikely(invalidate))
