@@ -2367,18 +2367,14 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
         sourceData->sourcePacketDurationSec * audio.playback.sampleRate);
   /* The device period, delivery jitter, packet phase, and resampler delay
    * define the minimum viable latency. Provider feedback directly controls
-   * the source rate, so latencyOffset only applies to local rate control.
-   * Provider delivery reserve is bounded because late USB packets must be
-   * skipped rather than allowed to become persistent playback latency. */
+   * the source rate, so latencyOffset only applies to local rate control. */
   const double latencyOffsetFrames = providerRateControl ? 0.0 :
     max(g_params.audioLatencyOffset, 0) *
       audio.playback.sampleRate / 1000.0;
   const double arrivalJitterFrames =
     sourceData->arrivalJitterSec * audio.playback.sampleRate;
   const double arrivalReserveFrames =
-    (providerRateControl ?
-      min(arrivalJitterFrames, backlogGuardFrames) :
-      arrivalJitterFrames) + 0.001 * audio.playback.sampleRate;
+    arrivalJitterFrames + 0.001 * audio.playback.sampleRate;
   const double minimumLowWaterReserveFrames =
     maxPeriodFrames * 0.1 + arrivalReserveFrames;
   const double minimumLowWaterFrames =
