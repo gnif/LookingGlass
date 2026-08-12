@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "transport/CControlHub.h"
 #include "transport/ITransport.h"
 
 #include <memory>
@@ -53,9 +54,11 @@ private:
     State                       state   = State::CLOSED;
     uint32_t                    epoch   = 1;
     uint64_t                    retryAt = 0;
+    bool                        controlAdded = false;
   };
 
   std::vector<std::unique_ptr<Entry>> m_entries;
+  CControlHub                         m_control;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
   bool                                 m_setup       = false;
@@ -68,6 +71,7 @@ private:
   void RetryEntry(Entry& entry, uint64_t now);
   void HandleProcessResult(Entry& entry, ProcessResult result);
   void ScheduleRetry(Entry& entry);
+  void RemoveServices(Entry& entry);
   ITransport& Primary();
 
 public:

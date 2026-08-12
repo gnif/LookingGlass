@@ -97,7 +97,7 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
 {
   const CRecovery::Request recovery = m_recovery.Process();
   if (recovery.valid)
-    events.OnRecoveryRequest(
+    events.OnRecoveryRequest(SourceKey(),
       recovery.session, recovery.serial, recovery.active);
 
   // Before the swap chain establishes the frame-buffer alignment, service
@@ -140,17 +140,21 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
     {
       case KVMFR_MESSAGE_SETCURSORPOS:
       {
+        SourceKey source;
+        source.client = sourceClientID;
         KVMFRSetCursorPos * position =
           reinterpret_cast<KVMFRSetCursorPos *>(msg);
-        events.OnSetCursorPos(position->x, position->y);
+        events.OnSetCursorPos(source, position->x, position->y);
         break;
       }
 
       case KVMFR_MESSAGE_WINDOWSIZE:
       {
+        SourceKey source;
+        source.client = sourceClientID;
         KVMFRWindowSize * window =
           reinterpret_cast<KVMFRWindowSize *>(msg);
-        events.OnSetResolution(window->w, window->h);
+        events.OnSetResolution(source, window->w, window->h);
         break;
       }
 

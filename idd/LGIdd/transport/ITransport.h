@@ -30,22 +30,32 @@ class IControlTransport;
 class IFrameTransport;
 class IInputTransport;
 
+using BackendId = uint32_t;
+
+struct SourceKey
+{
+  BackendId backend    = 0;
+  uint32_t  epoch      = 0;
+  uint32_t  client     = 0;
+  uint32_t  generation = 0;
+};
+
 class ITransportEvents
 {
 public:
   virtual ~ITransportEvents() = default;
 
-  virtual void OnSetCursorPos(int32_t x, int32_t y) = 0;
-  virtual void OnSetResolution(uint32_t width, uint32_t height) = 0;
-  virtual void OnRecoveryRequest(
+  virtual void OnSetCursorPos(
+    const SourceKey& source, int32_t x, int32_t y) = 0;
+  virtual void OnSetResolution(
+    const SourceKey& source, uint32_t width, uint32_t height) = 0;
+  virtual void OnRecoveryRequest(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active) = 0;
 };
 
 class ITransport
 {
 public:
-  using BackendId = uint32_t;
-
   enum class OpenResult
   {
     SUCCESS,
@@ -72,6 +82,8 @@ public:
   virtual OpenResult Open() = 0;
   virtual bool Initialize() = 0;
   virtual bool Setup(size_t alignment) = 0;
+  // Process performs a bounded, non-blocking drain. The events reference is
+  // valid only for the duration of this call and must not be retained.
   virtual ProcessResult Process(ITransportEvents& events) = 0;
   virtual void Stop() = 0;
   virtual void SyncRecovery() {}

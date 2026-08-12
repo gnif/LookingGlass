@@ -24,8 +24,49 @@
 
 #include <Windows.h>
 #include <new>
+#include <utility>
 
 static const uint64_t RETRY_DELAY_MS = 500;
+
+class CSourceEvents final : public ITransportEvents
+{
+private:
+  BackendId         m_backend;
+  uint32_t          m_epoch;
+  ITransportEvents& m_events;
+
+  SourceKey Stamp(const SourceKey& source) const
+  {
+    SourceKey stamped = source;
+    stamped.backend = m_backend;
+    stamped.epoch   = m_epoch;
+    return stamped;
+  }
+
+public:
+  CSourceEvents(
+    BackendId backend, uint32_t epoch, ITransportEvents& events) :
+    m_backend(backend), m_epoch(epoch), m_events(events) {}
+
+  void OnSetCursorPos(
+    const SourceKey& source, int32_t x, int32_t y) override
+  {
+    m_events.OnSetCursorPos(Stamp(source), x, y);
+  }
+
+  void OnSetResolution(const SourceKey& source,
+    uint32_t width, uint32_t height) override
+  {
+    m_events.OnSetResolution(Stamp(source), width, height);
+  }
+
+  void OnRecoveryRequest(const SourceKey& source,
+    uint64_t session, uint32_t serial, bool active) override
+  {
+    m_events.OnRecoveryRequest(
+      Stamp(source), session, serial, active);
+  }
+};
 
 CTransportManager::~CTransportManager()
 {
@@ -97,6 +138,13 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     return false;
   }
 
+  if (!m_control.Add(entry.id, entry.epoch, entry.transport->Control()))
+  {
+    entry.state = State::FAILED;
+    return false;
+  }
+
+  entry.controlAdded = true;
   entry.state = State::INITIALIZED;
   return true;
 }
@@ -187,6 +235,7 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now)
   if (entry.primary && m_exposed)
     return;
 
+  RemoveServices(entry);
   if (entry.transport)
     entry.transport->Stop();
   entry.transport.reset();
@@ -220,10 +269,12 @@ void CTransportManager::HandleProcessResult(
 
   if (result == ProcessResult::RETRY || !entry.required)
   {
+    RemoveServices(entry);
     ScheduleRetry(entry);
     return;
   }
 
+  RemoveServices(entry);
   entry.state = State::FAILED;
 }
 
@@ -238,7 +289,8 @@ ITransport::ProcessResult CTransportManager::Process(
     if (entry.state != State::INITIALIZED && entry.state != State::READY)
       continue;
 
-    const ProcessResult result = entry.transport->Process(events);
+    CSourceEvents sourceEvents(entry.id, entry.epoch, events);
+    const ProcessResult result = entry.transport->Process(sourceEvents);
     HandleProcessResult(entry, result);
   }
   return ProcessResult::OK;
@@ -250,9 +302,19 @@ void CTransportManager::Stop()
        ++current)
   {
     Entry& entry = **current;
+    RemoveServices(entry);
     if (entry.transport && entry.state != State::STOPPED)
       entry.transport->Stop();
     entry.state = State::STOPPED;
+  }
+}
+
+void CTransportManager::RemoveServices(Entry& entry)
+{
+  if (entry.controlAdded)
+  {
+    m_control.Remove(entry.id, entry.epoch);
+    entry.controlAdded = false;
   }
 }
 
@@ -299,7 +361,7 @@ IFrameTransport& CTransportManager::Frames()
 
 IControlTransport& CTransportManager::Control()
 {
-  return Primary().Control();
+  return m_control;
 }
 
 IInputTransport * CTransportManager::Input()

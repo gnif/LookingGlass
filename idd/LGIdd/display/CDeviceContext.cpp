@@ -593,18 +593,23 @@ void CDeviceContext::TransportTimer()
   m_transport->Process(*this);
 }
 
-void CDeviceContext::OnSetCursorPos(int32_t x, int32_t y)
+void CDeviceContext::OnSetCursorPos(
+  const SourceKey& source, int32_t x, int32_t y)
 {
+  UNREFERENCED_PARAMETER(source);
   g_pipe.SetCursorPos(x, y);
 }
 
-void CDeviceContext::OnSetResolution(uint32_t width, uint32_t height)
+void CDeviceContext::OnSetResolution(const SourceKey& source,
+  uint32_t width, uint32_t height)
 {
+  UNREFERENCED_PARAMETER(source);
   SetResolution(width, height);
 }
 
-void CDeviceContext::OnRecoveryRequest(
+void CDeviceContext::OnRecoveryRequest(const SourceKey& source,
   uint64_t session, uint32_t serial, bool active)
 {
+  UNREFERENCED_PARAMETER(source);
   g_pipe.SetRecovery(this, session, serial, active);
 }
