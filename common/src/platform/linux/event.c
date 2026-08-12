@@ -143,23 +143,24 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   return ret;
 }
 
+static bool waitEventNS(LGEvent * handle, uint64_t timeout)
+{
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  const uint64_t nsec = (uint64_t)ts.tv_nsec + timeout;
+  ts.tv_sec += nsec / 1000000000ULL;
+  ts.tv_nsec = nsec % 1000000000ULL;
+
+  return lgWaitEventAbs(handle, &ts);
+}
+
 bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
 {
   if (timeout == TIMEOUT_INFINITE)
     return lgWaitEventAbs(handle, NULL);
 
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  uint64_t nsec = ts.tv_nsec + timeout;
-  if(nsec > 1000000000UL)
-  {
-    ts.tv_nsec = nsec - 1000000000UL;
-    ++ts.tv_sec;
-  }
-  else
-    ts.tv_nsec = nsec;
-
-  return lgWaitEventAbs(handle, &ts);
+  return waitEventNS(handle, timeout);
 }
 
 bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
@@ -167,7 +168,7 @@ bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
   if (timeout == TIMEOUT_INFINITE)
     return lgWaitEventAbs(handle, NULL);
 
-  return lgWaitEventNS(handle, timeout * 1000000U);
+  return waitEventNS(handle, (uint64_t)timeout * 1000000ULL);
 }
 
 bool lgSignalEvent(LGEvent * handle)
