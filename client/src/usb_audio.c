@@ -99,7 +99,8 @@ enum
   USB_AUDIO_RECORD_STREAM_DESC_SIZE   = 46,
 };
 
-#define USB_AUDIO_RECORD_DEBUG_INTERVAL_NS UINT64_C(5000000000)
+#define USB_AUDIO_RECORD_DEBUG_INTERVAL_NS   UINT64_C(5000000000)
+#define USB_AUDIO_PLAYBACK_DEBUG_INTERVAL_NS UINT64_C(5000000000)
 
 enum
 {
@@ -370,6 +371,11 @@ struct LG_USBAudio
   uint8_t                  playbackBatchPackets;
   uint8_t                  playbackBatchFrameSize;
   uint16_t                 playbackBatchFrames;
+  uint32_t                 playbackPacketPhase;
+  bool                     playbackErrorWarned;
+  uint64_t                 playbackConcealedPackets;
+  uint64_t                 playbackInvalidPackets;
+  uint64_t                 playbackNextDebugTime;
   atomic_bool              feedbackStreaming;
   uint64_t                 feedbackPacketId;
   uint64_t                 feedbackNextPacketTime;
@@ -493,6 +499,14 @@ static void resetFeedbackRate(LG_USBAudio * audio)
       encodeFeedbackRate(audio->playbackSampleRate), memory_order_release);
 }
 
+static uint32_t nextPlaybackPacketFrames(LG_USBAudio * audio)
+{
+  const uint64_t phase = audio->playbackPacketPhase +
+    atomic_load_explicit(&audio->feedbackValue, memory_order_acquire);
+  audio->playbackPacketPhase = phase & UINT32_C(0xffff);
+  return (uint32_t)(phase >> 16);
+}
+
 static uint32_t nearestSampleRate(uint32_t sampleRate)
 {
   uint32_t selected  = l_sampleRates[0];
@@ -570,9 +584,12 @@ static void queuePlaybackPacket(LG_USBAudio * audio,
 
   if (frames)
   {
-    memcpy(audio->playbackBatch +
-          (size_t)audio->playbackBatchFrames * frameSize,
-        data, frames * frameSize);
+    uint8_t * destination = audio->playbackBatch +
+      (size_t)audio->playbackBatchFrames * frameSize;
+    if (data)
+      memcpy(destination, data, frames * frameSize);
+    else
+      memset(destination, 0, frames * frameSize);
     audio->playbackBatchFrameSize = frameSize;
     audio->playbackBatchFrames   += (uint16_t)frames;
   }
@@ -582,6 +599,7 @@ static void queuePlaybackPacket(LG_USBAudio * audio,
 static void stopPlayback(LG_USBAudio * audio)
 {
   flushPlayback(audio);
+  audio->playbackPacketPhase = 0;
   if (!audio->playbackStreaming)
     return;
 
@@ -613,7 +631,12 @@ static void startPlayback(LG_USBAudio * audio)
     return;
 
   resetFeedbackRate(audio);
-  audio->playbackStreaming = true;
+  audio->playbackPacketPhase        = 0;
+  audio->playbackErrorWarned        = false;
+  audio->playbackConcealedPackets   = 0;
+  audio->playbackInvalidPackets     = 0;
+  audio->playbackNextDebugTime      = 0;
+  audio->playbackStreaming          = true;
   if (audio->events && audio->events->playbackStart)
     audio->events->playbackStart(
         audio->eventOpaque, audio->playbackSampleRate,
@@ -1629,13 +1652,6 @@ static void controlPacket(void * opaque, uint64_t id,
     usbredirparser_free_packet_data(audio->parser, data);
 }
 
-static void stallPlayback(LG_USBAudio * audio)
-{
-  stopPlayback(audio);
-  sendISOStatus(audio, 0,
-      USB_AUDIO_PLAYBACK_DATA_ENDPOINT, usb_redir_stall);
-}
-
 static void isoPacket(void * opaque, uint64_t id,
     struct usb_redir_iso_packet_header * packet,
     uint8_t * data, int dataLength)
@@ -1648,20 +1664,42 @@ static void isoPacket(void * opaque, uint64_t id,
   {
     const uint16_t frameSize =
       layout ? layout->channelCount * USB_AUDIO_SAMPLE_SIZE : 0;
-    if (packet->endpoint != USB_AUDIO_PLAYBACK_DATA_ENDPOINT ||
-        packet->status != usb_redir_success || dataLength < 0 ||
-        packet->length != dataLength ||
-        (dataLength && !data) ||
-        !layout || dataLength > layoutPacketSize(layout) ||
-        dataLength % frameSize != 0)
+    if (packet->endpoint != USB_AUDIO_PLAYBACK_DATA_ENDPOINT || !layout)
     {
-      DEBUG_WARN("Invalid USB audio isochronous packet");
-      stallPlayback(audio);
+      ++audio->playbackInvalidPackets;
+      if (!audio->playbackErrorWarned)
+      {
+        DEBUG_WARN("USB audio packet loss detected; "
+            "keeping the playback stream active");
+        audio->playbackErrorWarned = true;
+      }
     }
     else
     {
-      queuePlaybackPacket(
-          audio, data, dataLength / frameSize, frameSize);
+      const uint32_t expectedFrames = nextPlaybackPacketFrames(audio);
+      const bool valid = packet->status == usb_redir_success &&
+        dataLength > 0 && packet->length == dataLength && data &&
+        dataLength <= layoutPacketSize(layout) &&
+        dataLength % frameSize == 0;
+
+      if (valid)
+        queuePlaybackPacket(
+            audio, data, dataLength / frameSize, frameSize);
+      else
+      {
+        if (packet->status == usb_redir_success)
+          ++audio->playbackInvalidPackets;
+        ++audio->playbackConcealedPackets;
+        queuePlaybackPacket(audio, NULL, expectedFrames, frameSize);
+
+        if (!audio->playbackErrorWarned)
+        {
+          DEBUG_WARN("USB audio packet loss detected; "
+              "keeping the playback stream active");
+          audio->playbackErrorWarned = true;
+        }
+      }
+
       if (audio->playbackBatchPackets == USB_AUDIO_PLAYBACK_BATCH_PACKETS)
         flushPlayback(audio);
     }
@@ -1755,12 +1793,43 @@ static void reportRecordDebug(LG_USBAudio * audio)
       discontinuities);
 }
 
+static void reportPlaybackDebug(LG_USBAudio * audio)
+{
+  if (!audio->debug)
+    return;
+
+  const uint64_t now = streamTime();
+  if (!audio->playbackNextDebugTime)
+  {
+    audio->playbackNextDebugTime =
+      now + USB_AUDIO_PLAYBACK_DEBUG_INTERVAL_NS;
+    return;
+  }
+
+  if (now < audio->playbackNextDebugTime)
+    return;
+  audio->playbackNextDebugTime =
+    now + USB_AUDIO_PLAYBACK_DEBUG_INTERVAL_NS;
+
+  if (!audio->playbackConcealedPackets &&
+      !audio->playbackInvalidPackets)
+    return;
+
+  DEBUG_INFO("USB playback: concealed %" PRIu64
+      " packets, invalid %" PRIu64,
+      audio->playbackConcealedPackets,
+      audio->playbackInvalidPackets);
+  audio->playbackConcealedPackets = 0;
+  audio->playbackInvalidPackets   = 0;
+}
+
 static void processDevice(void * opaque)
 {
   LG_USBAudio * audio = opaque;
   sendFeedbackPacketsDue(audio);
   flushPlayback(audio);
   sendRecordPackets(audio);
+  reportPlaybackDebug(audio);
   reportRecordDebug(audio);
 }
 
