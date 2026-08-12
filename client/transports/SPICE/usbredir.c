@@ -83,11 +83,12 @@ static int readUSBRedir(void * opaque, uint8_t * data, int count)
 static int writeUSBRedir(void * opaque, uint8_t * data, int count)
 {
   LG_USBRedir * usbredir = opaque;
-  if (!usbredir->channel ||
-      !purespice_usbRedirWrite(usbredir->channel, data, count))
+  if (!usbredir->channel)
     return -1;
 
-  return count;
+  const ssize_t written = purespice_usbRedirWriteNonblocking(
+      usbredir->channel, data, count);
+  return written >= 0 && written <= count ? (int)written : -1;
 }
 
 static void logUSBRedir(void * opaque, int level, const char * message)
@@ -324,6 +325,14 @@ static bool processUSBRedir(LG_USBRedir * usbredir, bool recover)
     return result;
   }
 
+  bool result = flushUSBRedir(usbredir);
+  if (!result)
+  {
+    if (recover)
+      resetChannel(usbredir);
+    return false;
+  }
+
   if (usbredir->disconnectPending)
   {
     if (usbredir->disconnectDeadline &&
@@ -334,10 +343,7 @@ static bool processUSBRedir(LG_USBRedir * usbredir, bool recover)
       return true;
     }
 
-    const bool result = flushUSBRedir(usbredir);
-    if (!result && recover)
-      resetChannel(usbredir);
-    return result;
+    return true;
   }
 
   const bool desired = atomic_load_explicit(&usbredir->desiredPlugged,
@@ -359,12 +365,25 @@ static bool processUSBRedir(LG_USBRedir * usbredir, bool recover)
         now + USB_REDIR_DISCONNECT_TIMEOUT_NS : 0;
       usbredirparser_send_device_disconnect(usbredir->parser);
     }
+
+    result = flushUSBRedir(usbredir);
+    if (!result)
+    {
+      if (recover)
+        resetChannel(usbredir);
+      return false;
+    }
   }
 
   if (usbredir->plugged && usbredir->deviceOps->process)
-    usbredir->deviceOps->process(usbredir->deviceOpaque);
+  {
+    const bool writable =
+      usbredirparser_has_data_to_write(usbredir->parser) == 0 &&
+      purespice_usbRedirWritable(usbredir->channel);
+    usbredir->deviceOps->process(usbredir->deviceOpaque, writable);
+  }
 
-  const bool result = flushUSBRedir(usbredir);
+  result = flushUSBRedir(usbredir);
   if (!result && recover)
     resetChannel(usbredir);
   return result;

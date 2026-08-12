@@ -21,6 +21,8 @@
 #ifndef _H_LG_CLIENT_USBREDIR_INTERFACE_
 #define _H_LG_CLIENT_USBREDIR_INTERFACE_
 
+#include <stdbool.h>
+
 struct usbredirparser;
 
 typedef struct LG_USBRedirDeviceOps
@@ -31,9 +33,9 @@ typedef struct LG_USBRedirDeviceOps
   /* Queue the device descriptors and connection announcement. */
   void (*plug)(void * opaque, struct usbredirparser * parser);
 
-  /* Queue time-sensitive device data immediately before parser output is
-   * flushed. */
-  void (*process)(void * opaque);
+  /* Process device data immediately before parser output is flushed.
+   * writable is false while previously queued output is backpressured. */
+  void (*process)(void * opaque, bool writable);
 
   /* Stop all device activity. The bridge sends the disconnect packet. */
   void (*unplug)(void * opaque);

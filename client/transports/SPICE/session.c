@@ -376,6 +376,11 @@ int spiceSession_thread(void * opaque)
       while (lgUsbRedir_disconnectPending(transport->usbRedir) &&
           microtime() < deadline)
       {
+        if (!lgUsbRedir_process(transport->usbRedir))
+        {
+          DEBUG_WARN("Failed to process USB audio device removal");
+          break;
+        }
         status = purespice_process(10);
         if (status != PS_STATUS_RUN)
           break;
