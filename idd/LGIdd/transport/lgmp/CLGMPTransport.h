@@ -63,7 +63,7 @@ public:
   FrameMemoryLimits GetMemoryLimits() const override;
   DirectFrameBufferMemory GetDirectMemory() const override;
 
-  IFrameTransport& Frames() override { return m_frames; }
+  IFrameSink& FrameSink() override { return m_frames; }
   IControlTransport& Control() override { return m_control; }
   IInputTransport * Input() override { return &m_input; }
 };

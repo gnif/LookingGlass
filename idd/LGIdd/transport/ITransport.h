@@ -27,7 +27,7 @@
 #include <stdint.h>
 
 class IControlTransport;
-class IFrameTransport;
+class IFrameSink;
 class IInputTransport;
 
 using BackendId = uint32_t;
@@ -93,7 +93,7 @@ public:
   virtual FrameMemoryLimits GetMemoryLimits() const = 0;
   virtual DirectFrameBufferMemory GetDirectMemory() const = 0;
 
-  virtual IFrameTransport& Frames() = 0;
+  virtual IFrameSink& FrameSink() = 0;
   virtual IControlTransport& Control() = 0;
   virtual IInputTransport * Input() { return nullptr; }
 };

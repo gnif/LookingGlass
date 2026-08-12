@@ -717,13 +717,13 @@ bool CLGMPFrameTransport::RetryPendingDelivery(uint64_t now, bool& retry)
   return result == SHARED_FRAME_POSTED;
 }
 
-PreparedFrameBuffer CLGMPFrameTransport::PrepareFrameBuffer(
+SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
   unsigned pitch, const D12FrameFormat& srcFormat,
   const D12FrameFormat& dstFormat, const RECT * dirtyRects,
   unsigned nbDirtyRects, const CFrameScheduler::Schedule& schedule,
   bool allowReadyReplacement)
 {
-  PreparedFrameBuffer result = {};
+  SinkTarget result = {};
 
   const unsigned dataWidth = dstFormat.dataWidth ?
     dstFormat.dataWidth : (unsigned)dstFormat.desc.Width;
@@ -913,7 +913,7 @@ PreparedFrameBuffer CLGMPFrameTransport::PrepareFrameBuffer(
   LGMPBuffer * fb = m_frameBuffer[frameIndex];
   fb->wp = 0;
 
-  result.frameIndex = frameIndex;
+  result.slot       = frameIndex;
   result.mem        = fb->data;
   result.heapOffset = reinterpret_cast<uintptr_t>(fb->data) -
     reinterpret_cast<uintptr_t>(m_ivshmem.GetMem());

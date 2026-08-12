@@ -21,15 +21,19 @@
 #pragma once
 
 #include "transport/CControlHub.h"
+#include "transport/CFrameHub.h"
 #include "transport/ITransport.h"
 
 #include <memory>
 #include <vector>
 
-class CTransportManager final : public ITransport
+class CTransportManager final
 {
 public:
   using CreateFn = std::unique_ptr<ITransport> (*)();
+  using OpenResult = ITransport::OpenResult;
+  using ProcessResult = ITransport::ProcessResult;
+  using Recovery = ITransport::Recovery;
 
 private:
   enum class State
@@ -55,10 +59,12 @@ private:
     uint32_t                    epoch   = 1;
     uint64_t                    retryAt = 0;
     bool                        controlAdded = false;
+    bool                        frameAdded   = false;
   };
 
   std::vector<std::unique_ptr<Entry>> m_entries;
   CControlHub                         m_control;
+  CFrameHub                           m_frames;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
   bool                                 m_setup       = false;
@@ -76,7 +82,7 @@ private:
 
 public:
   CTransportManager() = default;
-  ~CTransportManager() override;
+  ~CTransportManager();
 
   CTransportManager(const CTransportManager&) = delete;
   CTransportManager& operator=(const CTransportManager&) = delete;
@@ -84,19 +90,19 @@ public:
   bool Add(BackendId id, const char * name, bool required, bool primary,
     CreateFn create);
 
-  OpenResult Open() override;
-  bool Initialize() override;
-  bool Setup(size_t alignment) override;
-  ProcessResult Process(ITransportEvents& events) override;
-  void Stop() override;
-  void SyncRecovery() override;
+  OpenResult Open();
+  bool Initialize();
+  bool Setup(size_t alignment);
+  ProcessResult Process(ITransportEvents& events);
+  void Stop();
+  void SyncRecovery();
   void RecoveryStatus(uint64_t session, uint32_t serial, bool active,
-    Recovery state, uint32_t error) override;
+    Recovery state, uint32_t error);
 
-  FrameMemoryLimits GetMemoryLimits() const override;
-  DirectFrameBufferMemory GetDirectMemory() const override;
+  FrameMemoryLimits GetMemoryLimits() const;
+  DirectFrameBufferMemory GetDirectMemory() const;
 
-  IFrameTransport& Frames() override;
-  IControlTransport& Control() override;
-  IInputTransport * Input() override;
+  IFrameTransport& Frames();
+  IControlTransport& Control();
+  IInputTransport * Input();
 };

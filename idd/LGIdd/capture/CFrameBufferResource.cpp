@@ -25,11 +25,9 @@
 #include <cstring>
 
 bool CFrameBufferResource::Init(CD3D12Device * dx12,
-  unsigned frameIndex, uint8_t * base, uint64_t heapOffset, size_t size,
+  const FrameToken& token, uint8_t * base, uint64_t heapOffset, size_t size,
   size_t maxFrameSize)
 {
-  m_frameIndex = frameIndex;
-
   if (size > maxFrameSize)
   {
     DEBUG_ERROR("Frame size of %llu is too large for transport memory",
@@ -59,6 +57,7 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
   // Nothing to do if the resource already represents this allocation.
   if (m_base == base && m_size >= size)
   {
+    m_token     = token;
     m_frameSize = size;
     return true;
   }
@@ -137,6 +136,7 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
 
   m_res->SetName(resName);
 
+  m_token     = token;
   m_base      = base;
   m_size      = size;
   m_frameSize = size;
@@ -151,6 +151,7 @@ void CFrameBufferResource::Reset()
     m_map = NULL;
   }
 
+  m_token             = {};
   m_base              = nullptr;
   m_size              = 0;
   m_frameSize         = 0;

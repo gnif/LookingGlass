@@ -22,9 +22,26 @@
 
 #include <stdint.h>
 
+struct FrameToken
+{
+  uint32_t sink   = 0;
+  uint32_t epoch  = 0;
+  uint32_t slot   = 0;
+  uint64_t serial = 0;
+};
+
 struct PreparedFrameBuffer
 {
-  unsigned  frameIndex;
+  FrameToken token;
+  unsigned   resourceSlot;
+  uint8_t * mem;
+  uint64_t  heapOffset;
+  bool      fullCopy;
+};
+
+struct SinkTarget
+{
+  unsigned  slot;
   uint8_t * mem;
   uint64_t  heapOffset;
   bool      fullCopy;

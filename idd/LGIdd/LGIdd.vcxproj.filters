@@ -157,6 +157,9 @@
     <ClInclude Include="transport\CControlHub.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\CFrameHub.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\CTransportManager.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -167,6 +170,9 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IControlTransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IFrameSink.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IFrameTransport.h">
@@ -298,6 +304,9 @@
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>
     <ClCompile Include="transport\CControlHub.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\CFrameHub.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CTransportManager.cpp">

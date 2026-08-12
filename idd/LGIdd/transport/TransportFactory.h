@@ -20,8 +20,8 @@
 
 #pragma once
 
-#include "transport/ITransport.h"
-
 #include <memory>
 
-std::unique_ptr<ITransport> CreateTransport();
+class CTransportManager;
+
+std::unique_ptr<CTransportManager> CreateTransport();

@@ -346,7 +346,7 @@ void CHardwareFrameProcessor::CompletionFunction(
 
   if (!result)
   {
-    processor->m_transport->FailFrameBuffer(fbRes->GetFrameIndex());
+    processor->m_transport->FailFrameBuffer(fbRes->GetToken());
     processor->SetFullDamage();
     processor->m_transport->ForceFrame();
     processor->ReleaseCandidate(candidateIndex);
@@ -379,7 +379,7 @@ void CHardwareFrameProcessor::CompletionFunction(
   {
     const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
     processor->m_transport->WriteFrameBuffer(
-      fbRes->GetFrameIndex(), fbRes->GetMap(), 0,
+      fbRes->GetToken(), fbRes->GetMap(), 0,
       fbRes->GetFrameSize(), false);
     indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
   }
@@ -405,7 +405,7 @@ void CHardwareFrameProcessor::CompletionFunction(
 
   const uint64_t copyTime = prepareCopyTime + publishCopyTime;
 
-  processor->m_transport->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+  processor->m_transport->FinalizeFrameBuffer(fbRes->GetToken());
   const uint64_t publishedAt = CFrameScheduler::Nanotime();
   const uint64_t prepareElapsed = prepareReady >= postProcessStart ?
     prepareReady - postProcessStart : 0;
@@ -420,10 +420,11 @@ void CHardwareFrameProcessor::CompletionFunction(
   const uint64_t holdTime = publishStart >= prepareReady ?
     publishStart - prepareReady : 0;
 
-  processor->m_transport->SetFrameTiming(fbRes->GetFrameIndex(),
+  processor->m_transport->SetFrameTiming(fbRes->GetToken(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, holdTime,
     fbRes->GetSchedule(), publishedAt);
-  processor->m_transport->TryRecordFrameTiming(publishedAt - publishStart);
+  processor->m_transport->TryRecordFrameTiming(
+    fbRes->GetToken(), publishedAt - publishStart);
 
   const uint64_t timingToken = fbRes->GetTimingToken();
   if (timingToken && timingStart && prepareReady >= timingStart &&
@@ -436,7 +437,7 @@ void CHardwareFrameProcessor::CompletionFunction(
       fbRes->IsFullCopy(), totalTime);
   }
 
-  processor->m_transport->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
+  processor->m_transport->CompleteFrameBuffer(fbRes->GetToken(), true);
   processor->ReleaseCandidate(candidateIndex);
 }
 
@@ -512,7 +513,7 @@ bool CHardwareFrameProcessor::Publish(
     m_frameBuffers.Get(buffer, candidate.frameSize);
   if (!fbRes)
   {
-    m_transport->AbortFrameBuffer(buffer.frameIndex);
+    m_transport->AbortFrameBuffer(buffer.token);
     restoreCandidate();
     DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
     SetFullDamage();
@@ -522,7 +523,7 @@ bool CHardwareFrameProcessor::Publish(
   CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot(candidateIndex);
   if (!copySlot)
   {
-    m_transport->AbortFrameBuffer(buffer.frameIndex);
+    m_transport->AbortFrameBuffer(buffer.token);
     restoreCandidate();
     DEBUG_ERROR("Failed to get a copy CommandSlot for publication");
     SetFullDamage();
@@ -557,16 +558,16 @@ bool CHardwareFrameProcessor::Publish(
 
   bool deliveredToOwner;
   if (!m_transport->PublishFrameBuffer(
-        buffer.frameIndex, schedule, deliveredToOwner))
+        buffer.token, schedule, deliveredToOwner))
   {
     copySlot->Cancel();
-    m_transport->AbortFrameBuffer(buffer.frameIndex);
+    m_transport->AbortFrameBuffer(buffer.token);
     restoreCandidate();
     return false;
   }
   CFrameScheduler::Schedule frameSchedule = schedule;
   if (!deliveredToOwner ||
-      !m_transport->TryFrameSubmitted(buffer.frameIndex, schedule))
+      !m_transport->TryFrameSubmitted(buffer.token, schedule))
     frameSchedule.phaseEligible = false;
   fbRes->SetSchedule(frameSchedule);
 
@@ -601,7 +602,7 @@ bool CHardwareFrameProcessor::Publish(
     }
     if (callbackPending && !copySlot->HasSubmittedWork())
     {
-      m_transport->FailFrameBuffer(buffer.frameIndex);
+      m_transport->FailFrameBuffer(buffer.token);
       ReleaseCandidate(candidateIndex);
     }
     m_transport->ForceFrame();
@@ -610,7 +611,7 @@ bool CHardwareFrameProcessor::Publish(
   }
 
   m_transport->CommitFrameBuffer(
-    buffer.frameIndex, schedule, periodic, deliveredToOwner);
+    buffer.token, schedule, periodic, deliveredToOwner);
 
   unsigned superseded = 0;
   {

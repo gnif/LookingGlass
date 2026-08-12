@@ -31,7 +31,7 @@
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
-#include "transport/ITransport.h"
+#include "transport/CTransportManager.h"
 
 class CDeviceContext : private ITransportEvents
 {
@@ -47,7 +47,7 @@ private:
   bool              m_transportOpened = false;
   std::atomic<LONG> m_initInProgress  = 0;
 
-  std::unique_ptr<ITransport> m_transport;
+  std::unique_ptr<CTransportManager> m_transport;
   CDisplayConfiguration       m_displayConfiguration;
   CMonitorManager             m_monitorManager;
 
@@ -98,7 +98,7 @@ public:
   bool CanProcessFP16 () const { return m_canProcessFP16;  }
   bool IsSoftwareMode () const { return m_softwareMode;    }
 
-  ITransport& GetTransport()
+  CTransportManager& GetTransport()
   {
     return *m_transport;
   }

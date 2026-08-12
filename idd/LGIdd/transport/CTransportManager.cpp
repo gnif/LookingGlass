@@ -145,6 +145,16 @@ bool CTransportManager::InitializeEntry(Entry& entry)
   }
 
   entry.controlAdded = true;
+  if (entry.primary &&
+      !m_frames.Bind(entry.id, entry.epoch, entry.transport->FrameSink()))
+  {
+    m_control.Remove(entry.id, entry.epoch);
+    entry.controlAdded = false;
+    entry.state = State::FAILED;
+    return false;
+  }
+
+  entry.frameAdded = entry.primary;
   entry.state = State::INITIALIZED;
   return true;
 }
@@ -311,6 +321,12 @@ void CTransportManager::Stop()
 
 void CTransportManager::RemoveServices(Entry& entry)
 {
+  if (entry.frameAdded)
+  {
+    m_frames.Unbind(entry.id, entry.epoch);
+    entry.frameAdded = false;
+  }
+
   if (entry.controlAdded)
   {
     m_control.Remove(entry.id, entry.epoch);
@@ -356,7 +372,8 @@ DirectFrameBufferMemory CTransportManager::GetDirectMemory() const
 
 IFrameTransport& CTransportManager::Frames()
 {
-  return Primary().Frames();
+  m_exposed = true;
+  return m_frames;
 }
 
 IControlTransport& CTransportManager::Control()

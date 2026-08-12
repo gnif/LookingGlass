@@ -29,6 +29,7 @@
 
 #include "capture/CFrameScheduler.h"
 #include "d3d/CInteropResource.h"
+#include "transport/PreparedFrameBuffer.h"
 
 struct CD3D12Device;
 
@@ -37,7 +38,7 @@ using namespace Microsoft::WRL;
 class CFrameBufferResource
 {
   private:
-    unsigned                  m_frameIndex        = 0;
+    FrameToken                m_token             = {};
     uint8_t                 * m_base              = nullptr;
     size_t                    m_size              = 0;
     size_t                    m_frameSize         = 0;
@@ -60,13 +61,13 @@ class CFrameBufferResource
     void                    * m_map               = nullptr;
 
   public:
-    bool Init(CD3D12Device * dx12, unsigned frameIndex, uint8_t * base,
+    bool Init(CD3D12Device * dx12, const FrameToken& token, uint8_t * base,
       uint64_t heapOffset, size_t size, size_t maxFrameSize);
     void Reset();
 
-    unsigned  GetFrameIndex() { return m_frameIndex; }
-    size_t    GetFrameSize()  { return m_frameSize;  }
-    void *    GetMap()        { return m_map;        }
+    const FrameToken& GetToken() const { return m_token;     }
+    size_t            GetFrameSize()   { return m_frameSize; }
+    void *            GetMap()         { return m_map;       }
 
     void SetTiming(uint64_t captureTime, uint64_t postProcessStart,
       uint64_t copyStart)

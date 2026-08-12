@@ -34,14 +34,14 @@ extern "C" {
 #include "capture/CFrameScheduler.h"
 #include "capture/FramePipeline.h"
 #include "transport/FrameMemoryLimits.h"
-#include "transport/IFrameTransport.h"
+#include "transport/IFrameSink.h"
 
 class CIVSHMEM;
 class CLGMPHost;
 class CLGMPTransport;
 struct LGMPBuffer;
 
-class CLGMPFrameTransport final : public IFrameTransport
+class CLGMPFrameTransport final : public IFrameSink
 {
 private:
   friend class CLGMPTransport;
@@ -172,7 +172,7 @@ public:
   bool GetPendingDeliveryTarget(
     uint64_t now, uint64_t& target) override;
   bool RetryPendingDelivery(uint64_t now, bool& retry) override;
-  PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch,
+  SinkTarget PrepareFrameBuffer(unsigned pitch,
     const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
     const RECT * dirtyRects, unsigned nbDirtyRects,
     const CFrameScheduler::Schedule& schedule,

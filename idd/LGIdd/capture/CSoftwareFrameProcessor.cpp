@@ -45,7 +45,7 @@ void CSoftwareFrameProcessor::CompletionFunction(
 
   if (!result)
   {
-    processor->m_transport->FailFrameBuffer(fbRes->GetFrameIndex());
+    processor->m_transport->FailFrameBuffer(fbRes->GetToken());
     processor->SetFullDamage();
     processor->m_transport->ForceFrame();
     return;
@@ -56,7 +56,7 @@ void CSoftwareFrameProcessor::CompletionFunction(
   {
     const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
     if (fbRes->IsFullCopy())
-      processor->m_transport->WriteFrameBuffer(fbRes->GetFrameIndex(),
+      processor->m_transport->WriteFrameBuffer(fbRes->GetToken(),
         fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
     else
     {
@@ -71,7 +71,7 @@ void CSoftwareFrameProcessor::CompletionFunction(
           (size_t)rect->left * bytesPerPixel;
         const size_t rowBytes =
           (size_t)(rect->right - rect->left) * bytesPerPixel;
-        processor->m_transport->WriteFrameBufferRows(fbRes->GetFrameIndex(),
+        processor->m_transport->WriteFrameBufferRows(fbRes->GetToken(),
           fbRes->GetMap(), rowOffset, rowBytes, pitch,
           (unsigned)(rect->bottom - rect->top));
       }
@@ -84,7 +84,7 @@ void CSoftwareFrameProcessor::CompletionFunction(
   const uint64_t copyReady      = CFrameScheduler::Nanotime();
   const bool     gpuTimingValid = slot->GetGPUTimes(gpuStart, gpuEnd);
 
-  processor->m_transport->FinalizeFrameBuffer(fbRes->GetFrameIndex());
+  processor->m_transport->FinalizeFrameBuffer(fbRes->GetToken());
   const uint64_t publishedAt      = CFrameScheduler::Nanotime();
   const uint64_t postProcessStart = fbRes->GetPostProcessStart();
   const uint64_t copyStart        = fbRes->GetCopyStart();
@@ -104,10 +104,10 @@ void CSoftwareFrameProcessor::CompletionFunction(
   const uint64_t measured  = postProcessTime + copyTime;
   const uint64_t readyTime = elapsed > measured ? elapsed - measured : 0;
 
-  processor->m_transport->SetFrameTiming(fbRes->GetFrameIndex(),
+  processor->m_transport->SetFrameTiming(fbRes->GetToken(),
     fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, 0,
     fbRes->GetSchedule(), publishedAt);
-  processor->m_transport->CompleteFrameBuffer(fbRes->GetFrameIndex(), true);
+  processor->m_transport->CompleteFrameBuffer(fbRes->GetToken(), true);
 }
 
 bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
@@ -209,7 +209,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
     if (!fbRes)
     {
       copySlot->Cancel();
-      m_transport->AbortFrameBuffer(buffer.frameIndex);
+      m_transport->AbortFrameBuffer(buffer.token);
       RestorePendingDamage(
         currentDirtyRects, nbDirtyRects, hasDamage);
       DEBUG_ERROR("Failed to get a framebuffer for software capture");
@@ -221,7 +221,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
         !submission.source->Sync(*copySlot))
     {
       copySlot->Cancel();
-      m_transport->AbortFrameBuffer(buffer.frameIndex);
+      m_transport->AbortFrameBuffer(buffer.token);
       RestorePendingDamage(
         currentDirtyRects, nbDirtyRects, hasDamage);
       SetFullDamage();
@@ -260,10 +260,10 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
 
     bool deliveredToOwner;
     if (!m_transport->PublishFrameBuffer(
-          buffer.frameIndex, deliverySchedule, deliveredToOwner))
+          buffer.token, deliverySchedule, deliveredToOwner))
     {
       copySlot->Cancel();
-      m_transport->AbortFrameBuffer(buffer.frameIndex);
+      m_transport->AbortFrameBuffer(buffer.token);
       RestorePendingDamage(
         currentDirtyRects, nbDirtyRects, hasDamage);
       if (!submission.noImageUpdate)
@@ -283,7 +283,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
       const bool submittedWork     = copySlot->HasSubmittedWork();
       const bool completionHandled = fbRes->CompletionHandled();
       if (!submittedWork && !completionHandled)
-        m_transport->FailFrameBuffer(buffer.frameIndex);
+        m_transport->FailFrameBuffer(buffer.token);
       RestorePendingDamage(
         currentDirtyRects, nbDirtyRects, hasDamage);
       if (!submittedWork && !completionHandled)
@@ -295,7 +295,7 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
     }
 
     m_transport->CommitFrameBuffer(
-      buffer.frameIndex, commitSchedule, false, deliveredToOwner);
+      buffer.token, commitSchedule, false, deliveredToOwner);
     return true;
   }
 }
