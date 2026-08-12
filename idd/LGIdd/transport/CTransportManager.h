@@ -25,13 +25,18 @@
 #include "transport/CFrameHub.h"
 #include "transport/CInputHub.h"
 #include "transport/ITransport.h"
+#include "transport/TransportConfig.h"
 
 #include <memory>
+
+static_assert(TRANSPORT_MAX_INSTANCES == FRAME_MAX_SINKS,
+  "The transport and frame limits must match");
 
 class CTransportManager final
 {
 public:
-  using CreateFn = std::unique_ptr<ITransport> (*)();
+  using CreateFn = std::unique_ptr<ITransport> (*)(
+    const TransportInstance& config);
   using OpenResult = ITransport::OpenResult;
   using ProcessResult = ITransport::ProcessResult;
   using Recovery = ITransport::Recovery;
@@ -90,7 +95,7 @@ private:
     DWORD                       callOwner     = 0;
     bool                        stopRequested = false;
     BackendId                   id       = 0;
-    const char                * name     = nullptr;
+    TransportInstance           config;
     bool                        required = false;
     bool                        primary  = false;
     CreateFn                    create   = nullptr;
@@ -166,8 +171,7 @@ public:
   CTransportManager(const CTransportManager&) = delete;
   CTransportManager& operator=(const CTransportManager&) = delete;
 
-  bool Add(BackendId id, const char * name, bool required, bool primary,
-    CreateFn create);
+  bool Add(TransportInstance config, bool primary, CreateFn create);
 
   OpenResult Open();
   bool Initialize();

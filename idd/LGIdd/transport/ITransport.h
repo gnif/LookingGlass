@@ -22,6 +22,7 @@
 
 #include "transport/DirectFrameBufferMemory.h"
 #include "transport/FrameMemoryLimits.h"
+#include "transport/TransportConfig.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -29,8 +30,6 @@
 class IControlSink;
 class IFrameSink;
 class IInputSource;
-
-using BackendId = uint32_t;
 
 struct SourceKey
 {

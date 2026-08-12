@@ -48,7 +48,8 @@ static bool TranslateFrameScheduleFlags(
   return true;
 }
 
-CLGMPTransport::CLGMPTransport() :
+CLGMPTransport::CLGMPTransport(const TransportInstance& config) :
+  m_config(config),
   m_control(m_host),
   m_frames(m_host, m_ivshmem),
   m_input(m_host)

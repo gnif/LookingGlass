@@ -193,6 +193,9 @@
     <ClInclude Include="transport\ITransport.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\TransportConfig.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\PreparedFrameBuffer.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -322,6 +325,9 @@
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CTransportManager.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\TransportConfig.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\TransportFactory.cpp">

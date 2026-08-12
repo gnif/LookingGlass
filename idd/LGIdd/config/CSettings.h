@@ -19,6 +19,8 @@
  */
 
 #pragma once
+#include "transport/TransportConfig.h"
+
 #include <windows.h>
 #include <vector>
 #include <string>
@@ -39,6 +41,7 @@ class CSettings
     CSettings();
 
     DisplayModes LoadModes();
+    TransportInstances LoadTransportInstances() const;
     bool SetExtraMode(const DisplayMode & mode);
     bool GetExtraMode(DisplayMode & mode);
     unsigned GetDefaultRefreshMilliHz() const;
@@ -47,6 +50,8 @@ class CSettings
     bool ReadBoolValue(const wchar_t* name, bool defaultValue = false);
 
   private:
+    bool ReadMultiStringValue(const wchar_t * name,
+      std::vector<std::wstring>& out) const;
     bool ReadModesValue(std::vector<std::wstring> &out) const;
     bool ParseModeString(const std::wstring& in, DisplayMode& out);
 };

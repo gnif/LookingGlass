@@ -80,6 +80,21 @@ CSettings::DisplayModes CSettings::LoadModes()
   return displayModes;
 }
 
+TransportInstances CSettings::LoadTransportInstances() const
+{
+  std::vector<std::wstring> entries;
+  if (!ReadMultiStringValue(L"TransportInstances", entries))
+    return DefaultTransportInstances();
+
+  TransportInstances instances;
+  if (!ParseTransportInstances(entries, instances))
+  {
+    DEBUG_WARN("Invalid transport instance configuration; using defaults");
+    return DefaultTransportInstances();
+  }
+  return instances;
+}
+
 bool CSettings::SetExtraMode(const DisplayMode& mode)
 {
   WCHAR buf[64];
@@ -272,7 +287,8 @@ unsigned CSettings::GetDefaultRefreshMilliHz() const
   return refreshMilliHz ? refreshMilliHz : 60000;
 }
 
-bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
+bool CSettings::ReadMultiStringValue(const wchar_t * name,
+  std::vector<std::wstring>& out) const
 {
   HKEY hKey = nullptr;
   LONG st   = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
@@ -280,27 +296,42 @@ bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
     return false;
 
   DWORD type = 0, cb = 0;
-  st = RegGetValueW(hKey, nullptr, L"Modes", RRF_RT_REG_MULTI_SZ, &type, nullptr, &cb);
+  st = RegGetValueW(hKey, nullptr, name, RRF_RT_REG_MULTI_SZ,
+    &type, nullptr, &cb);
   if (st != ERROR_SUCCESS || cb == 0)  
   {
     RegCloseKey(hKey);
     return false;
   }
 
-  std::vector<wchar_t> buf(cb / sizeof(wchar_t));
-  st = RegGetValueW(hKey, nullptr, L"Modes", RRF_RT_REG_MULTI_SZ, &type, buf.data(), &cb);
+  const DWORD capacity = cb;
+  std::vector<wchar_t> buf(
+    capacity / sizeof(wchar_t) + 2, L'\0');
+  st = RegGetValueW(hKey, nullptr, name, RRF_RT_REG_MULTI_SZ,
+    &type, buf.data(), &cb);
   RegCloseKey(hKey);
-  if (st != ERROR_SUCCESS)
+  if (st != ERROR_SUCCESS || cb > capacity || cb % sizeof(wchar_t))
     return false;
 
-  const wchar_t* p = buf.data();
-  while (*p)
+  const size_t length = cb / sizeof(wchar_t);
+  size_t begin = 0;
+  while (begin < length && buf[begin])
   {
-    out.emplace_back(p);
-    p += (wcslen(p) + 1);
+    size_t end = begin;
+    while (end < length && buf[end])
+      ++end;
+    if (end == length)
+      return false;
+    out.emplace_back(buf.data() + begin, end - begin);
+    begin = end + 1;
   }
 
   return !out.empty();
+}
+
+bool CSettings::ReadModesValue(std::vector<std::wstring> &out) const
+{
+  return ReadMultiStringValue(L"Modes", out);
 }
 
 static std::wstring trim(const std::wstring &s)

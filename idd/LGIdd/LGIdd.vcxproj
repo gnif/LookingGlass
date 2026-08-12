@@ -64,6 +64,7 @@
     <ClCompile Include="transport\CFrameHub.cpp" />
     <ClCompile Include="transport\CInputHub.cpp" />
     <ClCompile Include="transport\CTransportManager.cpp" />
+    <ClCompile Include="transport\TransportConfig.cpp" />
     <ClCompile Include="transport\TransportFactory.cpp" />
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
@@ -123,6 +124,7 @@
     <ClInclude Include="transport\IInputTransport.h" />
     <ClInclude Include="transport\IInputSource.h" />
     <ClInclude Include="transport\ITransport.h" />
+    <ClInclude Include="transport\TransportConfig.h" />
     <ClInclude Include="transport\PreparedFrameBuffer.h" />
     <ClInclude Include="transport\TransportFactory.h" />
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />

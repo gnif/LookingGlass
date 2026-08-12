@@ -20,21 +20,66 @@
 
 #include "transport/TransportFactory.h"
 
+#include "CDebug.h"
+#include "config/CSettings.h"
 #include "transport/CTransportManager.h"
 #include "transport/lgmp/CLGMPTransport.h"
 
 #include <new>
 
-static std::unique_ptr<ITransport> CreateLGMP()
+namespace
 {
-  return std::unique_ptr<ITransport>(new (std::nothrow) CLGMPTransport());
+  struct Provider
+  {
+    CTransportManager::CreateFn create;
+  };
+
+  std::unique_ptr<ITransport> CreateLGMP(
+    const TransportInstance& config)
+  {
+    return std::unique_ptr<ITransport>(
+      new (std::nothrow) CLGMPTransport(config));
+  }
+
+  const TransportKind KINDS[] =
+  {
+    { L"LGMP", 1 },
+  };
+
+  const Provider PROVIDERS[] =
+  {
+    { CreateLGMP },
+  };
+
+  static_assert(ARRAYSIZE(KINDS) == ARRAYSIZE(PROVIDERS),
+    "Every transport kind must have a provider");
+
+  std::unique_ptr<CTransportManager> Build(
+    const ResolvedTransportInstances& instances)
+  {
+    std::unique_ptr<CTransportManager> manager(
+      new (std::nothrow) CTransportManager());
+    if (!manager)
+      return std::unique_ptr<CTransportManager>();
+
+    for (const ResolvedTransportInstance& instance : instances)
+      if (!manager->Add(instance.config, instance.primary,
+          PROVIDERS[instance.kindIndex].create))
+        return std::unique_ptr<CTransportManager>();
+    return manager;
+  }
 }
 
 std::unique_ptr<CTransportManager> CreateTransport()
 {
-  std::unique_ptr<CTransportManager> manager(
-    new (std::nothrow) CTransportManager());
-  if (!manager || !manager->Add(1, "LGMP", true, true, CreateLGMP))
+  TransportInstances instances = g_settings.LoadTransportInstances();
+  ResolvedTransportInstances resolved;
+  bool usedDefaults = false;
+  if (!ResolveTransportInstances(instances, KINDS, ARRAYSIZE(KINDS),
+      resolved, usedDefaults))
     return std::unique_ptr<CTransportManager>();
-  return manager;
+  if (usedDefaults)
+    DEBUG_WARN("Unsupported transport instance configuration; using defaults");
+
+  return Build(resolved);
 }

@@ -33,6 +33,7 @@
 class CLGMPTransport final : public ITransport
 {
 private:
+  TransportInstance    m_config;
   // Keep this declaration order. Destruction must release frame and control
   // allocations before the LGMP host and its IVSHMEM mapping are destroyed.
   CIVSHMEM            m_ivshmem;
@@ -44,7 +45,7 @@ private:
   std::atomic<bool>   m_ready = false;
 
 public:
-  CLGMPTransport();
+  explicit CLGMPTransport(const TransportInstance& config);
   ~CLGMPTransport() override = default;
 
   CLGMPTransport(const CLGMPTransport&) = delete;

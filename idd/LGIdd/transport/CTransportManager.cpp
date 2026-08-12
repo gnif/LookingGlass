@@ -238,29 +238,34 @@ void CTransportManager::EndCall(Entry& entry,
   }
 }
 
-bool CTransportManager::Add(BackendId id, const char * name, bool required,
-  bool primary, CreateFn create)
+bool CTransportManager::Add(TransportInstance config, bool primary,
+  CreateFn create)
 {
   CSRWExclusiveLock managerLock(m_lock);
   if (!m_phaseIdle || !m_stoppedEvent || m_phase != Phase::IDLE ||
       m_started || m_stopping ||
-      m_stopped || !id || !name || !create ||
+      m_stopped || !config.enabled || !config.id || config.kind.empty() ||
+      (config.services & ~TRANSPORT_SERVICE_ALL) || !create ||
       m_entryCount == FRAME_MAX_SINKS || (primary && m_primary))
     return false;
 
+  if (primary && (!config.required ||
+      !(config.services & TRANSPORT_SERVICE_FRAME)))
+    return false;
+
   for (unsigned i = 0; i < m_entryCount; ++i)
-    if (m_entries[i]->id == id)
+    if (m_entries[i]->id == config.id)
       return false;
 
   std::unique_ptr<Entry> entry(new (std::nothrow) Entry);
   if (!entry || !entry->idleEvent)
     return false;
 
-  entry->id       = id;
-  entry->name     = name;
-  entry->required = required;
+  entry->id       = config.id;
+  entry->required = config.required;
   entry->primary  = primary;
   entry->create   = create;
+  entry->config   = std::move(config);
 
   Entry * raw = entry.get();
   m_entries[m_entryCount++] = std::move(entry);
@@ -273,15 +278,17 @@ ITransport::OpenResult CTransportManager::OpenEntry(Entry& entry)
 {
   std::shared_ptr<ITransport> transport;
   CreateFn create = nullptr;
+  TransportInstance config;
   {
     CSRWSharedLock entryLock(entry.lock);
     transport = entry.transport;
     create    = entry.create;
+    config    = entry.config;
   }
 
   if (!transport)
   {
-    std::unique_ptr<ITransport> created = create();
+    std::unique_ptr<ITransport> created = create(config);
     transport.reset(created.release());
     CSRWExclusiveLock entryLock(entry.lock);
     entry.transport = transport;
@@ -353,6 +360,8 @@ bool CTransportManager::AddServices(Entry& entry)
   BackendId id = 0;
   uint32_t epoch = 0;
   bool primary = false;
+  bool required = false;
+  uint32_t services = 0;
   bool controlAdded = false;
   bool controlFailed = false;
   bool controlAbsent = false;
@@ -368,6 +377,8 @@ bool CTransportManager::AddServices(Entry& entry)
     id           = entry.id;
     epoch        = entry.epoch;
     primary      = entry.primary;
+    required     = entry.required;
+    services     = entry.config.services;
     controlAdded = entry.controlAdded;
     controlFailed = entry.controlFailed;
     controlAbsent = entry.controlAbsent;
@@ -380,14 +391,16 @@ bool CTransportManager::AddServices(Entry& entry)
   }
 
   if (!transport)
-    return !primary;
+    return !required;
 
   const uint64_t now = GetTickCount64();
   const bool attach = now >= retryAt;
   bool controlRetry = false;
   bool frameRetry   = false;
   bool inputRetry   = false;
-  if (attach && !controlAdded && !controlFailed && !controlAbsent)
+  if (!(services & TRANSPORT_SERVICE_CONTROL))
+    controlAbsent = true;
+  else if (attach && !controlAdded && !controlFailed && !controlAbsent)
   {
     IControlSink * control = transport->Control();
     if (control && m_control.Add(id, epoch, *control))
@@ -406,7 +419,9 @@ bool CTransportManager::AddServices(Entry& entry)
     }
   }
 
-  if (attach && !frameAdded && !frameAbsent)
+  if (!(services & TRANSPORT_SERVICE_FRAME))
+    frameAbsent = true;
+  else if (attach && !frameAdded && !frameAbsent)
   {
     IFrameSink * frame = transport->FrameSink();
     if (frame && m_frames.Bind(id, epoch, primary, *frame))
@@ -425,7 +440,9 @@ bool CTransportManager::AddServices(Entry& entry)
     }
   }
 
-  if (attach && !inputAdded && !inputFailed && !inputAbsent)
+  if (!(services & TRANSPORT_SERVICE_INPUT))
+    inputAbsent = true;
+  else if (attach && !inputAdded && !inputFailed && !inputAbsent)
   {
     IInputSource * input = transport->Input();
     if (input && m_input.Bind(id, epoch, *input))
@@ -450,7 +467,11 @@ bool CTransportManager::AddServices(Entry& entry)
     entry.serviceRetryAt = now + SERVICE_RETRY_DELAY_MS;
   }
 
-  return !primary || frameAdded;
+  const bool servicesReady =
+    (!(services & TRANSPORT_SERVICE_FRAME)   || frameAdded) &&
+    (!(services & TRANSPORT_SERVICE_CONTROL) || controlAdded) &&
+    (!(services & TRANSPORT_SERVICE_INPUT)   || inputAdded);
+  return !required || servicesReady;
 }
 
 void CTransportManager::HandleServiceFailures()
@@ -650,26 +671,25 @@ void CTransportManager::HandleProcessResult(
 
   bool exposed = false;
   bool primary = false;
-  bool required = false;
-  const char * name = nullptr;
+  std::wstring name;
   {
     CSRWSharedLock entryLock(entry.lock);
     exposed  = entry.exposed;
     primary  = entry.primary;
-    required = entry.required;
-    name     = entry.name;
-  }
-
-  if (primary && exposed)
-  {
-    (void)name;
-    DEBUG_WARN("Transport %s requested a restart while its frame interfaces "
-      "are active", name);
-    return;
+    name     = entry.config.kind;
   }
 
   RemoveServices(entry);
-  if (result == ProcessResult::RETRY || !required)
+  if (primary && exposed)
+  {
+    DEBUG_WARN("Transport %ls stopped while its frame interfaces are active",
+      name.c_str());
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.state = State::FAILED;
+    return;
+  }
+
+  if (result == ProcessResult::RETRY)
   {
     ScheduleRetry(entry);
     return;
@@ -774,6 +794,9 @@ bool CTransportManager::Initialize()
     {
       CSRWSharedLock entryLock(entry.lock);
       transport = entry.transport;
+      if (entry.required && entry.state != State::INITIALIZED &&
+          entry.state != State::READY)
+        success = false;
     }
     EndCall(entry, transport);
   }
@@ -818,7 +841,7 @@ bool CTransportManager::Setup(size_t alignment)
     Entry& entry = *entries[i];
     if (!BeginCall(entry, Call::LIFECYCLE, true))
     {
-      if (entry.primary)
+      if (entry.required)
         success = false;
       continue;
     }
@@ -831,14 +854,18 @@ bool CTransportManager::Setup(size_t alignment)
       transport = entry.transport;
     }
 
-    if ((state == State::INITIALIZED || state == State::READY) &&
-        !SetupEntry(entry, alignment))
+    if (state != State::INITIALIZED && state != State::READY)
+    {
+      if (entry.required)
+        success = false;
+    }
+    else if (!SetupEntry(entry, alignment))
     {
       {
         CSRWSharedLock entryLock(entry.lock);
         state = entry.state;
       }
-      if (entry.primary)
+      if (entry.required)
         success = false;
       else if (state == State::FAILED)
         ScheduleRetry(entry);
