@@ -74,6 +74,7 @@ enum
   USB_AUDIO_RECORD_PACKET_FRAMES      = 97,
   USB_AUDIO_RECORD_PACKETS_PER_SECOND = 2000,
   USB_AUDIO_RECORD_PACKET_INTERVAL_NS = 500000,
+  USB_AUDIO_FEEDBACK_PERIOD_NS        = 1000000,
   USB_AUDIO_RECORD_RATE_SCALE         = 65536,
   USB_AUDIO_RECORD_RATE_SETTLE_NS     = 2000000000,
   USB_AUDIO_RECORD_RATE_GAP_NS        = 100000000,
@@ -371,7 +372,8 @@ struct LG_USBAudio
   uint16_t                 playbackBatchFrames;
   atomic_bool              feedbackStreaming;
   uint64_t                 feedbackPacketId;
-  uint8_t                  feedbackDataPackets;
+  uint64_t                 feedbackNextPacketTime;
+  uint32_t                 feedbackQueueTarget;
   atomic_uint              feedbackValue;
 
   atomic_bool              recordStreaming;
@@ -413,9 +415,9 @@ static LG_USBAudio * getAudio(void * opaque)
   return lgUsbRedir_device(opaque);
 }
 
-static uint64_t recordTime(void)
+static uint64_t streamTime(void)
 {
-  /* PipeWire timestamps use CLOCK_MONOTONIC. Keep USB capture scheduling in
+  /* PipeWire timestamps use CLOCK_MONOTONIC. Keep USB stream scheduling in
    * that domain instead of introducing MONOTONIC_RAW clock drift. */
   return microtime() * UINT64_C(1000);
 }
@@ -593,7 +595,9 @@ static void stopFeedback(LG_USBAudio * audio)
 {
   atomic_store_explicit(
       &audio->feedbackStreaming, false, memory_order_release);
-  audio->feedbackDataPackets = 0;
+  audio->feedbackPacketId       = 0;
+  audio->feedbackNextPacketTime = 0;
+  audio->feedbackQueueTarget    = 0;
 }
 
 static void stopPlaybackStreams(LG_USBAudio * audio)
@@ -688,7 +692,7 @@ static void startRecordArrivalWindow(
 static void updateRecordArrivalRate(
     LG_USBAudio * audio, uint32_t sampleRate, size_t frames)
 {
-  const uint64_t now = recordTime();
+  const uint64_t now = streamTime();
   if (audio->recordRateMode != RECORD_RATE_ARRIVAL)
   {
     /* Preserve the current rate while a temporarily absent source clock
@@ -820,7 +824,7 @@ static void startRecord(LG_USBAudio * audio)
   /* Backend startup may block while the capture graph is configured. Do not
    * turn that setup time into a burst of stale USB packets. */
   recordWaitForInput(audio);
-  audio->recordNextPacketTime = recordTime();
+  audio->recordNextPacketTime = streamTime();
   atomic_store_explicit(
       &audio->recordAccepting, true, memory_order_seq_cst);
 }
@@ -843,7 +847,7 @@ static void reconfigureRecord(
    * queued around the format transition and restart the USB sample phase. */
   recordWaitForInput(audio);
   resetRecordData(audio);
-  audio->recordNextPacketTime = recordTime();
+  audio->recordNextPacketTime = streamTime();
   atomic_store_explicit(
       &audio->recordAccepting, true, memory_order_seq_cst);
 }
@@ -1116,6 +1120,30 @@ static void sendFeedbackPackets(LG_USBAudio * audio, uint32_t count)
         &packet, data, USB_AUDIO_FEEDBACK_SIZE);
 }
 
+static void sendFeedbackPacketsDue(LG_USBAudio * audio)
+{
+  if (!atomic_load_explicit(
+        &audio->feedbackStreaming, memory_order_acquire) ||
+      !audio->feedbackQueueTarget)
+    return;
+
+  const uint64_t now = streamTime();
+  if (now < audio->feedbackNextPacketTime)
+    return;
+
+  const uint64_t due =
+    (now - audio->feedbackNextPacketTime) /
+      USB_AUDIO_FEEDBACK_PERIOD_NS + 1;
+  sendFeedbackPackets(audio, (uint32_t)min(
+        due, (uint64_t)audio->feedbackQueueTarget));
+
+  if (due > audio->feedbackQueueTarget)
+    audio->feedbackNextPacketTime =
+      now + USB_AUDIO_FEEDBACK_PERIOD_NS;
+  else
+    audio->feedbackNextPacketTime += due * USB_AUDIO_FEEDBACK_PERIOD_NS;
+}
+
 static void sendRecordPacketBatch(LG_USBAudio * audio, uint32_t count,
     uint64_t rateQ16, bool forceSilence, uint64_t leadingSilenceFrames,
     uint64_t availableFrames)
@@ -1174,7 +1202,7 @@ static void sendRecordRefill(LG_USBAudio * audio, uint64_t rateQ16)
   audio->recordRefillPackets -= count;
   if (!audio->recordRefillPackets)
     audio->recordNextPacketTime =
-      recordTime() + USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
+      streamTime() + USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
 }
 
 static void sendRecordPackets(LG_USBAudio * audio)
@@ -1191,7 +1219,7 @@ static void sendRecordPackets(LG_USBAudio * audio)
     return;
   }
 
-  const uint64_t now = recordTime();
+  const uint64_t now = streamTime();
   if (audio->recordNextPacketTime > now)
     return;
 
@@ -1281,11 +1309,8 @@ static void startISOStream(void * opaque, uint64_t id,
       case USB_AUDIO_FEEDBACK_ENDPOINT:
         if (!getLayout(audio->playbackAlt))
           break;
+        stopFeedback(audio);
         resetFeedbackRate(audio);
-        atomic_store_explicit(
-            &audio->feedbackStreaming, true, memory_order_release);
-        audio->feedbackDataPackets = 0;
-        audio->feedbackPacketId     = 0;
         feedbackPrefill =
           (uint32_t)request->pkts_per_urb * request->no_urbs;
         if (!feedbackPrefill)
@@ -1293,6 +1318,7 @@ static void startISOStream(void * opaque, uint64_t id,
         else if (feedbackPrefill >
             USB_AUDIO_FEEDBACK_MAX_QUEUE)
           feedbackPrefill = USB_AUDIO_FEEDBACK_MAX_QUEUE;
+        audio->feedbackQueueTarget = feedbackPrefill;
         result = usb_redir_success;
         break;
 
@@ -1313,7 +1339,13 @@ static void startISOStream(void * opaque, uint64_t id,
 
   sendISOStatus(audio, id, request->endpoint, result);
   if (feedbackPrefill)
+  {
     sendFeedbackPackets(audio, feedbackPrefill);
+    audio->feedbackNextPacketTime =
+      streamTime() + USB_AUDIO_FEEDBACK_PERIOD_NS;
+    atomic_store_explicit(
+        &audio->feedbackStreaming, true, memory_order_release);
+  }
 }
 
 static void stopISOStream(void * opaque, uint64_t id,
@@ -1630,15 +1662,8 @@ static void isoPacket(void * opaque, uint64_t id,
     {
       queuePlaybackPacket(
           audio, data, dataLength / frameSize, frameSize);
-
-      if (atomic_load_explicit(
-            &audio->feedbackStreaming, memory_order_acquire) &&
-          ++audio->feedbackDataPackets == USB_AUDIO_FEEDBACK_INTERVAL)
-      {
+      if (audio->playbackBatchPackets == USB_AUDIO_PLAYBACK_BATCH_PACKETS)
         flushPlayback(audio);
-        audio->feedbackDataPackets = 0;
-        sendFeedbackPackets(audio, 1);
-      }
     }
   }
 
@@ -1693,7 +1718,7 @@ static void reportRecordDebug(LG_USBAudio * audio)
   if (!audio->debug)
     return;
 
-  const uint64_t now = recordTime();
+  const uint64_t now = streamTime();
   if (!audio->recordNextDebugTime)
   {
     audio->recordNextDebugTime =
@@ -1733,6 +1758,7 @@ static void reportRecordDebug(LG_USBAudio * audio)
 static void processDevice(void * opaque)
 {
   LG_USBAudio * audio = opaque;
+  sendFeedbackPacketsDue(audio);
   flushPlayback(audio);
   sendRecordPackets(audio);
   reportRecordDebug(audio);
@@ -1888,18 +1914,31 @@ bool lgUsbAudio_recordData(
 
 uint64_t lgUsbAudio_processDelayNs(const LG_USBAudio * audio)
 {
-  if (!audio || !atomic_load_explicit(
-        &audio->recordStreaming, memory_order_acquire))
+  if (!audio)
     return UINT64_MAX;
 
-  if (audio->recordRefillPackets)
-    return 0;
+  const uint64_t now = streamTime();
+  uint64_t delay = UINT64_MAX;
 
-  const uint64_t now = recordTime();
-  const uint64_t deadline = audio->recordNextPacketTime +
-    (uint64_t)(audio->recordBatchPackets - 1) *
-      USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
-  return deadline > now ? deadline - now : 0;
+  if (atomic_load_explicit(
+        &audio->feedbackStreaming, memory_order_acquire))
+    delay = audio->feedbackNextPacketTime > now ?
+      audio->feedbackNextPacketTime - now : 0;
+
+  if (!atomic_load_explicit(
+        &audio->recordStreaming, memory_order_acquire))
+    return delay;
+
+  uint64_t recordDelay = 0;
+  if (!audio->recordRefillPackets)
+  {
+    const uint64_t deadline = audio->recordNextPacketTime +
+      (uint64_t)(audio->recordBatchPackets - 1) *
+        USB_AUDIO_RECORD_PACKET_INTERVAL_NS;
+    recordDelay = deadline > now ? deadline - now : 0;
+  }
+
+  return min(delay, recordDelay);
 }
 
 void lgUsbAudio_destroy(LG_USBAudio * audio)
