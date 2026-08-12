@@ -3557,12 +3557,6 @@ static void lg_shutdown(void)
   lgAudio_free();
   lgClipboard_setLocalAvailable(false);
 
-  if (g_state.frameEvent)
-  {
-    lgFreeEvent(g_state.frameEvent);
-    g_state.frameEvent = NULL;
-  }
-
   if (e_startup)
   {
     lgFreeEvent(e_startup);
@@ -3585,6 +3579,13 @@ static void lg_shutdown(void)
     app_freeOverlays();
     ll_free(g_state.overlays);
     g_state.overlays = NULL;
+  }
+
+  // app_invalidateWindow runs during display server and overlay teardown
+  if (g_state.frameEvent)
+  {
+    lgFreeEvent(g_state.frameEvent);
+    g_state.frameEvent = NULL;
   }
 
   renderQueue_setSourceFns(NULL, NULL, NULL, NULL);
