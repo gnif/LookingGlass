@@ -93,19 +93,3 @@ continues to use its SDR-compatible path when those interfaces are unavailable.
 Native HDR presentation on Linux requires the EGL renderer, Wayland
 ``color-management-v1`` support in the compositor, and an HDR-capable output.
 When native HDR is unavailable, the client can map HDR content to SDR.
-
-Legacy Host compatibility
--------------------------
-
-The Windows Host Application is no longer the recommended server implementation.
-It is missing many of the features available in the Looking Glass IDD, such as:
-
-* Lack of video capture overhead;
-* Usage without a monitor or dummy plug connected;
-* Automatically resizing the guest to fit the client application viewport;
-* HDR support; or
-* Usage in virtual machines without GPU acceleration.
-
-B7 is the last recommended version of the legacy host application for users who
-require its non-capture mouse input workflow. Use the complete matching B7 stack
-for that workflow rather than mixing B7 and current components.

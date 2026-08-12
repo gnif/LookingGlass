@@ -15,4 +15,3 @@ do not install both Windows servers.
    install_libvirt
    install_idd
    install_client
-   install_host

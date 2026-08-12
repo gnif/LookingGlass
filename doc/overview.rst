@@ -78,3 +78,6 @@ If your workflow specifically requires non-capture mouse input with the Host
 Application, B7 is the last recommended release. Use the matching B7 client,
 Host Application and B7 documentation together; do not mix B7 components with
 current releases.
+
+Download the complete B7 release from https://looking-glass.io/downloads and see
+the :ref:`legacy_host` section.

@@ -1,7 +1,7 @@
 .. _host_usage:
 
-Legacy Host configuration
-#########################
+Legacy Host Application configuration
+#####################################
 
 .. warning::
 

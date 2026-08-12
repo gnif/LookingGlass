@@ -21,6 +21,8 @@ input.
    obs
    faq
 
+   legacy_host
+
 .. toctree::
    :hidden:
 
