@@ -3569,7 +3569,10 @@ static void lg_shutdown(void)
   ll_free(g_state.bindings);
 
   if (g_state.ds && g_state.dsInitialized)
+  {
+    g_state.dsInitialized = false;
     g_state.ds->free();
+  }
 
   // Input callbacks have stopped; the evdev state and overlays can go
   evdev_free();
