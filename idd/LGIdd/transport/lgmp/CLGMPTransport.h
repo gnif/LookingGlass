@@ -61,7 +61,7 @@ public:
     uint64_t session, uint32_t serial, bool active,
     Recovery state, uint32_t error) override;
 
-  FrameMemoryLimits GetMemoryLimits() const override;
+  std::shared_ptr<const FrameCaps> GetFrameCaps() const override;
   DirectFrameBufferMemory GetDirectMemory() const override;
 
   IFrameSink * FrameSink() override { return &m_frames; }

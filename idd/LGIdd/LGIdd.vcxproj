@@ -69,6 +69,7 @@
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
+    <ClCompile Include="transport\lgmp\CLGMPFrameCaps.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPHost.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPInputTransport.cpp" />
@@ -116,7 +117,7 @@
     <ClInclude Include="transport\CInputHub.h" />
     <ClInclude Include="transport\CTransportManager.h" />
     <ClInclude Include="transport\DirectFrameBufferMemory.h" />
-    <ClInclude Include="transport\FrameMemoryLimits.h" />
+    <ClInclude Include="transport\FrameCaps.h" />
     <ClInclude Include="transport\IControlSink.h" />
     <ClInclude Include="transport\IControlTransport.h" />
     <ClInclude Include="transport\IFrameSink.h" />
@@ -130,6 +131,7 @@
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />
     <ClInclude Include="transport\lgmp\CRecovery.h" />
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />
+    <ClInclude Include="transport\lgmp\CLGMPFrameCaps.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPHost.h" />
     <ClInclude Include="transport\lgmp\CLGMPInputTransport.h" />

@@ -33,8 +33,10 @@ extern "C" {
 #include "common/KVMFR.h"
 #include "capture/CFrameScheduler.h"
 #include "capture/FramePipeline.h"
-#include "transport/FrameMemoryLimits.h"
+#include "transport/FrameCaps.h"
 #include "transport/IFrameSink.h"
+
+#include <memory>
 
 class CIVSHMEM;
 class CLGMPHost;
@@ -151,7 +153,7 @@ private:
   void SealMemoryLayout();
   bool Setup(size_t alignSize);
   void DeInit();
-  FrameMemoryLimits GetMemoryLimits() const;
+  std::shared_ptr<const FrameCaps> GetFrameCaps() const;
   SubscriberSnapshot SnapshotSubscribers() const;
   void FinalizeSubscribers(
     const SubscriberSnapshot& snapshot, uint64_t now);

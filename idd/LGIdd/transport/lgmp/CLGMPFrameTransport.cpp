@@ -21,10 +21,13 @@
 #include "transport/lgmp/CLGMPFrameTransport.h"
 
 #include "transport/lgmp/CIVSHMEM.h"
+#include "transport/lgmp/CLGMPFrameCaps.h"
 #include "transport/lgmp/CLGMPHost.h"
 #include "CDebug.h"
 
 #include <cstring>
+#include <memory>
+#include <new>
 
 #pragma warning(push)
 #pragma warning(disable: 4200)
@@ -245,15 +248,11 @@ void CLGMPFrameTransport::DeInit()
   memset(m_frameOwnerQueue, 0, sizeof(m_frameOwnerQueue));
 }
 
-FrameMemoryLimits CLGMPFrameTransport::GetMemoryLimits() const
+std::shared_ptr<const FrameCaps> CLGMPFrameTransport::GetFrameCaps() const
 {
-  FrameMemoryLimits limits;
-  limits.capacity          = m_ivshmem.GetUsableSize();
-  limits.frameMemoryOffset = m_frameMemoryOffset;
-  limits.alignment         = m_alignSize;
-  limits.maxFrameSize      = m_maxFrameSize;
-  limits.bufferCount       = LGMP_Q_FRAME_BUFFER_LEN;
-  return limits;
+  return std::shared_ptr<const FrameCaps>(new (std::nothrow)
+    CLGMPFrameCaps(m_ivshmem.GetUsableSize(), m_frameMemoryOffset,
+      LGMP_Q_FRAME_BUFFER_LEN));
 }
 
 CLGMPFrameTransport::SubscriberSnapshot

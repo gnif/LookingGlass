@@ -272,7 +272,7 @@ void CDeviceContext::InitAdapter()
     return;
   }
   DEBUG_TRACE("Loading configured display modes");
-  if (!m_displayConfiguration.Load(m_transport->GetMemoryLimits()))
+  if (!m_displayConfiguration.Load(*m_transport))
   {
     m_initInProgress.store(0);
     return;
@@ -405,8 +405,7 @@ void CDeviceContext::ReplugMonitor()
 
 void CDeviceContext::ReloadSettings()
 {
-  if (!m_displayConfiguration.ReloadSettings(
-      m_transport->GetMemoryLimits()))
+  if (!m_displayConfiguration.ReloadSettings(*m_transport))
     return;
 
   ReplugMonitor();
@@ -449,7 +448,7 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
 {
   const CDisplayConfiguration::ResolutionResult result =
     m_displayConfiguration.SetResolution(
-      width, height, m_transport->GetMemoryLimits());
+      width, height, *m_transport);
 
   switch (result.status)
   {
@@ -462,6 +461,10 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
 
     case CDisplayConfiguration::ResolutionStatus::TOO_LARGE:
       g_pipe.ResolutionRejected(width, height, result.requiredMiB);
+      break;
+
+    case CDisplayConfiguration::ResolutionStatus::UNSUPPORTED:
+      g_pipe.ResolutionRejected(width, height, 0);
       break;
 
     default:

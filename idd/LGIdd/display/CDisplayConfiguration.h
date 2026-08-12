@@ -25,7 +25,7 @@
 #include "config/CSettings.h"
 #include "display/CEdid.h"
 #include "display/IddCxCompat.h"
-#include "transport/FrameMemoryLimits.h"
+#include "transport/FrameCaps.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -39,6 +39,7 @@ public:
     SUCCESS,
     INVALID,
     TOO_LARGE,
+    UNSUPPORTED,
     SETTINGS_FAILED,
     MODES_FAILED,
   };
@@ -68,16 +69,8 @@ private:
   CEdid                   m_edid;
   bool                    m_hdrEnabled = false;
 
-  bool LoadModes(const FrameMemoryLimits& limits);
+  bool LoadModes(const FrameCaps& caps);
   CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
-
-  static bool AlignUp(UINT64 value, UINT64 alignment, UINT64& result);
-  static bool CalculateFrameSize(uint32_t width, uint32_t height,
-    UINT64& frameSize);
-  static bool GetResolutionMemoryRequirements(uint32_t width,
-    uint32_t height, UINT64 alignment, const FrameMemoryLimits& limits,
-    UINT64& frameSize, UINT64& requiredSize);
-  static uint32_t RecommendedMemorySizeMiB(UINT64 requiredSize);
 
 public:
   explicit CDisplayConfiguration(CSettings& settings);
@@ -85,10 +78,10 @@ public:
   CDisplayConfiguration(const CDisplayConfiguration&) = delete;
   CDisplayConfiguration& operator=(const CDisplayConfiguration&) = delete;
 
-  bool Load(const FrameMemoryLimits& limits);
-  bool ReloadSettings(const FrameMemoryLimits& limits);
+  bool Load(const FrameCaps& caps);
+  bool ReloadSettings(const FrameCaps& caps);
   ResolutionResult SetResolution(uint32_t width, uint32_t height,
-    const FrameMemoryLimits& limits);
+    const FrameCaps& caps);
 
   void InitializeEdid(bool hdr);
   void RebuildEdid(bool hdr);

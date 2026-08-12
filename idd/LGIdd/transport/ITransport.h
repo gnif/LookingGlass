@@ -21,9 +21,10 @@
 #pragma once
 
 #include "transport/DirectFrameBufferMemory.h"
-#include "transport/FrameMemoryLimits.h"
+#include "transport/FrameCaps.h"
 #include "transport/TransportConfig.h"
 
+#include <memory>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -89,7 +90,14 @@ public:
   virtual void RecoveryStatus(
     uint64_t, uint32_t, bool, Recovery, uint32_t) {}
 
-  virtual FrameMemoryLimits GetMemoryLimits() const = 0;
+  // Frame capabilities describe the configured instance, not transient
+  // runtime state. CanUseMode answers are immutable for the returned
+  // object's lifetime, and recreating an instance from the same descriptor
+  // must provide the same capability contract.
+  virtual std::shared_ptr<const FrameCaps> GetFrameCaps() const
+  {
+    return std::shared_ptr<const FrameCaps>();
+  }
   virtual DirectFrameBufferMemory GetDirectMemory() const = 0;
 
   // Component pointers are fixed after Setup and remain valid until Stop.

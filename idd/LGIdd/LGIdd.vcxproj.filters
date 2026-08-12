@@ -169,7 +169,7 @@
     <ClInclude Include="transport\DirectFrameBufferMemory.h">
       <Filter>Transport</Filter>
     </ClInclude>
-    <ClInclude Include="transport\FrameMemoryLimits.h">
+    <ClInclude Include="transport\FrameCaps.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IControlSink.h">
@@ -209,6 +209,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CLGMPControl.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPFrameCaps.h">
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h">
@@ -340,6 +343,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPFrameCaps.cpp">
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp">

@@ -328,6 +328,8 @@ ITransport::OpenResult CTransportManager::OpenEntry(Entry& entry)
 bool CTransportManager::InitializeEntry(Entry& entry)
 {
   std::shared_ptr<ITransport> transport;
+  uint32_t services = 0;
+  bool required = false;
   {
     CSRWSharedLock entryLock(entry.lock);
     if (entry.state == State::INITIALIZED || entry.state == State::READY)
@@ -335,6 +337,8 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     if (entry.state != State::OPEN)
       return false;
     transport = entry.transport;
+    services  = entry.config.services;
+    required  = entry.required;
   }
 
   if (!transport || !transport->Initialize())
@@ -344,12 +348,30 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     return false;
   }
 
-  const FrameMemoryLimits limits = transport->GetMemoryLimits();
+  std::shared_ptr<const FrameCaps> frameCaps;
+  if (services & TRANSPORT_SERVICE_FRAME)
+  {
+    frameCaps = transport->GetFrameCaps();
+    if (!frameCaps && required)
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.state = State::FAILED;
+      return false;
+    }
+  }
+  const bool hasFrameCaps = frameCaps != nullptr;
   {
     CSRWExclusiveLock entryLock(entry.lock);
-    entry.limits      = limits;
-    entry.limitsValid = true;
-    entry.state       = State::INITIALIZED;
+    // The first successfully initialized instance fixes the advertised
+    // capability contract. Recreating an instance must not change the mode
+    // list during a runtime restart.
+    if (!entry.frameCaps)
+      entry.frameCaps = std::move(frameCaps);
+    // A best-effort instance without a capability contract can continue to
+    // provide its other configured services, but must not receive frames.
+    entry.frameAbsent = (services & TRANSPORT_SERVICE_FRAME) &&
+      !hasFrameCaps;
+    entry.state = State::INITIALIZED;
   }
   return true;
 }
@@ -627,8 +649,6 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
   {
     CSRWExclusiveLock entryLock(entry.lock);
     entry.transport.reset();
-    entry.limits       = FrameMemoryLimits {};
-    entry.limitsValid  = false;
     entry.directMemory = DirectFrameBufferMemory {};
     entry.directMemoryValid = false;
     entry.setupDone    = false;
@@ -1180,20 +1200,42 @@ void CTransportManager::RecoveryStatus(const SourceKey& source,
   }
 }
 
-FrameMemoryLimits CTransportManager::GetMemoryLimits() const
+bool CTransportManager::CanUseMode(const FrameMode& mode,
+  uint32_t * requiredSizeMiB) const
 {
+  if (requiredSizeMiB)
+    *requiredSizeMiB = 0;
+
+  std::shared_ptr<const FrameCaps> caps[FRAME_MAX_SINKS];
+  unsigned capsCount = 0;
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  for (unsigned i = 0; i < count; ++i)
   {
-    CSRWSharedLock managerLock(m_lock);
-    if (m_stopping || m_stopped)
-      return FrameMemoryLimits {};
+    Entry& entry = *entries[i];
+    CSRWSharedLock entryLock(entry.lock);
+    if (!entry.required ||
+        !(entry.config.services & TRANSPORT_SERVICE_FRAME))
+      continue;
+    if (!entry.frameCaps)
+      return false;
+    caps[capsCount++] = entry.frameCaps;
   }
 
-  Entry * primary = Primary();
-  if (!primary)
-    return FrameMemoryLimits {};
+  if (!capsCount)
+    return false;
 
-  CSRWSharedLock entryLock(primary->lock);
-  return primary->limitsValid ? primary->limits : FrameMemoryLimits {};
+  bool supported = true;
+  for (unsigned i = 0; i < capsCount; ++i)
+  {
+    uint32_t hint = 0;
+    if (caps[i]->CanUseMode(mode, capsCount == 1 ? &hint : nullptr))
+      continue;
+    supported = false;
+    if (requiredSizeMiB && capsCount == 1)
+      *requiredSizeMiB = hint;
+  }
+  return supported;
 }
 
 DirectFrameBufferMemory CTransportManager::GetDirectMemory() const

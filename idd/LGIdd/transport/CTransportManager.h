@@ -32,7 +32,7 @@
 static_assert(TRANSPORT_MAX_INSTANCES == FRAME_MAX_SINKS,
   "The transport and frame limits must match");
 
-class CTransportManager final
+class CTransportManager final : public FrameCaps
 {
 public:
   using CreateFn = std::unique_ptr<ITransport> (*)(
@@ -117,8 +117,7 @@ private:
     bool                        syncPending  = false;
     bool                        recoveryPending = false;
     RecoveryUpdate              recovery;
-    FrameMemoryLimits           limits;
-    bool                        limitsValid = false;
+    std::shared_ptr<const FrameCaps> frameCaps;
     DirectFrameBufferMemory     directMemory;
     bool                        directMemoryValid = false;
     std::shared_ptr<ITransport> exposedTransport;
@@ -183,7 +182,8 @@ public:
     uint64_t session, uint32_t serial, bool active,
     Recovery state, uint32_t error);
 
-  FrameMemoryLimits GetMemoryLimits() const;
+  bool CanUseMode(const FrameMode& mode,
+    uint32_t * requiredSizeMiB = nullptr) const override;
   DirectFrameBufferMemory GetDirectMemory() const;
 
   IFrameTransport& Frames();

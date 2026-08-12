@@ -320,11 +320,15 @@ void CNotifyWindow::handleResolutionRejected(uint32_t width, uint32_t height,
   nid.dwInfoFlags = NIIF_WARNING;
   StringCbCopy(nid.szInfoTitle, sizeof nid.szInfoTitle,
     L"Resolution change refused");
-  StringCbPrintf(nid.szInfo, sizeof nid.szInfo,
-    L"The requested resolution %ux%u does not fit in shared memory. "
-    L"Change the total IVSHMEM size to at least %u MiB.",
-    width, height,
-    requiredSizeMiB);
+  if (requiredSizeMiB)
+    StringCbPrintf(nid.szInfo, sizeof nid.szInfo,
+      L"The requested resolution %ux%u requires at least %u MiB of "
+      L"configured frame capacity.",
+      width, height, requiredSizeMiB);
+  else
+    StringCbPrintf(nid.szInfo, sizeof nid.szInfo,
+      L"The requested resolution %ux%u is not supported by the current "
+      L"configuration.", width, height);
 
   if (!Shell_NotifyIcon(NIM_MODIFY, &nid))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_MODIFY)");

@@ -23,76 +23,8 @@
 #include "CDebug.h"
 #include "CSRWLock.h"
 
-#include <d3d12.h>
 #include <iterator>
 #include <utility>
-
-static const UINT64 FRAME_BYTES_PER_PIXEL = 4;
-
-bool CDisplayConfiguration::AlignUp(
-  UINT64 value, UINT64 alignment, UINT64& result)
-{
-  if (!alignment || (alignment & (alignment - 1)))
-    return false;
-
-  const UINT64 mask = alignment - 1;
-  result = (value + mask) & ~mask;
-  return true;
-}
-
-bool CDisplayConfiguration::CalculateFrameSize(
-  uint32_t width, uint32_t height, UINT64& frameSize)
-{
-  frameSize = 0;
-  if (!width || !height)
-    return false;
-
-  UINT64 pitch;
-  if (!AlignUp((UINT64)width * FRAME_BYTES_PER_PIXEL,
-      D3D12_TEXTURE_DATA_PITCH_ALIGNMENT, pitch))
-    return false;
-
-  frameSize = pitch * height;
-  return true;
-}
-
-bool CDisplayConfiguration::GetResolutionMemoryRequirements(
-  uint32_t width, uint32_t height, UINT64 alignment,
-  const FrameMemoryLimits& limits, UINT64& frameSize, UINT64& requiredSize)
-{
-  frameSize    = 0;
-  requiredSize = 0;
-
-  if (!alignment || !limits.frameMemoryOffset || !limits.bufferCount ||
-      !CalculateFrameSize(width, height, frameSize))
-    return false;
-
-  UINT64 frameAllocationSize;
-  if (!AlignUp(frameSize + alignment, alignment, frameAllocationSize))
-    return false;
-
-  UINT64 frameMemoryStart;
-  if (!AlignUp(limits.frameMemoryOffset, alignment, frameMemoryStart))
-    return false;
-
-  requiredSize = frameMemoryStart +
-    frameAllocationSize * limits.bufferCount;
-  return true;
-}
-
-uint32_t CDisplayConfiguration::RecommendedMemorySizeMiB(
-  UINT64 requiredSize)
-{
-  UINT64 sizeMiB = requiredSize / 1048576;
-  if (requiredSize % 1048576)
-    ++sizeMiB;
-
-  UINT64 result = 1;
-  while (result < sizeMiB && result <= UINT32_MAX / 2)
-    result <<= 1;
-
-  return result < sizeMiB ? UINT32_MAX : (uint32_t)result;
-}
 
 #ifdef HAS_IDDCX_110
 static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
@@ -117,7 +49,7 @@ CDisplayConfiguration::CDisplayConfiguration(CSettings& settings) :
 {
 }
 
-bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
+bool CDisplayConfiguration::LoadModes(const FrameCaps& caps)
 {
   const CSettings::DisplayModes configuredModes =
     m_settings.LoadModes();
@@ -127,17 +59,17 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
   CSettings::DisplayModes newModes;
   newModes.reserve(configuredModes.size());
 
-  const UINT64 alignment = limits.alignment ? limits.alignment :
-    D3D12_DEFAULT_RESOURCE_PLACEMENT_ALIGNMENT;
-
   bool hasPreferred = false;
   for (const auto& configuredMode : configuredModes)
   {
-    UINT64 frameSize;
-    UINT64 requiredMemorySize;
-    if (!GetResolutionMemoryRequirements(configuredMode.width,
-        configuredMode.height, alignment, limits, frameSize,
-        requiredMemorySize))
+    const FrameMode frameMode =
+    {
+      configuredMode.width,
+      configuredMode.height,
+      configuredMode.refreshMilliHz,
+    };
+    if (!frameMode.width || !frameMode.height ||
+        !frameMode.refreshMilliHz)
     {
       DEBUG_WARN("Filtering invalid %s mode %ux%u@%.3f",
         configuredMode.extraMode ? "extra" : "configured",
@@ -145,16 +77,13 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
         configuredMode.refreshMilliHz / 1000.0);
       continue;
     }
-
-    if (requiredMemorySize > limits.capacity)
+    if (!caps.CanUseMode(frameMode))
     {
       DEBUG_WARN(
-        "Filtering %s mode %ux%u@%.3f: requires %llu bytes of transport memory, only %llu bytes are available",
+        "Filtering unsupported %s mode %ux%u@%.3f",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
-        configuredMode.refreshMilliHz / 1000.0,
-        (unsigned long long)requiredMemorySize,
-        (unsigned long long)limits.capacity);
+        configuredMode.refreshMilliHz / 1000.0);
       continue;
     }
 
@@ -169,7 +98,7 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
 
   if (newModes.empty())
   {
-    DEBUG_ERROR("No configured display modes fit in transport memory");
+    DEBUG_ERROR("No configured display modes are supported");
     return false;
   }
 
@@ -183,13 +112,13 @@ bool CDisplayConfiguration::LoadModes(const FrameMemoryLimits& limits)
   return true;
 }
 
-bool CDisplayConfiguration::Load(const FrameMemoryLimits& limits)
+bool CDisplayConfiguration::Load(const FrameCaps& caps)
 {
-  return LoadModes(limits);
+  return LoadModes(caps);
 }
 
 bool CDisplayConfiguration::ReloadSettings(
-  const FrameMemoryLimits& limits)
+  const FrameCaps& caps)
 {
   bool modesLoaded = false;
   {
@@ -209,7 +138,7 @@ bool CDisplayConfiguration::ReloadSettings(
     }
 
     if (settingsUpdated)
-      modesLoaded = LoadModes(limits);
+      modesLoaded = LoadModes(caps);
   }
 
   if (!modesLoaded)
@@ -219,31 +148,9 @@ bool CDisplayConfiguration::ReloadSettings(
 
 CDisplayConfiguration::ResolutionResult
 CDisplayConfiguration::SetResolution(
-  uint32_t width, uint32_t height, const FrameMemoryLimits& limits)
+  uint32_t width, uint32_t height, const FrameCaps& caps)
 {
   ResolutionResult result;
-
-  UINT64 frameSize;
-  UINT64 requiredMemorySize;
-  if (!GetResolutionMemoryRequirements(width, height, limits.alignment,
-      limits, frameSize, requiredMemorySize))
-  {
-    DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
-    return result;
-  }
-
-  if (requiredMemorySize > limits.capacity)
-  {
-    result.status      = ResolutionStatus::TOO_LARGE;
-    result.requiredMiB = RecommendedMemorySizeMiB(requiredMemorySize);
-    DEBUG_WARN(
-      "Refusing resolution %ux%u: frame requires %llu bytes, only %llu bytes are available; transport memory must be at least %u MiB",
-      width, height,
-      (unsigned long long)frameSize,
-      (unsigned long long)limits.maxFrameSize,
-      result.requiredMiB);
-    return result;
-  }
 
   CSettings::DisplayMode mode = {};
   mode.width          = width;
@@ -251,11 +158,42 @@ CDisplayConfiguration::SetResolution(
   mode.refreshMilliHz = m_settings.GetDefaultRefreshMilliHz();
   mode.preferred      = true;
 
+  if (!mode.width || !mode.height || !mode.refreshMilliHz)
+  {
+    DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
+    return result;
+  }
+
+  const FrameMode frameMode =
+  {
+    mode.width,
+    mode.height,
+    mode.refreshMilliHz,
+  };
+  if (!caps.CanUseMode(frameMode, &result.requiredMiB))
+  {
+    if (result.requiredMiB)
+    {
+      result.status = ResolutionStatus::TOO_LARGE;
+      DEBUG_WARN(
+        "Refusing resolution %ux%u: configured frame capacity must be at "
+        "least %u MiB",
+        width, height, result.requiredMiB);
+    }
+    else
+    {
+      result.status = ResolutionStatus::UNSUPPORTED;
+      DEBUG_WARN("Refusing unsupported resolution: %ux%u",
+        width, height);
+    }
+    return result;
+  }
+
   {
     CSRWExclusiveLock reloadLock(m_reloadLock);
     if (!m_settings.SetExtraMode(mode))
       result.status = ResolutionStatus::SETTINGS_FAILED;
-    else if (!LoadModes(limits))
+    else if (!LoadModes(caps))
       result.status = ResolutionStatus::MODES_FAILED;
     else
     {

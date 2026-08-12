@@ -20,13 +20,21 @@
 
 #pragma once
 
+#include "transport/FrameCaps.h"
+
 #include <stdint.h>
 
-struct FrameMemoryLimits
+class CLGMPFrameCaps final : public FrameCaps
 {
-  uint64_t capacity          = 0;
-  uint64_t frameMemoryOffset = 0;
-  uint64_t alignment         = 0;
-  uint64_t maxFrameSize      = 0;
-  unsigned bufferCount       = 0;
+private:
+  uint64_t m_capacity;
+  uint64_t m_frameMemoryOffset;
+  uint32_t m_bufferCount;
+
+public:
+  CLGMPFrameCaps(uint64_t capacity, uint64_t frameMemoryOffset,
+    uint32_t bufferCount);
+
+  bool CanUseMode(const FrameMode& mode,
+    uint32_t * requiredSizeMiB = nullptr) const override;
 };

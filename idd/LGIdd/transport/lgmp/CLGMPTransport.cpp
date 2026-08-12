@@ -239,9 +239,9 @@ void CLGMPTransport::RecoveryStatus(
     session, serial, active, wireState, wireError);
 }
 
-FrameMemoryLimits CLGMPTransport::GetMemoryLimits() const
+std::shared_ptr<const FrameCaps> CLGMPTransport::GetFrameCaps() const
 {
-  return m_frames.GetMemoryLimits();
+  return m_frames.GetFrameCaps();
 }
 
 DirectFrameBufferMemory CLGMPTransport::GetDirectMemory() const
