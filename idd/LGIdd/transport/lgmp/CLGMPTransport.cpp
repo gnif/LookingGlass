@@ -93,7 +93,7 @@ bool CLGMPTransport::Setup(size_t alignment)
   return true;
 }
 
-void CLGMPTransport::Process(ITransportEvents& events)
+ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
 {
   const CRecovery::Request recovery = m_recovery.Process();
   if (recovery.valid)
@@ -104,7 +104,7 @@ void CLGMPTransport::Process(ITransportEvents& events)
   // only the protocol-independent recovery channel. This preserves the old
   // transport startup boundary while keeping recovery available immediately.
   if (!m_ready.load(std::memory_order_acquire))
-    return;
+    return ProcessResult::OK;
 
   const LGMP_STATUS processStatus = m_host.Process();
   if (processStatus != LGMP_OK)
@@ -113,14 +113,12 @@ void CLGMPTransport::Process(ITransportEvents& events)
     {
       DEBUG_WARN(
         "LGMP reported the shared memory has been corrupted, attempting to recover\n");
-      // TODO: reinitialize LGMP.
-      return;
+      return ProcessResult::RETRY;
     }
 
     DEBUG_ERROR("lgmpHostProcess Failed: %s",
       lgmpStatusString(processStatus));
-    // TODO: shut down LGMP.
-    return;
+    return ProcessResult::FAILURE;
   }
 
   const uint64_t now = CFrameScheduler::Nanotime();
@@ -191,6 +189,14 @@ void CLGMPTransport::Process(ITransportEvents& events)
 
   if (m_control.HasNewSubscribers())
     m_control.ResendState();
+
+  return ProcessResult::OK;
+}
+
+void CLGMPTransport::Stop()
+{
+  m_ready.store(false, std::memory_order_release);
+  m_input.Stop();
 }
 
 void CLGMPTransport::SyncRecovery()

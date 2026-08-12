@@ -44,9 +44,18 @@ public:
 class ITransport
 {
 public:
+  using BackendId = uint32_t;
+
   enum class OpenResult
   {
     SUCCESS,
+    RETRY,
+    FAILURE,
+  };
+
+  enum class ProcessResult
+  {
+    OK,
     RETRY,
     FAILURE,
   };
@@ -63,7 +72,8 @@ public:
   virtual OpenResult Open() = 0;
   virtual bool Initialize() = 0;
   virtual bool Setup(size_t alignment) = 0;
-  virtual void Process(ITransportEvents& events) = 0;
+  virtual ProcessResult Process(ITransportEvents& events) = 0;
+  virtual void Stop() = 0;
   virtual void SyncRecovery() {}
   virtual void RecoveryStatus(
     uint64_t, uint32_t, bool, Recovery, uint32_t) {}

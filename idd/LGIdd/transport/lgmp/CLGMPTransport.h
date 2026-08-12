@@ -53,7 +53,8 @@ public:
   OpenResult Open() override;
   bool Initialize() override;
   bool Setup(size_t alignment) override;
-  void Process(ITransportEvents& events) override;
+  ProcessResult Process(ITransportEvents& events) override;
+  void Stop() override;
   void SyncRecovery() override;
   void RecoveryStatus(
     uint64_t session, uint32_t serial, bool active,

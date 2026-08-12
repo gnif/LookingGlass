@@ -20,11 +20,21 @@
 
 #include "transport/TransportFactory.h"
 
+#include "transport/CTransportManager.h"
 #include "transport/lgmp/CLGMPTransport.h"
 
 #include <new>
 
-std::unique_ptr<ITransport> CreateTransport()
+static std::unique_ptr<ITransport> CreateLGMP()
 {
   return std::unique_ptr<ITransport>(new (std::nothrow) CLGMPTransport());
+}
+
+std::unique_ptr<ITransport> CreateTransport()
+{
+  std::unique_ptr<CTransportManager> manager(
+    new (std::nothrow) CTransportManager());
+  if (!manager || !manager->Add(1, "LGMP", true, true, CreateLGMP))
+    return std::unique_ptr<ITransport>();
+  return std::unique_ptr<ITransport>(manager.release());
 }

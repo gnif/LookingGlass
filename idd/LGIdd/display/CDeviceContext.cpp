@@ -64,8 +64,8 @@ CDeviceContext::~CDeviceContext()
     m_transportTimer = nullptr;
   }
 
-  if (m_transport && m_transport->Input())
-    m_transport->Input()->Stop();
+  if (m_transport)
+    m_transport->Stop();
 }
 
 void CDeviceContext::QueryIddCxCapabilities()

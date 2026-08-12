@@ -154,6 +154,9 @@
     <ClInclude Include="postprocess\effect\CRGB24Effect.h">
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
+    <ClInclude Include="transport\CTransportManager.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\DirectFrameBufferMemory.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -290,6 +293,9 @@
     </ClCompile>
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp">
       <Filter>Post-processing\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\CTransportManager.cpp">
+      <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\TransportFactory.cpp">
       <Filter>Transport</Filter>

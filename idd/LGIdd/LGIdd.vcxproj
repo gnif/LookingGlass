@@ -60,6 +60,7 @@
     <ClCompile Include="postprocess\effect\CDownsampleEffect.cpp" />
     <ClCompile Include="postprocess\effect\CHDR16to10Effect.cpp" />
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp" />
+    <ClCompile Include="transport\CTransportManager.cpp" />
     <ClCompile Include="transport\TransportFactory.cpp" />
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
@@ -106,6 +107,7 @@
     <ClInclude Include="postprocess\effect\CDownsampleEffect.h" />
     <ClInclude Include="postprocess\effect\CHDR16to10Effect.h" />
     <ClInclude Include="postprocess\effect\CRGB24Effect.h" />
+    <ClInclude Include="transport\CTransportManager.h" />
     <ClInclude Include="transport\DirectFrameBufferMemory.h" />
     <ClInclude Include="transport\FrameMemoryLimits.h" />
     <ClInclude Include="transport\IControlTransport.h" />
