@@ -444,7 +444,8 @@ void CDeviceContext::OnSwapChainReady()
 
 // Display configuration
 
-void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
+InteractionResult CDeviceContext::SetResolution(
+  uint32_t width, uint32_t height)
 {
   const CDisplayConfiguration::ResolutionResult result =
     m_displayConfiguration.SetResolution(
@@ -457,18 +458,21 @@ void CDeviceContext::SetResolution(uint32_t width, uint32_t height)
       // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode
       // list, so depart and re-arrive the monitor to rebuild the topology.
       ReplugMonitor();
-      break;
+      return InteractionResult::ACCEPTED;
 
     case CDisplayConfiguration::ResolutionStatus::TOO_LARGE:
       g_pipe.ResolutionRejected(width, height, result.requiredMiB);
-      break;
+      return InteractionResult::REJECTED;
 
     case CDisplayConfiguration::ResolutionStatus::UNSUPPORTED:
       g_pipe.ResolutionRejected(width, height, 0);
-      break;
+      return InteractionResult::REJECTED;
+
+    case CDisplayConfiguration::ResolutionStatus::INVALID:
+      return InteractionResult::REJECTED;
 
     default:
-      break;
+      return InteractionResult::FAILED;
   }
 }
 
@@ -620,18 +624,19 @@ void CDeviceContext::TransportTimer()
   m_transport->Process(*this);
 }
 
-void CDeviceContext::OnSetCursorPos(
+InteractionResult CDeviceContext::OnSetCursorPos(
   const SourceKey& source, int32_t x, int32_t y)
 {
   UNREFERENCED_PARAMETER(source);
-  g_pipe.SetCursorPos(x, y);
+  return g_pipe.SetCursorPos(x, y) ?
+    InteractionResult::ACCEPTED : InteractionResult::UNAVAILABLE;
 }
 
-void CDeviceContext::OnSetResolution(const SourceKey& source,
+InteractionResult CDeviceContext::OnSetResolution(const SourceKey& source,
   uint32_t width, uint32_t height)
 {
   UNREFERENCED_PARAMETER(source);
-  SetResolution(width, height);
+  return SetResolution(width, height);
 }
 
 void CDeviceContext::OnRecoveryRequest(const SourceKey& source,

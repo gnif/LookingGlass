@@ -72,7 +72,7 @@ class CPipeServer : private IPipeEndpointHandler
     void SetRecoveryHandler(RecoveryHandler handler, void * opaque);
     void ClearRecoveryHandler(void * opaque);
 
-    void SetCursorPos(uint32_t x, uint32_t y);
+    bool SetCursorPos(int32_t x, int32_t y);
     void SetDisplayMode(
       uint32_t width, uint32_t height, uint32_t refreshMilliHz);
     void SetGPUStatus(bool software);

@@ -171,11 +171,11 @@ void CPipeServer::ClearRecoveryHandler(void * opaque)
   m_recoveryOpaque  = nullptr;
 }
 
-void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
+bool CPipeServer::SetCursorPos(int32_t x, int32_t y)
 {
   // do not send cursor messages if we are not connected or they will end up queued
   if (!m_endpoint.IsConnected())
-    return;
+    return false;
 
   LGPipeMsg msg = {};
   msg.size       = sizeof(msg);
@@ -184,7 +184,7 @@ void CPipeServer::SetCursorPos(uint32_t x, uint32_t y)
   msg.curorPos.y = y;
   // Cursor position is transient. If the connection is lost during this
   // write, drop it instead of replaying stale coordinates after reconnect.
-  m_endpoint.Send(&msg, sizeof(msg));
+  return m_endpoint.Send(&msg, sizeof(msg));
 }
 
 void CPipeServer::SetDisplayMode(

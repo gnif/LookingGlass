@@ -40,14 +40,24 @@ struct SourceKey
   uint32_t  generation = 0;
 };
 
+enum class InteractionResult
+{
+  ACCEPTED,
+  BUSY,
+  UNAVAILABLE,
+  STALE,
+  REJECTED,
+  FAILED,
+};
+
 class ITransportEvents
 {
 public:
   virtual ~ITransportEvents() = default;
 
-  virtual void OnSetCursorPos(
+  virtual InteractionResult OnSetCursorPos(
     const SourceKey& source, int32_t x, int32_t y) = 0;
-  virtual void OnSetResolution(
+  virtual InteractionResult OnSetResolution(
     const SourceKey& source, uint32_t width, uint32_t height) = 0;
   virtual void OnRecoveryRequest(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active) = 0;

@@ -34,6 +34,8 @@ class CSourceEvents final : public ITransportEvents
 private:
   BackendId         m_backend;
   uint32_t          m_epoch;
+  bool              m_interactions;
+  CInputHub&         m_input;
   ITransportEvents& m_events;
 
   SourceKey Stamp(const SourceKey& source) const
@@ -46,19 +48,45 @@ private:
 
 public:
   CSourceEvents(
-    BackendId backend, uint32_t epoch, ITransportEvents& events) :
-    m_backend(backend), m_epoch(epoch), m_events(events) {}
+    BackendId backend, uint32_t epoch, bool interactions, CInputHub& input,
+    ITransportEvents& events) :
+    m_backend(backend), m_epoch(epoch), m_interactions(interactions),
+    m_input(input), m_events(events) {}
 
-  void OnSetCursorPos(
+  InteractionResult OnSetCursorPos(
     const SourceKey& source, int32_t x, int32_t y) override
   {
-    m_events.OnSetCursorPos(Stamp(source), x, y);
+    if (!m_interactions)
+      return InteractionResult::UNAVAILABLE;
+    SourceKey stamped = Stamp(source);
+    CInputHub::InteractionPermit permit;
+    const InteractionResult result =
+      m_input.CheckInteraction(stamped, permit);
+    if (result != InteractionResult::ACCEPTED)
+      return result;
+    const InteractionResult applied =
+      m_events.OnSetCursorPos(stamped, x, y);
+    if (applied == InteractionResult::ACCEPTED)
+      m_input.CommitInteraction(stamped, permit);
+    return applied;
   }
 
-  void OnSetResolution(const SourceKey& source,
+  InteractionResult OnSetResolution(const SourceKey& source,
     uint32_t width, uint32_t height) override
   {
-    m_events.OnSetResolution(Stamp(source), width, height);
+    if (!m_interactions)
+      return InteractionResult::UNAVAILABLE;
+    SourceKey stamped = Stamp(source);
+    CInputHub::InteractionPermit permit;
+    const InteractionResult result =
+      m_input.CheckInteraction(stamped, permit);
+    if (result != InteractionResult::ACCEPTED)
+      return result;
+    const InteractionResult applied =
+      m_events.OnSetResolution(stamped, width, height);
+    if (applied == InteractionResult::ACCEPTED)
+      m_input.CommitInteraction(stamped, permit);
+    return applied;
   }
 
   void OnRecoveryRequest(const SourceKey& source,
@@ -518,6 +546,7 @@ void CTransportManager::HandleServiceFailures()
       }
 
       m_control.Remove(token.backend, token.epoch);
+      m_input.RevokeInteraction(token.backend, token.epoch);
       if (restart)
       {
         RemoveServices(entry);
@@ -622,6 +651,7 @@ void CTransportManager::RemoveServices(Entry& entry)
     entry.inputAdded     = false;
   }
 
+  m_input.RevokeInteraction(id, epoch);
   if (inputAdded)
     m_input.Unbind(id, epoch);
   if (controlAdded)
@@ -988,8 +1018,14 @@ ITransport::ProcessResult CTransportManager::Process(
     if (setup)
       SetupEntry(entry, alignment);
 
+    bool interactions = false;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      interactions = entry.controlAdded;
+    }
     DrainRecovery(entry, transport);
-    CSourceEvents sourceEvents(id, epoch, events);
+    CSourceEvents sourceEvents(
+      id, epoch, interactions, m_input, events);
     const ProcessResult result = transport->Process(sourceEvents);
     DrainRecovery(entry, transport);
     HandleProcessResult(entry, result);

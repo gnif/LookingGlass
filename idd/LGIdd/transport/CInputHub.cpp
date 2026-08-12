@@ -28,6 +28,12 @@ static bool SameSource(const SourceKey& left, const SourceKey& right)
     left.client == right.client && left.generation == right.generation;
 }
 
+static bool SameClient(const SourceKey& left, const SourceKey& right)
+{
+  return left.backend == right.backend && left.epoch == right.epoch &&
+    left.client == right.client;
+}
+
 CInputHub::CInputHub()
 {
   for (Source& source : m_sources)
@@ -222,6 +228,12 @@ void CInputHub::Unbind(BackendId backend, uint32_t epoch)
           m_owner = {};
           m_ownerDeadline = 0;
         }
+        if (m_interactionOwner.backend == backend &&
+            m_interactionOwner.epoch == epoch)
+        {
+          ClearInteraction();
+        }
+        AdvanceInteractionSerial();
         break;
       }
   }
@@ -243,6 +255,94 @@ void CInputHub::Unbind(BackendId backend, uint32_t epoch)
     selected->failed   = false;
     selected->failurePending = false;
   }
+}
+
+InteractionResult CInputHub::CheckInteraction(
+  SourceKey& source, InteractionPermit& permit)
+{
+  permit = {};
+  if (!source.backend || !source.epoch || !source.client)
+    return InteractionResult::STALE;
+
+  CSRWExclusiveLock lock(m_lock);
+  if (m_started && m_sink)
+    CheckState();
+
+  if (m_owner.backend)
+  {
+    if (!SameClient(m_owner, source))
+      return InteractionResult::BUSY;
+    if (source.generation && source.generation != m_owner.generation)
+      return InteractionResult::BUSY;
+    source.generation = m_owner.generation;
+    permit.serial = m_interactionSerial;
+    permit.source = source;
+    return InteractionResult::ACCEPTED;
+  }
+
+  const uint64_t now = GetTickCount64();
+  if (m_interactionOwner.backend && now >= m_interactionDeadline)
+    InvalidateInteraction();
+
+  if (!m_interactionOwner.backend)
+  {
+    permit.serial = m_interactionSerial;
+    permit.source = source;
+    return InteractionResult::ACCEPTED;
+  }
+
+  if (!SameClient(m_interactionOwner, source) ||
+      (source.generation && m_interactionOwner.generation &&
+       source.generation != m_interactionOwner.generation))
+    return InteractionResult::BUSY;
+
+  if (!source.generation)
+    source.generation = m_interactionOwner.generation;
+  permit.serial = m_interactionSerial;
+  permit.source = source;
+  return InteractionResult::ACCEPTED;
+}
+
+void CInputHub::CommitInteraction(
+  const SourceKey& source, const InteractionPermit& permit)
+{
+  if (!source.backend || !source.epoch || !source.client || !permit.serial ||
+      !SameSource(source, permit.source))
+    return;
+
+  CSRWExclusiveLock lock(m_lock);
+  if (m_started && m_sink)
+    CheckState();
+  if (permit.serial != m_interactionSerial)
+    return;
+  if (m_owner.backend)
+    return;
+
+  const uint64_t now = GetTickCount64();
+  if (m_interactionOwner.backend &&
+      (!SameClient(m_interactionOwner, source) ||
+       (source.generation && m_interactionOwner.generation &&
+        source.generation != m_interactionOwner.generation)))
+    return;
+
+  if (!m_interactionOwner.backend)
+    m_interactionOwner = source;
+  else if (!m_interactionOwner.generation)
+    m_interactionOwner.generation = source.generation;
+  m_interactionDeadline = now + INTERACTION_LEASE_MS;
+  AdvanceInteractionSerial();
+}
+
+void CInputHub::RevokeInteraction(BackendId backend, uint32_t epoch)
+{
+  if (!backend || !epoch)
+    return;
+
+  CSRWExclusiveLock lock(m_lock);
+  if (m_interactionOwner.backend == backend &&
+      m_interactionOwner.epoch == epoch)
+    ClearInteraction();
+  AdvanceInteractionSerial();
 }
 
 bool CInputHub::TakeFailure(SourceKey& source)
@@ -273,6 +373,7 @@ bool CInputHub::Start(IInputSink& sink)
     m_sink      = &sink;
     m_sinkState = sink.GetState();
     m_started   = true;
+    InvalidateInteraction();
     for (Source& source : m_sources)
       if (source.active)
       {
@@ -298,6 +399,12 @@ bool CInputHub::Start(IInputSink& sink)
           m_owner = {};
           m_ownerDeadline = 0;
         }
+        if (m_interactionOwner.backend == source.backend &&
+            m_interactionOwner.epoch == source.epoch)
+        {
+          ClearInteraction();
+        }
+        AdvanceInteractionSerial();
         source.active         = false;
         source.failed         = true;
         source.failurePending = true;
@@ -329,7 +436,10 @@ void CInputHub::Stop()
   {
     CSRWExclusiveLock lock(m_lock);
     if (!m_started)
+    {
+      InvalidateInteraction();
       return;
+    }
     m_started = false;
     for (Source& source : m_sources)
       if (source.endpoint && source.running)
@@ -341,6 +451,7 @@ void CInputHub::Stop()
     reset = m_owner.backend != 0;
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
   }
 
   for (unsigned i = count; i > 0; --i)
@@ -389,18 +500,38 @@ bool CInputHub::OwnerValid(const SourceKey& source) const
   return SourceValid(source) && SameSource(m_owner, source);
 }
 
+void CInputHub::ClearInteraction()
+{
+  m_interactionOwner    = {};
+  m_interactionDeadline = 0;
+}
+
+void CInputHub::InvalidateInteraction()
+{
+  ClearInteraction();
+  AdvanceInteractionSerial();
+}
+
+void CInputHub::AdvanceInteractionSerial()
+{
+  ++m_interactionSerial;
+  if (!m_interactionSerial)
+    ++m_interactionSerial;
+}
+
 bool CInputHub::CheckState()
 {
   if (!m_started || !m_sink)
     return false;
 
   const uint64_t state = m_sink->GetState();
-  if (state != m_sinkState || !(state & 1))
+  if (state != m_sinkState)
   {
     if (m_owner.backend)
       m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
     m_sinkState     = state;
   }
   else if (m_owner.backend && GetTickCount64() >= m_ownerDeadline)
@@ -408,6 +539,7 @@ bool CInputHub::CheckState()
     m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
   }
   return (state & 1) != 0;
 }
@@ -449,6 +581,12 @@ void CInputHub::Failed(Source& source)
     m_owner = {};
     m_ownerDeadline = 0;
   }
+  if (m_interactionOwner.backend == source.backend &&
+      m_interactionOwner.epoch == source.epoch)
+  {
+    ClearInteraction();
+  }
+  AdvanceInteractionSerial();
   source.active         = false;
   source.failed         = true;
   source.failurePending = true;
@@ -468,10 +606,12 @@ InputResult CInputHub::Claim(const SourceKey& source)
   {
     const uint64_t state = m_sink->GetState();
     m_sinkState = state;
+    InvalidateInteraction();
     return InputResult::UNAVAILABLE;
   }
   m_owner         = source;
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+  InvalidateInteraction();
   return InputResult::ACCEPTED;
 }
 
@@ -500,6 +640,7 @@ InputResult CInputHub::Release(const SourceKey& source, bool reset)
     accepted = m_sink->Reset();
   m_owner         = {};
   m_ownerDeadline = 0;
+  InvalidateInteraction();
   return accepted ? InputResult::ACCEPTED : InputResult::UNAVAILABLE;
 }
 
@@ -518,6 +659,7 @@ InputResult CInputHub::SendMouseRelative(const SourceKey& source,
     m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
     return InputResult::UNAVAILABLE;
   }
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
@@ -539,6 +681,7 @@ InputResult CInputHub::SendMouseAbsolute(const SourceKey& source,
     m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
     return InputResult::UNAVAILABLE;
   }
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
@@ -560,6 +703,7 @@ InputResult CInputHub::SendKeyboard(const SourceKey& source,
     m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
     return InputResult::UNAVAILABLE;
   }
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
@@ -579,6 +723,7 @@ InputResult CInputHub::Reset(const SourceKey& source)
   {
     m_owner         = {};
     m_ownerDeadline = 0;
+    InvalidateInteraction();
     return InputResult::UNAVAILABLE;
   }
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;

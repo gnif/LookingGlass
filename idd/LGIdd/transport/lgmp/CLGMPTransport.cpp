@@ -138,26 +138,43 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
   while ((status = m_control.ReadDataWithSource(
       data, &size, &sourceClientID)) == LGMP_OK)
   {
+    if (size < sizeof(KVMFRMessage))
+    {
+      DEBUG_WARN("Ignoring invalid KVMFR message");
+      m_control.AckData();
+      continue;
+    }
+
     KVMFRMessage * msg = reinterpret_cast<KVMFRMessage *>(data);
     switch (msg->type)
     {
       case KVMFR_MESSAGE_SETCURSORPOS:
       {
-        SourceKey source;
-        source.client = sourceClientID;
-        KVMFRSetCursorPos * position =
-          reinterpret_cast<KVMFRSetCursorPos *>(msg);
-        events.OnSetCursorPos(source, position->x, position->y);
+        if (size == sizeof(KVMFRSetCursorPos))
+        {
+          SourceKey source;
+          source.client = sourceClientID;
+          const KVMFRSetCursorPos * position =
+            reinterpret_cast<const KVMFRSetCursorPos *>(msg);
+          events.OnSetCursorPos(source, position->x, position->y);
+        }
+        else
+          DEBUG_WARN("Ignoring invalid KVMFR cursor position");
         break;
       }
 
       case KVMFR_MESSAGE_WINDOWSIZE:
       {
-        SourceKey source;
-        source.client = sourceClientID;
-        KVMFRWindowSize * window =
-          reinterpret_cast<KVMFRWindowSize *>(msg);
-        events.OnSetResolution(source, window->w, window->h);
+        if (size == sizeof(KVMFRWindowSize))
+        {
+          SourceKey source;
+          source.client = sourceClientID;
+          const KVMFRWindowSize * window =
+            reinterpret_cast<const KVMFRWindowSize *>(msg);
+          events.OnSetResolution(source, window->w, window->h);
+        }
+        else
+          DEBUG_WARN("Ignoring invalid KVMFR window size");
         break;
       }
 

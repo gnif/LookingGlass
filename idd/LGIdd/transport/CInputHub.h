@@ -31,9 +31,17 @@ class IInputSink;
 
 class CInputHub final : public IInputTransport
 {
+public:
+  struct InteractionPermit
+  {
+    uint64_t serial = 0;
+    SourceKey source;
+  };
+
 private:
   static constexpr unsigned MAX_SOURCES = 8;
   static constexpr uint64_t OWNER_LEASE_MS = 500;
+  static constexpr uint64_t INTERACTION_LEASE_MS = 500;
 
   struct Source final : public IInputTarget
   {
@@ -72,12 +80,18 @@ private:
   uint64_t         m_sinkState = 0;
   SourceKey        m_owner;
   uint64_t         m_ownerDeadline = 0;
+  SourceKey        m_interactionOwner;
+  uint64_t         m_interactionDeadline = 0;
+  uint64_t         m_interactionSerial = 1;
   bool             m_started = false;
 
   bool SourceValid(const SourceKey& source) const;
   bool BindingPresent(const SourceKey& source) const;
   bool BindingValid(const SourceKey& source) const;
   bool OwnerValid(const SourceKey& source) const;
+  void ClearInteraction();
+  void InvalidateInteraction();
+  void AdvanceInteractionSerial();
   bool CheckState();
   InputTargetState GetState(const SourceKey& source);
   void Failed(Source& source);
@@ -101,6 +115,11 @@ public:
 
   bool Bind(BackendId backend, uint32_t epoch, IInputSource& source);
   void Unbind(BackendId backend, uint32_t epoch);
+  InteractionResult CheckInteraction(
+    SourceKey& source, InteractionPermit& permit);
+  void CommitInteraction(
+    const SourceKey& source, const InteractionPermit& permit);
+  void RevokeInteraction(BackendId backend, uint32_t epoch);
   bool TakeFailure(SourceKey& source);
 
   bool Start(IInputSink& sink) override;
