@@ -167,7 +167,6 @@ typedef struct
   int64_t  mediaTimeMs;
   int64_t  mediaLocalOrigin;
   uint64_t mediaPosition;
-  int64_t  lastPacketTime;
   int64_t  lastArrivalTime;
   double   arrivalJitterSec;
   double   sourcePhaseBaselineSec;
@@ -867,7 +866,6 @@ static void playbackResetMediaClock(PlaybackSourceData * sourceData,
   sourceData->mediaTimeMs      = 0;
   sourceData->mediaLocalOrigin = now;
   sourceData->mediaPosition    = position;
-  sourceData->lastPacketTime   = INT64_MIN;
   sourceData->lastArrivalTime  = INT64_MIN;
   sourceData->mediaClockValid  = true;
   sourceData->mediaPositionValid = true;
@@ -916,6 +914,27 @@ static int64_t playbackMapMediaTime(PlaybackSourceData * sourceData,
   }
 
   const int64_t delta = time - sourceData->mediaTime;
+  if ((!clock || !clock->discontinuity) &&
+      sourceData->mediaClockFromSource == fromSource &&
+      sourceData->mediaPositionValid &&
+      sourceData->mediaPosition == position && delta >= 0 &&
+      delta <= PLAYBACK_TIMESTAMP_DISCONTINUITY_NS &&
+      sourceData->lastArrivalTime != INT64_MIN &&
+      now >= sourceData->lastArrivalTime)
+  {
+    const double mediaDelta = delta * 1.0e-9;
+    const double arrivalDelta =
+      (now - sourceData->lastArrivalTime) * 1.0e-9;
+    const double lateness = max(arrivalDelta - mediaDelta, 0.0);
+
+    /* Learn harmful late delivery before a buffer underrun rebases the media
+     * clock. Early catch-up packets do not require additional reserve. */
+    sourceData->arrivalJitterSec =
+      min(PLAYBACK_MAX_JITTER_SEC,
+          max(lateness, sourceData->arrivalJitterSec *
+            exp(-arrivalDelta / PLAYBACK_JITTER_DECAY_SEC)));
+  }
+
   if (*discontinuity ||
       sourceData->mediaClockFromSource != fromSource ||
       !sourceData->mediaPositionValid ||
@@ -2150,26 +2169,6 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     sourceData->bufferOverrunPending = false;
   }
 
-  if (!discontinuity &&
-      sourceData->lastPacketTime != INT64_MIN &&
-      sourceData->lastArrivalTime != INT64_MIN)
-  {
-    const double mediaDelta =
-      (packetTime - sourceData->lastPacketTime) * 1.0e-9;
-    const double arrivalDelta =
-      (arrivalTime - sourceData->lastArrivalTime) * 1.0e-9;
-    const double jitter = fabs(arrivalDelta - mediaDelta);
-
-    /* Keep a slowly decaying peak rather than feeding arrival jitter into the
-     * virtual clock. This lets the buffer absorb real delivery jitter while
-     * the rate controller follows only the source media clock. */
-    const double decaySec = max(arrivalDelta, 0.0);
-    sourceData->arrivalJitterSec =
-      min(PLAYBACK_MAX_JITTER_SEC,
-          max(jitter, sourceData->arrivalJitterSec *
-            exp(-decaySec / PLAYBACK_JITTER_DECAY_SEC)));
-  }
-  sourceData->lastPacketTime  = packetTime;
   sourceData->lastArrivalTime = arrivalTime;
 
   const bool sourceRateWasValid =
