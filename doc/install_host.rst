@@ -97,3 +97,4 @@ Legacy configuration
    :maxdepth: 1
 
    host_usage
+   build_host
