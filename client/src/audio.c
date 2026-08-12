@@ -126,10 +126,11 @@ PlaybackDiagnosticFlags;
 
 typedef struct
 {
-  int64_t nextPosition;
-  double  outputPosition;
-  double  appliedRatio;
-  int     startupSilenceFrames;
+  int64_t      nextPosition;
+  double       outputPosition;
+  double       appliedRatio;
+  int          startupSilenceFrames;
+  unsigned int discontinuity;
 }
 PlaybackDeviceData;
 
@@ -185,16 +186,18 @@ typedef struct
   double       sourceRateFrameSec;
   bool         sourceRateValid;
   bool         bufferOverrunPending;
+  bool         backlogTrimArmed;
 
-  int     devPeriodFrames;
-  int64_t devReadPosition;
+  int          devPeriodFrames;
+  int64_t      devReadPosition;
   unsigned int deviceTimingSequence;
-  int64_t deviceClockAcquireStart;
-  int64_t deviceClockCheckTime;
-  double  deviceClockCheckFrameSec;
-  double  deviceClockStableSec;
-  double  devicePositionOffsetFrames;
-  bool    deviceClockStable;
+  unsigned int deviceDiscontinuity;
+  int64_t      deviceClockAcquireStart;
+  int64_t      deviceClockCheckTime;
+  double       deviceClockCheckFrameSec;
+  double       deviceClockStableSec;
+  double       devicePositionOffsetFrames;
+  bool         deviceClockStable;
 
   double  offsetError;
   double  offsetErrorIntegral;
@@ -216,6 +219,7 @@ PlaybackSourceData;
 typedef struct
 {
   atomic_uint       sequence;
+  atomic_uint       discontinuity;
   atomic_int        periodFrames;
   _Atomic(int64_t)  time;
   _Atomic(int64_t)  position;
@@ -234,10 +238,9 @@ typedef struct
 {
   double              softwareLatencyMs;
   double              targetLatencyMs;
-  double              sourcePpm;
-  double              devicePpm;
   double              controlPpm;
   double              jitterMs;
+  double              backlogTrimmedMs;
   unsigned int        underruns;
   unsigned int        overruns;
   PlaybackRateControl rateControl;
@@ -334,9 +337,11 @@ typedef struct
     bool                lastProviderRateControl;
     _Atomic(double) backendResampleRatio;
     atomic_bool     backendResamplerFailed;
-    RingBuffer  buffer;
-    PlaybackDeviceTiming deviceTiming;
-    atomic_uint underruns;
+    RingBuffer            buffer;
+    PlaybackDeviceTiming  deviceTiming;
+    atomic_int            backlogTrimTarget;
+    atomic_uint           underruns;
+    atomic_uint_fast64_t  backlogTrimmedFrames;
 
     RingBuffer          timings;
     GraphHandle         graph;
@@ -557,10 +562,11 @@ static bool audioConvertToFloat(float * dst, const void * src,
 
 typedef struct
 {
-  int     periodFrames;
-  int64_t nextTime;
-  int64_t nextPosition;
-  double  outputPosition;
+  int          periodFrames;
+  int64_t      nextTime;
+  int64_t      nextPosition;
+  double       outputPosition;
+  unsigned int discontinuity;
 }
 PlaybackDeviceTick;
 
@@ -810,15 +816,17 @@ static void playbackSourceRateAdd(PlaybackSourceData * sourceData,
   sourceData->rateFilterTimeMs = timeMs;
 }
 
-static void playbackPublishDeviceTiming(
-    int periodFrames, int64_t time, int64_t position,
-    double outputPosition)
+static void playbackPublishDeviceTiming(int periodFrames, int64_t time,
+    int64_t position, double outputPosition,
+    unsigned int discontinuity)
 {
   PlaybackDeviceTiming * timing = &audio.playback.deviceTiming;
   /* Publish the odd writer marker before any snapshot field. */
   atomic_fetch_add_explicit(&timing->sequence, 1, memory_order_seq_cst);
   atomic_store_explicit(
       &timing->periodFrames, periodFrames, memory_order_relaxed);
+  atomic_store_explicit(
+      &timing->discontinuity, discontinuity, memory_order_relaxed);
   atomic_store_explicit(&timing->time, time, memory_order_relaxed);
   atomic_store_explicit(&timing->position, position, memory_order_relaxed);
   atomic_store_explicit(
@@ -842,6 +850,8 @@ static bool playbackReadDeviceTiming(
 
     tick->periodFrames =
       atomic_load_explicit(&timing->periodFrames, memory_order_relaxed);
+    tick->discontinuity = atomic_load_explicit(
+        &timing->discontinuity, memory_order_relaxed);
     tick->nextTime =
       atomic_load_explicit(&timing->time, memory_order_relaxed);
     tick->nextPosition =
@@ -1250,6 +1260,27 @@ static int playbackPullFrames(uint8_t * dst, int frames)
           memory_order_acq_rel, memory_order_acquire);
     }
 
+    if (playbackGetState() == STREAM_STATE_RUN)
+    {
+      const int trimTarget = atomic_exchange_explicit(
+          &audio.playback.backlogTrimTarget, -1, memory_order_acq_rel);
+      if (trimTarget >= 0)
+      {
+        const int queued = ringbuffer_getCount(audio.playback.buffer);
+        const int requested = max(queued - trimTarget, 0);
+        const int dropped = ringbuffer_consume(
+            audio.playback.buffer, NULL, requested);
+        if (dropped > 0)
+        {
+          data->nextPosition += dropped;
+          ++data->discontinuity;
+          atomic_fetch_add_explicit(
+              &audio.playback.backlogTrimmedFrames, dropped,
+              memory_order_relaxed);
+        }
+      }
+    }
+
     /* Timestamp the dequeue boundary before the current pull. The logical
      * position tracks source frames consumed from the ring for latency
      * measurement. With backend resampling, outputPosition separately tracks
@@ -1257,7 +1288,8 @@ static int playbackPullFrames(uint8_t * dst, int frames)
      * current request using the rate set by the previous callback, so apply
      * that same ratio to this period before adopting nextRatio. */
     playbackPublishDeviceTiming(
-        frames, now, data->nextPosition, data->outputPosition);
+        frames, now, data->nextPosition, data->outputPosition,
+        data->discontinuity);
     data->nextPosition += frames;
     data->outputPosition += frames * data->appliedRatio;
     data->appliedRatio = nextRatio;
@@ -1380,23 +1412,26 @@ static bool playbackStart(const LG_AudioFormat * format,
   audio.playback.deviceData.outputPosition       = 0.0;
   audio.playback.deviceData.appliedRatio         = 1.0;
   audio.playback.deviceData.startupSilenceFrames = 0;
+  audio.playback.deviceData.discontinuity         = 0;
 
-  audio.playback.sourceData.inputPosition       = 0;
-  audio.playback.sourceData.outputPosition      = 0;
-  audio.playback.sourceData.devPeriodFrames     = 0;
-  audio.playback.sourceData.devReadPosition     = 0;
+  audio.playback.sourceData.inputPosition        = 0;
+  audio.playback.sourceData.outputPosition       = 0;
+  audio.playback.sourceData.devPeriodFrames      = 0;
+  audio.playback.sourceData.devReadPosition      = 0;
   audio.playback.sourceData.deviceTimingSequence = 0;
+  audio.playback.sourceData.deviceDiscontinuity  = 0;
   playbackDeviceClockAcquireReset(&audio.playback.sourceData);
-  audio.playback.sourceData.offsetError         = 0.0;
-  audio.playback.sourceData.offsetErrorIntegral = 0.0;
-  audio.playback.sourceData.ratioIntegral       = 0.0;
-  audio.playback.sourceData.lastRatio           = 1.0;
-  audio.playback.sourceData.lastClockRatio      = 1.0;
-  audio.playback.sourceData.nextFeedbackTime    = 0;
-  audio.playback.sourceData.nextGraphTime       = 0;
+  audio.playback.sourceData.offsetError          = 0.0;
+  audio.playback.sourceData.offsetErrorIntegral  = 0.0;
+  audio.playback.sourceData.ratioIntegral        = 0.0;
+  audio.playback.sourceData.lastRatio            = 1.0;
+  audio.playback.sourceData.lastClockRatio       = 1.0;
+  audio.playback.sourceData.nextFeedbackTime     = 0;
+  audio.playback.sourceData.nextGraphTime        = 0;
   audio.playback.sourceData.bufferOverrunPending = false;
-  audio.playback.sourceData.bufferOverruns      = 0;
-  audio.playback.sourceData.nextLogTime         =
+  audio.playback.sourceData.backlogTrimArmed     = true;
+  audio.playback.sourceData.bufferOverruns       = 0;
+  audio.playback.sourceData.nextLogTime          =
     nanotime() + INT64_C(5000000000);
   audio.playback.sourceData.arrivalJitterSec    = 0.0;
   audio.playback.sourceData.sourcePhaseBaselineSec = 0.0;
@@ -1408,7 +1443,15 @@ static bool playbackStart(const LG_AudioFormat * format,
   playbackPrepareMediaClock(&audio.playback.sourceData, sourceClock);
 
   atomic_store_explicit(
+      &audio.playback.backlogTrimTarget, -1, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.backlogTrimmedFrames, 0, memory_order_relaxed);
+
+  atomic_store_explicit(
       &audio.playback.deviceTiming.sequence, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.deviceTiming.discontinuity, 0,
+      memory_order_relaxed);
   atomic_store_explicit(
       &audio.playback.deviceTiming.periodFrames, 0, memory_order_relaxed);
   atomic_store_explicit(
@@ -1889,23 +1932,20 @@ static void playbackProcessDiagnostics(void)
 
   if (diagnostics.pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG)
   {
-    const bool providerControl =
-      diagnostics.sync.rateControl == PLAYBACK_RATE_PROVIDER;
-    const char * controlName = providerControl ? "feedback" :
+    const char * controlName =
+      diagnostics.sync.rateControl == PLAYBACK_RATE_PROVIDER ? "feedback" :
       diagnostics.sync.rateControl == PLAYBACK_RATE_BACKEND ?
         "backend" : "software";
-    const char * sourceRateName = providerControl ? "arrival" : "source";
 
     DEBUG_INFO(
         "Audio sync: ring %.2f/%.2f ms, backend %.2f ms, "
-        "%s %+.1f ppm, rates %s/device %+.1f/%+.1f ppm, "
-        "jitter %.2f ms, xruns %u/%u",
+        "%s %+.1f ppm, jitter %.2f ms, xruns %u/%u, drop %.2f ms",
         diagnostics.sync.softwareLatencyMs,
         diagnostics.sync.targetLatencyMs,
         backendLatencyMs, controlName, diagnostics.sync.controlPpm,
-        sourceRateName, diagnostics.sync.sourcePpm,
-        diagnostics.sync.devicePpm, diagnostics.sync.jitterMs,
-        diagnostics.sync.underruns, diagnostics.sync.overruns);
+        diagnostics.sync.jitterMs,
+        diagnostics.sync.underruns, diagnostics.sync.overruns,
+        diagnostics.sync.backlogTrimmedMs);
   }
 }
 
@@ -2257,22 +2297,41 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     sourceData->devPeriodFrames = deviceTick.periodFrames;
     sourceData->devReadPosition =
       deviceTick.nextPosition + deviceTick.periodFrames;
-    const bool deviceClockUpdated =
-      playbackClockUpdate(&sourceData->deviceClock,
-          deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
-    const bool outputClockUpdated =
-      audio.playback.rateControl != PLAYBACK_RATE_BACKEND ||
-      playbackClockUpdate(&sourceData->outputClock,
-          deviceTick.nextTime, deviceTick.outputPosition,
-          nominalFrameSec);
-    if (!deviceClockUpdated || !outputClockUpdated)
+    if (deviceTick.discontinuity != sourceData->deviceDiscontinuity)
     {
+      sourceData->deviceDiscontinuity = deviceTick.discontinuity;
+      playbackClockReset(&sourceData->deviceClock,
+          deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
+      if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND)
+        playbackClockReset(&sourceData->outputClock,
+            deviceTick.nextTime, deviceTick.outputPosition,
+            nominalFrameSec);
       playbackDeviceClockAcquireReset(sourceData);
-      discontinuity = true;
+      sourceData->offsetError         = 0.0;
+      sourceData->offsetErrorIntegral = 0.0;
+      sourceData->ratioIntegral       = 0.0;
+      sourceData->lastRatio           = 1.0;
+      sourceData->nextFeedbackTime    = 0;
     }
     else
-      deviceClockBecameStable =
-        playbackDeviceClockAcquire(sourceData, deviceTick.nextTime);
+    {
+      const bool deviceClockUpdated =
+        playbackClockUpdate(&sourceData->deviceClock,
+            deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
+      const bool outputClockUpdated =
+        audio.playback.rateControl != PLAYBACK_RATE_BACKEND ||
+        playbackClockUpdate(&sourceData->outputClock,
+            deviceTick.nextTime, deviceTick.outputPosition,
+            nominalFrameSec);
+      if (!deviceClockUpdated || !outputClockUpdated)
+      {
+        playbackDeviceClockAcquireReset(sourceData);
+        discontinuity = true;
+      }
+      else
+        deviceClockBecameStable =
+          playbackDeviceClockAcquire(sourceData, deviceTick.nextTime);
+    }
   }
 
   if (deviceClockBecameStable)
@@ -2303,15 +2362,23 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
 
   const int maxPeriodFrames =
     max(audio.playback.deviceMaxPeriodFrames, sourceData->devPeriodFrames);
+  const double backlogGuardFrames =
+    max((double)maxPeriodFrames,
+        sourceData->sourcePacketDurationSec * audio.playback.sampleRate);
   /* The device period, delivery jitter, packet phase, and resampler delay
    * define the minimum viable latency. Provider feedback directly controls
-   * the source rate, so latencyOffset only applies to local rate control. */
+   * the source rate, so latencyOffset only applies to local rate control.
+   * Provider delivery reserve is bounded because late USB packets must be
+   * skipped rather than allowed to become persistent playback latency. */
   const double latencyOffsetFrames = providerRateControl ? 0.0 :
     max(g_params.audioLatencyOffset, 0) *
       audio.playback.sampleRate / 1000.0;
+  const double arrivalJitterFrames =
+    sourceData->arrivalJitterSec * audio.playback.sampleRate;
   const double arrivalReserveFrames =
-    (sourceData->arrivalJitterSec + 0.001) *
-      audio.playback.sampleRate;
+    (providerRateControl ?
+      min(arrivalJitterFrames, backlogGuardFrames) :
+      arrivalJitterFrames) + 0.001 * audio.playback.sampleRate;
   const double minimumLowWaterReserveFrames =
     maxPeriodFrames * 0.1 + arrivalReserveFrames;
   const double minimumLowWaterFrames =
@@ -2387,21 +2454,31 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   double actualOffsetError = 0.0;
   if (providerRateControl)
   {
+    const bool trimPending = !sourceData->backlogTrimArmed;
     const int occupancy = ringbuffer_getCount(audio.playback.buffer);
     actualLatencyFrames = occupancy + sourceReserveFrames;
     actualOffsetError   = targetLowWaterFrames - occupancy;
 
-    const double error =
-      actualOffsetError - sourceData->offsetError;
-    const double periodSec = frames * nominalFrameSec;
-    const double omega =
-      2.0 * M_PI * PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ * periodSec;
-    const double b = M_SQRT2 * omega;
-    const double c = omega * omega;
+    if (trimPending)
+    {
+      actualOffsetError                 = 0.0;
+      sourceData->offsetError           = 0.0;
+      sourceData->offsetErrorIntegral   = 0.0;
+    }
+    else
+    {
+      const double error =
+        actualOffsetError - sourceData->offsetError;
+      const double periodSec = frames * nominalFrameSec;
+      const double omega =
+        2.0 * M_PI * PLAYBACK_OFFSET_FILTER_BANDWIDTH_HZ * periodSec;
+      const double b = M_SQRT2 * omega;
+      const double c = omega * omega;
 
-    sourceData->offsetError += b * error +
-      sourceData->offsetErrorIntegral;
-    sourceData->offsetErrorIntegral += c * error;
+      sourceData->offsetError += b * error +
+        sourceData->offsetErrorIntegral;
+      sourceData->offsetErrorIntegral += c * error;
+    }
   }
   else if (sourceData->deviceClock.valid)
   {
@@ -2562,6 +2639,32 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     const int outputFrames =
       playbackAppendFrames(sourceData, inputFrames, frames);
     sourceData->outputPosition += outputFrames;
+
+    const int occupancy = ringbuffer_getCount(audio.playback.buffer);
+    if (!sourceData->backlogTrimArmed &&
+        occupancy <= targetLowWaterFrames + backlogGuardFrames)
+      sourceData->backlogTrimArmed = true;
+
+    /* Feedback corrects clock drift, but cannot remove audio which is
+     * already queued. Ask the device thread to discard the oldest part of a
+     * delayed burst instead of replaying stale audio for several seconds. */
+    if (playbackGetState() == STREAM_STATE_RUN && !discontinuity &&
+        sourceData->backlogTrimArmed &&
+        occupancy > targetLowWaterFrames + 2.0 * backlogGuardFrames)
+    {
+      const int trimTarget = clamp(
+          llrint(ceil(targetLowWaterFrames)),
+          INT64_C(0), (int64_t)INT_MAX);
+      atomic_store_explicit(
+          &audio.playback.backlogTrimTarget, trimTarget,
+          memory_order_release);
+      sourceData->backlogTrimArmed     = false;
+      sourceData->offsetError          = 0.0;
+      sourceData->offsetErrorIntegral  = 0.0;
+      sourceData->ratioIntegral        = 0.0;
+      sourceData->lastRatio            = 1.0;
+      sourceData->nextFeedbackTime     = 0;
+    }
   }
   else
   {
@@ -2681,12 +2784,6 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
 
   if (now >= sourceData->nextLogTime)
   {
-    const double sourcePpm = sourceData->sourceRateValid ?
-      (nominalFrameSec / sourceData->sourceRateFrameSec - 1.0) * 1.0e6 :
-      0.0;
-    const double devicePpm = rateClock->valid ?
-      (nominalFrameSec / rateClock->frameSec - 1.0) * 1.0e6 :
-      0.0;
     const bool providerControl =
       audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
     const double controlPpm = providerControl ?
@@ -2702,23 +2799,29 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     const unsigned int pendingOverruns =
       diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG ?
         diagnostics->sync.overruns : 0;
+    const double pendingBacklogTrimmedMs =
+      diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG ?
+        diagnostics->sync.backlogTrimmedMs : 0.0;
     diagnostics->sync = (PlaybackSyncDiagnostics)
     {
       .softwareLatencyMs = softwareLatencyMs,
       .targetLatencyMs   =
         targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
-      .sourcePpm   = sourcePpm,
-      .devicePpm   = devicePpm,
-      .controlPpm  = controlPpm,
-      .jitterMs    = sourceData->arrivalJitterSec * 1000.0,
-      .underruns   = pendingUnderruns + underruns,
-      .overruns    = pendingOverruns + sourceData->bufferOverruns,
-      .rateControl = audio.playback.rateControl,
+      .controlPpm       = controlPpm,
+      .jitterMs         = sourceData->arrivalJitterSec * 1000.0,
+      .underruns        = pendingUnderruns + underruns,
+      .overruns         = pendingOverruns + sourceData->bufferOverruns,
+      .backlogTrimmedMs = pendingBacklogTrimmedMs +
+        atomic_exchange_explicit(
+          &audio.playback.backlogTrimmedFrames, 0,
+          memory_order_relaxed) * 1000.0 /
+          audio.playback.sampleRate,
+      .rateControl      = audio.playback.rateControl,
     };
     diagnostics->pending |= PLAYBACK_DIAGNOSTIC_SYNC_LOG;
 
     sourceData->bufferOverruns = 0;
-    sourceData->nextLogTime = now + INT64_C(5000000000);
+    sourceData->nextLogTime    = now + INT64_C(5000000000);
     wakeDiagnostics = true;
   }
 
@@ -4132,6 +4235,9 @@ void lgAudio_init(void)
   atomic_init(&audio.playback.failedAttemptSerial, 0);
   atomic_init(&audio.playback.diagnosticsEpoch, 1);
   atomic_init(&audio.playback.graphReady, false);
+  atomic_init(&audio.playback.backlogTrimTarget, -1);
+  atomic_init(&audio.playback.backlogTrimmedFrames, 0);
+  atomic_init(&audio.playback.deviceTiming.discontinuity, 0);
   atomic_init(&audio.playback.worker.stop, false);
   atomic_init(&audio.playback.worker.wakePending, false);
   atomic_init(&audio.record.deliverySerial, 0);
