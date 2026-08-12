@@ -27,22 +27,55 @@
 
 #include <atomic>
 
-class CFrameHub final : public IFrameTransport
+class CFrameHub final : public IFrameTransport, public IFrameEvents
 {
 private:
   struct Sink
   {
     struct ResourceLane
     {
+      enum Phase
+      {
+        IDLE,
+        FILLING,
+        PENDING,
+        CANCELING,
+        COMPLETING,
+      };
+
       uint8_t  * mem        = nullptr;
       uint64_t   heapOffset = 0;
       unsigned   localSlot  = 0;
       bool       direct     = false;
       bool       valid      = false;
       bool       busy       = false;
+
+      FrameToken                 token       = {};
+      CFrameScheduler::Schedule schedule    = {};
+      uint64_t                   content     = 0;
+      uint64_t                   captureTime = 0;
+      uint64_t                   postProcessTime = 0;
+      uint64_t                   copyTime    = 0;
+      uint64_t                   readyTime   = 0;
+      uint64_t                   holdTime    = 0;
+      uint64_t                   filledAt    = 0;
+      uint64_t                   workStart   = 0;
+      unsigned                   pitch       = 0;
+      unsigned                   width       = 0;
+      unsigned                   height      = 0;
+      DXGI_FORMAT                format      = DXGI_FORMAT_UNKNOWN;
+      FrameType                  frameType   = FRAME_TYPE_INVALID;
+      Phase                      phase       = IDLE;
+      FrameDone                  pendingResult = FrameDone::FAILED;
+      uint64_t                   pendingReadyAt = 0;
+      bool                       timingValid = false;
+      bool                       resultPending = false;
+      bool                       callActive  = false;
+      bool                       cancelRequested = false;
     };
 
     CSRWLock          callLock;
+    CSRWLock          laneLock;
     IFrameSink      * target        = nullptr;
     HANDLE            drained       = nullptr;
     std::atomic<unsigned> outstanding = 0;
@@ -53,6 +86,7 @@ private:
     bool               primary       = false;
     bool               needsFullCopy = true;
     uint64_t           lastContent   = 0;
+    uint64_t           lastTerminalContent = 0;
     uint64_t           blockedContent = 0;
     size_t             blockedFrameSize = 0;
     bool               blockedAllocation = false;
@@ -87,6 +121,14 @@ private:
     bool                      completionPending   = false;
     bool                      completionSucceeded = false;
     bool                      releasePending = false;
+    uint64_t                  captureTime = 0;
+    uint64_t                  postProcessTime = 0;
+    uint64_t                  copyTime    = 0;
+    uint64_t                  readyTime   = 0;
+    uint64_t                  holdTime    = 0;
+    uint64_t                  filledAt    = 0;
+    uint64_t                  workStart   = 0;
+    bool                      timingValid = false;
     bool                      active      = false;
   };
 
@@ -117,7 +159,14 @@ private:
   unsigned Snapshot(SinkRef refs[FRAME_MAX_SINKS]) const;
   bool BatchValid(const Batch& batch, const FrameBatchToken& token) const;
   void ReleaseTarget(Batch& batch, BatchTarget& target);
-  void CompleteTarget(Batch& batch, BatchTarget& target, bool succeeded);
+  bool DetachTarget(Batch& batch, BatchTarget& target,
+    FrameToken& token);
+  void FillLane(Sink& sink, unsigned laneIndex,
+    const FrameToken& token);
+  void CancelLane(Sink& sink, unsigned laneIndex,
+    const FrameToken& token);
+  void CompleteLane(Sink& sink, unsigned laneIndex,
+    const FrameToken& token, FrameDone result, uint64_t readyAt);
 
 public:
   CFrameHub();
@@ -129,6 +178,9 @@ public:
   bool Bind(BackendId backend, uint32_t epoch, bool primary,
     IFrameSink& sink);
   void Unbind(BackendId backend, uint32_t epoch);
+
+  void OnFrameDone(const FrameToken& token, FrameDone result,
+    uint64_t readyAt) override;
 
   size_t GetMaxFrameSize() const override;
   uint64_t NextContentSerial() override;

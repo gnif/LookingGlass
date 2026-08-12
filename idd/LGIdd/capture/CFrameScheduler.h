@@ -172,10 +172,11 @@ public:
   void FrameMissed(const Schedule& schedule, uint64_t now, bool periodic);
   void FrameSuperseded();
   bool TryFrameSubmitted(const Schedule& schedule, uint32_t frameSerial);
-  void FramePublished(const Schedule& schedule, uint32_t frameSerial,
+  void FrameCommitted(const Schedule& schedule, uint32_t frameSerial,
     uint64_t now, bool periodic);
-  void FrameRetained(const Schedule& schedule, uint64_t now,
-    bool periodic);
+  void FramePublished(const Schedule& schedule, uint32_t frameSerial);
+  void FrameRetained(const Schedule& schedule);
+  void FrameFailed();
   void FrameRepublished(const Schedule& schedule, uint32_t frameSerial);
   bool TryFrameCompleted(const Schedule& schedule, uint32_t frameSerial,
     uint64_t completedAt);

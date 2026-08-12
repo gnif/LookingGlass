@@ -101,7 +101,11 @@ private:
   bool              m_frameCompleted[LGMP_Q_FRAME_BUFFER_LEN] = {};
   CSRWLock          m_framePublishLock;
   uint64_t          m_framePublishSequence = 0;
+  uint64_t          m_frameReadySequence   = 0;
   uint64_t          m_frameLastPublishSequence[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  CFrameScheduler::Schedule
+                    m_frameSchedule[LGMP_Q_FRAME_BUFFER_LEN] = {};
+  bool              m_frameDelivered[LGMP_Q_FRAME_BUFFER_LEN] = {};
 
   FrameDelivery m_frameDelivery[LGMP_Q_FRAME_BUFFER_LEN] = {};
   OwnerDelivery m_ownerDelivery[LGMP_Q_FRAME_LEN]        = {};
@@ -160,6 +164,7 @@ public:
   CLGMPFrameTransport(const CLGMPFrameTransport&) = delete;
   CLGMPFrameTransport& operator=(const CLGMPFrameTransport&) = delete;
 
+  void SetFrameEvents(IFrameEvents *) override {}
   size_t GetMaxFrameSize() const override { return m_maxFrameSize; }
 
   bool FrameBufferAvailable(const CFrameScheduler::Schedule& schedule,
@@ -189,8 +194,12 @@ public:
     bool deliveredToOwner) override;
   void AbortFrameBuffer(unsigned frameIndex) override;
   void FailFrameBuffer(unsigned frameIndex) override;
-  void CompleteFrameBuffer(
-    unsigned frameIndex, bool succeeded) override;
+  FrameFill FrameFilled(const FrameToken&) override
+  {
+    return FrameFill::READY;
+  }
+  void CancelFrame(const FrameToken&) override {}
+  void CompleteFrameBuffer(unsigned frameIndex, FrameDone result) override;
   void SetFrameTiming(unsigned frameIndex, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
     uint64_t holdTime, const CFrameScheduler::Schedule& schedule,

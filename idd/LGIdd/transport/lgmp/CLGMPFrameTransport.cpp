@@ -202,6 +202,7 @@ bool CLGMPFrameTransport::Setup(size_t alignSize)
   m_readyFrameIndex.store(-1, std::memory_order_release);
   m_deferredOwnerFrameIndex = -1;
   m_framePublishSequence = 0;
+  m_frameReadySequence   = 0;
   memset(m_frameLastPublishSequence, 0,
     sizeof(m_frameLastPublishSequence));
   for (FrameDelivery& delivery : m_frameDelivery)
@@ -222,6 +223,7 @@ void CLGMPFrameTransport::DeInit()
     m_readyFrameIndex.store(-1, std::memory_order_release);
     m_deferredOwnerFrameIndex = -1;
     m_framePublishSequence = 0;
+    m_frameReadySequence   = 0;
     memset(m_frameLastPublishSequence, 0,
       sizeof(m_frameLastPublishSequence));
     memset(m_frameCompleted, 0, sizeof(m_frameCompleted));
@@ -845,6 +847,8 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
     flags |= FRAME_FLAG_TRUNCATED;
 
   fi->formatVer        = m_formatVer;
+  if (!m_frameSerial)
+    ++m_frameSerial;
   fi->frameSerial      = m_frameSerial++;
   fi->screenWidth      = srcFormat.width;
   fi->screenHeight     = srcFormat.height;
@@ -1008,6 +1012,8 @@ bool CLGMPFrameTransport::PublishFrameBuffer(unsigned frameIndex,
   if (published)
   {
     m_frameLastPublishSequence[frameIndex] = ++m_framePublishSequence;
+    m_frameSchedule[frameIndex]   = schedule;
+    m_frameDelivered[frameIndex]  = deliveredToOwner;
     m_deferredOwnerFrameIndex = schedule.clientID && !deliveredToOwner ?
       static_cast<LONG>(frameIndex) : -1;
     m_submittedFrameIndex.store(
@@ -1122,15 +1128,14 @@ void CLGMPFrameTransport::CommitFrameBuffer(unsigned frameIndex,
   const CFrameScheduler::Schedule& schedule, bool periodic,
   bool deliveredToOwner)
 {
+  UNREFERENCED_PARAMETER(deliveredToOwner);
+
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
   const uint64_t now = CFrameScheduler::Nanotime();
-  if (deliveredToOwner)
-    m_frameScheduler.FramePublished(
-      schedule, m_frame[frameIndex]->frameSerial, now, periodic);
-  else
-    m_frameScheduler.FrameRetained(schedule, now, periodic);
+  m_frameScheduler.FrameCommitted(
+    schedule, m_frame[frameIndex]->frameSerial, now, periodic);
 }
 
 bool CLGMPFrameTransport::TryFrameSubmitted(unsigned frameIndex,
@@ -1200,16 +1205,21 @@ void CLGMPFrameTransport::FailFrameBuffer(unsigned frameIndex)
   InterlockedExchange(
     (volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
   FinalizeFrameBuffer(frameIndex);
-  CompleteFrameBuffer(frameIndex, false);
+  AbortFrameBuffer(frameIndex);
 }
 
 void CLGMPFrameTransport::CompleteFrameBuffer(
-  unsigned frameIndex, bool succeeded)
+  unsigned frameIndex, FrameDone result)
 {
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
+  const bool succeeded = result == FrameDone::READY;
   CSRWExclusiveLock lock(m_framePublishLock);
+  const CFrameScheduler::Schedule schedule = m_frameSchedule[frameIndex];
+  const uint32_t frameSerial = m_frame[frameIndex]->frameSerial;
+  const bool delivered = m_frameDelivered[frameIndex];
+  const uint64_t sequence = m_frameLastPublishSequence[frameIndex];
   m_frameCompleted[frameIndex] = succeeded;
   if (!succeeded &&
       m_deferredOwnerFrameIndex == static_cast<LONG>(frameIndex))
@@ -1218,7 +1228,6 @@ void CLGMPFrameTransport::CompleteFrameBuffer(
   {
     // Completion callbacks may run out of order. Never replace a newer ready
     // frame with an older submission.
-    const uint64_t sequence = m_frameLastPublishSequence[frameIndex];
     const LONG readyFrameIndex =
       m_readyFrameIndex.load(std::memory_order_acquire);
     if (sequence &&
@@ -1228,6 +1237,22 @@ void CLGMPFrameTransport::CompleteFrameBuffer(
         static_cast<LONG>(frameIndex), std::memory_order_release);
   }
   m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  const bool newerThanReady =
+    sequence && sequence > m_frameReadySequence;
+  if (result == FrameDone::READY && newerThanReady)
+    m_frameReadySequence = sequence;
+
+  if (result == FrameDone::READY && newerThanReady)
+  {
+    if (delivered)
+      m_frameScheduler.FramePublished(schedule, frameSerial);
+    else
+      m_frameScheduler.FrameRetained(schedule);
+  }
+  else if (result == FrameDone::FAILED && newerThanReady)
+    m_frameScheduler.FrameFailed();
+  else if (result == FrameDone::SUPERSEDED && newerThanReady)
+    m_frameScheduler.FrameSuperseded();
 }
 
 void CLGMPFrameTransport::SetFrameTiming(unsigned frameIndex,

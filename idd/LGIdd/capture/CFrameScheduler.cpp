@@ -701,13 +701,12 @@ bool CFrameScheduler::TryFrameSubmitted(const Schedule& schedule,
     publication.deadlineSerial = schedule.deadlineSerial;
     publication.frameSerial    = frameSerial;
     publication.deadline       = schedule.deadline;
-    publication.committed      = true;
     registered                 = true;
   }
   return registered;
 }
 
-void CFrameScheduler::FramePublished(const Schedule& schedule,
+void CFrameScheduler::FrameCommitted(const Schedule& schedule,
   uint32_t frameSerial, uint64_t now, bool periodic)
 {
   CSRWExclusiveLock lock(m_lock);
@@ -721,6 +720,25 @@ void CFrameScheduler::FramePublished(const Schedule& schedule,
     if (publication)
       publication->committed = true;
 
+    if (periodic)
+    {
+      AdvanceCurrentDeadline();
+      AdvanceDeadline(now);
+    }
+    Client * client = FindClient(m_schedule.clientID);
+    if (client)
+      client->nextDelivery = m_nextDeadline;
+  }
+}
+
+void CFrameScheduler::FramePublished(const Schedule& schedule,
+  uint32_t frameSerial)
+{
+  CSRWExclusiveLock lock(m_lock);
+  if (m_scheduling && schedule.clientID == m_schedule.clientID &&
+      schedule.generation == m_schedule.generation &&
+      schedule.epoch == m_schedule.epoch)
+  {
     if (schedule.forceTicket > m_forceAckTicket)
       m_forceAckTicket = schedule.forceTicket;
     if (schedule.republishTicket > m_republishAckTicket)
@@ -735,26 +753,16 @@ void CFrameScheduler::FramePublished(const Schedule& schedule,
       client->deliveredFrameValid      = true;
     }
     ++m_publishedFrames;
-    if (periodic)
-    {
-      AdvanceCurrentDeadline();
-      AdvanceDeadline(now);
-    }
-    if (client)
-      client->nextDelivery = m_nextDeadline;
   }
 }
 
-void CFrameScheduler::FrameRetained(const Schedule& schedule,
-  uint64_t now, bool periodic)
+void CFrameScheduler::FrameRetained(const Schedule& schedule)
 {
   bool wake = false;
   CSRWExclusiveLock lock(m_lock);
   if (m_scheduling && schedule.clientID == m_schedule.clientID &&
       schedule.generation == m_schedule.generation &&
-      schedule.epoch == m_schedule.epoch &&
-      schedule.deadlineSerial == m_deadlineSerial &&
-      schedule.deadline == m_nextDeadline)
+      schedule.epoch == m_schedule.epoch)
   {
     if (schedule.forceTicket > m_forceAckTicket)
       m_forceAckTicket = schedule.forceTicket;
@@ -766,21 +774,16 @@ void CFrameScheduler::FrameRetained(const Schedule& schedule,
       ++m_republishRequestTicket;
       wake = true;
     }
-
-    if (periodic)
-    {
-      AdvanceCurrentDeadline();
-      AdvanceDeadline(now);
-    }
-
-    Client * client = FindClient(m_schedule.clientID);
-    if (client)
-      client->nextDelivery = m_nextDeadline;
   }
   lock.Unlock();
 
   if (wake)
     WakePublisher();
+}
+
+void CFrameScheduler::FrameFailed()
+{
+  ForceFrame();
 }
 
 bool CFrameScheduler::TryFrameCompleted(const Schedule& schedule,

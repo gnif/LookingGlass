@@ -28,11 +28,22 @@
 #include <stddef.h>
 #include <stdint.h>
 
+class IFrameEvents
+{
+public:
+  virtual ~IFrameEvents() = default;
+
+  virtual void OnFrameDone(const FrameToken& token, FrameDone result,
+    uint64_t readyAt) = 0;
+};
+
 class IFrameSink
 {
 public:
   virtual ~IFrameSink() = default;
 
+  // Clearing events waits for callbacks through the previous pointer to end.
+  virtual void SetFrameEvents(IFrameEvents * events) = 0;
   virtual size_t GetMaxFrameSize() const = 0;
 
   virtual bool FrameBufferAvailable(
@@ -60,7 +71,12 @@ public:
     bool deliveredToOwner) = 0;
   virtual void AbortFrameBuffer(unsigned slot) = 0;
   virtual void FailFrameBuffer(unsigned slot) = 0;
-  virtual void CompleteFrameBuffer(unsigned slot, bool succeeded) = 0;
+  // A terminal callback raised before this returns takes precedence over the
+  // return value.
+  virtual FrameFill FrameFilled(const FrameToken& token) = 0;
+  // On return, the sink no longer accesses the frame identified by token.
+  virtual void CancelFrame(const FrameToken& token) = 0;
+  virtual void CompleteFrameBuffer(unsigned slot, FrameDone result) = 0;
   virtual void SetFrameTiming(unsigned slot, uint64_t captureTime,
     uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
     uint64_t holdTime, const CFrameScheduler::Schedule& schedule,

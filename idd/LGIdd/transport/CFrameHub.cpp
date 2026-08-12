@@ -27,6 +27,13 @@ static bool ContentAfter(uint64_t value, uint64_t current)
     static_cast<int64_t>(value - current) > 0);
 }
 
+static bool TokenMatches(const FrameToken& left, const FrameToken& right)
+{
+  return left.backend == right.backend &&
+    left.epoch == right.epoch && left.slot == right.slot &&
+    left.serial == right.serial;
+}
+
 CFrameHub::CFrameHub()
 {
   m_wakeEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
@@ -89,8 +96,14 @@ bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
     selected->backend.store(backend, std::memory_order_release);
     selected->epoch.store(epoch, std::memory_order_release);
     selected->primary       = primary;
+    selected->outstanding.store(0, std::memory_order_release);
+    SetEvent(selected->drained);
+  }
+  {
+    CSRWExclusiveLock lock(selected->laneLock);
     selected->needsFullCopy = true;
     selected->lastContent   = 0;
+    selected->lastTerminalContent = 0;
     selected->blockedContent   = 0;
     selected->blockedFrameSize = 0;
     selected->blockedAllocation = false;
@@ -101,11 +114,10 @@ bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
     selected->frameType     = FRAME_TYPE_INVALID;
     for (Sink::ResourceLane& lane : selected->lanes)
       lane = {};
-    selected->outstanding.store(0, std::memory_order_release);
-    SetEvent(selected->drained);
-    target.SetFrameScheduleEvent(m_wakeEvent);
   }
 
+  target.SetFrameEvents(this);
+  target.SetFrameScheduleEvent(m_wakeEvent);
   {
     CSRWExclusiveLock lock(m_listLock);
     selected->active.store(true, std::memory_order_release);
@@ -135,21 +147,52 @@ void CFrameHub::Unbind(BackendId backend, uint32_t epoch)
   if (!selected)
     return;
 
+  IFrameSink * target;
   {
     CSRWExclusiveLock lock(selected->callLock);
-    if (selected->target)
-      selected->target->SetFrameScheduleEvent(nullptr);
+    target = selected->target;
   }
+  if (target)
+    target->SetFrameScheduleEvent(nullptr);
+
+  FrameToken cancel[FRAME_SINK_BUFFERS] = {};
+  unsigned cancelCount = 0;
+  {
+    CSRWExclusiveLock lock(selected->laneLock);
+    for (Sink::ResourceLane& lane : selected->lanes)
+    {
+      if (lane.phase == Sink::ResourceLane::PENDING)
+        cancel[cancelCount++] = lane.token;
+      else if (lane.phase == Sink::ResourceLane::FILLING)
+        lane.cancelRequested = true;
+    }
+  }
+  for (unsigned i = 0; i < cancelCount; ++i)
+    for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
+    {
+      CSRWSharedLock lock(selected->laneLock);
+      if (!TokenMatches(selected->lanes[lane].token, cancel[i]))
+        continue;
+      lock.Unlock();
+      CancelLane(*selected, lane, cancel[i]);
+      break;
+    }
 
   WaitForSingleObject(selected->drained, INFINITE);
+  if (target)
+    target->SetFrameEvents(nullptr);
   {
     CSRWExclusiveLock lock(selected->callLock);
     selected->target        = nullptr;
     selected->backend.store(0, std::memory_order_release);
     selected->epoch.store(0, std::memory_order_release);
     selected->primary       = false;
+  }
+  {
+    CSRWExclusiveLock lock(selected->laneLock);
     selected->needsFullCopy = true;
     selected->lastContent   = 0;
+    selected->lastTerminalContent = 0;
     selected->blockedContent   = 0;
     selected->blockedFrameSize = 0;
     selected->blockedAllocation = false;
@@ -186,7 +229,10 @@ void CFrameHub::ReleaseTarget(Batch& batch, BatchTarget& target)
     return;
   target.releasePending = true;
   if (target.resourceLane < FRAME_SINK_BUFFERS)
+  {
+    CSRWExclusiveLock lock(target.sink->laneLock);
     target.sink->lanes[target.resourceLane].busy = false;
+  }
   if (target.sink->outstanding.fetch_sub(
         1, std::memory_order_acq_rel) == 1)
     SetEvent(target.sink->drained);
@@ -199,37 +245,276 @@ void CFrameHub::ReleaseTarget(Batch& batch, BatchTarget& target)
   batch.active = false;
 }
 
-void CFrameHub::CompleteTarget(
-  Batch& batch, BatchTarget& target, bool succeeded)
+bool CFrameHub::DetachTarget(Batch& batch, BatchTarget& target,
+  FrameToken& token)
 {
-  CSRWExclusiveLock call(target.sink->callLock);
-  if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
-        target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
-  {
-    target.sink->target->CompleteFrameBuffer(target.localSlot, succeeded);
-    if (succeeded)
-    {
-      if (ContentAfter(target.content, target.sink->lastContent))
-      {
-        target.sink->lastContent   = target.content;
-        target.sink->pitch         = target.pitch;
-        target.sink->width         = target.width;
-        target.sink->height        = target.height;
-        target.sink->format        = target.format;
-        target.sink->frameType     = target.frameType;
-        target.sink->needsFullCopy = false;
-        target.sink->blockedContent   = 0;
-        target.sink->blockedFrameSize = 0;
-        target.sink->blockedAllocation = false;
-      }
+  if (!target.active || target.releasePending ||
+      target.resourceLane >= FRAME_SINK_BUFFERS)
+    return false;
 
-    }
-    else
-      target.sink->needsFullCopy = true;
+  token.backend = target.backend;
+  token.epoch   = target.epoch;
+  token.slot    = target.localSlot;
+  token.serial  = batch.serial;
+  {
+    CSRWExclusiveLock lock(target.sink->laneLock);
+    Sink::ResourceLane& lane =
+      target.sink->lanes[target.resourceLane];
+    if (!lane.busy || lane.phase != Sink::ResourceLane::IDLE)
+      return false;
+    lane.token           = token;
+    lane.schedule        = target.schedule;
+    lane.content         = target.content;
+    lane.captureTime     = target.captureTime;
+    lane.postProcessTime = target.postProcessTime;
+    lane.copyTime        = target.copyTime;
+    lane.readyTime       = target.readyTime;
+    lane.holdTime        = target.holdTime;
+    lane.filledAt        = target.filledAt;
+    lane.workStart       = target.workStart;
+    lane.pitch           = target.pitch;
+    lane.width           = target.width;
+    lane.height          = target.height;
+    lane.format          = target.format;
+    lane.frameType       = target.frameType;
+    lane.phase           = Sink::ResourceLane::FILLING;
+    lane.timingValid     = target.timingValid;
+    lane.resultPending   = false;
+    lane.callActive      = false;
+    lane.cancelRequested = false;
   }
-  ReleaseTarget(batch, target);
+
+  target.releasePending = true;
+  target.active         = false;
+  for (unsigned i = 0; i < batch.count; ++i)
+    if (batch.targets[i].active)
+      return true;
+  batch.active = false;
+  return true;
+}
+
+void CFrameHub::FillLane(Sink& sink, unsigned laneIndex,
+  const FrameToken& token)
+{
+  if (laneIndex >= FRAME_SINK_BUFFERS)
+    return;
+
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (lane.phase != Sink::ResourceLane::FILLING ||
+        !TokenMatches(lane.token, token))
+      return;
+    lane.callActive = true;
+  }
+
+  IFrameSink * target = sink.target;
+  const FrameFill fill = target ? target->FrameFilled(token) :
+    FrameFill::REJECTED;
+
+  bool      terminal = false;
+  bool      cancel   = false;
+  FrameDone result   = FrameDone::FAILED;
+  uint64_t  readyAt  = 0;
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (lane.phase != Sink::ResourceLane::FILLING ||
+        !TokenMatches(lane.token, token))
+      return;
+    lane.callActive = false;
+    if (lane.resultPending)
+    {
+      terminal           = true;
+      result             = lane.pendingResult;
+      readyAt            = lane.pendingReadyAt;
+      lane.resultPending = false;
+    }
+    else if (fill == FrameFill::READY)
+    {
+      terminal = true;
+      result   = FrameDone::READY;
+    }
+    else if (fill == FrameFill::REJECTED)
+      terminal = true;
+    else
+    {
+      lane.phase = Sink::ResourceLane::PENDING;
+      cancel = lane.cancelRequested ||
+        !sink.active.load(std::memory_order_acquire);
+    }
+  }
+
+  if (terminal)
+    CompleteLane(sink, laneIndex, token, result, readyAt);
+  else if (cancel)
+    CancelLane(sink, laneIndex, token);
+}
+
+void CFrameHub::CancelLane(Sink& sink, unsigned laneIndex,
+  const FrameToken& token)
+{
+  if (laneIndex >= FRAME_SINK_BUFFERS)
+    return;
+
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (lane.phase != Sink::ResourceLane::PENDING ||
+        !TokenMatches(lane.token, token))
+      return;
+    lane.phase      = Sink::ResourceLane::CANCELING;
+    lane.callActive = true;
+  }
+
+  IFrameSink * target = sink.target;
+  if (target)
+    target->CancelFrame(token);
+
+  FrameDone result   = FrameDone::SUPERSEDED;
+  uint64_t  readyAt  = 0;
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (lane.phase != Sink::ResourceLane::CANCELING ||
+        !TokenMatches(lane.token, token))
+      return;
+    lane.callActive = false;
+    if (lane.resultPending)
+    {
+      result             = lane.pendingResult;
+      readyAt            = lane.pendingReadyAt;
+      lane.resultPending = false;
+    }
+  }
+  CompleteLane(sink, laneIndex, token, result, readyAt);
+}
+
+void CFrameHub::CompleteLane(Sink& sink, unsigned laneIndex,
+  const FrameToken& token, FrameDone result, uint64_t readyAt)
+{
+  if (laneIndex >= FRAME_SINK_BUFFERS)
+    return;
+
+  Sink::ResourceLane completed;
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (!lane.busy || lane.phase == Sink::ResourceLane::IDLE ||
+        lane.phase == Sink::ResourceLane::COMPLETING ||
+        !TokenMatches(lane.token, token))
+      return;
+    lane.phase = Sink::ResourceLane::COMPLETING;
+    completed  = lane;
+  }
+
+  if (!readyAt)
+    readyAt = CFrameScheduler::Nanotime();
+  IFrameSink * target = sink.target;
+  if (target)
+  {
+    if (result == FrameDone::READY && completed.timingValid)
+    {
+      uint64_t readyTime = completed.readyTime;
+      if (readyAt >= completed.filledAt)
+        readyTime += readyAt - completed.filledAt;
+      target->SetFrameTiming(completed.localSlot, completed.captureTime,
+        completed.postProcessTime, completed.copyTime, readyTime,
+        completed.holdTime, completed.schedule, readyAt);
+      if (completed.workStart && readyAt >= completed.workStart)
+        target->TryRecordFrameTiming(readyAt - completed.workStart);
+    }
+    target->CompleteFrameBuffer(completed.localSlot, result);
+  }
+
+  {
+    CSRWExclusiveLock lock(sink.laneLock);
+    const bool newestTerminal =
+      ContentAfter(completed.content, sink.lastTerminalContent);
+    if (newestTerminal)
+      sink.lastTerminalContent = completed.content;
+    if (result == FrameDone::READY &&
+        (newestTerminal ||
+         completed.content == sink.lastTerminalContent))
+    {
+      if (ContentAfter(completed.content, sink.lastContent))
+      {
+        sink.lastContent   = completed.content;
+        sink.pitch         = completed.pitch;
+        sink.width         = completed.width;
+        sink.height        = completed.height;
+        sink.format        = completed.format;
+        sink.frameType     = completed.frameType;
+        sink.needsFullCopy = false;
+        sink.blockedContent   = 0;
+        sink.blockedFrameSize = 0;
+        sink.blockedAllocation = false;
+      }
+    }
+    else if (newestTerminal)
+      sink.needsFullCopy = true;
+    Sink::ResourceLane& lane = sink.lanes[laneIndex];
+    if (lane.phase == Sink::ResourceLane::COMPLETING &&
+        TokenMatches(lane.token, token))
+    {
+      lane.token           = {};
+      lane.schedule        = {};
+      lane.content         = 0;
+      lane.phase           = Sink::ResourceLane::IDLE;
+      lane.timingValid     = false;
+      lane.resultPending   = false;
+      lane.callActive      = false;
+      lane.cancelRequested = false;
+      lane.busy            = false;
+    }
+  }
+  if (sink.outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1)
+    SetEvent(sink.drained);
+  SetEvent(m_wakeEvent);
+}
+
+void CFrameHub::OnFrameDone(const FrameToken& token, FrameDone result,
+  uint64_t readyAt)
+{
+  if (!token.backend || !token.epoch || !token.serial)
+    return;
+
+  for (Sink& sink : m_sinks)
+  {
+    if (sink.backend.load(std::memory_order_acquire) != token.backend ||
+        sink.epoch.load(std::memory_order_acquire) != token.epoch)
+      continue;
+
+    unsigned laneIndex = FRAME_SINK_BUFFERS;
+    {
+      CSRWExclusiveLock lock(sink.laneLock);
+      for (unsigned i = 0; i < FRAME_SINK_BUFFERS; ++i)
+      {
+        Sink::ResourceLane& lane = sink.lanes[i];
+        if (!lane.busy || !TokenMatches(lane.token, token) ||
+            lane.phase == Sink::ResourceLane::IDLE ||
+            lane.phase == Sink::ResourceLane::COMPLETING)
+          continue;
+        if (lane.callActive)
+        {
+          if (!lane.resultPending)
+          {
+            lane.pendingResult  = result;
+            lane.pendingReadyAt = readyAt;
+            lane.resultPending  = true;
+          }
+          return;
+        }
+        if (lane.phase == Sink::ResourceLane::PENDING ||
+            lane.phase == Sink::ResourceLane::CANCELING)
+          laneIndex = i;
+        break;
+      }
+    }
+    if (laneIndex < FRAME_SINK_BUFFERS)
+      CompleteLane(sink, laneIndex, token, result, readyAt);
+    return;
+  }
 }
 
 size_t CFrameHub::GetMaxFrameSize() const
@@ -281,11 +566,12 @@ bool CFrameHub::NeedsFrame() const
     if (!refs[i].sink->active.load(std::memory_order_acquire) ||
         !refs[i].sink->target)
       continue;
+    const size_t maxFrameSize = refs[i].sink->target->GetMaxFrameSize();
+    CSRWSharedLock state(refs[i].sink->laneLock);
     if (refs[i].sink->blockedContent == newest &&
         refs[i].sink->blockedFrameSize &&
         (refs[i].sink->blockedAllocation ||
-         refs[i].sink->target->GetMaxFrameSize() <
-           refs[i].sink->blockedFrameSize))
+         maxFrameSize < refs[i].sink->blockedFrameSize))
       continue;
     if (refs[i].sink->needsFullCopy ||
         ContentAfter(newest, refs[i].sink->lastContent))
@@ -485,18 +771,24 @@ bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
     const size_t maxFrameSize = sink.target->GetMaxFrameSize();
     if (!maxFrameSize || frameSize > maxFrameSize)
     {
-      sink.blockedContent   = contentSerial;
-      sink.blockedFrameSize = frameSize;
+      CSRWExclusiveLock lock(sink.laneLock);
+      sink.blockedContent    = contentSerial;
+      sink.blockedFrameSize  = frameSize;
       sink.blockedAllocation = false;
       continue;
     }
 
-    const bool layoutChanged = sink.pitch != pitch ||
-      sink.width != dstFormat.width || sink.height != dstFormat.height ||
-      sink.format != dstFormat.desc.Format ||
-      sink.frameType != dstFormat.format;
-    const bool forceFull = sink.needsFullCopy || layoutChanged ||
-      sink.lastContent + 1 != contentSerial;
+    bool forceFull;
+    {
+      CSRWSharedLock lock(sink.laneLock);
+      const bool layoutChanged = sink.pitch != pitch ||
+        sink.width != dstFormat.width ||
+        sink.height != dstFormat.height ||
+        sink.format != dstFormat.desc.Format ||
+        sink.frameType != dstFormat.format;
+      forceFull = sink.needsFullCopy || layoutChanged ||
+        sink.lastContent + 1 != contentSerial;
+    }
     const RECT * damage = forceFull ? nullptr : dirtyRects;
     const unsigned damageCount = forceFull ? 0 : nbDirtyRects;
     SinkTarget result = sink.target->PrepareFrameBuffer(
@@ -506,99 +798,107 @@ bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
     {
       if (result.mem)
       {
-        sink.blockedContent    = contentSerial;
-        sink.blockedFrameSize  = frameSize;
-        sink.blockedAllocation = true;
+        {
+          CSRWExclusiveLock lock(sink.laneLock);
+          sink.blockedContent    = contentSerial;
+          sink.blockedFrameSize  = frameSize;
+          sink.blockedAllocation = true;
+        }
         sink.target->AbortFrameBuffer(result.slot);
       }
       continue;
     }
 
-    unsigned resourceLane = FRAME_SINK_BUFFERS;
-    for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
     {
-      const Sink::ResourceLane& candidate = sink.lanes[lane];
-      if (!candidate.busy && candidate.valid &&
-          candidate.mem == result.mem &&
-          candidate.heapOffset == result.heapOffset &&
-          candidate.localSlot == result.slot &&
-          candidate.direct == request.primary)
-      {
-        resourceLane = lane;
-        break;
-      }
-    }
-    if (resourceLane == FRAME_SINK_BUFFERS)
+      CSRWExclusiveLock lock(sink.laneLock);
+      unsigned resourceLane = FRAME_SINK_BUFFERS;
       for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
-        if (!sink.lanes[lane].busy && !sink.lanes[lane].valid)
+      {
+        const Sink::ResourceLane& candidate = sink.lanes[lane];
+        if (!candidate.busy && candidate.valid &&
+            candidate.mem == result.mem &&
+            candidate.heapOffset == result.heapOffset &&
+            candidate.localSlot == result.slot &&
+            candidate.direct == request.primary)
         {
           resourceLane = lane;
           break;
         }
-    if (resourceLane == FRAME_SINK_BUFFERS)
-      for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
-        if (!sink.lanes[lane].busy)
-        {
-          resourceLane = lane;
-          break;
-        }
-    if (resourceLane == FRAME_SINK_BUFFERS)
-    {
-      sink.target->AbortFrameBuffer(result.slot);
-      continue;
-    }
-
-    Sink::ResourceLane& lane = sink.lanes[resourceLane];
-    lane.mem        = result.mem;
-    lane.heapOffset = result.heapOffset;
-    lane.localSlot  = result.slot;
-    lane.direct     = request.primary;
-    lane.valid      = true;
-    lane.busy       = true;
-
-    unsigned index = batch->count;
-    if (sink.primary && index)
-    {
-      for (unsigned move = index; move != 0; --move)
-      {
-        batch->targets[move] = batch->targets[move - 1];
-        prepared.targets[move] = prepared.targets[move - 1];
       }
-      index = 0;
-    }
-    ++batch->count;
-    BatchTarget& target = batch->targets[index];
-    target.sink       = &sink;
-    target.backend    = request.backend;
-    target.epoch      = request.epoch;
-    target.localSlot  = result.slot;
-    target.resourceLane = resourceLane;
-    target.schedule   = request.commitSchedule;
-    target.deliverySchedule = request.schedule;
-    target.content    = contentSerial;
-    target.pitch      = pitch;
-    target.width      = dstFormat.width;
-    target.height     = dstFormat.height;
-    target.format     = dstFormat.desc.Format;
-    target.frameType  = dstFormat.format;
-    target.periodic   = request.periodic;
-    target.active     = true;
-    if (sink.outstanding.fetch_add(
-          1, std::memory_order_acq_rel) == 0)
-      ResetEvent(sink.drained);
+      if (resourceLane == FRAME_SINK_BUFFERS)
+        for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
+          if (!sink.lanes[lane].busy && !sink.lanes[lane].valid)
+          {
+            resourceLane = lane;
+            break;
+          }
+      if (resourceLane == FRAME_SINK_BUFFERS)
+        for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
+          if (!sink.lanes[lane].busy)
+          {
+            resourceLane = lane;
+            break;
+          }
+      if (resourceLane == FRAME_SINK_BUFFERS)
+      {
+        lock.Unlock();
+        sink.target->AbortFrameBuffer(result.slot);
+        continue;
+      }
 
-    PreparedFrameBuffer& output = prepared.targets[index];
-    output.token.sink   = request.backend;
-    output.token.epoch  = request.epoch;
-    output.token.slot   = result.slot;
-    output.token.serial = batch->serial;
-    output.resourceSlot =
-      request.sink * FRAME_SINK_BUFFERS + resourceLane;
-    output.mem          = result.mem;
-    output.heapOffset   = result.heapOffset;
-    output.capacity     = result.capacity;
-    output.direct       = request.primary;
-    output.fullCopy     = forceFull || result.fullCopy;
+      Sink::ResourceLane& lane = sink.lanes[resourceLane];
+      lane.mem        = result.mem;
+      lane.heapOffset = result.heapOffset;
+      lane.localSlot  = result.slot;
+      lane.direct     = request.primary;
+      lane.valid      = true;
+      lane.busy       = true;
+      lane.phase      = Sink::ResourceLane::IDLE;
+
+      unsigned index = batch->count;
+      if (sink.primary && index)
+      {
+        for (unsigned move = index; move != 0; --move)
+        {
+          batch->targets[move] = batch->targets[move - 1];
+          prepared.targets[move] = prepared.targets[move - 1];
+        }
+        index = 0;
+      }
+      ++batch->count;
+      BatchTarget& target = batch->targets[index];
+      target.sink       = &sink;
+      target.backend    = request.backend;
+      target.epoch      = request.epoch;
+      target.localSlot  = result.slot;
+      target.resourceLane = resourceLane;
+      target.schedule   = request.commitSchedule;
+      target.deliverySchedule = request.schedule;
+      target.content    = contentSerial;
+      target.pitch      = pitch;
+      target.width      = dstFormat.width;
+      target.height     = dstFormat.height;
+      target.format     = dstFormat.desc.Format;
+      target.frameType  = dstFormat.format;
+      target.periodic   = request.periodic;
+      target.active     = true;
+      if (sink.outstanding.fetch_add(
+            1, std::memory_order_acq_rel) == 0)
+        ResetEvent(sink.drained);
+
+      PreparedFrameBuffer& output = prepared.targets[index];
+      output.token.backend = request.backend;
+      output.token.epoch  = request.epoch;
+      output.token.slot   = result.slot;
+      output.token.serial = batch->serial;
+      output.resourceSlot =
+        request.sink * FRAME_SINK_BUFFERS + resourceLane;
+      output.mem          = result.mem;
+      output.heapOffset   = result.heapOffset;
+      output.capacity     = result.capacity;
+      output.direct       = request.primary;
+      output.fullCopy     = forceFull || result.fullCopy;
+    }
   }
   prepared.count = batch->count;
   if (!batch->count)
@@ -636,7 +936,10 @@ uint32_t CFrameHub::PublishFrameBatch(const FrameBatchToken& token)
     {
       if (valid)
         target.sink->target->AbortFrameBuffer(target.localSlot);
-      target.sink->needsFullCopy = true;
+      {
+        CSRWExclusiveLock state(target.sink->laneLock);
+        target.sink->needsFullCopy = true;
+      }
       ReleaseTarget(batch, target);
       continue;
     }
@@ -658,6 +961,14 @@ void CFrameHub::CommitFrameBatch(const FrameBatchToken& token)
   if (token.slot >= FRAME_BATCHES)
     return;
   Batch& batch = m_batches[token.slot];
+  struct FillRequest
+  {
+    Sink       * sink;
+    unsigned     lane;
+    FrameToken  token;
+    bool        succeeded;
+  } fill[FRAME_MAX_SINKS] = {};
+  unsigned fillCount = 0;
   CSRWExclusiveLock lock(batch.lock);
   if (!BatchValid(batch, token))
     return;
@@ -678,8 +989,22 @@ void CFrameHub::CommitFrameBatch(const FrameBatchToken& token)
     }
     target.committed = true;
     if (target.completionPending)
-      CompleteTarget(batch, target, target.completionSucceeded);
+    {
+      FrameToken frameToken;
+      const unsigned lane = target.resourceLane;
+      Sink * sink = target.sink;
+      if (DetachTarget(batch, target, frameToken))
+        fill[fillCount++] = {
+          sink, lane, frameToken, target.completionSucceeded };
+    }
   }
+  lock.Unlock();
+  for (unsigned i = 0; i < fillCount; ++i)
+    if (fill[i].succeeded)
+      FillLane(*fill[i].sink, fill[i].lane, fill[i].token);
+    else
+      CompleteLane(*fill[i].sink, fill[i].lane, fill[i].token,
+        FrameDone::FAILED, CFrameScheduler::Nanotime());
 }
 
 void CFrameHub::AbortFrameBatch(const FrameBatchToken& token)
@@ -701,7 +1026,10 @@ void CFrameHub::AbortFrameBatch(const FrameBatchToken& token)
           target.backend &&
         target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
       target.sink->target->AbortFrameBuffer(target.localSlot);
-    target.sink->needsFullCopy = true;
+    {
+      CSRWExclusiveLock state(target.sink->laneLock);
+      target.sink->needsFullCopy = true;
+    }
     ReleaseTarget(batch, target);
   }
 }
@@ -730,7 +1058,10 @@ void CFrameHub::FailFrameBatch(const FrameBatchToken& token)
       else
         target.sink->target->AbortFrameBuffer(target.localSlot);
     }
-    target.sink->needsFullCopy = true;
+    {
+      CSRWExclusiveLock state(target.sink->laneLock);
+      target.sink->needsFullCopy = true;
+    }
     ReleaseTarget(batch, target);
   }
 }
@@ -804,19 +1135,18 @@ void CFrameHub::SetFrameTargetTiming(const FrameBatchToken& token,
   if (token.slot >= FRAME_BATCHES)
     return;
   Batch& batch = m_batches[token.slot];
-  CSRWSharedLock lock(batch.lock);
+  CSRWExclusiveLock lock(batch.lock);
   if (!BatchValid(batch, token) || index >= batch.count ||
       !batch.targets[index].active)
     return;
   BatchTarget& target = batch.targets[index];
-  CSRWSharedLock call(target.sink->callLock);
-  if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
-        target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
-    target.sink->target->SetFrameTiming(target.localSlot, captureTime,
-      postProcessTime, copyTime, readyTime, holdTime,
-      target.schedule, completedAt);
+  target.captureTime     = captureTime;
+  target.postProcessTime = postProcessTime;
+  target.copyTime        = copyTime;
+  target.readyTime       = readyTime;
+  target.holdTime        = holdTime;
+  target.filledAt        = completedAt;
+  target.timingValid     = true;
 }
 
 void CFrameHub::TryRecordFrameTiming(const FrameBatchToken& token,
@@ -825,17 +1155,13 @@ void CFrameHub::TryRecordFrameTiming(const FrameBatchToken& token,
   if (token.slot >= FRAME_BATCHES)
     return;
   Batch& batch = m_batches[token.slot];
-  CSRWSharedLock lock(batch.lock);
+  CSRWExclusiveLock lock(batch.lock);
   if (!BatchValid(batch, token) || index >= batch.count ||
       !batch.targets[index].active)
     return;
   BatchTarget& target = batch.targets[index];
-  CSRWSharedLock call(target.sink->callLock);
-  if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
-        target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
-    target.sink->target->TryRecordFrameTiming(duration);
+  if (target.filledAt >= duration)
+    target.workStart = target.filledAt - duration;
 }
 
 void CFrameHub::CompleteFrameTarget(const FrameBatchToken& token,
@@ -855,7 +1181,17 @@ void CFrameHub::CompleteFrameTarget(const FrameBatchToken& token,
     target.completionSucceeded = succeeded;
     return;
   }
-  CompleteTarget(batch, target, succeeded);
+  FrameToken frameToken;
+  const unsigned lane = target.resourceLane;
+  Sink * sink = target.sink;
+  if (!DetachTarget(batch, target, frameToken))
+    return;
+  lock.Unlock();
+  if (succeeded)
+    FillLane(*sink, lane, frameToken);
+  else
+    CompleteLane(*sink, lane, frameToken, FrameDone::FAILED,
+      CFrameScheduler::Nanotime());
 }
 
 void CFrameHub::ObserveFrame(uint64_t now)

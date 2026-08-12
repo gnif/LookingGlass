@@ -33,10 +33,24 @@ enum : unsigned
 
 struct FrameToken
 {
-  uint32_t sink   = 0;
+  uint32_t backend = 0;
   uint32_t epoch  = 0;
   uint32_t slot   = 0;
   uint64_t serial = 0;
+};
+
+enum class FrameFill
+{
+  READY,
+  PENDING,
+  REJECTED,
+};
+
+enum class FrameDone
+{
+  READY,
+  FAILED,
+  SUPERSEDED,
 };
 
 struct PreparedFrameBuffer
