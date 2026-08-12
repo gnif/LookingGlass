@@ -72,9 +72,8 @@ Which application runs on Linux?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The Looking Glass Client runs on the Linux host operating system. The IDD runs
-inside the Windows guest. The older product named the **Host Application** is
-a legacy Windows producer; “Host” in that name does not mean the Linux host
-OS.
+inside the Windows guest. The older product named the **Host Application** is a
+legacy Windows server; “Host” in that name does not mean the Linux host OS.
 
 Input and window system
 -----------------------

@@ -8,9 +8,9 @@ Client Application Installation
 For Linux
 ---------
 
-The Looking Glass Client receives frames from the Windows producer and displays
-them on Linux. It also handles input, audio, overlays and optional SPICE
-services.
+The Looking Glass Client receives frames from an implementation of the Looking
+Glass Server on Windows and displays them on Linux. It also handles input,
+audio, overlays and optional SPICE services.
 
 There are currently no Linux distribution packages for the client. First
 :ref:`build it from source <build_client_section>`, then run the following from

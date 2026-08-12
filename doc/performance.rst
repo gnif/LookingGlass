@@ -34,7 +34,7 @@ The current incomplete bucket is not plotted. This keeps the newest point from
 jumping as samples arrive. Each panel also keeps a stable vertical scale with
 hysteresis, so read the millisecond axis when comparing panels.
 
-.. list-table:: Producer and transport stages
+.. list-table:: Capture and transport stages
    :widths: 18 82
    :header-rows: 1
 
@@ -61,7 +61,7 @@ hysteresis, so read the millisecond axis when comparing panels.
    * - **Transport**
      - Inferred publication-to-client delay for a frame matched to a cadence
        deadline. It is not an “IVSHMEM copy” measurement and is omitted when
-       producer and client timing cannot be matched safely.
+       server and client timing cannot be matched safely.
 
 .. list-table:: Client EGL stages
    :widths: 18 82
@@ -95,7 +95,7 @@ hysteresis, so read the millisecond axis when comparing panels.
      - Time inside the display-server EGL swap call. It may include blocking
        in EGL or compositor submission, but not later physical scanout.
 
-Only guest frames actually consumed by EGL contribute producer samples.
+Only guest frames actually consumed by EGL contribute server samples.
 Superseded frames are not treated as latency samples. The minimum and maximum
 for each band are calculated independently, so the top of a minimum or maximum
 stack can combine stages from different frames. Use those panels to locate
@@ -105,7 +105,7 @@ Cadence and Hold
 ----------------
 
 The Linux display and Windows guest have independent clocks. Looking Glass
-does not subtract their raw timestamps. The producer reports durations, while
+does not subtract their raw timestamps. The server reports durations, while
 periods, generations and deadlines identify a matching cadence event. The
 Transport band is left absent when that match is not valid.
 
@@ -120,7 +120,7 @@ the display instead of rounding it to 120 Hz.
 
 Investigate when Hold repeatedly exceeds roughly one guest frame period, or
 when jumps occur with large Post, Copy or Ready spikes. Those patterns can
-indicate producer work or scheduling delays rather than normal phase drift.
+indicate server work or scheduling delays rather than normal phase drift.
 
 Frame and photon summaries
 --------------------------

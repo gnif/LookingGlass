@@ -101,7 +101,7 @@ Common options
      - Follow guest resolution changes
    * - ``win:setGuestRes``
      - ``yes``
-     - Ask a supporting producer to follow the client viewport
+     - Ask a supporting server to follow the client viewport
    * - ``win:fpsMin``
      - automatic
      - Set the minimum redraw rate; 0 disables it and is not recommended

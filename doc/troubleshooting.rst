@@ -2,7 +2,7 @@ Troubleshooting
 ###############
 
 Start with the symptom below. Avoid changing polling, synchronization or
-renderer options until the basic producer, shared-memory and version checks
+renderer options until the basic server, shared-memory and version checks
 pass.
 
 .. toctree::
@@ -22,8 +22,8 @@ The Looking Glass monitor is missing in Windows
    size and that at least one configured display mode fits.
 5. Increase IVSHMEM if every suitable mode was filtered. Restart the VM after
    changing its size.
-6. Ensure the legacy Host service is disabled. Only one frame producer should
-   use the Looking Glass IVSHMEM device.
+6. Ensure the legacy Host service is disabled. Only one Looking Glass Server
+   implementation should use the Looking Glass IVSHMEM device.
 
 A missing passed-through GPU does not by itself prevent the IDD display from
 appearing. The IDD can start in software mode, although that mode is slower and
