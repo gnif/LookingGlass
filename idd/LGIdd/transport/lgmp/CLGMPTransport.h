@@ -57,7 +57,7 @@ public:
   ProcessResult Process(ITransportEvents& events) override;
   void Stop() override;
   void SyncRecovery() override;
-  void RecoveryStatus(
+  void RecoveryStatus(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active,
     Recovery state, uint32_t error) override;
 

@@ -493,25 +493,6 @@ bool CDeviceContext::InitializeTransport()
       CDeviceContext * context =
         static_cast<CDeviceContext *>(opaque);
 
-      SourceKey source;
-      {
-        CSRWExclusiveLock routeLock(context->m_recoveryRouteLock);
-        if (!route || route != context->m_recoveryRoute ||
-            session != context->m_recoverySession ||
-            serial != context->m_recoverySerial ||
-            active != context->m_recoveryActive)
-        {
-          DEBUG_WARN("Ignoring stale recovery route");
-          return;
-        }
-        source = context->m_recoverySource;
-        context->m_recoveryRoute   = 0;
-        context->m_recoverySource  = {};
-        context->m_recoverySession = 0;
-        context->m_recoverySerial  = 0;
-        context->m_recoveryActive  = false;
-      }
-
       ITransport::Recovery state = ITransport::Recovery::FAILED;
       uint32_t error = ERROR_SUCCESS;
       switch (result)
@@ -537,7 +518,7 @@ bool CDeviceContext::InitializeTransport()
       }
 
       context->m_transport->RecoveryStatus(
-        source, session, serial, active, state, error);
+        route, session, serial, active, state, error);
     },
     this);
   m_recoveryHandlerSet = true;
@@ -639,37 +620,8 @@ InteractionResult CDeviceContext::OnSetResolution(const SourceKey& source,
   return SetResolution(width, height);
 }
 
-void CDeviceContext::OnRecoveryRequest(const SourceKey& source,
-  uint64_t session, uint32_t serial, bool active)
+bool CDeviceContext::OnRecoveryAction(const RecoveryAction& action)
 {
-  if (!source.backend || !source.epoch || !session || !serial ||
-      (serial & LGPipeMsg::RECOVERY_ACTIVE))
-    return;
-
-  CSRWExclusiveLock publishLock(m_recoveryPublishLock);
-  uint64_t route;
-  {
-    CSRWExclusiveLock routeLock(m_recoveryRouteLock);
-    route = m_nextRecoveryRoute++;
-    if (!m_nextRecoveryRoute)
-      ++m_nextRecoveryRoute;
-
-    m_recoveryRoute   = route;
-    m_recoverySource  = source;
-    m_recoverySession = session;
-    m_recoverySerial  = serial;
-    m_recoveryActive  = active;
-  }
-
-  if (!g_pipe.SetRecovery(this, route, session, serial, active))
-  {
-    CSRWExclusiveLock routeLock(m_recoveryRouteLock);
-    if (m_recoveryRoute != route)
-      return;
-    m_recoveryRoute   = 0;
-    m_recoverySource  = {};
-    m_recoverySession = 0;
-    m_recoverySerial  = 0;
-    m_recoveryActive  = false;
-  }
+  return g_pipe.SetRecovery(this, action.route, action.session,
+    action.serial, action.active);
 }

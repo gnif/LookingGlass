@@ -33,7 +33,7 @@
 #include "display/CMonitorManager.h"
 #include "transport/CTransportManager.h"
 
-class CDeviceContext : private ITransportEvents
+class CDeviceContext : private ITransportActions
 {
 private:
   WDFDEVICE     m_wdfDevice;
@@ -53,14 +53,6 @@ private:
 
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
-  CSRWLock m_recoveryPublishLock;
-  CSRWLock m_recoveryRouteLock;
-  uint64_t m_nextRecoveryRoute  = 1;
-  uint64_t m_recoveryRoute      = 0;
-  SourceKey m_recoverySource;
-  uint64_t  m_recoverySession   = 0;
-  uint32_t  m_recoverySerial    = 0;
-  bool      m_recoveryActive    = false;
 
   UINT m_iddCxVersion    = 0;
   bool m_hasIddCx110DDIs = false;
@@ -78,8 +70,7 @@ private:
     const SourceKey& source, int32_t x, int32_t y) override;
   InteractionResult OnSetResolution(const SourceKey& source,
     uint32_t width, uint32_t height) override;
-  void OnRecoveryRequest(const SourceKey& source,
-    uint64_t session, uint32_t serial, bool active) override;
+  bool OnRecoveryAction(const RecoveryAction& action) override;
   InteractionResult SetResolution(uint32_t width, uint32_t height);
 
 public:

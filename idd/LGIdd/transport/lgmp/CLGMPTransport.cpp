@@ -98,8 +98,13 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
 {
   const CRecovery::Request recovery = m_recovery.Process();
   if (recovery.valid)
-    events.OnRecoveryRequest(SourceKey(),
-      recovery.session, recovery.serial, recovery.active);
+  {
+    const RecoveryAdmission admission = events.OnRecoveryRequest(
+      SourceKey(), recovery.session, recovery.serial, recovery.active);
+    if (admission.complete)
+      RecoveryStatus(SourceKey(), recovery.session, recovery.serial,
+        recovery.active, admission.state, admission.error);
+  }
 
   // Before the swap chain establishes the frame-buffer alignment, service
   // only the protocol-independent recovery channel. This preserves the old
@@ -228,10 +233,11 @@ void CLGMPTransport::SyncRecovery()
   m_recovery.Sync();
 }
 
-void CLGMPTransport::RecoveryStatus(
+void CLGMPTransport::RecoveryStatus(const SourceKey& source,
   uint64_t session, uint32_t serial, bool active,
   Recovery state, uint32_t error)
 {
+  UNREFERENCED_PARAMETER(source);
   uint32_t wireState = KVMFR_R_STATE_FAILED;
   uint32_t wireError = KVMFR_R_ERR_NONE;
   switch (state)
@@ -246,9 +252,29 @@ void CLGMPTransport::RecoveryStatus(
 
     case Recovery::FAILED:
       wireState = KVMFR_R_STATE_FAILED;
-      wireError = error == ERROR_NOT_FOUND ?
-        KVMFR_R_ERR_NO_FALLBACK_DISPLAY :
-        KVMFR_R_ERR_TOPOLOGY_FAILED;
+      switch (error)
+      {
+        case ERROR_NOT_FOUND:
+          wireError = KVMFR_R_ERR_NO_FALLBACK_DISPLAY;
+          break;
+
+        case ERROR_BUSY:
+          wireError = KVMFR_R_ERR_BUSY;
+          break;
+
+        case ERROR_NOT_ENOUGH_QUOTA:
+          wireError = KVMFR_R_ERR_CAPACITY;
+          break;
+
+        case ERROR_TIMEOUT:
+        case RPC_S_SERVER_UNAVAILABLE:
+          wireError = KVMFR_R_ERR_HELPER_UNAVAILABLE;
+          break;
+
+        default:
+          wireError = KVMFR_R_ERR_TOPOLOGY_FAILED;
+          break;
+      }
       break;
   }
 

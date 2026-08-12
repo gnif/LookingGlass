@@ -63,6 +63,7 @@
     <ClCompile Include="transport\CControlHub.cpp" />
     <ClCompile Include="transport\CFrameHub.cpp" />
     <ClCompile Include="transport\CInputHub.cpp" />
+    <ClCompile Include="transport\CRecoveryHub.cpp" />
     <ClCompile Include="transport\CTransportManager.cpp" />
     <ClCompile Include="transport\TransportConfig.cpp" />
     <ClCompile Include="transport\TransportFactory.cpp" />
@@ -115,6 +116,7 @@
     <ClInclude Include="transport\CControlHub.h" />
     <ClInclude Include="transport\CFrameHub.h" />
     <ClInclude Include="transport\CInputHub.h" />
+    <ClInclude Include="transport\CRecoveryHub.h" />
     <ClInclude Include="transport\CTransportManager.h" />
     <ClInclude Include="transport\DirectFrameBufferMemory.h" />
     <ClInclude Include="transport\FrameCaps.h" />

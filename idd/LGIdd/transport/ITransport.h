@@ -50,6 +50,29 @@ enum class InteractionResult
   FAILED,
 };
 
+enum class RecoveryState
+{
+  NORMAL,
+  ACTIVE,
+  FAILED,
+};
+
+struct RecoveryAdmission
+{
+  bool          complete = false;
+  RecoveryState state    = RecoveryState::FAILED;
+  uint32_t      error    = 0;
+};
+
+struct RecoveryAction
+{
+  uint64_t route    = 0;
+  uint64_t session  = 0;
+  uint64_t deadline = 0;
+  uint32_t serial   = 0;
+  bool     active   = false;
+};
+
 class ITransportEvents
 {
 public:
@@ -59,8 +82,23 @@ public:
     const SourceKey& source, int32_t x, int32_t y) = 0;
   virtual InteractionResult OnSetResolution(
     const SourceKey& source, uint32_t width, uint32_t height) = 0;
-  virtual void OnRecoveryRequest(const SourceKey& source,
+  virtual RecoveryAdmission OnRecoveryRequest(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active) = 0;
+};
+
+// Actions are implemented above the transport manager. Transport instances
+// receive ITransportEvents only, so recovery work cannot bypass the manager's
+// coordinator.
+class ITransportActions
+{
+public:
+  virtual ~ITransportActions() = default;
+
+  virtual InteractionResult OnSetCursorPos(
+    const SourceKey& source, int32_t x, int32_t y) = 0;
+  virtual InteractionResult OnSetResolution(
+    const SourceKey& source, uint32_t width, uint32_t height) = 0;
+  virtual bool OnRecoveryAction(const RecoveryAction& action) = 0;
 };
 
 class ITransport
@@ -80,12 +118,7 @@ public:
     FAILURE,
   };
 
-  enum class Recovery
-  {
-    NORMAL,
-    ACTIVE,
-    FAILED,
-  };
+  using Recovery = RecoveryState;
 
   virtual ~ITransport() = default;
 
@@ -97,8 +130,8 @@ public:
   virtual ProcessResult Process(ITransportEvents& events) = 0;
   virtual void Stop() = 0;
   virtual void SyncRecovery() {}
-  virtual void RecoveryStatus(
-    uint64_t, uint32_t, bool, Recovery, uint32_t) {}
+  virtual void RecoveryStatus(const SourceKey&, uint64_t, uint32_t,
+    bool, Recovery, uint32_t) {}
 
   // Frame capabilities describe the configured instance, not transient
   // runtime state. CanUseMode answers are immutable for the returned

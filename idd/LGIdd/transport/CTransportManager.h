@@ -24,6 +24,7 @@
 #include "transport/CControlHub.h"
 #include "transport/CFrameHub.h"
 #include "transport/CInputHub.h"
+#include "transport/CRecoveryHub.h"
 #include "transport/ITransport.h"
 #include "transport/TransportConfig.h"
 
@@ -75,15 +76,6 @@ private:
     ACCESS,
   };
 
-  struct RecoveryUpdate
-  {
-    uint64_t session = 0;
-    uint32_t serial  = 0;
-    bool     active  = false;
-    Recovery state  = Recovery::FAILED;
-    uint32_t error   = 0;
-  };
-
   struct Entry
   {
     Entry();
@@ -115,8 +107,7 @@ private:
     bool                        exposed      = false;
     bool                        setupDone    = false;
     bool                        syncPending  = false;
-    bool                        recoveryPending = false;
-    RecoveryUpdate              recovery;
+    bool                        recoveryAttached = false;
     std::shared_ptr<const FrameCaps> frameCaps;
     DirectFrameBufferMemory     directMemory;
     bool                        directMemoryValid = false;
@@ -128,6 +119,7 @@ private:
   CControlHub                         m_control;
   CFrameHub                           m_frames;
   CInputHub                           m_input;
+  CRecoveryHub                        m_recovery;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
   bool                                 m_setup       = false;
@@ -150,6 +142,7 @@ private:
     const std::shared_ptr<ITransport>& transport, bool drain = true);
   void DrainRecovery(Entry& entry,
     const std::shared_ptr<ITransport>& transport);
+  void DetachRecovery(Entry& entry);
 
   OpenResult OpenEntry(Entry& entry);
   bool InitializeEntry(Entry& entry);
@@ -175,11 +168,11 @@ public:
   OpenResult Open();
   bool Initialize();
   bool Setup(size_t alignment);
-  ProcessResult Process(ITransportEvents& events);
+  ProcessResult Process(ITransportActions& actions);
   void Stop();
   void SyncRecovery();
-  void RecoveryStatus(const SourceKey& source,
-    uint64_t session, uint32_t serial, bool active,
+  void RecoveryStatus(uint64_t route, uint64_t session,
+    uint32_t serial, bool active,
     Recovery state, uint32_t error);
 
   bool CanUseMode(const FrameMode& mode,

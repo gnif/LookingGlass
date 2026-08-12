@@ -36,7 +36,8 @@ private:
   uint32_t          m_epoch;
   bool              m_interactions;
   CInputHub&         m_input;
-  ITransportEvents& m_events;
+  CRecoveryHub&      m_recovery;
+  ITransportActions& m_actions;
 
   SourceKey Stamp(const SourceKey& source) const
   {
@@ -49,9 +50,9 @@ private:
 public:
   CSourceEvents(
     BackendId backend, uint32_t epoch, bool interactions, CInputHub& input,
-    ITransportEvents& events) :
+    CRecoveryHub& recovery, ITransportActions& actions) :
     m_backend(backend), m_epoch(epoch), m_interactions(interactions),
-    m_input(input), m_events(events) {}
+    m_input(input), m_recovery(recovery), m_actions(actions) {}
 
   InteractionResult OnSetCursorPos(
     const SourceKey& source, int32_t x, int32_t y) override
@@ -65,7 +66,7 @@ public:
     if (result != InteractionResult::ACCEPTED)
       return result;
     const InteractionResult applied =
-      m_events.OnSetCursorPos(stamped, x, y);
+      m_actions.OnSetCursorPos(stamped, x, y);
     if (applied == InteractionResult::ACCEPTED)
       m_input.CommitInteraction(stamped, permit);
     return applied;
@@ -83,17 +84,23 @@ public:
     if (result != InteractionResult::ACCEPTED)
       return result;
     const InteractionResult applied =
-      m_events.OnSetResolution(stamped, width, height);
+      m_actions.OnSetResolution(stamped, width, height);
     if (applied == InteractionResult::ACCEPTED)
       m_input.CommitInteraction(stamped, permit);
     return applied;
   }
 
-  void OnRecoveryRequest(const SourceKey& source,
+  RecoveryAdmission OnRecoveryRequest(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active) override
   {
-    m_events.OnRecoveryRequest(
-      Stamp(source), session, serial, active);
+    RecoveryAction action;
+    bool dispatch = false;
+    const RecoveryAdmission admission = m_recovery.Submit(
+      Stamp(source), session, serial, active, GetTickCount64(),
+      action, dispatch);
+    if (dispatch && !m_actions.OnRecoveryAction(action))
+      m_recovery.DispatchFailed(action, RPC_S_SERVER_UNAVAILABLE);
+    return admission;
   }
 };
 
@@ -212,12 +219,12 @@ bool CTransportManager::BeginCall(
 void CTransportManager::DrainRecovery(Entry& entry,
   const std::shared_ptr<ITransport>& transport)
 {
-  static const unsigned MAX_DRAIN = 8;
+  static const unsigned MAX_DRAIN = 17;
   for (unsigned i = 0; i < MAX_DRAIN; ++i)
   {
     bool sync = false;
-    bool update = false;
-    RecoveryUpdate recovery;
+    BackendId id = 0;
+    uint32_t epoch = 0;
     {
       CSRWExclusiveLock entryLock(entry.lock);
       if (entry.stopRequested || !transport ||
@@ -225,25 +232,28 @@ void CTransportManager::DrainRecovery(Entry& entry,
           (entry.state != State::INITIALIZED &&
            entry.state != State::READY))
       {
-        entry.syncPending     = false;
-        entry.recoveryPending = false;
+        entry.syncPending = false;
         return;
       }
 
-      sync                  = entry.syncPending;
-      update                = entry.recoveryPending;
-      recovery              = entry.recovery;
-      entry.syncPending     = false;
-      entry.recoveryPending = false;
+      id                = entry.id;
+      epoch             = entry.epoch;
+      sync              = entry.syncPending;
+      entry.syncPending = false;
     }
 
-    if (!sync && !update)
-      return;
     if (sync)
       transport->SyncRecovery();
-    if (update)
-      transport->RecoveryStatus(recovery.session, recovery.serial,
-        recovery.active, recovery.state, recovery.error);
+
+    CRecoveryHub::Delivery delivery;
+    if (!m_recovery.TakeDelivery(id, epoch, delivery))
+    {
+      if (!sync)
+        return;
+      continue;
+    }
+    transport->RecoveryStatus(delivery.source, delivery.session,
+      delivery.serial, delivery.active, delivery.state, delivery.error);
   }
 }
 
@@ -256,7 +266,7 @@ void CTransportManager::EndCall(Entry& entry,
       DrainRecovery(entry, transport);
 
     CSRWExclusiveLock entryLock(entry.lock);
-    if (drain && (entry.syncPending || entry.recoveryPending))
+    if (drain && entry.syncPending)
       continue;
 
     entry.call      = Call::IDLE;
@@ -264,6 +274,23 @@ void CTransportManager::EndCall(Entry& entry,
     SetEvent(entry.idleEvent);
     return;
   }
+}
+
+void CTransportManager::DetachRecovery(Entry& entry)
+{
+  BackendId id = 0;
+  uint32_t epoch = 0;
+  bool attached = false;
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    id                     = entry.id;
+    epoch                  = entry.epoch;
+    attached               = entry.recoveryAttached;
+    entry.recoveryAttached = false;
+    entry.syncPending      = false;
+  }
+  if (attached)
+    m_recovery.Remove(id, epoch);
 }
 
 bool CTransportManager::Add(TransportInstance config, bool primary,
@@ -356,6 +383,8 @@ ITransport::OpenResult CTransportManager::OpenEntry(Entry& entry)
 bool CTransportManager::InitializeEntry(Entry& entry)
 {
   std::shared_ptr<ITransport> transport;
+  BackendId id = 0;
+  uint32_t epoch = 0;
   uint32_t services = 0;
   bool required = false;
   {
@@ -365,6 +394,8 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     if (entry.state != State::OPEN)
       return false;
     transport = entry.transport;
+    id        = entry.id;
+    epoch     = entry.epoch;
     services  = entry.config.services;
     required  = entry.required;
   }
@@ -388,6 +419,13 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     }
   }
   const bool hasFrameCaps = frameCaps != nullptr;
+  bool syncNow = false;
+  if (!m_recovery.Attach(id, epoch, syncNow))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.state = State::FAILED;
+    return false;
+  }
   {
     CSRWExclusiveLock entryLock(entry.lock);
     // The first successfully initialized instance fixes the advertised
@@ -399,7 +437,17 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     // provide its other configured services, but must not receive frames.
     entry.frameAbsent = (services & TRANSPORT_SERVICE_FRAME) &&
       !hasFrameCaps;
-    entry.state = State::INITIALIZED;
+    entry.recoveryAttached = true;
+    entry.syncPending      = syncNow;
+    entry.state            = State::INITIALIZED;
+  }
+  // Monitor readiness may be published after Attach but before this entry is
+  // visible to SyncRecovery. Claim any synchronization missed in that gap.
+  if (m_recovery.ClaimSync(id, epoch))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    if (entry.id == id && entry.epoch == epoch && entry.recoveryAttached)
+      entry.syncPending = true;
   }
   return true;
 }
@@ -672,6 +720,7 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     transport = entry.transport;
   }
 
+  DetachRecovery(entry);
   RemoveServices(entry);
   if (transport)
     transport->Stop();
@@ -688,8 +737,6 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.inputAbsent   = false;
     entry.frameAbsent   = false;
     entry.serviceRetryAt = 0;
-    entry.recoveryPending = false;
-    entry.recovery        = RecoveryUpdate {};
     ++entry.epoch;
     if (!entry.epoch)
       ++entry.epoch;
@@ -729,6 +776,7 @@ void CTransportManager::HandleProcessResult(
     name     = entry.config.kind;
   }
 
+  DetachRecovery(entry);
   RemoveServices(entry);
   if (primary && exposed)
   {
@@ -947,7 +995,7 @@ bool CTransportManager::Setup(size_t alignment)
 }
 
 ITransport::ProcessResult CTransportManager::Process(
-  ITransportEvents& events)
+  ITransportActions& actions)
 {
   if (!BeginPhase(Phase::PROCESS, false))
   {
@@ -967,6 +1015,7 @@ ITransport::ProcessResult CTransportManager::Process(
   }
 
   const uint64_t now = GetTickCount64();
+  m_recovery.Tick(now);
   HandleServiceFailures();
   Entry * entries[FRAME_MAX_SINKS] = {};
   const unsigned count = Entries(entries);
@@ -1025,7 +1074,7 @@ ITransport::ProcessResult CTransportManager::Process(
     }
     DrainRecovery(entry, transport);
     CSourceEvents sourceEvents(
-      id, epoch, interactions, m_input, events);
+      id, epoch, interactions, m_input, m_recovery, actions);
     const ProcessResult result = transport->Process(sourceEvents);
     DrainRecovery(entry, transport);
     HandleProcessResult(entry, result);
@@ -1070,9 +1119,8 @@ void CTransportManager::Stop()
   for (unsigned i = 0; i < count; ++i)
   {
     CSRWExclusiveLock entryLock(entries[i]->lock);
-    entries[i]->stopRequested   = true;
-    entries[i]->syncPending     = false;
-    entries[i]->recoveryPending = false;
+    entries[i]->stopRequested = true;
+    entries[i]->syncPending   = false;
   }
 
   for (unsigned i = 0; i < count; ++i)
@@ -1112,7 +1160,10 @@ void CTransportManager::Stop()
   }
 
   for (unsigned i = count; i > 0; --i)
+  {
+    DetachRecovery(*entries[i - 1]);
     RemoveServices(*entries[i - 1]);
+  }
 
   m_input.Stop();
 
@@ -1155,6 +1206,8 @@ void CTransportManager::SyncRecovery()
       return;
   }
 
+  m_recovery.MarkMonitorReady();
+
   Entry * entries[FRAME_MAX_SINKS] = {};
   const unsigned count = Entries(entries);
   for (unsigned i = 0; i < count; ++i)
@@ -1165,7 +1218,11 @@ void CTransportManager::SyncRecovery()
     {
       CSRWExclusiveLock entryLock(entry.lock);
       if (entry.stopRequested || !entry.transport ||
+          !entry.recoveryAttached ||
           (entry.state != State::INITIALIZED && entry.state != State::READY))
+        continue;
+
+      if (!m_recovery.ClaimSync(entry.id, entry.epoch))
         continue;
 
       if (entry.call != Call::IDLE)
@@ -1187,53 +1244,16 @@ void CTransportManager::SyncRecovery()
   }
 }
 
-void CTransportManager::RecoveryStatus(const SourceKey& source,
-  uint64_t session, uint32_t serial, bool active,
+void CTransportManager::RecoveryStatus(uint64_t route, uint64_t session,
+  uint32_t serial, bool active,
   Recovery state, uint32_t error)
 {
-  {
-    CSRWSharedLock managerLock(m_lock);
-    if (m_stopping || m_stopped)
-      return;
-  }
-
-  Entry * entries[FRAME_MAX_SINKS] = {};
-  const unsigned count = Entries(entries);
-  for (unsigned i = 0; i < count; ++i)
-  {
-    Entry& entry = *entries[i];
-    std::shared_ptr<ITransport> transport;
-    bool call = false;
-    {
-      CSRWExclusiveLock entryLock(entry.lock);
-      if (entry.id != source.backend || entry.epoch != source.epoch ||
-          entry.stopRequested || !entry.transport ||
-          (entry.state != State::INITIALIZED && entry.state != State::READY))
-        continue;
-
-      if (entry.call != Call::IDLE)
-      {
-        entry.recovery.session = session;
-        entry.recovery.serial  = serial;
-        entry.recovery.active  = active;
-        entry.recovery.state   = state;
-        entry.recovery.error   = error;
-        entry.recoveryPending  = true;
-        continue;
-      }
-
-      entry.call      = Call::RECOVERY;
-      entry.callOwner = GetCurrentThreadId();
-      ResetEvent(entry.idleEvent);
-      transport = entry.transport;
-      call = true;
-    }
-
-    if (call)
-      transport->RecoveryStatus(session, serial, active, state, error);
-    EndCall(entry, transport);
-    return;
-  }
+  RecoveryAction action;
+  action.route   = route;
+  action.session = session;
+  action.serial  = serial;
+  action.active  = active;
+  m_recovery.Complete(action, state, error);
 }
 
 bool CTransportManager::CanUseMode(const FrameMode& mode,
