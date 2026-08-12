@@ -13,11 +13,11 @@ Right-click the helper and open the log directory. The files are stored in:
 
 Collect these files when reporting an IDD fault:
 
-* ``looking-glass-idd.txt`` -- display creation, GPU selection, modes,
+* ``looking-glass-idd.txt``: display creation, GPU selection, modes,
   transport and frame scheduling;
-* ``looking-glass-input.txt`` -- direct keyboard and mouse device activity;
-* ``looking-glass-idd-service.txt`` -- service and driver control requests;
-* ``looking-glass-idd-helper.txt`` -- configuration, topology and user
+* ``looking-glass-input.txt``: direct keyboard and mouse device activity;
+* ``looking-glass-idd-service.txt``: service and driver control requests; and
+* ``looking-glass-idd-helper.txt``: configuration, topology and user
   notifications.
 
 Each log rotates through suffixes ``.1`` to ``.4``. Include the current file

@@ -60,7 +60,7 @@ For a new installation, use:
 * the matching Looking Glass IDD in the Windows guest; and
 * SPICE only for the fallback or convenience services you need.
 
-Use matching Looking Glass releases for the current client, IDD and OBS plugin.
+Use matching Looking Glass releases for the current client, IDD, and OBS plugin.
 The shared-memory protocol changes between releases and incompatible components
 will not connect. Users of the legacy host application must use the complete
 matching B7 stack described below.

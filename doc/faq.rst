@@ -47,7 +47,7 @@ Is a passed-through GPU required?
 
 No. The IDD can create an SDR display using software processing when it cannot
 use a Windows render adapter. A hardware adapter is strongly recommended for
-lower latency, higher refresh rates, HDR and cadence scheduling.
+lower latency, higher refresh rates, HDR, and cadence scheduling.
 
 The Linux client still needs an EGL-capable host graphics driver. Direct
 DMA-BUF import depends on the host GPU and driver; the client falls back to a
