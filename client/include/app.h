@@ -30,6 +30,13 @@
 #include "interface/displayserver.h"
 #include "interface/overlay.h"
 
+enum RunState
+{
+  APP_STATE_RUNNING,
+  APP_STATE_RESTART,
+  APP_STATE_SHUTDOWN
+};
+
 typedef enum LG_MsgAlert
 {
   LG_ALERT_INFO   ,
@@ -53,6 +60,9 @@ typedef struct LG_MouseState
 LG_MouseState;
 
 bool app_isRunning(void);
+enum RunState app_getState(void);
+void app_setState(enum RunState state);
+bool app_transitionState(enum RunState from, enum RunState to);
 bool app_inputEnabled(void);
 bool app_isCaptureMode(void);
 bool app_isCaptureOnlyMode(void);

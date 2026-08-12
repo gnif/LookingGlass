@@ -164,6 +164,16 @@ static void notifyDisconnected(
   LG_UNLOCK(fallback->eventLock);
 }
 
+static void notifyLost(LG_TransportFallback * fallback, bool requested)
+{
+  if (!requested || !fallback->eventOps.lost)
+    return;
+
+  LG_LOCK(fallback->eventLock);
+  fallback->eventOps.lost(fallback->eventOpaque);
+  LG_UNLOCK(fallback->eventLock);
+}
+
 static void unpublishProviders(LG_TransportFallback * fallback, bool live)
 {
   LG_LOCK(fallback->providerLock);
@@ -420,9 +430,12 @@ static bool connectFallback(LG_TransportFallback * fallback)
 
   notifyConnected(fallback);
 
+  bool lost = false;
   while (!atomic_load_explicit(&fallback->stop, memory_order_acquire))
   {
     lgWaitEvent(fallback->wakeEvent, SESSION_POLL_MS);
+    if (atomic_load_explicit(&fallback->stop, memory_order_acquire))
+      break;
     applyVideoRequest(fallback);
 
     LG_LOCK_EXCLUSIVE(fallback->lock);
@@ -436,16 +449,21 @@ static bool connectFallback(LG_TransportFallback * fallback)
     if (reject || !admitted || closing)
       break;
     if (!sessionLive(fallback))
+    {
+      lost = !atomic_load_explicit(
+          &fallback->stop, memory_order_acquire);
       break;
+    }
   }
 
-  const bool knownDead = !atomic_load_explicit(
-      &fallback->stop, memory_order_acquire) && !sessionLive(fallback);
-  const bool reportDisconnect = cleanupConnection(fallback, knownDead);
+  const bool reportDisconnect = cleanupConnection(fallback, lost);
 
   if (reportMismatch && fallback->eventOps.uuidMismatch)
     fallback->eventOps.uuidMismatch(
         fallback->eventOpaque, primaryUUID, fallbackUUID);
+  const bool reportLost = lost && reportDisconnect && !atomic_load_explicit(
+      &fallback->stop, memory_order_acquire);
+  notifyLost(fallback, reportLost);
   notifyDisconnected(fallback, reportDisconnect);
   return true;
 }

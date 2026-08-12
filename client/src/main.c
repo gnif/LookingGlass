@@ -81,12 +81,18 @@ _Static_assert((int)LG_CAPTURE_RGBA32F == (int)LG_TEST_CAPTURE_RGBA32F,
     "capture format mismatch");
 #endif
 
+#define TRANSPORT_LOST_PRIMARY  (1U << 0)
+#define TRANSPORT_LOST_FALLBACK (1U << 1)
+#define TRANSPORT_LOST_ALL \
+  (TRANSPORT_LOST_PRIMARY | TRANSPORT_LOST_FALLBACK)
+
 // forwards
 static int renderThread(void * unused);
 static RenderQueueSource renderQueueSource(LG_VideoSource source);
 static bool videoSourceInvalidate(LG_VideoSource source);
 static void videoSourceShowSplashIfNeeded(void);
 static bool fallbackRequestVideo(void);
+static void primaryLost(void);
 
 static LGEvent  *e_startup       = NULL;
 static LGEvent  *e_cursorRepaint = NULL;
@@ -1148,11 +1154,13 @@ int main_cursorThread(void * unused)
         lgInput_dropTransport();
         lgAudio_dropTransport();
         lgClipboard_dropTransport();
+        primaryLost();
       }
-      app_setState(status == LG_TRANSPORT_DISCONNECTED ?
-        APP_STATE_RESTART : APP_STATE_SHUTDOWN);
-      if (status != LG_TRANSPORT_DISCONNECTED)
+      else
+      {
         DEBUG_ERROR("Pointer transport failed with status %d", status);
+        app_setState(APP_STATE_SHUTDOWN);
+      }
       break;
     }
 
@@ -1334,7 +1342,7 @@ int main_frameThread(void * unused)
         lgInput_dropTransport();
         lgAudio_dropTransport();
         lgClipboard_dropTransport();
-        app_setState(APP_STATE_RESTART);
+        primaryLost();
       }
       else if (status == LG_TRANSPORT_END)
         app_setState(APP_STATE_SHUTDOWN);
@@ -2196,6 +2204,8 @@ static void fallbackConnected(void * opaque,
     const LG_TransportSession * session)
 {
   (void)opaque;
+  atomic_fetch_and_explicit(&g_state.transportLost,
+      ~TRANSPORT_LOST_FALLBACK, memory_order_acq_rel);
   if (app_getState() == APP_STATE_SHUTDOWN)
     return;
 
@@ -2219,6 +2229,19 @@ static void fallbackDisconnected(void * opaque)
     videoSourceShowSplashIfNeeded();
 }
 
+static void fallbackLost(void * opaque)
+{
+  (void)opaque;
+  const unsigned int lost = atomic_fetch_or_explicit(&g_state.transportLost,
+      TRANSPORT_LOST_FALLBACK, memory_order_acq_rel) |
+    TRANSPORT_LOST_FALLBACK;
+  if ((lost & TRANSPORT_LOST_ALL) == TRANSPORT_LOST_ALL)
+  {
+    DEBUG_INFO("Primary and fallback transport sessions disconnected");
+    app_setState(APP_STATE_SHUTDOWN);
+  }
+}
+
 static void fallbackUUIDMismatch(void * opaque, const uint8_t primary[16],
     const uint8_t fallback[16])
 {
@@ -2233,9 +2256,39 @@ static void fallbackUUIDMismatch(void * opaque, const uint8_t primary[16],
 static const LG_TransportFallbackEventOps fallbackEvents =
 {
   .connected    = fallbackConnected,
+  .lost         = fallbackLost,
   .disconnected = fallbackDisconnected,
   .uuidMismatch = fallbackUUIDMismatch,
 };
+
+static void primaryLost(void)
+{
+  atomic_store_explicit(
+      &g_state.lgHostConnected, false, memory_order_release);
+  unsigned int lost = atomic_load_explicit(
+      &g_state.transportLost, memory_order_acquire);
+  for (;;)
+  {
+    unsigned int next = lost | TRANSPORT_LOST_PRIMARY;
+    if (lgTransportFallback_ready(g_state.fallback))
+      next &= ~TRANSPORT_LOST_FALLBACK;
+    if (atomic_compare_exchange_weak_explicit(&g_state.transportLost,
+          &lost, next, memory_order_acq_rel, memory_order_acquire))
+    {
+      lost = next;
+      break;
+    }
+  }
+  if ((lost & TRANSPORT_LOST_ALL) == TRANSPORT_LOST_ALL)
+  {
+    DEBUG_INFO("Primary and fallback transport sessions disconnected");
+    app_setState(APP_STATE_SHUTDOWN);
+    return;
+  }
+
+  DEBUG_INFO("Waiting for the host to restart...");
+  app_setState(APP_STATE_RESTART);
+}
 
 static bool fallbackStart(const uint8_t primaryUUID[16])
 {
@@ -3268,6 +3321,8 @@ restart:
     if (probe.status == LG_TRANSPORT_OK)
     {
       session = probe.session;
+      atomic_fetch_and_explicit(&g_state.transportLost,
+          ~TRANSPORT_LOST_PRIMARY, memory_order_acq_rel);
       initialFallbackEnable = 0;
       break;
     }
@@ -3454,10 +3509,7 @@ restart:
       lgInput_dropTransport();
       lgAudio_dropTransport();
       lgClipboard_dropTransport();
-      atomic_store_explicit(
-          &g_state.lgHostConnected, false, memory_order_release);
-      DEBUG_INFO("Waiting for the host to restart...");
-      app_setState(APP_STATE_RESTART);
+      primaryLost();
       break;
     }
     lgMessage_process();
@@ -3491,9 +3543,11 @@ restart:
     lgClipboard_dropTransport();
     g_state.transport.ops->disconnect(g_state.transport.handle);
 
-    app_setState(APP_STATE_RUNNING);
-    lgInit();
-    goto restart;
+    if (app_transitionState(APP_STATE_RESTART, APP_STATE_RUNNING))
+    {
+      lgInit();
+      goto restart;
+    }
   }
 
   return recoveryExit(&recoveryPrompt, 0);

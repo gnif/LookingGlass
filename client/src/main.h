@@ -34,15 +34,9 @@
 #include "common/ll.h"
 
 #include "cimgui.h"
+#include "app.h"
 #include "interface/transport.h"
 #include "transport_fallback.h"
-
-enum RunState
-{
-  APP_STATE_RUNNING,
-  APP_STATE_RESTART,
-  APP_STATE_SHUTDOWN
-};
 
 enum MicDefaultState {
   MIC_DEFAULT_PROMPT,
@@ -112,6 +106,7 @@ struct AppState
   bool                      videoGeometryDirty;
 
   atomic_bool fallbackUUIDMismatch;
+  atomic_uint transportLost;
 
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
@@ -358,18 +353,6 @@ struct CursorState
 extern struct AppState    g_state;
 extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
-
-static inline enum RunState app_getState(void)
-{
-  extern _Atomic(enum RunState) p_appState;
-  return atomic_load_explicit(&p_appState, memory_order_acquire);
-}
-
-static inline void app_setState(enum RunState state)
-{
-  extern _Atomic(enum RunState) p_appState;
-  atomic_store_explicit(&p_appState, state, memory_order_release);
-}
 
 int main_cursorThread(void * unused);
 int main_frameThread(void * unused);

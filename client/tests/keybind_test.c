@@ -81,6 +81,16 @@ struct CursorState g_cursor;
 struct AppParams   g_params;
 _Atomic(enum RunState) p_appState;
 
+enum RunState app_getState(void)
+{
+  return atomic_load(&p_appState);
+}
+
+void app_setState(enum RunState state)
+{
+  atomic_store(&p_appState, state);
+}
+
 static const int fKeys[] =
 {
   KEY_F1 , KEY_F2 , KEY_F3 , KEY_F4,

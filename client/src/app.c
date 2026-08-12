@@ -57,6 +57,37 @@
   } \
   while (0)
 
+extern _Atomic(enum RunState) p_appState;
+
+enum RunState app_getState(void)
+{
+  return atomic_load_explicit(&p_appState, memory_order_acquire);
+}
+
+void app_setState(enum RunState state)
+{
+  if (state == APP_STATE_SHUTDOWN)
+  {
+    atomic_store_explicit(&p_appState, state, memory_order_release);
+    return;
+  }
+
+  enum RunState current = atomic_load_explicit(
+      &p_appState, memory_order_acquire);
+  while (current != APP_STATE_SHUTDOWN &&
+      !atomic_compare_exchange_weak_explicit(&p_appState, &current, state,
+        memory_order_acq_rel, memory_order_acquire));
+}
+
+bool app_transitionState(enum RunState from, enum RunState to)
+{
+  if (from == APP_STATE_SHUTDOWN)
+    return false;
+
+  return atomic_compare_exchange_strong_explicit(
+      &p_appState, &from, to, memory_order_acq_rel, memory_order_acquire);
+}
+
 bool app_isRunning(void)
 {
   const enum RunState state = app_getState();

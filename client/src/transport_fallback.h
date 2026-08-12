@@ -32,6 +32,8 @@ typedef struct LG_TransportFallbackEventOps
 {
   /* The session is valid only for the duration of this callback. */
   void (*connected)(void * opaque, const LG_TransportSession * session);
+  /* Called only when an admitted session is unexpectedly lost. */
+  void (*lost)(void * opaque);
   void (*disconnected)(void * opaque);
   void (*uuidMismatch)(void * opaque, const uint8_t primary[16],
       const uint8_t fallback[16]);
