@@ -26,6 +26,7 @@
 #include "common/KVMFRRecovery.h"
 #include "common/LGMPConfig.h"
 #include "common/debug.h"
+#include "common/event.h"
 #include "common/ivshmem.h"
 #include "common/locking.h"
 #include "common/option.h"
@@ -78,6 +79,8 @@ struct LG_Transport
   LGMPInput        * input;
   LG_Lock           frameLock;
   LG_Lock           pointerLock;
+  LGEvent         * frameWake;
+  LGEvent         * pointerWake;
 
   unsigned cursorPollInterval;
   unsigned framePollInterval;
@@ -345,6 +348,18 @@ static bool lgmp_create(LG_Transport ** result)
   this->framePollInterval  = framePoll;
   this->cursorPollInterval = cursorPoll;
 
+  this->frameWake   = lgCreateEvent(true, 0);
+  this->pointerWake = lgCreateEvent(true, 0);
+  if (!this->frameWake || !this->pointerWake)
+  {
+    if (this->frameWake)
+      lgFreeEvent(this->frameWake);
+    if (this->pointerWake)
+      lgFreeEvent(this->pointerWake);
+    free(this);
+    return false;
+  }
+
   for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     this->dma[i].fd = -1;
 
@@ -363,6 +378,8 @@ static bool lgmp_create(LG_Transport ** result)
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
     LG_LOCK_FREE(this->recoveryLock);
+    lgFreeEvent(this->frameWake);
+    lgFreeEvent(this->pointerWake);
     free(this);
     return false;
   }
@@ -399,6 +416,8 @@ static bool lgmp_create(LG_Transport ** result)
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
     LG_LOCK_FREE(this->recoveryLock);
+    lgFreeEvent(this->frameWake);
+    lgFreeEvent(this->pointerWake);
     free(this);
     return false;
   }
@@ -540,6 +559,8 @@ static void lgmp_destroy(LG_Transport ** transport)
   LG_LOCK_FREE(this->frameLock);
   LG_LOCK_FREE(this->pointerLock);
   LG_LOCK_FREE(this->recoveryLock);
+  lgFreeEvent(this->frameWake);
+  lgFreeEvent(this->pointerWake);
   free(this);
   *transport = NULL;
 }
@@ -1087,8 +1108,25 @@ static LG_TransportStatus lgmp_subscribe(PLGMPClient client, uint32_t id,
   }
 }
 
+static void lgmp_waitPoll(LGEvent * event, unsigned interval)
+{
+  if (!interval)
+    return;
+
+  const uint64_t timeout = (uint64_t)interval * 1000U;
+  if (timeout < TIMEOUT_INFINITE)
+  {
+    lgWaitEventNS(event, (unsigned)timeout);
+    return;
+  }
+
+  const unsigned timeoutMS = interval / 1000U +
+    (interval % 1000U != 0);
+  lgWaitEvent(event, timeoutMS);
+}
+
 static LG_TransportStatus lgmp_process(PLGMPClientQueue * subscription,
-    unsigned interval, LGMPMessage * message)
+    unsigned interval, LGEvent * wake, LGMPMessage * message)
 {
   PLGMPClientQueue queue = *subscription;
   if (!queue)
@@ -1101,7 +1139,7 @@ static LG_TransportStatus lgmp_process(PLGMPClientQueue * subscription,
       return LG_TRANSPORT_OK;
     case LGMP_ERR_QUEUE_EMPTY:
       if (interval)
-        usleep(interval);
+        lgmp_waitPoll(wake, interval);
       return LG_TRANSPORT_TIMEOUT;
     case LGMP_ERR_QUEUE_TIMEOUT:
     case LGMP_ERR_QUEUE_UNSUBSCRIBED:
@@ -1154,7 +1192,7 @@ static LG_TransportStatus lgmp_pollFrameQueue(
   }
 
   const LG_TransportStatus status =
-    lgmp_process(subscription, 0, &result->message);
+    lgmp_process(subscription, 0, NULL, &result->message);
   if (status == LG_TRANSPORT_OK)
   {
     result->queue = queue;
@@ -1581,8 +1619,13 @@ static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
   LG_UNLOCK(this->frameLock);
   if ((status == LG_TRANSPORT_TIMEOUT ||
        status == LG_TRANSPORT_UNAVAILABLE) && this->framePollInterval)
-    usleep(this->framePollInterval);
+    lgmp_waitPoll(this->frameWake, this->framePollInterval);
   return status;
+}
+
+static void lgmp_cancelFrameWait(LG_Transport * this)
+{
+  lgSignalEvent(this->frameWake);
 }
 
 static bool lgmp_frameTimingReady(const KVMFRFrame * frame)
@@ -1693,13 +1736,13 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   pointerQueue = this->pointerQueue;
   LG_UNLOCK(this->pointerLock);
   if (status == LG_TRANSPORT_TIMEOUT)
-    usleep(1000);
+    lgmp_waitPoll(this->pointerWake, 1000);
   if (status == LG_TRANSPORT_OK)
   {
     LGMPMessage message;
     PLGMPClientQueue processedQueue = pointerQueue;
     status = lgmp_process(&processedQueue, this->cursorPollInterval,
-        &message);
+        this->pointerWake, &message);
     if (!processedQueue)
       lgmp_clearPointerQueue(this, pointerQueue);
     if (status == LG_TRANSPORT_OK)
@@ -1783,6 +1826,11 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
     result->colorTransform = (const LGColorTransform *)(result->shape +
         shapeSize);
   return LG_TRANSPORT_OK;
+}
+
+static void lgmp_cancelPointerWait(LG_Transport * this)
+{
+  lgSignalEvent(this->pointerWake);
 }
 
 static void lgmp_releasePointer(LG_Transport * this,
@@ -1895,16 +1943,18 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
 
 static const LG_FrameOps lgmpFrameOps =
 {
-  .supportsDMA    = lgmp_supportsDMA,
-  .attachRenderer = lgmp_attachRenderer,
-  .detachRenderer = lgmp_detachRenderer,
-  .nextFrame      = lgmp_nextFrame,
-  .getFrameTiming = lgmp_getFrameTiming,
-  .releaseFrame   = lgmp_releaseFrame,
-  .stopFrame      = lgmp_stopFrame,
-  .nextPointer    = lgmp_nextPointer,
-  .releasePointer = lgmp_releasePointer,
-  .stopPointer    = lgmp_stopPointer,
+  .supportsDMA       = lgmp_supportsDMA,
+  .attachRenderer    = lgmp_attachRenderer,
+  .detachRenderer    = lgmp_detachRenderer,
+  .nextFrame         = lgmp_nextFrame,
+  .getFrameTiming    = lgmp_getFrameTiming,
+  .releaseFrame      = lgmp_releaseFrame,
+  .cancelFrameWait   = lgmp_cancelFrameWait,
+  .stopFrame         = lgmp_stopFrame,
+  .nextPointer       = lgmp_nextPointer,
+  .releasePointer    = lgmp_releasePointer,
+  .cancelPointerWait = lgmp_cancelPointerWait,
+  .stopPointer       = lgmp_stopPointer,
 };
 
 static const LG_VideoOps lgmpVideoOps =

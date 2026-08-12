@@ -114,7 +114,8 @@ struct AppState
 
   atomic_bool lgHostConnected;
 
-  bool                 stopVideo;
+  atomic_bool          stopVideo;
+  atomic_bool          stopVideoThreads;
   bool                 ignoreInput;
   bool                 escapeActive;
   uint64_t             escapeTime;

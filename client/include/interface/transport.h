@@ -327,6 +327,9 @@ typedef struct LG_FrameOps
   void (*getFrameTiming)(LG_Transport * transport,
       const LG_TransportFrame * frame, LG_TransportFrameTiming * timing);
   void (*releaseFrame)(LG_Transport * transport, LG_TransportFrame * frame);
+  /* Optional, thread-safe cancellation of a blocking nextFrame call. This
+   * does not release a frame already returned to the consumer. */
+  void (*cancelFrameWait)(LG_Transport * transport);
   /* Called by the frame consumer as it exits. A backend may release transient
    * stream resources; nextFrame must reacquire them when the consumer
    * restarts. */
@@ -336,6 +339,8 @@ typedef struct LG_FrameOps
       LG_TransportPointer * pointer);
   void (*releasePointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
+  /* Optional, thread-safe cancellation of a blocking nextPointer call. */
+  void (*cancelPointerWait)(LG_Transport * transport);
   /* Called by the pointer consumer as it exits. A backend may release
    * transient stream resources; nextPointer must reacquire them when the
    * consumer restarts. */

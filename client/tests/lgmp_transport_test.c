@@ -28,6 +28,7 @@
 #include <lgmp/host.h>
 
 #include <fcntl.h>
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -67,6 +68,77 @@ static bool waitForQueuesEmpty(PLGMPHost host, PLGMPHostQueue frameQueue,
   }
 
   return false;
+}
+
+struct WaitState
+{
+  LG_Transport      * transport;
+  const LG_FrameOps * ops;
+  LG_TransportStatus  status;
+  bool                frame;
+};
+
+static void * waitForVideo(void * opaque)
+{
+  struct WaitState * state = opaque;
+  if (state->frame)
+  {
+    LG_TransportFrame frame;
+    state->status = state->ops->nextFrame(
+        state->transport, false, &frame);
+  }
+  else
+  {
+    LG_TransportPointer pointer;
+    state->status = state->ops->nextPointer(state->transport, &pointer);
+  }
+  return NULL;
+}
+
+static bool checkWaitCancellation(LG_Transport * transport,
+    const LG_FrameOps * ops, PLGMPHostQueue frameQueue,
+    PLGMPHostQueue pointerQueue)
+{
+  struct WaitState frame = {
+    .transport = transport,
+    .ops       = ops,
+    .status    = LG_TRANSPORT_ERROR,
+    .frame     = true,
+  };
+  struct WaitState pointer = {
+    .transport = transport,
+    .ops       = ops,
+    .status    = LG_TRANSPORT_ERROR,
+  };
+  pthread_t frameThread;
+  pthread_t pointerThread;
+  if (pthread_create(&frameThread, NULL, waitForVideo, &frame) != 0)
+    return false;
+  if (pthread_create(&pointerThread, NULL, waitForVideo, &pointer) != 0)
+  {
+    ops->cancelFrameWait(transport);
+    pthread_join(frameThread, NULL);
+    return false;
+  }
+
+  bool subscribed = false;
+  for (unsigned i = 0; i < WAIT_TIMEOUT; ++i)
+  {
+    if (lgmpHostQueueHasSubs(frameQueue) &&
+        lgmpHostQueueHasSubs(pointerQueue))
+    {
+      subscribed = true;
+      break;
+    }
+    usleep(1000);
+  }
+  ops->cancelFrameWait(transport);
+  ops->cancelPointerWait(transport);
+  const int frameJoin   = pthread_join(frameThread, NULL);
+  const int pointerJoin = pthread_join(pointerThread, NULL);
+  return subscribed && frameJoin == 0 && pointerJoin == 0 &&
+    frame.status == LG_TRANSPORT_TIMEOUT &&
+    pointer.status == LG_TRANSPORT_TIMEOUT;
 }
 
 int main(void)
@@ -153,14 +225,16 @@ int main(void)
   LGT_LGMP.setup();
   option_set_string("lgmp", "shmDevice", path);
   option_set_bool("lgmp", "allowDMA", false);
-  option_set_int("lgmp", "framePollInterval", 0);
-  option_set_int("lgmp", "cursorPollInterval", 0);
+  option_set_int("lgmp", "framePollInterval", 5000000);
+  option_set_int("lgmp", "cursorPollInterval", 5000000);
   CHECK(LGT_LGMP.create(&transport));
   const LG_VideoOps * videoOps = LGT_LGMP.getVideoOps(transport);
   CHECK(videoOps);
   CHECK(videoOps->type == LG_VIDEO_TYPE_FRAME);
   CHECK(videoOps->frame);
   frameOps = videoOps->frame;
+  CHECK(frameOps->cancelFrameWait);
+  CHECK(frameOps->cancelPointerWait);
 
   CHECK(unlink(path) == 0);
   pathExists = false;
@@ -173,8 +247,8 @@ int main(void)
 
   LG_TransportFrame frame;
   LG_TransportPointer pointer;
-  CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
-  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
+  CHECK(checkWaitCancellation(
+        transport, frameOps, frameQueue, pointerQueue));
   CHECK(lgmpHostQueueHasSubs(frameQueue));
   CHECK(lgmpHostQueueHasSubs(pointerQueue));
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
@@ -212,7 +286,9 @@ int main(void)
   CHECK(lgmpHostQueuePending(frameQueue) == 0);
   CHECK(lgmpHostQueuePending(pointerQueue) == 0);
 
+  frameOps->cancelFrameWait(transport);
   CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
+  frameOps->cancelPointerWait(transport);
   CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
   CHECK(lgmpHostQueueNewSubs(pointerQueue) == 1);
@@ -242,7 +318,9 @@ int main(void)
 
   frameOps->stopFrame(transport);
   frameOps->stopPointer(transport);
+  frameOps->cancelFrameWait(transport);
   CHECK(frameOps->nextFrame(transport, false, &frame) == LG_TRANSPORT_TIMEOUT);
+  frameOps->cancelPointerWait(transport);
   CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_TIMEOUT);
   CHECK(lgmpHostQueueNewSubs(frameQueue) == 1);
   CHECK(lgmpHostQueueNewSubs(pointerQueue) == 1);

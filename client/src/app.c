@@ -1187,14 +1187,14 @@ bool app_guestIsOther(void)
 
 void app_stopVideo(bool stop)
 {
-  if (g_state.stopVideo == stop)
+  if (atomic_load_explicit(&g_state.stopVideo, memory_order_acquire) == stop)
     return;
 
   // do not change the state if the host app is not connected
   if (!atomic_load_explicit(&g_state.lgHostConnected, memory_order_acquire))
     return;
 
-  g_state.stopVideo = stop;
+  atomic_store_explicit(&g_state.stopVideo, stop, memory_order_release);
 
   app_alert(
     LG_ALERT_INFO,
@@ -1204,10 +1204,7 @@ void app_stopVideo(bool stop)
   if (stop)
   {
     if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
-    {
-      core_stopCursorThread();
-      core_stopFrameThread();
-    }
+      core_stopVideoThreads();
     else
       g_state.videoOps->swSurface->setActive(
           g_state.transport.handle, false);
@@ -1216,8 +1213,12 @@ void app_stopVideo(bool stop)
   {
     if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
     {
-      core_startCursorThread();
-      core_startFrameThread();
+      if (!core_startVideoThreads())
+      {
+        atomic_store_explicit(
+            &g_state.stopVideo, true, memory_order_release);
+        app_alert(LG_ALERT_ERROR, "Failed to enable the video stream");
+      }
     }
     else
     {

@@ -621,52 +621,57 @@ bool core_isValidPointerPos(int x, int y)
   return g_state.ds->isValidPointerPos(x, y);
 }
 
-bool core_startCursorThread(void)
+static void cancelVideoWaits(void)
 {
-  if (g_state.cursorThread)
-    return true;
+  if (!g_state.videoOps || g_state.videoOps->type != LG_VIDEO_TYPE_FRAME)
+    return;
 
-  g_state.stopVideo = false;
+  const LG_FrameOps * ops = g_state.videoOps->frame;
+  if (g_state.frameThread && ops->cancelFrameWait)
+    ops->cancelFrameWait(g_state.transport.handle);
+  if (g_state.cursorThread && ops->cancelPointerWait)
+    ops->cancelPointerWait(g_state.transport.handle);
+}
+
+void core_stopVideoThreads(void)
+{
+  atomic_store_explicit(
+      &g_state.stopVideoThreads, true, memory_order_release);
+  cancelVideoWaits();
+
+  if (g_state.frameThread)
+    lgJoinThread(g_state.frameThread, NULL);
+  if (g_state.cursorThread)
+    lgJoinThread(g_state.cursorThread, NULL);
+
+  g_state.frameThread  = NULL;
+  g_state.cursorThread = NULL;
+}
+
+bool core_startVideoThreads(void)
+{
+  if (g_state.frameThread && g_state.cursorThread)
+    return true;
+  if (g_state.frameThread || g_state.cursorThread)
+    core_stopVideoThreads();
+
+  atomic_store_explicit(
+      &g_state.stopVideoThreads, false, memory_order_release);
   if (!lgCreateThread("cursorThread", main_cursorThread, NULL,
         &g_state.cursorThread))
   {
     DEBUG_ERROR("cursor create thread failed");
     return false;
   }
-  return true;
-}
 
-void core_stopCursorThread(void)
-{
-  g_state.stopVideo = true;
-  if (g_state.cursorThread)
-    lgJoinThread(g_state.cursorThread, NULL);
-
-  g_state.cursorThread = NULL;
-}
-
-bool core_startFrameThread(void)
-{
-  if (g_state.frameThread)
-    return true;
-
-  g_state.stopVideo = false;
   if (!lgCreateThread("frameThread", main_frameThread, NULL,
         &g_state.frameThread))
   {
     DEBUG_ERROR("frame create thread failed");
+    core_stopVideoThreads();
     return false;
   }
   return true;
-}
-
-void core_stopFrameThread(void)
-{
-  g_state.stopVideo = true;
-  if (g_state.frameThread)
-    lgJoinThread(g_state.frameThread, NULL);
-
-  g_state.frameThread = NULL;
 }
 
 void core_handleGuestMouseUpdate(void)
@@ -932,7 +937,7 @@ void core_handleMouseNormal(double ex, double ey)
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
 
-    if (!g_state.stopVideo &&
+    if (!atomic_load_explicit(&g_state.stopVideo, memory_order_acquire) &&
       g_state.transportFeatures & LG_TRANSPORT_FEATURE_SET_CURSOR_POS)
     {
       const LG_TransportControl control = {

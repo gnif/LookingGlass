@@ -37,7 +37,8 @@ static void bind_fullscreen(int sc, void * opaque)
 
 static void bind_video(int sc, void * opaque)
 {
-  app_stopVideo(!g_state.stopVideo);
+  app_stopVideo(!atomic_load_explicit(
+        &g_state.stopVideo, memory_order_acquire));
 }
 
 static void bind_rotate(int sc, void * opaque)

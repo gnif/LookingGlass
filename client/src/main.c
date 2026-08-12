@@ -1101,8 +1101,7 @@ static int renderThread(void * unused)
     lgClipboard_dropTransport();
   }
 
-  core_stopCursorThread();
-  core_stopFrameThread();
+  core_stopVideoThreads();
 
   if (g_state.videoOps && g_state.videoOps->type == LG_VIDEO_TYPE_FRAME &&
       g_state.videoOps->frame->detachRenderer)
@@ -1135,7 +1134,9 @@ int main_cursorThread(void * unused)
   lgWaitEvent(e_startup, TIMEOUT_INFINITE);
 
   // subscribe to the pointer queue
-  while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
+  while(app_getState() == APP_STATE_RUNNING &&
+      !atomic_load_explicit(
+        &g_state.stopVideoThreads, memory_order_acquire))
   {
     LG_TransportPointer pointer;
     const LG_TransportStatus status = g_state.videoOps->frame->nextPointer(
@@ -1144,7 +1145,9 @@ int main_cursorThread(void * unused)
     {
       if (status == LG_TRANSPORT_TIMEOUT || status == LG_TRANSPORT_UNAVAILABLE)
       {
-        if (!g_state.stopVideo && queueCursorRedraw())
+        if (!atomic_load_explicit(
+              &g_state.stopVideoThreads, memory_order_acquire) &&
+            queueCursorRedraw())
           cursorRepaintRequest();
         continue;
       }
@@ -1288,7 +1291,8 @@ int main_cursorThread(void * unused)
     const bool contentChanged =
       (pointer.flags & (LG_TRANSPORT_POINTER_SHAPE |
         LG_TRANSPORT_POINTER_COLOR_TRANSFORM)) || whiteLevelChanged;
-    if (sourceApplied && !g_state.stopVideo &&
+    if (sourceApplied &&
+        !atomic_load_explicit(&g_state.stopVideo, memory_order_acquire) &&
         (wasRendered != isRendered ||
          ((wasRendered || isRendered) &&
           (g_params.mouseRedraw || contentChanged))))
@@ -1324,7 +1328,9 @@ int main_frameThread(void * unused)
     return 0;
   }
 
-  while(app_getState() == APP_STATE_RUNNING && !g_state.stopVideo)
+  while(app_getState() == APP_STATE_RUNNING &&
+      !atomic_load_explicit(
+        &g_state.stopVideoThreads, memory_order_acquire))
   {
     LG_TransportFrame frame;
     const LG_TransportStatus status = g_state.videoOps->frame->nextFrame(
@@ -3485,7 +3491,8 @@ restart:
   if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
   {
     videoSourceBegin(LG_VIDEO_SOURCE_PRIMARY);
-    if (!core_startCursorThread() || !core_startFrameThread())
+    if (!atomic_load_explicit(&g_state.stopVideo, memory_order_acquire) &&
+        !core_startVideoThreads())
       return recoveryExit(&recoveryPrompt, -1);
   }
   else
@@ -3529,10 +3536,7 @@ restart:
     lgSignalEvent(g_state.frameEvent);
 
     if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
-    {
-      core_stopFrameThread();
-      core_stopCursorThread();
-    }
+      core_stopVideoThreads();
     else
       g_state.videoOps->swSurface->setActive(
           g_state.transport.handle, false);
