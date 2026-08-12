@@ -23,7 +23,7 @@
 #include "CSRWLock.h"
 
 #include "transport/lgmp/CLGMPHost.h"
-#include "transport/IControlTransport.h"
+#include "transport/IControlSink.h"
 
 #include "common/KVMFR.h"
 
@@ -35,7 +35,7 @@
 
 class CLGMPTransport;
 
-class CLGMPControl final : public IControlTransport
+class CLGMPControl final : public IControlSink
 {
 private:
   friend class CLGMPTransport;
@@ -49,26 +49,25 @@ private:
   PLGMPMemory    m_pointerMemory[LGMP_Q_POINTER_LEN] = {};
   PLGMPMemory    m_pointerShapeMemory[POINTER_SHAPE_BUFFERS] = {};
   PLGMPMemory    m_pointerTransformMemory[COLOR_TRANSFORM_BUFFERS] = {};
-  PLGMPMemory    m_pointerShape = nullptr;
   int  m_pointerMemoryIndex    = 0;
   int  m_pointerShapeIndex     = 0;
   int  m_pointerTransformIndex = 0;
-  bool m_cursorVisible         = false;
-  int  m_cursorX               = 0;
-  int  m_cursorY               = 0;
 
-  mutable CSRWLock                        m_colorTransformLock;
-  std::shared_ptr<const D12ColorTransform> m_colorTransform;
+  mutable CSRWLock m_eventLock;
+  IControlEvents * m_events = nullptr;
+  ControlToken     m_token  = {};
 
-  void SendColorTransform();
-  void ResendCursor();
+  PLGMPMemory FindAvailable(
+    PLGMPMemory * memory, int count, int& index) const;
+  ControlResult SendColorTransform(
+    const std::shared_ptr<const D12ColorTransform>& transform);
   bool Initialize();
   void DeInit();
   LGMP_STATUS ReadDataWithSource(void * data, size_t * size,
     uint32_t * sourceClientID);
   LGMP_STATUS AckData();
   bool HasNewSubscribers();
-  void ResendState();
+  void RequestReplay();
 
 public:
   explicit CLGMPControl(CLGMPHost& host) :
@@ -78,10 +77,10 @@ public:
   CLGMPControl(const CLGMPControl&) = delete;
   CLGMPControl& operator=(const CLGMPControl&) = delete;
 
-  void SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info, const BYTE * data,
-    UINT sdrWhiteLevel) override;
-  void SetColorTransform(
+  void SetControlEvents(
+    IControlEvents * events, const ControlToken& token) override;
+  ControlResult SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
+    const BYTE * data, size_t size, UINT sdrWhiteLevel) override;
+  ControlResult SetColorTransform(
     std::shared_ptr<const D12ColorTransform> transform) override;
-  std::shared_ptr<const D12ColorTransform>
-    GetColorTransform() const override;
 };

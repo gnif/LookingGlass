@@ -20,8 +20,10 @@
 
 #pragma once
 
+#include "CSRWLock.h"
 #include "transport/CControlHub.h"
 #include "transport/CFrameHub.h"
+#include "transport/CInputHub.h"
 #include "transport/ITransport.h"
 
 #include <memory>
@@ -96,8 +98,15 @@ private:
     State                       state   = State::CLOSED;
     uint32_t                    epoch   = 1;
     uint64_t                    retryAt = 0;
-    bool                        controlAdded = false;
-    bool                        frameAdded   = false;
+    bool                        controlAdded  = false;
+    bool                        controlFailed = false;
+    bool                        controlAbsent = false;
+    bool                        inputAdded    = false;
+    bool                        inputFailed   = false;
+    bool                        inputAbsent   = false;
+    bool                        frameAdded    = false;
+    bool                        frameAbsent   = false;
+    uint64_t                    serviceRetryAt = 0;
     bool                        exposed      = false;
     bool                        setupDone    = false;
     bool                        syncPending  = false;
@@ -114,6 +123,7 @@ private:
   unsigned                             m_entryCount  = 0;
   CControlHub                         m_control;
   CFrameHub                           m_frames;
+  CInputHub                           m_input;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
   bool                                 m_setup       = false;
@@ -141,6 +151,7 @@ private:
   bool InitializeEntry(Entry& entry);
   bool SetupEntry(Entry& entry, size_t alignment);
   bool AddServices(Entry& entry);
+  void HandleServiceFailures();
   void RetryEntry(Entry& entry, uint64_t now, bool initialized,
     bool setup, size_t alignment);
   void HandleProcessResult(Entry& entry, ProcessResult result);
@@ -164,7 +175,8 @@ public:
   ProcessResult Process(ITransportEvents& events);
   void Stop();
   void SyncRecovery();
-  void RecoveryStatus(uint64_t session, uint32_t serial, bool active,
+  void RecoveryStatus(const SourceKey& source,
+    uint64_t session, uint32_t serial, bool active,
     Recovery state, uint32_t error);
 
   FrameMemoryLimits GetMemoryLimits() const;
@@ -172,5 +184,5 @@ public:
 
   IFrameTransport& Frames();
   IControlTransport& Control();
-  IInputTransport * Input();
+  IInputTransport& Input();
 };

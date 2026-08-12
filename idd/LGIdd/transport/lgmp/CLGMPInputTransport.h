@@ -21,11 +21,12 @@
 #pragma once
 
 #include "CSRWLock.h"
-#include "transport/IInputTransport.h"
+#include "transport/IInputSource.h"
 #include "common/LGMPConfig.h"
 
 #include <Windows.h>
 
+#include <atomic>
 #include <stdint.h>
 
 extern "C" {
@@ -33,10 +34,10 @@ extern "C" {
 }
 
 class CLGMPHost;
-class IInputSink;
+class IInputTarget;
 struct KVMFRInputMessage;
 
-class CLGMPInputTransport final : public IInputTransport
+class CLGMPInputTransport final : public IInputSource
 {
 private:
   static constexpr ULONGLONG OWNER_LEASE_MS = 500;
@@ -63,9 +64,10 @@ private:
 
   PLGMPHostQueue m_queue                          = nullptr;
   PLGMPMemory    m_statusMemory[LGMP_Q_INPUT_LEN] = {};
-  IInputSink   * m_sink                           = nullptr;
+  IInputTarget * m_target                         = nullptr;
 
   CSRWLock m_lifecycleLock;
+  CSRWLock m_statusLock;
   HANDLE   m_stopEvent = nullptr;
   HANDLE   m_pollTimer = nullptr;
   HANDLE   m_thread    = nullptr;
@@ -74,18 +76,21 @@ private:
   uint32_t   m_ownerGeneration     = 0;
   uint32_t   m_ownerSequence       = 0;
   ULONGLONG  m_ownerDeadline       = 0;
-  uint64_t   m_sinkState           = 0;
+  InputTargetState m_targetState;
   uint32_t   m_endpointGeneration = 0;
   uint32_t   m_statusSerial        = 0;
   bool       m_statusDirty         = false;
+  std::atomic<bool> m_statusFailed = false;
   Statistics m_statistics         = {};
 
   bool Initialize();
   void DeInit();
-  void UpdateSinkState(uint64_t state);
-  void PublishStatus();
+  InputSourceId Owner() const;
+  void UpdateTargetState(const InputTargetState& state);
+  bool PublishStatus();
+  void FlushStatus();
   void LogStatistics(ULONGLONG now);
-  bool DrainMessages();
+  bool DrainMessages(bool& received);
   bool ProcessMessage(uint32_t sourceClientID,
     const KVMFRInputMessage& message);
   bool ValidatePayload(const KVMFRInputMessage& message) const;
@@ -109,6 +114,6 @@ public:
   CLGMPInputTransport(const CLGMPInputTransport&) = delete;
   CLGMPInputTransport& operator=(const CLGMPInputTransport&) = delete;
 
-  bool Start(IInputSink& sink) override;
+  bool Start(IInputTarget& target) override;
   void Stop() override;
 };

@@ -53,6 +53,14 @@ private:
 
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
+  CSRWLock m_recoveryPublishLock;
+  CSRWLock m_recoveryRouteLock;
+  uint64_t m_nextRecoveryRoute  = 1;
+  uint64_t m_recoveryRoute      = 0;
+  SourceKey m_recoverySource;
+  uint64_t  m_recoverySession   = 0;
+  uint32_t  m_recoverySerial    = 0;
+  bool      m_recoveryActive    = false;
 
   UINT m_iddCxVersion    = 0;
   bool m_hasIddCx110DDIs = false;

@@ -98,6 +98,7 @@ bool CLGMPControl::Initialize()
 
 void CLGMPControl::DeInit()
 {
+  SetControlEvents(nullptr, {});
   for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
     lgmpHostMemFree(&m_pointerMemory[i]);
   for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)
@@ -106,7 +107,6 @@ void CLGMPControl::DeInit()
     lgmpHostMemFree(&m_pointerTransformMemory[i]);
 
   m_pointerQueue          = nullptr;
-  m_pointerShape          = nullptr;
   m_pointerMemoryIndex    = 0;
   m_pointerShapeIndex     = 0;
   m_pointerTransformIndex = 0;
@@ -129,43 +129,101 @@ bool CLGMPControl::HasNewSubscribers()
   return lgmpHostQueueNewSubs(m_pointerQueue) != 0;
 }
 
-void CLGMPControl::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
-  const BYTE * data, UINT sdrWhiteLevel)
+void CLGMPControl::SetControlEvents(
+  IControlEvents * events, const ControlToken& token)
 {
-  PLGMPMemory mem;
-  if (info.CursorShapeInfo.CursorType == IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
+  CSRWExclusiveLock lock(m_eventLock);
+  m_events = events;
+  m_token  = events ? token : ControlToken {};
+}
+
+PLGMPMemory CLGMPControl::FindAvailable(
+  PLGMPMemory * memory, int count, int& index) const
+{
+  for (int offset = 0; offset < count; ++offset)
   {
-    mem = m_pointerMemory[m_pointerMemoryIndex];
-    if (++m_pointerMemoryIndex == LGMP_Q_POINTER_LEN)
-      m_pointerMemoryIndex = 0;
+    const int candidate = (index + offset) % count;
+    if (memory[candidate] &&
+        !lgmpHostQueuePayloadPending(m_pointerQueue, memory[candidate]))
+    {
+      index = candidate;
+      return memory[candidate];
+    }
+  }
+  return nullptr;
+}
+
+ControlResult CLGMPControl::SendCursor(
+  const IDARG_OUT_QUERY_HWCURSOR& info,
+  const BYTE * data, size_t size, UINT sdrWhiteLevel)
+{
+  if (!m_pointerQueue)
+    return ControlResult::FAILED;
+
+  const bool hasShape = info.CursorShapeInfo.CursorType !=
+    IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED;
+  if (hasShape)
+  {
+    if (info.CursorShapeInfo.CursorType != IDDCX_CURSOR_SHAPE_TYPE_ALPHA &&
+        info.CursorShapeInfo.CursorType !=
+          IDDCX_CURSOR_SHAPE_TYPE_MASKED_COLOR)
+    {
+      DEBUG_ERROR("Unsupported pointer shape type: %u",
+        static_cast<unsigned>(info.CursorShapeInfo.CursorType));
+      return ControlResult::FAILED;
+    }
+
+    if (info.CursorShapeInfo.Height &&
+        info.CursorShapeInfo.Pitch > SIZE_MAX / info.CursorShapeInfo.Height)
+    {
+      DEBUG_ERROR("Pointer shape size overflow");
+      return ControlResult::FAILED;
+    }
+    const size_t required = static_cast<size_t>(
+      info.CursorShapeInfo.Height) * info.CursorShapeInfo.Pitch;
+    if (required != size || (required && !data) ||
+        required > MAX_POINTER_SIZE - sizeof(KVMFRCursor))
+    {
+      DEBUG_ERROR("Invalid pointer shape payload: %zu bytes", size);
+      return ControlResult::FAILED;
+    }
+  }
+
+  PLGMPMemory mem;
+  int * index;
+  int count;
+  if (!hasShape)
+  {
+    index = &m_pointerMemoryIndex;
+    count = LGMP_Q_POINTER_LEN;
+    mem = FindAvailable(m_pointerMemory, count, *index);
   }
   else
   {
-    mem = m_pointerShapeMemory[m_pointerShapeIndex];
-    if (++m_pointerShapeIndex == POINTER_SHAPE_BUFFERS)
-      m_pointerShapeIndex = 0;
+    index = &m_pointerShapeIndex;
+    count = POINTER_SHAPE_BUFFERS;
+    mem = FindAvailable(m_pointerShapeMemory, count, *index);
   }
+  if (!mem)
+    return ControlResult::RETRY;
 
   KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
   cursor->sdrWhiteLevel = sdrWhiteLevel ?
     sdrWhiteLevel : KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
-  m_cursorVisible = info.IsCursorVisible;
   uint32_t flags  = CURSOR_FLAG_VISIBLE_VALID;
 
   if (info.IsCursorVisible)
   {
-    m_cursorX       = info.X;
-    m_cursorY       = info.Y;
     cursor->x = (int16_t)info.X;
     cursor->y = (int16_t)info.Y;
     flags |= CURSOR_FLAG_POSITION | CURSOR_FLAG_VISIBLE;
   }
 
-  if (info.CursorShapeInfo.CursorType != IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED)
+  if (hasShape)
   {
-    memcpy(cursor + 1, data,
-      (size_t)info.CursorShapeInfo.Height * info.CursorShapeInfo.Pitch);
+    if (size)
+      memcpy(cursor + 1, data, size);
 
     cursor->hx     = (int8_t  )info.CursorShapeInfo.XHot;
     cursor->hy     = (int8_t  )info.CursorShapeInfo.YHot;
@@ -185,56 +243,43 @@ void CLGMPControl::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
     }
 
     flags |= CURSOR_FLAG_SHAPE;
-    m_pointerShape = mem;
   }
 
-  LGMP_STATUS status;
-  while ((status = lgmpHostQueuePost(
-      m_pointerQueue, flags, mem)) != LGMP_OK)
+  const LGMP_STATUS status =
+    lgmpHostQueuePost(m_pointerQueue, flags, mem);
+  if (status == LGMP_OK)
   {
-    if (status == LGMP_ERR_QUEUE_FULL)
-    {
-      Sleep(1);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s",
-      lgmpStatusString(status));
-    break;
+    *index = (*index + 1) % count;
+    return ControlResult::APPLIED;
   }
+  if (status == LGMP_ERR_QUEUE_FULL)
+    return ControlResult::RETRY;
+
+  DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s",
+    lgmpStatusString(status));
+  return ControlResult::FAILED;
 }
 
-void CLGMPControl::SetColorTransform(
+ControlResult CLGMPControl::SetColorTransform(
   std::shared_ptr<const D12ColorTransform> transform)
 {
-  {
-    CSRWExclusiveLock lock(m_colorTransformLock);
-    m_colorTransform = std::move(transform);
-  }
-  SendColorTransform();
+  return SendColorTransform(transform);
 }
 
-std::shared_ptr<const D12ColorTransform>
-CLGMPControl::GetColorTransform() const
-{
-  CSRWSharedLock lock(m_colorTransformLock);
-  std::shared_ptr<const D12ColorTransform> transform = m_colorTransform;
-  return transform;
-}
-
-void CLGMPControl::SendColorTransform()
+ControlResult CLGMPControl::SendColorTransform(
+  const std::shared_ptr<const D12ColorTransform>& transform)
 {
   if (!m_pointerQueue || !m_pointerTransformMemory[0])
-    return;
+    return ControlResult::FAILED;
 
-  PLGMPMemory mem = m_pointerTransformMemory[m_pointerTransformIndex];
-  if (++m_pointerTransformIndex == COLOR_TRANSFORM_BUFFERS)
-    m_pointerTransformIndex = 0;
+  PLGMPMemory mem = FindAvailable(m_pointerTransformMemory,
+    COLOR_TRANSFORM_BUFFERS, m_pointerTransformIndex);
+  if (!mem)
+    return ControlResult::RETRY;
 
   KVMFRCursor * cursor = (KVMFRCursor *)lgmpHostMemPtr(mem);
   KVMFRColorTransform * output =
     (KVMFRColorTransform *)(cursor + 1);
-  const auto transform = GetColorTransform();
 
   output->flags = 0;
   if (transform)
@@ -248,54 +293,25 @@ void CLGMPControl::SendColorTransform()
     memcpy(output->lut, transform->lut, sizeof(output->lut));
   }
 
-  LGMP_STATUS status;
-  while ((status = lgmpHostQueuePost(m_pointerQueue,
-      CURSOR_FLAG_COLOR_TRANSFORM, mem)) != LGMP_OK)
+  const LGMP_STATUS status = lgmpHostQueuePost(m_pointerQueue,
+    CURSOR_FLAG_COLOR_TRANSFORM, mem);
+  if (status == LGMP_OK)
   {
-    if (status == LGMP_ERR_QUEUE_FULL)
-    {
-      Sleep(1);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer Transform): %s",
-      lgmpStatusString(status));
-    break;
+    m_pointerTransformIndex =
+      (m_pointerTransformIndex + 1) % COLOR_TRANSFORM_BUFFERS;
+    return ControlResult::APPLIED;
   }
+  if (status == LGMP_ERR_QUEUE_FULL)
+    return ControlResult::RETRY;
+
+  DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer Transform): %s",
+    lgmpStatusString(status));
+  return ControlResult::FAILED;
 }
 
-void CLGMPControl::ResendCursor()
+void CLGMPControl::RequestReplay()
 {
-  PLGMPMemory mem = m_pointerShape;
-  if (!mem)
-    return;
-
-  KVMFRCursor* cursor = (KVMFRCursor*)lgmpHostMemPtr(mem);
-  cursor->x = (int16_t)m_cursorX;
-  cursor->y = (int16_t)m_cursorY;
-
-  const uint32_t flags =
-    CURSOR_FLAG_POSITION | CURSOR_FLAG_SHAPE | CURSOR_FLAG_VISIBLE_VALID |
-    (m_cursorVisible ? CURSOR_FLAG_VISIBLE : 0);
-
-  LGMP_STATUS status;
-  while ((status = lgmpHostQueuePost(
-      m_pointerQueue, flags, mem)) != LGMP_OK)
-  {
-    if (status == LGMP_ERR_QUEUE_FULL)
-    {
-      Sleep(1);
-      continue;
-    }
-
-    DEBUG_ERROR("lgmpHostQueuePost Failed (Pointer): %s",
-      lgmpStatusString(status));
-    break;
-  }
-}
-
-void CLGMPControl::ResendState()
-{
-  ResendCursor();
-  SendColorTransform();
+  CSRWSharedLock lock(m_eventLock);
+  if (m_events)
+    m_events->OnControlReplay(m_token);
 }

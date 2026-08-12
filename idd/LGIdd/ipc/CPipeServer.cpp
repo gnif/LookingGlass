@@ -136,7 +136,7 @@ void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
   queueLock.Unlock();
   if (m_recoveryHandler)
     m_recoveryHandler(m_recoveryOpaque,
-      msg.recovery.session, serial, active, msg.type);
+      m_recoveryRoute, msg.recovery.session, serial, active, msg.type);
 }
 
 void CPipeServer::SetDeviceContext(CDeviceContext * context)
@@ -150,6 +150,7 @@ void CPipeServer::SetRecoveryHandler(
 {
   CSRWExclusiveLock queueLock(m_queueLock);
   CSRWExclusiveLock recoveryLock(m_recoveryLock);
+  m_recoveryRoute   = 0;
   m_recoveryValid   = false;
   m_recoveryRequest = {};
   m_recoveryHandler = handler;
@@ -163,6 +164,7 @@ void CPipeServer::ClearRecoveryHandler(void * opaque)
   if (m_recoveryOpaque != opaque)
     return;
 
+  m_recoveryRoute   = 0;
   m_recoveryValid   = false;
   m_recoveryRequest = {};
   m_recoveryHandler = nullptr;
@@ -218,14 +220,14 @@ void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   WriteMsg(msg);
 }
 
-void CPipeServer::SetRecovery(
-  void * owner, uint64_t session, uint32_t serial, bool active)
+bool CPipeServer::SetRecovery(void * owner, uint64_t route,
+  uint64_t session, uint32_t serial, bool active)
 {
-  if (!session || !serial ||
+  if (!route || !session || !serial ||
       (serial & LGPipeMsg::RECOVERY_ACTIVE))
   {
     DEBUG_ERROR("Invalid recovery request correlation");
-    return;
+    return false;
   }
 
   LGPipeMsg msg = {};
@@ -236,11 +238,13 @@ void CPipeServer::SetRecovery(
     (active ? LGPipeMsg::RECOVERY_ACTIVE : 0U);
 
   CSRWExclusiveLock queueLock(m_queueLock);
-  CSRWSharedLock recoveryLock(m_recoveryLock);
+  CSRWExclusiveLock recoveryLock(m_recoveryLock);
   if (!m_recoveryHandler || m_recoveryOpaque != owner)
-    return;
+    return false;
 
   m_recoveryValid   = true;
+  m_recoveryRoute   = route;
   m_recoveryRequest = msg;
   m_endpoint.Send(&msg, sizeof(msg));
+  return true;
 }

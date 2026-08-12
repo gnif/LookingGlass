@@ -35,7 +35,7 @@ class CPipeServer : private IPipeEndpointHandler
 {
   public:
     using RecoveryHandler = void (*)(void * opaque,
-      uint64_t session, uint32_t serial, bool active,
+      uint64_t route, uint64_t session, uint32_t serial, bool active,
       LGPipeMsg::Type result);
 
   private:
@@ -51,6 +51,7 @@ class CPipeServer : private IPipeEndpointHandler
     CSRWLock        m_recoveryLock;
     RecoveryHandler m_recoveryHandler = nullptr;
     void *          m_recoveryOpaque  = nullptr;
+    uint64_t        m_recoveryRoute   = 0;
 
     void WriteMsg(const LGPipeMsg & msg);
     void QueueMsgLocked(const LGPipeMsg & msg);
@@ -77,8 +78,8 @@ class CPipeServer : private IPipeEndpointHandler
     void SetGPUStatus(bool software);
     void ResolutionRejected(uint32_t width, uint32_t height,
       uint32_t requiredSizeMiB);
-    void SetRecovery(
-      void * owner, uint64_t session, uint32_t serial, bool active);
+    bool SetRecovery(void * owner, uint64_t route,
+      uint64_t session, uint32_t serial, bool active);
 };
 
 extern CPipeServer g_pipe;

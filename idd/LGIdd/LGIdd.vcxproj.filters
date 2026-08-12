@@ -160,6 +160,9 @@
     <ClInclude Include="transport\CFrameHub.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\CInputHub.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\CTransportManager.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -167,6 +170,9 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\FrameMemoryLimits.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IControlSink.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IControlTransport.h">
@@ -179,6 +185,9 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IInputTransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IInputSource.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\ITransport.h">
@@ -307,6 +316,9 @@
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CFrameHub.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\CInputHub.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CTransportManager.cpp">

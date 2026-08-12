@@ -26,9 +26,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-class IControlTransport;
+class IControlSink;
 class IFrameSink;
-class IInputTransport;
+class IInputSource;
 
 using BackendId = uint32_t;
 
@@ -93,7 +93,8 @@ public:
   virtual FrameMemoryLimits GetMemoryLimits() const = 0;
   virtual DirectFrameBufferMemory GetDirectMemory() const = 0;
 
-  virtual IFrameSink& FrameSink() = 0;
-  virtual IControlTransport& Control() = 0;
-  virtual IInputTransport * Input() { return nullptr; }
+  // Component pointers are fixed after Setup and remain valid until Stop.
+  virtual IFrameSink * FrameSink() { return nullptr; }
+  virtual IControlSink * Control() { return nullptr; }
+  virtual IInputSource * Input() { return nullptr; }
 };

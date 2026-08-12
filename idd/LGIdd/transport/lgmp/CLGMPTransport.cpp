@@ -121,6 +121,8 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
     return ProcessResult::FAILURE;
   }
 
+  m_input.FlushStatus();
+
   const uint64_t now = CFrameScheduler::Nanotime();
 
   // Take the frame subscriber snapshot before processing scheduling messages,
@@ -192,7 +194,7 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
   m_frames.FinalizeSubscribers(subscribers, now);
 
   if (m_control.HasNewSubscribers())
-    m_control.ResendState();
+    m_control.RequestReplay();
 
   return ProcessResult::OK;
 }

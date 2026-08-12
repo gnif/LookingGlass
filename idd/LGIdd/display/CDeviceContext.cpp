@@ -85,15 +85,21 @@ void CDeviceContext::QueryIddCxCapabilities()
 
 #ifdef HAS_IDDCX_110
   const bool hasIddCx110DDIs =
-    !!IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
-    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
-    !!IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterQueryTargetInfo) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterCommitModes2) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxParseMonitorDescription2) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorQueryTargetModes2) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetDefaultHdrMetaData) &&
-    IDD_IS_FIELD_AVAILABLE(IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetGammaRamp);
+    IDD_IS_FUNCTION_AVAILABLE(IddCxSwapChainReleaseAndAcquireBuffer2) &&
+    IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorQueryHardwareCursor3) &&
+    IDD_IS_FUNCTION_AVAILABLE(IddCxMonitorUpdateModes2) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterQueryTargetInfo) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxAdapterCommitModes2) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxParseMonitorDescription2) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorQueryTargetModes2) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetDefaultHdrMetaData) &&
+    IDD_IS_FIELD_AVAILABLE(
+      IDD_CX_CLIENT_CONFIG, EvtIddCxMonitorSetGammaRamp);
 #else
   const bool hasIddCx110DDIs = false;
 #endif
@@ -474,11 +480,30 @@ bool CDeviceContext::InitializeTransport()
     return true;
 
   g_pipe.SetRecoveryHandler(
-    [](void * opaque, uint64_t session, uint32_t serial, bool active,
-       LGPipeMsg::Type result)
+    [](void * opaque, uint64_t route, uint64_t session,
+       uint32_t serial, bool active, LGPipeMsg::Type result)
     {
       CDeviceContext * context =
         static_cast<CDeviceContext *>(opaque);
+
+      SourceKey source;
+      {
+        CSRWExclusiveLock routeLock(context->m_recoveryRouteLock);
+        if (!route || route != context->m_recoveryRoute ||
+            session != context->m_recoverySession ||
+            serial != context->m_recoverySerial ||
+            active != context->m_recoveryActive)
+        {
+          DEBUG_WARN("Ignoring stale recovery route");
+          return;
+        }
+        source = context->m_recoverySource;
+        context->m_recoveryRoute   = 0;
+        context->m_recoverySource  = {};
+        context->m_recoverySession = 0;
+        context->m_recoverySerial  = 0;
+        context->m_recoveryActive  = false;
+      }
 
       ITransport::Recovery state = ITransport::Recovery::FAILED;
       uint32_t error = ERROR_SUCCESS;
@@ -505,7 +530,7 @@ bool CDeviceContext::InitializeTransport()
       }
 
       context->m_transport->RecoveryStatus(
-        session, serial, active, state, error);
+        source, session, serial, active, state, error);
     },
     this);
   m_recoveryHandlerSet = true;
@@ -563,8 +588,7 @@ bool CDeviceContext::SetupTransport(size_t alignSize)
       return false;
   }
 
-  IInputTransport * input = m_transport->Input();
-  if (input && !input->Start(g_inputPipeServer))
+  if (!m_transport->Input().Start(g_inputPipeServer))
   {
     DEBUG_ERROR("Failed to start input transport");
     return false;
@@ -610,6 +634,34 @@ void CDeviceContext::OnSetResolution(const SourceKey& source,
 void CDeviceContext::OnRecoveryRequest(const SourceKey& source,
   uint64_t session, uint32_t serial, bool active)
 {
-  UNREFERENCED_PARAMETER(source);
-  g_pipe.SetRecovery(this, session, serial, active);
+  if (!source.backend || !source.epoch || !session || !serial ||
+      (serial & LGPipeMsg::RECOVERY_ACTIVE))
+    return;
+
+  CSRWExclusiveLock publishLock(m_recoveryPublishLock);
+  uint64_t route;
+  {
+    CSRWExclusiveLock routeLock(m_recoveryRouteLock);
+    route = m_nextRecoveryRoute++;
+    if (!m_nextRecoveryRoute)
+      ++m_nextRecoveryRoute;
+
+    m_recoveryRoute   = route;
+    m_recoverySource  = source;
+    m_recoverySession = session;
+    m_recoverySerial  = serial;
+    m_recoveryActive  = active;
+  }
+
+  if (!g_pipe.SetRecovery(this, route, session, serial, active))
+  {
+    CSRWExclusiveLock routeLock(m_recoveryRouteLock);
+    if (m_recoveryRoute != route)
+      return;
+    m_recoveryRoute   = 0;
+    m_recoverySource  = {};
+    m_recoverySession = 0;
+    m_recoverySerial  = 0;
+    m_recoveryActive  = false;
+  }
 }
