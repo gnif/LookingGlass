@@ -45,8 +45,8 @@ the new default refresh rate.
 
 The client option ``win:setGuestRes`` enables automatic dynamic resolution
 requests when the client window changes size. The default is enabled when the
-producer supports it. Press the client's escape key together with ``=`` to
-request the current window resolution manually.
+server in the guest supports it. Press the client's escape key together with
+``=`` to request the current window resolution manually.
 
 Preferences
 -----------

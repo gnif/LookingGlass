@@ -88,7 +88,7 @@ Frame rate and multiple clients
 An active OBS source requests the global frame rate configured under **OBS
 Settings > Video**. There is no separate FPS control in the Looking Glass
 source. The IDD uses the fastest request among all active consumers, so a 120
-Hz client can raise the producer cadence while OBS records at 60 FPS. Each
+Hz client can raise the server cadence while OBS records at 60 FPS. Each
 consumer still selects the newest frame for its own deadline.
 
 The OBS source releases its cadence request while it is inactive or hidden.

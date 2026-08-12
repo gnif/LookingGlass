@@ -22,6 +22,11 @@ Looking Glass Client
    are currently no distribution packages for it, so it must be built from
    source before installation.
 
+Looking Glass Server
+   The Windows guest application that generates the video feed for the Looking
+   Glass client. There are broadly two implementations of the server: the
+   Looking Glass IDD and the legacy host application.
+
 Looking Glass IDD
    The recommended Windows Indirect Display Driver. It creates a virtual
    monitor, sends its frames to the client and provides direct keyboard and
@@ -55,19 +60,19 @@ For a new installation, use:
 * the matching Looking Glass IDD in the Windows guest; and
 * SPICE only for the fallback or convenience services you need.
 
-Use matching Looking Glass releases for the current client, IDD and OBS
-plugin. The shared-memory protocol changes between releases and incompatible
-components will not connect. Legacy Host users must use the complete matching
-B7 stack described below.
+Use matching Looking Glass releases for the current client, IDD and OBS plugin.
+The shared-memory protocol changes between releases and incompatible components
+will not connect. Users of the legacy host application must use the complete
+matching B7 stack described below.
 
 .. _legacy_host_policy:
 
 Legacy Host Application
 -----------------------
 
-The Host Application is a legacy producer. The IDD is recommended because it
-does not require a physical monitor or dummy plug and supports current display,
-input and scheduling features.
+The Host Application is the legacy implementation of the Looking Glass server.
+The IDD is recommended because it does not require a physical monitor or dummy
+plug and supports current display, input and scheduling features.
 
 If your workflow specifically requires non-capture mouse input with the Host
 Application, B7 is the last recommended release. Use the matching B7 client,

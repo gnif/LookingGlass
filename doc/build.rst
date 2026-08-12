@@ -233,7 +233,7 @@ Legacy Host Application build
 
 .. warning::
 
-   The Host Application is a legacy frame producer. New installations should
+   The Host Application is a legacy server application. New installations should
    use the prebuilt :doc:`Looking Glass IDD <install_idd>`. These build
    instructions are retained for the complete matching B7 stack described in
    :ref:`legacy_host_policy`.

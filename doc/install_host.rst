@@ -6,8 +6,9 @@ Legacy Host Application installation
 
 .. warning::
 
-   The Host Application is a legacy frame producer. New installations should
-   use the :doc:`Looking Glass IDD <install_idd>`.
+   The Host Application is the legacy implementation of the Looking Glass
+   Server. New installations should use the :doc:`Looking Glass IDD
+   <install_idd>`.
 
    B7 is the last recommended release when non-capture mouse input through the
    Host Application is required. Use the matching B7 client and documentation

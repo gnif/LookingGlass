@@ -97,7 +97,15 @@ When native HDR is unavailable, the client can map HDR content to SDR.
 Legacy Host compatibility
 -------------------------
 
-The Windows Host Application is no longer the recommended producer. B7 is the
-last recommended version for users who require its non-capture mouse input
-workflow. Use the complete matching B7 stack for that workflow rather than
-mixing B7 and current components.
+The Windows Host Application is no longer the recommended server implementation.
+It is missing many of the features available in the Looking Glass IDD, such as:
+
+* Lack of video capture overhead;
+* Usage without a monitor or dummy plug connected;
+* Automatically resizing the guest to fit the client application viewport;
+* HDR support; or
+* Usage in virtual machines without GPU acceleration.
+
+B7 is the last recommended version of the legacy host application for users who
+require its non-capture mouse input workflow. Use the complete matching B7 stack
+for that workflow rather than mixing B7 and current components.

@@ -19,8 +19,8 @@ KVMFR provides the Linux character-device interface used by the client and OBS
 and can export regions for direct GPU import.
 
 The IDD stores frame queues, frame metadata, pointer updates and input protocol
-state in this region. It uses three frame buffers so a producer and multiple
-consumers can progress without overwriting a frame that is still in use.
+state in this region. It uses three frame buffers so a server and multiple
+clients can progress without overwriting a frame that is still in use.
 
 .. _what_is_the_ivshmem_device_being_used_for:
 
