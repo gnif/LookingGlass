@@ -68,23 +68,191 @@ public:
   }
 };
 
+CTransportManager::Entry::Entry()
+{
+  idleEvent = CreateEvent(nullptr, TRUE, TRUE, nullptr);
+}
+
+CTransportManager::Entry::~Entry()
+{
+  if (idleEvent)
+    CloseHandle(idleEvent);
+}
+
+CTransportManager::CTransportManager()
+{
+  m_phaseIdle    = CreateEvent(nullptr, TRUE, TRUE, nullptr);
+  m_stoppedEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+}
+
 CTransportManager::~CTransportManager()
 {
   Stop();
+  if (m_stoppedEvent)
+    CloseHandle(m_stoppedEvent);
+  if (m_phaseIdle)
+    CloseHandle(m_phaseIdle);
+}
+
+unsigned CTransportManager::Entries(
+  Entry * entries[FRAME_MAX_SINKS]) const
+{
+  CSRWSharedLock managerLock(m_lock);
+  for (unsigned i = 0; i < m_entryCount; ++i)
+    entries[i] = m_entries[i].get();
+  return m_entryCount;
+}
+
+CTransportManager::Entry * CTransportManager::Primary() const
+{
+  CSRWSharedLock managerLock(m_lock);
+  return m_primary;
+}
+
+bool CTransportManager::BeginPhase(
+  Phase phase, bool wait, bool stopping)
+{
+  const DWORD thread = GetCurrentThreadId();
+  for (;;)
+  {
+    HANDLE idleEvent = nullptr;
+    {
+      CSRWExclusiveLock managerLock(m_lock);
+      if ((!stopping && (m_stopping || m_stopped)) ||
+          (stopping && m_stopped))
+        return false;
+
+      if (m_phase == Phase::IDLE)
+      {
+        m_phase      = phase;
+        m_phaseOwner = thread;
+        ResetEvent(m_phaseIdle);
+        return true;
+      }
+
+      if (!wait || m_phaseOwner == thread)
+        return false;
+      idleEvent = m_phaseIdle;
+    }
+
+    if (!idleEvent ||
+        WaitForSingleObject(idleEvent, INFINITE) != WAIT_OBJECT_0)
+      return false;
+  }
+}
+
+void CTransportManager::EndPhase()
+{
+  CSRWExclusiveLock managerLock(m_lock);
+  m_phase      = Phase::IDLE;
+  m_phaseOwner = 0;
+  SetEvent(m_phaseIdle);
+}
+
+bool CTransportManager::BeginCall(
+  Entry& entry, Call call, bool wait)
+{
+  const DWORD thread = GetCurrentThreadId();
+  for (;;)
+  {
+    HANDLE idleEvent = nullptr;
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      if (entry.stopRequested || entry.state == State::STOPPED)
+        return false;
+
+      if (entry.call == Call::IDLE)
+      {
+        entry.call      = call;
+        entry.callOwner = thread;
+        ResetEvent(entry.idleEvent);
+        return true;
+      }
+
+      if (!wait || entry.callOwner == thread)
+        return false;
+      idleEvent = entry.idleEvent;
+    }
+
+    if (!idleEvent ||
+        WaitForSingleObject(idleEvent, INFINITE) != WAIT_OBJECT_0)
+      return false;
+  }
+}
+
+void CTransportManager::DrainRecovery(Entry& entry,
+  const std::shared_ptr<ITransport>& transport)
+{
+  static const unsigned MAX_DRAIN = 8;
+  for (unsigned i = 0; i < MAX_DRAIN; ++i)
+  {
+    bool sync = false;
+    bool update = false;
+    RecoveryUpdate recovery;
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      if (entry.stopRequested || !transport ||
+          transport != entry.transport ||
+          (entry.state != State::INITIALIZED &&
+           entry.state != State::READY))
+      {
+        entry.syncPending     = false;
+        entry.recoveryPending = false;
+        return;
+      }
+
+      sync                  = entry.syncPending;
+      update                = entry.recoveryPending;
+      recovery              = entry.recovery;
+      entry.syncPending     = false;
+      entry.recoveryPending = false;
+    }
+
+    if (!sync && !update)
+      return;
+    if (sync)
+      transport->SyncRecovery();
+    if (update)
+      transport->RecoveryStatus(recovery.session, recovery.serial,
+        recovery.active, recovery.state, recovery.error);
+  }
+}
+
+void CTransportManager::EndCall(Entry& entry,
+  const std::shared_ptr<ITransport>& transport, bool drain)
+{
+  for (;;)
+  {
+    if (drain)
+      DrainRecovery(entry, transport);
+
+    CSRWExclusiveLock entryLock(entry.lock);
+    if (drain && (entry.syncPending || entry.recoveryPending))
+      continue;
+
+    entry.call      = Call::IDLE;
+    entry.callOwner = 0;
+    SetEvent(entry.idleEvent);
+    return;
+  }
 }
 
 bool CTransportManager::Add(BackendId id, const char * name, bool required,
   bool primary, CreateFn create)
 {
-  if (!id || !name || !create || (primary && m_primary))
+  CSRWExclusiveLock managerLock(m_lock);
+  if (!m_phaseIdle || !m_stoppedEvent || m_phase != Phase::IDLE ||
+      m_started || m_stopping ||
+      m_stopped || !id || !name || !create ||
+      m_entryCount == FRAME_MAX_SINKS || (primary && m_primary))
     return false;
 
-  for (const auto& current : m_entries)
-    if (current->id == id)
+  for (unsigned i = 0; i < m_entryCount; ++i)
+    if (m_entries[i]->id == id)
       return false;
 
   std::unique_ptr<Entry> entry(new (std::nothrow) Entry);
-  if (!entry)
+  if (!entry || !entry->idleEvent)
     return false;
 
   entry->id       = id;
@@ -94,7 +262,7 @@ bool CTransportManager::Add(BackendId id, const char * name, bool required,
   entry->create   = create;
 
   Entry * raw = entry.get();
-  m_entries.push_back(std::move(entry));
+  m_entries[m_entryCount++] = std::move(entry);
   if (primary)
     m_primary = raw;
   return true;
@@ -102,166 +270,242 @@ bool CTransportManager::Add(BackendId id, const char * name, bool required,
 
 ITransport::OpenResult CTransportManager::OpenEntry(Entry& entry)
 {
-  if (!entry.transport)
-    entry.transport = entry.create();
-  if (!entry.transport)
+  std::shared_ptr<ITransport> transport;
+  CreateFn create = nullptr;
   {
+    CSRWSharedLock entryLock(entry.lock);
+    transport = entry.transport;
+    create    = entry.create;
+  }
+
+  if (!transport)
+  {
+    std::unique_ptr<ITransport> created = create();
+    transport.reset(created.release());
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.transport = transport;
+  }
+
+  if (!transport)
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
     entry.state = State::FAILED;
     return OpenResult::FAILURE;
   }
 
-  const OpenResult result = entry.transport->Open();
+  const OpenResult result = transport->Open();
   switch (result)
   {
     case OpenResult::SUCCESS:
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
       entry.state = State::OPEN;
       break;
+    }
 
     case OpenResult::RETRY:
       ScheduleRetry(entry);
       break;
 
     case OpenResult::FAILURE:
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
       entry.state = State::FAILED;
       break;
+    }
   }
   return result;
 }
 
 bool CTransportManager::InitializeEntry(Entry& entry)
 {
-  if (entry.state == State::INITIALIZED || entry.state == State::READY)
-    return true;
-  if (entry.state != State::OPEN || !entry.transport->Initialize())
+  std::shared_ptr<ITransport> transport;
   {
+    CSRWSharedLock entryLock(entry.lock);
+    if (entry.state == State::INITIALIZED || entry.state == State::READY)
+      return true;
+    if (entry.state != State::OPEN)
+      return false;
+    transport = entry.transport;
+  }
+
+  if (!transport || !transport->Initialize())
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
     entry.state = State::FAILED;
     return false;
   }
 
-  if (!m_control.Add(entry.id, entry.epoch, entry.transport->Control()))
+  const FrameMemoryLimits limits = transport->GetMemoryLimits();
   {
-    entry.state = State::FAILED;
-    return false;
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.limits      = limits;
+    entry.limitsValid = true;
+    entry.state       = State::INITIALIZED;
   }
-
-  entry.controlAdded = true;
-  if (entry.primary &&
-      !m_frames.Bind(entry.id, entry.epoch, entry.transport->FrameSink()))
-  {
-    m_control.Remove(entry.id, entry.epoch);
-    entry.controlAdded = false;
-    entry.state = State::FAILED;
-    return false;
-  }
-
-  entry.frameAdded = entry.primary;
-  entry.state = State::INITIALIZED;
   return true;
 }
 
-bool CTransportManager::SetupEntry(Entry& entry)
+bool CTransportManager::AddServices(Entry& entry)
 {
-  if (entry.state == State::READY)
-    return true;
-  if (entry.state != State::INITIALIZED ||
-      !entry.transport->Setup(m_alignment))
+  std::shared_ptr<ITransport> transport;
+  BackendId id = 0;
+  uint32_t epoch = 0;
+  bool primary = false;
+  bool controlAdded = false;
+  bool frameAdded = false;
   {
+    CSRWSharedLock entryLock(entry.lock);
+    transport    = entry.transport;
+    id           = entry.id;
+    epoch        = entry.epoch;
+    primary      = entry.primary;
+    controlAdded = entry.controlAdded;
+    frameAdded   = entry.frameAdded;
+  }
+
+  if (!transport)
+    return false;
+
+  if (!controlAdded)
+  {
+    if (!m_control.Add(id, epoch, transport->Control()))
+      return false;
+    controlAdded = true;
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.controlAdded = true;
+  }
+
+  if (!frameAdded &&
+      m_frames.Bind(id, epoch, primary, transport->FrameSink()))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.frameAdded = true;
+    return true;
+  }
+
+  if (frameAdded)
+    return true;
+
+  m_control.Remove(id, epoch);
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.controlAdded = false;
+  }
+  return false;
+}
+
+bool CTransportManager::SetupEntry(Entry& entry, size_t alignment)
+{
+  std::shared_ptr<ITransport> transport;
+  {
+    CSRWSharedLock entryLock(entry.lock);
+    if (entry.state == State::READY)
+      return true;
+    if (entry.state != State::INITIALIZED)
+      return false;
+    transport = entry.transport;
+  }
+
+  bool setupDone = false;
+  {
+    CSRWSharedLock entryLock(entry.lock);
+    setupDone = entry.setupDone;
+  }
+
+  if (!transport || (!setupDone && !transport->Setup(alignment)))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
     entry.state = State::FAILED;
     return false;
   }
 
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.setupDone = true;
+  }
+  if (!AddServices(entry))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.state = State::INITIALIZED;
+    return false;
+  }
+
+  CSRWExclusiveLock entryLock(entry.lock);
   entry.state = State::READY;
   return true;
 }
 
 void CTransportManager::ScheduleRetry(Entry& entry)
 {
+  CSRWExclusiveLock entryLock(entry.lock);
   entry.state   = State::RETRY;
   entry.retryAt = GetTickCount64() + RETRY_DELAY_MS;
 }
 
-ITransport::OpenResult CTransportManager::Open()
+void CTransportManager::RemoveServices(Entry& entry)
 {
-  if (!m_primary)
-    return OpenResult::FAILURE;
-
-  OpenResult aggregate = OpenResult::SUCCESS;
-  for (const auto& current : m_entries)
+  BackendId id = 0;
+  uint32_t epoch = 0;
+  bool frameAdded = false;
+  bool controlAdded = false;
   {
-    Entry& entry = *current;
-    if (entry.state == State::OPEN ||
-        entry.state == State::INITIALIZED || entry.state == State::READY)
-      continue;
-
-    const OpenResult result = OpenEntry(entry);
-    if (!entry.required || result == OpenResult::SUCCESS)
-      continue;
-    if (result == OpenResult::FAILURE)
-      return OpenResult::FAILURE;
-    aggregate = OpenResult::RETRY;
-  }
-  return aggregate;
-}
-
-bool CTransportManager::Initialize()
-{
-  for (const auto& current : m_entries)
-  {
-    Entry& entry = *current;
-    if (entry.state != State::OPEN)
-      continue;
-    if (!InitializeEntry(entry))
-    {
-      if (entry.required)
-        return false;
-      ScheduleRetry(entry);
-    }
+    CSRWExclusiveLock entryLock(entry.lock);
+    id                   = entry.id;
+    epoch                = entry.epoch;
+    frameAdded           = entry.frameAdded;
+    controlAdded         = entry.controlAdded;
+    entry.frameAdded     = false;
+    entry.controlAdded   = false;
   }
 
-  m_initialized = true;
-  return m_primary &&
-    (m_primary->state == State::INITIALIZED ||
-     m_primary->state == State::READY);
+  if (frameAdded)
+    m_frames.Unbind(id, epoch);
+  if (controlAdded)
+    m_control.Remove(id, epoch);
 }
 
-bool CTransportManager::Setup(size_t alignment)
+void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
+  bool initialized, bool setup, size_t alignment)
 {
-  if (!m_initialized || !m_primary)
-    return false;
-
-  m_alignment = alignment;
-  if (!SetupEntry(*m_primary))
-    return false;
-
-  m_setup = true;
-  return true;
-}
-
-void CTransportManager::RetryEntry(Entry& entry, uint64_t now)
-{
-  if (entry.state != State::RETRY || now < entry.retryAt)
-    return;
-
-  if (entry.primary && m_exposed)
-    return;
+  std::shared_ptr<ITransport> transport;
+  {
+    CSRWSharedLock entryLock(entry.lock);
+    if (entry.state != State::RETRY || now < entry.retryAt ||
+        (entry.primary && entry.exposed))
+      return;
+    transport = entry.transport;
+  }
 
   RemoveServices(entry);
-  if (entry.transport)
-    entry.transport->Stop();
-  entry.transport.reset();
-  ++entry.epoch;
-  if (!entry.epoch)
+  if (transport)
+    transport->Stop();
+
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.transport.reset();
+    entry.limits       = FrameMemoryLimits {};
+    entry.limitsValid  = false;
+    entry.directMemory = DirectFrameBufferMemory {};
+    entry.directMemoryValid = false;
+    entry.setupDone    = false;
     ++entry.epoch;
+    if (!entry.epoch)
+      ++entry.epoch;
+  }
 
   if (OpenEntry(entry) != OpenResult::SUCCESS)
     return;
-  if (m_initialized && !InitializeEntry(entry))
+  if (initialized && !InitializeEntry(entry))
   {
     ScheduleRetry(entry);
     return;
   }
-  if (m_setup && entry.primary && !SetupEntry(entry))
+  if (setup && !SetupEntry(entry, alignment))
+  {
+    RemoveServices(entry);
     ScheduleRetry(entry);
+  }
 }
 
 void CTransportManager::HandleProcessResult(
@@ -270,109 +514,579 @@ void CTransportManager::HandleProcessResult(
   if (result == ProcessResult::OK)
     return;
 
-  if (entry.primary && m_exposed)
+  bool exposed = false;
+  bool primary = false;
+  bool required = false;
+  const char * name = nullptr;
   {
-    DEBUG_WARN("Transport %s requested a restart while its frame interfaces "
-      "are active", entry.name);
-    return;
+    CSRWSharedLock entryLock(entry.lock);
+    exposed  = entry.exposed;
+    primary  = entry.primary;
+    required = entry.required;
+    name     = entry.name;
   }
 
-  if (result == ProcessResult::RETRY || !entry.required)
+  if (primary && exposed)
   {
-    RemoveServices(entry);
-    ScheduleRetry(entry);
+    (void)name;
+    DEBUG_WARN("Transport %s requested a restart while its frame interfaces "
+      "are active", name);
     return;
   }
 
   RemoveServices(entry);
+  if (result == ProcessResult::RETRY || !required)
+  {
+    ScheduleRetry(entry);
+    return;
+  }
+
+  CSRWExclusiveLock entryLock(entry.lock);
   entry.state = State::FAILED;
+}
+
+void CTransportManager::Expose(Entry& entry)
+{
+  CSRWExclusiveLock entryLock(entry.lock);
+  entry.exposed          = true;
+  entry.exposedTransport = entry.transport;
+}
+
+ITransport::OpenResult CTransportManager::Open()
+{
+  if (!BeginPhase(Phase::OPEN, true))
+    return OpenResult::FAILURE;
+
+  {
+    CSRWExclusiveLock managerLock(m_lock);
+    m_started = true;
+  }
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  OpenResult aggregate = Primary() ?
+    OpenResult::SUCCESS : OpenResult::FAILURE;
+  for (unsigned i = 0; i < count && aggregate != OpenResult::FAILURE; ++i)
+  {
+    Entry& entry = *entries[i];
+    if (!BeginCall(entry, Call::LIFECYCLE, true))
+    {
+      if (entry.required)
+        aggregate = OpenResult::FAILURE;
+      continue;
+    }
+
+    bool alreadyOpen = false;
+    std::shared_ptr<ITransport> transport;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      alreadyOpen = entry.state == State::OPEN ||
+        entry.state == State::INITIALIZED || entry.state == State::READY;
+      transport = entry.transport;
+    }
+
+    const OpenResult result = alreadyOpen ?
+      OpenResult::SUCCESS : OpenEntry(entry);
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      transport = entry.transport;
+    }
+    EndCall(entry, transport);
+
+    if (entry.required && result != OpenResult::SUCCESS)
+      aggregate = result;
+  }
+
+  EndPhase();
+  return aggregate;
+}
+
+bool CTransportManager::Initialize()
+{
+  if (!BeginPhase(Phase::INITIALIZE, true))
+    return false;
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  bool success = true;
+  for (unsigned i = 0; i < count && success; ++i)
+  {
+    Entry& entry = *entries[i];
+    if (!BeginCall(entry, Call::LIFECYCLE, true))
+    {
+      if (entry.required)
+        success = false;
+      continue;
+    }
+
+    State state;
+    std::shared_ptr<ITransport> transport;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      state     = entry.state;
+      transport = entry.transport;
+    }
+
+    if (state == State::OPEN && !InitializeEntry(entry))
+    {
+      if (entry.required)
+        success = false;
+      else
+        ScheduleRetry(entry);
+    }
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      transport = entry.transport;
+    }
+    EndCall(entry, transport);
+  }
+
+  Entry * primary = Primary();
+  if (success && primary)
+  {
+    CSRWSharedLock entryLock(primary->lock);
+    success = primary->state == State::INITIALIZED ||
+      primary->state == State::READY;
+  }
+  else
+    success = false;
+
+  if (success)
+  {
+    CSRWExclusiveLock managerLock(m_lock);
+    m_initialized = true;
+  }
+  EndPhase();
+  return success;
+}
+
+bool CTransportManager::Setup(size_t alignment)
+{
+  if (!BeginPhase(Phase::SETUP, true))
+    return false;
+
+  bool initialized = false;
+  {
+    CSRWExclusiveLock managerLock(m_lock);
+    initialized = m_initialized && m_primary;
+    if (initialized)
+      m_alignment = alignment;
+  }
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  bool success = initialized;
+  for (unsigned i = 0; i < count && success; ++i)
+  {
+    Entry& entry = *entries[i];
+    if (!BeginCall(entry, Call::LIFECYCLE, true))
+    {
+      if (entry.required)
+        success = false;
+      continue;
+    }
+
+    State state;
+    std::shared_ptr<ITransport> transport;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      state     = entry.state;
+      transport = entry.transport;
+    }
+
+    if (state == State::INITIALIZED && !SetupEntry(entry, alignment))
+    {
+      RemoveServices(entry);
+      if (entry.required)
+        success = false;
+      else
+        ScheduleRetry(entry);
+    }
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      transport = entry.transport;
+    }
+    EndCall(entry, transport);
+  }
+
+  for (unsigned i = 0; i < count && success; ++i)
+  {
+    CSRWSharedLock entryLock(entries[i]->lock);
+    if (entries[i]->required && entries[i]->state != State::READY)
+      success = false;
+  }
+
+  if (success)
+  {
+    CSRWExclusiveLock managerLock(m_lock);
+    m_setup = true;
+  }
+  EndPhase();
+  return success;
 }
 
 ITransport::ProcessResult CTransportManager::Process(
   ITransportEvents& events)
 {
-  const uint64_t now = GetTickCount64();
-  for (const auto& current : m_entries)
+  if (!BeginPhase(Phase::PROCESS, false))
   {
-    Entry& entry = *current;
-    RetryEntry(entry, now);
-    if (entry.state != State::INITIALIZED && entry.state != State::READY)
+    CSRWSharedLock managerLock(m_lock);
+    return m_stopping || m_stopped ?
+      ProcessResult::FAILURE : ProcessResult::OK;
+  }
+
+  bool initialized = false;
+  bool setup = false;
+  size_t alignment = 0;
+  {
+    CSRWSharedLock managerLock(m_lock);
+    initialized = m_initialized;
+    setup       = m_setup;
+    alignment   = m_alignment;
+  }
+
+  const uint64_t now = GetTickCount64();
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Entry& entry = *entries[i];
+    if (!BeginCall(entry, Call::PROCESS, false))
       continue;
 
-    CSourceEvents sourceEvents(entry.id, entry.epoch, events);
-    const ProcessResult result = entry.transport->Process(sourceEvents);
+    RetryEntry(entry, now, initialized, setup, alignment);
+
+    std::shared_ptr<ITransport> transport;
+    BackendId id = 0;
+    uint32_t epoch = 0;
+    bool process = false;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      transport = entry.transport;
+      id        = entry.id;
+      epoch     = entry.epoch;
+      process   = transport &&
+        (entry.state == State::INITIALIZED || entry.state == State::READY);
+    }
+
+    if (!process)
+    {
+      EndCall(entry, transport);
+      continue;
+    }
+
+    bool setupDone = false;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      setupDone = entry.setupDone;
+    }
+    if (setup && !setupDone)
+    {
+      DrainRecovery(entry, transport);
+      if (!transport || !transport->Setup(alignment))
+      {
+        HandleProcessResult(entry, ProcessResult::FAILURE);
+        EndCall(entry, transport);
+        continue;
+      }
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.setupDone = true;
+    }
+
+    DrainRecovery(entry, transport);
+    CSourceEvents sourceEvents(id, epoch, events);
+    const ProcessResult result = transport->Process(sourceEvents);
+    DrainRecovery(entry, transport);
     HandleProcessResult(entry, result);
+    EndCall(entry, transport);
   }
+
+  EndPhase();
   return ProcessResult::OK;
 }
 
 void CTransportManager::Stop()
 {
-  for (auto current = m_entries.rbegin(); current != m_entries.rend();
-       ++current)
+  const DWORD thread = GetCurrentThreadId();
+  bool wait = false;
   {
-    Entry& entry = **current;
+    CSRWExclusiveLock managerLock(m_lock);
+    if (m_stopped)
+      return;
+    if (m_stopping)
+      wait = true;
+    else
+    {
+      if (m_phase != Phase::IDLE && m_phaseOwner == thread)
+        return;
+      m_stopping = true;
+      ResetEvent(m_stoppedEvent);
+    }
+  }
+
+  if (wait)
+  {
+    WaitForSingleObject(m_stoppedEvent, INFINITE);
+    return;
+  }
+
+  if (!BeginPhase(Phase::STOP, true, true))
+    return;
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  bool failed = false;
+  for (unsigned i = 0; i < count; ++i)
+  {
+    CSRWExclusiveLock entryLock(entries[i]->lock);
+    entries[i]->stopRequested   = true;
+    entries[i]->syncPending     = false;
+    entries[i]->recoveryPending = false;
+  }
+
+  for (unsigned i = 0; i < count; ++i)
+  {
+    for (;;)
+    {
+      HANDLE idleEvent = nullptr;
+      {
+        CSRWSharedLock entryLock(entries[i]->lock);
+        if (entries[i]->call == Call::IDLE)
+          break;
+        idleEvent = entries[i]->idleEvent;
+      }
+      if (!idleEvent ||
+          WaitForSingleObject(idleEvent, INFINITE) != WAIT_OBJECT_0)
+      {
+        failed = true;
+        break;
+      }
+    }
+  }
+
+  if (failed)
+  {
+    for (unsigned i = 0; i < count; ++i)
+    {
+      CSRWExclusiveLock entryLock(entries[i]->lock);
+      entries[i]->stopRequested = false;
+    }
+    CSRWExclusiveLock managerLock(m_lock);
+    m_stopping   = false;
+    m_phase      = Phase::IDLE;
+    m_phaseOwner = 0;
+    SetEvent(m_phaseIdle);
+    SetEvent(m_stoppedEvent);
+    return;
+  }
+
+  for (unsigned i = count; i > 0; --i)
+  {
+    Entry& entry = *entries[i - 1];
+    std::shared_ptr<ITransport> transport;
+    State state;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      transport = entry.transport;
+      state     = entry.state;
+    }
+
     RemoveServices(entry);
-    if (entry.transport && entry.state != State::STOPPED)
-      entry.transport->Stop();
-    entry.state = State::STOPPED;
-  }
-}
-
-void CTransportManager::RemoveServices(Entry& entry)
-{
-  if (entry.frameAdded)
-  {
-    m_frames.Unbind(entry.id, entry.epoch);
-    entry.frameAdded = false;
+    if (transport && state != State::STOPPED)
+      transport->Stop();
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.state = State::STOPPED;
+    }
   }
 
-  if (entry.controlAdded)
   {
-    m_control.Remove(entry.id, entry.epoch);
-    entry.controlAdded = false;
+    CSRWExclusiveLock managerLock(m_lock);
+    m_initialized = false;
+    m_setup       = false;
+    m_stopped     = true;
+    m_phase       = Phase::IDLE;
+    m_phaseOwner  = 0;
+    SetEvent(m_phaseIdle);
+    SetEvent(m_stoppedEvent);
   }
 }
 
 void CTransportManager::SyncRecovery()
 {
-  for (const auto& current : m_entries)
-    if (current->transport &&
-        (current->state == State::INITIALIZED ||
-         current->state == State::READY))
-      current->transport->SyncRecovery();
+  {
+    CSRWSharedLock managerLock(m_lock);
+    if (m_stopping || m_stopped)
+      return;
+  }
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Entry& entry = *entries[i];
+    std::shared_ptr<ITransport> transport;
+    bool call = false;
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      if (entry.stopRequested || !entry.transport ||
+          (entry.state != State::INITIALIZED && entry.state != State::READY))
+        continue;
+
+      if (entry.call != Call::IDLE)
+      {
+        entry.syncPending = true;
+        continue;
+      }
+
+      entry.call      = Call::RECOVERY;
+      entry.callOwner = GetCurrentThreadId();
+      ResetEvent(entry.idleEvent);
+      transport = entry.transport;
+      call = true;
+    }
+
+    if (call)
+      transport->SyncRecovery();
+    EndCall(entry, transport);
+  }
 }
 
 void CTransportManager::RecoveryStatus(uint64_t session, uint32_t serial,
   bool active, Recovery state, uint32_t error)
 {
-  for (const auto& current : m_entries)
-    if (current->transport &&
-        (current->state == State::INITIALIZED ||
-         current->state == State::READY))
-      current->transport->RecoveryStatus(
-        session, serial, active, state, error);
-}
+  {
+    CSRWSharedLock managerLock(m_lock);
+    if (m_stopping || m_stopped)
+      return;
+  }
 
-ITransport& CTransportManager::Primary()
-{
-  m_exposed = true;
-  return *m_primary->transport;
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Entry& entry = *entries[i];
+    std::shared_ptr<ITransport> transport;
+    bool call = false;
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      if (entry.stopRequested || !entry.transport ||
+          (entry.state != State::INITIALIZED && entry.state != State::READY))
+        continue;
+
+      if (entry.call != Call::IDLE)
+      {
+        entry.recovery.session = session;
+        entry.recovery.serial  = serial;
+        entry.recovery.active  = active;
+        entry.recovery.state   = state;
+        entry.recovery.error   = error;
+        entry.recoveryPending  = true;
+        continue;
+      }
+
+      entry.call      = Call::RECOVERY;
+      entry.callOwner = GetCurrentThreadId();
+      ResetEvent(entry.idleEvent);
+      transport = entry.transport;
+      call = true;
+    }
+
+    if (call)
+      transport->RecoveryStatus(session, serial, active, state, error);
+    EndCall(entry, transport);
+  }
 }
 
 FrameMemoryLimits CTransportManager::GetMemoryLimits() const
 {
-  return m_primary->transport->GetMemoryLimits();
+  {
+    CSRWSharedLock managerLock(m_lock);
+    if (m_stopping || m_stopped)
+      return FrameMemoryLimits {};
+  }
+
+  Entry * primary = Primary();
+  if (!primary)
+    return FrameMemoryLimits {};
+
+  CSRWSharedLock entryLock(primary->lock);
+  return primary->limitsValid ? primary->limits : FrameMemoryLimits {};
 }
 
 DirectFrameBufferMemory CTransportManager::GetDirectMemory() const
 {
-  return m_primary->transport->GetDirectMemory();
+  CTransportManager * manager = const_cast<CTransportManager *>(this);
+  {
+    CSRWSharedLock managerLock(m_lock);
+    if (m_stopping || m_stopped)
+      return DirectFrameBufferMemory {};
+  }
+
+  Entry * primary = manager->Primary();
+  if (!primary)
+    return DirectFrameBufferMemory {};
+
+  {
+    CSRWSharedLock entryLock(primary->lock);
+    if (primary->directMemoryValid)
+      return primary->directMemory;
+  }
+
+  if (!manager->BeginPhase(Phase::ACCESS, true))
+    return DirectFrameBufferMemory {};
+
+  {
+    CSRWSharedLock entryLock(primary->lock);
+    if (primary->directMemoryValid)
+    {
+      const DirectFrameBufferMemory memory = primary->directMemory;
+      manager->EndPhase();
+      return memory;
+    }
+  }
+
+  if (!manager->BeginCall(*primary, Call::ACCESS, true))
+  {
+    manager->EndPhase();
+    return DirectFrameBufferMemory {};
+  }
+
+  std::shared_ptr<ITransport> transport;
+  State state;
+  {
+    CSRWSharedLock entryLock(primary->lock);
+    transport = primary->transport;
+    state     = primary->state;
+  }
+
+  DirectFrameBufferMemory memory;
+  if (transport && state != State::FAILED && state != State::STOPPED)
+    memory = transport->GetDirectMemory();
+  {
+    CSRWExclusiveLock entryLock(primary->lock);
+    primary->directMemory     = memory;
+    primary->directMemoryValid = true;
+    primary->exposed          = true;
+    primary->exposedTransport = transport;
+  }
+
+  manager->EndCall(*primary, transport);
+  manager->EndPhase();
+  return memory;
 }
 
 IFrameTransport& CTransportManager::Frames()
 {
-  m_exposed = true;
+  Entry * primary = Primary();
+  if (!primary)
+    return m_frames;
+
+  if (BeginPhase(Phase::ACCESS, true))
+  {
+    Expose(*primary);
+    EndPhase();
+  }
   return m_frames;
 }
 
@@ -383,5 +1097,23 @@ IControlTransport& CTransportManager::Control()
 
 IInputTransport * CTransportManager::Input()
 {
-  return Primary().Input();
+  Entry * primary = Primary();
+  if (!primary || !BeginPhase(Phase::ACCESS, true))
+    return nullptr;
+  if (!BeginCall(*primary, Call::ACCESS, true))
+  {
+    EndPhase();
+    return nullptr;
+  }
+
+  std::shared_ptr<ITransport> transport;
+  {
+    CSRWSharedLock entryLock(primary->lock);
+    transport = primary->transport;
+  }
+  Expose(*primary);
+  IInputTransport * input = transport ? transport->Input() : nullptr;
+  EndCall(*primary, transport);
+  EndPhase();
+  return input;
 }

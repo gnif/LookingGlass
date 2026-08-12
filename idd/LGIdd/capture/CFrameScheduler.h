@@ -103,7 +103,9 @@ private:
   static const unsigned WORK_TIMING_HISTORY_SIZE  = 32;
 
   mutable CSRWLock m_lock;
+  mutable CSRWLock m_wakeLock;
   HANDLE           m_wakeEvent            = nullptr;
+  HANDLE           m_sharedWakeEvent      = nullptr;
   Client           m_clients[MAX_CLIENTS] = {};
   Schedule         m_schedule             = {};
   bool             m_scheduling           = false;
@@ -162,6 +164,7 @@ public:
     const FrameScheduleUpdate& schedule, uint64_t now);
   bool GetSchedule(Schedule& schedule) const;
   HANDLE GetWakeEvent() const { return m_wakeEvent; }
+  void SetSharedWakeEvent(HANDLE event);
   void ObserveFrame(uint64_t now);
   void ForceFrame();
   bool GetPublishTarget(uint64_t now, uint64_t& target,

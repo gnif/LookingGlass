@@ -26,7 +26,7 @@
 
 bool CFrameBufferResource::Init(CD3D12Device * dx12,
   const FrameToken& token, uint8_t * base, uint64_t heapOffset, size_t size,
-  size_t maxFrameSize)
+  size_t maxFrameSize, bool direct)
 {
   if (size > maxFrameSize)
   {
@@ -35,7 +35,7 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
     return false;
   }
 
-  const bool indirect = dx12->IsIndirectCopy();
+  const bool indirect = !direct || dx12->IsIndirectCopy();
 
   D3D12_RESOURCE_DESC desc = {};
   desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
@@ -55,7 +55,9 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
   }
 
   // Nothing to do if the resource already represents this allocation.
-  if (m_base == base && m_size >= size)
+  if (m_base == base && m_size >= size &&
+      m_capacity == maxFrameSize && m_heapOffset == heapOffset &&
+      m_direct == direct)
   {
     m_token     = token;
     m_frameSize = size;
@@ -136,10 +138,13 @@ bool CFrameBufferResource::Init(CD3D12Device * dx12,
 
   m_res->SetName(resName);
 
-  m_token     = token;
-  m_base      = base;
-  m_size      = size;
-  m_frameSize = size;
+  m_token      = token;
+  m_base       = base;
+  m_size       = size;
+  m_capacity   = maxFrameSize;
+  m_heapOffset = heapOffset;
+  m_frameSize  = size;
+  m_direct     = direct;
   return true;
 }
 
@@ -154,8 +159,11 @@ void CFrameBufferResource::Reset()
   m_token             = {};
   m_base              = nullptr;
   m_size              = 0;
+  m_capacity          = 0;
+  m_heapOffset        = 0;
   m_frameSize         = 0;
   m_fullCopy          = false;
+  m_direct            = false;
   m_nbCopyDirtyRects  = 0;
   m_copyPitch         = 0;
   m_copyBytesPerPixel = 0;

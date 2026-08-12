@@ -73,9 +73,10 @@ public:
 CHardwareFrameProcessor::CHardwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    CSRWLock * pipelineLock, HANDLE terminateEvent) :
+    CSRWLock * pipelineLock, HANDLE terminateEvent, bool useCadence) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
-    pipelineLock, terminateEvent)
+    pipelineLock, terminateEvent),
+  m_useCadence(useCadence)
 {
   m_candidateAvailableEvent.Attach(
     CreateEvent(nullptr, FALSE, FALSE, nullptr));
@@ -144,15 +145,19 @@ void CHardwareFrameProcessor::ResetPipeline()
 
 bool CHardwareFrameProcessor::HasReadyFrame() const
 {
-  bool ready = false;
-  CSRWSharedLock lock(m_candidateLock);
-  for (const FrameCandidate& candidate : m_candidates)
-    if (candidate.state == CANDIDATE_READY)
+  bool ready    = false;
+  bool retained = false;
+  {
+    CSRWSharedLock lock(m_candidateLock);
+    for (const FrameCandidate& candidate : m_candidates)
     {
-      ready = true;
-      break;
+      if (candidate.state == CANDIDATE_READY)
+        ready = true;
+      else if (candidate.state == CANDIDATE_RETAINED)
+        retained = true;
     }
-  return ready;
+  }
+  return ready || (retained && m_transport->NeedsFrame());
 }
 
 int CHardwareFrameProcessor::AcquireCandidate(
@@ -163,12 +168,18 @@ int CHardwareFrameProcessor::AcquireCandidate(
   bool     superseded = false;
   bool     idle       = true;
   bool     publishing = false;
+  bool     retained   = false;
 
   {
     CSRWExclusiveLock lock(m_candidateLock);
     for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
     {
-      if (m_candidates[i].state != CANDIDATE_FREE)
+      if (m_candidates[i].state == CANDIDATE_RETAINED)
+      {
+        retained = true;
+        continue;
+      }
+      else if (m_candidates[i].state != CANDIDATE_FREE)
       {
         idle = false;
         if (m_candidates[i].state == CANDIDATE_PUBLISHING)
@@ -187,7 +198,7 @@ int CHardwareFrameProcessor::AcquireCandidate(
         ++readyCount;
 
     if (allowSupersede && !exclusiveSample && selected < 0 &&
-        readyCount > (publishing ? 0U : 1U))
+        readyCount > ((publishing || retained) ? 0U : 1U))
       for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
         if (m_candidates[i].state == CANDIDATE_READY &&
             m_candidates[i].sequence < oldest)
@@ -202,7 +213,7 @@ int CHardwareFrameProcessor::AcquireCandidate(
         m_candidates[static_cast<unsigned>(selected)];
       superseded         = candidate.state == CANDIDATE_READY;
       candidate.state    = CANDIDATE_PREPARING;
-      candidate.sequence = ++m_candidateSequence;
+      candidate.sequence = m_transport->NextContentSerial();
     }
   }
 
@@ -220,6 +231,44 @@ void CHardwareFrameProcessor::ReleaseCandidate(unsigned candidateIndex)
     CSRWExclusiveLock lock(m_candidateLock);
     m_candidates[candidateIndex].state = CANDIDATE_FREE;
   }
+  SignalCandidateState();
+}
+
+void CHardwareFrameProcessor::RetainCandidate(unsigned candidateIndex)
+{
+  if (candidateIndex >= ARRAYSIZE(m_candidates))
+    return;
+
+  unsigned superseded = 0;
+  {
+    CSRWExclusiveLock lock(m_candidateLock);
+    FrameCandidate& candidate = m_candidates[candidateIndex];
+    if (candidate.state != CANDIDATE_PUBLISHING)
+      return;
+
+    bool newer = false;
+    for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+      if (i != candidateIndex)
+      {
+        FrameCandidate& current = m_candidates[i];
+        const bool complete = current.state == CANDIDATE_READY ||
+          current.state == CANDIDATE_PUBLISHING ||
+          current.state == CANDIDATE_RETAINED;
+        if (complete && current.sequence > candidate.sequence)
+          newer = true;
+        else if (current.sequence < candidate.sequence &&
+                 (current.state == CANDIDATE_READY ||
+                  current.state == CANDIDATE_RETAINED))
+        {
+          if (current.state == CANDIDATE_READY)
+            ++superseded;
+          current.state = CANDIDATE_FREE;
+        }
+      }
+    candidate.state = newer ? CANDIDATE_FREE : CANDIDATE_RETAINED;
+  }
+  for (unsigned i = 0; i < superseded; ++i)
+    m_transport->FrameSuperseded();
   SignalCandidateState();
 }
 
@@ -312,7 +361,8 @@ void CHardwareFrameProcessor::CandidateCompletionFunction(
   uint64_t gpuEnd   = 0;
   const bool timingValid = result && slot->GetGPUTimes(gpuStart, gpuEnd);
 
-  bool forceFrame = false;
+  uint64_t readySequence = 0;
+  bool forceFrame        = false;
   {
     CSRWExclusiveLock lock(processor->m_candidateLock);
     if (candidate->state == CANDIDATE_PREPARING)
@@ -321,9 +371,28 @@ void CHardwareFrameProcessor::CandidateCompletionFunction(
       candidate->prepareGPUStart    = gpuStart;
       candidate->prepareGPUEnd      = gpuEnd;
       candidate->prepareTimingValid = timingValid;
-      candidate->state              =
-        result ? CANDIDATE_READY : CANDIDATE_FREE;
-      forceFrame = result && candidate->timingToken != 0;
+      if (result)
+      {
+        bool newer = false;
+        for (FrameCandidate& current : processor->m_candidates)
+          if (&current != candidate)
+          {
+            const bool complete = current.state == CANDIDATE_READY ||
+              current.state == CANDIDATE_PUBLISHING ||
+              current.state == CANDIDATE_RETAINED;
+            if (complete && current.sequence > candidate->sequence)
+              newer = true;
+            else if (current.state == CANDIDATE_RETAINED)
+              current.state = CANDIDATE_FREE;
+          }
+        candidate->state = newer ? CANDIDATE_FREE : CANDIDATE_READY;
+      }
+      else
+        candidate->state = CANDIDATE_FREE;
+      if (candidate->state == CANDIDATE_READY)
+        readySequence = candidate->sequence;
+      forceFrame = candidate->state == CANDIDATE_READY &&
+        candidate->timingToken != 0;
     }
   }
 
@@ -332,8 +401,12 @@ void CHardwareFrameProcessor::CandidateCompletionFunction(
     processor->SetFullDamage();
     processor->m_transport->ForceFrame();
   }
-  else if (forceFrame)
-    processor->m_transport->ForceFrame();
+  else if (readySequence)
+  {
+    processor->m_transport->FrameProductReady(readySequence);
+    if (forceFrame)
+      processor->m_transport->ForceFrame();
+  }
   processor->SignalCandidateState();
 }
 
@@ -341,15 +414,16 @@ void CHardwareFrameProcessor::CompletionFunction(
   CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
 {
   auto processor = static_cast<CHardwareFrameProcessor *>(param1);
-  auto fbRes     = static_cast<CFrameBufferResource *>(param2);
-  const unsigned candidateIndex = fbRes->GetCandidateIndex();
+  const FrameCopyBatch batch =
+    *static_cast<FrameCopyBatch *>(param2);
+  const unsigned candidateIndex = batch.candidateIndex;
 
   if (!result)
   {
-    processor->m_transport->FailFrameBuffer(fbRes->GetToken());
+    processor->m_transport->FailFrameBatch(batch.prepared.token);
     processor->SetFullDamage();
     processor->m_transport->ForceFrame();
-    processor->ReleaseCandidate(candidateIndex);
+    processor->RetainCandidate(candidateIndex);
     return;
   }
 
@@ -371,79 +445,114 @@ void CHardwareFrameProcessor::CompletionFunction(
     prepareTimingValid = candidate.prepareTimingValid;
   }
 
-  const uint64_t publishStart = fbRes->GetCopyStart();
+  uint64_t publishStart = 0;
+  for (unsigned i = 0; i < batch.prepared.count; ++i)
+    if ((batch.accepted & (1U << i)) && batch.resources[i])
+    {
+      publishStart = batch.resources[i]->GetCopyStart();
+      break;
+    }
   uint64_t       gpuCopyStart     = 0;
   uint64_t       gpuCopyEnd       = 0;
-  uint64_t       indirectCopyTime = 0;
-  if (processor->m_dx12->IsIndirectCopy())
-  {
-    const uint64_t indirectCopyStart = CFrameScheduler::Nanotime();
-    processor->m_transport->WriteFrameBuffer(
-      fbRes->GetToken(), fbRes->GetMap(), 0,
-      fbRes->GetFrameSize(), false);
-    indirectCopyTime = CFrameScheduler::Nanotime() - indirectCopyStart;
-  }
-
   const bool gpuTimingValid =
     slot->GetGPUTimes(gpuCopyStart, gpuCopyEnd);
-  const uint64_t copyReady = CFrameScheduler::Nanotime();
-
-  const uint64_t postProcessStart = fbRes->GetPostProcessStart();
-  uint64_t postProcessTime = prepareCopyStart - postProcessStart;
-  uint64_t prepareCopyTime = prepareReady - prepareCopyStart;
-  if (prepareTimingValid && prepareGPUStart >= postProcessStart &&
-      prepareGPUEnd >= prepareGPUStart && prepareGPUEnd <= prepareReady)
+  bool timingRecorded = false;
+  for (unsigned i = 0; i < batch.prepared.count; ++i)
   {
-    postProcessTime = prepareGPUStart - postProcessStart;
-    prepareCopyTime = prepareGPUEnd - prepareGPUStart;
+    if (!(batch.accepted & (1U << i)))
+      continue;
+    CFrameBufferResource * fbRes = batch.resources[i];
+    if (!fbRes)
+      continue;
+
+    uint64_t stagedCopyTime = 0;
+    if (fbRes->GetMap())
+    {
+      const uint64_t stagedCopyStart = CFrameScheduler::Nanotime();
+      if (fbRes->IsFullCopy())
+        processor->m_transport->WriteFrameTarget(batch.prepared.token,
+          i, fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
+      else
+      {
+        const unsigned pitch         = fbRes->GetCopyPitch();
+        const unsigned bytesPerPixel = fbRes->GetCopyBytesPerPixel();
+        const RECT * dirtyRects      = fbRes->GetCopyDirtyRects();
+        const unsigned count         = fbRes->GetCopyDirtyRectCount();
+        for (const RECT * rect = dirtyRects;
+             rect < dirtyRects + count; ++rect)
+        {
+          const size_t rowOffset =
+            (size_t)rect->top * pitch +
+            (size_t)rect->left * bytesPerPixel;
+          const size_t rowBytes =
+            (size_t)(rect->right - rect->left) * bytesPerPixel;
+          processor->m_transport->WriteFrameTargetRows(
+            batch.prepared.token, i, fbRes->GetMap(), rowOffset,
+            rowBytes, pitch, (unsigned)(rect->bottom - rect->top));
+        }
+      }
+      stagedCopyTime = CFrameScheduler::Nanotime() - stagedCopyStart;
+    }
+    const uint64_t copyReady = CFrameScheduler::Nanotime();
+    const uint64_t postProcessStart = fbRes->GetPostProcessStart();
+    uint64_t postProcessTime = prepareCopyStart - postProcessStart;
+    uint64_t prepareCopyTime = prepareReady - prepareCopyStart;
+    if (prepareTimingValid && prepareGPUStart >= postProcessStart &&
+        prepareGPUEnd >= prepareGPUStart && prepareGPUEnd <= prepareReady)
+    {
+      postProcessTime = prepareGPUStart - postProcessStart;
+      prepareCopyTime = prepareGPUEnd - prepareGPUStart;
+    }
+
+    uint64_t publishCopyTime = copyReady - publishStart;
+    if (gpuTimingValid && gpuCopyStart >= publishStart &&
+        gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= copyReady)
+      publishCopyTime = gpuCopyEnd - gpuCopyStart + stagedCopyTime;
+
+    const uint64_t copyTime = prepareCopyTime + publishCopyTime;
+
+    processor->m_transport->FinalizeFrameTarget(
+      batch.prepared.token, i);
+    const uint64_t publishedAt = CFrameScheduler::Nanotime();
+    const uint64_t prepareElapsed = prepareReady >= postProcessStart ?
+      prepareReady - postProcessStart : 0;
+    const uint64_t prepareMeasured = postProcessTime + prepareCopyTime;
+    const uint64_t prepareReadyTime = prepareElapsed > prepareMeasured ?
+      prepareElapsed - prepareMeasured : 0;
+    const uint64_t publishElapsed = publishedAt >= publishStart ?
+      publishedAt - publishStart : 0;
+    const uint64_t publishReadyTime = publishElapsed > publishCopyTime ?
+      publishElapsed - publishCopyTime : 0;
+    const uint64_t readyTime = prepareReadyTime + publishReadyTime;
+    const uint64_t holdTime = publishStart >= prepareReady ?
+      publishStart - prepareReady : 0;
+
+    processor->m_transport->SetFrameTargetTiming(batch.prepared.token, i,
+      fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime,
+      holdTime, publishedAt);
+    processor->m_transport->TryRecordFrameTiming(
+      batch.prepared.token, i, publishedAt - publishStart);
+
+    const uint64_t timingToken = fbRes->GetTimingToken();
+    if (!timingRecorded && timingToken && timingStart &&
+        prepareReady >= timingStart && copyReady >= publishStart)
+    {
+      const uint64_t totalTime =
+        (prepareReady - timingStart) + (copyReady - publishStart);
+      processor->m_postProcessors[candidateIndex].RecordTiming(
+        fbRes->GetTimingEffectIndex(), timingToken,
+        fbRes->IsFullCopy(), totalTime);
+      timingRecorded = true;
+    }
+
+    processor->m_transport->CompleteFrameTarget(
+      batch.prepared.token, i, true);
   }
-
-  uint64_t publishCopyTime = copyReady - publishStart;
-  if (gpuTimingValid && gpuCopyStart >= publishStart &&
-      gpuCopyEnd >= gpuCopyStart && gpuCopyEnd <= copyReady)
-    publishCopyTime = gpuCopyEnd - gpuCopyStart + indirectCopyTime;
-
-  const uint64_t copyTime = prepareCopyTime + publishCopyTime;
-
-  processor->m_transport->FinalizeFrameBuffer(fbRes->GetToken());
-  const uint64_t publishedAt = CFrameScheduler::Nanotime();
-  const uint64_t prepareElapsed = prepareReady >= postProcessStart ?
-    prepareReady - postProcessStart : 0;
-  const uint64_t prepareMeasured = postProcessTime + prepareCopyTime;
-  const uint64_t prepareReadyTime = prepareElapsed > prepareMeasured ?
-    prepareElapsed - prepareMeasured : 0;
-  const uint64_t publishElapsed = publishedAt >= publishStart ?
-    publishedAt - publishStart : 0;
-  const uint64_t publishReadyTime = publishElapsed > publishCopyTime ?
-    publishElapsed - publishCopyTime : 0;
-  const uint64_t readyTime = prepareReadyTime + publishReadyTime;
-  const uint64_t holdTime = publishStart >= prepareReady ?
-    publishStart - prepareReady : 0;
-
-  processor->m_transport->SetFrameTiming(fbRes->GetToken(),
-    fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, holdTime,
-    fbRes->GetSchedule(), publishedAt);
-  processor->m_transport->TryRecordFrameTiming(
-    fbRes->GetToken(), publishedAt - publishStart);
-
-  const uint64_t timingToken = fbRes->GetTimingToken();
-  if (timingToken && timingStart && prepareReady >= timingStart &&
-      copyReady >= publishStart)
-  {
-    const uint64_t totalTime =
-      (prepareReady - timingStart) + (copyReady - publishStart);
-    processor->m_postProcessors[candidateIndex].RecordTiming(
-      fbRes->GetTimingEffectIndex(), timingToken,
-      fbRes->IsFullCopy(), totalTime);
-  }
-
-  processor->m_transport->CompleteFrameBuffer(fbRes->GetToken(), true);
-  processor->ReleaseCandidate(candidateIndex);
+  processor->RetainCandidate(candidateIndex);
 }
 
 bool CHardwareFrameProcessor::Publish(
-  const CFrameScheduler::Schedule& schedule, bool periodic,
-  uint64_t publishStart)
+  const FramePlan& plan, uint64_t publishStart)
 {
   CPublishPending publishPending(
     m_copySubmitLock, &m_publishPending, m_copySubmitEvent.Get());
@@ -451,6 +560,7 @@ bool CHardwareFrameProcessor::Publish(
 
   int      selectedCandidate = -1;
   uint64_t newestSequence    = 0;
+  CandidateState selectedState = CANDIDATE_FREE;
 
   {
     CSRWExclusiveLock lock(m_candidateLock);
@@ -463,9 +573,23 @@ bool CHardwareFrameProcessor::Publish(
         newestSequence    = m_candidates[i].sequence;
       }
 
+    if (selectedCandidate < 0 && m_transport->NeedsFrame())
+      for (unsigned i = 0; i < ARRAYSIZE(m_candidates); ++i)
+        if (m_candidates[i].state == CANDIDATE_RETAINED &&
+            (selectedCandidate < 0 ||
+              m_candidates[i].sequence > newestSequence))
+        {
+          selectedCandidate = static_cast<int>(i);
+          newestSequence    = m_candidates[i].sequence;
+        }
+
     if (selectedCandidate >= 0)
-      m_candidates[static_cast<unsigned>(selectedCandidate)].state =
-        CANDIDATE_PUBLISHING;
+    {
+      FrameCandidate& selected =
+        m_candidates[static_cast<unsigned>(selectedCandidate)];
+      selectedState  = selected.state;
+      selected.state = CANDIDATE_PUBLISHING;
+    }
   }
 
   if (selectedCandidate < 0)
@@ -473,12 +597,13 @@ bool CHardwareFrameProcessor::Publish(
   const unsigned candidateIndex =
     static_cast<unsigned>(selectedCandidate);
 
-  const auto restoreCandidate = [this, candidateIndex]()
+  const auto restoreCandidate =
+    [this, candidateIndex, selectedState]()
   {
     {
       CSRWExclusiveLock lock(m_candidateLock);
       if (m_candidates[candidateIndex].state == CANDIDATE_PUBLISHING)
-        m_candidates[candidateIndex].state = CANDIDATE_READY;
+        m_candidates[candidateIndex].state = selectedState;
     }
     SignalCandidateState();
   };
@@ -500,30 +625,20 @@ bool CHardwareFrameProcessor::Publish(
   CPostProcessor& postProcessor    = m_postProcessors[candidateIndex];
   const uint64_t candidateSequence = candidate.sequence;
 
-  auto buffer = m_transport->PrepareFrameBuffer(
-    candidate.pitch, candidate.srcFormat, candidate.dstFormat,
-    candidate.dirtyRects, candidate.nbDirtyRects, schedule);
-  if (!buffer.mem)
+  PreparedFrameBatch prepared = {};
+  if (!m_transport->PrepareFrameBatch(plan, candidate.sequence,
+        candidate.pitch, candidate.frameSize, candidate.srcFormat,
+        candidate.dstFormat, candidate.dirtyRects,
+        candidate.nbDirtyRects, true, prepared))
   {
     restoreCandidate();
-    return false;
-  }
-
-  CFrameBufferResource * fbRes =
-    m_frameBuffers.Get(buffer, candidate.frameSize);
-  if (!fbRes)
-  {
-    m_transport->AbortFrameBuffer(buffer.token);
-    restoreCandidate();
-    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
-    SetFullDamage();
     return false;
   }
 
   CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot(candidateIndex);
   if (!copySlot)
   {
-    m_transport->AbortFrameBuffer(buffer.token);
+    m_transport->AbortFrameBatch(prepared.token);
     restoreCandidate();
     DEBUG_ERROR("Failed to get a copy CommandSlot for publication");
     SetFullDamage();
@@ -534,42 +649,72 @@ bool CHardwareFrameProcessor::Publish(
   unsigned nbPreviousDirtyRects                   = 0;
   GetPreviousDamage(previousDirtyRects, &nbPreviousDirtyRects);
 
-  RECT     copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
-  unsigned nbCopyDirtyRects                       = 0;
-  const bool fullCopy = CFrameProcessorUtil::BuildCopyDamage(
-    postProcessor, buffer.fullCopy,
-    previousDirtyRects, nbPreviousDirtyRects,
-    candidate.dirtyRects, candidate.nbDirtyRects,
-    candidate.dstFormat.width, candidate.dstFormat.height,
-    copyDirtyRects, &nbCopyDirtyRects);
+  FrameCopyBatch& batch = m_publishBatches[candidateIndex];
+  batch = {};
+  batch.prepared       = prepared;
+  batch.candidateIndex = candidateIndex;
+  const unsigned bytesPerPixel =
+    candidate.dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+  bool resourcesReady = true;
+  for (unsigned i = 0; i < prepared.count; ++i)
+  {
+    CFrameBufferResource * fbRes =
+      m_frameBuffers.Get(prepared.targets[i], candidate.frameSize);
+    batch.resources[i] = fbRes;
+    if (!fbRes)
+    {
+      resourcesReady = false;
+      break;
+    }
 
-  fbRes->SetTiming(
-    candidate.captureTime, candidate.postProcessStart, publishStart);
-  fbRes->SetCandidateIndex(candidateIndex);
-  fbRes->SetPostProcessSample(
-    candidate.timingEffectIndex, candidate.timingToken, fullCopy);
-  copySlot->SetCompletionCallback(&CompletionFunction, this, fbRes);
-
-  copySlot->BeginTiming();
-  postProcessor.CopyFromCandidate(
-    copySlot->GetGfxList(), fbRes->Get().Get(), candidate.resource.Get(),
-    copyDirtyRects, nbCopyDirtyRects, fullCopy);
-  copySlot->EndTiming();
-
-  bool deliveredToOwner;
-  if (!m_transport->PublishFrameBuffer(
-        buffer.token, schedule, deliveredToOwner))
+    RECT copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
+    unsigned nbCopyDirtyRects = 0;
+    const bool fullCopy = CFrameProcessorUtil::BuildCopyDamage(
+      postProcessor, prepared.targets[i].fullCopy,
+      previousDirtyRects, nbPreviousDirtyRects,
+      candidate.dirtyRects, candidate.nbDirtyRects,
+      candidate.dstFormat.width, candidate.dstFormat.height,
+      copyDirtyRects, &nbCopyDirtyRects);
+    fbRes->SetTiming(
+      candidate.captureTime, candidate.postProcessStart, publishStart);
+    fbRes->SetCandidateIndex(candidateIndex);
+    fbRes->SetPostProcessSample(
+      candidate.timingEffectIndex, candidate.timingToken, fullCopy);
+    fbRes->SetCopyDamage(copyDirtyRects, nbCopyDirtyRects,
+      fullCopy, candidate.pitch, bytesPerPixel);
+  }
+  if (!resourcesReady)
   {
     copySlot->Cancel();
-    m_transport->AbortFrameBuffer(buffer.token);
+    m_transport->FailFrameBatch(prepared.token);
+    restoreCandidate();
+    DEBUG_ERROR("Failed to get a CFrameBufferResource from the pool");
+    SetFullDamage();
+    return false;
+  }
+
+  const uint32_t accepted =
+    m_transport->PublishFrameBatch(prepared.token);
+  if (!accepted)
+  {
+    copySlot->Cancel();
     restoreCandidate();
     return false;
   }
-  CFrameScheduler::Schedule frameSchedule = schedule;
-  if (!deliveredToOwner ||
-      !m_transport->TryFrameSubmitted(buffer.token, schedule))
-    frameSchedule.phaseEligible = false;
-  fbRes->SetSchedule(frameSchedule);
+  batch.accepted = accepted;
+
+  copySlot->SetCompletionCallback(&CompletionFunction, this, &batch);
+  copySlot->BeginTiming();
+  for (unsigned i = 0; i < prepared.count; ++i)
+    if (accepted & (1U << i))
+    {
+      CFrameBufferResource * fbRes = batch.resources[i];
+      postProcessor.CopyFromCandidate(copySlot->GetGfxList(),
+        fbRes->Get().Get(), candidate.resource.Get(),
+        fbRes->GetCopyDirtyRects(), fbRes->GetCopyDirtyRectCount(),
+        fbRes->IsFullCopy());
+    }
+  copySlot->EndTiming();
 
   {
     CSRWExclusiveLock lock(m_damageLock);
@@ -595,23 +740,25 @@ bool CHardwareFrameProcessor::Publish(
   if (!submitted)
   {
     SetFullDamage();
+    const bool submittedWork = copySlot->HasSubmittedWork();
     bool callbackPending;
     {
       CSRWSharedLock lock(m_candidateLock);
       callbackPending = candidate.state == CANDIDATE_PUBLISHING;
     }
-    if (callbackPending && !copySlot->HasSubmittedWork())
+    if (submittedWork || !callbackPending)
+      m_transport->CommitFrameBatch(prepared.token);
+    else
     {
-      m_transport->FailFrameBuffer(buffer.token);
-      ReleaseCandidate(candidateIndex);
+      m_transport->FailFrameBatch(prepared.token);
+      RetainCandidate(candidateIndex);
     }
     m_transport->ForceFrame();
     SignalCandidateState();
     return false;
   }
 
-  m_transport->CommitFrameBuffer(
-    buffer.token, schedule, periodic, deliveredToOwner);
+  m_transport->CommitFrameBatch(prepared.token);
 
   unsigned superseded = 0;
   {
@@ -780,6 +927,18 @@ bool CHardwareFrameProcessor::Submit(const FrameSubmission& submission)
     dstFormat.width, dstFormat.height);
 
   const size_t frameSize = postProcessor.GetOutputSize();
+  const unsigned pitch = postProcessor.GetOutputPitch();
+  if (!pitch || !frameSize || frameSize > m_transport->GetMaxFrameSize())
+  {
+    copySlot->Cancel();
+    if (computeSlot)
+      m_dx12->WaitForIdle();
+    ReleaseCandidate(candidateIndex);
+    DEBUG_ERROR("Processed frame does not fit in primary frame memory");
+    SetFullDamage();
+    return false;
+  }
+
   if (!EnsureCandidateResource(candidateIndex, frameSize))
   {
     copySlot->Cancel();
@@ -793,7 +952,7 @@ bool CHardwareFrameProcessor::Submit(const FrameSubmission& submission)
   candidate.srcFormat          = submission.sourceFormat;
   candidate.dstFormat          = dstFormat;
   candidate.nbDirtyRects       = nbDirtyRects;
-  candidate.pitch              = postProcessor.GetOutputPitch();
+  candidate.pitch              = pitch;
   candidate.frameSize          = frameSize;
   candidate.captureTime        = submission.captureTime;
   candidate.postProcessStart   = submission.postProcessStart;

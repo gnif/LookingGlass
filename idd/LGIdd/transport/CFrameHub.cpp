@@ -7,301 +7,892 @@
  * under the terms of the GNU General Public License as published by the Free
  * Software Foundation; either version 2 of the License, or (at your option)
  * any later version.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
- * more details.
- *
- * You should have received a copy of the GNU General Public License along
- * with this program; if not, write to the Free Software Foundation, Inc., 59
- * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
 #include "transport/CFrameHub.h"
 
-bool CFrameHub::Bind(
-  BackendId backend, uint32_t epoch, IFrameSink& sink)
+#include "CDebug.h"
+
+static const uint64_t RETRY_NS = 1000000ULL;
+
+static void Earlier(uint64_t value, uint64_t& target)
 {
-  if (!backend || !epoch)
+  if (value && (!target || value < target))
+    target = value;
+}
+
+static bool ContentAfter(uint64_t value, uint64_t current)
+{
+  return value && (!current ||
+    static_cast<int64_t>(value - current) > 0);
+}
+
+CFrameHub::CFrameHub()
+{
+  m_wakeEvent = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+  for (Sink& sink : m_sinks)
+    sink.drained = CreateEvent(nullptr, TRUE, TRUE, nullptr);
+}
+
+CFrameHub::~CFrameHub()
+{
+  for (Sink& sink : m_sinks)
+  {
+    const BackendId backend =
+      sink.backend.load(std::memory_order_acquire);
+    const uint32_t epoch = sink.epoch.load(std::memory_order_acquire);
+    if (backend && epoch)
+      Unbind(backend, epoch);
+  }
+
+  for (Sink& sink : m_sinks)
+  {
+    if (sink.drained)
+      CloseHandle(sink.drained);
+  }
+  if (m_wakeEvent)
+    CloseHandle(m_wakeEvent);
+}
+
+bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
+  IFrameSink& target)
+{
+  if (!backend || !epoch || !m_wakeEvent)
     return false;
 
-  CSRWExclusiveLock lock(m_lock);
-  if (m_sink)
-    return false;
-  m_sink    = &sink;
-  m_backend = backend;
-  m_epoch   = epoch;
-  m_slots.clear();
+  Sink * selected = nullptr;
+  {
+    CSRWExclusiveLock lock(m_listLock);
+    if (primary)
+    {
+      if (!m_sinks[0].active.load(std::memory_order_acquire) &&
+          !m_sinks[0].reserved)
+        selected = &m_sinks[0];
+    }
+    else
+      for (unsigned i = 1; i < FRAME_MAX_SINKS; ++i)
+        if (!m_sinks[i].active.load(std::memory_order_acquire) &&
+            !m_sinks[i].reserved)
+        {
+          selected = &m_sinks[i];
+          break;
+        }
+
+    if (!selected || !selected->drained)
+      return false;
+    selected->reserved = true;
+  }
+
+  {
+    CSRWExclusiveLock lock(selected->callLock);
+    selected->target        = &target;
+    selected->backend.store(backend, std::memory_order_release);
+    selected->epoch.store(epoch, std::memory_order_release);
+    selected->primary       = primary;
+    selected->needsFullCopy = true;
+    selected->lastContent   = 0;
+    selected->blockedContent   = 0;
+    selected->blockedFrameSize = 0;
+    selected->blockedAllocation = false;
+    selected->pitch         = 0;
+    selected->width         = 0;
+    selected->height        = 0;
+    selected->format        = DXGI_FORMAT_UNKNOWN;
+    selected->frameType     = FRAME_TYPE_INVALID;
+    for (Sink::ResourceLane& lane : selected->lanes)
+      lane = {};
+    selected->outstanding.store(0, std::memory_order_release);
+    SetEvent(selected->drained);
+    target.SetFrameScheduleEvent(m_wakeEvent);
+  }
+
+  {
+    CSRWExclusiveLock lock(m_listLock);
+    selected->active.store(true, std::memory_order_release);
+    selected->reserved = false;
+  }
+  target.ForceFrame();
+  SetEvent(m_wakeEvent);
   return true;
 }
 
 void CFrameHub::Unbind(BackendId backend, uint32_t epoch)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (m_backend != backend || m_epoch != epoch)
+  Sink * selected = nullptr;
+  {
+    CSRWExclusiveLock lock(m_listLock);
+    for (Sink& sink : m_sinks)
+      if (sink.active.load(std::memory_order_acquire) &&
+          sink.backend.load(std::memory_order_acquire) == backend &&
+          sink.epoch.load(std::memory_order_acquire) == epoch)
+      {
+        sink.active.store(false, std::memory_order_release);
+        sink.reserved = true;
+        selected = &sink;
+        break;
+      }
+  }
+  if (!selected)
     return;
-  m_sink    = nullptr;
-  m_backend = 0;
-  m_epoch   = 0;
-  m_slots.clear();
+
+  {
+    CSRWExclusiveLock lock(selected->callLock);
+    if (selected->target)
+      selected->target->SetFrameScheduleEvent(nullptr);
+  }
+
+  WaitForSingleObject(selected->drained, INFINITE);
+  {
+    CSRWExclusiveLock lock(selected->callLock);
+    selected->target        = nullptr;
+    selected->backend.store(0, std::memory_order_release);
+    selected->epoch.store(0, std::memory_order_release);
+    selected->primary       = false;
+    selected->needsFullCopy = true;
+    selected->lastContent   = 0;
+    selected->blockedContent   = 0;
+    selected->blockedFrameSize = 0;
+    selected->blockedAllocation = false;
+    for (Sink::ResourceLane& lane : selected->lanes)
+      lane = {};
+  }
+  {
+    CSRWExclusiveLock lock(m_listLock);
+    selected->reserved = false;
+  }
+  SetEvent(m_wakeEvent);
 }
 
-bool CFrameHub::Valid(const FrameToken& token) const
+unsigned CFrameHub::Snapshot(SinkRef refs[FRAME_MAX_SINKS]) const
 {
-  return m_sink && token.sink == m_backend && token.epoch == m_epoch &&
-    token.slot < m_slots.size() && token.serial &&
-    m_slots[token.slot].serial == token.serial;
+  unsigned count = 0;
+  CSRWSharedLock lock(m_listLock);
+  for (unsigned i = 0; i < FRAME_MAX_SINKS; ++i)
+    if (m_sinks[i].active.load(std::memory_order_acquire))
+      refs[count++] = {
+        const_cast<Sink *>(&m_sinks[i]), i, m_sinks[i].primary };
+  return count;
 }
 
-void CFrameHub::Invalidate(const FrameToken& token)
+bool CFrameHub::BatchValid(
+  const Batch& batch, const FrameBatchToken& token) const
 {
-  if (Valid(token))
-    m_slots[token.slot] = {};
+  return token.serial && batch.active && batch.serial == token.serial;
+}
+
+void CFrameHub::ReleaseTarget(Batch& batch, BatchTarget& target)
+{
+  if (!target.active || target.releasePending)
+    return;
+  target.releasePending = true;
+  if (target.resourceLane < FRAME_SINK_BUFFERS)
+    target.sink->lanes[target.resourceLane].busy = false;
+  if (target.sink->outstanding.fetch_sub(
+        1, std::memory_order_acq_rel) == 1)
+    SetEvent(target.sink->drained);
+
+  target.active = false;
+
+  for (unsigned i = 0; i < batch.count; ++i)
+    if (batch.targets[i].active)
+      return;
+  batch.active = false;
+}
+
+void CFrameHub::CompleteTarget(
+  Batch& batch, BatchTarget& target, bool succeeded)
+{
+  CSRWExclusiveLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+  {
+    target.sink->target->CompleteFrameBuffer(target.localSlot, succeeded);
+    if (succeeded)
+    {
+      if (ContentAfter(target.content, target.sink->lastContent))
+      {
+        target.sink->lastContent   = target.content;
+        target.sink->pitch         = target.pitch;
+        target.sink->width         = target.width;
+        target.sink->height        = target.height;
+        target.sink->format        = target.format;
+        target.sink->frameType     = target.frameType;
+        target.sink->needsFullCopy = false;
+        target.sink->blockedContent   = 0;
+        target.sink->blockedFrameSize = 0;
+        target.sink->blockedAllocation = false;
+      }
+
+    }
+    else
+      target.sink->needsFullCopy = true;
+  }
+  ReleaseTarget(batch, target);
 }
 
 size_t CFrameHub::GetMaxFrameSize() const
 {
-  CSRWSharedLock lock(m_lock);
-  return m_sink ? m_sink->GetMaxFrameSize() : 0;
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+    if (refs[i].primary)
+    {
+      CSRWSharedLock call(refs[i].sink->callLock);
+      if (refs[i].sink->active.load(std::memory_order_acquire) &&
+          refs[i].sink->target)
+        return refs[i].sink->target->GetMaxFrameSize();
+    }
+  return 0;
 }
 
-bool CFrameHub::FrameBufferAvailable(
-  const CFrameScheduler::Schedule& schedule, bool allowReadyReplacement)
+uint64_t CFrameHub::NextContentSerial()
 {
-  CSRWSharedLock lock(m_lock);
-  return m_sink &&
-    m_sink->FrameBufferAvailable(schedule, allowReadyReplacement);
+  uint64_t serial = m_nextContent.fetch_add(
+    1, std::memory_order_acq_rel) + 1;
+  if (!serial)
+    serial = m_nextContent.fetch_add(
+      1, std::memory_order_acq_rel) + 1;
+  return serial;
 }
 
-bool CFrameHub::HasPublishedFrame() const
+void CFrameHub::FrameProductReady(uint64_t contentSerial)
 {
-  CSRWSharedLock lock(m_lock);
-  return m_sink && m_sink->HasPublishedFrame();
+  uint64_t newest = m_newestContent.load(std::memory_order_acquire);
+  while (ContentAfter(contentSerial, newest) &&
+         !m_newestContent.compare_exchange_weak(newest,
+           contentSerial, std::memory_order_acq_rel,
+           std::memory_order_acquire))
+  {
+  }
+  SetEvent(m_wakeEvent);
 }
 
-void CFrameHub::ProcessDeliveries()
+bool CFrameHub::NeedsFrame() const
 {
-  CSRWSharedLock lock(m_lock);
-  if (m_sink)
-    m_sink->ProcessDeliveries();
+  const uint64_t newest =
+    m_newestContent.load(std::memory_order_acquire);
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    CSRWSharedLock call(refs[i].sink->callLock);
+    if (!refs[i].sink->active.load(std::memory_order_acquire) ||
+        !refs[i].sink->target)
+      continue;
+    if (refs[i].sink->blockedContent == newest &&
+        refs[i].sink->blockedFrameSize &&
+        (refs[i].sink->blockedAllocation ||
+         refs[i].sink->target->GetMaxFrameSize() <
+           refs[i].sink->blockedFrameSize))
+      continue;
+    if (refs[i].sink->needsFullCopy ||
+        ContentAfter(newest, refs[i].sink->lastContent))
+      return true;
+  }
+  return false;
 }
 
-bool CFrameHub::GetPendingDeliveryTarget(uint64_t now, uint64_t& target)
+bool CFrameHub::GetFramePlan(
+  uint64_t now, bool, FramePlan& plan)
 {
-  CSRWSharedLock lock(m_lock);
-  return m_sink && m_sink->GetPendingDeliveryTarget(now, target);
+  plan = {};
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Sink& sink = *refs[i].sink;
+    CSRWSharedLock call(sink.callLock);
+    if (!sink.active.load(std::memory_order_acquire) || !sink.target)
+      continue;
+
+    sink.target->ProcessDeliveries();
+    uint64_t deliveryTarget = 0;
+    if (sink.target->GetPendingDeliveryTarget(now, deliveryTarget))
+    {
+      if (deliveryTarget <= now)
+      {
+        bool retry = false;
+        if (sink.target->RetryPendingDelivery(now, retry))
+          plan.progressed = true;
+        else if (retry)
+          Earlier(now + RETRY_NS, plan.nextWake);
+      }
+      else
+        Earlier(deliveryTarget, plan.nextWake);
+    }
+
+    uint64_t target = 0;
+    CFrameScheduler::Schedule schedule = {};
+    bool periodic  = false;
+    bool republish = false;
+    if (!sink.target->GetPublishTarget(
+          now, target, schedule, periodic, republish))
+      continue;
+
+    if (target > now)
+    {
+      Earlier(target, plan.nextWake);
+      continue;
+    }
+
+    if (republish && sink.target->HasPublishedFrame())
+    {
+      if (sink.target->RepublishFrameBuffer(schedule))
+      {
+        plan.progressed = true;
+        continue;
+      }
+      else
+      {
+        Earlier(now + RETRY_NS, plan.nextWake);
+        continue;
+      }
+    }
+
+    if (plan.count == FRAME_MAX_SINKS)
+      continue;
+    FramePlanTarget& request = plan.targets[plan.count++];
+    request.sink     = refs[i].index;
+    request.backend  = sink.backend.load(std::memory_order_acquire);
+    request.epoch    = sink.epoch.load(std::memory_order_acquire);
+    request.schedule = schedule;
+    request.commitSchedule = schedule;
+    request.periodic = periodic;
+    request.primary  = sink.primary;
+  }
+  return plan.count != 0;
 }
 
-bool CFrameHub::RetryPendingDelivery(uint64_t now, bool& retry)
+bool CFrameHub::GetImmediateFramePlan(uint64_t now, FramePlan& plan)
 {
-  CSRWSharedLock lock(m_lock);
-  return m_sink && m_sink->RetryPendingDelivery(now, retry);
+  plan = {};
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Sink& sink = *refs[i].sink;
+    CSRWSharedLock call(sink.callLock);
+    if (!sink.active.load(std::memory_order_acquire) || !sink.target)
+      continue;
+
+    sink.target->ProcessDeliveries();
+    uint64_t deliveryTarget = 0;
+    if (sink.target->GetPendingDeliveryTarget(now, deliveryTarget) &&
+        deliveryTarget <= now)
+    {
+      bool retry = false;
+      if (sink.target->RetryPendingDelivery(now, retry))
+        plan.progressed = true;
+    }
+
+    uint64_t target = 0;
+    CFrameScheduler::Schedule schedule = {};
+    bool periodic  = false;
+    bool republish = false;
+    sink.target->GetPublishTarget(
+      now, target, schedule, periodic, republish);
+
+    if (plan.count == FRAME_MAX_SINKS)
+      continue;
+    FramePlanTarget& request = plan.targets[plan.count++];
+    request.sink           = refs[i].index;
+    request.backend        = sink.backend.load(std::memory_order_acquire);
+    request.epoch          = sink.epoch.load(std::memory_order_acquire);
+    request.schedule       = schedule;
+    request.schedule.deliveryDeadlineSerial = 0;
+    request.schedule.phaseEligible          = false;
+    request.commitSchedule = schedule;
+    request.periodic       = false;
+    request.primary        = sink.primary;
+  }
+  return plan.count != 0;
 }
 
-PreparedFrameBuffer CFrameHub::PrepareFrameBuffer(unsigned pitch,
+void CFrameHub::MissFramePlan(const FramePlan& plan, uint64_t now)
+{
+  for (unsigned i = 0; i < plan.count; ++i)
+  {
+    const FramePlanTarget& request = plan.targets[i];
+    if (!request.periodic ||
+        !request.schedule.deliveryDeadlineSerial ||
+        request.schedule.deadline > now ||
+        request.sink >= FRAME_MAX_SINKS)
+      continue;
+    Sink& sink = m_sinks[request.sink];
+    CSRWSharedLock call(sink.callLock);
+    if (sink.active.load(std::memory_order_acquire) && sink.target &&
+        sink.backend.load(std::memory_order_acquire) == request.backend &&
+        sink.epoch.load(std::memory_order_acquire) == request.epoch)
+      sink.target->FrameMissed(
+        request.commitSchedule, now, request.periodic);
+  }
+}
+
+bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
+  uint64_t contentSerial, unsigned pitch, size_t frameSize,
   const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
   const RECT * dirtyRects, unsigned nbDirtyRects,
-  const CFrameScheduler::Schedule& schedule, bool allowReadyReplacement)
+  bool allowReadyReplacement, PreparedFrameBatch& prepared)
 {
-  PreparedFrameBuffer result = {};
-  CSRWExclusiveLock lock(m_lock);
-  if (!m_sink)
-    return result;
+  prepared = {};
+  if (!contentSerial || !pitch || !frameSize)
+    return false;
 
-  const SinkTarget target = m_sink->PrepareFrameBuffer(
-    pitch, srcFormat, dstFormat, dirtyRects, nbDirtyRects, schedule,
-    allowReadyReplacement);
-  if (!target.mem || target.slot >= MAX_SLOTS)
+  Batch * batch = nullptr;
+  unsigned batchSlot = 0;
+  for (; batchSlot < FRAME_BATCHES; ++batchSlot)
   {
-    if (target.mem)
-      m_sink->AbortFrameBuffer(target.slot);
-    return result;
+    Batch& candidate = m_batches[batchSlot];
+    CSRWExclusiveLock lock = CSRWExclusiveLock::Try(candidate.lock);
+    if (!lock || candidate.active)
+      continue;
+    candidate.active = true;
+    candidate.count  = 0;
+    candidate.serial = m_nextSerial.fetch_add(
+      1, std::memory_order_acq_rel) + 1;
+    if (!candidate.serial)
+      candidate.serial = m_nextSerial.fetch_add(
+        1, std::memory_order_acq_rel) + 1;
+    for (BatchTarget& target : candidate.targets)
+      target = {};
+    prepared.token = {
+      static_cast<uint32_t>(batchSlot), candidate.serial };
+    batch = &candidate;
+    lock.Unlock();
+    break;
   }
+  if (!batch)
+    return false;
 
-  if (target.slot >= m_slots.size())
-    m_slots.resize(target.slot + 1);
-  if (++m_nextSerial == 0)
-    ++m_nextSerial;
-  m_slots[target.slot].serial = m_nextSerial;
-
-  result.token.sink   = m_backend;
-  result.token.epoch  = m_epoch;
-  result.token.slot   = target.slot;
-  result.token.serial = m_nextSerial;
-  result.resourceSlot = target.slot;
-  result.mem          = target.mem;
-  result.heapOffset   = target.heapOffset;
-  result.fullCopy     = target.fullCopy;
-  return result;
-}
-
-bool CFrameHub::PublishFrameBuffer(const FrameToken& token,
-  const CFrameScheduler::Schedule& schedule, bool& deliveredToOwner)
-{
-  CSRWSharedLock lock(m_lock);
-  return Valid(token) &&
-    m_sink->PublishFrameBuffer(token.slot, schedule, deliveredToOwner);
-}
-
-bool CFrameHub::RepublishFrameBuffer(
-  const CFrameScheduler::Schedule& schedule)
-{
-  CSRWSharedLock lock(m_lock);
-  return m_sink && m_sink->RepublishFrameBuffer(schedule);
-}
-
-bool CFrameHub::TryFrameSubmitted(const FrameToken& token,
-  const CFrameScheduler::Schedule& schedule)
-{
-  CSRWSharedLock lock(m_lock);
-  return Valid(token) &&
-    m_sink->TryFrameSubmitted(token.slot, schedule);
-}
-
-void CFrameHub::CommitFrameBuffer(const FrameToken& token,
-  const CFrameScheduler::Schedule& schedule, bool periodic,
-  bool deliveredToOwner)
-{
-  CSRWExclusiveLock lock(m_lock);
-  if (Valid(token))
+  CSRWExclusiveLock batchLock(batch->lock);
+  for (unsigned i = 0; i < plan.count &&
+       batch->count < FRAME_MAX_SINKS; ++i)
   {
-    m_sink->CommitFrameBuffer(
-      token.slot, schedule, periodic, deliveredToOwner);
-    Slot& slot     = m_slots[token.slot];
-    slot.committed = true;
-    if (slot.completionPending)
+    const FramePlanTarget& request = plan.targets[i];
+    if (request.sink >= FRAME_MAX_SINKS)
+      continue;
+    Sink& sink = m_sinks[request.sink];
+    CSRWExclusiveLock call(sink.callLock);
+    if (!sink.active.load(std::memory_order_acquire) || !sink.target ||
+        sink.backend.load(std::memory_order_acquire) != request.backend ||
+        sink.epoch.load(std::memory_order_acquire) != request.epoch ||
+        !sink.target->FrameBufferAvailable(
+          request.schedule, allowReadyReplacement))
+      continue;
+
+    const size_t maxFrameSize = sink.target->GetMaxFrameSize();
+    if (!maxFrameSize || frameSize > maxFrameSize)
     {
-      m_sink->CompleteFrameBuffer(
-        token.slot, slot.completionSucceeded);
-      Invalidate(token);
+      sink.blockedContent   = contentSerial;
+      sink.blockedFrameSize = frameSize;
+      sink.blockedAllocation = false;
+      continue;
     }
-  }
-}
 
-void CFrameHub::AbortFrameBuffer(const FrameToken& token)
-{
-  CSRWExclusiveLock lock(m_lock);
-  if (Valid(token))
-  {
-    m_sink->AbortFrameBuffer(token.slot);
-    Invalidate(token);
-  }
-}
-
-void CFrameHub::FailFrameBuffer(const FrameToken& token)
-{
-  CSRWExclusiveLock lock(m_lock);
-  if (Valid(token))
-  {
-    m_sink->FailFrameBuffer(token.slot);
-    Invalidate(token);
-  }
-}
-
-void CFrameHub::CompleteFrameBuffer(
-  const FrameToken& token, bool succeeded)
-{
-  CSRWExclusiveLock lock(m_lock);
-  if (Valid(token))
-  {
-    Slot& slot = m_slots[token.slot];
-    if (slot.committed)
+    const bool layoutChanged = sink.pitch != pitch ||
+      sink.width != dstFormat.width || sink.height != dstFormat.height ||
+      sink.format != dstFormat.desc.Format ||
+      sink.frameType != dstFormat.format;
+    const bool forceFull = sink.needsFullCopy || layoutChanged ||
+      sink.lastContent + 1 != contentSerial;
+    const RECT * damage = forceFull ? nullptr : dirtyRects;
+    const unsigned damageCount = forceFull ? 0 : nbDirtyRects;
+    SinkTarget result = sink.target->PrepareFrameBuffer(
+      pitch, srcFormat, dstFormat, damage, damageCount,
+      request.schedule, allowReadyReplacement);
+    if (!result.mem || result.capacity < frameSize)
     {
-      m_sink->CompleteFrameBuffer(token.slot, succeeded);
-      Invalidate(token);
+      if (result.mem)
+      {
+        sink.blockedContent    = contentSerial;
+        sink.blockedFrameSize  = frameSize;
+        sink.blockedAllocation = true;
+        sink.target->AbortFrameBuffer(result.slot);
+      }
+      continue;
     }
-    else
+
+    unsigned resourceLane = FRAME_SINK_BUFFERS;
+    for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
     {
-      slot.completionPending   = true;
-      slot.completionSucceeded = succeeded;
+      const Sink::ResourceLane& candidate = sink.lanes[lane];
+      if (!candidate.busy && candidate.valid &&
+          candidate.mem == result.mem &&
+          candidate.heapOffset == result.heapOffset &&
+          candidate.localSlot == result.slot &&
+          candidate.direct == request.primary)
+      {
+        resourceLane = lane;
+        break;
+      }
     }
+    if (resourceLane == FRAME_SINK_BUFFERS)
+      for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
+        if (!sink.lanes[lane].busy && !sink.lanes[lane].valid)
+        {
+          resourceLane = lane;
+          break;
+        }
+    if (resourceLane == FRAME_SINK_BUFFERS)
+      for (unsigned lane = 0; lane < FRAME_SINK_BUFFERS; ++lane)
+        if (!sink.lanes[lane].busy)
+        {
+          resourceLane = lane;
+          break;
+        }
+    if (resourceLane == FRAME_SINK_BUFFERS)
+    {
+      sink.target->AbortFrameBuffer(result.slot);
+      continue;
+    }
+
+    Sink::ResourceLane& lane = sink.lanes[resourceLane];
+    lane.mem        = result.mem;
+    lane.heapOffset = result.heapOffset;
+    lane.localSlot  = result.slot;
+    lane.direct     = request.primary;
+    lane.valid      = true;
+    lane.busy       = true;
+
+    unsigned index = batch->count;
+    if (sink.primary && index)
+    {
+      for (unsigned move = index; move != 0; --move)
+      {
+        batch->targets[move] = batch->targets[move - 1];
+        prepared.targets[move] = prepared.targets[move - 1];
+      }
+      index = 0;
+    }
+    ++batch->count;
+    BatchTarget& target = batch->targets[index];
+    target.sink       = &sink;
+    target.backend    = request.backend;
+    target.epoch      = request.epoch;
+    target.localSlot  = result.slot;
+    target.resourceLane = resourceLane;
+    target.schedule   = request.commitSchedule;
+    target.deliverySchedule = request.schedule;
+    target.content    = contentSerial;
+    target.pitch      = pitch;
+    target.width      = dstFormat.width;
+    target.height     = dstFormat.height;
+    target.format     = dstFormat.desc.Format;
+    target.frameType  = dstFormat.format;
+    target.periodic   = request.periodic;
+    target.active     = true;
+    if (sink.outstanding.fetch_add(
+          1, std::memory_order_acq_rel) == 0)
+      ResetEvent(sink.drained);
+
+    PreparedFrameBuffer& output = prepared.targets[index];
+    output.token.sink   = request.backend;
+    output.token.epoch  = request.epoch;
+    output.token.slot   = result.slot;
+    output.token.serial = batch->serial;
+    output.resourceSlot =
+      request.sink * FRAME_SINK_BUFFERS + resourceLane;
+    output.mem          = result.mem;
+    output.heapOffset   = result.heapOffset;
+    output.capacity     = result.capacity;
+    output.direct       = request.primary;
+    output.fullCopy     = forceFull || result.fullCopy;
+  }
+  prepared.count = batch->count;
+  if (!batch->count)
+  {
+    batch->active = false;
+    prepared = {};
+    return false;
+  }
+  return true;
+}
+
+uint32_t CFrameHub::PublishFrameBatch(const FrameBatchToken& token)
+{
+  if (token.slot >= FRAME_BATCHES)
+    return 0;
+  Batch& batch = m_batches[token.slot];
+  CSRWExclusiveLock lock(batch.lock);
+  if (!BatchValid(batch, token))
+    return 0;
+
+  uint32_t accepted = 0;
+  for (unsigned i = 0; i < batch.count; ++i)
+  {
+    BatchTarget& target = batch.targets[i];
+    if (!target.active)
+      continue;
+    CSRWExclusiveLock call(target.sink->callLock);
+    bool delivered = false;
+    const bool valid = target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch;
+    if (!valid || !target.sink->target->PublishFrameBuffer(
+          target.localSlot, target.deliverySchedule, delivered))
+    {
+      if (valid)
+        target.sink->target->AbortFrameBuffer(target.localSlot);
+      target.sink->needsFullCopy = true;
+      ReleaseTarget(batch, target);
+      continue;
+    }
+
+    target.published = true;
+    target.delivered = delivered;
+    target.submitted = delivered &&
+      target.sink->target->TryFrameSubmitted(
+        target.localSlot, target.deliverySchedule);
+    if (!target.submitted)
+      target.schedule.phaseEligible = false;
+    accepted |= 1U << i;
+  }
+  return accepted;
+}
+
+void CFrameHub::CommitFrameBatch(const FrameBatchToken& token)
+{
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWExclusiveLock lock(batch.lock);
+  if (!BatchValid(batch, token))
+    return;
+  for (unsigned i = 0; i < batch.count; ++i)
+  {
+    BatchTarget& target = batch.targets[i];
+    if (!target.active || !target.published)
+      continue;
+    {
+      CSRWExclusiveLock call(target.sink->callLock);
+      if (target.sink->target &&
+          target.sink->backend.load(std::memory_order_acquire) ==
+            target.backend &&
+          target.sink->epoch.load(std::memory_order_acquire) ==
+            target.epoch)
+        target.sink->target->CommitFrameBuffer(target.localSlot,
+          target.schedule, target.periodic, target.delivered);
+    }
+    target.committed = true;
+    if (target.completionPending)
+      CompleteTarget(batch, target, target.completionSucceeded);
   }
 }
 
-void CFrameHub::SetFrameTiming(const FrameToken& token,
-  uint64_t captureTime, uint64_t postProcessTime, uint64_t copyTime,
-  uint64_t readyTime, uint64_t holdTime,
-  const CFrameScheduler::Schedule& schedule, uint64_t completedAt)
+void CFrameHub::AbortFrameBatch(const FrameBatchToken& token)
 {
-  CSRWSharedLock lock(m_lock);
-  if (Valid(token))
-    m_sink->SetFrameTiming(token.slot, captureTime, postProcessTime,
-      copyTime, readyTime, holdTime, schedule, completedAt);
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWExclusiveLock lock(batch.lock);
+  if (!BatchValid(batch, token))
+    return;
+  for (unsigned i = 0; i < batch.count; ++i)
+  {
+    BatchTarget& target = batch.targets[i];
+    if (!target.active)
+      continue;
+    CSRWExclusiveLock call(target.sink->callLock);
+    if (target.sink->target &&
+        target.sink->backend.load(std::memory_order_acquire) ==
+          target.backend &&
+        target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+      target.sink->target->AbortFrameBuffer(target.localSlot);
+    target.sink->needsFullCopy = true;
+    ReleaseTarget(batch, target);
+  }
 }
 
-void CFrameHub::WriteFrameBuffer(const FrameToken& token, void * src,
-  size_t offset, size_t len, bool setWritePos) const
+void CFrameHub::FailFrameBatch(const FrameBatchToken& token)
 {
-  CSRWSharedLock lock(m_lock);
-  if (Valid(token))
-    m_sink->WriteFrameBuffer(
-      token.slot, src, offset, len, setWritePos);
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWExclusiveLock lock(batch.lock);
+  if (!BatchValid(batch, token))
+    return;
+  for (unsigned i = 0; i < batch.count; ++i)
+  {
+    BatchTarget& target = batch.targets[i];
+    if (!target.active)
+      continue;
+    CSRWExclusiveLock call(target.sink->callLock);
+    if (target.sink->target &&
+        target.sink->backend.load(std::memory_order_acquire) ==
+          target.backend &&
+        target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    {
+      if (target.published)
+        target.sink->target->FailFrameBuffer(target.localSlot);
+      else
+        target.sink->target->AbortFrameBuffer(target.localSlot);
+    }
+    target.sink->needsFullCopy = true;
+    ReleaseTarget(batch, target);
+  }
 }
 
-void CFrameHub::WriteFrameBufferRows(const FrameToken& token, void * src,
-  size_t offset, size_t rowBytes, size_t pitch, unsigned rows) const
+void CFrameHub::WriteFrameTarget(const FrameBatchToken& token,
+  unsigned index, void * src, size_t offset, size_t len,
+  bool setWritePos) const
 {
-  CSRWSharedLock lock(m_lock);
-  if (Valid(token))
-    m_sink->WriteFrameBufferRows(
-      token.slot, src, offset, rowBytes, pitch, rows);
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = const_cast<Batch&>(m_batches[token.slot]);
+  CSRWSharedLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  CSRWSharedLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    target.sink->target->WriteFrameBuffer(
+      target.localSlot, src, offset, len, setWritePos);
 }
 
-void CFrameHub::FinalizeFrameBuffer(const FrameToken& token) const
+void CFrameHub::WriteFrameTargetRows(const FrameBatchToken& token,
+  unsigned index, void * src, size_t offset, size_t rowBytes,
+  size_t pitch, unsigned rows) const
 {
-  CSRWSharedLock lock(m_lock);
-  if (Valid(token))
-    m_sink->FinalizeFrameBuffer(token.slot);
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = const_cast<Batch&>(m_batches[token.slot]);
+  CSRWSharedLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  CSRWSharedLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    target.sink->target->WriteFrameBufferRows(target.localSlot, src,
+      offset, rowBytes, pitch, rows);
+}
+
+void CFrameHub::FinalizeFrameTarget(
+  const FrameBatchToken& token, unsigned index) const
+{
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = const_cast<Batch&>(m_batches[token.slot]);
+  CSRWSharedLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  CSRWSharedLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    target.sink->target->FinalizeFrameBuffer(target.localSlot);
+}
+
+void CFrameHub::SetFrameTargetTiming(const FrameBatchToken& token,
+  unsigned index, uint64_t captureTime, uint64_t postProcessTime,
+  uint64_t copyTime, uint64_t readyTime, uint64_t holdTime,
+  uint64_t completedAt)
+{
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWSharedLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  CSRWSharedLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    target.sink->target->SetFrameTiming(target.localSlot, captureTime,
+      postProcessTime, copyTime, readyTime, holdTime,
+      target.schedule, completedAt);
+}
+
+void CFrameHub::TryRecordFrameTiming(const FrameBatchToken& token,
+  unsigned index, uint64_t duration)
+{
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWSharedLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  CSRWSharedLock call(target.sink->callLock);
+  if (target.sink->target &&
+      target.sink->backend.load(std::memory_order_acquire) ==
+        target.backend &&
+      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+    target.sink->target->TryRecordFrameTiming(duration);
+}
+
+void CFrameHub::CompleteFrameTarget(const FrameBatchToken& token,
+  unsigned index, bool succeeded)
+{
+  if (token.slot >= FRAME_BATCHES)
+    return;
+  Batch& batch = m_batches[token.slot];
+  CSRWExclusiveLock lock(batch.lock);
+  if (!BatchValid(batch, token) || index >= batch.count ||
+      !batch.targets[index].active)
+    return;
+  BatchTarget& target = batch.targets[index];
+  if (!target.committed)
+  {
+    target.completionPending   = true;
+    target.completionSucceeded = succeeded;
+    return;
+  }
+  CompleteTarget(batch, target, succeeded);
 }
 
 void CFrameHub::ObserveFrame(uint64_t now)
 {
-  CSRWSharedLock lock(m_lock);
-  if (m_sink)
-    m_sink->ObserveFrame(now);
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    CSRWSharedLock call(refs[i].sink->callLock);
+    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+        refs[i].sink->target)
+      refs[i].sink->target->ObserveFrame(now);
+  }
 }
 
 void CFrameHub::ForceFrame()
 {
-  CSRWSharedLock lock(m_lock);
-  if (m_sink)
-    m_sink->ForceFrame();
-}
-
-bool CFrameHub::GetPublishTarget(uint64_t now, uint64_t& target,
-  CFrameScheduler::Schedule& schedule, bool& periodic, bool& republish)
-{
-  CSRWSharedLock lock(m_lock);
-  return m_sink && m_sink->GetPublishTarget(
-    now, target, schedule, periodic, republish);
-}
-
-void CFrameHub::FrameMissed(const CFrameScheduler::Schedule& schedule,
-  uint64_t now, bool periodic)
-{
-  CSRWSharedLock lock(m_lock);
-  if (m_sink)
-    m_sink->FrameMissed(schedule, now, periodic);
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    CSRWSharedLock call(refs[i].sink->callLock);
+    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+        refs[i].sink->target)
+      refs[i].sink->target->ForceFrame();
+  }
 }
 
 void CFrameHub::FrameSuperseded()
 {
-  CSRWSharedLock lock(m_lock);
-  if (m_sink)
-    m_sink->FrameSuperseded();
-}
-
-HANDLE CFrameHub::GetFrameScheduleEvent() const
-{
-  CSRWSharedLock lock(m_lock);
-  return m_sink ? m_sink->GetFrameScheduleEvent() : nullptr;
-}
-
-void CFrameHub::TryRecordFrameTiming(
-  const FrameToken& token, uint64_t duration)
-{
-  CSRWSharedLock lock(m_lock);
-  if (Valid(token))
-    m_sink->TryRecordFrameTiming(duration);
+  SinkRef refs[FRAME_MAX_SINKS];
+  const unsigned count = Snapshot(refs);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    CSRWSharedLock call(refs[i].sink->callLock);
+    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+        refs[i].sink->target)
+      refs[i].sink->target->FrameSuperseded();
+  }
 }

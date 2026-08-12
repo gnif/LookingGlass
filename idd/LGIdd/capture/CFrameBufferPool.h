@@ -30,13 +30,12 @@ class IFrameTransport;
 class CFrameBufferPool
 {
 private:
-  IFrameTransport * m_transport = nullptr;
-  CD3D12Device    * m_dx12      = nullptr;
+  CD3D12Device * m_dx12 = nullptr;
 
-  CFrameBufferResource m_buffers[CAPTURE_FRAME_BUFFERS];
+  CFrameBufferResource m_buffers[FRAME_BUFFER_RESOURCES];
 
 public:
-  void Init(IFrameTransport * transport, CD3D12Device * dx12);
+  void Init(IFrameTransport *, CD3D12Device * dx12);
   void Reset();
 
   CFrameBufferResource * Get(

@@ -22,7 +22,7 @@
 
 #include "capture/CFrameProcessor.h"
 
-class CHardwareFrameProcessor final : public CFrameProcessor
+class CHardwareFrameProcessor : public CFrameProcessor
 {
 private:
   enum CandidateState
@@ -31,6 +31,7 @@ private:
     CANDIDATE_PREPARING,
     CANDIDATE_READY,
     CANDIDATE_PUBLISHING,
+    CANDIDATE_RETAINED,
   };
 
   struct FrameCandidate
@@ -67,10 +68,11 @@ private:
 
   FrameCandidate      m_candidates[CAPTURE_PIPELINE_SLOTS];
   CandidateDamageTail m_candidateDamageTail[CAPTURE_PIPELINE_SLOTS];
+  FrameCopyBatch      m_publishBatches[CAPTURE_PIPELINE_SLOTS];
   mutable CSRWLock    m_candidateLock;
   CSRWLock            m_copySubmitLock;
-  uint64_t            m_candidateSequence  = 0;
   bool                m_publishPending     = false;
+  bool                m_useCadence         = true;
   Wrappers::Event     m_candidateAvailableEvent;
   Wrappers::Event     m_copySubmitEvent;
 
@@ -80,6 +82,7 @@ private:
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
   int AcquireCandidate(bool exclusiveSample, bool allowSupersede);
   void ReleaseCandidate(unsigned candidateIndex);
+  void RetainCandidate(unsigned candidateIndex);
   bool EnsureCandidateResource(unsigned candidateIndex, size_t frameSize);
   void ResetCandidates();
   void SignalCandidateState();
@@ -92,14 +95,14 @@ public:
   CHardwareFrameProcessor(IFrameTransport * transport,
     std::shared_ptr<CD3D12Device> dx12,
     CPostProcessor postProcessors[CAPTURE_PIPELINE_SLOTS],
-    CSRWLock * pipelineLock, HANDLE terminateEvent);
+    CSRWLock * pipelineLock, HANDLE terminateEvent,
+    bool useCadence = true);
 
   bool IsValid() const override;
   bool Submit(const FrameSubmission& submission) override;
   bool HasReadyFrame() const override;
-  bool Publish(const CFrameScheduler::Schedule& schedule,
-    bool periodic, uint64_t publishStart) override;
-  bool UsesCadence() const override { return true; }
+  bool Publish(const FramePlan& plan, uint64_t publishStart) override;
+  bool UsesCadence() const override { return m_useCadence; }
   void Reset() override;
   void ResetPipeline() override;
 };

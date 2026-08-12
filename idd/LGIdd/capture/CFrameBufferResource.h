@@ -41,6 +41,8 @@ class CFrameBufferResource
     FrameToken                m_token             = {};
     uint8_t                 * m_base              = nullptr;
     size_t                    m_size              = 0;
+    size_t                    m_capacity          = 0;
+    uint64_t                  m_heapOffset        = 0;
     size_t                    m_frameSize         = 0;
     uint64_t                  m_captureTime       = 0;
     uint64_t                  m_postProcessStart  = 0;
@@ -51,6 +53,7 @@ class CFrameBufferResource
     unsigned                  m_timingEffectIndex = 0;
     uint64_t                  m_timingToken       = 0;
     bool                      m_fullCopy          = false;
+    bool                      m_direct            = false;
     RECT                      m_copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
     unsigned                  m_nbCopyDirtyRects  = 0;
     unsigned                  m_copyPitch         = 0;
@@ -62,7 +65,7 @@ class CFrameBufferResource
 
   public:
     bool Init(CD3D12Device * dx12, const FrameToken& token, uint8_t * base,
-      uint64_t heapOffset, size_t size, size_t maxFrameSize);
+      uint64_t heapOffset, size_t size, size_t maxFrameSize, bool direct);
     void Reset();
 
     const FrameToken& GetToken() const { return m_token;     }

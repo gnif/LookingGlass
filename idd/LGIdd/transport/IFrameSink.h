@@ -81,5 +81,6 @@ public:
     uint64_t now, bool periodic) = 0;
   virtual void FrameSuperseded() = 0;
   virtual HANDLE GetFrameScheduleEvent() const = 0;
+  virtual void SetFrameScheduleEvent(HANDLE event) = 0;
   virtual void TryRecordFrameTiming(uint64_t duration) = 0;
 };

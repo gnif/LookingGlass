@@ -785,195 +785,66 @@ void CSwapChainProcessor::PublisherThread()
 
   for (;;)
   {
-    const uint64_t            now = CFrameScheduler::Nanotime();
-    uint64_t                  target;
-    CFrameScheduler::Schedule schedule;
-    bool                      periodic;
-    bool                      republish;
-    m_transport.GetPublishTarget(
-      now, target, schedule, periodic, republish);
-
+    const uint64_t now = CFrameScheduler::Nanotime();
     const bool ready = m_frameProcessor->HasReadyFrame();
-    if (!ready)
-    {
-      m_transport.ProcessDeliveries();
-      if (m_frameProcessor->HasReadyFrame())
-        continue;
+    FramePlan plan = {};
+    const bool due = m_transport.GetFramePlan(now, ready, plan);
 
-      uint64_t current       = CFrameScheduler::Nanotime();
-      uint64_t cadenceTarget = 0;
-      if (cadenceEnabled && schedule.deliveryDeadlineSerial && periodic)
-      {
-        if (schedule.deadline <= current)
-        {
-          m_transport.FrameMissed(schedule, current, periodic);
-          continue;
-        }
-        cadenceTarget = schedule.deadline;
-      }
-
-      if (republish && m_transport.HasPublishedFrame())
-      {
-        if (m_transport.RepublishFrameBuffer(schedule))
-          continue;
-
-        current = CFrameScheduler::Nanotime();
-        if (cadenceTarget && cadenceTarget <= current)
-        {
-          m_transport.FrameMissed(schedule, current, periodic);
-          continue;
-        }
-
-        uint64_t retryTarget = current + PUBLISH_RETRY_NS;
-        if (cadenceTarget)
-          retryTarget = min(retryTarget, cadenceTarget);
-        ArmPublishTimer(m_publishTimer.Get(), retryTarget - current);
-        if (WaitForMultipleObjects(
-              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-            WAIT_OBJECT_0)
-          break;
-        continue;
-      }
-
-      uint64_t replayTarget;
-      if (m_transport.GetPendingDeliveryTarget(current, replayTarget))
-      {
-        bool retry = false;
-        if (replayTarget <= current)
-        {
-          if (m_transport.RetryPendingDelivery(current, retry))
-            continue;
-
-          current = CFrameScheduler::Nanotime();
-          if (cadenceTarget && cadenceTarget <= current)
-          {
-            m_transport.FrameMissed(schedule, current, periodic);
-            continue;
-          }
-
-          if (retry)
-            replayTarget = current + PUBLISH_RETRY_NS;
-          else
-          {
-            if (cadenceTarget)
-              replayTarget = cadenceTarget;
-            else
-            {
-              if (m_publishTimer.Get())
-                CancelWaitableTimer(m_publishTimer.Get());
-              if (WaitForMultipleObjects(
-                    ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
-                  WAIT_OBJECT_0)
-                break;
-              continue;
-            }
-          }
-        }
-
-        if (cadenceTarget)
-          replayTarget = min(replayTarget, cadenceTarget);
-
-        current = CFrameScheduler::Nanotime();
-        if (cadenceTarget && cadenceTarget <= current)
-        {
-          m_transport.FrameMissed(schedule, current, periodic);
-          continue;
-        }
-        if (replayTarget <= current)
-          continue;
-
-        ArmPublishTimer(m_publishTimer.Get(), replayTarget - current);
-        if (WaitForMultipleObjects(
-              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-            WAIT_OBJECT_0)
-          break;
-        continue;
-      }
-
-      if (cadenceTarget)
-      {
-        current = CFrameScheduler::Nanotime();
-        if (cadenceTarget <= current)
-        {
-          m_transport.FrameMissed(schedule, current, periodic);
-          continue;
-        }
-
-        ArmPublishTimer(m_publishTimer.Get(), cadenceTarget - current);
-        if (WaitForMultipleObjects(
-              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-            WAIT_OBJECT_0)
-          break;
-        continue;
-      }
-
-      if (m_publishTimer.Get())
-        CancelWaitableTimer(m_publishTimer.Get());
-      if (WaitForMultipleObjects(
-            ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
-          WAIT_OBJECT_0)
-        break;
+    if (plan.progressed)
       continue;
+
+    if (due && ready)
+    {
+      const uint64_t publishStart = CFrameScheduler::Nanotime();
+      if (m_frameProcessor->Publish(plan, publishStart))
+        continue;
+      const uint64_t retry = publishStart + PUBLISH_RETRY_NS;
+      if (!plan.nextWake || retry < plan.nextWake)
+        plan.nextWake = retry;
     }
 
     uint64_t current = CFrameScheduler::Nanotime();
-    uint64_t replayTarget;
-    if (m_transport.GetPendingDeliveryTarget(current, replayTarget) &&
-        replayTarget < target)
+    bool missed = false;
+    if (due && !ready && cadenceEnabled)
     {
-      if (replayTarget <= current)
+      for (unsigned i = 0; i < plan.count; ++i)
       {
-        m_transport.ProcessDeliveries();
-        current = CFrameScheduler::Nanotime();
-        bool retry = false;
-        if (m_transport.RetryPendingDelivery(current, retry))
+        const FramePlanTarget& request = plan.targets[i];
+        if (!request.periodic ||
+            !request.commitSchedule.deliveryDeadlineSerial)
           continue;
-
-        current = CFrameScheduler::Nanotime();
-        if (retry)
-          replayTarget = current + PUBLISH_RETRY_NS;
-        else
-          replayTarget = target;
+        if (request.commitSchedule.deadline <= current)
+          missed = true;
+        else if (!plan.nextWake ||
+                 request.commitSchedule.deadline < plan.nextWake)
+          plan.nextWake = request.commitSchedule.deadline;
       }
-
-      replayTarget = min(replayTarget, target);
-      current      = CFrameScheduler::Nanotime();
-      if (target > current)
-      {
-        if (replayTarget <= current)
-          continue;
-
-        ArmPublishTimer(m_publishTimer.Get(), replayTarget - current);
-        if (WaitForMultipleObjects(
-              ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-            WAIT_OBJECT_0)
-          break;
-        continue;
-      }
+    }
+    if (missed)
+    {
+      m_transport.MissFramePlan(plan, current);
+      continue;
     }
 
     current = CFrameScheduler::Nanotime();
-    if (target > current)
+    if (plan.nextWake && plan.nextWake > current)
     {
-      ArmPublishTimer(m_publishTimer.Get(), target - current);
+      ArmPublishTimer(m_publishTimer.Get(), plan.nextWake - current);
       if (WaitForMultipleObjects(
             ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-          WAIT_OBJECT_0)
+        WAIT_OBJECT_0)
         break;
       continue;
     }
 
-    const uint64_t publishStart = CFrameScheduler::Nanotime();
-    m_transport.ProcessDeliveries();
-    if (!m_transport.FrameBufferAvailable(schedule) ||
-        !m_frameProcessor->Publish(schedule, periodic, publishStart))
-    {
-      ArmPublishTimer(m_publishTimer.Get(), PUBLISH_RETRY_NS);
-      if (WaitForMultipleObjects(
-            ARRAYSIZE(timerHandles), timerHandles, FALSE, INFINITE) ==
-          WAIT_OBJECT_0)
-        break;
-    }
+    if (plan.nextWake)
+      continue;
+    if (m_publishTimer.Get())
+      CancelWaitableTimer(m_publishTimer.Get());
+    if (WaitForMultipleObjects(
+          ARRAYSIZE(idleHandles), idleHandles, FALSE, INFINITE) ==
+        WAIT_OBJECT_0)
+      break;
   }
 
   if (avTaskHandle)

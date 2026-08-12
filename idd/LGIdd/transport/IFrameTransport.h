@@ -28,60 +28,69 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct FramePlanTarget
+{
+  uint32_t                  sink    = 0;
+  uint32_t                  backend = 0;
+  uint32_t                  epoch   = 0;
+  CFrameScheduler::Schedule schedule = {};
+  CFrameScheduler::Schedule commitSchedule = {};
+  bool                      periodic = false;
+  bool                      primary  = false;
+};
+
+struct FramePlan
+{
+  FramePlanTarget targets[FRAME_MAX_SINKS] = {};
+  unsigned        count                    = 0;
+  uint64_t        nextWake                 = 0;
+  bool            progressed               = false;
+};
+
 class IFrameTransport
 {
 public:
   virtual ~IFrameTransport() = default;
 
   virtual size_t GetMaxFrameSize() const = 0;
+  virtual uint64_t NextContentSerial() = 0;
+  virtual void FrameProductReady(uint64_t contentSerial) = 0;
+  virtual bool NeedsFrame() const = 0;
+  virtual bool GetFramePlan(
+    uint64_t now, bool productReady, FramePlan& plan) = 0;
+  virtual bool GetImmediateFramePlan(
+    uint64_t now, FramePlan& plan) = 0;
+  virtual void MissFramePlan(const FramePlan& plan, uint64_t now) = 0;
 
-  virtual bool FrameBufferAvailable(
-    const CFrameScheduler::Schedule& schedule,
-    bool allowReadyReplacement = true) = 0;
-  virtual bool HasPublishedFrame() const = 0;
-  virtual void ProcessDeliveries() = 0;
-  virtual bool GetPendingDeliveryTarget(
-    uint64_t now, uint64_t& target) = 0;
-  virtual bool RetryPendingDelivery(uint64_t now, bool& retry) = 0;
-  virtual PreparedFrameBuffer PrepareFrameBuffer(unsigned pitch,
+  virtual bool PrepareFrameBatch(const FramePlan& plan,
+    uint64_t contentSerial, unsigned pitch, size_t frameSize,
     const D12FrameFormat& srcFormat, const D12FrameFormat& dstFormat,
     const RECT * dirtyRects, unsigned nbDirtyRects,
-    const CFrameScheduler::Schedule& schedule,
-    bool allowReadyReplacement = true) = 0;
-  virtual bool PublishFrameBuffer(const FrameToken& token,
-    const CFrameScheduler::Schedule& schedule,
-    bool& deliveredToOwner) = 0;
-  virtual bool RepublishFrameBuffer(
-    const CFrameScheduler::Schedule& schedule) = 0;
-  virtual bool TryFrameSubmitted(const FrameToken& token,
-    const CFrameScheduler::Schedule& schedule) = 0;
-  virtual void CommitFrameBuffer(const FrameToken& token,
-    const CFrameScheduler::Schedule& schedule, bool periodic,
-    bool deliveredToOwner) = 0;
-  virtual void AbortFrameBuffer(const FrameToken& token) = 0;
-  virtual void FailFrameBuffer(const FrameToken& token) = 0;
-  virtual void CompleteFrameBuffer(
-    const FrameToken& token, bool succeeded) = 0;
-  virtual void SetFrameTiming(const FrameToken& token, uint64_t captureTime,
-    uint64_t postProcessTime, uint64_t copyTime, uint64_t readyTime,
-    uint64_t holdTime, const CFrameScheduler::Schedule& schedule,
+    bool allowReadyReplacement, PreparedFrameBatch& batch) = 0;
+  virtual uint32_t PublishFrameBatch(const FrameBatchToken& token) = 0;
+  virtual void CommitFrameBatch(const FrameBatchToken& token) = 0;
+  virtual void AbortFrameBatch(const FrameBatchToken& token) = 0;
+  virtual void FailFrameBatch(const FrameBatchToken& token) = 0;
+
+  virtual void WriteFrameTarget(const FrameBatchToken& token,
+    unsigned target, void * src, size_t offset, size_t len,
+    bool setWritePos) const = 0;
+  virtual void WriteFrameTargetRows(const FrameBatchToken& token,
+    unsigned target, void * src, size_t offset, size_t rowBytes,
+    size_t pitch, unsigned rows) const = 0;
+  virtual void FinalizeFrameTarget(
+    const FrameBatchToken& token, unsigned target) const = 0;
+  virtual void SetFrameTargetTiming(const FrameBatchToken& token,
+    unsigned target, uint64_t captureTime, uint64_t postProcessTime,
+    uint64_t copyTime, uint64_t readyTime, uint64_t holdTime,
     uint64_t completedAt) = 0;
-  virtual void WriteFrameBuffer(const FrameToken& token, void * src,
-    size_t offset, size_t len, bool setWritePos) const = 0;
-  virtual void WriteFrameBufferRows(const FrameToken& token, void * src,
-    size_t offset, size_t rowBytes, size_t pitch,
-    unsigned rows) const = 0;
-  virtual void FinalizeFrameBuffer(const FrameToken& token) const = 0;
+  virtual void TryRecordFrameTiming(const FrameBatchToken& token,
+    unsigned target, uint64_t duration) = 0;
+  virtual void CompleteFrameTarget(const FrameBatchToken& token,
+    unsigned target, bool succeeded) = 0;
 
   virtual void ObserveFrame(uint64_t now) = 0;
   virtual void ForceFrame() = 0;
-  virtual bool GetPublishTarget(uint64_t now, uint64_t& target,
-    CFrameScheduler::Schedule& schedule, bool& periodic,
-    bool& republish) = 0;
-  virtual void FrameMissed(const CFrameScheduler::Schedule& schedule,
-    uint64_t now, bool periodic) = 0;
   virtual void FrameSuperseded() = 0;
   virtual HANDLE GetFrameScheduleEvent() const = 0;
-  virtual void TryRecordFrameTiming(
-    const FrameToken& token, uint64_t duration) = 0;
 };

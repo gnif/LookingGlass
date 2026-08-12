@@ -917,7 +917,10 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
   result.mem        = fb->data;
   result.heapOffset = reinterpret_cast<uintptr_t>(fb->data) -
     reinterpret_cast<uintptr_t>(m_ivshmem.GetMem());
+  result.capacity   = m_maxFrameSize;
   result.fullCopy   = fullCopy;
+  if (fullCopy)
+    fi->damageRectsCount = 0;
   return result;
 }
 

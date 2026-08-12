@@ -20,7 +20,16 @@
 
 #pragma once
 
+#include <stddef.h>
 #include <stdint.h>
+
+enum : unsigned
+{
+  FRAME_MAX_SINKS       = 8,
+  FRAME_BATCHES         = 3,
+  FRAME_SINK_BUFFERS    = 3,
+  FRAME_BUFFER_RESOURCES = FRAME_MAX_SINKS * FRAME_SINK_BUFFERS,
+};
 
 struct FrameToken
 {
@@ -33,16 +42,32 @@ struct FrameToken
 struct PreparedFrameBuffer
 {
   FrameToken token;
-  unsigned   resourceSlot;
-  uint8_t * mem;
-  uint64_t  heapOffset;
-  bool      fullCopy;
+  unsigned   resourceSlot = 0;
+  uint8_t  * mem          = nullptr;
+  uint64_t   heapOffset   = 0;
+  size_t     capacity     = 0;
+  bool       direct       = false;
+  bool       fullCopy     = false;
+};
+
+struct FrameBatchToken
+{
+  uint32_t slot   = 0;
+  uint64_t serial = 0;
+};
+
+struct PreparedFrameBatch
+{
+  FrameBatchToken     token;
+  PreparedFrameBuffer targets[FRAME_MAX_SINKS] = {};
+  unsigned            count = 0;
 };
 
 struct SinkTarget
 {
-  unsigned  slot;
-  uint8_t * mem;
-  uint64_t  heapOffset;
-  bool      fullCopy;
+  unsigned  slot       = 0;
+  uint8_t * mem        = nullptr;
+  uint64_t  heapOffset = 0;
+  size_t    capacity   = 0;
+  bool      fullCopy   = false;
 };

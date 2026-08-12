@@ -214,5 +214,9 @@ public:
   {
     return m_frameScheduler.GetWakeEvent();
   }
+  void SetFrameScheduleEvent(HANDLE event) override
+  {
+    m_frameScheduler.SetSharedWakeEvent(event);
+  }
   void TryRecordFrameTiming(uint64_t duration) override;
 };

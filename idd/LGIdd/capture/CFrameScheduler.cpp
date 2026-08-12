@@ -54,6 +54,15 @@ void CFrameScheduler::WakePublisher() const
 {
   if (m_wakeEvent)
     SetEvent(m_wakeEvent);
+  CSRWSharedLock lock(m_wakeLock);
+  if (m_sharedWakeEvent)
+    SetEvent(m_sharedWakeEvent);
+}
+
+void CFrameScheduler::SetSharedWakeEvent(HANDLE event)
+{
+  CSRWExclusiveLock lock(m_wakeLock);
+  m_sharedWakeEvent = event;
 }
 
 uint64_t CFrameScheduler::Nanotime()

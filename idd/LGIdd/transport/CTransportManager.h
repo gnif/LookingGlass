@@ -25,7 +25,6 @@
 #include "transport/ITransport.h"
 
 #include <memory>
-#include <vector>
 
 class CTransportManager final
 {
@@ -36,6 +35,19 @@ public:
   using Recovery = ITransport::Recovery;
 
 private:
+  mutable CSRWLock m_lock;
+
+  enum class Phase
+  {
+    IDLE,
+    OPEN,
+    INITIALIZE,
+    SETUP,
+    PROCESS,
+    ACCESS,
+    STOP,
+  };
+
   enum class State
   {
     CLOSED,
@@ -47,41 +59,97 @@ private:
     STOPPED,
   };
 
+  enum class Call
+  {
+    IDLE,
+    LIFECYCLE,
+    PROCESS,
+    RECOVERY,
+    ACCESS,
+  };
+
+  struct RecoveryUpdate
+  {
+    uint64_t session = 0;
+    uint32_t serial  = 0;
+    bool     active  = false;
+    Recovery state  = Recovery::FAILED;
+    uint32_t error   = 0;
+  };
+
   struct Entry
   {
-    BackendId                   id;
-    const char                * name;
-    bool                        required;
-    bool                        primary;
-    CreateFn                    create;
-    std::unique_ptr<ITransport> transport;
+    Entry();
+    ~Entry();
+
+    mutable CSRWLock            lock;
+    HANDLE                      idleEvent     = nullptr;
+    Call                        call          = Call::IDLE;
+    DWORD                       callOwner     = 0;
+    bool                        stopRequested = false;
+    BackendId                   id       = 0;
+    const char                * name     = nullptr;
+    bool                        required = false;
+    bool                        primary  = false;
+    CreateFn                    create   = nullptr;
+    std::shared_ptr<ITransport> transport;
     State                       state   = State::CLOSED;
     uint32_t                    epoch   = 1;
     uint64_t                    retryAt = 0;
     bool                        controlAdded = false;
     bool                        frameAdded   = false;
+    bool                        exposed      = false;
+    bool                        setupDone    = false;
+    bool                        syncPending  = false;
+    bool                        recoveryPending = false;
+    RecoveryUpdate              recovery;
+    FrameMemoryLimits           limits;
+    bool                        limitsValid = false;
+    DirectFrameBufferMemory     directMemory;
+    bool                        directMemoryValid = false;
+    std::shared_ptr<ITransport> exposedTransport;
   };
 
-  std::vector<std::unique_ptr<Entry>> m_entries;
+  std::unique_ptr<Entry>               m_entries[FRAME_MAX_SINKS];
+  unsigned                             m_entryCount  = 0;
   CControlHub                         m_control;
   CFrameHub                           m_frames;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
   bool                                 m_setup       = false;
-  bool                                 m_exposed     = false;
   size_t                               m_alignment   = 0;
+  Phase                                m_phase       = Phase::IDLE;
+  DWORD                                m_phaseOwner  = 0;
+  HANDLE                               m_phaseIdle   = nullptr;
+  HANDLE                               m_stoppedEvent = nullptr;
+  bool                                 m_started     = false;
+  bool                                 m_stopping    = false;
+  bool                                 m_stopped     = false;
+
+  unsigned Entries(Entry * entries[FRAME_MAX_SINKS]) const;
+  Entry * Primary() const;
+
+  bool BeginPhase(Phase phase, bool wait, bool stopping = false);
+  void EndPhase();
+  bool BeginCall(Entry& entry, Call call, bool wait);
+  void EndCall(Entry& entry,
+    const std::shared_ptr<ITransport>& transport, bool drain = true);
+  void DrainRecovery(Entry& entry,
+    const std::shared_ptr<ITransport>& transport);
 
   OpenResult OpenEntry(Entry& entry);
   bool InitializeEntry(Entry& entry);
-  bool SetupEntry(Entry& entry);
-  void RetryEntry(Entry& entry, uint64_t now);
+  bool SetupEntry(Entry& entry, size_t alignment);
+  bool AddServices(Entry& entry);
+  void RetryEntry(Entry& entry, uint64_t now, bool initialized,
+    bool setup, size_t alignment);
   void HandleProcessResult(Entry& entry, ProcessResult result);
   void ScheduleRetry(Entry& entry);
   void RemoveServices(Entry& entry);
-  ITransport& Primary();
+  void Expose(Entry& entry);
 
 public:
-  CTransportManager() = default;
+  CTransportManager();
   ~CTransportManager();
 
   CTransportManager(const CTransportManager&) = delete;

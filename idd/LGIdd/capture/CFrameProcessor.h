@@ -34,6 +34,15 @@
 using namespace Microsoft::WRL;
 
 class IFrameTransport;
+struct FramePlan;
+
+struct FrameCopyBatch
+{
+  PreparedFrameBatch      prepared;
+  CFrameBufferResource  * resources[FRAME_MAX_SINKS] = {};
+  uint32_t                accepted = 0;
+  unsigned                candidateIndex = 0;
+};
 
 struct FrameSubmission
 {
@@ -84,8 +93,8 @@ public:
   virtual bool IsValid() const;
   virtual bool Submit(const FrameSubmission& submission) = 0;
   virtual bool HasReadyFrame() const                     = 0;
-  virtual bool Publish(const CFrameScheduler::Schedule& schedule,
-    bool periodic, uint64_t publishStart)                = 0;
+  virtual bool Publish(
+    const FramePlan& plan, uint64_t publishStart)         = 0;
   virtual bool UsesCadence() const                       = 0;
   virtual void Reset();
   virtual void Invalidate();
