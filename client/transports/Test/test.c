@@ -86,6 +86,7 @@ struct LG_Transport
   bool                    framePending;
   uint64_t                serial;
   uint64_t                nextFrameTime;
+  uint64_t                framePrepareTime;
   unsigned                bufferIndex;
   struct TestBuffer       buffers[TEST_BUFFER_COUNT];
   FrameDamageRect         damage[LG_TRANSPORT_MAX_DAMAGE_RECTS];
@@ -416,6 +417,23 @@ static LG_TransportStatus test_connect(LG_Transport * this,
   return LG_TRANSPORT_OK;
 }
 
+static void test_disconnect(LG_Transport * this);
+
+static LG_TransportStatus test_connectCancellable(LG_Transport * this,
+    LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+    void * opaque)
+{
+  if (cancelled && cancelled(opaque))
+    return LG_TRANSPORT_DISCONNECTED;
+
+  const LG_TransportStatus status = test_connect(this, session);
+  if (!cancelled || !cancelled(opaque))
+    return status;
+
+  test_disconnect(this);
+  return LG_TRANSPORT_DISCONNECTED;
+}
+
 static void test_disconnect(LG_Transport * this)
 {
   this->connected    = false;
@@ -581,6 +599,7 @@ static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
 static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
     LG_TransportFrame * frame)
 {
+  const uint64_t prepareStart = nanotime();
   if (!this->connected)
     return LG_TRANSPORT_DISCONNECTED;
   if (this->framePending)
@@ -614,6 +633,7 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
 
   memset(frame, 0, sizeof(*frame));
   frame->serial    = this->serial;
+  frame->epoch     = 1;
   frame->timestamp = this->realtime ? nanotime() :
     this->serial * (1000000000ULL / this->frameRate);
   frame->format      = &this->format;
@@ -688,14 +708,31 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
   }
 
   this->framePending = true;
+  this->framePrepareTime = nanotime() - prepareStart;
   this->nextFrameTime += 1000000000ULL / this->frameRate;
   return LG_TRANSPORT_OK;
+}
+
+static void test_getFrameTiming(LG_Transport * this,
+    const LG_TransportFrame * frame, LG_TransportFrameTiming * timing)
+{
+  memset(timing, 0, sizeof(*timing));
+  if (!this->framePending || frame->serial != this->serial)
+    return;
+
+  timing->providerValid = true;
+  timing->prepareTime   = this->framePrepareTime;
 }
 
 static void test_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
 {
   this->framePending = false;
   memset(frame, 0, sizeof(*frame));
+}
+
+static void test_cancelFrameWait(LG_Transport * this)
+{
+  (void)this;
 }
 
 static LG_TransportStatus test_nextPointer(LG_Transport * this,
@@ -710,6 +747,11 @@ static LG_TransportStatus test_nextPointer(LG_Transport * this,
 static void test_releasePointer(LG_Transport * this,
     LG_TransportPointer * pointer)
 {
+}
+
+static void test_cancelPointerWait(LG_Transport * this)
+{
+  (void)this;
 }
 
 static LG_TransportStatus test_sendControl(LG_Transport * this,
@@ -740,9 +782,12 @@ static const LG_FrameOps testFrameOps =
   .attachRenderer = test_attachRenderer,
   .detachRenderer = test_detachRenderer,
   .nextFrame      = test_nextFrame,
+  .getFrameTiming = test_getFrameTiming,
   .releaseFrame   = test_releaseFrame,
+  .cancelFrameWait = test_cancelFrameWait,
   .nextPointer    = test_nextPointer,
   .releasePointer = test_releasePointer,
+  .cancelPointerWait = test_cancelPointerWait,
 };
 
 static const LG_VideoOps testVideoOps =
@@ -764,6 +809,7 @@ const LG_TransportOps LGT_Test =
   .create        = test_create,
   .destroy       = test_destroy,
   .connect       = test_connect,
+  .connectCancellable = test_connectCancellable,
   .disconnect    = test_disconnect,
   .sessionValid  = test_sessionValid,
   .getVideoOps   = test_getVideoOps,

@@ -63,6 +63,16 @@ struct TransportTrace
   atomic_bool          release;
   atomic_bool          cancel;
   atomic_bool          badProvider;
+  atomic_bool          noVideo;
+  atomic_bool          failAttach;
+  atomic_bool          failActive;
+  atomic_bool          blockActive;
+  atomic_bool          activeEntered;
+  atomic_bool          activeCancelled;
+  atomic_bool          holdActiveReturn;
+  atomic_uint          cancelPending;
+  const LG_SwSurfaceEventOps * surfaceEvents;
+  void                       * surfaceOpaque;
   atomic_uint_fast64_t connTime[4];
   unsigned int         failConn;
   bool                 uuidValid;
@@ -74,6 +84,11 @@ struct EventTrace
   atomic_uint         conn;
   atomic_uint         disc;
   atomic_uint         mismatch;
+  atomic_uint         videoReady;
+  atomic_uint         videoUnavailable;
+  atomic_uint         configureAccepted;
+  atomic_uint         surfaceCleanup;
+  atomic_bool         surfaceRetained;
   LG_TransportSession session;
   uint8_t             primary[16];
   uint8_t             fallback[16];
@@ -86,6 +101,7 @@ static struct ProviderTrace  pInput;
 static struct ProviderTrace  pAudio;
 #endif
 static struct ProviderTrace  pClipboard;
+static _Atomic(LG_TransportFallback *) surfaceFallback;
 
 static const uint8_t UUID_A[16] =
   { 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
@@ -118,6 +134,18 @@ static bool waitReady(const LG_TransportFallback * fallback)
   for (unsigned int i = 0; i < TEST_WAIT_MS; ++i)
   {
     if (lgTransportFallback_ready(fallback))
+      return true;
+    usleep(1000);
+  }
+
+  return false;
+}
+
+static bool waitUsable(const LG_TransportFallback * fallback)
+{
+  for (unsigned int i = 0; i < TEST_WAIT_MS; ++i)
+  {
+    if (lgTransportFallback_usable(fallback))
       return true;
     usleep(1000);
   }
@@ -203,8 +231,10 @@ static bool fakeAttach(LG_Transport * transport,
 {
   CHECK(transport);
   CHECK(events);
+  t.surfaceEvents = events;
+  t.surfaceOpaque = opaque;
   atomic_fetch_add(&t.attach, 1);
-  return true;
+  return !atomic_load(&t.failAttach);
 }
 
 static void fakeDetach(LG_Transport * transport)
@@ -217,7 +247,20 @@ static bool fakeActive(LG_Transport * transport, bool active)
 {
   CHECK(transport);
   atomic_fetch_add(active ? &t.on : &t.off, 1);
-  return true;
+  atomic_store(&t.activeEntered, true);
+  while (atomic_load(&t.blockActive) &&
+      !atomic_load(&t.activeCancelled))
+    usleep(1000);
+  while (active && atomic_load(&t.holdActiveReturn))
+    usleep(1000);
+  return !atomic_load(&t.failActive);
+}
+
+static void fakeCancelPending(LG_Transport * transport)
+{
+  CHECK(transport);
+  atomic_fetch_add(&t.cancelPending, 1);
+  atomic_store(&t.activeCancelled, true);
 }
 
 static const LG_InputOps inputOps =
@@ -264,6 +307,7 @@ static const LG_SwSurfaceOps surfaceOps =
   .attach    = fakeAttach,
   .detach    = fakeDetach,
   .setActive = fakeActive,
+  .cancelPending = fakeCancelPending,
 };
 
 static const LG_VideoOps videoOps =
@@ -276,7 +320,7 @@ static const LG_VideoOps videoOps =
 static const LG_VideoOps * fakeGetVideo(LG_Transport * transport)
 {
   CHECK(transport);
-  return &videoOps;
+  return atomic_load(&t.noVideo) ? NULL : &videoOps;
 }
 
 static const LG_TransportOps transportOps =
@@ -389,20 +433,48 @@ static void onMismatch(void * opaque, const uint8_t primary[16],
   atomic_fetch_add(&e.mismatch, 1);
 }
 
+static void onVideoState(void * opaque, bool ready)
+{
+  CHECK(opaque == &e);
+  atomic_fetch_add(ready ? &e.videoReady : &e.videoUnavailable, 1);
+  if (!ready && atomic_exchange(&e.surfaceRetained, false))
+    atomic_fetch_add(&e.surfaceCleanup, 1);
+}
+
+static void onSurfaceConfigure(void * opaque,
+    unsigned int width, unsigned int height)
+{
+  CHECK(opaque == &e);
+  CHECK(width == 1920);
+  CHECK(height == 1080);
+  LG_TransportFallback * fallback = atomic_load(&surfaceFallback);
+  CHECK(fallback);
+  if (!lgTransportFallback_acceptsVideoEvents(fallback))
+    return;
+
+  atomic_store(&e.surfaceRetained, true);
+  atomic_fetch_add(&e.configureAccepted, 1);
+}
+
 static LG_TransportFallback * start(const uint8_t primary[16])
 {
-  static const LG_SwSurfaceEventOps surfaceEvents = { 0 };
+  static const LG_SwSurfaceEventOps surfaceEvents =
+  {
+    .configure = onSurfaceConfigure,
+  };
   static const LG_TransportFallbackEventOps eventOps =
   {
     .connected    = onConnected,
     .disconnected = onDisconnected,
-    .uuidMismatch = onMismatch,
+    .videoStateChanged = onVideoState,
+    .endpointMismatch = onMismatch,
   };
 
   LG_TransportFallback * fallback = NULL;
-  CHECK(lgTransportFallback_start("fake", &surfaceEvents, NULL,
+  CHECK(lgTransportFallback_start("fake", &surfaceEvents, &e,
         &eventOps, &e, primary, &fallback));
   CHECK(fallback);
+  atomic_store(&surfaceFallback, fallback);
   return fallback;
 }
 
@@ -438,8 +510,9 @@ static void testGraceful(void)
   atomic_store(&t.release, true);
   CHECK(waitReady(fallback));
   CHECK(waitCount(&e.conn, 1));
+  CHECK(waitCount(&e.videoReady, 1));
 
-  CHECK(lgTransportFallback_admitted(fallback));
+  CHECK(lgTransportFallback_usable(fallback));
   CHECK(atomic_load(&t.on) == 1);
   CHECK(memcmp(e.session.uuid, UUID_A, sizeof(UUID_A)) == 0);
   checkPublished(1, 0, 0);
@@ -459,17 +532,17 @@ static void testDead(void)
 {
   setRemote(UUID_A);
   LG_TransportFallback * fallback = start(UUID_A);
-  CHECK(waitReady(fallback));
   CHECK(waitCount(&e.conn, 1));
 
   lgTransportFallback_requestVideoActive(fallback, true);
   CHECK(waitCount(&t.on, 1));
+  CHECK(waitReady(fallback));
   atomic_store(&t.alive, false);
   lgTransportFallback_requestVideoActive(fallback, true);
   CHECK(waitCount(&e.disc, 1));
 
   CHECK(!lgTransportFallback_ready(fallback));
-  CHECK(!lgTransportFallback_admitted(fallback));
+  CHECK(!lgTransportFallback_usable(fallback));
   CHECK(atomic_load(&t.off) == 0);
   checkPublished(1, 0, 1);
 
@@ -487,7 +560,7 @@ static void testMismatch(void)
   CHECK(waitCount(&t.free, 2));
 
   CHECK(!lgTransportFallback_ready(fallback));
-  CHECK(!lgTransportFallback_admitted(fallback));
+  CHECK(!lgTransportFallback_usable(fallback));
   CHECK(atomic_load(&e.conn) == 0);
   CHECK(atomic_load(&e.disc) == 0);
   CHECK(atomic_load(&e.mismatch) == 1);
@@ -503,11 +576,27 @@ static void testMismatch(void)
   CHECK(atomic_load(&t.free) == 2);
 }
 
-static void testRevoke(void)
+static void testMissingUUID(void)
+{
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+  CHECK(lgTransportFallback_usable(fallback));
+  CHECK(atomic_load(&e.mismatch) == 0);
+  lgTransportFallback_stop(&fallback);
+
+  setRemote(UUID_B);
+  fallback = start(NULL);
+  CHECK(waitCount(&e.conn, 2));
+  CHECK(lgTransportFallback_usable(fallback));
+  CHECK(atomic_load(&e.mismatch) == 0);
+  lgTransportFallback_stop(&fallback);
+  checkPublished(2, 2, 0);
+}
+
+static void testLateMismatch(void)
 {
   setRemote(UUID_A);
   LG_TransportFallback * fallback = start(UUID_A);
-  CHECK(waitReady(fallback));
   CHECK(waitCount(&e.conn, 1));
 
   lgTransportFallback_setPrimaryUUID(fallback, UUID_B);
@@ -515,7 +604,7 @@ static void testRevoke(void)
   CHECK(waitCount(&t.free, 2));
 
   CHECK(!lgTransportFallback_ready(fallback));
-  CHECK(!lgTransportFallback_admitted(fallback));
+  CHECK(!lgTransportFallback_usable(fallback));
   CHECK(atomic_load(&e.conn) == 1);
   CHECK(atomic_load(&e.disc) == 1);
   CHECK(atomic_load(&e.mismatch) == 1);
@@ -535,7 +624,6 @@ static void testRetry(void)
   setRemote(UUID_A);
   t.failConn = 2;
   LG_TransportFallback * fallback = start(UUID_A);
-  CHECK(waitReady(fallback));
   CHECK(waitCount(&e.conn, 1));
 
   const uint64_t first  = atomic_load(&t.connTime[0]);
@@ -549,8 +637,8 @@ static void testRetry(void)
   lgTransportFallback_stop(&fallback);
   CHECK(atomic_load(&e.conn) == 1);
   CHECK(atomic_load(&e.disc) == 1);
-  CHECK(atomic_load(&t.attach) == 3);
-  CHECK(atomic_load(&t.detach) == 3);
+  CHECK(atomic_load(&t.attach) == 1);
+  CHECK(atomic_load(&t.detach) == 1);
   CHECK(atomic_load(&t.disc) == 3);
   CHECK(atomic_load(&t.free) == 3);
   checkPublished(1, 1, 0);
@@ -568,12 +656,190 @@ static void testCancel(void)
   CHECK(atomic_load(&t.cancel));
   CHECK(atomic_load(&e.conn) == 0);
   CHECK(atomic_load(&e.disc) == 0);
-  CHECK(atomic_load(&t.attach) == 1);
-  CHECK(atomic_load(&t.detach) == 1);
+  CHECK(atomic_load(&t.attach) == 0);
+  CHECK(atomic_load(&t.detach) == 0);
   CHECK(atomic_load(&t.disc) == 1);
   CHECK(atomic_load(&t.free) == 1);
   checkPublished(0, 0, 0);
 }
+
+static void testWithoutVideo(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.noVideo, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitUsable(fallback));
+  CHECK(waitCount(&e.conn, 1));
+  CHECK(!lgTransportFallback_ready(fallback));
+  checkPublished(1, 0, 0);
+
+  lgTransportFallback_requestVideoActive(fallback, true);
+  usleep(50000);
+  CHECK(atomic_load(&t.on) == 0);
+  CHECK(lgTransportFallback_usable(fallback));
+
+  lgTransportFallback_stop(&fallback);
+  CHECK(atomic_load(&t.attach) == 0);
+  CHECK(atomic_load(&t.detach) == 0);
+  checkPublished(1, 1, 0);
+}
+
+static void testAttachFailure(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.failAttach, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitUsable(fallback));
+  CHECK(waitCount(&e.conn, 1));
+  CHECK(!lgTransportFallback_ready(fallback));
+  CHECK(atomic_load(&t.attach) == 1);
+  CHECK(atomic_load(&t.detach) == 0);
+  checkPublished(1, 0, 0);
+  lgTransportFallback_stop(&fallback);
+  checkPublished(1, 1, 0);
+}
+
+static void testActiveFailure(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.failActive, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+  lgTransportFallback_requestVideoActive(fallback, true);
+  CHECK(waitCount(&t.on, 1));
+  CHECK(waitCount(&e.videoUnavailable, 1));
+  CHECK(lgTransportFallback_usable(fallback));
+  CHECK(!lgTransportFallback_ready(fallback));
+  checkPublished(1, 0, 0);
+  lgTransportFallback_stop(&fallback);
+  CHECK(atomic_load(&t.detach) == 1);
+  checkPublished(1, 1, 0);
+}
+
+static void testActivationCancel(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.blockActive, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+  lgTransportFallback_requestVideoActive(fallback, true);
+  CHECK(waitCount(&t.on, 1));
+  CHECK(atomic_load(&t.activeEntered));
+  lgTransportFallback_stop(&fallback);
+  CHECK(!fallback);
+  CHECK(atomic_load(&t.cancelPending) > 0);
+  CHECK(atomic_load(&t.detach) == 1);
+  CHECK(atomic_load(&t.disc) == 1);
+  CHECK(atomic_load(&t.free) == 1);
+}
+
+static void testActivationRequestCancel(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.blockActive, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+
+  lgTransportFallback_requestVideoActive(fallback, true);
+  CHECK(waitCount(&t.on, 1));
+  CHECK(atomic_load(&t.activeEntered));
+  CHECK(lgTransportFallback_acceptsVideoEvents(fallback));
+  CHECK(t.surfaceEvents);
+  CHECK(t.surfaceEvents->configure);
+  t.surfaceEvents->configure(t.surfaceOpaque, 1920, 1080);
+  CHECK(atomic_load(&e.configureAccepted) == 1);
+  CHECK(atomic_load(&e.surfaceRetained));
+
+  lgTransportFallback_requestVideoActive(fallback, false);
+  CHECK(waitCount(&t.cancelPending, 1));
+  CHECK(waitCount(&t.off, 1));
+  CHECK(waitCount(&e.videoUnavailable, 1));
+  usleep(250000);
+
+  CHECK(atomic_load(&e.videoUnavailable) == 1);
+  CHECK(atomic_load(&e.videoReady) == 0);
+  CHECK(atomic_load(&e.configureAccepted) == 1);
+  CHECK(atomic_load(&e.surfaceCleanup) == 1);
+  CHECK(!atomic_load(&e.surfaceRetained));
+  CHECK(!lgTransportFallback_ready(fallback));
+  CHECK(!lgTransportFallback_acceptsVideoEvents(fallback));
+  CHECK(lgTransportFallback_usable(fallback));
+  checkPublished(1, 0, 0);
+
+  lgTransportFallback_stop(&fallback);
+  CHECK(!fallback);
+  CHECK(atomic_load(&t.off) == 1);
+  CHECK(atomic_load(&t.detach) == 1);
+  CHECK(atomic_load(&t.disc) == 1);
+  CHECK(atomic_load(&t.free) == 1);
+  checkPublished(1, 1, 0);
+}
+
+static void testDeactivationCompletes(void)
+{
+  setRemote(UUID_A);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+  lgTransportFallback_requestVideoActive(fallback, true);
+  CHECK(waitReady(fallback));
+  atomic_store(&t.activeEntered, false);
+  lgTransportFallback_stop(&fallback);
+  CHECK(!fallback);
+  CHECK(atomic_load(&t.off) == 1);
+  CHECK(atomic_load(&t.cancelPending) == 0);
+  CHECK(atomic_load(&t.detach) == 1);
+  CHECK(atomic_load(&t.disc) == 1);
+  CHECK(atomic_load(&t.free) == 1);
+}
+
+static void testMismatchDuringActivation(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.holdActiveReturn, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&e.conn, 1));
+  lgTransportFallback_requestVideoActive(fallback, true);
+  CHECK(waitCount(&t.on, 1));
+  CHECK(atomic_load(&t.activeEntered));
+  lgTransportFallback_setPrimaryUUID(fallback, UUID_B);
+  CHECK(waitCount(&e.disc, 1));
+  atomic_store(&t.holdActiveReturn, false);
+  CHECK(waitCount(&t.free, 1));
+  CHECK(!lgTransportFallback_ready(fallback));
+  CHECK(!lgTransportFallback_usable(fallback));
+  CHECK(!lgTransportFallback_acceptsVideoEvents(fallback));
+  CHECK(atomic_load(&e.videoReady) == 0);
+  lgTransportFallback_stop(&fallback);
+}
+
+static void testPreRequestedActivation(void)
+{
+  setRemote(UUID_A);
+  atomic_store(&t.hold, true);
+  atomic_store(&t.blockActive, true);
+  LG_TransportFallback * fallback = start(UUID_A);
+  CHECK(waitCount(&t.conn, 1));
+  lgTransportFallback_requestVideoActive(fallback, true);
+  atomic_store(&t.release, true);
+  CHECK(waitCount(&e.conn, 1));
+  CHECK(waitCount(&t.on, 1));
+  CHECK(atomic_load(&t.activeEntered));
+  CHECK(!lgTransportFallback_ready(fallback));
+
+  atomic_store(&t.blockActive, false);
+  CHECK(waitReady(fallback));
+  CHECK(waitCount(&e.videoReady, 1));
+  lgTransportFallback_setPrimaryUUID(fallback, UUID_B);
+  CHECK(waitCount(&e.disc, 1));
+  CHECK(waitCount(&t.free, 1));
+  CHECK(atomic_load(&e.conn) == 1);
+  CHECK(atomic_load(&e.disc) == 1);
+  CHECK(atomic_load(&e.mismatch) == 1);
+  CHECK(!lgTransportFallback_usable(fallback));
+  CHECK(!lgTransportFallback_ready(fallback));
+  lgTransportFallback_stop(&fallback);
+}
+
 
 struct Test
 {
@@ -586,9 +852,18 @@ static const struct Test tests[] =
   { "graceful", testGraceful },
   { "dead"    , testDead     },
   { "mismatch", testMismatch },
-  { "revoke"  , testRevoke   },
+  { "missing-uuid", testMissingUUID },
+  { "late-mismatch", testLateMismatch },
   { "retry"   , testRetry    },
   { "cancel"  , testCancel   },
+  { "no-video", testWithoutVideo },
+  { "attach-fail", testAttachFailure },
+  { "active-fail", testActiveFailure },
+  { "activation-cancel", testActivationCancel },
+  { "activation-request-cancel", testActivationRequestCancel },
+  { "deactivation-completes", testDeactivationCompletes },
+  { "activation-mismatch", testMismatchDuringActivation },
+  { "pre-requested-activation", testPreRequestedActivation },
 };
 
 int main(int argc, char ** argv)

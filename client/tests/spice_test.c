@@ -63,6 +63,11 @@ struct Pure
   atomic_bool   connectOK;
   atomic_bool   callReady;
   atomic_bool   blockConnect;
+  atomic_bool   enterConnect;
+  atomic_bool   allowConnect;
+  atomic_bool   blockChannelConnect;
+  atomic_bool   enterChannelConnect;
+  atomic_bool   channelCancel[PS_CHANNEL_MAX];
   atomic_bool   cancel;
   atomic_bool   drop;
   PSStatus      dropStatus;
@@ -136,8 +141,18 @@ void purespice_init(const PSInit * init)
   (void)init;
 }
 
+void purespice_beginConnect(void)
+{
+  atomic_store_explicit(&ps.cancel, false, memory_order_release);
+}
+
 bool purespice_connect(const PSConfig * config)
 {
+  while (!atomic_load_explicit(&ps.allowConnect, memory_order_acquire) &&
+      !atomic_load_explicit(&ps.cancel, memory_order_acquire))
+    usleep(1000);
+  atomic_store_explicit(&ps.enterConnect, true, memory_order_release);
+
   ps.config       = *config;
   ps.connectOrder = nextOrder();
   atomic_fetch_add(&ps.connectN, 1);
@@ -150,6 +165,23 @@ bool purespice_connect(const PSConfig * config)
   if (atomic_load(&ps.callReady) && config->ready)
     config->ready();
   return true;
+}
+
+void purespice_cancelConnect(void)
+{
+  atomic_store_explicit(&ps.cancel, true, memory_order_release);
+}
+
+void purespice_beginChannelConnect(PSChannelType channel)
+{
+  atomic_store_explicit(
+      &ps.channelCancel[channel], false, memory_order_release);
+}
+
+void purespice_cancelChannelConnect(PSChannelType channel)
+{
+  atomic_store_explicit(
+      &ps.channelCancel[channel], true, memory_order_release);
 }
 
 void purespice_disconnect(void)
@@ -201,6 +233,18 @@ bool purespice_channelConnected(PSChannelType channel)
 bool purespice_connectChannel(PSChannelType channel)
 {
   ++ps.connectChannelN[channel];
+  atomic_store_explicit(
+      &ps.enterChannelConnect, true, memory_order_release);
+  while (atomic_load_explicit(
+        &ps.blockChannelConnect, memory_order_acquire) &&
+      !atomic_load_explicit(&ps.cancel, memory_order_acquire) &&
+      !atomic_load_explicit(
+        &ps.channelCancel[channel], memory_order_acquire))
+    usleep(1000);
+  if (atomic_load_explicit(&ps.cancel, memory_order_acquire) ||
+      atomic_load_explicit(
+        &ps.channelCancel[channel], memory_order_acquire))
+    return false;
   if (!ps.connectResult[channel])
     return false;
   ps.connected[channel] = true;
@@ -335,6 +379,12 @@ static void resetPure(void)
   atomic_init(&ps.connectOK, true);
   atomic_init(&ps.callReady, true);
   atomic_init(&ps.blockConnect, false);
+  atomic_init(&ps.enterConnect, false);
+  atomic_init(&ps.allowConnect, true);
+  atomic_init(&ps.blockChannelConnect, false);
+  atomic_init(&ps.enterChannelConnect, false);
+  for(unsigned int i = 0; i < PS_CHANNEL_MAX; ++i)
+    atomic_init(&ps.channelCancel[i], false);
   atomic_init(&ps.cancel, false);
   atomic_init(&ps.drop, false);
   atomic_init(&ps.connectN, 0);
@@ -485,8 +535,14 @@ static bool cancel(void * opaque)
 {
   unsigned int * calls = opaque;
   ++*calls;
-  atomic_store(&ps.cancel, true);
   return true;
+}
+
+static bool cancelBeforeEntry(void * opaque)
+{
+  unsigned int * calls = opaque;
+  ++*calls;
+  return !atomic_load_explicit(&ps.enterConnect, memory_order_acquire);
 }
 
 static void testConnectFail(void)
@@ -559,6 +615,19 @@ static void testCancel(void)
   CHECK(f.input.offN == 1);
   CHECK(f.clipboard.offN == 1);
   CHECK(!atomic_load(&cbTarget));
+  freeFixture(&f);
+
+  resetPure();
+  atomic_store_explicit(&ps.allowConnect, false, memory_order_release);
+  atomic_store_explicit(&ps.enterConnect, false, memory_order_release);
+  initFixture(&f);
+  cancelN = 0;
+  CHECK(LGT_SPICE.connectCancellable(&f.transport, &session,
+        cancelBeforeEntry, &cancelN) == LG_TRANSPORT_DISCONNECTED);
+  CHECK(cancelN == 1);
+  CHECK(!f.transport.thread);
+  CHECK(!LGT_SPICE.sessionValid(&f.transport));
+  CHECK(atomic_load_explicit(&ps.cancel, memory_order_acquire));
   freeFixture(&f);
 }
 
@@ -700,6 +769,148 @@ static void testSurfaceActive(void)
   CHECK(sw->setActive(&f.transport, false));
   CHECK(!ps.connected[PS_CHANNEL_DISPLAY]);
   CHECK(!ps.connected[PS_CHANNEL_CURSOR]);
+  sw->detach(&f.transport);
+  freeFixture(&f);
+}
+
+struct ActiveCall
+{
+  const LG_SwSurfaceOps * ops;
+  LG_Transport          * transport;
+  atomic_bool             done;
+  bool                    result;
+};
+
+static void * activateSurface(void * opaque)
+{
+  struct ActiveCall * call = opaque;
+  call->result = call->ops->setActive(call->transport, true);
+  atomic_store_explicit(&call->done, true, memory_order_release);
+  return NULL;
+}
+
+static void * holdActivationLock(void * opaque)
+{
+  LG_Transport * transport = opaque;
+  spiceSurface_testLockActivation(transport->surface);
+  atomic_store_explicit(
+      &ps.enterChannelConnect, true, memory_order_release);
+  while (atomic_load_explicit(
+        &ps.blockChannelConnect, memory_order_acquire))
+    usleep(1000);
+  spiceSurface_testUnlockActivation(transport->surface);
+  return NULL;
+}
+
+static void testSurfaceCancel(void)
+{
+  resetPure();
+  struct Fixture f;
+  initFixture(&f);
+  const LG_SwSurfaceOps * sw = spiceSurface_getVideoOps()->swSurface;
+  CHECK(sw->attach(&f.transport, &surfaceEvents, &f.log));
+  atomic_store_explicit(
+      &f.transport.sessionValid, true, memory_order_release);
+  atomic_store_explicit(
+      &ps.blockChannelConnect, true, memory_order_release);
+
+  struct ActiveCall call =
+  {
+    .ops       = sw,
+    .transport = &f.transport,
+  };
+  atomic_init(&call.done, false);
+  pthread_t thread;
+  CHECK(pthread_create(&thread, NULL, activateSurface, &call) == 0);
+  waitBool(&ps.enterChannelConnect);
+
+  sw->cancelPending(&f.transport);
+  waitBool(&call.done);
+  CHECK(pthread_join(thread, NULL) == 0);
+  CHECK(!call.result);
+  CHECK(atomic_load_explicit(
+        &ps.channelCancel[PS_CHANNEL_DISPLAY], memory_order_acquire));
+  CHECK(!atomic_load_explicit(&ps.cancel, memory_order_acquire));
+  CHECK(ps.connectChannelN[PS_CHANNEL_DISPLAY] == 1);
+  CHECK(ps.connectChannelN[PS_CHANNEL_CURSOR] == 0);
+  CHECK(LGT_SPICE.sessionValid(&f.transport));
+
+  atomic_store_explicit(
+      &ps.blockChannelConnect, false, memory_order_release);
+  CHECK(sw->setActive(&f.transport, true));
+  CHECK(LGT_SPICE.sessionValid(&f.transport));
+  CHECK(sw->setActive(&f.transport, false));
+
+  sw->detach(&f.transport);
+  freeFixture(&f);
+
+  resetPure();
+  initFixture(&f);
+  sw = spiceSurface_getVideoOps()->swSurface;
+  CHECK(sw->attach(&f.transport, &surfaceEvents, &f.log));
+  atomic_store_explicit(
+      &f.transport.sessionValid, true, memory_order_release);
+  atomic_store_explicit(
+      &ps.blockChannelConnect, true, memory_order_release);
+
+  pthread_t holdThread;
+  CHECK(pthread_create(
+        &holdThread, NULL, holdActivationLock, &f.transport) == 0);
+  waitBool(&ps.enterChannelConnect);
+
+  call = (struct ActiveCall)
+  {
+    .ops       = sw,
+    .transport = &f.transport,
+  };
+  atomic_init(&call.done, false);
+  CHECK(pthread_create(&thread, NULL, activateSurface, &call) == 0);
+  usleep(10000);
+  sw->cancelPending(&f.transport);
+  atomic_store_explicit(
+      &ps.blockChannelConnect, false, memory_order_release);
+  CHECK(pthread_join(holdThread, NULL) == 0);
+  waitBool(&call.done);
+  CHECK(pthread_join(thread, NULL) == 0);
+  CHECK(!call.result);
+  CHECK(ps.connectChannelN[PS_CHANNEL_DISPLAY] == 0);
+
+  sw->detach(&f.transport);
+  freeFixture(&f);
+
+  resetPure();
+  initFixture(&f);
+  sw = spiceSurface_getVideoOps()->swSurface;
+  CHECK(sw->attach(&f.transport, &surfaceEvents, &f.log));
+  atomic_store_explicit(
+      &f.transport.sessionValid, true, memory_order_release);
+  atomic_store_explicit(
+      &ps.blockChannelConnect, true, memory_order_release);
+
+  call = (struct ActiveCall)
+  {
+    .ops       = sw,
+    .transport = &f.transport,
+  };
+  atomic_init(&call.done, false);
+  CHECK(pthread_create(&thread, NULL, activateSurface, &call) == 0);
+  waitBool(&ps.enterChannelConnect);
+
+  atomic_store_explicit(
+      &f.transport.sessionValid, false, memory_order_release);
+  spiceSurface_sessionStopped(f.transport.surface);
+  waitBool(&call.done);
+  CHECK(pthread_join(thread, NULL) == 0);
+  CHECK(!call.result);
+  CHECK(atomic_load_explicit(
+        &ps.channelCancel[PS_CHANNEL_DISPLAY], memory_order_acquire));
+  CHECK(atomic_load_explicit(
+        &ps.channelCancel[PS_CHANNEL_CURSOR], memory_order_acquire));
+  CHECK(!atomic_load_explicit(&ps.cancel, memory_order_acquire));
+  CHECK(sw->setActive(&f.transport, false));
+
+  atomic_store_explicit(
+      &ps.blockChannelConnect, false, memory_order_release);
   sw->detach(&f.transport);
   freeFixture(&f);
 }
@@ -864,6 +1075,7 @@ static const struct Test tests[] =
   { "ready-drop"    , testReadyDrop     },
   { "session-order" , testSessionOrder  },
   { "surface-active", testSurfaceActive },
+  { "surface-cancel", testSurfaceCancel },
   { "surface-events", testSurfaceEvents },
   { "surface-detach", testSurfaceDetach },
 };

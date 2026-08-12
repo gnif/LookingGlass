@@ -188,6 +188,7 @@ set(SOURCES
   src/evdev.c
   src/transport.c
   src/transport_fallback.c
+  src/sw_surface.c
   src/input.c
 
   src/overlay/splash.c

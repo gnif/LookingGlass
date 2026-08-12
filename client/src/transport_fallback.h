@@ -32,10 +32,12 @@ typedef struct LG_TransportFallbackEventOps
 {
   /* The session is valid only for the duration of this callback. */
   void (*connected)(void * opaque, const LG_TransportSession * session);
-  /* Called only when an admitted session is unexpectedly lost. */
+  /* Called only when a usable session is unexpectedly lost. */
   void (*lost)(void * opaque);
   void (*disconnected)(void * opaque);
-  void (*uuidMismatch)(void * opaque, const uint8_t primary[16],
+  /* Reports completion of an optional video state request. */
+  void (*videoStateChanged)(void * opaque, bool ready);
+  void (*endpointMismatch)(void * opaque, const uint8_t primary[16],
       const uint8_t fallback[16]);
 }
 LG_TransportFallbackEventOps;
@@ -47,8 +49,13 @@ bool lgTransportFallback_start(const char * transportName,
     LG_TransportFallback ** result);
 void lgTransportFallback_stop(LG_TransportFallback ** fallback);
 
+/* ready reports optional video availability; usable reports session services. */
 bool lgTransportFallback_ready(const LG_TransportFallback * fallback);
-bool lgTransportFallback_admitted(const LG_TransportFallback * fallback);
+bool lgTransportFallback_usable(const LG_TransportFallback * fallback);
+/* True while video callbacks belong to the current activation attempt or
+ * confirmed active state. */
+bool lgTransportFallback_acceptsVideoEvents(
+    const LG_TransportFallback * fallback);
 bool lgTransportFallback_videoRequested(
     LG_TransportFallback * fallback);
 /* The requested state is retained across reconnects. */

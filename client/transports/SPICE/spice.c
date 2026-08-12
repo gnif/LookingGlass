@@ -237,6 +237,7 @@ static LG_TransportStatus spiceConnectCancellable(LG_Transport * transport,
   atomic_store_explicit(
       &transport->sessionValid, false, memory_order_release);
   lgResetEvent(transport->connectEvent);
+  purespice_beginConnect();
 
   if (!lgCreateThread(
         "spiceProcess", spiceSession_thread, transport, &transport->thread))
@@ -248,6 +249,7 @@ static LG_TransportStatus spiceConnectCancellable(LG_Transport * transport,
     {
       cancel = true;
       atomic_store_explicit(&transport->stop, true, memory_order_release);
+      purespice_cancelConnect();
       lgWaitEvent(transport->connectEvent, TIMEOUT_INFINITE);
       break;
     }
@@ -255,6 +257,7 @@ static LG_TransportStatus spiceConnectCancellable(LG_Transport * transport,
   if (cancel || (cancelled && cancelled(opaque)))
   {
     atomic_store_explicit(&transport->stop, true, memory_order_release);
+    purespice_cancelConnect();
     lgJoinThread(transport->thread, NULL);
     transport->thread = NULL;
     return LG_TRANSPORT_DISCONNECTED;
@@ -283,6 +286,7 @@ static void spiceDisconnect(LG_Transport * transport)
     return;
 
   atomic_store_explicit(&transport->stop, true, memory_order_release);
+  purespice_cancelConnect();
   lgJoinThread(transport->thread, NULL);
   transport->thread = NULL;
 }

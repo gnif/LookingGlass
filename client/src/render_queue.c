@@ -36,6 +36,7 @@ typedef struct RenderCommand
 
   RenderQueueSource source;
   uint64_t          generation;
+  uint64_t          cursorGeneration;
   uint64_t          transitionSerial;
 
   enum
@@ -47,6 +48,7 @@ typedef struct RenderCommand
     CURSOR_OP_IMAGE,
     CURSOR_OP_COLOR_TRANSFORM,
     CURSOR_OP_WHITE_LEVEL,
+    CURSOR_OP_CLEAR,
     SOURCE_OP_TRANSITION,
   }
   op;
@@ -172,6 +174,7 @@ static bool              l_rendererSupportsNativeHDR;
 static LG_RendererFormat l_surfaceFormat;
 
 static _Atomic(uint64_t) l_sourceGeneration[RENDER_QUEUE_SOURCE_COUNT];
+static _Atomic(uint64_t) l_cursorGeneration[RENDER_QUEUE_SOURCE_COUNT];
 static _Atomic(uint64_t) l_transitionSerial;
 static LG_Lock           l_sourceLock;
 static LG_Lock           l_transitionLock;
@@ -257,6 +260,15 @@ static bool transitionCommand(const RenderCommand * cmd)
     cmd->op == SW_SURFACE_OP_CONFIGURE_TRANSITION;
 }
 
+static bool cursorCommand(const RenderCommand * cmd)
+{
+  return cmd->op == CURSOR_OP_STATE ||
+    cmd->op == CURSOR_OP_IMAGE ||
+    cmd->op == CURSOR_OP_COLOR_TRANSFORM ||
+    cmd->op == CURSOR_OP_WHITE_LEVEL ||
+    cmd->op == CURSOR_OP_CLEAR;
+}
+
 static bool commandValid(const RenderCommand * cmd)
 {
   if (transitionCommand(cmd) &&
@@ -266,8 +278,15 @@ static bool commandValid(const RenderCommand * cmd)
 
   if (cmd->source == RENDER_QUEUE_SOURCE_NONE)
     return cmd->op == SOURCE_OP_TRANSITION;
+  if (!sourceValid(cmd->source))
+    return false;
 
-  return generationValid(cmd->source, cmd->generation);
+  const bool cursorCurrent = !cursorCommand(cmd) || atomic_load_explicit(
+      &l_cursorGeneration[cmd->source], memory_order_acquire) ==
+        cmd->cursorGeneration;
+  if (cmd->op == CURSOR_OP_CLEAR)
+    return cursorCurrent;
+  return generationValid(cmd->source, cmd->generation) && cursorCurrent;
 }
 
 static uint64_t swSurfaceDamageArea(const FrameDamageRect * rect)
@@ -469,6 +488,8 @@ static void setCommandSource(RenderCommand * cmd, RenderQueueSource source,
 {
   cmd->source     = source;
   cmd->generation = generation;
+  cmd->cursorGeneration = sourceValid(source) ? atomic_load_explicit(
+      &l_cursorGeneration[source], memory_order_acquire) : 0;
 }
 
 static bool copyCursorImage(RenderCommand * cmd, const void * data)
@@ -567,6 +588,7 @@ void renderQueue_init(void)
   for (int i = 0; i < RENDER_QUEUE_SOURCE_COUNT; ++i)
   {
     atomic_store_explicit(&l_sourceGeneration[i], 0, memory_order_relaxed);
+    atomic_store_explicit(&l_cursorGeneration[i], 1, memory_order_relaxed);
     LG_LOCK_INIT(l_swSurface[i].lock);
   }
   atomic_store_explicit(&l_transitionSerial, 0, memory_order_relaxed);
@@ -686,9 +708,26 @@ void renderQueue_sourceClearCursor(RenderQueueSource source)
     return;
 
   LG_LOCK(l_sourceLock);
+  uint64_t cursorGeneration = atomic_load_explicit(
+      &l_cursorGeneration[source], memory_order_relaxed) + 1;
+  if (!cursorGeneration)
+    ++cursorGeneration;
+  atomic_store_explicit(&l_cursorGeneration[source], cursorGeneration,
+      memory_order_release);
   free(l_cursor[source].data);
   memset(&l_cursor[source], 0, sizeof(l_cursor[source]));
+  const uint64_t sourceGeneration = atomic_load_explicit(
+      &l_sourceGeneration[source], memory_order_acquire);
+  RenderCommand * cmd = malloc(sizeof(*cmd));
+  bool wake = false;
+  if (cmd)
+  {
+    setCommandSource(cmd, source, sourceGeneration);
+    cmd->op = CURSOR_OP_CLEAR;
+    wake = queueCommand(cmd, RENDER_QUEUE_INVALIDATE_PARTIAL);
+  }
   LG_UNLOCK(l_sourceLock);
+  wakeQueue(wake);
 }
 
 static bool configureSwSurface(RenderQueueSource source,
@@ -1453,6 +1492,19 @@ bool renderQueue_process(void)
               cursor->sdrWhiteLevel);
         break;
       }
+
+      case CURSOR_OP_CLEAR:
+        if (l_appliedSource == cmd->source)
+        {
+          RENDERER(onMouseEvent, false, 0, 0, 0, 0);
+          if (g_state.lgr->ops.onMouseColorTransform)
+            g_state.lgr->ops.onMouseColorTransform(
+                g_state.lgr, &l_identityColorTransform);
+          if (g_state.lgr->ops.onMouseWhiteLevel)
+            g_state.lgr->ops.onMouseWhiteLevel(
+                g_state.lgr, LG_SDR_WHITE_LEVEL_DEFAULT);
+        }
+        break;
 
       case SOURCE_OP_TRANSITION:
       {

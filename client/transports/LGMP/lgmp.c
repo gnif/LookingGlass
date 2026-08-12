@@ -65,9 +65,41 @@ struct LGMPFrameLease
   LG_TransportFrameFormat   format;
   uint64_t                  handle;
   uint32_t                  generation;
+  uint64_t                  receiveTime;
+  uint64_t                  prepareTime;
+  bool                      providerValid;
   bool                      releaseRequested;
   bool                      active;
 };
+
+typedef struct LGMPVideoStatusUpdate
+{
+  bool frame;
+  bool frameAvailable;
+  bool frameReplaced;
+  LG_TransportStatus frameReason;
+  bool pointer;
+  bool pointerAvailable;
+  bool pointerReplaced;
+  LG_TransportStatus pointerReason;
+}
+LGMPVideoStatusUpdate;
+
+typedef struct LGMPVideoStatusDispatch
+{
+  LG_VideoStatusFn callback;
+  void *           opaque;
+  uint64_t         listenerSerial;
+  bool             pending;
+}
+LGMPVideoStatusDispatch;
+
+typedef struct LGMPVideoCallbackContext
+{
+  struct LGMPVideoCallbackContext * previous;
+  LG_Transport                    * transport;
+}
+LGMPVideoCallbackContext;
 
 struct LG_Transport
 {
@@ -79,16 +111,28 @@ struct LG_Transport
   LGMPInput        * input;
   LG_Lock           frameLock;
   LG_Lock           pointerLock;
+  LG_RWLock         videoStatusLock;
   LGEvent         * frameWake;
   LGEvent         * pointerWake;
+
+  LG_VideoStatusFn videoStatusCallback;
+  void           * videoStatusOpaque;
+  atomic_uint      videoStatusCallbacks;
+  uint64_t         videoStatusListenerSerial;
+  uint64_t         videoFrameEpoch;
+  uint64_t         videoPointerEpoch;
+  LG_TransportStatus videoFrameReason;
+  LG_TransportStatus videoPointerReason;
+  bool             videoFrameAvailable;
+  bool             videoPointerAvailable;
 
   unsigned cursorPollInterval;
   unsigned framePollInterval;
   bool     allowDMA;
-  bool     connected;
+  atomic_bool connected;
   bool     frameStopRequested;
   bool     frameScheduleSupported;
-  bool     inputSupported;
+  atomic_bool inputSupported;
   uint64_t frameLeaseHandle;
   uint32_t frameGeneration;
   uint32_t clientID;
@@ -111,7 +155,248 @@ struct LG_Transport
   uint32_t    recoveryCandidateHeartbeat;
   uint32_t    recoveryLGMPVersion;
   bool        recoveryLive;
+  atomic_bool destroyPending;
 };
+
+static LG_Lock l_videoStatusCallbackLock = ATOMIC_FLAG_INIT;
+static _Thread_local LGMPVideoCallbackContext * l_videoStatusContext;
+
+#ifdef ENABLE_TESTS
+static atomic_bool * l_videoStatusDispatchWaiting;
+static atomic_bool * l_videoStatusDispatchHold;
+static LG_Transport * l_videoStatusDispatchTarget;
+static LG_Lock        l_videoStatusTestLock = ATOMIC_FLAG_INIT;
+
+void lgmp_testSetVideoStatusDispatchGate(
+    LG_Transport * target, atomic_bool * waiting, atomic_bool * hold)
+{
+  LG_LOCK(l_videoStatusTestLock);
+  l_videoStatusDispatchTarget  = target;
+  l_videoStatusDispatchWaiting = waiting;
+  l_videoStatusDispatchHold    = hold;
+  LG_UNLOCK(l_videoStatusTestLock);
+}
+#endif
+
+static void lgmp_setVideoStatusListener(LG_Transport * this,
+    LG_VideoStatusFn callback, void * callbackOpaque);
+static void lgmp_destroyNow(LG_Transport * this);
+static void lgmp_releaseFrame(LG_Transport * this,
+    LG_TransportFrame * frame);
+
+static unsigned lgmp_videoStatusOwnCallbacks(const LG_Transport * transport)
+{
+  unsigned count = 0;
+  for (const LGMPVideoCallbackContext * context = l_videoStatusContext;
+       context; context = context->previous)
+    count += context->transport == transport;
+  return count;
+}
+
+static bool lgmp_videoStatusContextContains(const LG_Transport * transport)
+{
+  for (const LGMPVideoCallbackContext * context = l_videoStatusContext;
+       context; context = context->previous)
+    if (context->transport == transport)
+      return true;
+  return false;
+}
+
+static void lgmp_waitVideoStatusCallbacks(
+    LG_Transport * transport, unsigned ownCallbacks)
+{
+  while (atomic_load_explicit(
+        &transport->videoStatusCallbacks, memory_order_acquire) >
+      ownCallbacks)
+    nsleep(1000000U);
+
+  /* A retiring callback publishes the count while holding this lock.  Taking
+   * it here ensures that callback has completed every access to the instance
+   * before an external caller tears it down. */
+  LG_LOCK_EXCLUSIVE(transport->videoStatusLock);
+  LG_UNLOCK_EXCLUSIVE(transport->videoStatusLock);
+}
+
+static bool lgmp_releaseVideoStatusCallback(LG_Transport * transport)
+{
+  /* Linearize the final reference and a nested destroy request.  Whichever
+   * side acquires the lock first either observes the pending request or leaves
+   * a zero count for the destroy path to observe. */
+  LG_LOCK_EXCLUSIVE(transport->videoStatusLock);
+  const bool destroy = atomic_load_explicit(
+      &transport->destroyPending, memory_order_acquire);
+  const unsigned previous = atomic_fetch_sub_explicit(
+      &transport->videoStatusCallbacks, 1, memory_order_acq_rel);
+  DEBUG_ASSERT(previous != 0);
+  LG_UNLOCK_EXCLUSIVE(transport->videoStatusLock);
+  return destroy && previous == 1;
+}
+
+static void lgmp_retainVideoStatusLifetime(LG_Transport * transport)
+{
+  atomic_fetch_add_explicit(
+      &transport->videoStatusCallbacks, 1, memory_order_acq_rel);
+}
+
+static bool lgmp_destroyRequested(const LG_Transport * transport)
+{
+  return atomic_load_explicit(
+      &transport->destroyPending, memory_order_acquire);
+}
+
+static void lgmp_releaseVideoStatusLifetime(LG_Transport * transport)
+{
+  if (lgmp_releaseVideoStatusCallback(transport))
+    lgmp_destroyNow(transport);
+}
+
+static uint64_t lgmp_nextEpoch(uint64_t epoch)
+{
+  if (++epoch == 0)
+    ++epoch;
+  return epoch;
+}
+
+static void lgmp_callVideoStatusCallback(LG_VideoStatusFn callback,
+    void * opaque,
+    LG_Transport * transport,
+    const LG_VideoStatus * status)
+{
+  LGMPVideoCallbackContext context =
+  {
+    .previous  = l_videoStatusContext,
+    .transport = transport,
+  };
+  l_videoStatusContext = &context;
+  callback(opaque, status);
+  l_videoStatusContext = context.previous;
+}
+
+static LG_VideoStatus lgmp_videoStatusLocked(const LG_Transport * this)
+{
+  return (LG_VideoStatus)
+  {
+    .frame =
+    {
+      .available  = this->videoFrameAvailable,
+      .epoch      = this->videoFrameEpoch,
+      .reason     = this->videoFrameAvailable ? LG_TRANSPORT_OK :
+        this->videoFrameReason,
+    },
+    .pointer =
+    {
+      .available  = this->videoPointerAvailable,
+      .epoch      = this->videoPointerEpoch,
+      .reason     = this->videoPointerAvailable ? LG_TRANSPORT_OK :
+        this->videoPointerReason,
+    },
+  };
+}
+
+static LG_VideoStatus lgmp_updateVideoStatus(LG_Transport * this,
+    const LGMPVideoStatusUpdate update,
+    LGMPVideoStatusDispatch * dispatch)
+{
+  *dispatch = (LGMPVideoStatusDispatch) { 0 };
+  LG_VideoStatus published;
+
+  LG_LOCK_EXCLUSIVE(this->videoStatusLock);
+  const LG_TransportStatus frameReason = update.frameAvailable ?
+    LG_TRANSPORT_OK : update.frameReason == LG_TRANSPORT_OK ?
+    LG_TRANSPORT_UNAVAILABLE : update.frameReason;
+  const LG_TransportStatus pointerReason = update.pointerAvailable ?
+    LG_TRANSPORT_OK : update.pointerReason == LG_TRANSPORT_OK ?
+    LG_TRANSPORT_UNAVAILABLE : update.pointerReason;
+  const bool frameChanged = update.frame &&
+    this->videoFrameAvailable != update.frameAvailable;
+  const bool pointerChanged = update.pointer &&
+    this->videoPointerAvailable != update.pointerAvailable;
+  const bool frameReasonChanged = update.frame &&
+    this->videoFrameReason != frameReason;
+  const bool pointerReasonChanged = update.pointer &&
+    this->videoPointerReason != pointerReason;
+  if (frameChanged || update.frameReplaced)
+    this->videoFrameEpoch = lgmp_nextEpoch(this->videoFrameEpoch);
+  if (pointerChanged || update.pointerReplaced)
+    this->videoPointerEpoch = lgmp_nextEpoch(this->videoPointerEpoch);
+  if (update.frame)
+  {
+    this->videoFrameAvailable = update.frameAvailable;
+    this->videoFrameReason    = frameReason;
+  }
+  if (update.pointer)
+  {
+    this->videoPointerAvailable = update.pointerAvailable;
+    this->videoPointerReason    = pointerReason;
+  }
+  published = lgmp_videoStatusLocked(this);
+
+  dispatch->callback       = this->videoStatusCallback;
+  dispatch->opaque         = this->videoStatusOpaque;
+  dispatch->listenerSerial = this->videoStatusListenerSerial;
+  if (!dispatch->callback || (!frameChanged && !pointerChanged &&
+        !frameReasonChanged && !pointerReasonChanged &&
+        !update.frameReplaced && !update.pointerReplaced))
+    dispatch->callback = NULL;
+  if (dispatch->callback)
+    atomic_fetch_add_explicit(
+        &this->videoStatusCallbacks, 1, memory_order_acq_rel);
+  dispatch->pending = dispatch->callback != NULL;
+  LG_UNLOCK_EXCLUSIVE(this->videoStatusLock);
+  return published;
+}
+
+static void lgmp_dispatchVideoStatus(LG_Transport * this,
+    const LGMPVideoStatusDispatch * dispatch)
+{
+  if (dispatch->pending)
+  {
+    const bool serialized = l_videoStatusContext == NULL;
+    if (serialized)
+    {
+#ifdef ENABLE_TESTS
+      LG_LOCK(l_videoStatusTestLock);
+      LG_Transport * target = l_videoStatusDispatchTarget;
+      atomic_bool * waiting = l_videoStatusDispatchWaiting;
+      atomic_bool * hold    = l_videoStatusDispatchHold;
+      LG_UNLOCK(l_videoStatusTestLock);
+      if ((!target || target == this) && waiting)
+        atomic_store_explicit(
+            waiting, true, memory_order_release);
+      if ((!target || target == this) && hold)
+        while (atomic_load_explicit(
+            hold, memory_order_acquire))
+          nsleep(1000000U);
+#endif
+      LG_LOCK(l_videoStatusCallbackLock);
+    }
+    LG_LOCK_SHARED(this->videoStatusLock);
+    const bool current =
+      this->videoStatusCallback == dispatch->callback &&
+      this->videoStatusOpaque == dispatch->opaque &&
+      this->videoStatusListenerSerial == dispatch->listenerSerial;
+    const LG_VideoStatus status = lgmp_videoStatusLocked(this);
+    LG_UNLOCK_SHARED(this->videoStatusLock);
+    if (current)
+      lgmp_callVideoStatusCallback(
+          dispatch->callback, dispatch->opaque, this, &status);
+    const bool destroy = lgmp_releaseVideoStatusCallback(this);
+    if (serialized)
+      LG_UNLOCK(l_videoStatusCallbackLock);
+    if (destroy)
+      lgmp_destroyNow(this);
+  }
+}
+
+static LG_VideoStatus lgmp_publishVideoStatus(LG_Transport * this,
+    const LGMPVideoStatusUpdate update)
+{
+  LGMPVideoStatusDispatch dispatch;
+  const LG_VideoStatus published =
+    lgmp_updateVideoStatus(this, update, &dispatch);
+  lgmp_dispatchVideoStatus(this, &dispatch);
+  return published;
+}
 
 static bool lgmp_deviceValidator(struct Option * opt, const char ** error)
 {
@@ -238,13 +523,23 @@ static bool lgmp_recoverySnapshot(const struct LG_Transport * this,
   return true;
 }
 
-static bool lgmp_refreshRecoveryLocked(struct LG_Transport * this, bool wait)
+static bool lgmp_cancelled(LG_TransportCancelledFn cancelled, void * opaque)
+{
+  return cancelled && cancelled(opaque);
+}
+
+static bool lgmp_refreshRecoveryLockedCancellable(
+    struct LG_Transport * this, bool wait,
+    LG_TransportCancelledFn cancelled, void * opaque)
 {
   const uint64_t deadline = wait ?
     microtime() + LGMP_RECOVERY_PROBE_TIMEOUT_US : 0;
 
   do
   {
+    if (lgmp_cancelled(cancelled, opaque))
+      break;
+
     KVMFRRHeader header;
     KVMFRRInfo info;
     const bool valid = lgmp_recoverySnapshot(this, &header, &info);
@@ -291,6 +586,12 @@ static bool lgmp_refreshRecoveryLocked(struct LG_Transport * this, bool wait)
   this->recoveryLive = false;
   this->lgmpSize     = this->shm.size;
   return false;
+}
+
+static bool lgmp_refreshRecoveryLocked(struct LG_Transport * this, bool wait)
+{
+  return lgmp_refreshRecoveryLockedCancellable(
+      this, wait, NULL, NULL);
 }
 
 static bool lgmp_recoveryVersions(struct LG_Transport * this,
@@ -347,6 +648,9 @@ static bool lgmp_create(LG_Transport ** result)
   }
   this->framePollInterval  = framePoll;
   this->cursorPollInterval = cursorPoll;
+  atomic_init(&this->connected, false);
+  atomic_init(&this->inputSupported, false);
+  atomic_init(&this->destroyPending, false);
 
   this->frameWake   = lgCreateEvent(true, 0);
   this->pointerWake = lgCreateEvent(true, 0);
@@ -365,7 +669,9 @@ static bool lgmp_create(LG_Transport ** result)
 
   LG_LOCK_INIT(this->frameLock);
   LG_LOCK_INIT(this->pointerLock);
+  LG_RWLOCK_INIT(this->videoStatusLock);
   LG_LOCK_INIT(this->recoveryLock);
+  atomic_init(&this->videoStatusCallbacks, 0);
 
   this->frameGeneration = 1;
   this->frameLease[0].subscription = &this->frameQueue;
@@ -377,6 +683,7 @@ static bool lgmp_create(LG_Transport ** result)
   {
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
+    LG_RWLOCK_FREE(this->videoStatusLock);
     LG_LOCK_FREE(this->recoveryLock);
     lgFreeEvent(this->frameWake);
     lgFreeEvent(this->pointerWake);
@@ -415,6 +722,7 @@ static bool lgmp_create(LG_Transport ** result)
     ivshmemClose(&this->shm);
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
+    LG_RWLOCK_FREE(this->videoStatusLock);
     LG_LOCK_FREE(this->recoveryLock);
     lgFreeEvent(this->frameWake);
     lgFreeEvent(this->pointerWake);
@@ -527,6 +835,13 @@ static void lgmp_closeQueues(struct LG_Transport * this)
 {
   lgmp_stopFrame(this);
   lgmp_stopPointer(this);
+  lgmp_publishVideoStatus(this, (LGMPVideoStatusUpdate)
+  {
+    .frame         = true,
+    .frameReason   = LG_TRANSPORT_DISCONNECTED,
+    .pointer       = true,
+    .pointerReason = LG_TRANSPORT_DISCONNECTED,
+  });
 }
 
 static void lgmp_closeDMA(struct LG_Transport * this)
@@ -541,12 +856,8 @@ static void lgmp_closeDMA(struct LG_Transport * this)
   }
 }
 
-static void lgmp_destroy(LG_Transport ** transport)
+static void lgmp_destroyNow(LG_Transport * this)
 {
-  if (!transport || !*transport)
-    return;
-
-  struct LG_Transport * this = *transport;
   if (this->client)
   {
     lgmpInput_destroy(&this->input);
@@ -558,11 +869,36 @@ static void lgmp_destroy(LG_Transport ** transport)
   ivshmemClose(&this->shm);
   LG_LOCK_FREE(this->frameLock);
   LG_LOCK_FREE(this->pointerLock);
+  LG_RWLOCK_FREE(this->videoStatusLock);
   LG_LOCK_FREE(this->recoveryLock);
   lgFreeEvent(this->frameWake);
   lgFreeEvent(this->pointerWake);
   free(this);
+}
+
+static void lgmp_destroy(LG_Transport ** transport)
+{
+  if (!transport || !*transport)
+    return;
+
+  struct LG_Transport * this = *transport;
   *transport = NULL;
+  const bool nested = l_videoStatusContext != NULL;
+  lgmp_setVideoStatusListener(this, NULL, NULL);
+  if (nested)
+  {
+    LG_LOCK_EXCLUSIVE(this->videoStatusLock);
+    atomic_store_explicit(
+        &this->destroyPending, true, memory_order_release);
+    const bool deferred = lgmp_videoStatusContextContains(this) ||
+      atomic_load_explicit(
+          &this->videoStatusCallbacks, memory_order_acquire) != 0;
+    LG_UNLOCK_EXCLUSIVE(this->videoStatusLock);
+    if (deferred)
+      return;
+  }
+
+  lgmp_destroyNow(this);
 }
 
 static void lgmp_setVersionMismatch(LG_TransportSession * session,
@@ -675,18 +1011,25 @@ static bool lgmp_parseSession(struct LG_Transport * this,
   return true;
 }
 
-static LG_TransportStatus lgmp_connect(LG_Transport * this,
-    LG_TransportSession * session)
+static LG_TransportStatus lgmp_connectInternal(LG_Transport * this,
+    LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+    void * opaque)
 {
   memset(session, 0, sizeof(*session));
   session->os = LG_TRANSPORT_OS_OTHER;
 
+  if (lgmp_cancelled(cancelled, opaque))
+    return LG_TRANSPORT_DISCONNECTED;
+
   if (!this->client)
   {
     LG_LOCK(this->recoveryLock);
-    lgmp_refreshRecoveryLocked(this,
-        lgmp_recoveryMagic(this->recovery));
+    lgmp_refreshRecoveryLockedCancellable(this,
+        lgmp_recoveryMagic(this->recovery), cancelled, opaque);
     LG_UNLOCK(this->recoveryLock);
+
+    if (lgmp_cancelled(cancelled, opaque))
+      return LG_TRANSPORT_DISCONNECTED;
 
     const LGMP_STATUS status = lgmp_initializeClient(this);
     if (status != LGMP_OK)
@@ -709,6 +1052,9 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
     }
   }
 
+  if (lgmp_cancelled(cancelled, opaque))
+    return LG_TRANSPORT_DISCONNECTED;
+
   uint32_t size;
   uint8_t * data;
   uint32_t remoteVersion = 0;
@@ -720,19 +1066,28 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
       if (!lgmp_parseSession(this, data, size, session))
         return LG_TRANSPORT_INVALID_VERSION;
 
+      LGMPVideoStatusDispatch dispatch;
       LG_LOCK(this->frameLock);
       if (++this->frameGeneration == 0)
         ++this->frameGeneration;
-      this->connected              = true;
       this->frameStopRequested     = false;
       this->frameScheduleSupported =
         session->features & LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
-      this->inputSupported         =
-        session->features & LG_TRANSPORT_FEATURE_INPUT;
+      atomic_store_explicit(&this->inputSupported,
+          session->features & LG_TRANSPORT_FEATURE_INPUT,
+          memory_order_release);
       this->frameSerial            = 0;
       this->frameSerialValid       = false;
       this->formatValid            = false;
+      lgmp_updateVideoStatus(this, (LGMPVideoStatusUpdate)
+      {
+        .frame   = true,
+        .pointer = true,
+      }, &dispatch);
+      atomic_store_explicit(
+          &this->connected, true, memory_order_release);
       LG_UNLOCK(this->frameLock);
+      lgmp_dispatchVideoStatus(this, &dispatch);
       return LG_TRANSPORT_OK;
 
     case LGMP_ERR_INVALID_VERSION:
@@ -761,32 +1116,68 @@ static LG_TransportStatus lgmp_connect(LG_Transport * this,
   }
 }
 
+static LG_TransportStatus lgmp_connect(LG_Transport * this,
+    LG_TransportSession * session)
+{
+  lgmp_retainVideoStatusLifetime(this);
+  LG_TransportStatus status =
+    lgmp_connectInternal(this, session, NULL, NULL);
+  if (lgmp_destroyRequested(this))
+    status = LG_TRANSPORT_DISCONNECTED;
+  lgmp_releaseVideoStatusLifetime(this);
+  return status;
+}
+
 static void lgmp_disconnect(LG_Transport * this)
 {
   if (!this->client)
     return;
 
+  lgmp_retainVideoStatusLifetime(this);
+
   lgmpInput_disconnect(this->input);
-  lgmp_closeQueues(this);
 
   LG_LOCK(this->frameLock);
   if (++this->frameGeneration == 0)
     ++this->frameGeneration;
-  this->frameQueue = NULL;
-  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
-    this->ownerFrameQueue[i] = NULL;
-  this->connected              = false;
+  atomic_store_explicit(
+      &this->connected, false, memory_order_release);
   this->frameScheduleSupported = false;
-  this->inputSupported         = false;
+  atomic_store_explicit(
+      &this->inputSupported, false, memory_order_release);
   this->clientID               = 0;
   LG_UNLOCK(this->frameLock);
 
+  lgmp_closeQueues(this);
   lgmp_closeDMA(this);
+  lgmp_releaseVideoStatusLifetime(this);
+}
+
+static LG_TransportStatus lgmp_connectCancellable(LG_Transport * this,
+    LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+    void * opaque)
+{
+  lgmp_retainVideoStatusLifetime(this);
+  const LG_TransportStatus status = lgmp_connectInternal(
+      this, session, cancelled, opaque);
+  LG_TransportStatus result = status;
+  if (lgmp_destroyRequested(this))
+    result = LG_TRANSPORT_DISCONNECTED;
+  else if (lgmp_cancelled(cancelled, opaque))
+  {
+    if (status == LG_TRANSPORT_OK)
+      lgmp_disconnect(this);
+    result = LG_TRANSPORT_DISCONNECTED;
+  }
+
+  lgmp_releaseVideoStatusLifetime(this);
+  return result;
 }
 
 static bool lgmp_sessionValid(LG_Transport * this)
 {
-  return this->client && this->connected &&
+  return this->client && atomic_load_explicit(
+      &this->connected, memory_order_acquire) &&
     lgmpClientSessionValid(this->client);
 }
 
@@ -834,10 +1225,35 @@ static LG_RecoveryError lgmp_recoveryError(uint32_t error)
       return LG_RECOVERY_ERR_TOPOLOGY_FAILED;
     case KVMFR_R_ERR_NO_FALLBACK_DISPLAY:
       return LG_RECOVERY_ERR_NO_FALLBACK_DISPLAY;
+    case KVMFR_R_ERR_BUSY:
+      return LG_RECOVERY_ERR_BUSY;
+    case KVMFR_R_ERR_CAPACITY:
+      return LG_RECOVERY_ERR_CAPACITY;
     default:
       return LG_RECOVERY_ERR_UNSUPPORTED;
   }
 }
+
+#ifdef ENABLE_TESTS
+LG_RecoveryError lgmp_testRecoveryError(uint32_t error)
+{
+  return lgmp_recoveryError(error);
+}
+
+bool lgmp_testRecoveryProbeCancellation(
+    LG_TransportCancelledFn cancelled, void * opaque)
+{
+  struct LG_Transport transport =
+  {
+    .lgmpSize = 1,
+  };
+  LG_LOCK_INIT(transport.recoveryLock);
+  const bool result = lgmp_refreshRecoveryLockedCancellable(
+      &transport, true, cancelled, opaque);
+  LG_LOCK_FREE(transport.recoveryLock);
+  return result;
+}
+#endif
 
 static bool lgmp_recoveryRequestSnapshot(const KVMFRRRequest * source,
     KVMFRRRequest * result)
@@ -1380,13 +1796,14 @@ static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
 }
 
 static void lgmp_releaseFrameLease(void * opaque, uint64_t handle);
+static bool lgmp_frameTimingReady(const KVMFRFrame * frame);
 
 static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
     bool useDMA,
     LG_TransportFrame * result)
 {
   lgmp_drainFrameLeasesLocked(this);
-  if (!this->connected)
+  if (!atomic_load_explicit(&this->connected, memory_order_acquire))
     return LG_TRANSPORT_DISCONNECTED;
 
   this->frameStopRequested = false;
@@ -1513,6 +1930,9 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
     return done == LG_TRANSPORT_OK ? LG_TRANSPORT_TIMEOUT : done;
   }
 
+  const bool providerValid = lgmp_frameTimingReady(frame);
+  const uint64_t providerStart = providerValid ? nanotime() : 0;
+
   const bool fullDamage = !this->frameSerialValid || equalSerial ||
     frame->frameSerial != this->frameSerial + 1;
   this->frameSerial      = frame->frameSerial;
@@ -1602,6 +2022,9 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
     ++this->frameLeaseHandle;
   lease->handle           = this->frameLeaseHandle;
   lease->generation       = this->frameGeneration;
+  lease->providerValid    = providerValid;
+  lease->receiveTime      = 0;
+  lease->prepareTime      = providerValid ? nanotime() - providerStart : 0;
   lease->releaseRequested = false;
   lease->active           = true;
   result->releaseFn     = lgmp_releaseFrameLease;
@@ -1613,14 +2036,57 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
 static LG_TransportStatus lgmp_nextFrame(LG_Transport * this, bool useDMA,
     LG_TransportFrame * result)
 {
+  lgmp_retainVideoStatusLifetime(this);
   LG_LOCK(this->frameLock);
+  bool subscribed[LGMP_FRAME_LEASE_COUNT];
+  subscribed[0] = this->frameQueue != NULL;
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+    subscribed[i + 1] = this->ownerFrameQueue[i] != NULL;
   const LG_TransportStatus status =
     lgmp_nextFrameLocked(this, useDMA, result);
+  bool available = this->frameQueue != NULL;
+  bool replaced = subscribed[0] != available;
+  for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+  {
+    const bool ownerAvailable = this->ownerFrameQueue[i] != NULL;
+    available |= ownerAvailable;
+    replaced |= subscribed[i + 1] != ownerAvailable;
+  }
+  if (status == LG_TRANSPORT_OK)
+  {
+    struct LGMPFrameLease * lease =
+      lgmp_findFrameLeaseLocked(this, result->releaseHandle);
+    DEBUG_ASSERT(lease);
+  }
+  if (status == LG_TRANSPORT_DISCONNECTED || status == LG_TRANSPORT_ERROR)
+    available = false;
+  LGMPVideoStatusDispatch dispatch;
+  const LG_VideoStatus published = lgmp_updateVideoStatus(this,
+      (LGMPVideoStatusUpdate)
+  {
+    .frame          = true,
+    .frameAvailable = available,
+    .frameReplaced  = replaced,
+    .frameReason    = status,
+  }, &dispatch);
+  if (status == LG_TRANSPORT_OK)
+    result->epoch = published.frame.epoch;
   LG_UNLOCK(this->frameLock);
-  if ((status == LG_TRANSPORT_TIMEOUT ||
-       status == LG_TRANSPORT_UNAVAILABLE) && this->framePollInterval)
+  lgmp_dispatchVideoStatus(this, &dispatch);
+  LG_TransportStatus resultStatus = status;
+  if (lgmp_destroyRequested(this))
+  {
+    if (status == LG_TRANSPORT_OK)
+      lgmp_releaseFrame(this, result);
+    resultStatus = LG_TRANSPORT_DISCONNECTED;
+  }
+  else if ((status == LG_TRANSPORT_TIMEOUT ||
+       status == LG_TRANSPORT_UNAVAILABLE ||
+       (status == LG_TRANSPORT_ERROR && !available)) &&
+      this->framePollInterval)
     lgmp_waitPoll(this->frameWake, this->framePollInterval);
-  return status;
+  lgmp_releaseVideoStatusLifetime(this);
+  return resultStatus;
 }
 
 static void lgmp_cancelFrameWait(LG_Transport * this)
@@ -1649,6 +2115,13 @@ static void lgmp_getFrameTiming(LG_Transport * this,
   {
     LG_UNLOCK(this->frameLock);
     return;
+  }
+
+  timing->providerValid = lease->providerValid;
+  if (lease->providerValid)
+  {
+    timing->receiveTime = lease->receiveTime;
+    timing->prepareTime = lease->prepareTime;
   }
 
   /* The producer writes these immediately after publishing FrameBuffer::wp.
@@ -1719,8 +2192,17 @@ static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
 static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
     LG_TransportPointer * result)
 {
-  if (!this->connected)
+  lgmp_retainVideoStatusLifetime(this);
+  if (!atomic_load_explicit(&this->connected, memory_order_acquire))
+  {
+    lgmp_publishVideoStatus(this, (LGMPVideoStatusUpdate)
+    {
+      .pointer       = true,
+      .pointerReason = LG_TRANSPORT_DISCONNECTED,
+    });
+    lgmp_releaseVideoStatusLifetime(this);
     return LG_TRANSPORT_DISCONNECTED;
+  }
 
   uint32_t           pointerFlags  = 0;
   size_t             shapeSize     = 0;
@@ -1728,6 +2210,7 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   LG_TransportStatus status        = LG_TRANSPORT_OK;
   PLGMPClientQueue   pointerQueue;
   LG_LOCK(this->pointerLock);
+  const bool wasAvailable = this->pointerQueue != NULL;
   if (!this->pointerQueue)
   {
     status = lgmp_subscribe(this->client, LGMP_Q_POINTER,
@@ -1798,10 +2281,58 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
     }
   }
   if (status != LG_TRANSPORT_OK)
-    return status;
+  {
+    LGMPVideoStatusDispatch dispatch;
+    LG_LOCK(this->pointerLock);
+    bool available = atomic_load_explicit(
+        &this->connected, memory_order_acquire) &&
+      this->pointerQueue != NULL;
+    if (status == LG_TRANSPORT_DISCONNECTED || status == LG_TRANSPORT_ERROR)
+      available = false;
+    lgmp_updateVideoStatus(this, (LGMPVideoStatusUpdate)
+    {
+      .pointer          = true,
+      .pointerAvailable = available,
+      .pointerReplaced  = !wasAvailable && available,
+      .pointerReason    = status,
+    }, &dispatch);
+    LG_UNLOCK(this->pointerLock);
+    lgmp_dispatchVideoStatus(this, &dispatch);
+    LG_TransportStatus resultStatus = status;
+    if (lgmp_destroyRequested(this))
+      resultStatus = LG_TRANSPORT_DISCONNECTED;
+    else if (status == LG_TRANSPORT_ERROR && !available &&
+        this->cursorPollInterval)
+      lgmp_waitPoll(this->pointerWake, this->cursorPollInterval);
+    lgmp_releaseVideoStatusLifetime(this);
+    return resultStatus;
+  }
+
+  LGMPVideoStatusDispatch dispatch;
+  LG_LOCK(this->pointerLock);
+  const bool current =
+    atomic_load_explicit(&this->connected, memory_order_acquire) &&
+    this->pointerQueue == pointerQueue;
+  const LG_VideoStatus published = lgmp_updateVideoStatus(this,
+      (LGMPVideoStatusUpdate)
+  {
+    .pointer          = true,
+    .pointerAvailable = current,
+    .pointerReplaced  = current && !wasAvailable,
+    .pointerReason    = current ? LG_TRANSPORT_OK :
+      LG_TRANSPORT_DISCONNECTED,
+  }, &dispatch);
+  LG_UNLOCK(this->pointerLock);
+  lgmp_dispatchVideoStatus(this, &dispatch);
+  if (!current || lgmp_destroyRequested(this))
+  {
+    lgmp_releaseVideoStatusLifetime(this);
+    return LG_TRANSPORT_DISCONNECTED;
+  }
 
   const KVMFRCursor * cursor = (const KVMFRCursor *)this->pointerData;
   memset(result, 0, sizeof(*result));
+  result->epoch = published.pointer.epoch;
   if (pointerFlags & CURSOR_FLAG_POSITION)
     result->flags |= LG_TRANSPORT_POINTER_POSITION;
   if (pointerFlags & CURSOR_FLAG_VISIBLE)
@@ -1825,6 +2356,7 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   if (transformSize)
     result->colorTransform = (const LGColorTransform *)(result->shape +
         shapeSize);
+  lgmp_releaseVideoStatusLifetime(this);
   return LG_TRANSPORT_OK;
 }
 
@@ -1933,7 +2465,8 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
     void ** opaque)
 {
   *opaque = NULL;
-  if (!this->connected || !this->inputSupported ||
+  if (!atomic_load_explicit(&this->connected, memory_order_acquire) ||
+      !atomic_load_explicit(&this->inputSupported, memory_order_acquire) ||
       !lgmpInput_connect(this->input, this->clientID))
     return NULL;
 
@@ -1941,8 +2474,111 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
   return lgmpInput_getOps();
 }
 
+static void lgmp_probeVideoStatus(LG_Transport * this)
+{
+  bool frameAvailable   = false;
+  bool pointerAvailable = false;
+  LGMPVideoStatusDispatch frameDispatch;
+  LGMPVideoStatusDispatch pointerDispatch;
+
+  LG_LOCK(this->frameLock);
+  const bool frameConnected = atomic_load_explicit(
+      &this->connected, memory_order_acquire);
+  if (frameConnected)
+  {
+    lgmp_subscribe(this->client, LGMP_Q_FRAME, &this->frameQueue);
+    frameAvailable = this->frameQueue != NULL;
+    if (this->frameScheduleSupported)
+      for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
+      {
+        lgmp_subscribe(this->client, LGMP_Q_FRAME_OWNER + i,
+            &this->ownerFrameQueue[i]);
+        frameAvailable |= this->ownerFrameQueue[i] != NULL;
+      }
+  }
+  lgmp_updateVideoStatus(this, (LGMPVideoStatusUpdate)
+  {
+    .frame          = true,
+    .frameAvailable = frameAvailable,
+    .frameReason    = frameConnected ? LG_TRANSPORT_UNAVAILABLE :
+      LG_TRANSPORT_DISCONNECTED,
+  }, &frameDispatch);
+  LG_UNLOCK(this->frameLock);
+  lgmp_dispatchVideoStatus(this, &frameDispatch);
+
+  LG_LOCK(this->pointerLock);
+  const bool pointerConnected = atomic_load_explicit(
+      &this->connected, memory_order_acquire);
+  if (pointerConnected)
+  {
+    lgmp_subscribe(this->client, LGMP_Q_POINTER, &this->pointerQueue);
+    pointerAvailable = this->pointerQueue != NULL;
+  }
+  lgmp_updateVideoStatus(this, (LGMPVideoStatusUpdate)
+  {
+    .pointer          = true,
+    .pointerAvailable = pointerAvailable,
+    .pointerReason    = pointerConnected ? LG_TRANSPORT_UNAVAILABLE :
+      LG_TRANSPORT_DISCONNECTED,
+  }, &pointerDispatch);
+  LG_UNLOCK(this->pointerLock);
+  lgmp_dispatchVideoStatus(this, &pointerDispatch);
+}
+
+static void lgmp_setVideoStatusListener(LG_Transport * this,
+    LG_VideoStatusFn callback, void * callbackOpaque)
+{
+  LG_VideoStatus status;
+  const bool nested = l_videoStatusContext != NULL;
+  const unsigned ownCallbacks =
+    lgmp_videoStatusOwnCallbacks(this);
+
+  if (!nested)
+    LG_LOCK(l_videoStatusCallbackLock);
+  LG_LOCK_EXCLUSIVE(this->videoStatusLock);
+  ++this->videoStatusListenerSerial;
+  this->videoStatusCallback = NULL;
+  this->videoStatusOpaque   = NULL;
+  LG_UNLOCK_EXCLUSIVE(this->videoStatusLock);
+
+  if (callback)
+    lgmp_probeVideoStatus(this);
+
+  LG_LOCK_EXCLUSIVE(this->videoStatusLock);
+  this->videoStatusCallback = callback;
+  this->videoStatusOpaque   = callbackOpaque;
+  status = lgmp_videoStatusLocked(this);
+  LG_UNLOCK_EXCLUSIVE(this->videoStatusLock);
+
+  if (callback)
+  {
+    atomic_fetch_add_explicit(
+        &this->videoStatusCallbacks, 1, memory_order_acq_rel);
+    lgmp_callVideoStatusCallback(
+        callback, callbackOpaque, this, &status);
+
+    /* Releasing this callback's lifetime reference is the final access to the
+     * instance unless this thread becomes the deferred destroy owner. */
+    const bool destroy = lgmp_releaseVideoStatusCallback(this);
+    if (!nested)
+      LG_UNLOCK(l_videoStatusCallbackLock);
+    if (destroy)
+      lgmp_destroyNow(this);
+    return;
+  }
+
+  if (nested)
+    return;
+
+  /* Publications accepted before unregistration retain lifetime references,
+   * but will skip the cleared listener when they acquire serialization. */
+  LG_UNLOCK(l_videoStatusCallbackLock);
+  lgmp_waitVideoStatusCallbacks(this, ownCallbacks);
+}
+
 static const LG_FrameOps lgmpFrameOps =
 {
+  .setStatusListener = lgmp_setVideoStatusListener,
   .supportsDMA       = lgmp_supportsDMA,
   .attachRenderer    = lgmp_attachRenderer,
   .detachRenderer    = lgmp_detachRenderer,
@@ -1975,8 +2611,9 @@ const LG_TransportOps LGT_LGMP =
   .setup            = lgmp_setup,
   .create           = lgmp_create,
   .destroy          = lgmp_destroy,
-  .connect          = lgmp_connect,
-  .disconnect       = lgmp_disconnect,
+  .connect            = lgmp_connect,
+  .connectCancellable = lgmp_connectCancellable,
+  .disconnect         = lgmp_disconnect,
   .sessionValid     = lgmp_sessionValid,
   .getVideoOps      = lgmp_getVideoOps,
   .getInputOps      = lgmp_getInputOps,

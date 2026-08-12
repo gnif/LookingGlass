@@ -27,6 +27,7 @@
 #include "render_queue.h"
 #include "evdev.h"
 #include "input.h"
+#include "sw_surface.h"
 
 #include "kb.h"
 
@@ -58,6 +59,13 @@
   while (0)
 
 extern _Atomic(enum RunState) p_appState;
+
+static bool swSurfaceActivationCancelled(void * opaque)
+{
+  (void)opaque;
+  return app_getState() != APP_STATE_RUNNING ||
+    atomic_load_explicit(&g_state.stopVideo, memory_order_acquire);
+}
 
 enum RunState app_getState(void)
 {
@@ -670,6 +678,12 @@ void app_handleRenderEvent(const uint64_t timeUs)
     app_invalidateWindow(false);
 }
 
+void app_handleFramePresented(uint64_t frameToken, uint64_t presentTime,
+    bool valid)
+{
+  main_framePresented(frameToken, presentTime, valid);
+}
+
 void app_setFullscreen(bool fs)
 {
   g_state.ds->setFullscreen(fs);
@@ -1203,11 +1217,19 @@ void app_stopVideo(bool stop)
 
   if (stop)
   {
+    if (g_state.fallback)
+      lgTransportFallback_requestVideoActive(g_state.fallback, false);
+
     if (g_state.videoOps->type == LG_VIDEO_TYPE_FRAME)
+    {
       core_stopVideoThreads();
+      /* A status callback may have requested fallback before it quiesced. */
+      if (g_state.fallback)
+        lgTransportFallback_requestVideoActive(g_state.fallback, false);
+    }
     else
-      g_state.videoOps->swSurface->setActive(
-          g_state.transport.handle, false);
+      lgSwSurface_setActive(g_state.videoOps->swSurface,
+          g_state.transport.handle, false, NULL, NULL);
   }
   else
   {
@@ -1217,14 +1239,19 @@ void app_stopVideo(bool stop)
       {
         atomic_store_explicit(
             &g_state.stopVideo, true, memory_order_release);
+        if (g_state.fallback)
+          lgTransportFallback_requestVideoActive(g_state.fallback, false);
         app_alert(LG_ALERT_ERROR, "Failed to enable the video stream");
       }
+      else
+        main_videoStreamEnabled();
     }
     else
     {
-      g_state.videoOps->swSurface->setActive(
-          g_state.transport.handle, true);
-      app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
+      if (lgSwSurface_setActive(g_state.videoOps->swSurface,
+            g_state.transport.handle, true,
+            swSurfaceActivationCancelled, NULL))
+        app_useVideoSource(LG_VIDEO_SOURCE_PRIMARY);
     }
   }
 }

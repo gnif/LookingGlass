@@ -113,6 +113,8 @@ typedef enum LG_RecoveryError
   LG_RECOVERY_ERR_HELPER_UNAVAILABLE,
   LG_RECOVERY_ERR_TOPOLOGY_FAILED,
   LG_RECOVERY_ERR_NO_FALLBACK_DISPLAY,
+  LG_RECOVERY_ERR_BUSY,
+  LG_RECOVERY_ERR_CAPACITY,
 }
 LG_RecoveryError;
 
@@ -175,7 +177,10 @@ typedef uint32_t LG_TransportFrameFlags;
 
 typedef struct LG_TransportFrameTiming
 {
-  bool     valid; /* producer fields below are available and coherent */
+  /* The producer fields through readyLeadTime are available and coherent. */
+  bool     valid;
+  /* receiveTime and prepareTime are available and coherent. */
+  bool     providerValid;
   bool     phaseValid;
   uint32_t scheduleGeneration;
   uint32_t scheduleEpoch;
@@ -186,6 +191,10 @@ typedef struct LG_TransportFrameTiming
   uint64_t readyTime;
   uint64_t holdTime;
   uint64_t readyLeadTime;
+  /* Non-overlapping work performed while acquiring and preparing the returned
+   * payload. These do not include status callbacks or renderer import time. */
+  uint64_t receiveTime;
+  uint64_t prepareTime;
 }
 LG_TransportFrameTiming;
 
@@ -219,6 +228,9 @@ LG_TransportFrameFormat;
 typedef struct LG_TransportFrame
 {
   uint64_t serial;
+  /* When setStatusListener is present, matches LG_VideoComponentStatus::epoch
+   * for the frame endpoint which returned this payload; otherwise may be 0. */
+  uint64_t epoch;
   uint64_t timestamp;
   uint32_t scheduleEpoch;
   uint32_t scheduleDeadlineSerial;
@@ -253,6 +265,10 @@ typedef uint32_t LG_TransportPointerFlags;
 
 typedef struct LG_TransportPointer
 {
+  /* When setStatusListener is present, matches LG_VideoComponentStatus::epoch
+   * for the pointer endpoint which returned this payload; otherwise may be 0.
+   */
+  uint64_t epoch;
   LG_TransportPointerFlags flags;
   int16_t x;
   int16_t y;
@@ -267,6 +283,27 @@ typedef struct LG_TransportPointer
   const LGColorTransform * colorTransform;
 }
 LG_TransportPointer;
+
+typedef struct LG_VideoComponentStatus
+{
+  bool     available;
+  /* Nonzero while available and changed whenever the endpoint is replaced or
+   * changes availability. */
+  uint64_t epoch;
+  /* LG_TRANSPORT_OK while available; otherwise the latest observed cause. */
+  LG_TransportStatus reason;
+}
+LG_VideoComponentStatus;
+
+typedef struct LG_VideoStatus
+{
+  LG_VideoComponentStatus frame;
+  LG_VideoComponentStatus pointer;
+}
+LG_VideoStatus;
+
+typedef void (*LG_VideoStatusFn)(void * opaque,
+    const LG_VideoStatus * status);
 
 typedef enum LG_TransportControlType
 {
@@ -314,6 +351,16 @@ typedef uint64_t LG_TransportControlToken;
 
 typedef struct LG_FrameOps
 {
+  /* Registration is scoped to a connected session and must synchronously
+   * report the current status after releasing component state locks. Frame and
+   * pointer epochs advance independently whenever their endpoint is
+   * replaced or changes availability. Passing NULL unregisters the listener
+   * and synchronously quiesces its callbacks. Callbacks must be serialized.
+   * Providers without a listener are assumed to keep every component they
+   * expose available for the session. */
+  void (*setStatusListener)(LG_Transport * transport,
+      LG_VideoStatusFn callback, void * callbackOpaque);
+
   bool (*supportsDMA)(LG_Transport * transport);
   bool (*attachRenderer)(LG_Transport * transport,
       const LG_RendererInterop * interop);
@@ -327,7 +374,7 @@ typedef struct LG_FrameOps
   void (*getFrameTiming)(LG_Transport * transport,
       const LG_TransportFrame * frame, LG_TransportFrameTiming * timing);
   void (*releaseFrame)(LG_Transport * transport, LG_TransportFrame * frame);
-  /* Optional, thread-safe cancellation of a blocking nextFrame call. This
+  /* Required, thread-safe cancellation of a blocking nextFrame call. This
    * does not release a frame already returned to the consumer. */
   void (*cancelFrameWait)(LG_Transport * transport);
   /* Called by the frame consumer as it exits. A backend may release transient
@@ -335,11 +382,14 @@ typedef struct LG_FrameOps
    * restarts. */
   void (*stopFrame)(LG_Transport * transport);
 
+  /* Pointer operations are optional. When absent, pointer.available must be
+   * false for providers implementing the status listener. */
   LG_TransportStatus (*nextPointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
   void (*releasePointer)(LG_Transport * transport,
       LG_TransportPointer * pointer);
-  /* Optional, thread-safe cancellation of a blocking nextPointer call. */
+  /* Required whenever nextPointer is present; thread-safe cancellation of a
+   * blocking nextPointer call. */
   void (*cancelPointerWait)(LG_Transport * transport);
   /* Called by the pointer consumer as it exits. A backend may release
    * transient stream resources; nextPointer must reacquire them when the
@@ -368,7 +418,12 @@ typedef struct LG_SwSurfaceOps
   bool (*attach)(LG_Transport * transport,
       const LG_SwSurfaceEventOps * events, void * opaque);
   void (*detach)(LG_Transport * transport);
+  /* Activation may wait while the requested component becomes available.
+   * Deactivation must complete promptly without cancellation. */
   bool (*setActive)(LG_Transport * transport, bool active);
+  /* Required. Interrupts a pending setActive call and causes it to return
+   * promptly. Safe to invoke repeatedly from another thread. */
+  void (*cancelPending)(LG_Transport * transport);
 }
 LG_SwSurfaceOps;
 
@@ -400,8 +455,8 @@ typedef struct LG_TransportOps
 
   LG_TransportStatus (*connect)(LG_Transport * transport,
       LG_TransportSession * session);
-  /* Optional cancellable form used by transports which may wait while
-   * establishing a session. */
+  /* Required session entry point. The callback must be observed promptly
+   * while establishing a session, and cancellation must bound this call. */
   LG_TransportStatus (*connectCancellable)(LG_Transport * transport,
       LG_TransportSession * session, LG_TransportCancelledFn cancelled,
       void * opaque);

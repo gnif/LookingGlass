@@ -33,6 +33,11 @@ void spiceSurface_free(SpiceSurface ** surface);
 const LG_VideoOps * spiceSurface_getVideoOps(void);
 void spiceSurface_sessionStopped(SpiceSurface * surface);
 
+#ifdef ENABLE_TESTS
+void spiceSurface_testLockActivation(SpiceSurface * surface);
+void spiceSurface_testUnlockActivation(SpiceSurface * surface);
+#endif
+
 void spiceSurface_create(SpiceSurface * surface, unsigned int surfaceId,
     PSSurfaceFormat format, unsigned int width, unsigned int height);
 void spiceSurface_destroy(SpiceSurface * surface, unsigned int surfaceId);

@@ -32,6 +32,7 @@ struct SpiceSurface
 {
   LG_RWLock eventsLock;
   LG_Lock   activationLock;
+  atomic_uint_fast64_t activationCancel;
 
   const LG_SwSurfaceEventOps * events;
   void                       * eventOpaque;
@@ -68,7 +69,16 @@ static void surfaceDetach(LG_Transport * transport)
 static bool surfaceSetActive(LG_Transport * transport, bool active)
 {
   SpiceSurface * surface = transport->surface;
+  const uint64_t cancel = atomic_load_explicit(
+      &surface->activationCancel, memory_order_acquire);
   LG_LOCK(surface->activationLock);
+
+  if (cancel != atomic_load_explicit(
+        &surface->activationCancel, memory_order_acquire))
+  {
+    LG_UNLOCK(surface->activationLock);
+    return false;
+  }
 
   if (surface->active == active)
   {
@@ -88,8 +98,15 @@ static bool surfaceSetActive(LG_Transport * transport, bool active)
     if (!atomic_load_explicit(
           &transport->sessionValid, memory_order_acquire) ||
         !purespice_hasChannel(PS_CHANNEL_DISPLAY) ||
-        !purespice_hasChannel(PS_CHANNEL_CURSOR) ||
-        !purespice_connectChannel(PS_CHANNEL_DISPLAY))
+        !purespice_hasChannel(PS_CHANNEL_CURSOR))
+      goto done;
+
+    purespice_beginChannelConnect(PS_CHANNEL_DISPLAY);
+    purespice_beginChannelConnect(PS_CHANNEL_CURSOR);
+    if (cancel != atomic_load_explicit(
+          &surface->activationCancel, memory_order_acquire))
+      goto done;
+    if (!purespice_connectChannel(PS_CHANNEL_DISPLAY))
       goto done;
 
     if (!purespice_connectChannel(PS_CHANNEL_CURSOR))
@@ -105,9 +122,21 @@ static bool surfaceSetActive(LG_Transport * transport, bool active)
 
     if (!purespice_disconnectChannel(PS_CHANNEL_CURSOR))
     {
+      purespice_beginChannelConnect(PS_CHANNEL_DISPLAY);
+      if (cancel != atomic_load_explicit(
+            &surface->activationCancel, memory_order_acquire))
+        goto done;
       purespice_connectChannel(PS_CHANNEL_DISPLAY);
       goto done;
     }
+  }
+
+  if (active && cancel != atomic_load_explicit(
+        &surface->activationCancel, memory_order_acquire))
+  {
+    purespice_disconnectChannel(PS_CHANNEL_CURSOR);
+    purespice_disconnectChannel(PS_CHANNEL_DISPLAY);
+    goto done;
   }
 
   surface->active = active;
@@ -118,11 +147,25 @@ done:
   return result;
 }
 
+static void surfaceCancelActivation(SpiceSurface * surface)
+{
+  atomic_fetch_add_explicit(&surface->activationCancel,
+      1, memory_order_acq_rel);
+  purespice_cancelChannelConnect(PS_CHANNEL_DISPLAY);
+  purespice_cancelChannelConnect(PS_CHANNEL_CURSOR);
+}
+
+static void surfaceCancelPending(LG_Transport * transport)
+{
+  surfaceCancelActivation(transport->surface);
+}
+
 static const LG_SwSurfaceOps swSurfaceOps =
 {
-  .attach    = surfaceAttach,
-  .detach    = surfaceDetach,
-  .setActive = surfaceSetActive,
+  .attach        = surfaceAttach,
+  .detach        = surfaceDetach,
+  .setActive     = surfaceSetActive,
+  .cancelPending = surfaceCancelPending,
 };
 
 static const LG_VideoOps videoOps =
@@ -143,6 +186,7 @@ bool spiceSurface_init(SpiceSurface ** result)
 
   LG_RWLOCK_INIT(surface->eventsLock);
   LG_LOCK_INIT(surface->activationLock);
+  atomic_init(&surface->activationCancel, 0);
   *result = surface;
   return true;
 }
@@ -165,11 +209,24 @@ const LG_VideoOps * spiceSurface_getVideoOps(void)
 
 void spiceSurface_sessionStopped(SpiceSurface * surface)
 {
+  surfaceCancelActivation(surface);
   LG_LOCK(surface->activationLock);
   surface->active       = false;
   surface->primaryValid = false;
   LG_UNLOCK(surface->activationLock);
 }
+
+#ifdef ENABLE_TESTS
+void spiceSurface_testLockActivation(SpiceSurface * surface)
+{
+  LG_LOCK(surface->activationLock);
+}
+
+void spiceSurface_testUnlockActivation(SpiceSurface * surface)
+{
+  LG_UNLOCK(surface->activationLock);
+}
+#endif
 
 void spiceSurface_create(SpiceSurface * surface, unsigned int surfaceId,
     PSSurfaceFormat format, unsigned int width, unsigned int height)

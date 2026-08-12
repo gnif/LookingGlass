@@ -4,6 +4,20 @@ add_executable(font-tests
   font_test.c
   ../src/font.c
 )
+
+add_executable(sw-surface-tests
+  sw_surface_test.c
+  ../src/sw_surface.c
+)
+target_include_directories(sw-surface-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(sw-surface-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+add_test(NAME sw-surface-tests COMMAND sw-surface-tests)
+set_tests_properties(sw-surface-tests PROPERTIES TIMEOUT 10)
 target_compile_definitions(font-tests PRIVATE
   FONT_TEST_FILE="${PROJECT_TOP}/repos/gui/cimgui/imgui/misc/fonts/DroidSans.ttf"
 )
@@ -427,6 +441,7 @@ endforeach()
 add_executable(transport-fallback-tests
   transport_fallback_test.c
   ../src/transport_fallback.c
+  ../src/sw_surface.c
 )
 target_include_directories(transport-fallback-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
@@ -444,9 +459,18 @@ set(TRANSPORT_FALLBACK_CASES
   graceful
   dead
   mismatch
-  revoke
+  missing-uuid
+  late-mismatch
   retry
   cancel
+  no-video
+  attach-fail
+  active-fail
+  activation-cancel
+  activation-request-cancel
+  deactivation-completes
+  activation-mismatch
+  pre-requested-activation
 )
 foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
   add_test(NAME transport-fallback-${name}
@@ -482,6 +506,7 @@ set(SPICE_CASES
   ready-drop
   session-order
   surface-active
+  surface-cancel
   surface-events
   surface-detach
 )
@@ -493,6 +518,30 @@ foreach(name IN LISTS SPICE_CASES)
     TIMEOUT 10
   )
 endforeach()
+
+add_executable(purespice-connect-cancel-tests
+  purespice_connect_cancel_test.c
+)
+target_compile_definitions(purespice PRIVATE PURESPICE_TESTING)
+target_compile_definitions(purespice-connect-cancel-tests PRIVATE
+  PURESPICE_TESTING
+)
+target_include_directories(purespice-connect-cancel-tests PRIVATE
+  "${PROJECT_TOP}/repos/PureSpice/include"
+  "${PROJECT_TOP}/repos/PureSpice/src"
+  "$<TARGET_PROPERTY:purespice,INCLUDE_DIRECTORIES>"
+)
+target_link_libraries(purespice-connect-cancel-tests
+  ${EXE_FLAGS}
+  purespice
+  pthread
+)
+add_test(NAME purespice-connect-cancel
+  COMMAND purespice-connect-cancel-tests
+)
+set_tests_properties(purespice-connect-cancel PROPERTIES
+  TIMEOUT 5
+)
 
 add_executable(frame-scheduler-tests
   frame_scheduler_test.c
@@ -534,6 +583,7 @@ add_executable(frame-timing-tests
 target_compile_definitions(frame-timing-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
 )
+target_compile_options(frame-timing-tests PRIVATE -O1)
 target_include_directories(frame-timing-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   "${PROJECT_TOP}/repos/gui/cimgui"
@@ -547,11 +597,18 @@ set(FRAME_TIMING_CASES
   lifecycle
   order
   untracked
+  accounting
+  provider-unavailable
   timeout
   fifo
   retire
   feedback
   wrap
+  component-epoch
+  payload-gate
+  frame-payload-bookkeeping
+  connect-cancel
+  recovery-errors
 )
 foreach(name IN LISTS FRAME_TIMING_CASES)
   add_test(NAME frame-timing-${name}
@@ -662,6 +719,7 @@ set(RENDER_QUEUE_CASES
   payload
   validation
   cache
+  cursor-replacement
 )
 foreach(name IN LISTS RENDER_QUEUE_CASES)
   add_test(NAME render-queue-${name}

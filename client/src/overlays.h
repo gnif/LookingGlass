@@ -54,6 +54,8 @@ typedef struct OverlayFrameTiming
   float    ready;
   float    hold;
   float    transport;
+  float    receive;
+  float    providerPrepare;
   float    import;
   float    dispatch;
   float    queue;
@@ -75,6 +77,8 @@ enum OverlayFrameTimingStage
   OVERLAY_FRAME_TIMING_READY,
   OVERLAY_FRAME_TIMING_HOLD,
   OVERLAY_FRAME_TIMING_TRANSPORT,
+  OVERLAY_FRAME_TIMING_RECEIVE,
+  OVERLAY_FRAME_TIMING_PROVIDER_PREPARE,
   OVERLAY_FRAME_TIMING_IMPORT,
   OVERLAY_FRAME_TIMING_DISPATCH,
   OVERLAY_FRAME_TIMING_QUEUE,
@@ -94,6 +98,9 @@ enum OverlayFrameTimingStage
   ((1U << OVERLAY_FRAME_TIMING_TRANSPORT) - 1U)
 #define OVERLAY_FRAME_TIMING_VALID_TRANSPORT \
   (1U << OVERLAY_FRAME_TIMING_TRANSPORT)
+#define OVERLAY_FRAME_TIMING_VALID_PROVIDER \
+  ((1U << OVERLAY_FRAME_TIMING_RECEIVE) | \
+   (1U << OVERLAY_FRAME_TIMING_PROVIDER_PREPARE))
 #define OVERLAY_FRAME_TIMING_VALID_PRESENT \
   (1U << OVERLAY_FRAME_TIMING_PRESENT)
 

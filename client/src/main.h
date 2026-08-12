@@ -101,11 +101,20 @@ struct AppState
   atomic_int               videoSourceRequested;
   atomic_int               videoSourceApplied;
   atomic_uint_least64_t     videoSourceAppliedGeneration;
+  atomic_bool              videoStatusActive;
+  atomic_bool              videoStatusKnown;
+  atomic_bool              videoFrameAvailable;
+  atomic_bool              videoPointerAvailable;
+  atomic_uint_least64_t     videoFrameEpoch;
+  atomic_uint_least64_t     videoPointerEpoch;
+  atomic_int                videoFrameReason;
+  atomic_int                videoPointerReason;
+  LG_Lock                   videoPayloadLock;
   LG_Lock                   videoSourceLock;
   LG_Lock                   videoSplashLock;
   bool                      videoGeometryDirty;
 
-  atomic_bool fallbackUUIDMismatch;
+  atomic_bool fallbackEndpointMismatch;
   atomic_uint transportLost;
 
   uint8_t guestUUID[16];
@@ -357,5 +366,8 @@ extern struct AppParams   g_params;
 
 int main_cursorThread(void * unused);
 int main_frameThread(void * unused);
+void main_videoStreamEnabled(void);
+void main_framePresented(uint64_t frameToken, uint64_t presentTime,
+    bool valid);
 
 #define RENDERER(fn, ...) g_state.lgr->ops.fn(g_state.lgr, ##__VA_ARGS__)

@@ -611,13 +611,125 @@ static void testCache(void)
         clear, false, NULL) != 0);
   renderQueue_process();
   CHECK(f.shapeCount == 2);
-  CHECK(f.cursorCount == 3);
+  CHECK(f.cursorCount == 4);
   CHECK(!f.cursorVisible);
-  CHECK(f.colorCount == 3);
+  CHECK(f.colorCount == 4);
   CHECK(f.colorFlags == 0);
   CHECK(f.colorScalar == 0.0f);
-  CHECK(f.whiteCount == 3);
+  CHECK(f.whiteCount == 4);
   CHECK(f.whiteLevel == LG_SDR_WHITE_LEVEL_DEFAULT);
+
+  stop();
+}
+
+static void testCursorReplacement(void)
+{
+  start();
+
+  const uint64_t generation =
+    renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
+  const uint8_t shape[] = { 1, 2, 3, 4 };
+  LGColorTransform color =
+  {
+    .flags  = LG_COLOR_TRANSFORM_LUT,
+    .scalar = 2.0f,
+  };
+  CHECK(renderQueue_sourceTransition(RENDER_QUEUE_SOURCE_PRIMARY,
+        generation, false, NULL) != 0);
+  renderQueue_process();
+  renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      LG_CURSOR_COLOR, 1, 1, 4, shape);
+  renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
+      generation, &color);
+  renderQueue_sourceCursorWhiteLevel(RENDER_QUEUE_SOURCE_PRIMARY,
+      generation, 250);
+  renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      true, 5, 6, 1, 2);
+  renderQueue_process();
+  CHECK(f.shapeCount == 1);
+  CHECK(f.cursorVisible);
+  f.shapeCount  = 0;
+  f.colorCount  = 0;
+  f.whiteCount  = 0;
+  f.cursorCount = 0;
+  renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      LG_CURSOR_COLOR, 1, 1, 4, shape);
+  renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
+      generation, &color);
+  renderQueue_sourceCursorWhiteLevel(RENDER_QUEUE_SOURCE_PRIMARY,
+      generation, 250);
+  renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      true, 10, 11, 1, 2);
+
+  renderQueue_sourceClearCursor(RENDER_QUEUE_SOURCE_PRIMARY);
+  CHECK(f.shapeCount == 0);
+  CHECK(f.colorCount == 0);
+  CHECK(f.whiteCount == 0);
+  CHECK(f.cursorCount == 0);
+  renderQueue_process();
+  CHECK(f.shapeCount == 0);
+  CHECK(f.colorCount == 1);
+  CHECK(f.colorFlags == 0);
+  CHECK(f.whiteCount == 1);
+  CHECK(f.whiteLevel == LG_SDR_WHITE_LEVEL_DEFAULT);
+  CHECK(f.cursorCount == 1);
+  CHECK(!f.cursorVisible);
+  f.shapeCount  = 0;
+  f.colorCount  = 0;
+  f.whiteCount  = 0;
+  f.cursorCount = 0;
+  renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      LG_CURSOR_COLOR, 1, 1, 4, shape);
+  renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, generation,
+      true, 12, 13, 1, 2);
+  renderQueue_process();
+  CHECK(f.shapeCount == 1);
+  CHECK(f.cursorCount == 1);
+  CHECK(f.cursorVisible);
+
+  f.shapeCount  = 0;
+  f.colorCount  = 0;
+  f.whiteCount  = 0;
+  f.cursorCount = 0;
+  renderQueue_sourceClearCursor(RENDER_QUEUE_SOURCE_PRIMARY);
+  renderQueue_sourceInvalidate(RENDER_QUEUE_SOURCE_PRIMARY, generation);
+  const uint64_t replacement =
+    renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
+  CHECK(replacement != generation);
+  CHECK(f.shapeCount == 0);
+  CHECK(f.colorCount == 0);
+  CHECK(f.whiteCount == 0);
+  CHECK(f.cursorCount == 0);
+  renderQueue_process();
+  CHECK(f.shapeCount == 0);
+  CHECK(f.colorCount == 1);
+  CHECK(f.colorFlags == 0);
+  CHECK(f.whiteCount == 1);
+  CHECK(f.whiteLevel == LG_SDR_WHITE_LEVEL_DEFAULT);
+  CHECK(f.cursorCount == 1);
+  CHECK(!f.cursorVisible);
+
+  f.shapeCount  = 0;
+  f.colorCount  = 0;
+  f.whiteCount  = 0;
+  f.cursorCount = 0;
+  CHECK(renderQueue_sourceTransition(RENDER_QUEUE_SOURCE_PRIMARY,
+        replacement, false, NULL) != 0);
+  renderQueue_process();
+  f.shapeCount  = 0;
+  f.colorCount  = 0;
+  f.whiteCount  = 0;
+  f.cursorCount = 0;
+  renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, replacement,
+      LG_CURSOR_COLOR, 1, 1, 4, shape);
+  renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, replacement,
+      true, 20, 21, 3, 4);
+  renderQueue_process();
+  CHECK(f.shapeCount == 1);
+  CHECK(f.cursorCount == 1);
+  CHECK(f.cursorVisible);
+  CHECK(f.cursorX == 20);
+  CHECK(f.cursorY == 21);
 
   stop();
 }
@@ -637,6 +749,7 @@ static const struct Test tests[] =
   { "payload"   , testPayload    },
   { "validation", testValidation },
   { "cache"     , testCache      },
+  { "cursor-replacement", testCursorReplacement },
 };
 
 int main(int argc, char ** argv)

@@ -21,6 +21,8 @@
 #include "interface/transport.h"
 #include "dynamic/transports.h"
 
+#include "common/debug.h"
+
 #include <string.h>
 
 void lgTransport_setup(void)
@@ -51,10 +53,39 @@ bool lgTransport_create(const char * name, LG_TransportInstance * instance)
     if (strcmp(LG_Transports[i]->name, name) != 0)
       continue;
 
-    if (!LG_Transports[i]->create(&instance->handle))
+    const LG_TransportOps * ops = LG_Transports[i];
+    if (!ops->create || !ops->destroy || !ops->connectCancellable ||
+        !ops->disconnect || !ops->sessionValid)
+    {
+      DEBUG_ERROR("Transport %s has an incomplete session interface", name);
+      return false;
+    }
+
+    if (!ops->create(&instance->handle))
       return false;
 
-    instance->ops = LG_Transports[i];
+    const LG_VideoOps * video = ops->getVideoOps ?
+      ops->getVideoOps(instance->handle) : NULL;
+    const bool badFrame = video && video->type == LG_VIDEO_TYPE_FRAME &&
+      (!video->frame || !video->frame->nextFrame ||
+       !video->frame->releaseFrame || !video->frame->cancelFrameWait ||
+       ((video->frame->nextPointer != NULL) !=
+        (video->frame->releasePointer != NULL)) ||
+       (video->frame->nextPointer && !video->frame->cancelPointerWait));
+    const bool badSurface = video && video->type == LG_VIDEO_TYPE_SW_SURFACE &&
+      (!video->swSurface || !video->swSurface->attach ||
+       !video->swSurface->detach || !video->swSurface->setActive ||
+       !video->swSurface->cancelPending);
+    if (video && (badFrame || badSurface ||
+          (video->type != LG_VIDEO_TYPE_FRAME &&
+           video->type != LG_VIDEO_TYPE_SW_SURFACE)))
+    {
+      DEBUG_ERROR("Transport %s has an incomplete video interface", name);
+      ops->destroy(&instance->handle);
+      return false;
+    }
+
+    instance->ops = ops;
     return true;
   }
 

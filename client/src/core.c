@@ -627,9 +627,9 @@ static void cancelVideoWaits(void)
     return;
 
   const LG_FrameOps * ops = g_state.videoOps->frame;
-  if (g_state.frameThread && ops->cancelFrameWait)
+  if (g_state.frameThread)
     ops->cancelFrameWait(g_state.transport.handle);
-  if (g_state.cursorThread && ops->cancelPointerWait)
+  if (g_state.cursorThread)
     ops->cancelPointerWait(g_state.transport.handle);
 }
 
@@ -650,24 +650,26 @@ void core_stopVideoThreads(void)
 
 bool core_startVideoThreads(void)
 {
-  if (g_state.frameThread && g_state.cursorThread)
+  const LG_FrameOps * ops = g_state.videoOps->frame;
+  const bool pointer = ops->nextPointer && ops->releasePointer;
+  if (g_state.frameThread && (!pointer || g_state.cursorThread))
     return true;
   if (g_state.frameThread || g_state.cursorThread)
     core_stopVideoThreads();
 
   atomic_store_explicit(
       &g_state.stopVideoThreads, false, memory_order_release);
-  if (!lgCreateThread("cursorThread", main_cursorThread, NULL,
-        &g_state.cursorThread))
-  {
-    DEBUG_ERROR("cursor create thread failed");
-    return false;
-  }
-
   if (!lgCreateThread("frameThread", main_frameThread, NULL,
         &g_state.frameThread))
   {
     DEBUG_ERROR("frame create thread failed");
+    return false;
+  }
+
+  if (pointer && !lgCreateThread("cursorThread", main_cursorThread, NULL,
+        &g_state.cursorThread))
+  {
+    DEBUG_ERROR("cursor create thread failed");
     core_stopVideoThreads();
     return false;
   }
