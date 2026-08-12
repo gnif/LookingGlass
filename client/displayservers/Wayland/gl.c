@@ -35,6 +35,40 @@
 #include "egl_dynprocs.h"
 #include "eglutil.h"
 
+// Map the buffer onto width x height logical pixels, through the viewport for
+// a fractional scale, or the buffer scale otherwise
+static void applySurfaceScale(int width, int height)
+{
+  if (wlWm.fractionalScale)
+  {
+    wl_surface_set_buffer_scale(wlWm.surface, 1);
+    if (!wlWm.viewport)
+      wlWm.viewport = wp_viewporter_get_viewport(wlWm.viewporter, wlWm.surface);
+    wp_viewport_set_source(
+        wlWm.viewport,
+        wl_fixed_from_int(-1), wl_fixed_from_int(-1),
+        wl_fixed_from_int(-1), wl_fixed_from_int(-1)
+    );
+    wp_viewport_set_destination(wlWm.viewport, width, height);
+  }
+  else
+  {
+    if (wlWm.viewport)
+    {
+      // Clearing the source and destination rectangles should happen in wp_viewport_destroy.
+      // However, wlroots does not clear the rectangle until fixed in 456c6e22 (2021-08-02).
+      // This should be kept to work around old versions of wlroots.
+      wl_fixed_t clear = wl_fixed_from_int(-1);
+      wp_viewport_set_source(wlWm.viewport, clear, clear, clear, clear);
+      wp_viewport_set_destination(wlWm.viewport, -1, -1);
+
+      wp_viewport_destroy(wlWm.viewport);
+      wlWm.viewport = NULL;
+    }
+    wl_surface_set_buffer_scale(wlWm.surface, waylandScaleFloor(wlWm.scale));
+  }
+}
+
 bool waylandEGLInit(int w, int h)
 {
   wlWm.eglWindow = wl_egl_window_create(wlWm.surface, w, h);
@@ -43,6 +77,13 @@ bool waylandEGLInit(int w, int h)
     DEBUG_ERROR("Failed to create EGL window");
     return false;
   }
+
+  // The compositor sizes the window from the first buffer committed, so the
+  // scale has to be applied before then
+  int width, height;
+  wlWm.desktop->getSize(&width, &height);
+  if (width > 0 && height > 0)
+    applySurfaceScale(width, height);
 
   return true;
 }
@@ -277,34 +318,8 @@ bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
 
     if (width == 0 || height == 0)
       skipResize = true;
-    else if (wlWm.fractionalScale)
-    {
-      wl_surface_set_buffer_scale(wlWm.surface, 1);
-      if (!wlWm.viewport)
-        wlWm.viewport = wp_viewporter_get_viewport(wlWm.viewporter, wlWm.surface);
-      wp_viewport_set_source(
-          wlWm.viewport,
-          wl_fixed_from_int(-1), wl_fixed_from_int(-1),
-          wl_fixed_from_int(-1), wl_fixed_from_int(-1)
-      );
-      wp_viewport_set_destination(wlWm.viewport, width, height);
-    }
     else
-    {
-      if (wlWm.viewport)
-      {
-        // Clearing the source and destination rectangles should happen in wp_viewport_destroy.
-        // However, wlroots does not clear the rectangle until fixed in 456c6e22 (2021-08-02).
-        // This should be kept to work around old versions of wlroots.
-        wl_fixed_t clear = wl_fixed_from_int(-1);
-        wp_viewport_set_source(wlWm.viewport, clear, clear, clear, clear);
-        wp_viewport_set_destination(wlWm.viewport, -1, -1);
-
-        wp_viewport_destroy(wlWm.viewport);
-        wlWm.viewport = NULL;
-      }
-      wl_surface_set_buffer_scale(wlWm.surface, waylandScaleFloor(wlWm.scale));
-    }
+      applySurfaceScale(width, height);
 
     struct wl_region * region = wl_compositor_create_region(wlWm.compositor);
     wl_region_add(region, 0, 0, width, height);
