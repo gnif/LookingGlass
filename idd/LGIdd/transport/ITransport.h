@@ -29,6 +29,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+class IClipboardSource;
 class IControlSink;
 class IFrameSink;
 class IInputSource;
@@ -178,4 +179,5 @@ public:
   virtual ITexSink * TexSink() { return nullptr; }
   virtual IControlSink * Control() { return nullptr; }
   virtual IInputSource * Input() { return nullptr; }
+  virtual IClipboardSource * Clipboard() { return nullptr; }
 };

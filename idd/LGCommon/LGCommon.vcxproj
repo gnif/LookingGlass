@@ -65,12 +65,14 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CClipboardChannel.cpp" />
     <ClCompile Include="CClipboardRing.cpp" />
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
     <ClCompile Include="RefreshRate.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CClipboardChannel.h" />
     <ClInclude Include="CClipboardRing.h" />
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="CDebug.h" />

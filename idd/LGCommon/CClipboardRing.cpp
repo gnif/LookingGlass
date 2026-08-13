@@ -82,17 +82,21 @@ bool CClipboardRing::EndWrite(ClipboardRing& ring, uint32_t ticket)
   return true;
 }
 
-const ClipboardRingSlot * CClipboardRing::BeginRead(
-  ClipboardRing& ring, uint32_t& ticket)
+ClipboardRingReadResult CClipboardRing::BeginRead(ClipboardRing& ring,
+  uint32_t& ticket, const ClipboardRingSlot *& slot)
 {
+  slot = nullptr;
   const uint32_t consumed = Atomic::Load(ring.consumed);
   const uint32_t pending = Atomic::Load(ring.produced) - consumed;
-  if (!pending || pending > KVMFR_CLIPBOARD_SLOT_COUNT)
-    return nullptr;
+  if (!pending)
+    return ClipboardRingReadResult::EMPTY;
+  if (pending > KVMFR_CLIPBOARD_SLOT_COUNT)
+    return ClipboardRingReadResult::CORRUPT;
 
   Atomic::Fence();
   ticket = consumed;
-  return &ring.slots[consumed % KVMFR_CLIPBOARD_SLOT_COUNT];
+  slot = &ring.slots[consumed % KVMFR_CLIPBOARD_SLOT_COUNT];
+  return ClipboardRingReadResult::READY;
 }
 
 bool CClipboardRing::EndRead(ClipboardRing& ring, uint32_t ticket)

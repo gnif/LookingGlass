@@ -27,6 +27,8 @@
 #include <optional>
 
 class CConfigWindow;
+class CClipboardChannel;
+class CClipboardManager;
 
 class CNotifyWindow : public CWindow
 {
@@ -40,6 +42,7 @@ class CNotifyWindow : public CWindow
   std::atomic_bool closeRequested;
   bool m_recoveryActive;
   std::unique_ptr<CConfigWindow> m_config;
+  std::unique_ptr<CClipboardManager> m_clipboard;
 
   std::function<void()> m_onSettingChange;
   std::function<bool()> m_onEnsureOnlyDisplay;
@@ -79,6 +82,8 @@ public:
   void notifyResolutionRejected(uint32_t width, uint32_t height,
     uint32_t requiredSizeMiB);
   void setRecoveryMode(bool active);
+
+  bool initClipboard(CClipboardChannel& channel);
 
   HWND hwndDialog();
   void close();

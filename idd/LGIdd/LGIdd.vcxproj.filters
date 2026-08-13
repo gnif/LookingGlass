@@ -169,6 +169,9 @@
     <ClInclude Include="postprocess\effect\CRGB24Effect.h">
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
+    <ClInclude Include="transport\CClipboardHub.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\CControlHub.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -197,6 +200,9 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\FrameIn.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IClipboardSource.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IControlSink.h">
@@ -239,6 +245,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CRecovery.h">
+      <Filter>Transport\LGMP</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\lgmp\CLGMPClipboardTransport.h">
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
     <ClInclude Include="transport\lgmp\CLGMPControl.h">
@@ -369,6 +378,9 @@
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp">
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>
+    <ClCompile Include="transport\CClipboardHub.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
     <ClCompile Include="transport\CControlHub.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
@@ -397,6 +409,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CRecovery.cpp">
+      <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\lgmp\CLGMPClipboardTransport.cpp">
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp">

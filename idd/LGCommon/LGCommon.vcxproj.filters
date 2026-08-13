@@ -12,6 +12,9 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="CClipboardChannel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="CClipboardRing.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
@@ -27,6 +30,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Atomic.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="CClipboardChannel.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CClipboardRing.h">

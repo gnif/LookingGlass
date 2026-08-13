@@ -67,7 +67,8 @@ CLGMPTransport::CLGMPTransport(const TransportInstance& config) :
   m_config(config),
   m_control(m_host),
   m_frames(m_host, m_ivshmem),
-  m_input(m_host)
+  m_input(m_host),
+  m_clipboard(m_host)
 {
 }
 
@@ -90,10 +91,10 @@ bool CLGMPTransport::Initialize()
   if (!m_host.Initialize(m_ivshmem))
     return false;
 
-  // Preserve the existing shared-memory layout by appending input after the
-  // frame and pointer queues and retained pointer state allocations.
+  // Preserve the existing shared-memory layout by appending input and then
+  // clipboard after the frame/pointer queues and retained pointer state.
   if (!m_frames.Initialize() || !m_control.Initialize() ||
-      !m_input.Initialize())
+      !m_input.Initialize() || !m_clipboard.Initialize())
     return false;
 
   m_frames.SealMemoryLayout();
@@ -242,6 +243,7 @@ void CLGMPTransport::Stop()
   Atomic::Store(m_ready, false, std::memory_order_release);
   Abort();
   m_hasActive = false;
+  m_clipboard.Stop();
   m_input.Stop();
 }
 

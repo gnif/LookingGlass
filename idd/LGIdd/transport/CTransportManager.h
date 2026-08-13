@@ -22,6 +22,7 @@
 
 #include "Atomic.h"
 #include "CSRWLock.h"
+#include "transport/CClipboardHub.h"
 #include "transport/CControlHub.h"
 #include "transport/CFrameHub.h"
 #include "transport/CInputHub.h"
@@ -109,6 +110,9 @@ private:
     bool                        inputAdded       = false;
     bool                        inputFailed      = false;
     bool                        inputAbsent      = false;
+    bool                        clipboardAdded   = false;
+    bool                        clipboardFailed  = false;
+    bool                        clipboardAbsent  = false;
     bool                        frameAdded       = false;
     bool                        frameLegacy      = false;
     ITexSink                  * texSink          = nullptr;
@@ -132,6 +136,7 @@ private:
   CFrameHub                           m_frames;
   CTexHub                             m_tex;
   CInputHub                           m_input;
+  CClipboardHub                       m_clipboard;
   CRecoveryHub                        m_recovery;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;

@@ -22,6 +22,13 @@
 
 #include "ClipboardRing.h"
 
+enum class ClipboardRingReadResult
+{
+  EMPTY,
+  READY,
+  CORRUPT,
+};
+
 class CClipboardRing
 {
 public:
@@ -32,8 +39,8 @@ public:
     ClipboardRing& ring, uint32_t& ticket);
   static bool EndWrite(ClipboardRing& ring, uint32_t ticket);
 
-  static const ClipboardRingSlot * BeginRead(
-    ClipboardRing& ring, uint32_t& ticket);
+  static ClipboardRingReadResult BeginRead(ClipboardRing& ring,
+    uint32_t& ticket, const ClipboardRingSlot *& slot);
   static bool EndRead(ClipboardRing& ring, uint32_t ticket);
 
   static bool Valid(const ClipboardRingSlot& slot);

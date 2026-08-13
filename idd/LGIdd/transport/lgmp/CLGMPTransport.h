@@ -23,6 +23,7 @@
 #include "Atomic.h"
 #include "transport/ITransport.h"
 #include "transport/lgmp/CIVSHMEM.h"
+#include "transport/lgmp/CLGMPClipboardTransport.h"
 #include "transport/lgmp/CLGMPControl.h"
 #include "transport/lgmp/CLGMPFrameTransport.h"
 #include "transport/lgmp/CLGMPHost.h"
@@ -32,20 +33,21 @@
 class CLGMPTransport final : public ITransport
 {
 private:
-  TransportInstance    m_config;
+  TransportInstance        m_config;
   // Keep this declaration order. Destruction must release frame and control
   // allocations before the LGMP host and its IVSHMEM mapping are destroyed.
-  CIVSHMEM            m_ivshmem;
-  CLGMPHost           m_host;
-  CLGMPControl        m_control;
-  CLGMPFrameTransport m_frames;
-  CLGMPInputTransport m_input;
-  CRecovery           m_recovery;
-  std::atomic<bool>   m_ready = false;
-  FrameCfg            m_activeCfg;
-  FrameCfg            m_pendingCfg;
-  bool                m_hasActive  = false;
-  bool                m_hasPending = false;
+  CIVSHMEM                 m_ivshmem;
+  CLGMPHost                m_host;
+  CLGMPControl             m_control;
+  CLGMPFrameTransport      m_frames;
+  CLGMPInputTransport      m_input;
+  CLGMPClipboardTransport  m_clipboard;
+  CRecovery                m_recovery;
+  std::atomic<bool>        m_ready = false;
+  FrameCfg                 m_activeCfg;
+  FrameCfg                 m_pendingCfg;
+  bool                     m_hasActive  = false;
+  bool                     m_hasPending = false;
 
 public:
   explicit CLGMPTransport(const TransportInstance& config);
@@ -76,4 +78,5 @@ public:
   IFrameSink * FrameSink() override { return &m_frames; }
   IControlSink * Control() override { return &m_control; }
   IInputSource * Input() override { return &m_input; }
+  IClipboardSource * Clipboard() override { return &m_clipboard; }
 };

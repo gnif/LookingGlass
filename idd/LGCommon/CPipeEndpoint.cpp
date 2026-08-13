@@ -310,6 +310,12 @@ bool CPipeEndpoint::Send(const void * message, size_t size)
   return success;
 }
 
+HANDLE CPipeEndpoint::NativeHandle()
+{
+  CSRWSharedLock lock(m_pipeLock);
+  return m_pipe;
+}
+
 DWORD WINAPI CPipeEndpoint::ThreadProc(void * context)
 {
   static_cast<CPipeEndpoint *>(context)->Thread();

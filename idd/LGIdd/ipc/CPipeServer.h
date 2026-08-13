@@ -26,12 +26,14 @@
 #include <vector>
 
 #include "CPipeEndpoint.h"
+#include "CClipboardChannel.h"
 #include "CSRWLock.h"
 #include "PipeMsg.h"
 
 class CDeviceContext;
 
-class CPipeServer : private IPipeEndpointHandler
+class CPipeServer : private IPipeEndpointHandler,
+  public IClipboardChannelDoorbell
 {
   public:
     using RecoveryHandler = void (*)(void * opaque,
@@ -40,6 +42,7 @@ class CPipeServer : private IPipeEndpointHandler
 
   private:
     CPipeEndpoint          m_endpoint;
+    CClipboardChannel      m_clipboard;
     CSRWLock               m_queueLock;
     std::vector<LGPipeMsg> m_queue;
     bool                   m_recoveryValid   = false;
@@ -60,6 +63,7 @@ class CPipeServer : private IPipeEndpointHandler
     void HandleRecovery(const LGPipeMsg & msg);
 
     void OnPipeConnected() override;
+    void OnPipeDisconnected() override;
     bool OnPipeMessage(const void * message, size_t size) override;
 
   public:
@@ -80,6 +84,10 @@ class CPipeServer : private IPipeEndpointHandler
       uint32_t requiredSizeMiB);
     bool SetRecovery(void * owner, uint64_t route,
       uint64_t session, uint32_t serial, bool active);
+
+    CClipboardChannel& Clipboard() { return m_clipboard; }
+    bool ClipboardKick(uint64_t epoch) override;
+    void ClipboardResetPeer(uint64_t epoch, uint32_t reason) override;
 };
 
 extern CPipeServer g_pipe;

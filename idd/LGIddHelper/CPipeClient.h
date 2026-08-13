@@ -24,14 +24,22 @@
 #include <stdint.h>
 
 #include "CPipeEndpoint.h"
+#include "CClipboardChannel.h"
 #include "CSRWLock.h"
 #include "PipeMsg.h"
 
-class CPipeClient : private IPipeEndpointHandler
+class CPipeClient : private IPipeEndpointHandler,
+  public IClipboardChannelDoorbell
 {
 private:
-  CPipeEndpoint m_endpoint;
-  CSRWLock      m_displayLock;
+  CPipeEndpoint      m_endpoint;
+  CClipboardChannel  m_clipboard;
+  CSRWLock           m_clipboardSetupLock;
+  HANDLE             m_clipboardMapping      = nullptr;
+  uint64_t           m_clipboardEpoch        = 0;
+  uint64_t           m_clipboardEpochCounter = 0;
+  bool               m_clipboardEnabled      = false;
+  CSRWLock           m_displayLock;
 
   bool      m_recoveryActive    = false;
   bool      m_hasRecoveryStatus = false;
@@ -50,8 +58,10 @@ private:
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
   void HandleSetRecovery(const LGPipeMsg& msg);
+  void ResetClipboardSetupLocked();
 
   void OnPipeConnected() override;
+  void OnPipeDisconnected() override;
   bool ShouldReconnect() override;
   bool OnPipeMessage(const void * message, size_t size) override;
 
@@ -63,6 +73,11 @@ public:
   bool Init();
   void DeInit();
   bool IsRunning() { return m_endpoint.IsRunning(); }
+
+  CClipboardChannel& Clipboard() { return m_clipboard; }
+  void EnableClipboard() { m_clipboardEnabled = true; }
+  bool ClipboardKick(uint64_t epoch) override;
+  void ClipboardResetPeer(uint64_t epoch, uint32_t reason) override;
 
   void ReloadSettings();
   bool EnsureOnlyDisplay();

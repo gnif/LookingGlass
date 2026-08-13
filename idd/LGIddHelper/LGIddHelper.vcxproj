@@ -191,6 +191,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <ItemGroup>
     <ClCompile Include="CButton.cpp" />
     <ClCompile Include="CCheckbox.cpp" />
+    <ClCompile Include="CClipboardManager.cpp" />
     <ClCompile Include="CConfigWindow.cpp" />
     <ClCompile Include="CEditWidget.cpp" />
     <ClCompile Include="CGroupBox.cpp" />
@@ -207,6 +208,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <ItemGroup>
     <ClInclude Include="CButton.h" />
     <ClInclude Include="CCheckbox.h" />
+    <ClInclude Include="CClipboardManager.h" />
     <ClInclude Include="CConfigWindow.h" />
     <ClInclude Include="CEditWidget.h" />
     <ClInclude Include="CGroupBox.h" />

@@ -125,6 +125,8 @@ namespace
       service = TRANSPORT_SERVICE_CONTROL;
     else if (Equal(name, L"input"))
       service = TRANSPORT_SERVICE_INPUT;
+    else if (Equal(name, L"clipboard"))
+      service = TRANSPORT_SERVICE_CLIPBOARD;
     else
       return false;
 

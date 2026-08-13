@@ -66,6 +66,7 @@
     <ClCompile Include="postprocess\effect\CFormatEffect.cpp" />
     <ClCompile Include="postprocess\effect\CHDR16to10Effect.cpp" />
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp" />
+    <ClCompile Include="transport\CClipboardHub.cpp" />
     <ClCompile Include="transport\CControlHub.cpp" />
     <ClCompile Include="transport\CFrameHub.cpp" />
     <ClCompile Include="transport\CInputHub.cpp" />
@@ -76,6 +77,7 @@
     <ClCompile Include="transport\TransportFactory.cpp" />
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
+    <ClCompile Include="transport\lgmp\CLGMPClipboardTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameCaps.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp" />
@@ -125,6 +127,7 @@
     <ClInclude Include="postprocess\effect\CFormatEffect.h" />
     <ClInclude Include="postprocess\effect\CHDR16to10Effect.h" />
     <ClInclude Include="postprocess\effect\CRGB24Effect.h" />
+    <ClInclude Include="transport\CClipboardHub.h" />
     <ClInclude Include="transport\CControlHub.h" />
     <ClInclude Include="transport\CFrameHub.h" />
     <ClInclude Include="transport\CInputHub.h" />
@@ -135,6 +138,7 @@
     <ClInclude Include="transport\FrameCaps.h" />
     <ClInclude Include="transport\FrameProfile.h" />
     <ClInclude Include="transport\FrameIn.h" />
+    <ClInclude Include="transport\IClipboardSource.h" />
     <ClInclude Include="transport\IControlSink.h" />
     <ClInclude Include="transport\IControlTransport.h" />
     <ClInclude Include="transport\IFrameSink.h" />
@@ -149,6 +153,7 @@
     <ClInclude Include="transport\TransportFactory.h" />
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />
     <ClInclude Include="transport\lgmp\CRecovery.h" />
+    <ClInclude Include="transport\lgmp\CLGMPClipboardTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameCaps.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h" />

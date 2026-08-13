@@ -37,6 +37,7 @@ bool CPipeServer::Init()
 void CPipeServer::DeInit()
 {
   m_endpoint.Stop();
+  m_clipboard.Detach();
 }
 
 void CPipeServer::OnPipeConnected()
@@ -58,6 +59,11 @@ void CPipeServer::OnPipeConnected()
   // silently restore the IDD-only topology while recovery is active.
   if (m_recoveryValid)
     m_endpoint.Send(&m_recoveryRequest, sizeof(m_recoveryRequest));
+}
+
+void CPipeServer::OnPipeDisconnected()
+{
+  m_clipboard.Detach();
 }
 
 bool CPipeServer::OnPipeMessage(const void * message, size_t size)
@@ -82,10 +88,88 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
       HandleRecovery(msg);
       return true;
 
+    case LGPipeMsg::CLIPBOARD_SETUP:
+    {
+      HANDLE transferred = reinterpret_cast<HANDLE>(
+        static_cast<uintptr_t>(msg.clipboardSetup.handle));
+      HANDLE mapping = transferred;
+      uint64_t epoch = 0;
+      if (transferred &&
+          msg.clipboardSetup.bytes == sizeof(ClipboardMapping))
+      {
+        ClipboardMapping * view = static_cast<ClipboardMapping *>(
+          MapViewOfFile(mapping, FILE_MAP_READ, 0, 0,
+            sizeof(ClipboardMapping)));
+        if (view)
+        {
+          epoch = view->epoch;
+          UnmapViewOfFile(view);
+        }
+      }
+      else if (transferred)
+      {
+        CloseHandle(transferred);
+        mapping = nullptr;
+      }
+
+      // The transferred handle has exactly one owner from this point:
+      // Attach consumes it on both success and failure paths.
+      const bool ready = m_clipboard.Attach(
+        mapping, epoch, false, *this);
+      LGPipeMsg reply = {};
+      reply.size                  = sizeof(reply);
+      reply.type                  = LGPipeMsg::CLIPBOARD_READY;
+      reply.clipboardReady.epoch  = epoch;
+      reply.clipboardReady.status = ready ? ERROR_SUCCESS : ERROR_INVALID_DATA;
+      m_endpoint.Send(&reply, sizeof(reply));
+      return true;
+    }
+
+    case LGPipeMsg::CLIPBOARD_READY:
+      // READY normally travels IDD to Helper. A failure in the reverse
+      // direction reports that Helper activation failed after IDD attach.
+      if (msg.clipboardReady.status != ERROR_SUCCESS &&
+          msg.clipboardReady.epoch == m_clipboard.Epoch())
+      {
+        m_clipboard.Reset(
+          msg.clipboardReady.epoch, msg.clipboardReady.status);
+        m_clipboard.Detach();
+      }
+      return true;
+
+    case LGPipeMsg::CLIPBOARD_KICK:
+      m_clipboard.Kick(msg.clipboardKick.epoch);
+      return true;
+
+    case LGPipeMsg::CLIPBOARD_RESET:
+      m_clipboard.Reset(
+        msg.clipboardReset.epoch, msg.clipboardReset.reason);
+      return true;
+
     default:
       DEBUG_ERROR("Unknown message type %d", msg.type);
       return true;
   }
+}
+
+bool CPipeServer::ClipboardKick(uint64_t epoch)
+{
+  LGPipeMsg msg = {};
+  msg.size                = sizeof(msg);
+  msg.type                = LGPipeMsg::CLIPBOARD_KICK;
+  msg.clipboardKick.epoch = epoch;
+  msg.clipboardKick.rings = 0;
+  return m_endpoint.Send(&msg, sizeof(msg));
+}
+
+void CPipeServer::ClipboardResetPeer(uint64_t epoch, uint32_t reason)
+{
+  LGPipeMsg msg = {};
+  msg.size                  = sizeof(msg);
+  msg.type                  = LGPipeMsg::CLIPBOARD_RESET;
+  msg.clipboardReset.epoch  = epoch;
+  msg.clipboardReset.reason = reason;
+  m_endpoint.Send(&msg, sizeof(msg));
 }
 
 void CPipeServer::QueueMsgLocked(const LGPipeMsg & msg)

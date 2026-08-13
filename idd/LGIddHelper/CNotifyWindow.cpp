@@ -19,6 +19,7 @@
  */
 
 #include "CNotifyWindow.h"
+#include "CClipboardManager.h"
 #include "CConfigWindow.h"
 #include "Resources.h"
 #include <CDebug.h>
@@ -86,6 +87,11 @@ CNotifyWindow::~CNotifyWindow()
 
 LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 {
+  LRESULT clipboardResult;
+  if (m_clipboard && m_clipboard->HandleMessage(
+      uMsg, wParam, lParam, clipboardResult))
+    return clipboardResult;
+
   switch (uMsg)
   {
   case WM_NOTIFY_ICON:
@@ -168,6 +174,8 @@ LRESULT CNotifyWindow::onClose()
 
 LRESULT CNotifyWindow::onDestroy()
 {
+  if (m_clipboard)
+    m_clipboard->Shutdown();
   KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
   Shell_NotifyIcon(NIM_DELETE, &m_iconData);
   return 0;
@@ -308,6 +316,20 @@ void CNotifyWindow::setRecoveryMode(bool active)
 {
   if (!PostMessage(m_hwnd, WM_RECOVERY_STATE, active, 0))
     DEBUG_ERROR_HR(GetLastError(), "Failed to update recovery state");
+}
+
+bool CNotifyWindow::initClipboard(CClipboardChannel& channel)
+{
+  if (m_clipboard)
+    return true;
+  std::unique_ptr<CClipboardManager> clipboard(
+    new (std::nothrow) CClipboardManager(m_hwnd, channel));
+  if (!clipboard)
+    return false;
+  if (!clipboard->Initialize())
+    return false;
+  m_clipboard = std::move(clipboard);
+  return true;
 }
 
 void CNotifyWindow::handleResolutionRejected(uint32_t width, uint32_t height,

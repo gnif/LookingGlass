@@ -31,6 +31,21 @@
 #define KVMFR_CLIPBOARD_DATA_BYTES    (64U * 1024U)
 #define KVMFR_CLIPBOARD_SIZE_UNKNOWN  UINT64_MAX
 
+/* Transfer IDs are selected by the side which sends REQUEST. Keeping the
+ * namespaces disjoint makes a simultaneous transfer in each direction
+ * unambiguous when CANCEL and DATA cross in flight. */
+#define KVMFR_CLIPBOARD_TRANSFER_HELPER (UINT64_C(1) << 63)
+
+static inline int kvmfrClipboardTransferFromHelper(uint64_t transfer)
+{
+  return (transfer & KVMFR_CLIPBOARD_TRANSFER_HELPER) != 0;
+}
+
+static inline int kvmfrClipboardTransferFromClient(uint64_t transfer)
+{
+  return transfer != 0 && !kvmfrClipboardTransferFromHelper(transfer);
+}
+
 enum
 {
   KVMFR_CLIPBOARD_FORMAT_NONE = 0,
@@ -119,6 +134,14 @@ typedef struct KVMFRClipboardMessage
   uint32_t                    length;
 }
 KVMFRClipboardMessage;
+
+/* Type-specific fields:
+ * OFFER:  token is KVMFRClipboardFormatFlags.
+ * REQUEST: format and transfer identify the requested representation.
+ * DATA: size is an optional total hint on BEGIN and authoritative on END;
+ *       offset/length describe this record's borrowed payload.
+ * CANCEL: token is a KVMFRClipboardCancelReason-compatible reason.
+ * ACK/GRANT: token identifies the acknowledged or writable slot. */
 
 enum
 {

@@ -136,6 +136,11 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
 
   CNotifyWindow& window = CNotifyWindow::instance();
 
+  if (!window.initClipboard(g_pipe.Clipboard()))
+    DEBUG_ERROR("Failed to initialize clipboard synchronization");
+  else
+    g_pipe.EnableClipboard();
+
   // the pipe must be initialized after the CNotifyWindow
   // has been created to avoid a potential race
   if (!g_pipe.Init())

@@ -69,6 +69,8 @@ public:
   bool IsRunning() const { return Atomic::Load(m_running); }
   bool IsConnected() const { return Atomic::Load(m_connected); }
 
+  HANDLE NativeHandle();
+
   void SetHandler(_In_opt_ IPipeEndpointHandler * handler)
   {
     m_handler = handler;

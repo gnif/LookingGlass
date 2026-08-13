@@ -23,7 +23,9 @@
 #include "Atomic.h"
 #include "capture/CFrameGraph.h"
 #include "CDebug.h"
+#include "ipc/CPipeServer.h"
 #include "Seq.h"
+#include "transport/IClipboardSource.h"
 #include "transport/ITexStage.h"
 
 #include <Windows.h>
@@ -121,7 +123,8 @@ CTransportManager::Entry::~Entry()
     CloseHandle(idleEvent);
 }
 
-CTransportManager::CTransportManager() : m_tex(m_frameRev)
+CTransportManager::CTransportManager() :
+  m_tex(m_frameRev), m_clipboard(g_pipe.Clipboard())
 {
   m_phaseIdle    = CreateEvent(nullptr, TRUE, TRUE, nullptr);
   m_stoppedEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
@@ -492,48 +495,55 @@ bool CTransportManager::InitializeEntry(Entry& entry)
 bool CTransportManager::AddServices(Entry& entry)
 {
   std::shared_ptr<ITransport> transport;
-  BackendId id = 0;
-  uint32_t epoch = 0;
-  bool primary = false;
-  bool required = false;
-  uint32_t services = 0;
-  bool controlAdded = false;
-  bool controlFailed = false;
-  bool controlAbsent = false;
-  bool inputAdded = false;
-  bool inputFailed = false;
-  bool inputAbsent = false;
-  bool frameAdded = false;
-  bool frameBound = false;
-  bool frameAbsent = false;
-  uint64_t retryAt = 0;
+  BackendId id              = 0;
+  uint32_t  epoch           = 0;
+  bool      primary         = false;
+  bool      required        = false;
+  uint32_t  services        = 0;
+  bool      controlAdded    = false;
+  bool      controlFailed   = false;
+  bool      controlAbsent   = false;
+  bool      inputAdded      = false;
+  bool      inputFailed     = false;
+  bool      inputAbsent     = false;
+  bool      clipboardAdded  = false;
+  bool      clipboardFailed = false;
+  bool      clipboardAbsent = false;
+  bool      frameAdded      = false;
+  bool      frameBound      = false;
+  bool      frameAbsent     = false;
+  uint64_t  retryAt         = 0;
   {
     CSRWSharedLock entryLock(entry.lock);
-    transport    = entry.transport;
-    id           = entry.id;
-    epoch        = entry.epoch;
-    primary      = entry.primary;
-    required     = entry.required;
-    services     = entry.config.services;
-    controlAdded = entry.controlAdded;
-    controlFailed = entry.controlFailed;
-    controlAbsent = entry.controlAbsent;
-    inputAdded   = entry.inputAdded;
-    inputFailed  = entry.inputFailed;
-    inputAbsent  = entry.inputAbsent;
-    frameAdded   = entry.frameAdded;
-    frameAbsent  = entry.frameAbsent;
-    retryAt      = entry.serviceRetryAt;
+    transport       = entry.transport;
+    id              = entry.id;
+    epoch           = entry.epoch;
+    primary         = entry.primary;
+    required        = entry.required;
+    services        = entry.config.services;
+    controlAdded    = entry.controlAdded;
+    controlFailed   = entry.controlFailed;
+    controlAbsent   = entry.controlAbsent;
+    inputAdded      = entry.inputAdded;
+    inputFailed     = entry.inputFailed;
+    inputAbsent     = entry.inputAbsent;
+    clipboardAdded  = entry.clipboardAdded;
+    clipboardFailed = entry.clipboardFailed;
+    clipboardAbsent = entry.clipboardAbsent;
+    frameAdded      = entry.frameAdded;
+    frameAbsent     = entry.frameAbsent;
+    retryAt         = entry.serviceRetryAt;
   }
 
   if (!transport)
     return !required;
 
-  const uint64_t now = GetTickCount64();
-  const bool attach = now >= retryAt;
-  bool controlRetry = false;
-  bool frameRetry   = false;
-  bool inputRetry   = false;
+  const uint64_t now    = GetTickCount64();
+  const bool     attach = now >= retryAt;
+  bool controlRetry   = false;
+  bool frameRetry     = false;
+  bool inputRetry     = false;
+  bool clipboardRetry = false;
   if (!(services & TRANSPORT_SERVICE_CONTROL))
     controlAbsent = true;
   else if (attach && !controlAdded && !controlFailed && !controlAbsent)
@@ -610,7 +620,30 @@ bool CTransportManager::AddServices(Entry& entry)
     }
   }
 
-  if (attach && (controlRetry || inputRetry || frameRetry))
+  if (!(services & TRANSPORT_SERVICE_CLIPBOARD))
+    clipboardAbsent = true;
+  else if (attach && !clipboardAdded && !clipboardFailed &&
+      !clipboardAbsent)
+  {
+    IClipboardSource * clipboard = transport->Clipboard();
+    if (clipboard && m_clipboard.Bind(id, epoch, *clipboard))
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.clipboardAdded = true;
+      clipboardAdded       = true;
+    }
+    else if (clipboard)
+      clipboardRetry = true;
+    else
+    {
+      clipboardAbsent = true;
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.clipboardAbsent = true;
+    }
+  }
+
+  if (attach && (controlRetry || inputRetry || frameRetry ||
+      clipboardRetry))
   {
     CSRWExclusiveLock entryLock(entry.lock);
     entry.serviceRetryAt = now + SERVICE_RETRY_DELAY_MS;
@@ -623,9 +656,10 @@ bool CTransportManager::AddServices(Entry& entry)
   }
 
   const bool servicesReady =
-    (!(services & TRANSPORT_SERVICE_FRAME)   || frameAdded) &&
-    (!(services & TRANSPORT_SERVICE_CONTROL) || controlAdded) &&
-    (!(services & TRANSPORT_SERVICE_INPUT)   || inputAdded);
+    (!(services & TRANSPORT_SERVICE_FRAME)     || frameAdded)     &&
+    (!(services & TRANSPORT_SERVICE_CONTROL)   || controlAdded)   &&
+    (!(services & TRANSPORT_SERVICE_INPUT)     || inputAdded)     &&
+    (!(services & TRANSPORT_SERVICE_CLIPBOARD) || clipboardAdded);
   return !required || servicesReady;
 }
 
@@ -720,6 +754,35 @@ void CTransportManager::HandleServiceFailures()
       break;
     }
   }
+
+  source = {};
+  while (m_clipboard.TakeFailure(source))
+  {
+    Entry * entries[FRAME_MAX_SINKS] = {};
+    const unsigned count = Entries(entries);
+    for (unsigned i = 0; i < count; ++i)
+    {
+      Entry& entry = *entries[i];
+      bool restart = false;
+      {
+        CSRWExclusiveLock entryLock(entry.lock);
+        if (entry.id != source.backend || entry.epoch != source.epoch ||
+            !entry.clipboardAdded)
+          continue;
+        entry.clipboardAdded  = false;
+        entry.clipboardFailed = true;
+        restart = !entry.exposed;
+      }
+
+      m_clipboard.Unbind(source.backend, source.epoch);
+      if (restart)
+      {
+        RemoveServices(entry);
+        ScheduleRetry(entry);
+      }
+      break;
+    }
+  }
 }
 
 bool CTransportManager::SetupEntry(Entry& entry, size_t alignment)
@@ -770,12 +833,13 @@ void CTransportManager::ScheduleRetry(Entry& entry)
 
 void CTransportManager::RemoveServices(Entry& entry)
 {
-  BackendId id = 0;
-  uint32_t epoch = 0;
-  bool frameAdded = false;
-  bool frameLegacy = false;
-  bool controlAdded = false;
-  bool inputAdded = false;
+  BackendId id             = 0;
+  uint32_t  epoch          = 0;
+  bool      frameAdded     = false;
+  bool      frameLegacy    = false;
+  bool      controlAdded   = false;
+  bool      inputAdded     = false;
+  bool      clipboardAdded = false;
   {
     CSRWExclusiveLock entryLock(entry.lock);
     id                   = entry.id;
@@ -784,11 +848,13 @@ void CTransportManager::RemoveServices(Entry& entry)
     frameLegacy          = entry.frameLegacy;
     controlAdded         = entry.controlAdded;
     inputAdded           = entry.inputAdded;
+    clipboardAdded       = entry.clipboardAdded;
     entry.frameAdded     = false;
     entry.frameLegacy    = false;
     entry.texSink        = nullptr;
     entry.controlAdded   = false;
     entry.inputAdded     = false;
+    entry.clipboardAdded = false;
     entry.frameRetryAt   = 0;
   }
 
@@ -796,6 +862,8 @@ void CTransportManager::RemoveServices(Entry& entry)
   m_tex.Drop(id, epoch);
   if (inputAdded)
     m_input.Unbind(id, epoch);
+  if (clipboardAdded)
+    m_clipboard.Unbind(id, epoch);
   if (controlAdded)
     m_control.Remove(id, epoch);
   if (frameLegacy)
@@ -835,6 +903,8 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.controlAbsent     = false;
     entry.inputFailed       = false;
     entry.inputAbsent       = false;
+    entry.clipboardFailed   = false;
+    entry.clipboardAbsent   = false;
     entry.frameAbsent       = false;
     entry.serviceRetryAt    = 0;
     Seq::Inc(entry.epoch);
@@ -1601,6 +1671,7 @@ void CTransportManager::Stop()
   }
 
   m_input.Stop();
+  m_clipboard.Stop();
 
   for (unsigned i = count; i > 0; --i)
   {
