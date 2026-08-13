@@ -29,6 +29,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define COMPAT_CHUNK_SIZE (64U * 1024U)
+
 typedef struct ClipboardBinding
 {
   const LG_ClipboardOps * ops;
@@ -45,9 +47,32 @@ typedef struct ClipboardRequest
   uint32_t            remoteGeneration;
   LG_ClipboardData    type;
   LG_ClipboardReplyFn replyFn;
-  void              * opaque;
+  const LG_ClipboardStreamOps * stream;
+  void                        * opaque;
+
+  bool     started;
+  bool     blocked;
+  uint64_t sizeHint;
+  uint64_t offset;
+
+  uint8_t * buffer;
+  size_t    bufferSize;
+  size_t    bufferCapacity;
+
+  bool             compat;
+  unsigned int     compatPhase;
+  LG_ClipboardData compatType;
+  uint8_t        * compatData;
+  size_t           compatSize;
 }
 ClipboardRequest;
+
+enum
+{
+  COMPAT_BEGIN,
+  COMPAT_CHUNK,
+  COMPAT_END,
+};
 
 static struct
 {
@@ -76,12 +101,25 @@ static struct
   LG_ClipboardRequest remoteRequestId;
   LG_ClipboardRequest remoteTransferId;
   LG_ClipboardData    remoteRequestType;
+  bool                remoteStarted;
+  bool                remoteBlocked;
+  uint64_t            remoteSizeHint;
+  uint64_t            remoteOffset;
+
+  uint8_t * remoteBuffer;
+  size_t    remoteBufferSize;
+  size_t    remoteBufferCapacity;
+
+  bool         remoteCompat;
+  unsigned int remoteCompatPhase;
 
   LG_ClipboardRequest requestSerial;
   LG_ClipboardRequest transferSerial;
   struct ll         * requests;
 }
 clipboard;
+
+static LG_ClipboardResult pumpRemoteCompat(void);
 
 static bool validType(LG_ClipboardData type)
 {
@@ -132,13 +170,144 @@ static bool localHasTypeNL(LG_ClipboardData type)
   return false;
 }
 
-static void clearRemoteRequestNL(void)
+static bool validStream(const LG_ClipboardStreamOps * stream)
 {
+  return stream && stream->begin && stream->chunk &&
+    stream->end && stream->cancel;
+}
+
+static bool streamProvider(const LG_ClipboardOps * ops)
+{
+  return ops && ops->dataBegin && ops->dataChunk && ops->dataEnd &&
+    ops->dataCancel && ops->dataReady;
+}
+
+static bool growBuffer(uint8_t ** buffer, size_t * capacity, size_t size)
+{
+  if (size <= *capacity)
+    return true;
+
+  size_t next = *capacity ? *capacity : 4096;
+  while (next < size)
+  {
+    if (next > SIZE_MAX / 2)
+    {
+      next = size;
+      break;
+    }
+    next *= 2;
+  }
+
+  uint8_t * resized = realloc(*buffer, next);
+  if (!resized)
+    return false;
+
+  *buffer   = resized;
+  *capacity = next;
+  return true;
+}
+
+static LG_ClipboardResult legacyBegin(void * opaque,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  ClipboardRequest * request = opaque;
+  if (type != request->type ||
+      (sizeHint != LG_CLIPBOARD_SIZE_UNKNOWN && sizeHint > UINT32_MAX))
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  free(request->buffer);
+  request->buffer         = NULL;
+  request->bufferSize     = 0;
+  request->bufferCapacity = 0;
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static LG_ClipboardResult legacyChunk(void * opaque, uint64_t offset,
+    const void * data, size_t size)
+{
+  ClipboardRequest * request = opaque;
+  if (offset != request->bufferSize || !size || !data ||
+      offset > UINT32_MAX || size > UINT32_MAX - offset)
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  const size_t required = request->bufferSize + size;
+  if (!growBuffer(&request->buffer, &request->bufferCapacity, required))
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  memcpy(request->buffer + request->bufferSize, data, size);
+  request->bufferSize = required;
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static LG_ClipboardResult legacyEnd(void * opaque, uint64_t finalSize)
+{
+  ClipboardRequest * request = opaque;
+  if (finalSize != request->bufferSize || finalSize > UINT32_MAX)
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  request->replyFn(request->opaque, request->type,
+      request->bufferSize ? request->buffer : NULL,
+      (uint32_t)request->bufferSize);
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static void legacyCancel(void * opaque, LG_ClipboardCancelReason reason)
+{
+  (void)reason;
+  ClipboardRequest * request = opaque;
+  request->replyFn(
+      request->opaque, LG_CLIPBOARD_DATA_NONE, NULL, 0);
+}
+
+static const LG_ClipboardStreamOps legacyStream =
+{
+  .begin  = legacyBegin,
+  .chunk  = legacyChunk,
+  .end    = legacyEnd,
+  .cancel = legacyCancel,
+};
+
+static LG_ClipboardRequest clearRemoteRequestNL(void)
+{
+  const LG_ClipboardRequest transfer = clipboard.remoteRequest ?
+    clipboard.remoteTransferId : LG_CLIPBOARD_REQUEST_INVALID;
+  free(clipboard.remoteBuffer);
   clipboard.remoteRequest        = false;
   clipboard.remoteRequestBinding = (ClipboardBinding) { 0 };
   clipboard.remoteRequestId      = LG_CLIPBOARD_REQUEST_INVALID;
   clipboard.remoteTransferId     = LG_CLIPBOARD_REQUEST_INVALID;
   clipboard.remoteRequestType    = LG_CLIPBOARD_DATA_NONE;
+  clipboard.remoteStarted        = false;
+  clipboard.remoteBlocked        = false;
+  clipboard.remoteSizeHint       = LG_CLIPBOARD_SIZE_UNKNOWN;
+  clipboard.remoteOffset         = 0;
+  clipboard.remoteBuffer         = NULL;
+  clipboard.remoteBufferSize     = 0;
+  clipboard.remoteBufferCapacity = 0;
+  clipboard.remoteCompat         = false;
+  clipboard.remoteCompatPhase    = COMPAT_BEGIN;
+  return transfer;
+}
+
+static void freeRequest(ClipboardRequest * request)
+{
+  if (!request)
+    return;
+
+  free(request->compatData);
+  free(request->buffer);
+  free(request);
+}
+
+static void * requestStreamOpaque(ClipboardRequest * request)
+{
+  return request->replyFn ? request : request->opaque;
+}
+
+static void cancelRequest(ClipboardRequest * request,
+    LG_ClipboardCancelReason reason)
+{
+  request->stream->cancel(requestStreamOpaque(request), reason);
 }
 
 static ClipboardRequest * takeCancelableRequest(
@@ -187,20 +356,20 @@ static ClipboardRequest * takeRequest(LG_ClipboardRequest id)
 
 /* callbackLock must be held while completing canceled requests. */
 static void cancelRequestsNL(const ClipboardBinding * binding,
-    uint32_t generation, bool all)
+    uint32_t generation, bool all, LG_ClipboardCancelReason reason)
 {
   ClipboardRequest * request;
   while ((request = takeCancelableRequest(binding, generation, all)))
   {
-    request->replyFn(
-        request->opaque, LG_CLIPBOARD_DATA_NONE, NULL, 0);
-    free(request);
+    cancelRequest(request, reason);
+    freeRequest(request);
   }
 }
 
 static void resetRemote(void)
 {
   bool release;
+  LG_ClipboardRequest transfer;
 
   LG_LOCK(clipboard.requestLock);
   LG_LOCK(clipboard.stateLock);
@@ -210,12 +379,16 @@ static void resetRemote(void)
   clipboard.remoteType       = LG_CLIPBOARD_DATA_NONE;
   clipboard.remoteGeneration = nextGeneration(
       clipboard.remoteGeneration);
-  clearRemoteRequestNL();
+  transfer = clearRemoteRequestNL();
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
   LG_LOCK(clipboard.callbackLock);
-  cancelRequestsNL(NULL, 0, true);
+  cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+  if (transfer != LG_CLIPBOARD_REQUEST_INVALID &&
+      g_state.ds->cbRequestCancel)
+    g_state.ds->cbRequestCancel(
+        transfer, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
   LG_LOCK(clipboard.stateLock);
   release = release && clipboard.localAvailable &&
     !clipboard.remoteNotice;
@@ -228,7 +401,8 @@ static void resetRemote(void)
 static bool validOps(const LG_ClipboardOps * ops)
 {
   return ops && ops->name && ops->attach && ops->detach &&
-    ops->release && ops->notifyTypes && ops->data && ops->request;
+    ops->release && ops->notifyTypes && ops->request &&
+    (ops->data || streamProvider(ops));
 }
 
 static ClipboardBinding makeBinding(
@@ -300,6 +474,7 @@ static void eventNotice(void * opaque,
   LG_UNLOCK_SHARED(clipboard.activeLock);
   bool notice;
   uint32_t generation;
+  LG_ClipboardRequest transfer;
 
   LG_LOCK(clipboard.requestLock);
   LG_LOCK(clipboard.stateLock);
@@ -308,13 +483,17 @@ static void eventNotice(void * opaque,
   clipboard.remoteGeneration = nextGeneration(
       clipboard.remoteGeneration);
   generation = clipboard.remoteGeneration;
-  clearRemoteRequestNL();
+  transfer = clearRemoteRequestNL();
   notice = clipboard.localAvailable && g_params.clipboardToLocal;
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
   LG_LOCK(clipboard.callbackLock);
-  cancelRequestsNL(&current, generation, false);
+  cancelRequestsNL(&current, generation, false,
+      LG_CLIPBOARD_CANCEL_REPLACED);
+  if (transfer != LG_CLIPBOARD_REQUEST_INVALID &&
+      g_state.ds->cbRequestCancel)
+    g_state.ds->cbRequestCancel(transfer, LG_CLIPBOARD_CANCEL_REPLACED);
   LG_LOCK(clipboard.stateLock);
   notice = notice && clipboard.localAvailable &&
     clipboard.remoteNotice &&
@@ -328,31 +507,36 @@ static void eventNotice(void * opaque,
   LG_UNLOCK(clipboard.callbackLock);
 }
 
-static void eventData(void * opaque, LG_ClipboardRequest id,
-    LG_ClipboardData type, const void * data, size_t size)
+static bool returnRequest(ClipboardRequest * request)
 {
-  ClipboardBinding * binding = opaque;
+  if (ll_push(clipboard.requests, request))
+    return true;
+
+  cancelRequest(request, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+  freeRequest(request);
+  return false;
+}
+
+/* callbackLock must be held. The returned request has been removed from the
+ * request list and must either be returned to it or freed. */
+static ClipboardRequest * takeIncoming(ClipboardBinding * binding,
+    LG_ClipboardRequest id, ClipboardBinding * current)
+{
   if (id == LG_CLIPBOARD_REQUEST_INVALID)
-    return;
+    return NULL;
 
   LG_LOCK_SHARED(clipboard.activeLock);
   if (!bindingActiveNL(binding))
   {
     LG_UNLOCK_SHARED(clipboard.activeLock);
-    return;
+    return NULL;
   }
-
-  const ClipboardBinding current = *binding;
+  *current = *binding;
   LG_UNLOCK_SHARED(clipboard.activeLock);
-  LG_LOCK(clipboard.callbackLock);
+
   ClipboardRequest * request = takeRequest(id);
   if (!request)
-  {
-    LG_UNLOCK(clipboard.callbackLock);
-    DEBUG_WARN("Ignoring stale clipboard data from %s",
-        current.ops->name);
-    return;
-  }
+    return NULL;
 
   LG_LOCK(clipboard.stateLock);
   const bool deliver = clipboard.localAvailable &&
@@ -361,22 +545,333 @@ static void eventData(void * opaque, LG_ClipboardRequest id,
   LG_UNLOCK(clipboard.stateLock);
 
   LG_LOCK_SHARED(clipboard.activeLock);
-  const bool active = bindingActiveNL(&current);
+  const bool active = bindingActiveNL(current);
   LG_UNLOCK_SHARED(clipboard.activeLock);
-  if (!deliver || !active || !bindingEqual(&request->binding, &current) ||
-      type != request->type || !validType(type) ||
-      size > UINT32_MAX || (size && !data))
+  if (deliver && active && bindingEqual(&request->binding, current))
+    return request;
+
+  cancelRequest(request, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+  freeRequest(request);
+  return NULL;
+}
+
+static LG_ClipboardResult incomingBegin(ClipboardRequest * request,
+    LG_ClipboardData type, uint64_t sizeHint, bool * terminal)
+{
+  if (request->started || request->blocked || type != request->type ||
+      !validType(type))
+    goto invalid;
+
+  const LG_ClipboardResult result = request->stream->begin(
+      requestStreamOpaque(request), type, sizeHint);
+  switch (result)
   {
-    DEBUG_ERROR("Invalid clipboard response from %s", current.ops->name);
-    request->replyFn(
-        request->opaque, LG_CLIPBOARD_DATA_NONE, NULL, 0);
+    case LG_CLIPBOARD_RESULT_ACCEPTED:
+      request->started  = true;
+      request->sizeHint = sizeHint;
+      request->offset   = 0;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_BLOCKED:
+      request->blocked = true;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_FAILED:
+      break;
+  }
+
+invalid:
+  cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+  *terminal = true;
+  return LG_CLIPBOARD_RESULT_FAILED;
+}
+
+static LG_ClipboardResult incomingChunk(ClipboardRequest * request,
+    uint64_t offset, const void * data, size_t size, bool * terminal)
+{
+  if (!request->started || request->blocked || offset != request->offset ||
+      !data || !size || size > UINT64_MAX - offset)
+    goto invalid;
+
+  const LG_ClipboardResult result = request->stream->chunk(
+      requestStreamOpaque(request), offset, data, size);
+  switch (result)
+  {
+    case LG_CLIPBOARD_RESULT_ACCEPTED:
+      request->offset += size;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_BLOCKED:
+      request->blocked = true;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_FAILED:
+      break;
+  }
+
+invalid:
+  cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+  *terminal = true;
+  return LG_CLIPBOARD_RESULT_FAILED;
+}
+
+static LG_ClipboardResult incomingEnd(ClipboardRequest * request,
+    uint64_t finalSize, bool * terminal)
+{
+  if (!request->started || request->blocked || finalSize != request->offset)
+    goto invalid;
+
+  const LG_ClipboardResult result = request->stream->end(
+      requestStreamOpaque(request), finalSize);
+  switch (result)
+  {
+    case LG_CLIPBOARD_RESULT_ACCEPTED:
+      *terminal = true;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_BLOCKED:
+      request->blocked = true;
+      return result;
+
+    case LG_CLIPBOARD_RESULT_FAILED:
+      break;
+  }
+
+invalid:
+  cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+  *terminal = true;
+  return LG_CLIPBOARD_RESULT_FAILED;
+}
+
+static LG_ClipboardResult pumpIncomingCompat(ClipboardRequest * request,
+    bool * terminal)
+{
+  for (;;)
+  {
+    LG_ClipboardResult result;
+    switch (request->compatPhase)
+    {
+      case COMPAT_BEGIN:
+        result = incomingBegin(request, request->compatType,
+            request->compatSize, terminal);
+        if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
+          return result;
+        request->compatPhase = COMPAT_CHUNK;
+        break;
+
+      case COMPAT_CHUNK:
+        if (request->offset < request->compatSize)
+        {
+          const size_t remaining = request->compatSize - request->offset;
+          const size_t size = remaining < COMPAT_CHUNK_SIZE ?
+            remaining : COMPAT_CHUNK_SIZE;
+          result = incomingChunk(request, request->offset,
+              request->compatData + request->offset, size, terminal);
+          if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
+            return result;
+          break;
+        }
+        request->compatPhase = COMPAT_END;
+        break;
+
+      case COMPAT_END:
+        return incomingEnd(request, request->compatSize, terminal);
+
+      default:
+        cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+        *terminal = true;
+        return LG_CLIPBOARD_RESULT_FAILED;
+    }
+  }
+}
+
+static LG_ClipboardResult eventDataBegin(void * opaque,
+    LG_ClipboardRequest id, LG_ClipboardData type, uint64_t sizeHint)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardBinding current;
+  ClipboardRequest * request = takeIncoming(binding, id, &current);
+  if (!request)
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  bool terminal = false;
+  LG_ClipboardResult result;
+  if (request->compat)
+  {
+    cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+    terminal = true;
+    result = LG_CLIPBOARD_RESULT_FAILED;
   }
   else
-    request->replyFn(
-        request->opaque, type, data, (uint32_t)size);
-
+    result = incomingBegin(request, type, sizeHint, &terminal);
+  if (!terminal && !returnRequest(request))
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (terminal)
+    freeRequest(request);
   LG_UNLOCK(clipboard.callbackLock);
-  free(request);
+  return result;
+}
+
+static LG_ClipboardResult eventDataChunk(void * opaque,
+    LG_ClipboardRequest id, uint64_t offset, const void * data, size_t size)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardBinding current;
+  ClipboardRequest * request = takeIncoming(binding, id, &current);
+  if (!request)
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  bool terminal = false;
+  LG_ClipboardResult result;
+  if (request->compat)
+  {
+    cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+    terminal = true;
+    result = LG_CLIPBOARD_RESULT_FAILED;
+  }
+  else
+    result = incomingChunk(request, offset, data, size, &terminal);
+  if (!terminal && !returnRequest(request))
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (terminal)
+    freeRequest(request);
+  LG_UNLOCK(clipboard.callbackLock);
+  return result;
+}
+
+static LG_ClipboardResult eventDataEnd(void * opaque,
+    LG_ClipboardRequest id, uint64_t finalSize)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardBinding current;
+  ClipboardRequest * request = takeIncoming(binding, id, &current);
+  if (!request)
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  bool terminal = false;
+  LG_ClipboardResult result;
+  if (request->compat)
+  {
+    cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+    terminal = true;
+    result = LG_CLIPBOARD_RESULT_FAILED;
+  }
+  else
+    result = incomingEnd(request, finalSize, &terminal);
+  if (!terminal && !returnRequest(request))
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (terminal)
+    freeRequest(request);
+  LG_UNLOCK(clipboard.callbackLock);
+  return result;
+}
+
+static void eventDataCancel(void * opaque, LG_ClipboardRequest id,
+    LG_ClipboardCancelReason reason)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardBinding current;
+  ClipboardRequest * request = takeIncoming(binding, id, &current);
+  if (request)
+  {
+    cancelRequest(request, reason);
+    freeRequest(request);
+  }
+  LG_UNLOCK(clipboard.callbackLock);
+}
+
+static void eventData(void * opaque, LG_ClipboardRequest id,
+    LG_ClipboardData type, const void * data, size_t size)
+{
+  ClipboardBinding * binding = opaque;
+  if (type == LG_CLIPBOARD_DATA_NONE)
+  {
+    eventDataCancel(opaque, id, LG_CLIPBOARD_CANCEL_ABORTED);
+    return;
+  }
+
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardBinding current;
+  ClipboardRequest * request = takeIncoming(binding, id, &current);
+  if (!request)
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    DEBUG_WARN("Ignoring stale clipboard data");
+    return;
+  }
+
+  bool terminal = false;
+  LG_ClipboardResult result = LG_CLIPBOARD_RESULT_FAILED;
+  if (type != request->type || !validType(type) || (size && !data) ||
+      request->started || request->compat)
+  {
+    cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+    terminal = true;
+  }
+  else if (request->replyFn && size <= UINT32_MAX)
+  {
+    request->replyFn(request->opaque, type, data, (uint32_t)size);
+    terminal = true;
+    result = LG_CLIPBOARD_RESULT_ACCEPTED;
+  }
+  else if (!request->replyFn)
+  {
+    if (size)
+    {
+      request->compatData = malloc(size);
+      if (request->compatData)
+        memcpy(request->compatData, data, size);
+    }
+    if (!size || request->compatData)
+    {
+      request->compat      = true;
+      request->compatPhase = COMPAT_BEGIN;
+      request->compatType  = type;
+      request->compatSize  = size;
+      result = pumpIncomingCompat(request, &terminal);
+    }
+    else
+    {
+      cancelRequest(request, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+      terminal = true;
+    }
+  }
+  else
+  {
+    cancelRequest(request, LG_CLIPBOARD_CANCEL_INVALID);
+    terminal = true;
+  }
+
+  if (!terminal && !returnRequest(request))
+    result = LG_CLIPBOARD_RESULT_FAILED;
+  if (terminal)
+    freeRequest(request);
+  LG_UNLOCK(clipboard.callbackLock);
+
+  if (result == LG_CLIPBOARD_RESULT_FAILED)
+    DEBUG_ERROR("Invalid clipboard response from %s", current.ops->name);
 }
 
 static void eventRelease(void * opaque)
@@ -392,6 +887,7 @@ static void eventRelease(void * opaque)
   LG_UNLOCK_SHARED(clipboard.activeLock);
 
   bool release;
+  LG_ClipboardRequest transfer;
   LG_LOCK(clipboard.requestLock);
   LG_LOCK(clipboard.stateLock);
   release = clipboard.remoteNotice && clipboard.localAvailable &&
@@ -400,11 +896,15 @@ static void eventRelease(void * opaque)
   clipboard.remoteType       = LG_CLIPBOARD_DATA_NONE;
   clipboard.remoteGeneration = nextGeneration(
       clipboard.remoteGeneration);
+  transfer = clearRemoteRequestNL();
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
   LG_LOCK(clipboard.callbackLock);
-  cancelRequestsNL(NULL, 0, true);
+  cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_REPLACED);
+  if (transfer != LG_CLIPBOARD_REQUEST_INVALID &&
+      g_state.ds->cbRequestCancel)
+    g_state.ds->cbRequestCancel(transfer, LG_CLIPBOARD_CANCEL_REPLACED);
   LG_LOCK(clipboard.stateLock);
   release = release && clipboard.localAvailable &&
     !clipboard.remoteNotice;
@@ -474,12 +974,68 @@ static bool eventRequest(void * opaque, LG_ClipboardRequest id,
   return deliver && active;
 }
 
+static void eventDataReady(void * opaque, LG_ClipboardRequest id)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  LG_LOCK(clipboard.writeLock);
+  LG_LOCK_SHARED(clipboard.activeLock);
+  LG_LOCK(clipboard.stateLock);
+  const bool valid = bindingActiveNL(binding) && clipboard.remoteRequest &&
+    clipboard.remoteRequestId == id && clipboard.remoteBlocked &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  const bool compat = valid && clipboard.remoteCompat;
+  const LG_ClipboardRequest transfer = valid ?
+    clipboard.remoteTransferId : LG_CLIPBOARD_REQUEST_INVALID;
+  if (valid)
+    clipboard.remoteBlocked = false;
+  LG_UNLOCK(clipboard.stateLock);
+
+  if (compat)
+    pumpRemoteCompat();
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.writeLock);
+  if (!compat && valid && g_state.ds->cbRequestReady)
+    g_state.ds->cbRequestReady(transfer);
+  LG_UNLOCK(clipboard.callbackLock);
+}
+
+static void eventRequestCancel(void * opaque, LG_ClipboardRequest id,
+    LG_ClipboardCancelReason reason)
+{
+  ClipboardBinding * binding = opaque;
+  LG_LOCK(clipboard.callbackLock);
+  LG_LOCK(clipboard.writeLock);
+  LG_LOCK_SHARED(clipboard.activeLock);
+  LG_LOCK(clipboard.stateLock);
+  const bool valid = bindingActiveNL(binding) && clipboard.remoteRequest &&
+    clipboard.remoteRequestId == id &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  const LG_ClipboardRequest transfer = valid ?
+    clipboard.remoteTransferId : LG_CLIPBOARD_REQUEST_INVALID;
+  if (valid)
+    clearRemoteRequestNL();
+  LG_UNLOCK(clipboard.stateLock);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.writeLock);
+
+  if (valid && g_state.ds->cbRequestCancel)
+    g_state.ds->cbRequestCancel(transfer, reason);
+  LG_UNLOCK(clipboard.callbackLock);
+}
+
 static const LG_ClipboardEventOps eventOps =
 {
-  .notice  = eventNotice,
-  .data    = eventData,
-  .release = eventRelease,
-  .request = eventRequest,
+  .notice        = eventNotice,
+  .data          = eventData,
+  .dataBegin     = eventDataBegin,
+  .dataChunk     = eventDataChunk,
+  .dataEnd       = eventDataEnd,
+  .dataCancel    = eventDataCancel,
+  .dataReady     = eventDataReady,
+  .requestCancel = eventRequestCancel,
+  .release       = eventRelease,
+  .request       = eventRequest,
 };
 
 /* providerLock must be held. dropActive suppresses all calls into an endpoint
@@ -633,7 +1189,7 @@ void lgClipboard_free(void)
   lgClipboard_setTransport(NULL, NULL);
   lgClipboard_setFallback(NULL, NULL);
   LG_LOCK(clipboard.callbackLock);
-  cancelRequestsNL(NULL, 0, true);
+  cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
   LG_UNLOCK(clipboard.callbackLock);
   if (clipboard.requests)
   {
@@ -655,6 +1211,7 @@ void lgClipboard_setLocalAvailable(bool available)
   bool notice;
   bool release;
   LG_ClipboardData type;
+  LG_ClipboardRequest transfer = LG_CLIPBOARD_REQUEST_INVALID;
 
   LG_LOCK(clipboard.callbackLock);
   LG_LOCK(clipboard.requestLock);
@@ -666,7 +1223,7 @@ void lgClipboard_setLocalAvailable(bool available)
     g_params.clipboardToLocal;
   type = clipboard.remoteType;
   if (!available)
-    clearRemoteRequestNL();
+    transfer = clearRemoteRequestNL();
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
@@ -674,7 +1231,11 @@ void lgClipboard_setLocalAvailable(bool available)
     g_state.ds->cbNotice(type);
   if (!available)
   {
-    cancelRequestsNL(NULL, 0, true);
+    cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+    if (transfer != LG_CLIPBOARD_REQUEST_INVALID &&
+        g_state.ds->cbRequestCancel)
+      g_state.ds->cbRequestCancel(
+          transfer, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
     if (release)
       g_state.ds->cbRelease();
   }
@@ -768,6 +1329,302 @@ void lgClipboard_notifyTypes(
   LG_UNLOCK(clipboard.writeLock);
 }
 
+/* writeLock and activeLock must be held. */
+static bool cancelRemoteNL(LG_ClipboardCancelReason reason)
+{
+  const bool result = streamProvider(clipboard.active.ops) ?
+    clipboard.active.ops->dataCancel(clipboard.active.opaque,
+        clipboard.remoteRequestId, reason) :
+    clipboard.active.ops->data(clipboard.active.opaque,
+        clipboard.remoteRequestId, LG_CLIPBOARD_DATA_NONE, NULL, 0);
+  clearRemoteRequestNL();
+  return result;
+}
+
+/* writeLock and activeLock must be held. */
+static LG_ClipboardResult sendBegin(LG_ClipboardRequest transfer,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  LG_LOCK(clipboard.stateLock);
+  const bool matches = clipboard.remoteRequest &&
+    clipboard.remoteTransferId == transfer && clipboard.active.ops &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  if (!matches)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (clipboard.remoteBlocked)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_BLOCKED;
+  }
+  if (clipboard.remoteStarted || clipboard.remoteRequestType != type ||
+      !validType(type))
+  {
+    cancelRemoteNL(LG_CLIPBOARD_CANCEL_INVALID);
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  LG_ClipboardResult result;
+  if (streamProvider(clipboard.active.ops))
+    result = clipboard.active.ops->dataBegin(clipboard.active.opaque,
+        clipboard.remoteRequestId, type, sizeHint);
+  else if (sizeHint != LG_CLIPBOARD_SIZE_UNKNOWN && sizeHint > SIZE_MAX)
+    result = LG_CLIPBOARD_RESULT_FAILED;
+  else
+  {
+    free(clipboard.remoteBuffer);
+    clipboard.remoteBuffer         = NULL;
+    clipboard.remoteBufferSize     = 0;
+    clipboard.remoteBufferCapacity = 0;
+    result = LG_CLIPBOARD_RESULT_ACCEPTED;
+  }
+
+  if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    clipboard.remoteStarted  = true;
+    clipboard.remoteSizeHint = sizeHint;
+    clipboard.remoteOffset   = 0;
+  }
+  else if (result == LG_CLIPBOARD_RESULT_BLOCKED)
+    clipboard.remoteBlocked = true;
+  else
+    clearRemoteRequestNL();
+  LG_UNLOCK(clipboard.stateLock);
+  return result;
+}
+
+/* writeLock and activeLock must be held. */
+static LG_ClipboardResult sendChunk(LG_ClipboardRequest transfer,
+    uint64_t offset, const void * data, size_t size)
+{
+  LG_LOCK(clipboard.stateLock);
+  const bool matches = clipboard.remoteRequest &&
+    clipboard.remoteTransferId == transfer && clipboard.active.ops &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  if (!matches)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (clipboard.remoteBlocked)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_BLOCKED;
+  }
+  if (!clipboard.remoteStarted || clipboard.remoteOffset != offset ||
+      !data || !size || size > UINT64_MAX - offset)
+  {
+    cancelRemoteNL(LG_CLIPBOARD_CANCEL_INVALID);
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  LG_ClipboardResult result;
+  if (streamProvider(clipboard.active.ops))
+    result = clipboard.active.ops->dataChunk(clipboard.active.opaque,
+        clipboard.remoteRequestId, offset, data, size);
+  else if (offset > SIZE_MAX || size > SIZE_MAX - (size_t)offset ||
+      !growBuffer(&clipboard.remoteBuffer,
+        &clipboard.remoteBufferCapacity, (size_t)offset + size))
+    result = LG_CLIPBOARD_RESULT_FAILED;
+  else
+  {
+    memcpy(clipboard.remoteBuffer + offset, data, size);
+    clipboard.remoteBufferSize = (size_t)offset + size;
+    result = LG_CLIPBOARD_RESULT_ACCEPTED;
+  }
+
+  if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
+    clipboard.remoteOffset += size;
+  else if (result == LG_CLIPBOARD_RESULT_BLOCKED)
+    clipboard.remoteBlocked = true;
+  else
+    clearRemoteRequestNL();
+  LG_UNLOCK(clipboard.stateLock);
+  return result;
+}
+
+/* writeLock and activeLock must be held. */
+static LG_ClipboardResult sendEnd(LG_ClipboardRequest transfer,
+    uint64_t finalSize)
+{
+  LG_LOCK(clipboard.stateLock);
+  const bool matches = clipboard.remoteRequest &&
+    clipboard.remoteTransferId == transfer && clipboard.active.ops &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  if (!matches)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (clipboard.remoteBlocked)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_BLOCKED;
+  }
+  if (!clipboard.remoteStarted || clipboard.remoteOffset != finalSize)
+  {
+    cancelRemoteNL(LG_CLIPBOARD_CANCEL_INVALID);
+    LG_UNLOCK(clipboard.stateLock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  LG_ClipboardResult result;
+  if (streamProvider(clipboard.active.ops))
+    result = clipboard.active.ops->dataEnd(clipboard.active.opaque,
+        clipboard.remoteRequestId, finalSize);
+  else
+    result = clipboard.active.ops->data(clipboard.active.opaque,
+        clipboard.remoteRequestId, clipboard.remoteRequestType,
+        clipboard.remoteBufferSize ? clipboard.remoteBuffer : NULL,
+        clipboard.remoteBufferSize) ?
+      LG_CLIPBOARD_RESULT_ACCEPTED : LG_CLIPBOARD_RESULT_FAILED;
+
+  if (result == LG_CLIPBOARD_RESULT_BLOCKED)
+    clipboard.remoteBlocked = true;
+  else
+    clearRemoteRequestNL();
+  LG_UNLOCK(clipboard.stateLock);
+  return result;
+}
+
+/* writeLock and activeLock must be held. */
+static bool sendCancel(LG_ClipboardRequest transfer,
+    LG_ClipboardCancelReason reason)
+{
+  LG_LOCK(clipboard.stateLock);
+  const bool valid = clipboard.remoteRequest &&
+    clipboard.remoteTransferId == transfer && clipboard.active.ops &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  if (!valid)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    return false;
+  }
+
+  const bool result = cancelRemoteNL(reason);
+  LG_UNLOCK(clipboard.stateLock);
+  return result;
+}
+
+static LG_ClipboardResult pumpRemoteCompat(void)
+{
+  for (;;)
+  {
+    LG_LOCK(clipboard.stateLock);
+    if (!clipboard.remoteRequest || !clipboard.remoteCompat)
+    {
+      LG_UNLOCK(clipboard.stateLock);
+      return LG_CLIPBOARD_RESULT_FAILED;
+    }
+    const LG_ClipboardRequest transfer = clipboard.remoteTransferId;
+    const LG_ClipboardData type = clipboard.remoteRequestType;
+    const unsigned int phase = clipboard.remoteCompatPhase;
+    const uint64_t offset = clipboard.remoteOffset;
+    const size_t total = clipboard.remoteBufferSize;
+    const uint8_t * data = clipboard.remoteBuffer;
+    LG_UNLOCK(clipboard.stateLock);
+
+    LG_ClipboardResult result;
+    switch (phase)
+    {
+      case COMPAT_BEGIN:
+        result = sendBegin(transfer, type, total);
+        if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
+          return result;
+        LG_LOCK(clipboard.stateLock);
+        if (clipboard.remoteRequest)
+          clipboard.remoteCompatPhase = COMPAT_CHUNK;
+        LG_UNLOCK(clipboard.stateLock);
+        break;
+
+      case COMPAT_CHUNK:
+        if (offset < total)
+        {
+          const size_t remaining = total - offset;
+          const size_t size = remaining < COMPAT_CHUNK_SIZE ?
+            remaining : COMPAT_CHUNK_SIZE;
+          result = sendChunk(transfer, offset, data + offset, size);
+          if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
+            return result;
+          break;
+        }
+        LG_LOCK(clipboard.stateLock);
+        if (clipboard.remoteRequest)
+          clipboard.remoteCompatPhase = COMPAT_END;
+        LG_UNLOCK(clipboard.stateLock);
+        break;
+
+      case COMPAT_END:
+        return sendEnd(transfer, total);
+
+      default:
+        sendCancel(transfer, LG_CLIPBOARD_CANCEL_INVALID);
+        return LG_CLIPBOARD_RESULT_FAILED;
+    }
+  }
+}
+
+LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest transfer,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  if (!g_params.clipboardToVM ||
+      transfer == LG_CLIPBOARD_REQUEST_INVALID)
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  LG_LOCK(clipboard.writeLock);
+  LG_LOCK_SHARED(clipboard.activeLock);
+  LG_LOCK(clipboard.stateLock);
+  const bool compat = clipboard.remoteCompat;
+  LG_UNLOCK(clipboard.stateLock);
+  const LG_ClipboardResult result = compat ?
+    LG_CLIPBOARD_RESULT_FAILED : sendBegin(transfer, type, sizeHint);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.writeLock);
+  return result;
+}
+
+LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest transfer,
+    uint64_t offset, const void * data, size_t size)
+{
+  if (!g_params.clipboardToVM ||
+      transfer == LG_CLIPBOARD_REQUEST_INVALID)
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  LG_LOCK(clipboard.writeLock);
+  LG_LOCK_SHARED(clipboard.activeLock);
+  LG_LOCK(clipboard.stateLock);
+  const bool compat = clipboard.remoteCompat;
+  LG_UNLOCK(clipboard.stateLock);
+  const LG_ClipboardResult result = compat ?
+    LG_CLIPBOARD_RESULT_FAILED : sendChunk(transfer, offset, data, size);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.writeLock);
+  return result;
+}
+
+LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest transfer,
+    uint64_t finalSize)
+{
+  if (!g_params.clipboardToVM ||
+      transfer == LG_CLIPBOARD_REQUEST_INVALID)
+    return LG_CLIPBOARD_RESULT_FAILED;
+
+  LG_LOCK(clipboard.writeLock);
+  LG_LOCK_SHARED(clipboard.activeLock);
+  LG_LOCK(clipboard.stateLock);
+  const bool compat = clipboard.remoteCompat;
+  LG_UNLOCK(clipboard.stateLock);
+  const LG_ClipboardResult result = compat ?
+    LG_CLIPBOARD_RESULT_FAILED : sendEnd(transfer, finalSize);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.writeLock);
+  return result;
+}
+
 void lgClipboard_data(LG_ClipboardRequest transfer,
     LG_ClipboardData type, const void * data, size_t size)
 {
@@ -778,35 +1635,62 @@ void lgClipboard_data(LG_ClipboardRequest transfer,
   LG_LOCK(clipboard.writeLock);
   LG_LOCK_SHARED(clipboard.activeLock);
   LG_LOCK(clipboard.stateLock);
-
   const bool matches = clipboard.remoteRequest &&
     clipboard.remoteTransferId == transfer;
-  if (!matches)
+  const bool provider = matches && clipboard.active.ops &&
+    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
+  const bool valid = provider && clipboard.remoteRequestType == type &&
+    validType(type) && (!size || data) && !clipboard.remoteStarted &&
+    !clipboard.remoteBlocked && !clipboard.remoteCompat;
+
+  if (!valid)
   {
     LG_UNLOCK(clipboard.stateLock);
+    if (provider)
+      sendCancel(transfer, LG_CLIPBOARD_CANCEL_INVALID);
     LG_UNLOCK_SHARED(clipboard.activeLock);
     LG_UNLOCK(clipboard.writeLock);
+    DEBUG_WARN("Ignoring unexpected local clipboard data");
     return;
   }
 
-  const LG_ClipboardRequest request = clipboard.remoteRequestId;
-  const bool provider = clipboard.active.ops &&
-    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
-  const bool valid = provider && clipboard.remoteRequestType == type &&
-    validType(type) && (!size || data);
-  clearRemoteRequestNL();
+  if (!streamProvider(clipboard.active.ops))
+  {
+    const LG_ClipboardRequest request = clipboard.remoteRequestId;
+    clearRemoteRequestNL();
+    LG_UNLOCK(clipboard.stateLock);
+    const bool result = clipboard.active.ops->data(clipboard.active.opaque,
+        request, type, data, size);
+    LG_UNLOCK_SHARED(clipboard.activeLock);
+    LG_UNLOCK(clipboard.writeLock);
+    if (!result)
+      DEBUG_WARN("Failed to send remote clipboard data");
+    return;
+  }
+
+  uint8_t * copy = size ? malloc(size) : NULL;
+  if (size && !copy)
+  {
+    LG_UNLOCK(clipboard.stateLock);
+    sendCancel(transfer, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+    LG_UNLOCK_SHARED(clipboard.activeLock);
+    LG_UNLOCK(clipboard.writeLock);
+    DEBUG_ERROR("Out of memory");
+    return;
+  }
+  if (size)
+    memcpy(copy, data, size);
+  clipboard.remoteBuffer         = copy;
+  clipboard.remoteBufferSize     = size;
+  clipboard.remoteBufferCapacity = size;
+  clipboard.remoteCompat         = true;
+  clipboard.remoteCompatPhase    = COMPAT_BEGIN;
   LG_UNLOCK(clipboard.stateLock);
 
-  const bool result = provider && clipboard.active.ops->data(
-      clipboard.active.opaque, request,
-      valid ? type : LG_CLIPBOARD_DATA_NONE,
-      valid ? data : NULL, valid ? size : 0);
+  const LG_ClipboardResult result = pumpRemoteCompat();
   LG_UNLOCK_SHARED(clipboard.activeLock);
   LG_UNLOCK(clipboard.writeLock);
-
-  if (!valid)
-    DEBUG_WARN("Ignoring unexpected local clipboard data");
-  else if (!result)
+  if (result == LG_CLIPBOARD_RESULT_FAILED)
     DEBUG_WARN("Failed to send remote clipboard data");
 }
 
@@ -818,19 +1702,8 @@ void lgClipboard_abort(LG_ClipboardRequest transfer)
 
   LG_LOCK(clipboard.writeLock);
   LG_LOCK_SHARED(clipboard.activeLock);
-  LG_LOCK(clipboard.stateLock);
-  const bool matches = clipboard.remoteRequest &&
-    clipboard.remoteTransferId == transfer;
-  const bool valid = matches && clipboard.active.ops &&
-    bindingEqual(&clipboard.remoteRequestBinding, &clipboard.active);
-  const LG_ClipboardRequest request = clipboard.remoteRequestId;
-  if (matches)
-    clearRemoteRequestNL();
-  LG_UNLOCK(clipboard.stateLock);
-
-  const bool result = !valid || clipboard.active.ops->data(
-      clipboard.active.opaque, request,
-      LG_CLIPBOARD_DATA_NONE, NULL, 0);
+  const bool result = sendCancel(
+      transfer, LG_CLIPBOARD_CANCEL_ABORTED);
   LG_UNLOCK_SHARED(clipboard.activeLock);
   LG_UNLOCK(clipboard.writeLock);
 
@@ -838,14 +1711,17 @@ void lgClipboard_abort(LG_ClipboardRequest transfer)
     DEBUG_WARN("Failed to abort remote clipboard data");
 }
 
-bool lgClipboard_request(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque)
+static bool requestClipboard(LG_ClipboardData type,
+    LG_ClipboardReplyFn replyFn, const LG_ClipboardStreamOps * stream,
+    void * opaque, LG_ClipboardRequest * resultId)
 {
+  if (resultId)
+    *resultId = LG_CLIPBOARD_REQUEST_INVALID;
   if (!g_params.clipboardToLocal || !validType(type) ||
-      !replyFn || !clipboard.requests)
+      (!replyFn && !validStream(stream)) || !clipboard.requests)
     return false;
 
-  ClipboardRequest * request = malloc(sizeof(*request));
+  ClipboardRequest * request = calloc(1, sizeof(*request));
   if (!request)
   {
     DEBUG_ERROR("Out of memory");
@@ -856,7 +1732,7 @@ bool lgClipboard_request(LG_ClipboardData type,
   if (!clipboard.active.ops)
   {
     LG_UNLOCK_SHARED(clipboard.activeLock);
-    free(request);
+    freeRequest(request);
     return false;
   }
 
@@ -876,7 +1752,9 @@ bool lgClipboard_request(LG_ClipboardData type,
       .remoteGeneration = generation,
       .type             = type,
       .replyFn          = replyFn,
+      .stream           = replyFn ? &legacyStream : stream,
       .opaque           = opaque,
+      .sizeHint         = LG_CLIPBOARD_SIZE_UNKNOWN,
     };
   }
   LG_UNLOCK(clipboard.stateLock);
@@ -891,16 +1769,99 @@ bool lgClipboard_request(LG_ClipboardData type,
   LG_UNLOCK_SHARED(clipboard.activeLock);
 
   if (result)
+  {
+    if (resultId)
+      *resultId = id;
     return true;
+  }
   if (queued)
   {
     ClipboardRequest * failed = takeRequest(id);
     if (!failed)
+    {
+      if (resultId)
+        *resultId = id;
       return true;
-    free(failed);
+    }
+    freeRequest(failed);
     return false;
   }
 
-  free(request);
+  freeRequest(request);
   return false;
+}
+
+bool lgClipboard_requestStream(LG_ClipboardData type,
+    const LG_ClipboardStreamOps * stream, void * opaque,
+    LG_ClipboardRequest * request)
+{
+  if (!request)
+    return false;
+  return requestClipboard(type, NULL, stream, opaque, request);
+}
+
+bool lgClipboard_requestReady(LG_ClipboardRequest id)
+{
+  if (id == LG_CLIPBOARD_REQUEST_INVALID || !clipboard.requests)
+    return false;
+
+  LG_LOCK(clipboard.callbackLock);
+  ClipboardRequest * request = takeRequest(id);
+  if (!request || !request->blocked)
+  {
+    if (request)
+      returnRequest(request);
+    LG_UNLOCK(clipboard.callbackLock);
+    return false;
+  }
+
+  request->blocked = false;
+  if (request->compat)
+  {
+    bool terminal = false;
+    const LG_ClipboardResult result =
+      pumpIncomingCompat(request, &terminal);
+    if (!terminal && !returnRequest(request))
+    {
+      LG_UNLOCK(clipboard.callbackLock);
+      return false;
+    }
+    if (terminal)
+      freeRequest(request);
+    LG_UNLOCK(clipboard.callbackLock);
+    return result != LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  const ClipboardBinding binding = request->binding;
+  if (!returnRequest(request))
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return false;
+  }
+
+  LG_LOCK_SHARED(clipboard.activeLock);
+  const bool active = bindingActiveNL(&binding) &&
+    streamProvider(binding.ops);
+  const bool result = active && binding.ops->dataReady(
+      binding.opaque, id);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  if (!result)
+  {
+    ClipboardRequest * failed = takeRequest(id);
+    if (failed)
+    {
+      cancelRequest(failed, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+      freeRequest(failed);
+    }
+  }
+  LG_UNLOCK(clipboard.callbackLock);
+  return result;
+}
+
+bool lgClipboard_request(LG_ClipboardData type,
+    LG_ClipboardReplyFn replyFn, void * opaque)
+{
+  if (!replyFn)
+    return false;
+  return requestClipboard(type, replyFn, NULL, opaque, NULL);
 }

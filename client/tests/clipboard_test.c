@@ -54,6 +54,11 @@ struct Provider
   unsigned int                 release;
   unsigned int                 notice;
   unsigned int                 data;
+  unsigned int                 begin;
+  unsigned int                 chunk;
+  unsigned int                 end;
+  unsigned int                 cancel;
+  unsigned int                 ready;
   unsigned int                 request;
   LG_ClipboardData             noticeTypes[LG_CLIPBOARD_DATA_NONE];
   size_t                       noticeCount;
@@ -63,6 +68,17 @@ struct Provider
   LG_ClipboardData             dataType[MAX_CALL];
   size_t                       dataSize[MAX_CALL];
   uint8_t                      dataBuf[MAX_CALL][MAX_DATA];
+  LG_ClipboardResult           beginResult;
+  LG_ClipboardResult           chunkResult;
+  LG_ClipboardResult           endResult;
+  LG_ClipboardRequest          streamId;
+  LG_ClipboardData             streamType;
+  uint64_t                     sizeHint;
+  uint64_t                     chunkOffset[MAX_CALL];
+  size_t                       chunkSize[MAX_CALL];
+  uint8_t                      chunkBuf[MAX_CALL][MAX_DATA];
+  uint64_t                     finalSize;
+  LG_ClipboardCancelReason     cancelReason;
 };
 
 struct Display
@@ -70,6 +86,8 @@ struct Display
   unsigned int        notice;
   unsigned int        release;
   unsigned int        request;
+  unsigned int        ready;
+  unsigned int        cancel;
   LG_ClipboardData    noticeType[MAX_CALL];
   LG_ClipboardRequest reqId[MAX_CALL];
   LG_ClipboardData    reqType[MAX_CALL];
@@ -77,6 +95,9 @@ struct Display
   LG_ClipboardData    autoType;
   const void        * autoBuf;
   size_t              autoSize;
+  bool                autoBegin;
+  LG_ClipboardResult  readyResult;
+  LG_ClipboardCancelReason cancelReason;
 };
 
 struct Reply
@@ -89,6 +110,24 @@ struct Reply
   bool             nested;
 };
 
+struct StreamSink
+{
+  unsigned int             begin;
+  unsigned int             chunk;
+  unsigned int             end;
+  unsigned int             cancel;
+  LG_ClipboardResult       beginResult;
+  LG_ClipboardResult       chunkResult;
+  LG_ClipboardResult       endResult;
+  LG_ClipboardData         type;
+  uint64_t                 sizeHint;
+  uint64_t                 offset;
+  uint64_t                 finalSize;
+  LG_ClipboardCancelReason reason;
+  size_t                   size;
+  uint8_t                  data[MAX_DATA];
+};
+
 static struct Provider p;
 static struct Provider q;
 static struct Provider r;
@@ -96,6 +135,61 @@ static struct Display  d;
 
 struct AppState  g_state;
 struct AppParams g_params;
+
+static LG_ClipboardResult sinkBegin(void * opaque,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  struct StreamSink * sink = opaque;
+  ++sink->begin;
+  sink->type     = type;
+  sink->sizeHint = sizeHint;
+  return sink->beginResult;
+}
+
+static LG_ClipboardResult sinkChunk(void * opaque, uint64_t offset,
+    const void * data, size_t size)
+{
+  struct StreamSink * sink = opaque;
+  ++sink->chunk;
+  sink->offset = offset;
+  if (sink->chunkResult == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    CHECK(offset + size <= MAX_DATA);
+    memcpy(sink->data + offset, data, size);
+    sink->size = offset + size;
+  }
+  return sink->chunkResult;
+}
+
+static LG_ClipboardResult sinkEnd(void * opaque, uint64_t finalSize)
+{
+  struct StreamSink * sink = opaque;
+  ++sink->end;
+  sink->finalSize = finalSize;
+  return sink->endResult;
+}
+
+static void sinkCancel(void * opaque, LG_ClipboardCancelReason reason)
+{
+  struct StreamSink * sink = opaque;
+  ++sink->cancel;
+  sink->reason = reason;
+}
+
+static const LG_ClipboardStreamOps sinkOps =
+{
+  .begin  = sinkBegin,
+  .chunk  = sinkChunk,
+  .end    = sinkEnd,
+  .cancel = sinkCancel,
+};
+
+static void initSink(struct StreamSink * sink)
+{
+  sink->beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  sink->chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  sink->endResult   = LG_CLIPBOARD_RESULT_ACCEPTED;
+}
 
 static void setStat(void * opaque, LG_ClipboardStatusFn callback,
     void * callbackOpaque)
@@ -175,6 +269,59 @@ static bool data(void * opaque, LG_ClipboardRequest id,
   return provider->callOK;
 }
 
+static LG_ClipboardResult dataBegin(void * opaque,
+    LG_ClipboardRequest id, LG_ClipboardData type, uint64_t sizeHint)
+{
+  struct Provider * provider = opaque;
+  ++provider->begin;
+  provider->streamId   = id;
+  provider->streamType = type;
+  provider->sizeHint   = sizeHint;
+  return provider->beginResult;
+}
+
+static LG_ClipboardResult dataChunk(void * opaque,
+    LG_ClipboardRequest id, uint64_t offset, const void * buf, size_t size)
+{
+  struct Provider * provider = opaque;
+  CHECK(provider->chunk < MAX_CALL);
+  CHECK(id == provider->streamId);
+  const unsigned int no = provider->chunk++;
+  provider->chunkOffset[no] = offset;
+  provider->chunkSize[no]   = size;
+  if (size <= MAX_DATA)
+    memcpy(provider->chunkBuf[no], buf, size);
+  return provider->chunkResult;
+}
+
+static LG_ClipboardResult dataEnd(void * opaque,
+    LG_ClipboardRequest id, uint64_t finalSize)
+{
+  struct Provider * provider = opaque;
+  CHECK(id == provider->streamId);
+  ++provider->end;
+  provider->finalSize = finalSize;
+  return provider->endResult;
+}
+
+static bool dataCancel(void * opaque, LG_ClipboardRequest id,
+    LG_ClipboardCancelReason reason)
+{
+  struct Provider * provider = opaque;
+  ++provider->cancel;
+  provider->streamId    = id;
+  provider->cancelReason = reason;
+  return provider->callOK;
+}
+
+static bool dataReady(void * opaque, LG_ClipboardRequest id)
+{
+  struct Provider * provider = opaque;
+  ++provider->ready;
+  provider->streamId = id;
+  return provider->callOK;
+}
+
 static bool request(void * opaque, LG_ClipboardRequest id,
     LG_ClipboardData type)
 {
@@ -209,6 +356,21 @@ static const LG_ClipboardOps statOps =
   .request           = request,
 };
 
+static const LG_ClipboardOps streamOps =
+{
+  .name        = "stream",
+  .attach      = attach,
+  .detach      = detach,
+  .release     = release,
+  .notifyTypes = notify,
+  .dataBegin   = dataBegin,
+  .dataChunk   = dataChunk,
+  .dataEnd     = dataEnd,
+  .dataCancel  = dataCancel,
+  .dataReady   = dataReady,
+  .request     = request,
+};
+
 static void dsNotice(LG_ClipboardData type)
 {
   CHECK(d.notice < MAX_CALL);
@@ -230,11 +392,29 @@ static void dsRequest(LG_ClipboardRequest id, LG_ClipboardData type)
     lgClipboard_data(id, d.autoType, d.autoBuf, d.autoSize);
 }
 
+static void dsRequestReady(LG_ClipboardRequest id)
+{
+  ++d.ready;
+  if (d.autoBegin)
+    d.readyResult = lgClipboard_dataBegin(
+        id, LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN);
+}
+
+static void dsRequestCancel(LG_ClipboardRequest id,
+    LG_ClipboardCancelReason reason)
+{
+  (void)id;
+  ++d.cancel;
+  d.cancelReason = reason;
+}
+
 static struct LG_DisplayServerOps dsOps =
 {
   .cbNotice  = dsNotice,
   .cbRelease = dsRelease,
   .cbRequest = dsRequest,
+  .cbRequestReady  = dsRequestReady,
+  .cbRequestCancel = dsRequestCancel,
 };
 
 static void initProvider(struct Provider * provider)
@@ -244,6 +424,9 @@ static void initProvider(struct Provider * provider)
   provider->callOK   = true;
   provider->reqOK    = true;
   provider->gen      = 1;
+  provider->beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  provider->chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  provider->endResult   = LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
 static void init(void)
@@ -634,6 +817,192 @@ static void testReentrant(void)
   lgClipboard_free();
 }
 
+static void testStreamLocal(void)
+{
+  init();
+  lgClipboard_setFallback(&streamOps, &p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+  lgClipboard_notifyTypes(types, 1);
+
+  CHECK(p.ev->request(p.evCtx, 40, LG_CLIPBOARD_DATA_TEXT));
+  const LG_ClipboardRequest transfer = d.reqId[0];
+  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+      LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  const uint8_t first[] = { 1, 2 };
+  const uint8_t second[] = { 3, 4, 5 };
+  CHECK(lgClipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataChunk(transfer, sizeof(first),
+      second, sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataEnd(transfer,
+      sizeof(first) + sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(p.begin == 1);
+  CHECK(p.streamId == 40);
+  CHECK(p.streamType == LG_CLIPBOARD_DATA_TEXT);
+  CHECK(p.sizeHint == LG_CLIPBOARD_SIZE_UNKNOWN);
+  CHECK(p.chunk == 2);
+  CHECK(p.chunkOffset[0] == 0);
+  CHECK(p.chunkOffset[1] == sizeof(first));
+  CHECK(p.finalSize == sizeof(first) + sizeof(second));
+
+  CHECK(p.ev->request(p.evCtx, 41, LG_CLIPBOARD_DATA_TEXT));
+  const LG_ClipboardRequest invalid = d.reqId[1];
+  CHECK(lgClipboard_dataBegin(invalid, LG_CLIPBOARD_DATA_TEXT, 1) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataChunk(invalid, 1, first, 1) ==
+      LG_CLIPBOARD_RESULT_FAILED);
+  CHECK(p.cancel == 1);
+  CHECK(p.streamId == 41);
+  CHECK(p.cancelReason == LG_CLIPBOARD_CANCEL_INVALID);
+
+  CHECK(p.ev->request(p.evCtx, 42, LG_CLIPBOARD_DATA_TEXT));
+  p.ev->requestCancel(p.evCtx, 42, LG_CLIPBOARD_CANCEL_REPLACED);
+  CHECK(d.cancel == 1);
+  CHECK(d.cancelReason == LG_CLIPBOARD_CANCEL_REPLACED);
+
+  lgClipboard_free();
+}
+
+static void testStreamBlocked(void)
+{
+  init();
+  lgClipboard_setFallback(&streamOps, &p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+  lgClipboard_notifyTypes(types, 1);
+  CHECK(p.ev->request(p.evCtx, 50, LG_CLIPBOARD_DATA_TEXT));
+
+  p.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  uint8_t data[] = { 7, 8, 9 };
+  lgClipboard_data(d.reqId[0], LG_CLIPBOARD_DATA_TEXT,
+      data, sizeof(data));
+  CHECK(p.begin == 1);
+  CHECK(p.chunk == 0);
+  CHECK(p.end == 0);
+  data[0] = 0;
+
+  p.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  p.ev->dataReady(p.evCtx, 50);
+  CHECK(p.begin == 2);
+  CHECK(p.chunk == 1);
+  CHECK(p.end == 1);
+  CHECK(p.chunkSize[0] == 3);
+  CHECK(p.chunkBuf[0][0] == 7);
+  CHECK(p.chunkBuf[0][1] == 8);
+  CHECK(p.chunkBuf[0][2] == 9);
+  CHECK(p.finalSize == 3);
+
+  CHECK(p.ev->request(p.evCtx, 51, LG_CLIPBOARD_DATA_TEXT));
+  const LG_ClipboardRequest transfer = d.reqId[1];
+  p.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+      LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_BLOCKED);
+  p.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  d.autoBegin = true;
+  p.ev->dataReady(p.evCtx, 51);
+  CHECK(d.ready == 1);
+  CHECK(d.readyResult == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataEnd(transfer, 0) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+
+  lgClipboard_free();
+}
+
+static void testStreamRemote(void)
+{
+  init();
+  lgClipboard_setFallback(&streamOps, &p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+  notice(&p, types, 1);
+
+  struct StreamSink sink = { 0 };
+  initSink(&sink);
+  LG_ClipboardRequest id;
+  CHECK(lgClipboard_requestStream(
+      LG_CLIPBOARD_DATA_TEXT, &sinkOps, &sink, &id));
+  CHECK(id == p.reqId[0]);
+  CHECK(p.ev->dataBegin(p.evCtx, id, LG_CLIPBOARD_DATA_TEXT,
+      LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(sink.begin == 1);
+  CHECK(sink.sizeHint == LG_CLIPBOARD_SIZE_UNKNOWN);
+
+  const uint8_t data[] = { 1, 3, 5, 7 };
+  sink.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  CHECK(p.ev->dataChunk(p.evCtx, id, 0, data, sizeof(data)) ==
+      LG_CLIPBOARD_RESULT_BLOCKED);
+  CHECK(sink.chunk == 1);
+  sink.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  CHECK(lgClipboard_requestReady(id));
+  CHECK(p.ready == 1);
+  CHECK(p.streamId == id);
+  CHECK(p.ev->dataChunk(p.evCtx, id, 0, data, sizeof(data)) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(p.ev->dataEnd(p.evCtx, id, sizeof(data)) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(sink.chunk == 2);
+  CHECK(sink.end == 1);
+  CHECK(sink.finalSize == sizeof(data));
+  CHECK(memcmp(sink.data, data, sizeof(data)) == 0);
+
+  struct StreamSink cancel = { 0 };
+  initSink(&cancel);
+  CHECK(lgClipboard_requestStream(
+      LG_CLIPBOARD_DATA_TEXT, &sinkOps, &cancel, &id));
+  p.ev->dataCancel(p.evCtx, id, LG_CLIPBOARD_CANCEL_ABORTED);
+  CHECK(cancel.cancel == 1);
+  CHECK(cancel.reason == LG_CLIPBOARD_CANCEL_ABORTED);
+
+  lgClipboard_free();
+}
+
+static void testStreamLegacy(void)
+{
+  init();
+  bind(&p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+  lgClipboard_notifyTypes(types, 1);
+
+  CHECK(p.ev->request(p.evCtx, 60, LG_CLIPBOARD_DATA_TEXT));
+  const LG_ClipboardRequest transfer = d.reqId[0];
+  const uint8_t first[] = { 2, 4 };
+  const uint8_t second[] = { 6, 8 };
+  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+      LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataChunk(transfer, sizeof(first), second,
+      sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(lgClipboard_dataEnd(transfer, 4) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(p.data == 1);
+  CHECK(p.dataId[0] == 60);
+  CHECK(p.dataType[0] == LG_CLIPBOARD_DATA_TEXT);
+  CHECK(p.dataSize[0] == 4);
+  CHECK(memcmp(p.dataBuf[0], "\x02\x04\x06\x08", 4) == 0);
+
+  notice(&p, types, 1);
+  struct StreamSink sink = { 0 };
+  initSink(&sink);
+  sink.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  LG_ClipboardRequest id;
+  CHECK(lgClipboard_requestStream(
+      LG_CLIPBOARD_DATA_TEXT, &sinkOps, &sink, &id));
+  const uint8_t remote[] = { 9, 8, 7 };
+  remoteData(&p, id, LG_CLIPBOARD_DATA_TEXT, remote, sizeof(remote));
+  CHECK(sink.begin == 1);
+  CHECK(sink.chunk == 0);
+
+  sink.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  CHECK(lgClipboard_requestReady(id));
+  CHECK(p.ready == 0);
+  CHECK(sink.begin == 2);
+  CHECK(sink.chunk == 1);
+  CHECK(sink.end == 1);
+  CHECK(sink.size == sizeof(remote));
+  CHECK(memcmp(sink.data, remote, sizeof(remote)) == 0);
+
+  lgClipboard_free();
+}
+
 struct Test
 {
   const char * name;
@@ -649,6 +1018,10 @@ static const struct Test tests[] =
   { "generation", testGeneration },
   { "local"     , testLocal      },
   { "reentrant" , testReentrant  },
+  { "stream-local"  , testStreamLocal   },
+  { "stream-blocked", testStreamBlocked },
+  { "stream-remote" , testStreamRemote  },
+  { "stream-legacy" , testStreamLegacy  },
 };
 
 int main(int argc, char ** argv)

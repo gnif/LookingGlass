@@ -249,6 +249,9 @@ struct LG_DisplayServerOps
   void (*cbNotice)(LG_ClipboardData type);
   void (*cbRelease)(void);
   void (*cbRequest)(LG_ClipboardRequest request, LG_ClipboardData type);
+  void (*cbRequestReady)(LG_ClipboardRequest request);
+  void (*cbRequestCancel)(LG_ClipboardRequest request,
+      LG_ClipboardCancelReason reason);
 };
 
 #ifdef ENABLE_EGL

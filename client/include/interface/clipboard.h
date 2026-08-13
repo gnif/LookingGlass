@@ -43,6 +43,42 @@ typedef void (*LG_ClipboardReplyFn)(void * opaque,
 typedef uint64_t LG_ClipboardRequest;
 
 #define LG_CLIPBOARD_REQUEST_INVALID UINT64_C(0)
+#define LG_CLIPBOARD_SIZE_UNKNOWN    UINT64_MAX
+
+typedef enum LG_ClipboardResult
+{
+  /* The operation is terminal and consumed no data. */
+  LG_CLIPBOARD_RESULT_FAILED = 0,
+  /* The operation, including the complete chunk, was accepted. */
+  LG_CLIPBOARD_RESULT_ACCEPTED = 1,
+  /* Nothing was consumed. Retry only after the matching ready callback. */
+  LG_CLIPBOARD_RESULT_BLOCKED = 2,
+}
+LG_ClipboardResult;
+
+typedef enum LG_ClipboardCancelReason
+{
+  LG_CLIPBOARD_CANCEL_ABORTED = 0,
+  LG_CLIPBOARD_CANCEL_REPLACED = 1,
+  LG_CLIPBOARD_CANCEL_UNAVAILABLE = 2,
+  LG_CLIPBOARD_CANCEL_INVALID = 3,
+}
+LG_ClipboardCancelReason;
+
+/* A consumer of a provider-to-client stream. Callbacks are serialized and
+ * buffers are borrowed only for the duration of chunk(). A callback which
+ * returns BLOCKED consumes nothing; the consumer must subsequently call
+ * its request-ready entry point before the same operation can be retried. */
+typedef struct LG_ClipboardStreamOps
+{
+  LG_ClipboardResult (*begin)(void * opaque, LG_ClipboardData type,
+      uint64_t sizeHint);
+  LG_ClipboardResult (*chunk)(void * opaque, uint64_t offset,
+      const void * data, size_t size);
+  LG_ClipboardResult (*end)(void * opaque, uint64_t finalSize);
+  void (*cancel)(void * opaque, LG_ClipboardCancelReason reason);
+}
+LG_ClipboardStreamOps;
 
 typedef struct LG_ClipboardStatus
 {
@@ -61,6 +97,22 @@ typedef struct LG_ClipboardEventOps
   void (*notice)(void * opaque, const LG_ClipboardData types[], size_t count);
   void (*data)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type, const void * data, size_t size);
+  LG_ClipboardResult (*dataBegin)(void * opaque,
+      LG_ClipboardRequest request, LG_ClipboardData type,
+      uint64_t sizeHint);
+  LG_ClipboardResult (*dataChunk)(void * opaque,
+      LG_ClipboardRequest request, uint64_t offset,
+      const void * data, size_t size);
+  LG_ClipboardResult (*dataEnd)(void * opaque,
+      LG_ClipboardRequest request, uint64_t finalSize);
+  void (*dataCancel)(void * opaque, LG_ClipboardRequest request,
+      LG_ClipboardCancelReason reason);
+  /* Signals that the provider can accept a retry of the operation which most
+   * recently returned BLOCKED for its request. */
+  void (*dataReady)(void * opaque, LG_ClipboardRequest request);
+  /* Cancels a request previously delivered through request(). */
+  void (*requestCancel)(void * opaque, LG_ClipboardRequest request,
+      LG_ClipboardCancelReason reason);
   void (*release)(void * opaque);
   bool (*request)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type);
@@ -93,10 +145,30 @@ typedef struct LG_ClipboardOps
   bool (*notifyTypes)(void * opaque, const LG_ClipboardData types[],
       size_t count);
   /* Data is a complete response to a remote request. NONE with no payload
-   * reports that the request could not be completed. The provider must finish
-   * any transport framing before returning. */
+   * reports that the request could not be completed. This operation is the
+   * legacy whole-buffer alternative to the stream operation group below. */
   bool (*data)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type, const void * data, size_t size);
+  /* Streaming providers implement this complete group instead of data().
+   * BEGIN may use LG_CLIPBOARD_SIZE_UNKNOWN. CHUNK is all-or-nothing and its
+   * offset must be the next byte in the stream. END's size is authoritative.
+   * A BLOCKED operation consumes nothing and is retried only after dataReady
+   * is delivered through the attached event operations. Ready callbacks must
+   * be serialized with other events, delivered without backend locks held,
+   * and never delivered synchronously from one of these operations. */
+  LG_ClipboardResult (*dataBegin)(void * opaque,
+      LG_ClipboardRequest request, LG_ClipboardData type,
+      uint64_t sizeHint);
+  LG_ClipboardResult (*dataChunk)(void * opaque,
+      LG_ClipboardRequest request, uint64_t offset,
+      const void * data, size_t size);
+  LG_ClipboardResult (*dataEnd)(void * opaque,
+      LG_ClipboardRequest request, uint64_t finalSize);
+  bool (*dataCancel)(void * opaque, LG_ClipboardRequest request,
+      LG_ClipboardCancelReason reason);
+  /* Signals that the client can accept a retry of a provider-to-client stream
+   * operation which returned BLOCKED. */
+  bool (*dataReady)(void * opaque, LG_ClipboardRequest request);
   /* A successful request produces exactly one matching data event unless the
    * provider is detached, becomes unavailable, or publishes a newer notice
    * or release first. */

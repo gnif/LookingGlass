@@ -36,9 +36,19 @@ void lgClipboard_dropTransport(void);
 void lgClipboard_release(void);
 void lgClipboard_notifyTypes(
     const LG_ClipboardData types[], size_t count);
+LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
+    LG_ClipboardData type, uint64_t sizeHint);
+LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
+    uint64_t offset, const void * data, size_t size);
+LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
+    uint64_t finalSize);
 void lgClipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size);
 void lgClipboard_abort(LG_ClipboardRequest request);
+bool lgClipboard_requestStream(LG_ClipboardData type,
+    const LG_ClipboardStreamOps * stream, void * opaque,
+    LG_ClipboardRequest * request);
+bool lgClipboard_requestReady(LG_ClipboardRequest request);
 bool lgClipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque);
 

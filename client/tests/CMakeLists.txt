@@ -428,12 +428,44 @@ set(CLIPBOARD_CASES
   generation
   local
   reentrant
+  stream-local
+  stream-blocked
+  stream-remote
+  stream-legacy
 )
 foreach(name IN LISTS CLIPBOARD_CASES)
   add_test(NAME clipboard-${name}
     COMMAND clipboard-tests ${name}
   )
   set_tests_properties(clipboard-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
+add_executable(spice-clipboard-tests
+  spice_clipboard_test.c
+  ../src/clipboard.c
+  ../transports/SPICE/clipboard.c
+)
+target_compile_definitions(spice-clipboard-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(spice-clipboard-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
+  "${PROJECT_TOP}/repos/PureSpice/include"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+target_link_libraries(spice-clipboard-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+foreach(name IN ITEMS outbound inbound)
+  add_test(NAME spice-clipboard-${name}
+    COMMAND spice-clipboard-tests ${name}
+  )
+  set_tests_properties(spice-clipboard-${name} PROPERTIES
     TIMEOUT 10
   )
 endforeach()
