@@ -37,6 +37,18 @@ enum class TexResult : uint8_t
   FAILED,
 };
 
+// Immutable producer boundaries for one node product. A transport adds its
+// own transfer or encode timing without rewriting these common values.
+struct FrameTime
+{
+  uint64_t postStart  = 0;
+  uint64_t gpuStart   = 0;
+  uint64_t gpuEnd     = 0;
+  uint64_t readyAt    = 0;
+  bool     gpuValid   = false;
+  bool     readyValid = false;
+};
+
 // An immutable, pool-owned D3D12 graph product. Node zero is deliberately
 // excluded because it aliases the acquired IddCx surface.
 class CFrameTex final
@@ -51,7 +63,8 @@ private:
 
   CFrameTex(uint64_t graph, uint64_t pool, unsigned node, unsigned slot,
     uint64_t version, const FrameProfile& profile, const FrameDesc& frame,
-    const ComPtr<ID3D12Resource>& res, const D12Sync& sync,
+    const FrameTime& time, const ComPtr<ID3D12Resource>& res,
+    const D12Sync& sync,
     D3D12_RESOURCE_STATES state, bool shared);
 
 public:
@@ -65,6 +78,7 @@ public:
   const uint64_t     version;
   const FrameProfile profile;
   const FrameDesc    frame;
+  const FrameTime    time;
 
   ID3D12Resource * Get() const { return m_res.Get(); }
   const D12Sync& Sync() const { return m_sync; }
@@ -126,7 +140,8 @@ public:
   ID3D12Resource * Get() const;
   // Seal only after producer commands restore the texture to the pool's
   // configured immutable state and Execute returns this exact sync point.
-  bool Seal(const FrameDesc& frame, const D12Sync& sync, TexLease& lease);
+  bool Seal(const FrameDesc& frame, const FrameTime& time,
+    const D12Sync& sync, TexLease& lease);
   void Cancel();
 };
 

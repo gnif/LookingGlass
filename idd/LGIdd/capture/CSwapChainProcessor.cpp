@@ -533,17 +533,29 @@ void CSwapChainProcessor::QueueGraph(const D12FrameFormat& source,
         source, checkpoint, m_dx11Device->IsSoftware(),
         m_renderAdapter, cfg))
     return;
-  if (m_haveGraphCfg && Frame::Same(m_graphCfg, cfg))
+  CTransportManager& transport = m_devContext->GetTransport();
+  const uint64_t revision = transport.FrameRev();
+  if (m_haveGraphCfg && m_graphRev == revision &&
+      Frame::Same(m_graphCfg, cfg))
     return;
 
   m_graphCfg     = cfg;
   m_haveGraphCfg = true;
   m_graphPending = true;
+  m_graphRev     = revision;
   m_graphRetryAt = 0;
 }
 
 void CSwapChainProcessor::CfgGraph()
 {
+  CTransportManager& transport = m_devContext->GetTransport();
+  const uint64_t revision = transport.FrameRev();
+  if (m_haveGraphCfg && revision != m_graphRev)
+  {
+    m_graphRev     = revision;
+    m_graphPending = true;
+    m_graphRetryAt = 0;
+  }
   if (!m_graphPending)
     return;
 
@@ -553,7 +565,7 @@ void CSwapChainProcessor::CfgGraph()
 
   m_graphPending = false;
   const CfgResult result =
-    m_devContext->GetTransport().Cfg(m_graphCfg, m_graph);
+    transport.Cfg(m_graphCfg, m_graphRev, m_graph);
   if (result == CfgResult::ACCEPTED)
   {
     m_graphRetryAt = 0;

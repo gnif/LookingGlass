@@ -61,6 +61,7 @@ private:
   GraphCfg                         m_graphCfg;
   bool                             m_haveGraphCfg    = false;
   bool                             m_graphPending    = false;
+  uint64_t                         m_graphRev        = 0;
   uint64_t                         m_graphRetryAt    = 0;
   CPostProcessor                   m_postProcessors[CAPTURE_PIPELINE_SLOTS];
   std::unique_ptr<CFrameProcessor> m_frameProcessor;

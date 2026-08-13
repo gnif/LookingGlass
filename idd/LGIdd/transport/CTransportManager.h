@@ -20,11 +20,13 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 #include "transport/CControlHub.h"
 #include "transport/CFrameHub.h"
 #include "transport/CInputHub.h"
 #include "transport/CRecoveryHub.h"
+#include "transport/CTexHub.h"
 #include "transport/ITransport.h"
 #include "transport/TransportConfig.h"
 
@@ -34,6 +36,7 @@ static_assert(TRANSPORT_MAX_INSTANCES == FRAME_MAX_SINKS,
   "The transport and frame limits must match");
 
 class CFrameGraph;
+class ITexStage;
 struct GraphCfg;
 
 class CTransportManager final : public FrameCaps
@@ -106,8 +109,10 @@ private:
     bool                        inputAdded    = false;
     bool                        inputFailed   = false;
     bool                        inputAbsent   = false;
-    bool                        frameAdded    = false;
-    bool                        frameAbsent   = false;
+    bool                        frameAdded     = false;
+    bool                        frameLegacy    = false;
+    ITexSink                  * texSink        = nullptr;
+    bool                        frameAbsent    = false;
     uint64_t                    serviceRetryAt = 0;
     bool                        exposed      = false;
     bool                        setupDone    = false;
@@ -121,8 +126,10 @@ private:
 
   std::unique_ptr<Entry>               m_entries[FRAME_MAX_SINKS];
   unsigned                             m_entryCount  = 0;
+  std::atomic<uint64_t>                m_frameRev    = 1;
   CControlHub                         m_control;
   CFrameHub                           m_frames;
+  CTexHub                             m_tex;
   CInputHub                           m_input;
   CRecoveryHub                        m_recovery;
   Entry                              * m_primary     = nullptr;
@@ -136,6 +143,7 @@ private:
   bool                                 m_started     = false;
   bool                                 m_stopping    = false;
   bool                                 m_stopped     = false;
+  uint64_t                             m_graphSerial = 0;
 
   unsigned Entries(Entry * entries[FRAME_MAX_SINKS]) const;
   Entry * Primary() const;
@@ -160,6 +168,8 @@ private:
   void ScheduleRetry(Entry& entry);
   void RemoveServices(Entry& entry);
   void Expose(Entry& entry);
+  void BumpFrameRev();
+  uint64_t NextGraph();
 
 public:
   CTransportManager();
@@ -173,7 +183,8 @@ public:
   OpenResult Open();
   bool Initialize();
   bool Setup(size_t alignment);
-  CfgResult Cfg(const GraphCfg& cfg, CFrameGraph& graph);
+  CfgResult Cfg(const GraphCfg& cfg, uint64_t revision,
+    CFrameGraph& graph, ITexStage * activation = nullptr);
   ProcessResult Process(ITransportActions& actions);
   void Stop();
   void SyncRecovery();
@@ -186,6 +197,8 @@ public:
   DirectFrameBufferMemory GetDirectMemory() const;
 
   IFrameTransport& Frames();
+  CTexHub& Tex() { return m_tex; }
+  uint64_t FrameRev() const;
   IControlTransport& Control();
   IInputTransport& Input();
 };

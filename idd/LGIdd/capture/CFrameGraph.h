@@ -131,6 +131,7 @@ private:
   GraphCfg  m_cfg;
   GraphNode m_nodes[FRAME_GRAPH_MAX_NODES]    = {};
   GraphLeaf m_leaves[TRANSPORT_MAX_INSTANCES] = {};
+  uint64_t  m_generation                      = 0;
   unsigned  m_nodeCount                       = 0;
   unsigned  m_leafCount                       = 0;
   bool      m_begun                           = false;
@@ -150,6 +151,7 @@ public:
   bool Add(BackendId id, uint32_t epoch, bool required, bool primary,
     const FrameCfg& cfg);
   bool Seal();
+  bool Stamp(uint64_t generation);
   bool Same(const GraphCfg& cfg) const;
   bool Want(FrameSignal signal) const;
   bool Need(FrameOp op) const;
@@ -158,6 +160,7 @@ public:
     LeafDesc& desc) const;
 
   const GraphCfg& Cfg() const { return m_cfg; }
+  uint64_t Generation() const { return m_generation; }
   const GraphNode * Nodes(unsigned& count) const;
   const GraphLeaf * Leaves(unsigned& count) const;
 };

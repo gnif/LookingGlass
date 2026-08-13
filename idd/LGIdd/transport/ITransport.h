@@ -32,6 +32,7 @@
 class IControlSink;
 class IFrameSink;
 class IInputSource;
+class ITexSink;
 
 struct SourceKey
 {
@@ -151,8 +152,11 @@ public:
   // Profiles is an immutable, ordered preference list of at most
   // FRAME_PROFILE_MAX entries whose pointer remains valid for the lifetime
   // of this instance.
-  // Probe has no side effects. Prepare changes pending state only; Commit
-  // promotes it without failure, while Abort preserves the active route.
+  // Probe has no side effects. Prepare changes pending state only and is safe
+  // while the active texture sink is admitting frames. Commit promotes it
+  // without failure, while Abort preserves the active route. A texture
+  // transport retains old-generation resources until every accepted lease
+  // completes; Stop drains all accepted leases before destroying its sink.
   virtual const FrameProfile * Profiles(unsigned& count) const = 0;
   virtual CfgResult Probe(const FrameCfg& cfg) const = 0;
   virtual CfgResult Prepare(const FrameCfg& cfg) = 0;
@@ -171,6 +175,7 @@ public:
 
   // Component pointers are fixed after Setup and remain valid until Stop.
   virtual IFrameSink * FrameSink() { return nullptr; }
+  virtual ITexSink * TexSink() { return nullptr; }
   virtual IControlSink * Control() { return nullptr; }
   virtual IInputSource * Input() { return nullptr; }
 };

@@ -175,6 +175,9 @@
     <ClInclude Include="transport\CRecoveryHub.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\CTexHub.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\CTransportManager.h">
       <Filter>Transport</Filter>
     </ClInclude>
@@ -185,6 +188,9 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\FrameProfile.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\FrameIn.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\IControlSink.h">
@@ -206,6 +212,12 @@
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\ITransport.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\ITexSink.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\ITexStage.h">
       <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\TransportConfig.h">
@@ -355,6 +367,9 @@
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CRecoveryHub.cpp">
+      <Filter>Transport</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\CTexHub.cpp">
       <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CTransportManager.cpp">

@@ -66,11 +66,12 @@ bool Frame::Valid(FrameDamage damage, const RECT * rects, unsigned count,
 
 void CFrameGraph::Reset()
 {
-  m_cfg       = GraphCfg {};
-  m_nodeCount = 0;
-  m_leafCount = 0;
-  m_begun     = false;
-  m_sealed    = false;
+  m_cfg        = GraphCfg {};
+  m_generation = 0;
+  m_nodeCount  = 0;
+  m_leafCount  = 0;
+  m_begun      = false;
+  m_sealed     = false;
 }
 
 bool CFrameGraph::Begin(const GraphCfg& cfg)
@@ -285,6 +286,14 @@ bool CFrameGraph::Seal()
       return false;
 
   m_sealed = true;
+  return true;
+}
+
+bool CFrameGraph::Stamp(uint64_t generation)
+{
+  if (!m_sealed || m_generation || !generation)
+    return false;
+  m_generation = generation;
   return true;
 }
 

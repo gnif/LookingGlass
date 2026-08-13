@@ -20,9 +20,11 @@
 
 #include "transport/CTransportManager.h"
 
+#include "Atomic.h"
 #include "capture/CFrameGraph.h"
 #include "CDebug.h"
 #include "Seq.h"
+#include "transport/ITexStage.h"
 
 #include <Windows.h>
 #include <new>
@@ -117,10 +119,25 @@ CTransportManager::Entry::~Entry()
     CloseHandle(idleEvent);
 }
 
-CTransportManager::CTransportManager()
+CTransportManager::CTransportManager() : m_tex(m_frameRev)
 {
   m_phaseIdle    = CreateEvent(nullptr, TRUE, TRUE, nullptr);
   m_stoppedEvent = CreateEvent(nullptr, TRUE, FALSE, nullptr);
+}
+
+uint64_t CTransportManager::FrameRev() const
+{
+  return Atomic::Load(m_frameRev, std::memory_order_acquire);
+}
+
+void CTransportManager::BumpFrameRev()
+{
+  Atomic::Next(m_frameRev, std::memory_order_release);
+}
+
+uint64_t CTransportManager::NextGraph()
+{
+  return Seq::Inc(m_graphSerial);
 }
 
 CTransportManager::~CTransportManager()
@@ -469,6 +486,7 @@ bool CTransportManager::AddServices(Entry& entry)
   bool inputFailed = false;
   bool inputAbsent = false;
   bool frameAdded = false;
+  bool frameBound = false;
   bool frameAbsent = false;
   uint64_t retryAt = 0;
   {
@@ -524,11 +542,24 @@ bool CTransportManager::AddServices(Entry& entry)
   else if (attach && !frameAdded && !frameAbsent)
   {
     IFrameSink * frame = transport->FrameSink();
+    ITexSink * tex = transport->TexSink();
     if (frame && m_frames.Bind(id, epoch, primary, *frame))
     {
       CSRWExclusiveLock entryLock(entry.lock);
-      entry.frameAdded = true;
-      frameAdded = true;
+      entry.frameAdded  = true;
+      entry.frameLegacy = true;
+      entry.texSink     = nullptr;
+      frameAdded        = true;
+      frameBound        = true;
+    }
+    else if (!frame && tex)
+    {
+      CSRWExclusiveLock entryLock(entry.lock);
+      entry.frameAdded  = true;
+      entry.frameLegacy = false;
+      entry.texSink     = tex;
+      frameAdded        = true;
+      frameBound        = true;
     }
     else if (frame || primary)
       frameRetry = true;
@@ -567,6 +598,12 @@ bool CTransportManager::AddServices(Entry& entry)
     entry.serviceRetryAt = now + SERVICE_RETRY_DELAY_MS;
   }
 
+  if (frameBound)
+  {
+    m_tex.Rebind(id, epoch);
+    BumpFrameRev();
+  }
+
   const bool servicesReady =
     (!(services & TRANSPORT_SERVICE_FRAME)   || frameAdded) &&
     (!(services & TRANSPORT_SERVICE_CONTROL) || controlAdded) &&
@@ -576,6 +613,37 @@ bool CTransportManager::AddServices(Entry& entry)
 
 void CTransportManager::HandleServiceFailures()
 {
+  BackendId frameId = 0;
+  uint32_t frameEpoch = 0;
+  while (m_tex.TakeFailure(frameId, frameEpoch))
+  {
+    Entry * entries[FRAME_MAX_SINKS] = {};
+    const unsigned count = Entries(entries);
+    for (unsigned i = 0; i < count; ++i)
+    {
+      Entry& entry = *entries[i];
+      bool restart = false;
+      {
+        CSRWSharedLock entryLock(entry.lock);
+        if (entry.id != frameId || entry.epoch != frameEpoch ||
+            !entry.frameAdded || !entry.texSink)
+          continue;
+        restart = !entry.exposed;
+      }
+
+      DetachRecovery(entry);
+      RemoveServices(entry);
+      if (restart)
+        ScheduleRetry(entry);
+      else
+      {
+        CSRWExclusiveLock entryLock(entry.lock);
+        entry.state = State::FAILED;
+      }
+      break;
+    }
+  }
+
   ControlToken token;
   while (m_control.TakeFailure(token))
   {
@@ -687,6 +755,7 @@ void CTransportManager::RemoveServices(Entry& entry)
   BackendId id = 0;
   uint32_t epoch = 0;
   bool frameAdded = false;
+  bool frameLegacy = false;
   bool controlAdded = false;
   bool inputAdded = false;
   {
@@ -694,20 +763,28 @@ void CTransportManager::RemoveServices(Entry& entry)
     id                   = entry.id;
     epoch                = entry.epoch;
     frameAdded           = entry.frameAdded;
+    frameLegacy          = entry.frameLegacy;
     controlAdded         = entry.controlAdded;
     inputAdded           = entry.inputAdded;
     entry.frameAdded     = false;
+    entry.frameLegacy    = false;
+    entry.texSink        = nullptr;
     entry.controlAdded   = false;
     entry.inputAdded     = false;
   }
 
   m_input.RevokeInteraction(id, epoch);
+  m_tex.Drop(id, epoch);
   if (inputAdded)
     m_input.Unbind(id, epoch);
   if (controlAdded)
     m_control.Remove(id, epoch);
-  if (frameAdded)
+  if (frameLegacy)
     m_frames.Unbind(id, epoch);
+  if (frameAdded)
+  {
+    BumpFrameRev();
+  }
 }
 
 void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
@@ -729,6 +806,8 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
 
   {
     CSRWExclusiveLock entryLock(entry.lock);
+    const bool frameService =
+      (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
     entry.transport.reset();
     entry.directMemory = DirectFrameBufferMemory {};
     entry.directMemoryValid = false;
@@ -740,6 +819,8 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.frameAbsent   = false;
     entry.serviceRetryAt = 0;
     Seq::Inc(entry.epoch);
+    if (frameService)
+      BumpFrameRev();
   }
 
   if (OpenEntry(entry) != OpenResult::SUCCESS)
@@ -994,32 +1075,46 @@ bool CTransportManager::Setup(size_t alignment)
   return success;
 }
 
-CfgResult CTransportManager::Cfg(
-  const GraphCfg& cfg, CFrameGraph& graph)
+CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
+  uint64_t revision, CFrameGraph& graph, ITexStage * activation)
 {
+  if (!revision || revision != FrameRev())
+    return CfgResult::RETRY;
+
   CFrameGraph next;
   if (!next.Begin(cfg))
     return CfgResult::REJECTED;
   if (!BeginPhase(Phase::CFG, true))
     return CfgResult::RETRY;
 
+  CTexStage texStage;
+  CfgResult held = m_tex.Hold(texStage);
+  if (held != CfgResult::ACCEPTED)
+  {
+    m_tex.Abort(texStage);
+    EndPhase();
+    return held;
+  }
+
   struct Route
   {
-    Entry                    * entry     = nullptr;
+    Entry                     * entry     = nullptr;
     std::shared_ptr<ITransport> transport;
-    BackendId                  id        = 0;
-    uint32_t                   epoch     = 0;
-    bool                       required  = false;
-    bool                       primary   = false;
-    bool                       prepared  = false;
-    bool                       eligible  = false;
-    FrameProfile               profiles[FRAME_PROFILE_MAX] = {};
-    unsigned                   profileCount = 0;
+    BackendId                   id           = 0;
+    uint32_t                    epoch        = 0;
+    bool                        required     = false;
+    bool                        primary      = false;
+    bool                        prepared     = false;
+    bool                        eligible     = false;
+    ITexSink                  * texSink      = nullptr;
+    FrameProfile                profiles[FRAME_PROFILE_MAX] = {};
+    unsigned                    profileCount = 0;
   };
 
   Route routes[FRAME_MAX_SINKS];
   unsigned routeCount = 0;
-  CfgResult result = CfgResult::ACCEPTED;
+  CfgResult result = revision == FrameRev() ?
+    CfgResult::ACCEPTED : CfgResult::RETRY;
 
   Entry * entries[FRAME_MAX_SINKS] = {};
   const unsigned count = Entries(entries);
@@ -1051,6 +1146,7 @@ CfgResult CTransportManager::Cfg(
     route.entry = &entry;
     State state;
     bool frameAbsent = false;
+    bool frameAdded = false;
     {
       CSRWSharedLock entryLock(entry.lock);
       route.transport = entry.transport;
@@ -1058,12 +1154,14 @@ CfgResult CTransportManager::Cfg(
       route.epoch     = entry.epoch;
       route.required  = entry.required;
       route.primary   = entry.primary;
+      route.texSink   = entry.texSink;
       state           = entry.state;
       frameAbsent     = entry.frameAbsent;
+      frameAdded      = entry.frameAdded;
     }
 
     route.eligible = route.transport && !frameAbsent &&
-      (state == State::INITIALIZED || state == State::READY);
+      frameAdded && state == State::READY;
     if (!route.eligible)
     {
       if (!route.required &&
@@ -1072,6 +1170,16 @@ CfgResult CTransportManager::Cfg(
       result = frameAbsent ? CfgResult::REJECTED :
         (state == State::FAILED ? CfgResult::FAILED : CfgResult::RETRY);
       break;
+    }
+    if (route.texSink && !activation)
+    {
+      route.eligible = false;
+      if (route.required)
+      {
+        result = CfgResult::REJECTED;
+        break;
+      }
+      continue;
     }
 
     unsigned profileCount = 0;
@@ -1113,6 +1221,22 @@ CfgResult CTransportManager::Cfg(
         candidate.profile = profile;
         if (!next.Can(candidate))
           continue;
+
+        if (route.texSink)
+        {
+          const CfgResult fault =
+            m_tex.Faulted(route.id, route.epoch, candidate);
+          if (fault == CfgResult::FAILED)
+          {
+            routeResult = fault;
+            break;
+          }
+          if (fault == CfgResult::REJECTED)
+          {
+            routeResult = fault;
+            continue;
+          }
+        }
 
         routeResult = route.transport->Probe(candidate);
         if (routeResult == CfgResult::NEXT)
@@ -1160,17 +1284,53 @@ CfgResult CTransportManager::Cfg(
   if (result == CfgResult::ACCEPTED && !next.Seal())
     result = CfgResult::FAILED;
 
+  if (result == CfgResult::ACCEPTED &&
+      !next.Stamp(NextGraph()))
+    result = CfgResult::FAILED;
+
+  CTexHub::Bind binds[FRAME_MAX_SINKS];
+  unsigned bindCount = 0;
+  if (result == CfgResult::ACCEPTED)
+    for (unsigned i = 0; i < routeCount; ++i)
+      if (routes[i].prepared)
+      {
+        CTexHub::Bind& bind = binds[bindCount++];
+        bind.owner = routes[i].transport;
+        bind.id    = routes[i].id;
+        bind.epoch = routes[i].epoch;
+        bind.sink  = routes[i].texSink;
+      }
+
+  bool activationReady = false;
+  if (result == CfgResult::ACCEPTED && activation)
+  {
+    result = activation->Prep(next);
+    activationReady = result == CfgResult::ACCEPTED;
+  }
+  if (result == CfgResult::ACCEPTED)
+    result = m_tex.Prep(next, binds, bindCount, texStage);
+  if (result == CfgResult::ACCEPTED && revision != FrameRev())
+    result = CfgResult::RETRY;
+
   if (result == CfgResult::ACCEPTED)
   {
     for (unsigned i = 0; i < routeCount; ++i)
       if (routes[i].prepared)
         routes[i].transport->Commit();
     graph = next;
+    m_tex.Commit(texStage);
+    if (activationReady)
+      activation->Commit();
   }
   else
+  {
     for (unsigned i = routeCount; i > 0; --i)
       if (routes[i - 1].prepared)
         routes[i - 1].transport->Abort();
+    m_tex.Abort(texStage);
+    if (activationReady)
+      activation->Abort();
+  }
 
   for (unsigned i = routeCount; i > 0; --i)
     EndCall(*routes[i - 1].entry, routes[i - 1].transport);
@@ -1342,6 +1502,8 @@ void CTransportManager::Stop()
     SetEvent(m_stoppedEvent);
     return;
   }
+
+  m_tex.Stop();
 
   for (unsigned i = count; i > 0; --i)
   {

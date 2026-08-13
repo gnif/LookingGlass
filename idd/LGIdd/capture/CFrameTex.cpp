@@ -48,6 +48,22 @@ static uint64_t NextPool()
   return Atomic::Next(next);
 }
 
+static bool ValidTime(const FrameTime& time)
+{
+  if (!time.postStart                                      ||
+      (!time.gpuValid && (time.gpuStart || time.gpuEnd))   ||
+      (!time.readyValid && time.readyAt))
+    return false;
+  if (time.gpuValid && (!time.gpuStart                     ||
+      time.gpuStart < time.postStart                       ||
+      time.gpuEnd   < time.gpuStart))
+    return false;
+  if (time.readyValid && (!time.readyAt                    ||
+      time.readyAt < (time.gpuValid ? time.gpuEnd : time.postStart)))
+    return false;
+  return true;
+}
+
 static bool ValidFrame(const FrameProfile& profile,
   const D3D12_RESOURCE_DESC& resource, const FrameDesc& frame)
 {
@@ -279,7 +295,8 @@ struct CTexCore
 CFrameTex::CFrameTex(uint64_t graphValue, uint64_t poolValue,
   unsigned nodeValue, unsigned slotValue, uint64_t versionValue,
   const FrameProfile& profileValue,
-  const FrameDesc& frameValue, const ComPtr<ID3D12Resource>& res,
+  const FrameDesc& frameValue, const FrameTime& timeValue,
+  const ComPtr<ID3D12Resource>& res,
   const D12Sync& sync, D3D12_RESOURCE_STATES state, bool sharedValue) :
   m_res(res),
   m_sync(sync),
@@ -291,7 +308,8 @@ CFrameTex::CFrameTex(uint64_t graphValue, uint64_t poolValue,
   slot(slotValue),
   version(versionValue),
   profile(profileValue),
-  frame(frameValue)
+  frame(frameValue),
+  time(timeValue)
 {
 }
 
@@ -359,13 +377,19 @@ ID3D12Resource * TexWrite::Get() const
     resource.Get() : nullptr;
 }
 
-bool TexWrite::Seal(const FrameDesc& frame, const D12Sync& sync,
-  TexLease& lease)
+bool TexWrite::Seal(const FrameDesc& frame, const FrameTime& time,
+  const D12Sync& sync, TexLease& lease)
 {
   if (!m_core || !sync.Valid())
     return false;
 
   const std::shared_ptr<CTexCore> core = m_core;
+  if (!ValidTime(time))
+  {
+    core->Fail(m_index, m_version, sync);
+    Clear();
+    return false;
+  }
   ComPtr<ID3D12Resource> resource;
   FrameDesc desc = frame;
   if (!core->Info(m_index, m_version, resource) ||
@@ -390,8 +414,8 @@ bool TexWrite::Seal(const FrameDesc& frame, const D12Sync& sync,
   }
 
   CFrameTex * raw = new (std::nothrow) CFrameTex(core->graph, core->id,
-    core->node, m_index, m_version, core->profile, desc, resource, sync,
-    core->read, core->shared);
+    core->node, m_index, m_version, core->profile, desc, time, resource,
+    sync, core->read, core->shared);
   if (!raw)
   {
     core->Drop(index, generation);
