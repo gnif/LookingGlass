@@ -96,6 +96,13 @@ struct GraphLeaf
   FrameCfg  cfg;
 };
 
+struct GraphRouteName
+{
+  BackendId      id    = 0;
+  uint32_t       epoch = 0;
+  const wchar_t * name = nullptr;
+};
+
 // All products derived from one capture retain the same immutable content.
 // It contains no acquired IddCx or Direct3D resource.
 struct FrameContent
@@ -148,6 +155,8 @@ private:
     unsigned height,
     const FrameProfile& profile);
   unsigned Checkpoint(const FrameProfile& profile);
+  void LogNode(unsigned node, const GraphRouteName * routes,
+    unsigned routeCount, bool * ancestry, unsigned depth, bool last) const;
 
 public:
   void Reset();
@@ -158,6 +167,7 @@ public:
   bool Seal();
   bool Stamp(uint64_t generation);
   bool Ready() const { return m_sealed && m_generation; }
+  void Log(const GraphRouteName * routes, unsigned routeCount) const;
   bool Same(const GraphCfg& cfg) const;
   const GraphLeaf * FindLeaf(BackendId id, uint32_t epoch, bool tex,
     const FrameCfg& frame) const;

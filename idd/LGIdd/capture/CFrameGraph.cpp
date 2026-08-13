@@ -20,6 +20,8 @@
 
 #include "capture/CFrameGraph.h"
 
+#include "CDebug.h"
+
 #include <cstring>
 
 bool Frame::Same(const GraphCfg& left, const GraphCfg& right)
@@ -62,6 +64,68 @@ bool Frame::Valid(FrameDamage damage, const RECT * rects, unsigned count,
       return true;
   }
   return false;
+}
+
+static const char * OpName(FrameOp op)
+{
+  switch (op)
+  {
+    case FrameOp::SRC:   return "src";
+    case FrameOp::CAL:   return "cal";
+    case FrameOp::LUT:   return "lut";
+    case FrameOp::SCALE: return "scale";
+    case FrameOp::SDR:   return "sdr";
+    case FrameOp::SCRGB: return "scrgb";
+    case FrameOp::HDR10: return "hdr10";
+  }
+  return "?";
+}
+
+static const char * PixelName(FramePixel pixel)
+{
+  switch (pixel)
+  {
+    case FramePixel::BGRA8:   return "bgra8";
+    case FramePixel::RGBA8:   return "rgba8";
+    case FramePixel::RGB10A2: return "rgb10";
+    case FramePixel::RGBA16F: return "rgba16f";
+  }
+  return "?";
+}
+
+static const char * SignalName(FrameSignal signal)
+{
+  switch (signal)
+  {
+    case FrameSignal::SRGB:         return "srgb";
+    case FrameSignal::PQ_BT2020:    return "pq";
+    case FrameSignal::SCRGB_LINEAR: return "scrgb";
+  }
+  return "?";
+}
+
+static const char * StorageName(FrameStorage storage)
+{
+  switch (storage)
+  {
+    case FrameStorage::D3D11_TEXTURE: return "d3d11";
+    case FrameStorage::D3D12_TEXTURE: return "d3d12";
+    default:                          return "?";
+  }
+}
+
+static void Branch(char * result, const bool * ancestry,
+  unsigned depth, bool last)
+{
+  char * current = result;
+  for (unsigned i = 0; i < depth; ++i)
+  {
+    const char * segment = ancestry[i] ? "   " : "|  ";
+    memcpy(current, segment, 3);
+    current += 3;
+  }
+  memcpy(current, last ? "`- " : "+- ", 3);
+  current[3] = 0;
 }
 
 void CFrameGraph::Reset()
@@ -305,6 +369,95 @@ bool CFrameGraph::Stamp(uint64_t generation)
     return false;
   m_generation = generation;
   return true;
+}
+
+void CFrameGraph::LogNode(unsigned node, const GraphRouteName * routes,
+  unsigned routeCount, bool * ancestry, unsigned depth, bool last) const
+{
+  char branch[FRAME_GRAPH_MAX_NODES * 3 + 4];
+  Branch(branch, ancestry, depth, last);
+
+  const GraphNode& item = m_nodes[node];
+  switch (item.op)
+  {
+    case FrameOp::SRC:
+      DEBUG_INFO("%ssrc %s/%s", branch,
+        PixelName(item.profile.pixel), SignalName(item.profile.signal));
+      break;
+
+    case FrameOp::SDR:
+    case FrameOp::SCRGB:
+      DEBUG_INFO("%snative %s", branch, PixelName(item.profile.pixel));
+      break;
+
+    case FrameOp::SCALE:
+      DEBUG_INFO("%sscale %ux%u %s/%s", branch,
+        item.width, item.height, PixelName(item.profile.pixel),
+        SignalName(item.profile.signal));
+      break;
+
+    default:
+      DEBUG_INFO("%s%s %s/%s", branch, OpName(item.op),
+        PixelName(item.profile.pixel), SignalName(item.profile.signal));
+      break;
+  }
+
+  unsigned children = 0;
+  for (unsigned child = 1; child < m_nodeCount; ++child)
+    if (m_nodes[child].refs && m_nodes[child].parent == node)
+      ++children;
+  for (unsigned leaf = 0; leaf < m_leafCount; ++leaf)
+    if (m_leaves[leaf].node == node)
+      ++children;
+
+  ancestry[depth] = last;
+  unsigned emitted = 0;
+  for (unsigned child = 1; child < m_nodeCount; ++child)
+    if (m_nodes[child].refs && m_nodes[child].parent == node)
+      LogNode(child, routes, routeCount, ancestry, depth + 1,
+        ++emitted == children);
+
+  for (unsigned leaf = 0; leaf < m_leafCount; ++leaf)
+  {
+    const GraphLeaf& endpoint = m_leaves[leaf];
+    if (endpoint.node != node)
+      continue;
+
+    const wchar_t * name = L"transport";
+    for (unsigned route = 0; routes && route < routeCount; ++route)
+      if (routes[route].id    == endpoint.id    &&
+          routes[route].epoch == endpoint.epoch &&
+          routes[route].name)
+      {
+        name = routes[route].name;
+        break;
+      }
+
+    Branch(branch, ancestry, depth + 1, ++emitted == children);
+    DEBUG_INFO("%s%ls:%u %s", branch, name, endpoint.id,
+      StorageName(endpoint.cfg.profile.storage));
+  }
+}
+
+void CFrameGraph::Log(const GraphRouteName * routes,
+  unsigned routeCount) const
+{
+  if (!Ready() || routeCount > TRANSPORT_MAX_INSTANCES ||
+      (routeCount && !routes))
+    return;
+
+  const unsigned long long generation =
+    static_cast<unsigned long long>(m_generation);
+  const char * mode = m_cfg.mode == GpuMode::HARDWARE ? "hw" : "sw";
+  if (m_cfg.srcWidth == m_cfg.width && m_cfg.srcHeight == m_cfg.height)
+    DEBUG_INFO("Frame graph g=%llu mode=%s %ux%u", generation, mode,
+      m_cfg.srcWidth, m_cfg.srcHeight);
+  else
+    DEBUG_INFO("Frame graph g=%llu mode=%s %ux%u -> %ux%u",
+      generation, mode, m_cfg.srcWidth, m_cfg.srcHeight,
+      m_cfg.width, m_cfg.height);
+  bool ancestry[FRAME_GRAPH_MAX_NODES] = {};
+  LogNode(0, routes, routeCount, ancestry, 0, true);
 }
 
 bool CFrameGraph::Same(const GraphCfg& cfg) const

@@ -1127,6 +1127,8 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
     bool                        selected     = false;
     bool                        eligible     = false;
     ITexSink                  * texSink      = nullptr;
+    std::wstring                name;
+    CfgResult                   outcome      = CfgResult::NEXT;
     FrameProfile                profiles[FRAME_PROFILE_MAX] = {};
     unsigned                    profileCount = 0;
   };
@@ -1175,6 +1177,7 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
       route.required  = entry.required;
       route.primary   = entry.primary;
       route.texSink   = entry.texSink;
+      route.name      = entry.config.kind;
       state           = entry.state;
       frameAbsent     = entry.frameAbsent;
       frameAdded      = entry.frameAdded;
@@ -1186,14 +1189,20 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
     {
       if (!route.required &&
           (frameAbsent || state == State::FAILED))
+      {
+        if (frameAbsent)
+          route.outcome = CfgResult::REJECTED;
         continue;
+      }
       result = frameAbsent ? CfgResult::REJECTED :
         (state == State::FAILED ? CfgResult::FAILED : CfgResult::RETRY);
+      route.outcome = result;
       break;
     }
     if (route.texSink && !activation)
     {
       route.eligible = false;
+      route.outcome  = CfgResult::REJECTED;
       if (route.required)
       {
         result = CfgResult::REJECTED;
@@ -1309,9 +1318,14 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
       }
 
       if (route.selected)
+      {
+        route.outcome = CfgResult::ACCEPTED;
         continue;
+      }
 
       route.transport->Abort();
+      route.outcome = routeResult == CfgResult::NEXT ?
+        CfgResult::REJECTED : routeResult;
       if (routeResult == CfgResult::RETRY)
       {
         result = CfgResult::RETRY;
@@ -1319,8 +1333,7 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
       }
       if (route.required)
       {
-        result = routeResult == CfgResult::NEXT ?
-          CfgResult::REJECTED : routeResult;
+        result = route.outcome;
         break;
       }
     }
@@ -1346,6 +1359,7 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
       }
 
   bool activationReady = false;
+  bool committed       = false;
   if (result == CfgResult::ACCEPTED && activation)
   {
     result = activation->Prep(next);
@@ -1372,6 +1386,7 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
     m_tex.Commit(texStage);
     if (activationReady)
       activation->Commit();
+    committed = true;
   }
   else
   {
@@ -1386,6 +1401,27 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
   for (unsigned i = routeCount; i > 0; --i)
     EndCall(*routes[i - 1].entry, routes[i - 1].transport);
   EndPhase();
+
+  if (committed)
+  {
+    GraphRouteName logRoutes[FRAME_MAX_SINKS];
+    unsigned logRouteCount = 0;
+    for (unsigned route = 0; route < routeCount; ++route)
+      if (routes[route].selected)
+      {
+        GraphRouteName& label = logRoutes[logRouteCount++];
+        label.id    = routes[route].id;
+        label.epoch = routes[route].epoch;
+        label.name  = routes[route].name.c_str();
+      }
+    next.Log(logRoutes, logRouteCount);
+  }
+  if (result == CfgResult::ACCEPTED || result == CfgResult::REJECTED)
+    for (unsigned i = 0; i < routeCount; ++i)
+      if (routes[i].outcome == CfgResult::REJECTED)
+        DEBUG_INFO("Frame route rejected %ls:%u",
+          routes[i].name.empty() ? L"transport" : routes[i].name.c_str(),
+          routes[i].id);
   return result;
 }
 
