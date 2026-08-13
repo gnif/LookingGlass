@@ -306,6 +306,9 @@
     <ClCompile Include="postprocess\CPostProcessor.cpp">
       <Filter>Post-processing</Filter>
     </ClCompile>
+    <ClCompile Include="postprocess\D12FrameFormat.cpp">
+      <Filter>Post-processing</Filter>
+    </ClCompile>
     <ClCompile Include="postprocess\effect\CColorTransformEffect.cpp">
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>

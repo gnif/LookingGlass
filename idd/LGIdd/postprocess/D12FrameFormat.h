@@ -68,3 +68,30 @@ struct D12FrameFormat
   uint32_t maxContentLightLevel;
   uint32_t maxFrameAverageLightLevel;
 };
+
+namespace D12
+{
+  enum class DescCmp : uint8_t
+  {
+    EXACT,
+    CREATE,
+    COPY,
+    NO_FLAGS,
+    VIEW,
+  };
+
+  enum class FormatCmp : uint8_t
+  {
+    EXACT,
+    IMAGE,
+    NO_FLAGS,
+  };
+
+  FrameType Type(DXGI_FORMAT format);
+  void CopyHdr(D12FrameFormat& dst, const D12FrameFormat& src);
+  bool Same(const D3D12_RESOURCE_DESC& left,
+    const D3D12_RESOURCE_DESC& right,
+    DescCmp cmp = DescCmp::EXACT);
+  bool Same(const D12FrameFormat& left, const D12FrameFormat& right,
+    FormatCmp cmp = FormatCmp::EXACT);
+}

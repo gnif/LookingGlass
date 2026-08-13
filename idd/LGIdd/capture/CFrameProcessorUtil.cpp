@@ -41,39 +41,6 @@ bool CFrameProcessorUtil::FrameMetadataChanged(
        previous.maxFrameAverageLightLevel != current.maxFrameAverageLightLevel));
 }
 
-FrameType CFrameProcessorUtil::GetFrameType(DXGI_FORMAT format)
-{
-  switch (format)
-  {
-    case DXGI_FORMAT_B8G8R8A8_UNORM    : return FRAME_TYPE_BGRA;
-    case DXGI_FORMAT_R8G8B8A8_UNORM    : return FRAME_TYPE_RGBA;
-    case DXGI_FORMAT_R10G10B10A2_UNORM : return FRAME_TYPE_RGBA10;
-    case DXGI_FORMAT_R16G16B16A16_FLOAT: return FRAME_TYPE_RGBA16F;
-    default                            : return FRAME_TYPE_INVALID;
-  }
-}
-
-bool CFrameProcessorUtil::ResourceDescMatches(
-  const D3D12_RESOURCE_DESC& left, const D3D12_RESOURCE_DESC& right,
-  bool compareAlignment)
-{
-  // GetDesc may report a resolved alignment when resource creation requested
-  // automatic alignment, so callers comparing creation descriptors can omit
-  // this allocation metadata.
-  return
-    left.Dimension          == right.Dimension          &&
-    (!compareAlignment || left.Alignment == right.Alignment) &&
-    left.Width              == right.Width              &&
-    left.Height             == right.Height             &&
-    left.DepthOrArraySize   == right.DepthOrArraySize   &&
-    left.MipLevels          == right.MipLevels          &&
-    left.Format             == right.Format             &&
-    left.SampleDesc.Count   == right.SampleDesc.Count   &&
-    left.SampleDesc.Quality == right.SampleDesc.Quality &&
-    left.Layout             == right.Layout             &&
-    left.Flags              == right.Flags;
-}
-
 static bool IsFullDamage(const RECT * dirtyRects, unsigned nbDirtyRects,
   unsigned width, unsigned height)
 {

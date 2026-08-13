@@ -263,8 +263,7 @@ bool CSoftwareFrameProcessor::EnsureProductResource(
   desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
 
   if (product.resource &&
-      CFrameProcessorUtil::ResourceDescMatches(
-        product.resource->GetDesc(), desc, false))
+      D12::Same(product.resource->GetDesc(), desc, D12::DescCmp::CREATE))
     return true;
 
   product.resource.Reset();

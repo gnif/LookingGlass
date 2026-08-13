@@ -27,7 +27,6 @@
 #include "postprocess/effect/CHDR16to10Effect.h"
 #include "postprocess/effect/CRGB24Effect.h"
 
-#include <cstring>
 #include <limits>
 #include <utility>
 
@@ -69,18 +68,6 @@ bool IsIdentityColorTransform(const D12ColorTransform& transform)
     }
 
   return true;
-}
-
-static void CopyHDRMetadata(D12FrameFormat& dst, const D12FrameFormat& src)
-{
-  dst.hdrMetadata   = src.hdrMetadata;
-  dst.sdrWhiteLevel = src.sdrWhiteLevel;
-  std::memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
-  std::memcpy(dst.whitePoint, src.whitePoint, sizeof(dst.whitePoint));
-  dst.maxDisplayLuminance       = src.maxDisplayLuminance;
-  dst.minDisplayLuminance       = src.minDisplayLuminance;
-  dst.maxContentLightLevel      = src.maxContentLightLevel;
-  dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
 }
 
 bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device,
@@ -213,8 +200,8 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
   {
     // Static HDR metadata may change independently of the resource format.
     // Propagate it without recreating resources or post-processing state.
-    CopyHDRMetadata(m_srcFormat, srcFormat);
-    CopyHDRMetadata(m_dstFormat, srcFormat);
+    D12::CopyHdr(m_srcFormat, srcFormat);
+    D12::CopyHdr(m_dstFormat, srcFormat);
     return true;
   }
 

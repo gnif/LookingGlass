@@ -572,7 +572,7 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
   srcFormat.desc           = srcDesc;
   srcFormat.width          = (unsigned)srcDesc.Width;
   srcFormat.height         = srcDesc.Height;
-  srcFormat.format         = CFrameProcessorUtil::GetFrameType(srcDesc.Format);
+  srcFormat.format         = D12::Type(srcDesc.Format);
   srcFormat.sdrWhiteLevel  = sdrWhiteLevel;
   srcFormat.colorTransform = m_control.GetColorTransform();
 

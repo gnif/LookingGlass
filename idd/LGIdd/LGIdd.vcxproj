@@ -55,6 +55,7 @@
     <ClCompile Include="d3d\CInteropResource.cpp" />
     <ClCompile Include="d3d\CInteropResourcePool.cpp" />
     <ClCompile Include="postprocess\CPostProcessor.cpp" />
+    <ClCompile Include="postprocess\D12FrameFormat.cpp" />
     <ClCompile Include="postprocess\effect\CColorTransformEffect.cpp" />
     <ClCompile Include="postprocess\effect\CComputeEffect.cpp" />
     <ClCompile Include="postprocess\effect\CDownsampleEffect.cpp" />

@@ -29,9 +29,6 @@ class CFrameProcessorUtil
 public:
   static bool FrameMetadataChanged(const D12FrameFormat& previous,
     const D12FrameFormat& current);
-  static FrameType GetFrameType(DXGI_FORMAT format);
-  static bool ResourceDescMatches(const D3D12_RESOURCE_DESC& left,
-    const D3D12_RESOURCE_DESC& right, bool compareAlignment = true);
   static void ClipDirtyRects(RECT dirtyRects[], unsigned * nbDirtyRects,
     unsigned width, unsigned height);
   static bool BuildCopyDamage(const CPostProcessor& postProcessor,

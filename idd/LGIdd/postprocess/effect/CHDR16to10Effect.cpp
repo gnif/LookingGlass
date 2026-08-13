@@ -134,14 +134,7 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
 
   // Gamut conversion changes the signal's container primaries to BT.2020, but
   // does not change the mastering display chromaticities described by ST 2086.
-  dst.hdrMetadata = src.hdrMetadata;
-  memcpy(dst.displayPrimary, src.displayPrimary, sizeof(dst.displayPrimary));
-  memcpy(dst.whitePoint    , src.whitePoint    , sizeof(dst.whitePoint    ));
-  dst.maxDisplayLuminance       = src.maxDisplayLuminance;
-  dst.minDisplayLuminance       = src.minDisplayLuminance;
-  dst.maxContentLightLevel      = src.maxContentLightLevel;
-  dst.maxFrameAverageLightLevel = src.maxFrameAverageLightLevel;
-  dst.sdrWhiteLevel             = src.sdrWhiteLevel;
+  D12::CopyHdr(dst, src);
 
   return PostProcessStatus::SUCCESS;
 }

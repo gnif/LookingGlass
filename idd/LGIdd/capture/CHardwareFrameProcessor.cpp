@@ -290,8 +290,7 @@ bool CHardwareFrameProcessor::EnsureCandidateResource(
   desc.Flags              = D3D12_RESOURCE_FLAG_NONE;
 
   if (candidate.resource &&
-      CFrameProcessorUtil::ResourceDescMatches(
-        candidate.resource->GetDesc(), desc, false))
+      D12::Same(candidate.resource->GetDesc(), desc, D12::DescCmp::CREATE))
     return true;
 
   candidate.resource.Reset();
