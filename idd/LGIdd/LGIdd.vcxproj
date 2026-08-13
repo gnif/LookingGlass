@@ -51,6 +51,7 @@
     <ClCompile Include="capture\CHardwareFrameProcessor.cpp" />
     <ClCompile Include="capture\CSoftwareFrameProcessor.cpp" />
     <ClCompile Include="capture\CSwapChainProcessor.cpp" />
+    <ClCompile Include="d3d\CInteropPool.cpp" />
     <ClCompile Include="d3d\CD3D11Device.cpp" />
     <ClCompile Include="d3d\CD3D12CommandQueue.cpp" />
     <ClCompile Include="d3d\CD3D12Device.cpp" />
@@ -106,6 +107,7 @@
     <ClInclude Include="capture\CHardwareFrameProcessor.h" />
     <ClInclude Include="capture\CSoftwareFrameProcessor.h" />
     <ClInclude Include="capture\CSwapChainProcessor.h" />
+    <ClInclude Include="d3d\CInteropPool.h" />
     <ClInclude Include="d3d\CD3D11Device.h" />
     <ClInclude Include="d3d\CD3D12CommandQueue.h" />
     <ClInclude Include="d3d\CD3D12Device.h" />

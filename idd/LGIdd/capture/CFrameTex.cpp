@@ -95,8 +95,9 @@ struct CTexCore
   unsigned               node    = 0;
   unsigned               count   = 0;
   FrameProfile           profile;
-  D3D12_RESOURCE_DESC    desc    = {};
-  D3D12_RESOURCE_STATES  read    = D3D12_RESOURCE_STATE_COMMON;
+  D3D12_RESOURCE_DESC    desc     = {};
+  D3D12_RESOURCE_STATES  read     = D3D12_RESOURCE_STATE_COMMON;
+  bool                   shared   = false;
   Slot                   slots[CTexPool::MAX_SLOTS];
 
   TexResult Acquire(unsigned& index, uint64_t& generation)
@@ -279,10 +280,11 @@ CFrameTex::CFrameTex(uint64_t graphValue, uint64_t poolValue,
   unsigned nodeValue, unsigned slotValue, uint64_t versionValue,
   const FrameProfile& profileValue,
   const FrameDesc& frameValue, const ComPtr<ID3D12Resource>& res,
-  const D12Sync& sync, D3D12_RESOURCE_STATES state) :
+  const D12Sync& sync, D3D12_RESOURCE_STATES state, bool sharedValue) :
   m_res(res),
   m_sync(sync),
   m_state(state),
+  m_shared(sharedValue),
   graph(graphValue),
   pool(poolValue),
   node(nodeValue),
@@ -389,7 +391,7 @@ bool TexWrite::Seal(const FrameDesc& frame, const D12Sync& sync,
 
   CFrameTex * raw = new (std::nothrow) CFrameTex(core->graph, core->id,
     core->node, m_index, m_version, core->profile, desc, resource, sync,
-    core->read);
+    core->read, core->shared);
   if (!raw)
   {
     core->Drop(index, generation);
@@ -429,7 +431,7 @@ void TexWrite::Cancel()
 TexResult CTexPool::Init(ID3D12Device3 * device, uint64_t graph,
   unsigned node, const FrameProfile& profile,
   const D3D12_RESOURCE_DESC& desc, D3D12_RESOURCE_STATES state,
-  unsigned slots)
+  unsigned slots, bool shared)
 {
   if (!device || !graph || !node || !slots || slots > MAX_SLOTS     ||
       profile.storage         != FrameStorage::D3D12_TEXTURE        ||
@@ -468,6 +470,7 @@ TexResult CTexPool::Init(ID3D12Device3 * device, uint64_t graph,
   core->profile = profile;
   core->desc    = desc;
   core->read    = state;
+  core->shared  = shared;
 
   D3D12_HEAP_PROPERTIES heap = {};
   heap.Type                 = D3D12_HEAP_TYPE_DEFAULT;
@@ -478,8 +481,12 @@ TexResult CTexPool::Init(ID3D12Device3 * device, uint64_t graph,
 
   for (unsigned i = 0; i < slots; ++i)
   {
+    const D3D12_HEAP_FLAGS flags = shared ?
+      static_cast<D3D12_HEAP_FLAGS>(D3D12_HEAP_FLAG_SHARED |
+        D3D12_HEAP_FLAG_CREATE_NOT_ZEROED) :
+      D3D12_HEAP_FLAG_CREATE_NOT_ZEROED;
     const HRESULT hr = device->CreateCommittedResource(&heap,
-      D3D12_HEAP_FLAG_CREATE_NOT_ZEROED, &desc, state, nullptr,
+      flags, &desc, state, nullptr,
       IID_PPV_ARGS(&core->slots[i].res));
     if (FAILED(hr))
     {

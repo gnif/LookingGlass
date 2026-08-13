@@ -36,11 +36,14 @@ private:
   ComPtr<IDXGIAdapter1       > m_adapter;
   ComPtr<ID3D11Device5       > m_device;
   ComPtr<ID3D11DeviceContext4> m_context;
-  bool m_isSoftware = false;
+  bool                         m_isSoftware = false;
+  bool                         m_video      = false;
 
 public:
-  CD3D11Device(LUID adapterLuid) :
-    m_adapterLuid(adapterLuid) {};
+  CD3D11Device(LUID adapterLuid, bool video = false) :
+    m_adapterLuid(adapterLuid),
+    m_video(video)
+  {}
 
   CD3D11Device()
   {
@@ -53,5 +56,8 @@ public:
 
   ComPtr<ID3D11DeviceContext4> GetContext() { return m_context; }
 
+  LUID GetAdapterLuid() const { return m_adapterLuid; }
+
   bool IsSoftware() { return m_isSoftware; }
+  bool IsVideo() const { return m_video; }
 };

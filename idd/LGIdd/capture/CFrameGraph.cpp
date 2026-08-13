@@ -313,6 +313,17 @@ bool CFrameGraph::Want(FrameSignal signal) const
   return false;
 }
 
+bool CFrameGraph::Shared(unsigned node) const
+{
+  if (!m_sealed || !node || node >= m_nodeCount)
+    return false;
+  for (unsigned i = 0; i < m_leafCount; ++i)
+    if (m_leaves[i].node                == node &&
+        m_leaves[i].cfg.profile.storage == FrameStorage::D3D11_TEXTURE)
+      return true;
+  return false;
+}
+
 bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
   LeafDesc& desc) const
 {

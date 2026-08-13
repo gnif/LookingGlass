@@ -137,12 +137,12 @@ CD3D12Device::InitResult CD3D12Device::Init(
 
   if (!m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,
       L"Copy", m_indirectCopy ? CD3D12CommandSlot::NORMAL :
-                               CD3D12CommandSlot::FAST, 2, true))
+                               CD3D12CommandSlot::FAST, 2, true, true))
     return InitResult::FAILURE;
 
   if (m_computeEnabled &&
       !m_computeQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE,
-        L"Compute", CD3D12CommandSlot::FAST, 2))
+        L"Compute", CD3D12CommandSlot::FAST, 2, false, true))
     return InitResult::FAILURE;
 
   DEBUG_INFO("Created CD3D12Device");

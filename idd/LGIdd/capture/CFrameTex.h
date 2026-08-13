@@ -47,11 +47,12 @@ private:
   ComPtr<ID3D12Resource>  m_res;
   D12Sync                 m_sync;
   D3D12_RESOURCE_STATES   m_state;
+  bool                     m_shared;
 
   CFrameTex(uint64_t graph, uint64_t pool, unsigned node, unsigned slot,
     uint64_t version, const FrameProfile& profile, const FrameDesc& frame,
     const ComPtr<ID3D12Resource>& res, const D12Sync& sync,
-    D3D12_RESOURCE_STATES state);
+    D3D12_RESOURCE_STATES state, bool shared);
 
 public:
   CFrameTex(const CFrameTex&) = delete;
@@ -68,6 +69,7 @@ public:
   ID3D12Resource * Get() const { return m_res.Get(); }
   const D12Sync& Sync() const { return m_sync; }
   D3D12_RESOURCE_STATES State() const { return m_state; }
+  bool Shared() const { return m_shared; }
   bool Wait(CD3D12CommandSlot& cmd) const;
   D12SyncState Status() const { return m_sync.State(); }
   bool Ready() const { return m_sync.Done(); }
@@ -152,7 +154,7 @@ public:
 
   TexResult Init(ID3D12Device3 * device, uint64_t graph, unsigned node,
     const FrameProfile& profile, const D3D12_RESOURCE_DESC& desc,
-    D3D12_RESOURCE_STATES state, unsigned slots);
+    D3D12_RESOURCE_STATES state, unsigned slots, bool shared = false);
   void Reset();
   TexResult Try(TexWrite& write);
 };

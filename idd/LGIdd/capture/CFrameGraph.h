@@ -153,6 +153,7 @@ public:
   bool Same(const GraphCfg& cfg) const;
   bool Want(FrameSignal signal) const;
   bool Need(FrameOp op) const;
+  bool Shared(unsigned node) const;
   bool Desc(unsigned leaf, const FrameContentRef& content,
     LeafDesc& desc) const;
 

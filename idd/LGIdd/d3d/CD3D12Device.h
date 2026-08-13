@@ -79,6 +79,7 @@ struct CD3D12Device
 
     ComPtr<ID3D12Device3> GetDevice() { return m_device; }
     ComPtr<ID3D12Heap   > GetTransportHeap() { return m_transportHeap; }
+    LUID GetAdapterLuid() const { return m_adapterLuid; }
     bool IsIndirectCopy() const { return m_indirectCopy; }
 
     CD3D12CommandSlot * GetCopySlot   ();

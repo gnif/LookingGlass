@@ -124,6 +124,9 @@
     <ClInclude Include="capture\CSwapChainProcessor.h">
       <Filter>Capture</Filter>
     </ClInclude>
+    <ClInclude Include="d3d\CInteropPool.h">
+      <Filter>D3D</Filter>
+    </ClInclude>
     <ClInclude Include="d3d\CD3D11Device.h">
       <Filter>D3D</Filter>
     </ClInclude>
@@ -302,6 +305,9 @@
     </ClCompile>
     <ClCompile Include="capture\CSwapChainProcessor.cpp">
       <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="d3d\CInteropPool.cpp">
+      <Filter>D3D</Filter>
     </ClCompile>
     <ClCompile Include="d3d\CD3D11Device.cpp">
       <Filter>D3D</Filter>

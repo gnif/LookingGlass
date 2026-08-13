@@ -198,7 +198,7 @@ class CD3D12CommandQueue
 
     bool Init(ID3D12Device3 * device, D3D12_COMMAND_LIST_TYPE type,
       const WCHAR * name, CD3D12CommandSlot::CallbackMode callbackMode,
-      UINT slotCount, bool enableTiming = false);
+      UINT slotCount, bool enableTiming = false, bool sharedFence = false);
     void DeInit();
 
     CD3D12CommandSlot * Acquire(UINT slotIndex);

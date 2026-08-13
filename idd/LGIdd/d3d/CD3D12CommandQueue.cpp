@@ -432,7 +432,7 @@ bool CD3D12CommandQueue::InitTiming(ID3D12Device3 * device, UINT slotCount)
 bool CD3D12CommandQueue::Init(ID3D12Device3 * device,
   D3D12_COMMAND_LIST_TYPE type, const WCHAR * name,
   CD3D12CommandSlot::CallbackMode callbackMode, UINT slotCount,
-  bool enableTiming)
+  bool enableTiming, bool sharedFence)
 {
   if (!slotCount || slotCount > MAX_SLOTS)
   {
@@ -455,7 +455,9 @@ bool CD3D12CommandQueue::Init(ID3D12Device3 * device,
   }
   m_queue->SetName(name);
 
-  hr = device->CreateFence(0, D3D12_FENCE_FLAG_NONE,
+  const D3D12_FENCE_FLAGS fenceFlags = sharedFence ?
+    D3D12_FENCE_FLAG_SHARED : D3D12_FENCE_FLAG_NONE;
+  hr = device->CreateFence(0, fenceFlags,
     IID_PPV_ARGS(&m_fence));
   if (FAILED(hr))
   {

@@ -47,11 +47,13 @@ HRESULT CD3D11Device::Init()
 
   ComPtr<ID3D11Device> device;
   ComPtr<ID3D11DeviceContext> context;
+  const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT |
+    (m_video ? D3D11_CREATE_DEVICE_VIDEO_SUPPORT : 0);
   hr = D3D11CreateDevice(
     m_adapter.Get(),
     D3D_DRIVER_TYPE_UNKNOWN,
     nullptr,
-    D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+    flags,
     featureLevels,
     ARRAYSIZE(featureLevels),
     D3D11_SDK_VERSION,
