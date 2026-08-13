@@ -43,6 +43,7 @@
     <ClCompile Include="display\CMonitorContext.cpp" />
     <ClCompile Include="capture\CFrameBufferPool.cpp" />
     <ClCompile Include="capture\CFrameBufferResource.cpp" />
+    <ClCompile Include="capture\CFrameGraph.cpp" />
     <ClCompile Include="capture\CFrameProcessor.cpp" />
     <ClCompile Include="capture\CFrameProcessorUtil.cpp" />
     <ClCompile Include="capture\CFrameScheduler.cpp" />
@@ -95,6 +96,7 @@
     <ClInclude Include="display\CMonitorContext.h" />
     <ClInclude Include="capture\CFrameBufferPool.h" />
     <ClInclude Include="capture\CFrameBufferResource.h" />
+    <ClInclude Include="capture\CFrameGraph.h" />
     <ClInclude Include="capture\CFrameProcessor.h" />
     <ClInclude Include="capture\CFrameProcessorUtil.h" />
     <ClInclude Include="capture\CFrameScheduler.h" />

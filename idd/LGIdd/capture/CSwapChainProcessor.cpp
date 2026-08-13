@@ -40,6 +40,34 @@
 
 static const uint32_t HDR_PQ_MIN_LUMINANCE = 50;
 static const uint32_t HDR_PQ_MAX_LUMINANCE = 10000;
+static const uint64_t GRAPH_RETRY_NS       = 250000000ULL;
+
+static bool MakeGraphCfg(const D12FrameFormat& source,
+  const D12FrameFormat& checkpoint, bool software,
+  const LUID& adapter, GraphCfg& cfg)
+{
+  if (!source.width || !source.height ||
+      source.desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+      !checkpoint.width || !checkpoint.height ||
+      checkpoint.desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+    return false;
+
+  FrameProfile src;
+  FrameProfile output;
+  if (!D12::Profile(source, FrameStorage::D3D12_TEXTURE, src) ||
+      !D12::Profile(checkpoint, FrameStorage::D3D12_TEXTURE, output))
+    return false;
+
+  cfg.mode       = software ? GpuMode::SOFTWARE : GpuMode::HARDWARE;
+  cfg.adapter    = adapter;
+  cfg.srcWidth   = source.width;
+  cfg.srcHeight  = source.height;
+  cfg.src        = src;
+  cfg.width      = checkpoint.width;
+  cfg.height     = checkpoint.height;
+  cfg.checkpoint = output;
+  return true;
+}
 
 CSwapChainProcessor::CSwapChainProcessor(CMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
@@ -329,6 +357,8 @@ void CSwapChainProcessor::SwapChainThreadCore()
     if (WaitForSingleObject(m_terminateEvent.Get(), 0) == WAIT_OBJECT_0)
       break;
 
+    CfgGraph();
+
     UINT frameNumber     = 0;
     UINT dirtyRectCount  = 0;
     UINT moveRegionCount = 0;
@@ -413,6 +443,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
       // Every acquired frame must be finished before the next acquire, even if
       // its presentation number was a duplicate and no work was submitted.
       hr = IddCxSwapChainFinishedProcessingFrame(m_hSwapChain);
+      surface.Reset();
       if (FAILED(hr))
       {
         // A lost path is normal (mode change/topology rebuild); Windows
@@ -491,6 +522,46 @@ bool CSwapChainProcessor::GetContentHDRMetadata(D12FrameFormat& format) const
   UNREFERENCED_PARAMETER(format);
   return false;
 #endif
+}
+
+void CSwapChainProcessor::QueueGraph(const D12FrameFormat& source,
+  const D12FrameFormat& checkpoint)
+{
+  GraphCfg cfg;
+  if (!MakeGraphCfg(
+        source, checkpoint, m_dx11Device->IsSoftware(),
+        m_renderAdapter, cfg))
+    return;
+  if (m_haveGraphCfg && Frame::Same(m_graphCfg, cfg))
+    return;
+
+  m_graphCfg     = cfg;
+  m_haveGraphCfg = true;
+  m_graphPending = true;
+  m_graphRetryAt = 0;
+}
+
+void CSwapChainProcessor::CfgGraph()
+{
+  if (!m_graphPending)
+    return;
+
+  const uint64_t now = CFrameScheduler::Nanotime();
+  if (now < m_graphRetryAt)
+    return;
+
+  m_graphPending = false;
+  const CfgResult result =
+    m_devContext->GetTransport().Cfg(m_graphCfg, m_graph);
+  if (result == CfgResult::ACCEPTED)
+  {
+    m_graphRetryAt = 0;
+  }
+  else if (result == CfgResult::RETRY)
+  {
+    m_graphPending = true;
+    m_graphRetryAt = now + GRAPH_RETRY_NS;
+  }
 }
 
 bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
@@ -732,6 +803,10 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
     m_postProcessors[0].GetTimingToken(
       &timingEffectIndex, &timingToken);
+
+    const D12FrameFormat& graphFormat =
+      m_postProcessors[0].GetTextureFormat();
+    QueueGraph(srcFormat, graphFormat);
   }
 
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)

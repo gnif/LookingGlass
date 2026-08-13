@@ -91,6 +91,7 @@ void CPostProcessor::Reset()
   m_device.Reset();
   m_srcFormat     = {};
   m_dstFormat     = {};
+  m_texFormat     = {};
   m_copyLayout    = {};
   m_copyEffect    = nullptr;
   m_frameSize     = 0;
@@ -173,6 +174,7 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
     // Propagate it without recreating resources or post-processing state.
     D12::CopyHdr(m_srcFormat, srcFormat);
     D12::CopyHdr(m_dstFormat, srcFormat);
+    D12::CopyHdr(m_texFormat, srcFormat);
     return true;
   }
 
@@ -181,6 +183,7 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
 
   D12FrameFormat       oldDst        = m_dstFormat;
   D12FrameFormat       cur           = srcFormat;
+  D12FrameFormat       tex           = srcFormat;
   CPostProcessEffect * outputEffect  = nullptr;
   bool                 effectsActive = false;
 
@@ -193,6 +196,8 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
       effect->Enabled = true;
       effectsActive   = true;
       cur             = dst;
+      if (dst.desc.Dimension == D3D12_RESOURCE_DIMENSION_TEXTURE2D)
+        tex = dst;
       outputEffect    = effect.get();
       break;
 
@@ -249,6 +254,7 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
 
   m_srcFormat     = srcFormat;
   m_dstFormat     = cur;
+  m_texFormat     = tex;
   m_copyLayout    = copyLayout;
   m_copyEffect    = copyEffect;
   m_frameSize     = frameSize;

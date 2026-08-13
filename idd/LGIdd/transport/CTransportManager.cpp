@@ -20,6 +20,7 @@
 
 #include "transport/CTransportManager.h"
 
+#include "capture/CFrameGraph.h"
 #include "CDebug.h"
 #include "Seq.h"
 
@@ -991,6 +992,190 @@ bool CTransportManager::Setup(size_t alignment)
   }
   EndPhase();
   return success;
+}
+
+CfgResult CTransportManager::Cfg(
+  const GraphCfg& cfg, CFrameGraph& graph)
+{
+  CFrameGraph next;
+  if (!next.Begin(cfg))
+    return CfgResult::REJECTED;
+  if (!BeginPhase(Phase::CFG, true))
+    return CfgResult::RETRY;
+
+  struct Route
+  {
+    Entry                    * entry     = nullptr;
+    std::shared_ptr<ITransport> transport;
+    BackendId                  id        = 0;
+    uint32_t                   epoch     = 0;
+    bool                       required  = false;
+    bool                       primary   = false;
+    bool                       prepared  = false;
+    bool                       eligible  = false;
+    FrameProfile               profiles[FRAME_PROFILE_MAX] = {};
+    unsigned                   profileCount = 0;
+  };
+
+  Route routes[FRAME_MAX_SINKS];
+  unsigned routeCount = 0;
+  CfgResult result = CfgResult::ACCEPTED;
+
+  Entry * entries[FRAME_MAX_SINKS] = {};
+  const unsigned count = Entries(entries);
+  for (unsigned i = 0; i < count; ++i)
+  {
+    Entry& entry = *entries[i];
+    bool frameService = false;
+    bool required = false;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      frameService =
+        (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
+      required = entry.required;
+    }
+    if (!frameService)
+      continue;
+
+    if (!BeginCall(entry, Call::CFG, true))
+    {
+      if (required)
+      {
+        result = CfgResult::RETRY;
+        break;
+      }
+      continue;
+    }
+
+    Route& route = routes[routeCount++];
+    route.entry = &entry;
+    State state;
+    bool frameAbsent = false;
+    {
+      CSRWSharedLock entryLock(entry.lock);
+      route.transport = entry.transport;
+      route.id        = entry.id;
+      route.epoch     = entry.epoch;
+      route.required  = entry.required;
+      route.primary   = entry.primary;
+      state           = entry.state;
+      frameAbsent     = entry.frameAbsent;
+    }
+
+    route.eligible = route.transport && !frameAbsent &&
+      (state == State::INITIALIZED || state == State::READY);
+    if (!route.eligible)
+    {
+      if (!route.required &&
+          (frameAbsent || state == State::FAILED))
+        continue;
+      result = frameAbsent ? CfgResult::REJECTED :
+        (state == State::FAILED ? CfgResult::FAILED : CfgResult::RETRY);
+      break;
+    }
+
+    unsigned profileCount = 0;
+    const FrameProfile * profiles =
+      route.transport->Profiles(profileCount);
+    if (profileCount > FRAME_PROFILE_MAX ||
+        (profileCount && !profiles))
+    {
+      route.eligible = false;
+      if (route.required)
+      {
+        result = CfgResult::FAILED;
+        break;
+      }
+      continue;
+    }
+    route.profileCount = profileCount;
+    for (unsigned profile = 0; profile < profileCount; ++profile)
+      route.profiles[profile] = profiles[profile];
+  }
+
+  if (result == CfgResult::ACCEPTED)
+    for (unsigned i = 0; i < routeCount; ++i)
+    {
+      Route& route = routes[i];
+      if (!route.eligible)
+        continue;
+
+      CfgResult routeResult = CfgResult::NEXT;
+      for (unsigned profileIndex = 0;
+           profileIndex < route.profileCount; ++profileIndex)
+      {
+        const FrameProfile& profile = route.profiles[profileIndex];
+        FrameCfg candidate;
+        candidate.mode    = cfg.mode;
+        candidate.adapter = cfg.adapter;
+        candidate.width   = cfg.width;
+        candidate.height  = cfg.height;
+        candidate.profile = profile;
+        if (!next.Can(candidate))
+          continue;
+
+        routeResult = route.transport->Probe(candidate);
+        if (routeResult == CfgResult::NEXT)
+          continue;
+        if (routeResult != CfgResult::ACCEPTED)
+          break;
+
+        routeResult = route.transport->Prepare(candidate);
+        if (routeResult == CfgResult::NEXT)
+        {
+          route.transport->Abort();
+          continue;
+        }
+        if (routeResult != CfgResult::ACCEPTED)
+          break;
+
+        if (!next.Add(route.id, route.epoch, route.required,
+              route.primary, candidate))
+        {
+          route.transport->Abort();
+          routeResult = CfgResult::FAILED;
+          break;
+        }
+        route.prepared = true;
+        break;
+      }
+
+      if (route.prepared)
+        continue;
+
+      route.transport->Abort();
+      if (routeResult == CfgResult::RETRY)
+      {
+        result = CfgResult::RETRY;
+        break;
+      }
+      if (route.required)
+      {
+        result = routeResult == CfgResult::NEXT ?
+          CfgResult::REJECTED : routeResult;
+        break;
+      }
+    }
+
+  if (result == CfgResult::ACCEPTED && !next.Seal())
+    result = CfgResult::FAILED;
+
+  if (result == CfgResult::ACCEPTED)
+  {
+    for (unsigned i = 0; i < routeCount; ++i)
+      if (routes[i].prepared)
+        routes[i].transport->Commit();
+    graph = next;
+  }
+  else
+    for (unsigned i = routeCount; i > 0; --i)
+      if (routes[i - 1].prepared)
+        routes[i - 1].transport->Abort();
+
+  for (unsigned i = routeCount; i > 0; --i)
+    EndCall(*routes[i - 1].entry, routes[i - 1].transport);
+  EndPhase();
+  return result;
 }
 
 ITransport::ProcessResult CTransportManager::Process(

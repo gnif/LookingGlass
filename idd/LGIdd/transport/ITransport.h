@@ -148,8 +148,9 @@ public:
   virtual void RecoveryStatus(const SourceKey&, uint64_t, uint32_t,
     bool, Recovery, uint32_t) {}
 
-  // Profiles is an immutable, ordered preference list whose pointer remains
-  // valid for the lifetime of this instance.
+  // Profiles is an immutable, ordered preference list of at most
+  // FRAME_PROFILE_MAX entries whose pointer remains valid for the lifetime
+  // of this instance.
   // Probe has no side effects. Prepare changes pending state only; Commit
   // promotes it without failure, while Abort preserves the active route.
   virtual const FrameProfile * Profiles(unsigned& count) const = 0;

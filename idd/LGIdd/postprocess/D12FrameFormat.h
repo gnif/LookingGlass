@@ -20,6 +20,8 @@
 
 #pragma once
 
+#include "transport/FrameProfile.h"
+
 #include <Windows.h>
 #include <d3d12.h>
 #include <memory>
@@ -85,7 +87,15 @@ namespace D12
     NO_FLAGS,
   };
 
+  DXGI_FORMAT Dxgi(FramePixel pixel);
   FrameType Type(DXGI_FORMAT format);
+  FrameType Type(FramePixel pixel);
+
+  bool Profile(const D12FrameFormat& format, FrameStorage storage,
+    FrameProfile& profile);
+  bool Set(D12FrameFormat& format, const FrameProfile& profile,
+    unsigned width, unsigned height,
+    D3D12_RESOURCE_FLAGS flags = D3D12_RESOURCE_FLAG_NONE);
   void CopyHdr(D12FrameFormat& dst, const D12FrameFormat& src);
   std::shared_ptr<const D12ColorTransform> Transform(
     const std::shared_ptr<const D12ColorTransform>& transform);

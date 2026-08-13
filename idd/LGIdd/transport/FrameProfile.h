@@ -23,6 +23,8 @@
 #include <Windows.h>
 #include <stdint.h>
 
+static const unsigned FRAME_PROFILE_MAX = 16;
+
 enum class FrameStorage : uint8_t
 {
   D3D12_TEXTURE,

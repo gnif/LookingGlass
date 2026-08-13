@@ -25,6 +25,7 @@
 #include "d3d/CD3D12Device.h"
 #include "display/IddCxCompat.h"
 #include "d3d/CInteropResourcePool.h"
+#include "capture/CFrameGraph.h"
 #include "capture/CFrameProcessor.h"
 #include "postprocess/D12FrameFormat.h"
 #include "postprocess/CPostProcessor.h"
@@ -56,6 +57,11 @@ private:
   HANDLE                           m_newFrameEvent;
 
   CInteropResourcePool             m_resPool;
+  CFrameGraph                      m_graph;
+  GraphCfg                         m_graphCfg;
+  bool                             m_haveGraphCfg    = false;
+  bool                             m_graphPending    = false;
+  uint64_t                         m_graphRetryAt    = 0;
   CPostProcessor                   m_postProcessors[CAPTURE_PIPELINE_SLOTS];
   std::unique_ptr<CFrameProcessor> m_frameProcessor;
   // Reconfiguration is exclusive while per-candidate recording is shared.
@@ -93,6 +99,9 @@ private:
   void UpdateHDRMetadata(const IDDCX_METADATA2& metadata);
 #endif
   bool GetContentHDRMetadata(D12FrameFormat& format) const;
+  void QueueGraph(const D12FrameFormat& source,
+    const D12FrameFormat& checkpoint);
+  void CfgGraph();
   bool SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer,
     unsigned dirtyRectCount, unsigned moveRegionCount,
     DXGI_COLOR_SPACE_TYPE colorSpace, UINT sdrWhiteLevel,

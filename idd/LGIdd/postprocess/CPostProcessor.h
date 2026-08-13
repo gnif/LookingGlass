@@ -107,6 +107,7 @@ private:
   std::vector<std::unique_ptr<CPostProcessEffect>> m_effects;
   D12FrameFormat                                   m_srcFormat     = {};
   D12FrameFormat                                   m_dstFormat     = {};
+  D12FrameFormat                                   m_texFormat     = {};
   D3D12_PLACED_SUBRESOURCE_FOOTPRINT               m_copyLayout    = {};
   CPostProcessEffect                             * m_copyEffect    = nullptr;
   size_t                                           m_frameSize     = 0;
@@ -135,6 +136,7 @@ public:
     unsigned * nbDirtyRects);
 
   const D12FrameFormat& GetOutputFormat() const { return m_dstFormat; }
+  const D12FrameFormat& GetTextureFormat() const { return m_texFormat; }
   bool HasActiveEffects() const { return m_effectsActive; }
   void GetTimingToken(unsigned * effectIndex, uint64_t * token) const;
   void RecordTiming(unsigned effectIndex, uint64_t token,

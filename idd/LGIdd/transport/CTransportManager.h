@@ -33,6 +33,9 @@
 static_assert(TRANSPORT_MAX_INSTANCES == FRAME_MAX_SINKS,
   "The transport and frame limits must match");
 
+class CFrameGraph;
+struct GraphCfg;
+
 class CTransportManager final : public FrameCaps
 {
 public:
@@ -51,6 +54,7 @@ private:
     OPEN,
     INITIALIZE,
     SETUP,
+    CFG,
     PROCESS,
     ACCESS,
     STOP,
@@ -71,6 +75,7 @@ private:
   {
     IDLE,
     LIFECYCLE,
+    CFG,
     PROCESS,
     RECOVERY,
     ACCESS,
@@ -168,6 +173,7 @@ public:
   OpenResult Open();
   bool Initialize();
   bool Setup(size_t alignment);
+  CfgResult Cfg(const GraphCfg& cfg, CFrameGraph& graph);
   ProcessResult Process(ITransportActions& actions);
   void Stop();
   void SyncRecovery();

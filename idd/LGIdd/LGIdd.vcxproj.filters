@@ -97,6 +97,9 @@
     <ClInclude Include="capture\CFrameBufferResource.h">
       <Filter>Capture</Filter>
     </ClInclude>
+    <ClInclude Include="capture\CFrameGraph.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
     <ClInclude Include="capture\CFrameProcessor.h">
       <Filter>Capture</Filter>
     </ClInclude>
@@ -271,6 +274,9 @@
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameBufferResource.cpp">
+      <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="capture\CFrameGraph.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameProcessor.cpp">

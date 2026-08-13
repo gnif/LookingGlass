@@ -71,6 +71,27 @@ std::shared_ptr<const D12ColorTransform> D12::Transform(
   return transform;
 }
 
+DXGI_FORMAT D12::Dxgi(FramePixel pixel)
+{
+  switch (pixel)
+  {
+    case FramePixel::BGRA8:
+      return DXGI_FORMAT_B8G8R8A8_UNORM;
+    case FramePixel::RGBA8:
+      return DXGI_FORMAT_R8G8B8A8_UNORM;
+    case FramePixel::RGB10A2:
+      return DXGI_FORMAT_R10G10B10A2_UNORM;
+    case FramePixel::RGBA16F:
+      return DXGI_FORMAT_R16G16B16A16_FLOAT;
+  }
+  return DXGI_FORMAT_UNKNOWN;
+}
+
+FrameType D12::Type(FramePixel pixel)
+{
+  return Type(Dxgi(pixel));
+}
+
 FrameType D12::Type(DXGI_FORMAT format)
 {
   switch (format)
@@ -86,6 +107,75 @@ FrameType D12::Type(DXGI_FORMAT format)
     default:
       return FRAME_TYPE_INVALID;
   }
+}
+
+bool D12::Profile(const D12FrameFormat& format, FrameStorage storage,
+  FrameProfile& profile)
+{
+  if ((format.hdrPQ && !format.hdr) || !Frame::Valid(storage))
+    return false;
+
+  FrameProfile result;
+  result.storage = storage;
+  if (!format.hdr)
+  {
+    result.signal = FrameSignal::SRGB;
+    if (format.format == FRAME_TYPE_BGRA)
+      result.pixel = FramePixel::BGRA8;
+    else if (format.format == FRAME_TYPE_RGBA)
+      result.pixel = FramePixel::RGBA8;
+    else
+      return false;
+  }
+  else if (format.hdrPQ)
+  {
+    if (format.format != FRAME_TYPE_RGBA10)
+      return false;
+    result.pixel  = FramePixel::RGB10A2;
+    result.signal = FrameSignal::PQ_BT2020;
+  }
+  else
+  {
+    if (format.format != FRAME_TYPE_RGBA16F)
+      return false;
+    result.pixel  = FramePixel::RGBA16F;
+    result.signal = FrameSignal::SCRGB_LINEAR;
+  }
+
+  if (format.desc.Format != Dxgi(result.pixel))
+    return false;
+
+  profile = result;
+  return true;
+}
+
+bool D12::Set(D12FrameFormat& format, const FrameProfile& profile,
+  unsigned width, unsigned height, D3D12_RESOURCE_FLAGS flags)
+{
+  if (!width || !height || profile.storage != FrameStorage::D3D12_TEXTURE ||
+      !Frame::Valid(profile))
+    return false;
+
+  format.desc                  = {};
+  format.desc.Dimension        = D3D12_RESOURCE_DIMENSION_TEXTURE2D;
+  format.desc.Width            = width;
+  format.desc.Height           = height;
+  format.desc.DepthOrArraySize = 1;
+  format.desc.MipLevels        = 1;
+  format.desc.Format           = Dxgi(profile.pixel);
+  format.desc.SampleDesc.Count = 1;
+  format.desc.Layout           = D3D12_TEXTURE_LAYOUT_UNKNOWN;
+  format.desc.Flags            = flags;
+  format.dataWidth             = width;
+  format.dataHeight            = height;
+  format.pitch                 = 0;
+  format.width                 = width;
+  format.height                = height;
+  format.format                = Type(profile.pixel);
+  format.hdr                   = profile.signal != FrameSignal::SRGB;
+  format.hdrPQ                 = profile.signal == FrameSignal::PQ_BT2020;
+  return format.desc.Format != DXGI_FORMAT_UNKNOWN &&
+         format.format      != FRAME_TYPE_INVALID;
 }
 
 void D12::CopyHdr(D12FrameFormat& dst, const D12FrameFormat& src)
