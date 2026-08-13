@@ -137,8 +137,8 @@ bool CSwapChainProcessor::InitializePipeline()
     DEBUG_INFO("Software render adapter: post-processing disabled");
 
   bool initialized = true;
-  for (CPostProcessor& postProcessor : m_postProcessors)
-    if (!postProcessor.Init(m_dx12Device, enableEffects))
+  for (unsigned i = 0; i < ARRAYSIZE(m_postProcessors); ++i)
+    if (!m_postProcessors[i].Init(m_dx12Device, enableEffects, i == 0))
     {
       initialized = false;
       break;
@@ -153,12 +153,15 @@ bool CSwapChainProcessor::InitializePipeline()
         break;
       }
 
+  if (initialized)
+    m_postProcessors[0].LogEffects();
+
   if (!initialized)
   {
     for (CPostProcessor& postProcessor : m_postProcessors)
     {
       postProcessor.Reset();
-      if (!postProcessor.Init(m_dx12Device, false))
+      if (!postProcessor.Init(m_dx12Device, false, false))
         DEBUG_ERROR("Failed to initialize post processor copy support");
     }
     DEBUG_WARN(
@@ -680,17 +683,21 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     }
 
     bool configurationStable = false;
+    bool configured          = false;
     for (unsigned pass = 0; pass < 2 && !configurationStable; ++pass)
     {
       for (unsigned i = 0; i < ARRAYSIZE(m_postProcessors); ++i)
       {
         bool formatChanged = false;
-        if (!m_postProcessors[i].Configure(srcFormat, &formatChanged))
+        bool changed       = false;
+        if (!m_postProcessors[i].Configure(
+              srcFormat, &formatChanged, &changed))
         {
           m_frameProcessor->SetFullDamage();
           return false;
         }
 
+        configured |= changed;
         if (i == 0)
           postProcessFormatChanged |= formatChanged;
       }
@@ -710,6 +717,9 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
       m_frameProcessor->SetFullDamage();
       return false;
     }
+
+    if (configured)
+      m_postProcessors[0].LogActiveEffects();
 
     if (postProcessFormatChanged)
       m_frameProcessor->Invalidate();

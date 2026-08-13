@@ -51,13 +51,13 @@ private:
   unsigned m_width = 0;
   unsigned m_height = 0;
 
-  bool ParseRules(const std::wstring& value);
+  bool ParseRules(const std::wstring& value, bool report);
   const Rule * MatchRule(unsigned width, unsigned height) const;
 
 public:
   const char * GetName() const override { return "Downsample"; }
 
-  bool Init(const ComPtr<ID3D12Device3>& device);
+  bool Init(const ComPtr<ID3D12Device3>& device, bool report = true);
 
   PostProcessStatus SetFormat(const ComPtr<ID3D12Device3>& device,
     const D12FrameFormat& src, D12FrameFormat& dst) override;

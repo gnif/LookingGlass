@@ -30,7 +30,7 @@
 
 using namespace PostProcessUtil;
 
-bool CDownsampleEffect::ParseRules(const std::wstring& value)
+bool CDownsampleEffect::ParseRules(const std::wstring& value, bool report)
 {
   m_rules.clear();
   if (value.empty())
@@ -61,14 +61,16 @@ bool CDownsampleEffect::ParseRules(const std::wstring& value)
       if (swscanf_s(start, L"%ux%u:%ux%u",
         &rule.x, &rule.y, &rule.targetX, &rule.targetY) != 4)
       {
-        DEBUG_ERROR("Unable to parse IDD downsample rule");
+        if (report)
+          DEBUG_ERROR("Unable to parse IDD downsample rule");
         m_rules.clear();
         return false;
       }
 
-      DEBUG_INFO("idd:downsample rule: %ux%u -> %ux%u%s",
-        rule.x, rule.y, rule.targetX, rule.targetY,
-        rule.greater ? " (greater-than)" : "");
+      if (report)
+        DEBUG_INFO("idd:downsample rule: %ux%u -> %ux%u%s",
+          rule.x, rule.y, rule.targetX, rule.targetY,
+          rule.greater ? " (greater-than)" : "");
       m_rules.push_back(rule);
     }
 
@@ -92,9 +94,9 @@ const CDownsampleEffect::Rule * CDownsampleEffect::MatchRule(
   return match;
 }
 
-bool CDownsampleEffect::Init(const ComPtr<ID3D12Device3>& device)
+bool CDownsampleEffect::Init(const ComPtr<ID3D12Device3>& device, bool report)
 {
-  if (!ParseRules(g_settings.ReadStringValue(L"Downsample")))
+  if (!ParseRules(g_settings.ReadStringValue(L"Downsample"), report))
     return false;
 
   D3D12_STATIC_SAMPLER_DESC sampler = {};

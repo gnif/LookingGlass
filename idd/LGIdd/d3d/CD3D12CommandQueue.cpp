@@ -123,7 +123,6 @@ bool CD3D12CommandSlot::Init(ID3D12Device3 * device,
     return false;
   }
 
-  DEBUG_INFO("Created CD3D12CommandSlot(%ls)", name);
   return true;
 }
 

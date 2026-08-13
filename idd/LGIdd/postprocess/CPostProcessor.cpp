@@ -31,7 +31,7 @@
 #include <utility>
 
 bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device,
-  bool enableEffects)
+  bool enableEffects, bool report)
 {
   m_dx12Device = dx12Device;
   m_device      = dx12Device->GetDevice();
@@ -42,37 +42,46 @@ bool CPostProcessor::Init(std::shared_ptr<CD3D12Device> dx12Device,
 
   std::unique_ptr<CColorTransformEffect> colorTransform(new CColorTransformEffect());
   if (colorTransform->Init(m_device))
-  {
-    DEBUG_INFO("Created post-processing effect: %s", colorTransform->GetName());
     m_effects.push_back(std::move(colorTransform));
-  }
   else
+  {
+    DEBUG_ERROR("Failed to create post-processing effect: %s",
+      colorTransform->GetName());
     return false;
+  }
 
   std::unique_ptr<CDownsampleEffect> downsample(new CDownsampleEffect());
-  if (downsample->Init(m_device))
-  {
-    DEBUG_INFO("Created post-processing effect: %s", downsample->GetName());
+  if (downsample->Init(m_device, report))
     m_effects.push_back(std::move(downsample));
-  }
 
   std::unique_ptr<CHDR16to10Effect> hdr16to10(new CHDR16to10Effect());
   if (hdr16to10->Init(m_device))
-  {
-    DEBUG_INFO("Created post-processing effect: %s", hdr16to10->GetName());
     m_effects.push_back(std::move(hdr16to10));
-  }
   else
+  {
+    DEBUG_ERROR("Failed to create post-processing effect: %s",
+      hdr16to10->GetName());
     return false;
+  }
 
   std::unique_ptr<CRGB24Effect> rgb24(new CRGB24Effect());
   if (rgb24->Init(m_device))
-  {
-    DEBUG_INFO("Created post-processing effect: %s", rgb24->GetName());
     m_effects.push_back(std::move(rgb24));
-  }
 
   return true;
+}
+
+void CPostProcessor::LogEffects() const
+{
+  for (const std::unique_ptr<CPostProcessEffect>& effect : m_effects)
+    DEBUG_INFO("Created post-processing effect: %s", effect->GetName());
+}
+
+void CPostProcessor::LogActiveEffects() const
+{
+  for (const std::unique_ptr<CPostProcessEffect>& effect : m_effects)
+    if (effect->Enabled)
+      DEBUG_INFO("Post-processing effect active: %s", effect->GetName());
 }
 
 void CPostProcessor::Reset()
@@ -151,10 +160,12 @@ bool CPostProcessor::RequiresFullDamage() const
 }
 
 bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
-  bool * formatChanged)
+  bool * formatChanged, bool * configured)
 {
   if (formatChanged)
     *formatChanged = false;
+  if (configured)
+    *configured = false;
 
   if (!NeedsReconfigure(srcFormat))
   {
@@ -164,6 +175,9 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
     D12::CopyHdr(m_dstFormat, srcFormat);
     return true;
   }
+
+  if (configured)
+    *configured = true;
 
   D12FrameFormat       oldDst        = m_dstFormat;
   D12FrameFormat       cur           = srcFormat;
@@ -180,7 +194,6 @@ bool CPostProcessor::Configure(const D12FrameFormat& srcFormat,
       effectsActive   = true;
       cur             = dst;
       outputEffect    = effect.get();
-      DEBUG_INFO("Post-processing effect active: %s", effect->GetName());
       break;
 
     case PostProcessStatus::BYPASS_EFFECT:

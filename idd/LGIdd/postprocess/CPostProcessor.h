@@ -116,7 +116,9 @@ private:
 
 public:
   bool Init(std::shared_ptr<CD3D12Device> dx12Device,
-    bool enableEffects);
+    bool enableEffects, bool report);
+  void LogEffects() const;
+  void LogActiveEffects() const;
   void Reset();
 
   bool HasSameEffectChain(const CPostProcessor& other) const;
@@ -124,7 +126,8 @@ public:
   void Update(const D12FrameFormat& srcFormat);
   bool NeedsReconfigure(const D12FrameFormat& srcFormat) const;
   bool RequiresFullDamage() const;
-  bool Configure(const D12FrameFormat& srcFormat, bool * formatChanged);
+  bool Configure(const D12FrameFormat& srcFormat, bool * formatChanged,
+    bool * configured);
   void AdjustFrameDamage(RECT dirtyRects[], unsigned * nbDirtyRects);
   ComPtr<ID3D12Resource> Run(
     const ComPtr<ID3D12GraphicsCommandList>& commandList,
