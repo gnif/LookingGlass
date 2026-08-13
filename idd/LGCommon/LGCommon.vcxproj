@@ -65,13 +65,16 @@
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="CClipboardRing.cpp" />
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
     <ClCompile Include="RefreshRate.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="CClipboardRing.h" />
     <ClInclude Include="Atomic.h" />
     <ClInclude Include="CDebug.h" />
+    <ClInclude Include="ClipboardRing.h" />
     <ClInclude Include="CPipeEndpoint.h" />
     <ClInclude Include="CSRWLock.h" />
     <ClInclude Include="DefaultDisplayModes.h" />

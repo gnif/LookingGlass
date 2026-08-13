@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Looking Glass
  * Copyright © 2017-2026 The Looking Glass Authors
  * https://looking-glass.io
@@ -18,22 +18,23 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_LG_COMMON_LGMP_CONFIG_
-#define _H_LG_COMMON_LGMP_CONFIG_
+#pragma once
 
-#define LGMP_Q_POINTER     1
-#define LGMP_Q_FRAME       2
-// Base ID for LGMP_Q_FRAME_LEN independent owner-delivery queues.
-#define LGMP_Q_FRAME_OWNER 3
-#define LGMP_Q_INPUT       5
-#define LGMP_Q_CLIPBOARD   6
+#include "ClipboardRing.h"
 
-// Two delivery lanes plus a spare buffer let the timing owner continue to
-// alternate buffers while a secondary client holds the shared delivery.
-#define LGMP_Q_FRAME_LEN        2
-#define LGMP_Q_FRAME_BUFFER_LEN 3
-#define LGMP_Q_POINTER_LEN      32
-#define LGMP_Q_INPUT_LEN        4
-#define LGMP_Q_CLIPBOARD_LEN    8
+class CClipboardRing
+{
+public:
+  static void Initialize(ClipboardMapping& mapping, uint64_t epoch);
+  static bool Valid(const ClipboardMapping& mapping, uint64_t epoch);
 
-#endif
+  static ClipboardRingSlot * BeginWrite(
+    ClipboardRing& ring, uint32_t& ticket);
+  static bool EndWrite(ClipboardRing& ring, uint32_t ticket);
+
+  static const ClipboardRingSlot * BeginRead(
+    ClipboardRing& ring, uint32_t& ticket);
+  static bool EndRead(ClipboardRing& ring, uint32_t ticket);
+
+  static bool Valid(const ClipboardRingSlot& slot);
+};

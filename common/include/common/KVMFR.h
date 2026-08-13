@@ -28,6 +28,7 @@
 #include <stddef.h>
 #include "types.h"
 #include "LGMPConfig.h"
+#include "KVMFRClipboard.h"
 #include "KVMFRInput.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
@@ -63,7 +64,8 @@ enum
   KVMFR_FEATURE_SETCURSORPOS   = 0x1,
   KVMFR_FEATURE_WINDOWSIZE     = 0x2,
   KVMFR_FEATURE_FRAME_SCHEDULE = 0x4,
-  KVMFR_FEATURE_INPUT          = 0x8
+  KVMFR_FEATURE_INPUT          = 0x8,
+  KVMFR_FEATURE_CLIPBOARD      = 0x10
 };
 
 typedef uint32_t KVMFRFeatureFlags;

@@ -39,7 +39,11 @@ struct LGPipeMsg
     RECOVERY_OFF,
     RECOVERY_ON,
     RECOVERY_FAILED,
-    RECOVERY_NO_DISPLAY
+    RECOVERY_NO_DISPLAY,
+    CLIPBOARD_SETUP,
+    CLIPBOARD_READY,
+    CLIPBOARD_KICK,
+    CLIPBOARD_RESET
   }
   type;
 
@@ -85,6 +89,34 @@ struct LGPipeMsg
       uint32_t request;
     }
     recovery;
+
+    struct
+    {
+      uint64_t handle;
+      uint32_t bytes;
+    }
+    clipboardSetup;
+
+    struct
+    {
+      uint64_t epoch;
+      uint32_t status;
+    }
+    clipboardReady;
+
+    struct
+    {
+      uint64_t epoch;
+      uint32_t rings;
+    }
+    clipboardKick;
+
+    struct
+    {
+      uint64_t epoch;
+      uint32_t reason;
+    }
+    clipboardReset;
   };
 };
 #pragma pack(pop)
