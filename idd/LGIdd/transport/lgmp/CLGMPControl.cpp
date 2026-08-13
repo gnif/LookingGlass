@@ -28,6 +28,8 @@
 
 static const uint32_t MAX_POINTER_SIZE =
   (uint32_t)(sizeof(KVMFRCursor) + (512 * 512 * 4));
+static const uint32_t POINTER_POSITION_SIZE =
+  (uint32_t)sizeof(KVMFRCursor);
 
 static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 {
@@ -58,13 +60,13 @@ bool CLGMPControl::Initialize()
   for (int i = 0; i < LGMP_Q_POINTER_LEN; ++i)
   {
     if ((status = m_host.Allocate(
-        MAX_POINTER_SIZE, &m_pointerMemory[i])) != LGMP_OK)
+        POINTER_POSITION_SIZE, &m_pointerMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Pointer): %s",
         lgmpStatusString(status));
       return false;
     }
-    memset(lgmpHostMemPtr(m_pointerMemory[i]), 0, MAX_POINTER_SIZE);
+    memset(lgmpHostMemPtr(m_pointerMemory[i]), 0, POINTER_POSITION_SIZE);
   }
 
   for (int i = 0; i < POINTER_SHAPE_BUFFERS; ++i)

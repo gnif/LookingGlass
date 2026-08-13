@@ -13,16 +13,17 @@ is strongly recommended, but the IDD can start in software mode without one.
 Determining memory
 ^^^^^^^^^^^^^^^^^^
 
-Calculate the base IVSHMEM requirement as:
+Calculate the IVSHMEM requirement as:
 
 .. math::
 
-  \text{BASE SIZE} =
+  \text{REQUIRED BYTES} =
   \left(\left\lceil\frac{\text{WIDTH} \times 4}{256}\right\rceil
   \times 256\right) \times \text{HEIGHT} \times 3
+  + (4 \times 1024 \times 1024)
 
-Additional shared memory is required for protocol metadata and alignment. The
-values below include that requirement and are rounded up to a power of two.
+Convert the result to MiB and round it up to the next power of two. The common
+values below have already been rounded.
 
 If a configured mode does not fit, the IDD omits it from the Windows mode list.
 If a client-requested dynamic resolution does not fit, the helper refuses it
@@ -40,15 +41,15 @@ not publish a truncated frame.
    * - Maximum resolution
      - Total IVSHMEM size (MiB)
    * - 1920x1080 (1080p)
-     - 64
+     - 32
    * - 1920x1200
-     - 64
+     - 32
    * - 2560x1440 (1440p)
-     - 128
+     - 64
    * - 3440x1440
-     - 128
+     - 64
    * - 3840x2160 (4K)
-     - 256
+     - 128
    * - 5120x1440
      - 128
    * - 5120x2880 (5K)
