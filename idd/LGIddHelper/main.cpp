@@ -39,23 +39,32 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 
 #define SVCNAME L"Looking Glass (IDD Helper)"
 
+static constexpr DWORD NO_CONSOLE_SESSION = 0xFFFFFFFFu;
+
 static SERVICE_STATUS_HANDLE l_svcStatusHandle;
 static SERVICE_STATUS        l_svcStatus;
 static HandleT<EventTraits>  l_svcStopEvent;
+static HandleT<EventTraits>  l_svcSessionChangeEvent;
 
 bool HandleService();
 static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv);
-static void WINAPI SvcCtrlHandler(DWORD dwControl);
+static DWORD WINAPI SvcCtrlHandler(DWORD dwControl, DWORD dwEventType,
+  LPVOID lpEventData, LPVOID lpContext);
 static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD dwWaitHint);
 
 static std::wstring              l_executable;
 static HandleT<HANDLENullTraits> l_process;
+static HandleT<EventTraits>      l_childStopEvent;
+static DWORD                     l_desiredSession = NO_CONSOLE_SESSION;
+static DWORD                     l_childSession   = NO_CONSOLE_SESSION;
 
-static void Launch();
+static bool Launch(DWORD sessionId);
+static bool StopChild();
 
 void CALLBACK DestroyNotifyWindow(PVOID lpParam, BOOLEAN bTimedOut)
 {
-  DEBUG_INFO("Parent process exited, exiting...");
+  (void) bTimedOut;
+  DEBUG_INFO("Helper shutdown requested, exiting...");
   CNotifyWindow *window = (CNotifyWindow *)lpParam;
   window->close();
 }
@@ -88,7 +97,7 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return EXIT_SUCCESS;
   }
 
-  if (argc != 2)
+  if (argc != 2 && argc != 3)
     return EXIT_FAILURE;
 
   // child process
@@ -100,6 +109,17 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to open parent process");
     return EXIT_FAILURE;
+  }
+
+  HandleT<EventTraits> hStop;
+  if (argc == 3)
+  {
+    hStop.Attach(OpenEvent(SYNCHRONIZE, FALSE, args[2].c_str()));
+    if (!hStop.IsValid())
+    {
+      DEBUG_ERROR_HR(GetLastError(), "Failed to open the child stop event");
+      return EXIT_FAILURE;
+    }
   }
 
   if (!CNotifyWindow::registerClass())
@@ -129,9 +149,16 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return g_pipe.EnsureOnlyDisplay();
   });
 
-  HANDLE hWait;
-  if (!RegisterWaitForSingleObject(&hWait, hParent.Get(), DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))
+  HANDLE hParentWait = NULL;
+  if (!RegisterWaitForSingleObject(&hParentWait, hParent.Get(),
+      DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))
     DEBUG_ERROR_HR(GetLastError(), "Failed to RegisterWaitForSingleObject");
+
+  HANDLE hStopWait = NULL;
+  if (hStop.IsValid() &&
+      !RegisterWaitForSingleObject(&hStopWait, hStop.Get(),
+        DestroyNotifyWindow, &window, INFINITE, WT_EXECUTEONLYONCE))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to register the child stop wait");
 
   MSG msg;
   while (GetMessage(&msg, NULL, 0, 0) > 0)
@@ -144,7 +171,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     }
   }
 
-  (void) UnregisterWait(hWait);
+  if (hParentWait)
+    (void) UnregisterWaitEx(hParentWait, INVALID_HANDLE_VALUE);
+  if (hStopWait)
+    (void) UnregisterWaitEx(hStopWait, INVALID_HANDLE_VALUE);
 
   DEBUG_INFO("Helper window destroyed.");
   g_pipe.DeInit();
@@ -168,31 +198,46 @@ bool HandleService()
   return true;
 }
 
-static void WINAPI SvcCtrlHandler(DWORD dwControl)
+static DWORD WINAPI SvcCtrlHandler(DWORD dwControl, DWORD dwEventType,
+  LPVOID lpEventData, LPVOID lpContext)
 {
+  (void) dwEventType;
+  (void) lpEventData;
+  (void) lpContext;
+
   switch (dwControl)
   {
     case SERVICE_CONTROL_STOP:
-      ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, 0);
+      ReportSvcStatus(SERVICE_STOP_PENDING, NO_ERROR, 5000);
       SetEvent(l_svcStopEvent.Get());
-      return;
+      return NO_ERROR;
+
+    case SERVICE_CONTROL_SESSIONCHANGE:
+      if (l_svcSessionChangeEvent.IsValid())
+        SetEvent(l_svcSessionChangeEvent.Get());
+      return NO_ERROR;
+
+    case SERVICE_CONTROL_INTERROGATE:
+      ReportSvcStatus(l_svcStatus.dwCurrentState, NO_ERROR, 0);
+      return NO_ERROR;
 
     default:
-      break;
+      return ERROR_CALL_NOT_IMPLEMENTED;
   }
-
-  ReportSvcStatus(l_svcStatus.dwCurrentState, NO_ERROR, 0);
 }
 
 static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
 {
   l_svcStatus.dwServiceType   = SERVICE_WIN32_OWN_PROCESS;
   l_svcStatus.dwWin32ExitCode = 0;
+  l_desiredSession = NO_CONSOLE_SESSION;
+  l_childSession   = NO_CONSOLE_SESSION;
 
-  l_svcStatusHandle = RegisterServiceCtrlHandler(SVCNAME, SvcCtrlHandler);
+  l_svcStatusHandle = RegisterServiceCtrlHandlerExW(SVCNAME,
+    SvcCtrlHandler, NULL);
   if (!l_svcStatusHandle)
   {
-    DEBUG_ERROR_HR(GetLastError(), "RegisterServiceCtrlHandler Failed");
+    DEBUG_ERROR_HR(GetLastError(), "RegisterServiceCtrlHandlerExW Failed");
     return;
   }
 
@@ -212,33 +257,74 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     return;
   }
 
+  l_svcSessionChangeEvent.Attach(CreateEvent(NULL, FALSE, FALSE, NULL));
+  if (!l_svcSessionChangeEvent.IsValid())
+  {
+    DEBUG_ERROR_HR(GetLastError(), "CreateEvent Failed");
+    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
+    return;
+  }
+
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
   bool running = true;
+  ULONGLONG nextLaunch = 0;
   while (running)
   {
-    ULONGLONG launchTime = 0ULL;
+    if (WaitForSingleObject(l_svcStopEvent.Get(), 0) == WAIT_OBJECT_0)
+      break;
 
     DWORD interactiveSession = WTSGetActiveConsoleSessionId();
-    if (interactiveSession != 0 && interactiveSession != 0xFFFFFFFF)
+    if (l_desiredSession != interactiveSession)
+    {
+      if (interactiveSession == NO_CONSOLE_SESSION)
+        DEBUG_INFO("No active console session");
+      else
+        DEBUG_INFO("Active console session changed to %lu", interactiveSession);
+
+      l_desiredSession = interactiveSession;
+      nextLaunch = 0;
+    }
+
+    if (l_process.IsValid() && l_childSession != l_desiredSession)
+    {
+      if (!StopChild())
+      {
+        running = false;
+        break;
+      }
+
+      // Re-evaluate both the stop event and the active console session before
+      // launching a replacement child.
+      continue;
+    }
+
+    if (!l_process.IsValid() &&
+        l_desiredSession != NO_CONSOLE_SESSION &&
+        GetTickCount64() >= nextLaunch)
     {
       if (!CPipeClient::IsLGIddDeviceAttached())
       {
         DEBUG_INFO("Looking Glass Indirect Display Device has gone away");
-        ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-        return;
+        running = false;
+        break;
       }
 
-      Launch();
-      launchTime = GetTickCount64();
+      if (!Launch(l_desiredSession))
+        nextLaunch = GetTickCount64() + 1000;
     }
 
-    HANDLE waitOn[] = { l_svcStopEvent.Get(), l_process.Get()};
-    DWORD count     = 2;
+    HANDLE waitOn[] =
+    {
+      l_svcStopEvent.Get(),
+      l_svcSessionChangeEvent.Get(),
+      l_process.Get()
+    };
+    DWORD count     = 3;
     DWORD duration  = INFINITE;
 
     if (!l_process.IsValid())
     {
-      count    = 1;
+      count    = 2;
       duration = 1000;
     }
 
@@ -249,18 +335,23 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
         running = false;
         break;
 
-      // child application exited
+      // active console session may have changed
       case WAIT_OBJECT_0 + 1:
+        break;
+
+      // child application exited
+      case WAIT_OBJECT_0 + 2:
       {
         DWORD code;
         if (!GetExitCodeProcess(l_process.Get(), &code))
-        {
           DEBUG_ERROR_HR(GetLastError(), "GetExitCodeProcess Failed");
-          break;
-        }
+        else
+          DEBUG_INFO("Child process exited with code 0x%lx", code);
 
-        DEBUG_INFO("Child process exited with code 0x%lx", code);
         l_process.Close();
+        l_childStopEvent.Close();
+        l_childSession = NO_CONSOLE_SESSION;
+        nextLaunch = GetTickCount64() + 1000;
         break;
       }
 
@@ -269,13 +360,9 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
         running = false;
         break;
     }
-
-    if (!running)
-      break;
-
-    Sleep(1000);
   }
 
+  (void) StopChild();
   ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
 }
 
@@ -286,10 +373,11 @@ static void ReportSvcStatus(DWORD dwCurrentState, DWORD dwWin32ExitCode, DWORD d
   l_svcStatus.dwWin32ExitCode = dwWin32ExitCode;
   l_svcStatus.dwWaitHint      = dwWaitHint;
 
-  if (dwCurrentState == SERVICE_START_PENDING)
-    l_svcStatus.dwControlsAccepted = 0;
+  if (dwCurrentState == SERVICE_RUNNING)
+    l_svcStatus.dwControlsAccepted =
+      SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_SESSIONCHANGE;
   else
-    l_svcStatus.dwControlsAccepted = SERVICE_ACCEPT_STOP;
+    l_svcStatus.dwControlsAccepted = 0;
 
   if ((dwCurrentState == SERVICE_RUNNING) || (dwCurrentState == SERVICE_STOPPED))
     l_svcStatus.dwCheckPoint = 0;
@@ -360,9 +448,10 @@ static void DisablePriv(LPCWSTR name)
     DEBUG_ERROR_HR(GetLastError(), "AdjustTokenPrivileges %s", name);
 }
 
-static void Launch()
+static bool Launch(DWORD sessionId)
 {
-  l_process.Close();
+  if (l_process.IsValid())
+    return false;
 
   HandleT<HANDLENullTraits> sysToken;
   if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE |
@@ -370,7 +459,7 @@ static void Launch()
     sysToken.GetAddressOf()))
   {
     DEBUG_ERROR_HR(GetLastError(), "OpenProcessToken failed");
-    return;
+    return false;
   }
 
   HandleT<HANDLENullTraits> token;
@@ -378,21 +467,24 @@ static void Launch()
     TokenPrimary, token.GetAddressOf()))
   {
     DEBUG_ERROR_HR(GetLastError(), "DuplicateTokenEx failed");
-    return;
+    return false;
   }
 
-  DWORD origSessionID, targetSessionID, returnedLen;
-  GetTokenInformation(token.Get(), TokenSessionId, &origSessionID,
-    sizeof(origSessionID), &returnedLen);
+  DWORD origSessionID, returnedLen;
+  if (!GetTokenInformation(token.Get(), TokenSessionId, &origSessionID,
+      sizeof(origSessionID), &returnedLen))
+  {
+    DEBUG_ERROR_HR(GetLastError(), "GetTokenInformation failed");
+    return false;
+  }
 
-  targetSessionID = WTSGetActiveConsoleSessionId();
-  if (origSessionID != targetSessionID)
+  if (origSessionID != sessionId)
   {
     if (!SetTokenInformation(token.Get(), TokenSessionId,
-      &targetSessionID, sizeof(targetSessionID)))
+      &sessionId, sizeof(sessionId)))
     {
       DEBUG_ERROR_HR(GetLastError(), "SetTokenInformation failed");
-      return;
+      return false;
     }
   }
   
@@ -400,13 +492,14 @@ static void Launch()
   if (!CreateEnvironmentBlock(&env, token.Get(), TRUE))
   {
     DEBUG_ERROR_HR(GetLastError(), "CreateEnvironmentBlock failed");
-    return;
+    return false;
   }
 
   if (!EnablePriv(SE_INCREASE_QUOTA_NAME))
   {
     DEBUG_ERROR("Failed to enable %s", SE_INCREASE_QUOTA_NAME);
-    return;
+    DestroyEnvironmentBlock(env);
+    return false;
   }
 
   PROCESS_INFORMATION pi = {0};
@@ -416,19 +509,25 @@ static void Launch()
   si.wShowWindow = SW_SHOW;
   si.lpDesktop   = (LPWSTR) L"WinSta0\\Default";
 
-  HandleT<HANDLENullTraits> hProcSync;
-  if (!DuplicateHandle(GetCurrentProcess(), GetCurrentProcess(), GetCurrentProcess(),
-    hProcSync.GetAddressOf(), SYNCHRONIZE, TRUE, 0))
+  wchar_t stopEventName[128];
+  _snwprintf_s(stopEventName, ARRAY_LENGTH(stopEventName), _TRUNCATE,
+    L"Global\\LookingGlassIDDHelperStop-%lu-%lu-%" PRIu64,
+    GetCurrentProcessId(), sessionId, GetTickCount64());
+
+  l_childStopEvent.Attach(CreateEvent(NULL, TRUE, FALSE, stopEventName));
+  if (!l_childStopEvent.IsValid())
   {
-    DEBUG_ERROR("Failed to duplicate own handle for synchronization");
-    return;
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create the child stop event");
+    DisablePriv(SE_INCREASE_QUOTA_NAME);
+    DestroyEnvironmentBlock(env);
+    return false;
   }
 
-  wchar_t cmdBuf[128];
-  _snwprintf_s(cmdBuf, ARRAY_LENGTH(cmdBuf), L"LGIddHelper.exe %" PRId32,
-    GetCurrentProcessId());
+  wchar_t cmdBuf[256];
+  _snwprintf_s(cmdBuf, ARRAY_LENGTH(cmdBuf), _TRUNCATE,
+    L"LGIddHelper.exe %" PRIu32 L" %s", GetCurrentProcessId(), stopEventName);
 
-  if (!CreateProcessAsUser(
+  const bool created = CreateProcessAsUser(
     token.Get(),
     l_executable.c_str(),
     cmdBuf,
@@ -440,14 +539,66 @@ static void Launch()
     NULL,
     &si,
     &pi
-  ))
-  {
-    DEBUG_ERROR_HR(GetLastError(), "CreateProcessAsUser failed");
-    return;
-  }
+  );
+  const DWORD createError = created ? ERROR_SUCCESS : GetLastError();
 
   DisablePriv(SE_INCREASE_QUOTA_NAME);
+  DestroyEnvironmentBlock(env);
+
+  if (!created)
+  {
+    DEBUG_ERROR_HR(createError, "CreateProcessAsUser failed");
+    l_childStopEvent.Close();
+    return false;
+  }
 
   l_process.Attach(pi.hProcess);
   CloseHandle(pi.hThread);
+  l_childSession = sessionId;
+  DEBUG_INFO("Started child process %lu in session %lu",
+    pi.dwProcessId, sessionId);
+  return true;
+}
+
+static bool StopChild()
+{
+  if (!l_process.IsValid())
+  {
+    l_childStopEvent.Close();
+    l_childSession = NO_CONSOLE_SESSION;
+    return true;
+  }
+
+  DEBUG_INFO("Stopping child process in session %lu", l_childSession);
+  if (l_childStopEvent.IsValid() && !SetEvent(l_childStopEvent.Get()))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to signal the child stop event");
+
+  DWORD result = WaitForSingleObject(l_process.Get(), 5000);
+  if (result == WAIT_TIMEOUT)
+  {
+    DEBUG_WARN("Child process did not stop in time, terminating it");
+    if (!TerminateProcess(l_process.Get(), EXIT_FAILURE))
+    {
+      DEBUG_ERROR_HR(GetLastError(), "Failed to terminate child process");
+      return false;
+    }
+    else
+      result = WaitForSingleObject(l_process.Get(), 1000);
+  }
+  else if (result == WAIT_FAILED)
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Failed to wait for child process");
+    return false;
+  }
+
+  if (result != WAIT_OBJECT_0)
+  {
+    DEBUG_ERROR("Child process did not terminate");
+    return false;
+  }
+
+  l_process.Close();
+  l_childStopEvent.Close();
+  l_childSession = NO_CONSOLE_SESSION;
+  return true;
 }

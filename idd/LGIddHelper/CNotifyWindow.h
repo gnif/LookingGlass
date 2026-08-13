@@ -20,6 +20,7 @@
 
 #pragma once
 #include "CWindow.h"
+#include <atomic>
 #include <stdint.h>
 #include <functional>
 #include <memory>
@@ -36,7 +37,7 @@ class CNotifyWindow : public CWindow
   bool m_iconRegistered;
   std::optional<bool> m_gpuQueue;
   HMENU m_menu;
-  bool closeRequested;
+  std::atomic_bool closeRequested;
   bool m_recoveryActive;
   std::unique_ptr<CConfigWindow> m_config;
 
