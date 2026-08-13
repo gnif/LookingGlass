@@ -208,8 +208,8 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
-  if (!src.colorTransform || IsIdentityColorTransform(*src.colorTransform) ||
-      (!src.colorTransform->matrixEnabled && !src.colorTransform->lutEnabled))
+  const auto transform = D12::Transform(src.colorTransform);
+  if (!transform)
     return PostProcessStatus::BYPASS_EFFECT;
 
   DXGI_FORMAT dstFormat;
@@ -247,16 +247,16 @@ PostProcessStatus CColorTransformEffect::SetFormat(
       return PostProcessStatus::FAILED;
   }
 
-  std::memcpy(m_consts.matrix, src.colorTransform->matrix,
+  std::memcpy(m_consts.matrix, transform->matrix,
     sizeof(m_consts.matrix));
-  m_consts.scalar        = src.colorTransform->scalar;
-  m_consts.matrixEnabled = src.colorTransform->matrixEnabled;
-  m_consts.lutEnabled    = src.colorTransform->lutEnabled;
-  m_consts.inputTransfer = src.hdrPQ ? TRANSFER_PQ :
+  m_consts.scalar         = transform->scalar;
+  m_consts.matrixEnabled  = transform->matrixEnabled;
+  m_consts.lutEnabled     = transform->lutEnabled;
+  m_consts.inputTransfer  = src.hdrPQ ? TRANSFER_PQ :
     (src.hdr ? TRANSFER_LINEAR : TRANSFER_SRGB);
   m_consts.outputTransfer = src.hdr ? TRANSFER_PQ : TRANSFER_SRGB;
 
-  std::memcpy(m_lut, src.colorTransform->lut, sizeof(m_lut));
+  std::memcpy(m_lut, transform->lut, sizeof(m_lut));
   m_uploadPending = true;
 
   m_srcFormat = src.desc.Format;

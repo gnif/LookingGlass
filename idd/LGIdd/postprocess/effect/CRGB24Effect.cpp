@@ -83,12 +83,7 @@ struct CRGB24Effect::State
         format.desc.Format    != DXGI_FORMAT_B8G8R8A8_UNORM)
       return false;
 
-    if (!format.colorTransform ||
-        (!format.colorTransform->matrixEnabled &&
-         !format.colorTransform->lutEnabled))
-      return true;
-
-    return IsIdentityColorTransform(*format.colorTransform);
+    return !D12::Transform(format.colorTransform);
   }
 
   bool WantsPackedLocked() const

@@ -38,8 +38,6 @@ struct D12ColorTransform
   float lut[4096][4]  = {};
 };
 
-bool IsIdentityColorTransform(const D12ColorTransform& transform);
-
 struct D12FrameFormat
 {
   D3D12_RESOURCE_DESC                       desc          = {};
@@ -89,6 +87,8 @@ namespace D12
 
   FrameType Type(DXGI_FORMAT format);
   void CopyHdr(D12FrameFormat& dst, const D12FrameFormat& src);
+  std::shared_ptr<const D12ColorTransform> Transform(
+    const std::shared_ptr<const D12ColorTransform>& transform);
   bool Same(const D3D12_RESOURCE_DESC& left,
     const D3D12_RESOURCE_DESC& right,
     DescCmp cmp = DescCmp::EXACT);

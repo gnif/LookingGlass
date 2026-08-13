@@ -241,13 +241,14 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
     transform->lut[i][3] = 1.0f;
   }
 
-  if (IsIdentityColorTransform(*transform))
+  auto active = D12::Transform(transform);
+  if (!active)
   {
     control.SetColorTransform(nullptr);
     return STATUS_SUCCESS;
   }
 
-  control.SetColorTransform(std::move(transform));
+  control.SetColorTransform(std::move(active));
   DEBUG_INFO("Display color transform updated (matrix:%d lut:%d)",
     input->MatrixEnabled, input->LutEnabled);
   return STATUS_SUCCESS;
