@@ -18,22 +18,24 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#ifndef _H_X11DS_CLIPBOARD_
-#define _H_X11DS_CLIPBOARD_
+#ifndef _H_LG_CLIENT_TRANSPORT_LGMP_CLIPBOARD_
+#define _H_LG_CLIENT_TRANSPORT_LGMP_CLIPBOARD_
+
+#include "interface/clipboard.h"
+
+#include <lgmp/client.h>
 
 #include <stdbool.h>
-#include <X11/extensions/Xfixes.h>
+#include <stdint.h>
 
-#include "interface/displayserver.h"
+typedef struct LGMPClipboard LGMPClipboard;
 
-bool x11CBEventThread(const XEvent * xe);
+bool lgmpClipboard_create(PLGMPClient client, LGMPClipboard ** result);
+void lgmpClipboard_destroy(LGMPClipboard ** clipboard);
 
-bool x11CBInit(void);
-void x11CBNotice(LG_ClipboardData type);
-void x11CBRelease(void);
-void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type);
-void x11CBRequestReady(LG_ClipboardRequest request);
-void x11CBRequestCancel(LG_ClipboardRequest request,
-    LG_ClipboardCancelReason reason);
+bool lgmpClipboard_connect(LGMPClipboard * clipboard, uint32_t clientID);
+void lgmpClipboard_disconnect(LGMPClipboard * clipboard);
+
+const LG_ClipboardOps * lgmpClipboard_getOps(void);
 
 #endif

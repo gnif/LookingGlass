@@ -20,6 +20,7 @@
 
 #include "wayland.h"
 #include "test.h"
+#include "../src/clipboard.h"
 
 #include "common/debug.h"
 
@@ -76,9 +77,12 @@ struct Proto
   unsigned int   dirtyDestroyN;
   unsigned int   receiveN;
   unsigned int   setActionsN;
+  unsigned int   selectionSetN;
   char           receiveMime[80];
   const void   * receiveData;
   size_t         receiveSize;
+  int            receiveFd;
+  bool           keepReceiveOpen;
   struct Proxy * selection;
   uint32_t       serial;
 };
@@ -97,7 +101,7 @@ struct Poll
 struct TypeNotice
 {
   LG_ClipboardData type[LG_CLIPBOARD_DATA_NONE];
-  int              count;
+  size_t           count;
 };
 
 struct DataNotice
@@ -108,11 +112,25 @@ struct DataNotice
   size_t              size;
 };
 
+struct StreamNotice
+{
+  LG_ClipboardRequest request;
+  LG_ClipboardData    type;
+  uint64_t            sizeHint;
+  uint64_t            finalSize;
+  uint8_t             data[MAX_TRANSFER];
+  size_t              size;
+  unsigned int        beginN;
+  unsigned int        chunkN;
+  unsigned int        endN;
+};
+
 struct Log
 {
   struct Poll         poll[MAX_POLL];
   struct TypeNotice   notice[MAX_NOTICE];
   struct DataNotice   data[MAX_DATA];
+  struct StreamNotice streamData;
   LG_ClipboardRequest abort[MAX_ABORT];
   unsigned int        pollN;
   unsigned int        pollUnregisterN;
@@ -122,11 +140,21 @@ struct Log
   unsigned int        abortN;
   unsigned int        releaseN;
   unsigned int        requestN;
+  unsigned int        requestReadyN;
   LG_ClipboardData    requestType;
-  LG_ClipboardReplyFn reply;
-  void               * replyOpaque;
+  const LG_ClipboardStreamOps * requestStream;
+  void               * requestOpaque;
+  LG_ClipboardRequest requestId;
+  LG_ClipboardResult  beginResult;
+  LG_ClipboardResult  chunkResult;
+  LG_ClipboardResult  endResult;
+  LG_ClipboardResult  requestBeginResult;
+  bool                 readyDuringChunk;
+  bool                 readyDuringEnd;
   bool                 pollOK;
   bool                 requestOK;
+  bool                 requestCancelSync;
+  bool                 requestBeginSync;
   bool                 firing;
 };
 
@@ -280,6 +308,7 @@ struct wl_proxy * wl_proxy_marshal_flags(struct wl_proxy * proxy,
       CHECK(!interface);
       proto.selection = (struct Proxy *)va_arg(ap, struct wl_data_source *);
       proto.serial    = va_arg(ap, unsigned int);
+      ++proto.selectionSetN;
       p               = NULL;
       break;
 
@@ -292,6 +321,12 @@ struct wl_proxy * wl_proxy_marshal_flags(struct wl_proxy * proxy,
         ++proto.receiveN;
         snprintf(proto.receiveMime, sizeof(proto.receiveMime),
             "%s", p->mime[p->mimeN - 1]);
+        if (proto.keepReceiveOpen)
+        {
+          CHECK(proto.receiveFd < 0);
+          proto.receiveFd = dup(fd);
+          CHECK(proto.receiveFd >= 0);
+        }
         if (proto.receiveSize)
           sendData(fd, proto.receiveData, proto.receiveSize);
       }
@@ -364,6 +399,20 @@ bool waylandPollUnregister(int fd)
   return false;
 }
 
+bool waylandPollUpdate(int fd, uint32_t events)
+{
+  for (unsigned int i = 0; i < rec.pollN; ++i)
+  {
+    struct Poll * poll = &rec.poll[i];
+    if (!poll->active || poll->fd != fd)
+      continue;
+
+    poll->events = events;
+    return true;
+  }
+  return false;
+}
+
 static void pollFire(unsigned int no, uint32_t events)
 {
   CHECK(no < rec.pollN);
@@ -379,28 +428,28 @@ static void pollFire(unsigned int no, uint32_t events)
       pollCleanup(&rec.poll[i]);
 }
 
-void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
+void lgClipboard_notifyTypes(
+    const LG_ClipboardData types[], size_t count)
 {
   CHECK(rec.noticeN < ARRAY_LENGTH(rec.notice));
-  CHECK(count >= 0);
-  CHECK(count <= LG_CLIPBOARD_DATA_NONE);
+  CHECK(count <= ARRAY_LENGTH(rec.notice[0].type));
   struct TypeNotice * notice = &rec.notice[rec.noticeN++];
-  memcpy(notice->type, types, (size_t)count * sizeof(*types));
+  memcpy(notice->type, types, count * sizeof(*types));
   notice->count = count;
 }
 
-void app_clipboardRelease(void)
+void lgClipboard_release(void)
 {
   ++rec.releaseN;
 }
 
-void app_clipboardAbort(LG_ClipboardRequest request)
+void lgClipboard_abort(LG_ClipboardRequest request)
 {
   CHECK(rec.abortN < ARRAY_LENGTH(rec.abort));
   rec.abort[rec.abortN++] = request;
 }
 
-void app_clipboardData(LG_ClipboardRequest request,
+void lgClipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size)
 {
   CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
@@ -412,14 +461,91 @@ void app_clipboardData(LG_ClipboardRequest request,
   memcpy(notice->data, data, size);
 }
 
-bool app_clipboardRequest(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque)
+LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  struct StreamNotice * stream = &rec.streamData;
+  ++stream->beginN;
+  stream->request  = request;
+  stream->type     = type;
+  stream->sizeHint = sizeHint;
+  return rec.beginResult;
+}
+
+LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
+    uint64_t offset, const void * data, size_t size)
+{
+  const LG_ClipboardResult result = rec.chunkResult;
+  struct StreamNotice * stream = &rec.streamData;
+  ++stream->chunkN;
+  CHECK(request == stream->request);
+  CHECK(offset == stream->size);
+  CHECK(data);
+  CHECK(size);
+  CHECK(size <= sizeof(stream->data) - stream->size);
+  if (rec.readyDuringChunk)
+  {
+    rec.readyDuringChunk = false;
+    rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+    waylandCBRequestReady(request);
+  }
+  if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    memcpy(stream->data + stream->size, data, size);
+    stream->size += size;
+  }
+  return result;
+}
+
+LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
+    uint64_t finalSize)
+{
+  const LG_ClipboardResult result = rec.endResult;
+  struct StreamNotice * stream = &rec.streamData;
+  ++stream->endN;
+  CHECK(request == stream->request);
+  stream->finalSize = finalSize;
+  if (rec.readyDuringEnd)
+  {
+    rec.readyDuringEnd = false;
+    rec.endResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+    waylandCBRequestReady(request);
+  }
+  return result;
+}
+
+bool lgClipboard_requestStream(LG_ClipboardData type,
+    const LG_ClipboardStreamOps * stream, void * opaque,
+    LG_ClipboardRequest * request)
 {
   ++rec.requestN;
   rec.requestType = type;
-  rec.reply       = replyFn;
-  rec.replyOpaque = opaque;
+  rec.requestStream = stream;
+  rec.requestOpaque = opaque;
+  rec.requestId = 9000 + rec.requestN;
+  if (request)
+    *request = rec.requestId;
+  if (rec.requestBeginSync)
+  {
+    rec.requestBeginResult = stream->begin(
+        opaque, type, LG_CLIPBOARD_SIZE_UNKNOWN);
+    const uint8_t byte = 0xa5;
+    CHECK(stream->chunk(opaque, 0, &byte, 1) ==
+        LG_CLIPBOARD_RESULT_ACCEPTED);
+    CHECK(stream->chunk(opaque, 1, &byte, 1) ==
+        LG_CLIPBOARD_RESULT_BLOCKED);
+    pollFire(rec.pollN - 1, EPOLLOUT);
+  }
+  if (rec.requestCancelSync)
+    stream->cancel(opaque, LG_CLIPBOARD_CANCEL_REPLACED);
   return rec.requestOK;
+}
+
+bool lgClipboard_requestReady(LG_ClipboardRequest request)
+{
+  CHECK(request == rec.requestId);
+  ++rec.requestReadyN;
+  return true;
 }
 
 static const struct wl_data_device_listener * deviceListener(void)
@@ -458,6 +584,7 @@ static void offerMime(struct Proxy * offer, const char * mime)
 
 static void selectOffer(struct Proxy * offer)
 {
+  proto.selection = offer;
   deviceListener()->selection(proto.device.data,
       (struct wl_data_device *)&proto.device,
       (struct wl_data_offer *)offer);
@@ -477,10 +604,14 @@ static void start(void)
   memset(&wlCb, 0, sizeof(wlCb));
   memset(&proto, 0, sizeof(proto));
   memset(&rec, 0, sizeof(rec));
+  proto.receiveFd = -1;
   LG_LOCK_INIT(wlCb.lock);
 
   rec.pollOK             = true;
   rec.requestOK          = true;
+  rec.beginResult        = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.chunkResult        = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.endResult          = LG_CLIPBOARD_RESULT_ACCEPTED;
   proto.manager.kind     = PROXY_MANAGER;
   proto.device.kind      = PROXY_DEVICE;
   wlWm.dataDeviceManager =
@@ -497,6 +628,11 @@ static void start(void)
 
 static void finish(void)
 {
+  if (proto.receiveFd >= 0)
+  {
+    CHECK(close(proto.receiveFd) == 0);
+    proto.receiveFd = -1;
+  }
   waylandCBFree();
   CHECK(!wlCb.dataDevice);
   CHECK(!wlCb.offer);
@@ -620,20 +756,118 @@ static void testReadEOF(void)
 
   pollFire(0, EPOLLIN);
   CHECK(rec.poll[0].active);
-  CHECK(rec.dataN == 0);
+  CHECK(rec.streamData.beginN == 1);
+  CHECK(rec.streamData.chunkN == 1);
+  CHECK(rec.streamData.endN == 0);
   pollFire(0, EPOLLIN);
   CHECK(!rec.poll[0].active);
   CHECK(rec.pollCleanupN == 1);
-  CHECK(rec.dataN == 1);
-  CHECK(rec.data[0].request == 201);
-  CHECK(rec.data[0].type == LG_CLIPBOARD_DATA_TEXT);
-  CHECK(rec.data[0].size == sizeof(data));
-  CHECK(memcmp(rec.data[0].data, data, sizeof(data)) == 0);
+  CHECK(rec.streamData.request == 201);
+  CHECK(rec.streamData.type == LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.streamData.sizeHint == LG_CLIPBOARD_SIZE_UNKNOWN);
+  CHECK(rec.streamData.size == sizeof(data));
+  CHECK(rec.streamData.finalSize == sizeof(data));
+  CHECK(rec.streamData.endN == 1);
+  CHECK(memcmp(rec.streamData.data, data, sizeof(data)) == 0);
   checkClosed(fd);
 
   finish();
-  CHECK(rec.dataN == 1);
   CHECK(rec.abortN == 0);
+}
+
+static void testReadBlocked(void)
+{
+  start();
+  textOffer();
+  const uint8_t data[] = "blocked stream";
+  proto.receiveData = data;
+  proto.receiveSize = sizeof(data) - 1;
+  rec.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+
+  waylandCBRequest(202, LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.beginN == 1);
+  CHECK(rec.streamData.chunkN == 1);
+  CHECK(rec.streamData.size == 0);
+  CHECK(rec.poll[0].events == 0);
+
+  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  waylandCBRequestReady(202);
+  CHECK(rec.streamData.chunkN == 2);
+  CHECK(rec.streamData.size == sizeof(data) - 1);
+  CHECK(rec.streamData.endN == 1);
+  CHECK(rec.streamData.finalSize == sizeof(data) - 1);
+  CHECK(memcmp(rec.streamData.data, data, sizeof(data) - 1) == 0);
+  CHECK(!rec.poll[0].active);
+  CHECK(rec.abortN == 0);
+  finish();
+}
+
+static void testReadBlockedEmpty(void)
+{
+  start();
+  textOffer();
+  const uint8_t data[] = "buffered while source stays open";
+  proto.receiveData     = data;
+  proto.receiveSize     = sizeof(data) - 1;
+  proto.keepReceiveOpen = true;
+  rec.chunkResult       = LG_CLIPBOARD_RESULT_BLOCKED;
+
+  waylandCBRequest(204, LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.chunkN == 1);
+  CHECK(rec.streamData.size == 0);
+  CHECK(rec.poll[0].events == 0);
+
+  /* The read drained the pipe, whose duplicated write end remains open.
+   * Ready must retry the buffered chunk without another poll callback. */
+  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  waylandCBRequestReady(204);
+  CHECK(rec.streamData.chunkN == 2);
+  CHECK(rec.streamData.size == sizeof(data) - 1);
+  CHECK(memcmp(rec.streamData.data, data, sizeof(data) - 1) == 0);
+  CHECK(rec.streamData.endN == 0);
+  CHECK(rec.poll[0].active);
+  CHECK(rec.poll[0].events == EPOLLIN);
+
+  CHECK(close(proto.receiveFd) == 0);
+  proto.receiveFd = -1;
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.endN == 1);
+  CHECK(rec.streamData.finalSize == sizeof(data) - 1);
+  CHECK(!rec.poll[0].active);
+  CHECK(rec.abortN == 0);
+  finish();
+}
+
+static void testReadReadyRace(void)
+{
+  start();
+  textOffer();
+  const uint8_t data[] = "ready while returning blocked";
+  proto.receiveData = data;
+  proto.receiveSize = sizeof(data) - 1;
+  rec.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  rec.readyDuringChunk = true;
+
+  waylandCBRequest(203, LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.beginN == 1);
+  CHECK(rec.streamData.chunkN == 2);
+  CHECK(rec.streamData.size == sizeof(data) - 1);
+  CHECK(rec.poll[0].events == EPOLLIN);
+
+  rec.endResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  rec.readyDuringEnd = true;
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.endN == 2);
+  CHECK(rec.streamData.finalSize == sizeof(data) - 1);
+  CHECK(!rec.poll[0].active);
+  CHECK(rec.abortN == 0);
+  finish();
 }
 
 static void testReadError(void)
@@ -666,13 +900,6 @@ static void testSource(void)
 {
   start();
   waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
-  CHECK(rec.requestN == 1);
-  CHECK(rec.requestType == LG_CLIPBOARD_DATA_TEXT);
-  CHECK(rec.reply);
-
-  const uint8_t data[] = "source data";
-  rec.reply(rec.replyOpaque, LG_CLIPBOARD_DATA_TEXT,
-      data, sizeof(data) - 1);
   CHECK(proto.sourceN == 1);
   struct Proxy * source = &proto.source[0];
   CHECK(proto.selection == source);
@@ -698,21 +925,219 @@ static void testSource(void)
       (struct wl_data_source *)source, "text/plain", good[1]);
   CHECK(rec.pollN == 1);
   CHECK(rec.poll[0].fd == good[1]);
+  CHECK(rec.poll[0].events == 0);
+  CHECK(rec.requestN == 1);
+  CHECK(rec.requestType == LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.requestStream);
+  CHECK(rec.requestOpaque);
+
+  const uint8_t first[] = "source ";
+  const uint8_t second[] = "data";
+  CHECK(rec.requestStream->begin(rec.requestOpaque,
+      LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, 0,
+      first, sizeof(first) - 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(rec.poll[0].events == EPOLLOUT);
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, sizeof(first) - 1,
+      second, sizeof(second) - 1) == LG_CLIPBOARD_RESULT_BLOCKED);
+  pollFire(0, EPOLLOUT);
+  CHECK(rec.requestReadyN == 1);
+  CHECK(rec.poll[0].events == 0);
+
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, sizeof(first) - 1,
+      second, sizeof(second) - 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestStream->end(rec.requestOpaque,
+      sizeof(first) + sizeof(second) - 2) == LG_CLIPBOARD_RESULT_BLOCKED);
+  pollFire(0, EPOLLOUT);
+  CHECK(rec.requestReadyN == 2);
+  CHECK(rec.requestStream->end(rec.requestOpaque,
+      sizeof(first) + sizeof(second) - 2) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(!rec.poll[0].active);
 
   sourceListener(source)->cancelled(source->data,
       (struct wl_data_source *)source);
   CHECK(source->dead);
   CHECK(proto.sourceDestroyN == 1);
-  pollFire(0, EPOLLOUT);
   CHECK(rec.pollCleanupN == 1);
-  uint8_t actual[sizeof(data)] = {};
-  CHECK(read(good[0], actual, sizeof(actual)) == sizeof(data) - 1);
-  CHECK(memcmp(actual, data, sizeof(data) - 1) == 0);
+  uint8_t actual[sizeof(first) + sizeof(second)] = {};
+  const size_t expected = sizeof(first) + sizeof(second) - 2;
+  CHECK(read(good[0], actual, sizeof(actual)) == (ssize_t)expected);
+  CHECK(memcmp(actual, "source data", expected) == 0);
   CHECK(read(good[0], &value, 1) == 0);
   CHECK(close(good[0]) == 0);
   checkClosed(good[1]);
 
+  finish();
+}
+
+static void testSourceRelease(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+  CHECK(wlCb.sources);
+  CHECK(proto.selection == source);
+  CHECK(proto.selectionSetN == 1);
+
+  waylandCBRelease();
+  CHECK(!wlCb.selectionSource);
+  CHECK(wlCb.sources);
+  CHECK(!proto.selection);
+  CHECK(proto.selectionSetN == 2);
+
+  waylandCBRelease();
+  CHECK(proto.selectionSetN == 2);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
+  CHECK(source->dead);
+  CHECK(!wlCb.sources);
+  finish();
+}
+
+static void testSourceExternalOwner(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  CHECK(proto.selectionSetN == 1);
+
+  struct Proxy * external = newOffer();
+  offerMime(external, "image/png");
+  selectOffer(external);
+  CHECK(!wlCb.selectionSource);
+  CHECK(proto.selection == external);
+
+  waylandCBRelease();
+  CHECK(proto.selectionSetN == 1);
+  CHECK(proto.selection == external);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
+  CHECK(source->dead);
+  finish();
+}
+
+static void testSourceReplacement(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * first = &proto.source[0];
+  waylandCBNotice(LG_CLIPBOARD_DATA_PNG);
+  struct Proxy * second = &proto.source[1];
+  CHECK(proto.selection == second);
+  CHECK(proto.selectionSetN == 2);
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)second);
+
+  sourceListener(first)->cancelled(first->data,
+      (struct wl_data_source *)first);
+  CHECK(first->dead);
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)second);
+
+  waylandCBRelease();
+  CHECK(!proto.selection);
+  CHECK(proto.selectionSetN == 3);
+  CHECK(!wlCb.selectionSource);
+
+  sourceListener(second)->cancelled(second->data,
+      (struct wl_data_source *)second);
+  CHECK(second->dead);
+  CHECK(!wlCb.sources);
+  finish();
+}
+
+static void testSourceCancelDuringRequest(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  rec.requestCancelSync = true;
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/plain", fds[1]);
+  CHECK(rec.requestN == 1);
+  CHECK(rec.pollN == 1);
+  CHECK(!rec.poll[0].active);
+  CHECK(rec.pollCleanupN == 1);
+  checkClosed(fds[1]);
+  uint8_t value;
+  CHECK(read(fds[0], &value, 1) == 0);
+  CHECK(close(fds[0]) == 0);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
+  finish();
+}
+
+static void testSourceBeginDuringRequest(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  rec.requestBeginSync = true;
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/plain", fds[1]);
+  CHECK(rec.requestN == 1);
+  CHECK(rec.requestBeginResult == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestOpaque);
+  CHECK(rec.requestReadyN == 1);
+
+  CHECK(rec.requestStream->end(rec.requestOpaque, 1) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.pollCleanupN == 1);
+  uint8_t value = 0;
+  CHECK(read(fds[0], &value, 1) == 1);
+  CHECK(value == 0xa5);
+  CHECK(read(fds[0], &value, 1) == 0);
+  CHECK(close(fds[0]) == 0);
+  checkClosed(fds[1]);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
+  finish();
+}
+
+static void testSourceError(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/plain", fds[1]);
+  CHECK(rec.requestStream->begin(rec.requestOpaque,
+      LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+
+  const uint8_t first[] = "first";
+  const uint8_t second[] = "second";
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, 0,
+      first, sizeof(first) - 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, sizeof(first) - 1,
+      second, sizeof(second) - 1) == LG_CLIPBOARD_RESULT_BLOCKED);
+  CHECK(close(fds[0]) == 0);
+  pollFire(0, EPOLLERR);
+  CHECK(rec.requestReadyN == 1);
+  CHECK(!rec.poll[0].active);
+  CHECK(rec.pollCleanupN == 1);
+
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, sizeof(first) - 1,
+      second, sizeof(second) - 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestStream->end(rec.requestOpaque,
+      sizeof(first) + sizeof(second) - 2) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  checkClosed(fds[1]);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
   finish();
 }
 
@@ -725,15 +1150,38 @@ static void testTeardown(void)
   const int fd = rec.poll[0].fd;
   struct Proxy * dnd = rawOffer();
   wlCb.dndOffer = (struct wl_data_offer *)dnd;
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
 
   finish();
   CHECK(offer->dead);
   CHECK(dnd->dead);
+  CHECK(source->dead);
   CHECK(proto.offerDestroyN == 2);
+  CHECK(proto.sourceDestroyN == 1);
   CHECK(proto.dirtyDestroyN == 0);
+  CHECK(proto.selectionSetN == 2);
+  CHECK(!proto.selection);
   CHECK(rec.pollUnregisterN == 1);
   CHECK(rec.pollCleanupN == 1);
   checkClosed(fd);
+}
+
+static void testTeardownExternalOwner(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  struct Proxy * external = newOffer();
+  offerMime(external, "text/plain");
+  selectOffer(external);
+  CHECK(!wlCb.selectionSource);
+
+  finish();
+  CHECK(source->dead);
+  CHECK(external->dead);
+  CHECK(proto.selectionSetN == 1);
+  CHECK(proto.selection == external);
 }
 
 static void testDnd(void)
@@ -783,9 +1231,19 @@ static const struct Test tests[] =
   { "mime"      , testMime      },
   { "replace"   , testReplace   },
   { "read-eof"  , testReadEOF   },
+  { "read-block", testReadBlocked },
+  { "read-empty", testReadBlockedEmpty },
+  { "read-ready", testReadReadyRace },
   { "read-error", testReadError },
   { "source"    , testSource    },
+  { "source-release", testSourceRelease },
+  { "source-external", testSourceExternalOwner },
+  { "source-replace", testSourceReplacement },
+  { "source-cancel", testSourceCancelDuringRequest },
+  { "source-early", testSourceBeginDuringRequest },
+  { "source-error", testSourceError },
   { "teardown"  , testTeardown  },
+  { "teardown-external", testTeardownExternalOwner },
   { "self-copy" , testSelfCopy  },
   { "dnd"       , testDnd       },
 };

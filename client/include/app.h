@@ -173,14 +173,6 @@ void app_overlayConfigRegister(const char * title,
 void app_overlayConfigRegisterTab(const char * title,
     void (*callback)(void * udata, int * id), void * udata);
 
-void app_clipboardRelease(void);
-void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count);
-void app_clipboardData(LG_ClipboardRequest request,
-    LG_ClipboardData type, const void * data, size_t size);
-void app_clipboardAbort(LG_ClipboardRequest request);
-bool app_clipboardRequest(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque);
-
 /**
  * Show an alert on screen
  * @param type The alert type

@@ -1761,6 +1761,11 @@ static bool requestClipboard(LG_ClipboardData type,
 
   const bool queued = available &&
     ll_push(clipboard.requests, request);
+  /* Publish the request before the provider can make it visible to its
+   * worker. A provider event may otherwise reach the stream sink before the
+   * caller has learned which request it belongs to. */
+  if (queued && resultId)
+    *resultId = id;
   bool result = queued;
   if (queued)
     result = clipboard.active.ops->request(clipboard.active.opaque,
@@ -1769,20 +1774,14 @@ static bool requestClipboard(LG_ClipboardData type,
   LG_UNLOCK_SHARED(clipboard.activeLock);
 
   if (result)
-  {
-    if (resultId)
-      *resultId = id;
     return true;
-  }
   if (queued)
   {
     ClipboardRequest * failed = takeRequest(id);
     if (!failed)
-    {
-      if (resultId)
-        *resultId = id;
       return true;
-    }
+    if (resultId)
+      *resultId = LG_CLIPBOARD_REQUEST_INVALID;
     freeRequest(failed);
     return false;
   }

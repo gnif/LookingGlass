@@ -22,6 +22,7 @@
 #include "clipboard.h"
 #include "test.h"
 #include "x11.h"
+#include "../src/clipboard.h"
 
 #include "common/debug.h"
 
@@ -29,6 +30,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
@@ -42,7 +44,7 @@
 #define MAX_NOTICE   8U
 #define MAX_PROP     16U
 #define MAX_SEND     8U
-#define MAX_TRANSFER 8192U
+#define MAX_TRANSFER (128U * 1024U)
 #define MAX_WINDOW   16U
 
 #define A_CLIPBOARD 10UL
@@ -95,7 +97,7 @@ struct Property
 struct TypeNotice
 {
   LG_ClipboardData type[LG_CLIPBOARD_DATA_NONE];
-  int              count;
+  size_t           count;
 };
 
 struct DataNotice
@@ -127,6 +129,7 @@ struct Log
   unsigned int       abortN;
   unsigned int       releaseN;
   unsigned int       requestN;
+  unsigned int       requestReadyN;
   unsigned int       destroyN;
   unsigned int       freeN;
   unsigned int       flushN;
@@ -134,11 +137,27 @@ struct Log
   unsigned int       ungrabN;
   unsigned int       selectN;
   LG_ClipboardData   requestType;
-  LG_ClipboardReplyFn reply;
-  void              * replyOpaque;
+  const LG_ClipboardStreamOps * requestStream;
+  void              * requestOpaque;
+  LG_ClipboardRequest requestId;
+  LG_ClipboardRequest streamRequest;
+  LG_ClipboardData    streamType;
+  uint64_t            streamSizeHint;
+  unsigned int        streamBeginN;
+  unsigned int        streamChunkN;
+  unsigned int        streamEndN;
+  size_t              streamMaxChunk;
+  LG_ClipboardResult  beginResult;
+  LG_ClipboardResult  chunkResult;
+  LG_ClipboardResult  endResult;
+  LG_ClipboardResult  requestBeginResult;
+  bool                readyDuringChunk;
+  bool                readyDuringEnd;
   Window              owner;
   Window              nextWindow;
   bool                requestOK;
+  bool                requestCancelSync;
+  bool                requestBeginSync;
   bool                fixesOK;
 };
 
@@ -146,6 +165,12 @@ struct X11DSState x11;
 struct X11DSAtoms x11atoms;
 
 static struct Log rec;
+
+static pthread_mutex_t readRaceLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t  readRaceCond = PTHREAD_COND_INITIALIZER;
+static bool readRacePause;
+static bool readRaceEntered;
+static bool readRaceResume;
 
 static size_t itemSize(int format, unsigned long count)
 {
@@ -253,10 +278,7 @@ int XSelectInput(Display * display, Window window, long mask)
 {
   CHECK(display == x11.display);
   CHECK(mask == PropertyChangeMask);
-  bool found = false;
-  for (unsigned int i = 0; i < rec.windowN; ++i)
-    found |= rec.window[i].window == window && !rec.window[i].dead;
-  CHECK(found);
+  CHECK(window != None);
   return Success;
 }
 
@@ -339,26 +361,44 @@ int XGetWindowProperty(Display * display, Window window, Atom property,
   CHECK(display == x11.display);
   CHECK(window != None);
   CHECK(property != None);
-  CHECK(offset == 0);
-  CHECK(length == ~0L);
+  CHECK(offset >= 0);
+  CHECK(length == ~0L || length == (64U * 1024U + 3U) / 4U);
   CHECK(delete);
   CHECK(requestedType == AnyPropertyType);
   CHECK(rec.propPos < rec.propN);
-  const struct Property * prop = &rec.prop[rec.propPos++];
+  const struct Property * prop = &rec.prop[rec.propPos];
   *actualType   = prop->type;
   *actualFormat = prop->format;
-  *count        = prop->count;
-  *after        = prop->after;
+  size_t start = 0;
+  size_t size = prop->size;
+  if (prop->format == 8 && length != ~0L)
+  {
+    start = (size_t)offset * 4U;
+    CHECK(start <= prop->size);
+    const size_t maximum = (size_t)length * 4U;
+    size = prop->size - start;
+    if (size > maximum)
+      size = maximum;
+    *count = size;
+    *after = prop->size - start - size;
+  }
+  else
+  {
+    *count = prop->count;
+    *after = prop->after;
+  }
   if (prop->null)
     *data = NULL;
   else
   {
-    CHECK(prop->size <= sizeof(prop->data));
-    *data = malloc(prop->size ? prop->size : 1);
+    CHECK(start + size <= sizeof(prop->data));
+    *data = malloc(size ? size : 1);
     CHECK(*data);
-    if (prop->size)
-      memcpy(*data, prop->data, prop->size);
+    if (size)
+      memcpy(*data, prop->data + start, size);
   }
+  if (*after == 0)
+    ++rec.propPos;
   return prop->status;
 }
 
@@ -370,17 +410,17 @@ int XFree(void * data)
   return Success;
 }
 
-void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
+void lgClipboard_notifyTypes(
+    const LG_ClipboardData types[], size_t count)
 {
   CHECK(rec.noticeN < ARRAY_LENGTH(rec.notice));
-  CHECK(count >= 0);
-  CHECK(count <= LG_CLIPBOARD_DATA_NONE);
+  CHECK(count <= ARRAY_LENGTH(rec.notice[0].type));
   struct TypeNotice * notice = &rec.notice[rec.noticeN++];
   notice->count = count;
-  memcpy(notice->type, types, (size_t)count * sizeof(*types));
+  memcpy(notice->type, types, count * sizeof(*types));
 }
 
-void app_clipboardData(LG_ClipboardRequest request,
+void lgClipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size)
 {
   CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
@@ -394,25 +434,119 @@ void app_clipboardData(LG_ClipboardRequest request,
     memcpy(notice->data, data, size);
 }
 
-void app_clipboardAbort(LG_ClipboardRequest request)
+LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  ++rec.streamBeginN;
+  rec.streamRequest  = request;
+  rec.streamType     = type;
+  rec.streamSizeHint = sizeHint;
+  if (rec.beginResult == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
+    rec.data[rec.dataN] = (struct DataNotice)
+    {
+      .request = request,
+      .type    = type,
+    };
+  }
+  return rec.beginResult;
+}
+
+LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
+    uint64_t offset, const void * data, size_t size)
+{
+  const LG_ClipboardResult result = rec.chunkResult;
+  ++rec.streamChunkN;
+  CHECK(request == rec.streamRequest);
+  CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
+  struct DataNotice * notice = &rec.data[rec.dataN];
+  CHECK(offset == notice->size);
+  CHECK(data);
+  CHECK(size);
+  CHECK(size <= sizeof(notice->data) - notice->size);
+  if (size > rec.streamMaxChunk)
+    rec.streamMaxChunk = size;
+  pthread_mutex_lock(&readRaceLock);
+  if (readRacePause)
+  {
+    readRacePause   = false;
+    readRaceEntered = true;
+    pthread_cond_signal(&readRaceCond);
+    while (!readRaceResume)
+      pthread_cond_wait(&readRaceCond, &readRaceLock);
+  }
+  pthread_mutex_unlock(&readRaceLock);
+  if (rec.readyDuringChunk)
+  {
+    rec.readyDuringChunk = false;
+    rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+    x11CBRequestReady(request);
+  }
+  if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    memcpy(notice->data + notice->size, data, size);
+    notice->size += size;
+  }
+  return result;
+}
+
+LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
+    uint64_t finalSize)
+{
+  const LG_ClipboardResult result = rec.endResult;
+  ++rec.streamEndN;
+  CHECK(request == rec.streamRequest);
+  CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
+  if (rec.readyDuringEnd)
+  {
+    rec.readyDuringEnd = false;
+    rec.endResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+    x11CBRequestReady(request);
+  }
+  if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
+  {
+    CHECK(finalSize == rec.data[rec.dataN].size);
+    ++rec.dataN;
+  }
+  return result;
+}
+
+void lgClipboard_abort(LG_ClipboardRequest request)
 {
   CHECK(rec.abortN < ARRAY_LENGTH(rec.abort));
   rec.abort[rec.abortN++] = request;
 }
 
-void app_clipboardRelease(void)
+void lgClipboard_release(void)
 {
   ++rec.releaseN;
 }
 
-bool app_clipboardRequest(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque)
+bool lgClipboard_requestStream(LG_ClipboardData type,
+    const LG_ClipboardStreamOps * stream, void * opaque,
+    LG_ClipboardRequest * request)
 {
   ++rec.requestN;
   rec.requestType = type;
-  rec.reply       = replyFn;
-  rec.replyOpaque = opaque;
+  rec.requestStream = stream;
+  rec.requestOpaque = opaque;
+  rec.requestId = 9000 + rec.requestN;
+  if (request)
+    *request = rec.requestId;
+  if (rec.requestBeginSync)
+    rec.requestBeginResult = stream->begin(
+        opaque, type, LG_CLIPBOARD_SIZE_UNKNOWN);
+  if (rec.requestCancelSync)
+    stream->cancel(opaque, LG_CLIPBOARD_CANCEL_REPLACED);
   return rec.requestOK;
+}
+
+bool lgClipboard_requestReady(LG_ClipboardRequest request)
+{
+  CHECK(request == rec.requestId);
+  ++rec.requestReadyN;
+  return true;
 }
 
 static struct Property * prop(void)
@@ -469,15 +603,20 @@ static void selection(Window requestor, Atom target, Atom property)
   CHECK(x11CBEventThread(&event));
 }
 
-static void property(Window window)
+static void propertyState(Window window, Atom atom, int state)
 {
   XEvent event = {};
   event.xproperty.type    = PropertyNotify;
   event.xproperty.display = x11.display;
   event.xproperty.window  = window;
-  event.xproperty.atom    = x11atoms.SEL_DATA;
-  event.xproperty.state   = PropertyNewValue;
+  event.xproperty.atom    = atom;
+  event.xproperty.state   = state;
   CHECK(x11CBEventThread(&event));
+}
+
+static void property(Window window)
+{
+  propertyState(window, x11atoms.SEL_DATA, PropertyNewValue);
 }
 
 static void owner(Window owner)
@@ -540,6 +679,15 @@ static void start(void)
   rec.nextWindow  = 1000;
   rec.requestOK   = true;
   rec.fixesOK     = true;
+  rec.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.endResult   = LG_CLIPBOARD_RESULT_ACCEPTED;
+
+  pthread_mutex_lock(&readRaceLock);
+  readRacePause   = false;
+  readRaceEntered = false;
+  readRaceResume  = false;
+  pthread_mutex_unlock(&readRaceLock);
 
   x11.display     = (Display *)(uintptr_t)1;
   x11.window      = 50;
@@ -632,6 +780,166 @@ static void testIncr(void)
   finish();
 }
 
+static void testIncrBlocked(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT };
+  discover(620, targets, ARRAY_LENGTH(targets));
+  const Window window = request(211, LG_CLIPBOARD_DATA_TEXT);
+  const unsigned long capacity = 9;
+  rec.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  prop32(x11atoms.INCR, &capacity, 1);
+  selection(window, A_TEXT, x11atoms.SEL_DATA);
+  CHECK(rec.streamBeginN == 1);
+  CHECK(rec.dataN == 0);
+
+  const uint8_t first[] = "abc";
+  prop8(A_TEXT, first, sizeof(first) - 1);
+  property(window);
+  CHECK(rec.streamChunkN == 0);
+
+  rec.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  x11CBRequestReady(211);
+  CHECK(rec.streamBeginN == 2);
+  CHECK(rec.streamSizeHint == capacity);
+  CHECK(rec.streamChunkN == 1);
+  CHECK(rec.data[0].size == 0);
+
+  const uint8_t second[] = "defghi";
+  prop8(A_TEXT, second, sizeof(second) - 1);
+  property(window);
+  CHECK(rec.streamChunkN == 1);
+
+  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  x11CBRequestReady(211);
+  CHECK(rec.streamChunkN == 3);
+  CHECK(rec.data[0].size == 9);
+  CHECK(memcmp(rec.data[0].data, "abcdefghi", 9) == 0);
+
+  rec.endResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  propNull(A_TEXT, 8, 0);
+  property(window);
+  CHECK(rec.streamEndN == 1);
+  CHECK(rec.dataN == 0);
+  rec.endResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  x11CBRequestReady(211);
+  CHECK(rec.streamEndN == 2);
+  CHECK(rec.dataN == 1);
+  CHECK(rec.abortN == 0);
+  finish();
+}
+
+static void testIncrReadyRace(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT };
+  discover(622, targets, ARRAY_LENGTH(targets));
+  const Window window = request(213, LG_CLIPBOARD_DATA_TEXT);
+  const unsigned long capacity = 4;
+  prop32(x11atoms.INCR, &capacity, 1);
+  selection(window, A_TEXT, x11atoms.SEL_DATA);
+
+  const uint8_t data[] = "race";
+  rec.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  rec.readyDuringChunk = true;
+  prop8(A_TEXT, data, sizeof(data) - 1);
+  property(window);
+  CHECK(rec.streamChunkN == 2);
+  CHECK(rec.data[0].size == sizeof(data) - 1);
+
+  rec.endResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  rec.readyDuringEnd = true;
+  propNull(A_TEXT, 8, 0);
+  property(window);
+  CHECK(rec.streamEndN == 2);
+  CHECK(rec.dataN == 1);
+  CHECK(rec.abortN == 0);
+  finish();
+}
+
+static void * requestReadyThread(void * opaque)
+{
+  x11CBRequestReady(*(const LG_ClipboardRequest *)opaque);
+  return NULL;
+}
+
+static void testIncrCancelRace(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT };
+  discover(623, targets, ARRAY_LENGTH(targets));
+  const LG_ClipboardRequest id = 214;
+  const Window window = request(id, LG_CLIPBOARD_DATA_TEXT);
+  const unsigned long capacity = 6;
+  prop32(x11atoms.INCR, &capacity, 1);
+  selection(window, A_TEXT, x11atoms.SEL_DATA);
+
+  const uint8_t data[] = "cancel";
+  rec.chunkResult = LG_CLIPBOARD_RESULT_BLOCKED;
+  prop8(A_TEXT, data, sizeof(data) - 1);
+  property(window);
+  CHECK(rec.streamChunkN == 1);
+
+  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
+  pthread_mutex_lock(&readRaceLock);
+  readRacePause = true;
+  pthread_mutex_unlock(&readRaceLock);
+
+  pthread_t readyThread;
+  CHECK(pthread_create(&readyThread, NULL, requestReadyThread,
+      (void *)&id) == 0);
+
+  pthread_mutex_lock(&readRaceLock);
+  while (!readRaceEntered)
+    pthread_cond_wait(&readRaceCond, &readRaceLock);
+  pthread_mutex_unlock(&readRaceLock);
+
+  /* The callback is outside x11cb.lock and still consuming its chunk. */
+  x11CBRequestCancel(id, LG_CLIPBOARD_CANCEL_REPLACED);
+
+  pthread_mutex_lock(&readRaceLock);
+  readRaceResume = true;
+  pthread_cond_signal(&readRaceCond);
+  pthread_mutex_unlock(&readRaceLock);
+
+  CHECK(pthread_join(readyThread, NULL) == 0);
+  CHECK(rec.streamChunkN == 2);
+  CHECK(rec.data[0].size == sizeof(data) - 1);
+  CHECK(memcmp(rec.data[0].data, data, sizeof(data) - 1) == 0);
+  CHECK(rec.abortN == 0);
+  finish();
+}
+
+static void testIncrLargeProperty(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT };
+  discover(621, targets, ARRAY_LENGTH(targets));
+  const Window window = request(212, LG_CLIPBOARD_DATA_TEXT);
+  const unsigned long capacity = 70U * 1024U;
+  prop32(x11atoms.INCR, &capacity, 1);
+  selection(window, A_TEXT, x11atoms.SEL_DATA);
+
+  const size_t size = 70U * 1024U;
+  uint8_t * data = malloc(size);
+  CHECK(data);
+  for (size_t i = 0; i < size; ++i)
+    data[i] = (uint8_t)i;
+  prop8(A_TEXT, data, size);
+  property(window);
+  propNull(A_TEXT, 8, 0);
+  property(window);
+
+  CHECK(rec.streamChunkN == 2);
+  CHECK(rec.streamMaxChunk == 64U * 1024U);
+  CHECK(rec.dataN == 1);
+  CHECK(rec.data[0].size == size);
+  CHECK(memcmp(rec.data[0].data, data, size) == 0);
+  free(data);
+  finish();
+}
+
 static void testMalformed(void)
 {
   start();
@@ -717,33 +1025,85 @@ static void testSource(void)
   selectionRequest(A_PNG, 701);
   CHECK(rec.requestN == 1);
   CHECK(rec.requestType == LG_CLIPBOARD_DATA_PNG);
-  CHECK(rec.reply);
+  CHECK(rec.requestStream);
   CHECK(rec.sendN == 1);
   const uint8_t data[] = { 1, 2, 3, 4 };
-  rec.reply(rec.replyOpaque, LG_CLIPBOARD_DATA_PNG,
-      data, ARRAY_LENGTH(data));
+  CHECK(rec.requestStream->begin(rec.requestOpaque,
+      LG_CLIPBOARD_DATA_PNG, LG_CLIPBOARD_SIZE_UNKNOWN) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(rec.changeN == 2);
   CHECK(rec.change[1].property == 701);
-  CHECK(rec.change[1].type == A_PNG);
-  CHECK(rec.change[1].format == 8);
-  CHECK(rec.change[1].count == 4);
-  CHECK(memcmp(rec.change[1].data, data, sizeof(data)) == 0);
+  CHECK(rec.change[1].type == x11atoms.INCR);
+  CHECK(rec.change[1].format == 32);
+  CHECK(rec.change[1].count == 1);
   CHECK(rec.sendN == 2);
   CHECK(rec.send[1].xselection.property == 701);
 
-  selectionRequest(A_TEXT, 702);
-  CHECK(rec.requestN == 1);
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, 0,
+      data, ARRAY_LENGTH(data)) == LG_CLIPBOARD_RESULT_BLOCKED);
+  propertyState(900, 701, PropertyDelete);
+  CHECK(rec.requestReadyN == 1);
+  CHECK(rec.requestStream->chunk(rec.requestOpaque, 0,
+      data, ARRAY_LENGTH(data)) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.changeN == 3);
+  CHECK(rec.change[2].property == 701);
+  CHECK(rec.change[2].type == A_PNG);
+  CHECK(rec.change[2].format == 8);
+  CHECK(rec.change[2].count == 4);
+  CHECK(memcmp(rec.change[2].data, data, sizeof(data)) == 0);
+  CHECK(rec.requestStream->end(rec.requestOpaque, ARRAY_LENGTH(data)) ==
+      LG_CLIPBOARD_RESULT_BLOCKED);
+  propertyState(900, 701, PropertyDelete);
+  CHECK(rec.requestReadyN == 2);
+  CHECK(rec.requestStream->end(rec.requestOpaque, ARRAY_LENGTH(data)) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.changeN == 4);
+  CHECK(rec.change[3].property == 701);
+  CHECK(rec.change[3].type == A_PNG);
+  CHECK(rec.change[3].format == 8);
+  CHECK(rec.change[3].count == 0);
+
+  rec.requestCancelSync = true;
+  selectionRequest(A_PNG, 704);
+  CHECK(rec.requestN == 2);
   CHECK(rec.sendN == 3);
   CHECK(rec.send[2].xselection.property == None);
+  rec.requestCancelSync = false;
 
-  rec.requestOK = false;
-  selectionRequest(A_PNG, 703);
+  selectionRequest(A_TEXT, 702);
   CHECK(rec.requestN == 2);
   CHECK(rec.sendN == 4);
   CHECK(rec.send[3].xselection.property == None);
 
+  rec.requestOK = false;
+  selectionRequest(A_PNG, 703);
+  CHECK(rec.requestN == 3);
+  CHECK(rec.sendN == 5);
+  CHECK(rec.send[4].xselection.property == None);
+
   x11CBRelease();
   CHECK(rec.owner == None);
+  finish();
+}
+
+static void testSourceBeginDuringRequest(void)
+{
+  start();
+  x11CBNotice(LG_CLIPBOARD_DATA_PNG);
+  rec.requestBeginSync = true;
+  selectionRequest(A_PNG, 705);
+  CHECK(rec.requestN == 1);
+  CHECK(rec.requestBeginResult == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestOpaque);
+  CHECK(rec.changeN == 1);
+  CHECK(rec.change[0].type == x11atoms.INCR);
+  CHECK(rec.sendN == 1);
+
+  propertyState(900, 705, PropertyDelete);
+  CHECK(rec.requestStream->end(rec.requestOpaque, 0) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.changeN == 2);
+  CHECK(rec.change[1].count == 0);
   finish();
 }
 
@@ -789,9 +1149,14 @@ static const struct Test tests[] =
   { "targets"  , testTargets   },
   { "normal"   , testNormal    },
   { "incr"     , testIncr      },
+  { "incr-block", testIncrBlocked },
+  { "incr-ready", testIncrReadyRace },
+  { "incr-cancel", testIncrCancelRace },
+  { "incr-large", testIncrLargeProperty },
   { "malformed", testMalformed },
   { "replace"  , testReplace   },
   { "source"   , testSource    },
+  { "source-early", testSourceBeginDuringRequest },
   { "teardown" , testTeardown  },
 };
 

@@ -133,16 +133,18 @@ bool waylandPollRegisterWithCleanup(int fd, WaylandPollCallback callback,
     return false;
 
   node->fd       = fd;
+  node->events   = events;
   node->callback = callback;
   node->cleanup  = cleanup;
   node->opaque   = opaque;
   atomic_init(&node->removed, false);
 
   LG_LOCK(wlWm.pollLock);
-  if (epoll_ctl(wlWm.epollFd, EPOLL_CTL_ADD, fd, &(struct epoll_event) {
-    .events = events,
-    .data = (epoll_data_t) { .ptr = node },
-  }) < 0)
+  if (events && epoll_ctl(wlWm.epollFd, EPOLL_CTL_ADD, fd,
+      &(struct epoll_event) {
+        .events = events,
+        .data = (epoll_data_t) { .ptr = node },
+      }) < 0)
   {
     LG_UNLOCK(wlWm.pollLock);
     free(node);
@@ -184,7 +186,8 @@ bool waylandPollUnregister(int fd)
     return false;
   }
 
-  if (epoll_ctl(wlWm.epollFd, EPOLL_CTL_DEL, fd, NULL) < 0)
+  if (node->events &&
+      epoll_ctl(wlWm.epollFd, EPOLL_CTL_DEL, fd, NULL) < 0)
   {
     LG_UNLOCK(wlWm.pollLock);
     DEBUG_ERROR("Failed to unregister from epoll: %s", strerror(errno));
@@ -198,4 +201,46 @@ bool waylandPollUnregister(int fd)
     wl_list_insert(&wlWm.pollFree, &node->link);
   });
   return true;
+}
+
+bool waylandPollUpdate(int fd, uint32_t events)
+{
+  bool result = false;
+  LG_LOCK(wlWm.pollLock);
+  struct WaylandPoll * node;
+  wl_list_for_each(node, &wlWm.poll, link)
+  {
+    if (node->fd != fd)
+      continue;
+
+    int operation;
+    if (!node->events && events)
+      operation = EPOLL_CTL_ADD;
+    else if (node->events && !events)
+      operation = EPOLL_CTL_DEL;
+    else if (events)
+      operation = EPOLL_CTL_MOD;
+    else
+    {
+      result = true;
+      break;
+    }
+
+    struct epoll_event event =
+    {
+      .events = events,
+      .data = (epoll_data_t) { .ptr = node },
+    };
+    if (epoll_ctl(wlWm.epollFd, operation, fd,
+        operation == EPOLL_CTL_DEL ? NULL : &event) < 0)
+      DEBUG_ERROR("Failed to update epoll events: %s", strerror(errno));
+    else
+    {
+      node->events = events;
+      result = true;
+    }
+    break;
+  }
+  LG_UNLOCK(wlWm.pollLock);
+  return result;
 }

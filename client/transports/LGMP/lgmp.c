@@ -20,6 +20,7 @@
 
 #include "interface/transport.h"
 
+#include "clipboard.h"
 #include "input.h"
 
 #include "common/KVMFR.h"
@@ -109,6 +110,7 @@ struct LG_Transport
   PLGMPClientQueue  ownerFrameQueue[LGMP_Q_FRAME_LEN];
   PLGMPClientQueue  pointerQueue;
   LGMPInput        * input;
+  LGMPClipboard    * clipboard;
   LG_Lock           frameLock;
   LG_Lock           pointerLock;
   LG_RWLock         videoStatusLock;
@@ -133,6 +135,7 @@ struct LG_Transport
   bool     frameStopRequested;
   bool     frameScheduleSupported;
   atomic_bool inputSupported;
+  atomic_bool clipboardSupported;
   uint64_t frameLeaseHandle;
   uint32_t frameGeneration;
   uint32_t clientID;
@@ -628,6 +631,13 @@ static LGMP_STATUS lgmp_initializeClient(struct LG_Transport * this)
     return LGMP_ERR_NO_MEM;
   }
 
+  if (!lgmpClipboard_create(this->client, &this->clipboard))
+  {
+    lgmpInput_destroy(&this->input);
+    lgmpClientFree(&this->client);
+    return LGMP_ERR_NO_MEM;
+  }
+
   return LGMP_OK;
 }
 
@@ -650,6 +660,7 @@ static bool lgmp_create(LG_Transport ** result)
   this->cursorPollInterval = cursorPoll;
   atomic_init(&this->connected, false);
   atomic_init(&this->inputSupported, false);
+  atomic_init(&this->clipboardSupported, false);
   atomic_init(&this->destroyPending, false);
 
   this->frameWake   = lgCreateEvent(true, 0);
@@ -860,6 +871,7 @@ static void lgmp_destroyNow(LG_Transport * this)
 {
   if (this->client)
   {
+    lgmpClipboard_destroy(&this->clipboard);
     lgmpInput_destroy(&this->input);
     lgmp_closeQueues(this);
     lgmpClientFree(&this->client);
@@ -958,6 +970,8 @@ static bool lgmp_parseSession(struct LG_Transport * this,
     session->features |= LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
   if (header->features & KVMFR_FEATURE_INPUT)
     session->features |= LG_TRANSPORT_FEATURE_INPUT;
+  if (header->features & KVMFR_FEATURE_CLIPBOARD)
+    session->features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
 
   data += sizeof(*header);
   size -= sizeof(*header);
@@ -1076,6 +1090,9 @@ static LG_TransportStatus lgmp_connectInternal(LG_Transport * this,
       atomic_store_explicit(&this->inputSupported,
           session->features & LG_TRANSPORT_FEATURE_INPUT,
           memory_order_release);
+      atomic_store_explicit(&this->clipboardSupported,
+          session->features & LG_TRANSPORT_FEATURE_CLIPBOARD,
+          memory_order_release);
       this->frameSerial            = 0;
       this->frameSerialValid       = false;
       this->formatValid            = false;
@@ -1136,6 +1153,7 @@ static void lgmp_disconnect(LG_Transport * this)
   lgmp_retainVideoStatusLifetime(this);
 
   lgmpInput_disconnect(this->input);
+  lgmpClipboard_disconnect(this->clipboard);
 
   LG_LOCK(this->frameLock);
   if (++this->frameGeneration == 0)
@@ -1145,6 +1163,8 @@ static void lgmp_disconnect(LG_Transport * this)
   this->frameScheduleSupported = false;
   atomic_store_explicit(
       &this->inputSupported, false, memory_order_release);
+  atomic_store_explicit(
+      &this->clipboardSupported, false, memory_order_release);
   this->clientID               = 0;
   LG_UNLOCK(this->frameLock);
 
@@ -2474,6 +2494,20 @@ static const LG_InputOps * lgmp_getInputOps(LG_Transport * this,
   return lgmpInput_getOps();
 }
 
+static const LG_ClipboardOps * lgmp_getClipboardOps(
+    LG_Transport * this, void ** opaque)
+{
+  *opaque = NULL;
+  if (!atomic_load_explicit(&this->connected, memory_order_acquire) ||
+      !atomic_load_explicit(
+          &this->clipboardSupported, memory_order_acquire) ||
+      !lgmpClipboard_connect(this->clipboard, this->clientID))
+    return NULL;
+
+  *opaque = this->clipboard;
+  return lgmpClipboard_getOps();
+}
+
 static void lgmp_probeVideoStatus(LG_Transport * this)
 {
   bool frameAvailable   = false;
@@ -2617,6 +2651,7 @@ const LG_TransportOps LGT_LGMP =
   .sessionValid     = lgmp_sessionValid,
   .getVideoOps      = lgmp_getVideoOps,
   .getInputOps      = lgmp_getInputOps,
+  .getClipboardOps  = lgmp_getClipboardOps,
   .getRecoveryInfo  = lgmp_getRecoveryInfo,
   .requestRecovery  = lgmp_requestRecovery,
   .sendControl      = lgmp_sendControl,

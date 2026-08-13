@@ -24,6 +24,7 @@
 
 #include "common/debug.h"
 
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -79,6 +80,8 @@ struct Provider
   uint8_t                      chunkBuf[MAX_CALL][MAX_DATA];
   uint64_t                     finalSize;
   LG_ClipboardCancelReason     cancelReason;
+  bool                         earlyBegin;
+  LG_ClipboardResult           earlyResult;
 };
 
 struct Display
@@ -124,6 +127,8 @@ struct StreamSink
   uint64_t                 offset;
   uint64_t                 finalSize;
   LG_ClipboardCancelReason reason;
+  LG_ClipboardRequest          request;
+  bool                         requireRequest;
   size_t                   size;
   uint8_t                  data[MAX_DATA];
 };
@@ -140,6 +145,8 @@ static LG_ClipboardResult sinkBegin(void * opaque,
     LG_ClipboardData type, uint64_t sizeHint)
 {
   struct StreamSink * sink = opaque;
+  if (sink->requireRequest)
+    CHECK(sink->request != LG_CLIPBOARD_REQUEST_INVALID);
   ++sink->begin;
   sink->type     = type;
   sink->sizeHint = sizeHint;
@@ -322,6 +329,22 @@ static bool dataReady(void * opaque, LG_ClipboardRequest id)
   return provider->callOK;
 }
 
+struct EarlyRequest
+{
+  struct Provider     * provider;
+  LG_ClipboardRequest   request;
+  LG_ClipboardData      type;
+};
+
+static void * earlyRequestThread(void * opaque)
+{
+  struct EarlyRequest * early = opaque;
+  early->provider->earlyResult = early->provider->ev->dataBegin(
+      early->provider->evCtx, early->request, early->type,
+      LG_CLIPBOARD_SIZE_UNKNOWN);
+  return NULL;
+}
+
 static bool request(void * opaque, LG_ClipboardRequest id,
     LG_ClipboardData type)
 {
@@ -330,6 +353,18 @@ static bool request(void * opaque, LG_ClipboardRequest id,
   const unsigned int no = provider->request++;
   provider->reqId[no]    = id;
   provider->reqType[no]  = type;
+  if (provider->earlyBegin)
+  {
+    struct EarlyRequest early =
+    {
+      .provider = provider,
+      .request  = id,
+      .type     = type,
+    };
+    pthread_t thread;
+    CHECK(pthread_create(&thread, NULL, earlyRequestThread, &early) == 0);
+    CHECK(pthread_join(thread, NULL) == 0);
+  }
   return provider->reqOK;
 }
 
@@ -954,6 +989,29 @@ static void testStreamRemote(void)
   lgClipboard_free();
 }
 
+static void testRequestPublication(void)
+{
+  init();
+  lgClipboard_setFallback(&streamOps, &p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+  notice(&p, types, 1);
+
+  struct StreamSink sink = { 0 };
+  initSink(&sink);
+  sink.requireRequest = true;
+  p.earlyBegin = true;
+  CHECK(lgClipboard_requestStream(LG_CLIPBOARD_DATA_TEXT,
+      &sinkOps, &sink, &sink.request));
+  CHECK(sink.request == p.reqId[0]);
+  CHECK(p.earlyResult == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(sink.begin == 1);
+  CHECK(p.ev->dataEnd(p.evCtx, sink.request, 0) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(sink.end == 1);
+
+  lgClipboard_free();
+}
+
 static void testStreamLegacy(void)
 {
   init();
@@ -1021,6 +1079,7 @@ static const struct Test tests[] =
   { "stream-local"  , testStreamLocal   },
   { "stream-blocked", testStreamBlocked },
   { "stream-remote" , testStreamRemote  },
+  { "request-publish", testRequestPublication },
   { "stream-legacy" , testStreamLegacy  },
 };
 

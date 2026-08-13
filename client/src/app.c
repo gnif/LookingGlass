@@ -23,7 +23,6 @@
 #include "main.h"
 #include "core.h"
 #include "util.h"
-#include "clipboard.h"
 #include "render_queue.h"
 #include "evdev.h"
 #include "input.h"
@@ -347,35 +346,6 @@ void app_handleEnterEvent(bool entered)
     g_cursor.redraw = true;
     app_invalidateWindow(false);
   }
-}
-
-void app_clipboardRelease(void)
-{
-  lgClipboard_release();
-}
-
-void app_clipboardNotifyTypes(const LG_ClipboardData types[], int count)
-{
-  if (count < 0)
-    return;
-  lgClipboard_notifyTypes(types, (size_t)count);
-}
-
-void app_clipboardData(LG_ClipboardRequest request,
-    const LG_ClipboardData type, const void * data, size_t size)
-{
-  lgClipboard_data(request, type, data, size);
-}
-
-void app_clipboardAbort(LG_ClipboardRequest request)
-{
-  lgClipboard_abort(request);
-}
-
-bool app_clipboardRequest(LG_ClipboardData type,
-    LG_ClipboardReplyFn replyFn, void * opaque)
-{
-  return lgClipboard_request(type, replyFn, opaque);
 }
 
 static int mapInputToImGuiButton(uint32_t button)

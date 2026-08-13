@@ -2314,8 +2314,10 @@ struct LG_DisplayServerOps LGDS_X11 =
   .getFullscreen       = x11GetFullscreen,
   .minimize            = x11Minimize,
 
-  .cbInit    = x11CBInit,
-  .cbNotice  = x11CBNotice,
-  .cbRelease = x11CBRelease,
-  .cbRequest = x11CBRequest
+  .cbInit          = x11CBInit,
+  .cbNotice        = x11CBNotice,
+  .cbRelease       = x11CBRelease,
+  .cbRequest       = x11CBRequest,
+  .cbRequestReady  = x11CBRequestReady,
+  .cbRequestCancel = x11CBRequestCancel,
 };

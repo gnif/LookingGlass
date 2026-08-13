@@ -355,8 +355,10 @@ struct LG_DisplayServerOps LGDS_Wayland =
 
   .setHDRImageDesc = waylandHDRCallback,
 
-  .cbInit    = waylandCBInit,
-  .cbNotice  = waylandCBNotice,
-  .cbRelease = waylandCBRelease,
-  .cbRequest = waylandCBRequest
+  .cbInit          = waylandCBInit,
+  .cbNotice        = waylandCBNotice,
+  .cbRelease       = waylandCBRelease,
+  .cbRequest       = waylandCBRequest,
+  .cbRequestReady  = waylandCBRequestReady,
+  .cbRequestCancel = waylandCBRequestCancel,
 };

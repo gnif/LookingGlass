@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(transport_LGMP LANGUAGES C)
 
 add_library(transport_LGMP STATIC
+  clipboard.c
   input.c
   lgmp.c
 )

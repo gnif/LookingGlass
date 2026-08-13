@@ -103,6 +103,38 @@ foreach(name IN LISTS LGMP_INPUT_CASES)
   )
 endforeach()
 
+add_executable(lgmp-clipboard-tests
+  lgmp_clipboard_test.c
+  ../transports/LGMP/clipboard.c
+)
+target_include_directories(lgmp-clipboard-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(lgmp-clipboard-tests
+  ${EXE_FLAGS}
+  lg_common
+  lgmp
+)
+set(LGMP_CLIPBOARD_CASES
+  claim
+  offer-request
+  inbound-stream
+  outbound-grant
+  blocked
+  cancel
+  restart
+  disconnect
+  malformed
+)
+foreach(name IN LISTS LGMP_CLIPBOARD_CASES)
+  add_test(NAME lgmp-clipboard-${name}
+    COMMAND lgmp-clipboard-tests ${name}
+  )
+  set_tests_properties(lgmp-clipboard-${name} PROPERTIES
+    TIMEOUT 10
+  )
+endforeach()
+
 add_executable(wayland-motion-tests
   motion_test.c
 )
@@ -165,9 +197,19 @@ if(ENABLE_WAYLAND)
     mime
     replace
     read-eof
+    read-block
+    read-empty
+    read-ready
     read-error
     source
+    source-release
+    source-external
+    source-replace
+    source-cancel
+    source-early
+    source-error
     teardown
+    teardown-external
     self-copy
     dnd
   )
@@ -192,14 +234,20 @@ if(ENABLE_X11)
   target_link_libraries(x11-clipboard-tests
     ${EXE_FLAGS}
     lg_common
+    pthread
   )
   set(X11_CLIPBOARD_CASES
     targets
     normal
     incr
+    incr-block
+    incr-ready
+    incr-cancel
+    incr-large
     malformed
     replace
     source
+    source-early
     teardown
   )
   foreach(name IN LISTS X11_CLIPBOARD_CASES)
@@ -431,6 +479,7 @@ set(CLIPBOARD_CASES
   stream-local
   stream-blocked
   stream-remote
+  request-publish
   stream-legacy
 )
 foreach(name IN LISTS CLIPBOARD_CASES)

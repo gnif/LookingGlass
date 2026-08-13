@@ -22,15 +22,16 @@
 #include "x11.h"
 #include "atoms.h"
 
+#include <limits.h>
 #include <string.h>
-#include <unistd.h>
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 
-#include "app.h"
+#include "../../src/clipboard.h"
 #include "common/array.h"
 #include "common/debug.h"
+#include "common/KVMFRClipboard.h"
 #include "common/locking.h"
 
 struct X11ClipboardRead
@@ -39,9 +40,33 @@ struct X11ClipboardRead
   LG_ClipboardRequest request;
   LG_ClipboardData    type;
   bool                incremental;
-  uint8_t           * buffer;
-  size_t              size;
-  size_t              capacity;
+  bool                begun;
+  bool                blocked;
+  bool                calling;
+  bool                readyPending;
+  bool                endPending;
+  bool                propertyPending;
+  bool                pendingMore;
+  uint64_t            sizeHint;
+  uint64_t            offset;
+  long                propertyOffset;
+  unsigned long       pendingUnits;
+  uint8_t           * pending;
+  size_t              pendingSize;
+};
+
+struct X11ClipboardWrite
+{
+  struct X11ClipboardWrite * next;
+  XEvent                     event;
+  LG_ClipboardRequest        request;
+  LG_ClipboardData           type;
+  uint64_t                   offset;
+  bool                       begun;
+  bool                       blocked;
+  bool                       ready;
+  bool                       endPending;
+  bool                       creating;
 };
 
 struct X11ClipboardState
@@ -53,7 +78,8 @@ struct X11ClipboardState
   LG_ClipboardData type;
   bool             haveRequest;
 
-  struct X11ClipboardRead read;
+  struct X11ClipboardRead   read;
+  struct X11ClipboardWrite * writes;
 };
 
 static const char * atomTypes[] =
@@ -73,7 +99,10 @@ static void x11CBSelectionClear(const XSelectionClearEvent e);
 static void x11CBSelectionIncr(const XPropertyEvent e);
 static void x11CBSelectionNotify(const XSelectionEvent e);
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e);
-static LG_ClipboardRequest cancelReadNL(void);
+static LG_ClipboardRequest cancelReadNL(bool abort);
+static bool writeLinkedNL(const struct X11ClipboardWrite * write);
+static void writeRemoveNL(struct X11ClipboardWrite * write);
+static bool advanceReadPropertyNL(unsigned long units);
 static void clearTargetsNL(void);
 
 bool x11CBEventThread(const XEvent * xe)
@@ -93,13 +122,38 @@ bool x11CBEventThread(const XEvent * xe)
       return true;
 
     case PropertyNotify:
-      if (xe->xproperty.state != PropertyNewValue)
-        break;
-
-      if (xe->xproperty.atom == x11atoms.SEL_DATA)
+      if (xe->xproperty.state == PropertyNewValue &&
+          xe->xproperty.atom == x11atoms.SEL_DATA)
       {
         x11CBSelectionIncr(xe->xproperty);
         return true;
+      }
+      if (xe->xproperty.state == PropertyDelete)
+      {
+        LG_ClipboardRequest request = LG_CLIPBOARD_REQUEST_INVALID;
+        LG_LOCK(x11cb.lock);
+        struct X11ClipboardWrite * write;
+        for (write = x11cb.writes; write; write = write->next)
+          if (write->request        != LG_CLIPBOARD_REQUEST_INVALID &&
+              xe->xproperty.window == write->event.xselection.requestor &&
+              xe->xproperty.atom   == write->event.xselection.property)
+            break;
+        if (write)
+        {
+          write->ready = true;
+          if (write->blocked)
+          {
+            write->blocked = false;
+            request = write->request;
+          }
+        }
+        LG_UNLOCK(x11cb.lock);
+        if (write)
+        {
+          if (request != LG_CLIPBOARD_REQUEST_INVALID)
+            lgClipboard_requestReady(request);
+          return true;
+        }
       }
       break;
 
@@ -120,6 +174,8 @@ bool x11CBInit(void)
 {
   LG_LOCK_INIT(x11cb.lock);
   x11cb.aCurSelection = BadValue;
+  x11cb.read.request  = LG_CLIPBOARD_REQUEST_INVALID;
+  x11cb.writes        = NULL;
   for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
   {
     x11cb.aTypes[i] = XInternAtom(x11.display, atomTypes[i], False);
@@ -143,28 +199,151 @@ bool x11CBInit(void)
   return true;
 }
 
-static void x11CBReplyFn(void * opaque, LG_ClipboardData type,
-    const uint8_t * data, uint32_t size)
+static void x11CBWriteSend(XEvent * event)
 {
-  XEvent *s = (XEvent *)opaque;
-
-  if (type == LG_CLIPBOARD_DATA_NONE)
-    s->xselection.property = None;
-  else
-    XChangeProperty(
-        x11.display          ,
-        s->xselection.requestor,
-        s->xselection.property ,
-        s->xselection.target   ,
-        8,
-        PropModeReplace,
-        data,
-        size);
-
-  XSendEvent(x11.display, s->xselection.requestor, 0, 0, s);
+  XSendEvent(x11.display, event->xselection.requestor, 0, 0, event);
   XFlush(x11.display);
-  free(s);
 }
+
+static LG_ClipboardResult x11CBWriteBegin(void * opaque,
+    LG_ClipboardData type, uint64_t sizeHint)
+{
+  struct X11ClipboardWrite * write = opaque;
+  LG_LOCK(x11cb.lock);
+  if (!writeLinkedNL(write) ||
+      write->request == LG_CLIPBOARD_REQUEST_INVALID ||
+      write->begun || type != write->type)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  const unsigned long hint = sizeHint == LG_CLIPBOARD_SIZE_UNKNOWN ? 0 :
+    (sizeHint > ULONG_MAX ? ULONG_MAX : (unsigned long)sizeHint);
+  XChangeProperty(x11.display, write->event.xselection.requestor,
+      write->event.xselection.property, x11atoms.INCR, 32,
+      PropModeReplace, (const unsigned char *)&hint, 1);
+  XSelectInput(x11.display, write->event.xselection.requestor,
+      PropertyChangeMask);
+  write->begun = true;
+  write->ready = false;
+  XEvent event = write->event;
+  LG_UNLOCK(x11cb.lock);
+  x11CBWriteSend(&event);
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static LG_ClipboardResult x11CBWriteChunk(void * opaque,
+    uint64_t offset, const void * data, size_t size)
+{
+  struct X11ClipboardWrite * write = opaque;
+  LG_LOCK(x11cb.lock);
+  if (!writeLinkedNL(write) ||
+      write->request == LG_CLIPBOARD_REQUEST_INVALID || !write->begun ||
+      write->endPending || !data || !size)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (!write->ready)
+  {
+    write->blocked = true;
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_BLOCKED;
+  }
+  if (offset != write->offset || size > KVMFR_CLIPBOARD_DATA_BYTES)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  XChangeProperty(x11.display, write->event.xselection.requestor,
+      write->event.xselection.property, write->event.xselection.target,
+      8, PropModeReplace, data, (int)size);
+  write->ready   = false;
+  write->blocked = false;
+  write->offset  += size;
+  LG_UNLOCK(x11cb.lock);
+  XFlush(x11.display);
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static LG_ClipboardResult x11CBWriteEnd(void * opaque, uint64_t finalSize)
+{
+  struct X11ClipboardWrite * write = opaque;
+  LG_LOCK(x11cb.lock);
+  if (!writeLinkedNL(write) ||
+      write->request == LG_CLIPBOARD_REQUEST_INVALID || !write->begun)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (!write->ready)
+  {
+    write->blocked    = true;
+    write->endPending = true;
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_BLOCKED;
+  }
+  if (finalSize != write->offset)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+
+  const XEvent event = write->event;
+  const bool destroy = !write->creating;
+  writeRemoveNL(write);
+  LG_UNLOCK(x11cb.lock);
+  XChangeProperty(x11.display, event.xselection.requestor,
+      event.xselection.property, event.xselection.target, 8,
+      PropModeReplace, NULL, 0);
+  XFlush(x11.display);
+  if (destroy)
+    free(write);
+  return LG_CLIPBOARD_RESULT_ACCEPTED;
+}
+
+static void x11CBWriteCancel(void * opaque,
+    LG_ClipboardCancelReason reason)
+{
+  struct X11ClipboardWrite * write = opaque;
+  (void)reason;
+  LG_LOCK(x11cb.lock);
+  if (!writeLinkedNL(write))
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  const XEvent event = write->event;
+  const bool begun = write->begun;
+  const bool destroy = !write->creating;
+  writeRemoveNL(write);
+  LG_UNLOCK(x11cb.lock);
+  if (begun)
+  {
+    XChangeProperty(x11.display, event.xselection.requestor,
+        event.xselection.property, event.xselection.target, 8,
+        PropModeReplace, NULL, 0);
+    XFlush(x11.display);
+  }
+  else
+  {
+    XEvent reply = event;
+    reply.xselection.property = None;
+    x11CBWriteSend(&reply);
+  }
+  if (destroy)
+    free(write);
+}
+
+static const LG_ClipboardStreamOps x11CBWriteStream =
+{
+  .begin  = x11CBWriteBegin,
+  .chunk  = x11CBWriteChunk,
+  .end    = x11CBWriteEnd,
+  .cancel = x11CBWriteCancel,
+};
 
 static void x11CBSelectionRequest(const XSelectionRequestEvent e)
 {
@@ -215,9 +394,64 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
   for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
     if (x11cb.aTypes[i] == e.target && requestType == i)
     {
-      // request the data
-      if (app_clipboardRequest(requestType, x11CBReplyFn, s))
+      struct X11ClipboardWrite * write = calloc(1, sizeof(*write));
+      if (!write)
+      {
+        DEBUG_ERROR("out of memory");
+        goto nodata;
+      }
+      write->event    = *s;
+      write->request  = LG_CLIPBOARD_REQUEST_INVALID;
+      write->type     = requestType;
+      write->creating = true;
+
+      LG_LOCK(x11cb.lock);
+      bool duplicate = false;
+      for (struct X11ClipboardWrite * current = x11cb.writes;
+          current; current = current->next)
+      {
+        duplicate = current->event.xselection.requestor == e.requestor &&
+          current->event.xselection.property            == e.property;
+        if (duplicate)
+          break;
+      }
+      if (!duplicate)
+      {
+        write->next   = x11cb.writes;
+        x11cb.writes = write;
+      }
+      LG_UNLOCK(x11cb.lock);
+      if (duplicate)
+      {
+        free(write);
+        goto nodata;
+      }
+
+      const bool result = lgClipboard_requestStream(requestType,
+          &x11CBWriteStream, write, &write->request);
+      LG_LOCK(x11cb.lock);
+      const bool linked = writeLinkedNL(write);
+      if (linked)
+      {
+        write->creating = false;
+        if (!result)
+          writeRemoveNL(write);
+      }
+      else
+        write->creating = false;
+      LG_UNLOCK(x11cb.lock);
+
+      if (result && linked)
+      {
+        free(s);
         return;
+      }
+      free(write);
+      if (!linked)
+      {
+        free(s);
+        return;
+      }
       goto nodata;
     }
 
@@ -240,18 +474,51 @@ static void x11CBSelectionClear(const XSelectionClearEvent e)
 static struct X11ClipboardRead clearReadNL(void)
 {
   const struct X11ClipboardRead read = x11cb.read;
-  x11cb.read = (struct X11ClipboardRead) { 0 };
+  x11cb.read = (struct X11ClipboardRead)
+  {
+    .request = LG_CLIPBOARD_REQUEST_INVALID,
+  };
   if (read.window)
     XDestroyWindow(x11.display, read.window);
   return read;
 }
 
 /* x11cb.lock must be held. */
-static LG_ClipboardRequest cancelReadNL(void)
+static LG_ClipboardRequest cancelReadNL(bool abort)
 {
   const struct X11ClipboardRead read = clearReadNL();
-  free(read.buffer);
-  return read.request;
+  free(read.pending);
+  return abort ? read.request : LG_CLIPBOARD_REQUEST_INVALID;
+}
+
+/* x11cb.lock must be held. */
+static bool writeLinkedNL(const struct X11ClipboardWrite * write)
+{
+  for (const struct X11ClipboardWrite * current = x11cb.writes;
+      current; current = current->next)
+    if (current == write)
+      return true;
+  return false;
+}
+
+/* x11cb.lock must be held and write must be linked. */
+static void writeRemoveNL(struct X11ClipboardWrite * write)
+{
+  struct X11ClipboardWrite ** current = &x11cb.writes;
+  while (*current != write)
+    current = &(*current)->next;
+  *current = write->next;
+  write->next = NULL;
+}
+
+/* x11cb.lock must be held. */
+static bool advanceReadPropertyNL(unsigned long units)
+{
+  if (units > LONG_MAX ||
+      x11cb.read.propertyOffset > LONG_MAX - (long)units)
+    return false;
+  x11cb.read.propertyOffset += (long)units;
+  return true;
 }
 
 /* x11cb.lock must be held. */
@@ -262,6 +529,75 @@ static void clearTargetsNL(void)
 
   XDestroyWindow(x11.display, x11cb.targetsWindow);
   x11cb.targetsWindow = 0;
+}
+
+enum X11ClipboardReadOperation
+{
+  X11_CLIPBOARD_READ_BEGIN,
+  X11_CLIPBOARD_READ_CHUNK,
+  X11_CLIPBOARD_READ_END,
+};
+
+enum X11ClipboardReadCallResult
+{
+  X11_CLIPBOARD_READ_CALL_STALE,
+  X11_CLIPBOARD_READ_CALL_ACCEPTED,
+  X11_CLIPBOARD_READ_CALL_BLOCKED,
+  X11_CLIPBOARD_READ_CALL_RETRY,
+  X11_CLIPBOARD_READ_CALL_FAILED,
+};
+
+/* x11cb.lock must be held on entry and is held again on return. Retain a ready
+ * edge delivered between the provider operation and committing BLOCKED. */
+static enum X11ClipboardReadCallResult x11CBReadCallNL(
+    enum X11ClipboardReadOperation operation, LG_ClipboardData type,
+    uint64_t sizeHint, uint64_t offset, const void * data, size_t size)
+{
+  const LG_ClipboardRequest request = x11cb.read.request;
+  x11cb.read.calling      = true;
+  x11cb.read.readyPending = false;
+  LG_UNLOCK(x11cb.lock);
+
+  LG_ClipboardResult result;
+  switch (operation)
+  {
+    case X11_CLIPBOARD_READ_BEGIN:
+      result = lgClipboard_dataBegin(request, type, sizeHint);
+      break;
+
+    case X11_CLIPBOARD_READ_CHUNK:
+      result = lgClipboard_dataChunk(request, offset, data, size);
+      break;
+
+    case X11_CLIPBOARD_READ_END:
+      result = lgClipboard_dataEnd(request, offset);
+      break;
+
+    default:
+      result = LG_CLIPBOARD_RESULT_FAILED;
+      break;
+  }
+
+  LG_LOCK(x11cb.lock);
+  if (x11cb.read.request != request)
+    return X11_CLIPBOARD_READ_CALL_STALE;
+
+  x11cb.read.calling = false;
+  if (result == LG_CLIPBOARD_RESULT_BLOCKED)
+  {
+    if (x11cb.read.readyPending)
+    {
+      x11cb.read.readyPending = false;
+      return X11_CLIPBOARD_READ_CALL_RETRY;
+    }
+
+    x11cb.read.blocked = true;
+    return X11_CLIPBOARD_READ_CALL_BLOCKED;
+  }
+
+  x11cb.read.readyPending = false;
+  return result == LG_CLIPBOARD_RESULT_ACCEPTED ?
+    X11_CLIPBOARD_READ_CALL_ACCEPTED : X11_CLIPBOARD_READ_CALL_FAILED;
 }
 
 static void x11CBSelectionIncr(const XPropertyEvent e)
@@ -281,11 +617,21 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
     return;
   }
 
+  if (x11cb.read.blocked || x11cb.read.calling || x11cb.read.pendingSize ||
+      x11cb.read.endPending)
+  {
+    x11cb.read.propertyPending = true;
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+readProperty:
   if (XGetWindowProperty(
       e.display,
       e.window,
       e.atom,
-      0, ~0L, // start and length
+      x11cb.read.propertyOffset,
+      (KVMFR_CLIPBOARD_DATA_BYTES + 3U) / 4U,
       True,   // delete the property
       AnyPropertyType,
       &type,
@@ -297,8 +643,8 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
     DEBUG_ERROR("XGetWindowProperty Failed");
     const struct X11ClipboardRead read = clearReadNL();
     LG_UNLOCK(x11cb.lock);
-    free(read.buffer);
-    app_clipboardAbort(read.request);
+    free(read.pending);
+    lgClipboard_abort(read.request);
     return;
   }
 
@@ -307,7 +653,8 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
     if (x11cb.aTypes[dataType] == type)
       break;
 
-  if ((itemCount && !data) || dataType == LG_CLIPBOARD_DATA_NONE ||
+  if ((itemCount && !data) || (!itemCount && after) ||
+      dataType == LG_CLIPBOARD_DATA_NONE ||
       dataType != x11cb.read.type || format != 8)
   {
     DEBUG_WARN("Invalid incremental clipboard data");
@@ -315,66 +662,105 @@ static void x11CBSelectionIncr(const XPropertyEvent e)
     LG_UNLOCK(x11cb.lock);
     if (data)
       XFree(data);
-    free(read.buffer);
-    app_clipboardAbort(read.request);
+    free(read.pending);
+    lgClipboard_abort(read.request);
     return;
   }
 
   if (itemCount == 0)
   {
-    const struct X11ClipboardRead read = clearReadNL();
-    LG_UNLOCK(x11cb.lock);
     if (data)
       XFree(data);
-    app_clipboardData(
-        read.request, read.type, read.buffer, read.size);
-    free(read.buffer);
+    const uint64_t offset = x11cb.read.offset;
+    enum X11ClipboardReadCallResult result;
+    do
+      result = x11CBReadCallNL(X11_CLIPBOARD_READ_END,
+          x11cb.read.type, x11cb.read.sizeHint, offset, NULL, 0);
+    while (result == X11_CLIPBOARD_READ_CALL_RETRY);
+    if (result == X11_CLIPBOARD_READ_CALL_STALE)
+    {
+      LG_UNLOCK(x11cb.lock);
+      return;
+    }
+    if (result == X11_CLIPBOARD_READ_CALL_BLOCKED)
+    {
+      x11cb.read.endPending = true;
+      LG_UNLOCK(x11cb.lock);
+      return;
+    }
+    cancelReadNL(false);
+    LG_UNLOCK(x11cb.lock);
     return;
   }
 
-  if (itemCount > SIZE_MAX - x11cb.read.size)
+  if (itemCount > KVMFR_CLIPBOARD_DATA_BYTES)
   {
     const struct X11ClipboardRead read = clearReadNL();
     LG_UNLOCK(x11cb.lock);
     XFree(data);
-    free(read.buffer);
-    app_clipboardAbort(read.request);
+    free(read.pending);
+    lgClipboard_abort(read.request);
     return;
   }
 
-  const size_t required = x11cb.read.size + itemCount;
-  if (required > x11cb.read.capacity)
+  uint8_t * copy = malloc(itemCount);
+  if (!copy)
   {
-    size_t capacity = x11cb.read.capacity;
-    while (capacity < required)
-    {
-      if (capacity > SIZE_MAX / 2)
-      {
-        capacity = required;
-        break;
-      }
-      capacity *= 2;
-    }
+    const struct X11ClipboardRead read = clearReadNL();
+    LG_UNLOCK(x11cb.lock);
+    XFree(data);
+    free(read.pending);
+    lgClipboard_abort(read.request);
+    return;
+  }
+  memcpy(copy, data, itemCount);
+  XFree(data);
+  data = NULL;
 
-    uint8_t * buffer = realloc(x11cb.read.buffer, capacity);
-    if (!buffer)
+  const uint64_t offset = x11cb.read.offset;
+  enum X11ClipboardReadCallResult result;
+  do
+    result = x11CBReadCallNL(X11_CLIPBOARD_READ_CHUNK,
+        x11cb.read.type, x11cb.read.sizeHint,
+        offset, copy, itemCount);
+  while (result == X11_CLIPBOARD_READ_CALL_RETRY);
+  if (result == X11_CLIPBOARD_READ_CALL_STALE)
+  {
+    LG_UNLOCK(x11cb.lock);
+    free(copy);
+    return;
+  }
+  if (result == X11_CLIPBOARD_READ_CALL_BLOCKED)
+  {
+    x11cb.read.pending      = copy;
+    x11cb.read.pendingSize  = itemCount;
+    x11cb.read.pendingUnits = (itemCount + 3U) / 4U;
+    x11cb.read.pendingMore  = after != 0;
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  free(copy);
+  if (result != X11_CLIPBOARD_READ_CALL_ACCEPTED)
+  {
+    cancelReadNL(false);
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  x11cb.read.offset += itemCount;
+  if (after)
+  {
+    if (!advanceReadPropertyNL((itemCount + 3U) / 4U))
     {
       const struct X11ClipboardRead read = clearReadNL();
       LG_UNLOCK(x11cb.lock);
-      XFree(data);
-      free(read.buffer);
-      app_clipboardAbort(read.request);
+      free(read.pending);
+      lgClipboard_abort(read.request);
       return;
     }
-    x11cb.read.buffer   = buffer;
-    x11cb.read.capacity = capacity;
+    goto readProperty;
   }
-
-  memcpy(x11cb.read.buffer + x11cb.read.size, data, itemCount);
-  x11cb.read.size += itemCount;
+  x11cb.read.propertyOffset = 0;
   LG_UNLOCK(x11cb.lock);
-  if (data)
-    XFree(data);
 }
 
 static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
@@ -393,7 +779,7 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
   }
 
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
-    cancelReadNL() : LG_CLIPBOARD_REQUEST_INVALID;
+    cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   clearTargetsNL();
 
   if (e.owner == 0)
@@ -403,8 +789,8 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     XFlush(x11.display);
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      app_clipboardAbort(oldRequest);
-    app_clipboardRelease();
+      lgClipboard_abort(oldRequest);
+    lgClipboard_release();
     return;
   }
 
@@ -419,8 +805,8 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     XFlush(x11.display);
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      app_clipboardAbort(oldRequest);
-    app_clipboardRelease();
+      lgClipboard_abort(oldRequest);
+    lgClipboard_release();
     return;
   }
 
@@ -436,7 +822,7 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
   LG_UNLOCK(x11cb.lock);
 
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    app_clipboardAbort(oldRequest);
+    lgClipboard_abort(oldRequest);
 }
 
 static void x11CBSelectionNotify(const XSelectionEvent e)
@@ -456,7 +842,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     {
       clearTargetsNL();
       LG_UNLOCK(x11cb.lock);
-      app_clipboardRelease();
+      lgClipboard_release();
       return;
     }
 
@@ -475,7 +861,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     {
       clearTargetsNL();
       LG_UNLOCK(x11cb.lock);
-      app_clipboardRelease();
+      lgClipboard_release();
       return;
     }
     clearTargetsNL();
@@ -486,11 +872,11 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     // an array of padded 64-bit values
     if (!data || format != 32)
     {
-      app_clipboardRelease();
+      lgClipboard_release();
       goto out;
     }
 
-    int typeCount = 0;
+    size_t typeCount = 0;
     LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
 
     // see if we support any of the targets listed
@@ -503,7 +889,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
           break;
         }
 
-    app_clipboardNotifyTypes(types, typeCount);
+    lgClipboard_notifyTypes(types, typeCount);
     goto out;
   }
   LG_UNLOCK(x11cb.lock);
@@ -517,9 +903,9 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
 
   if (e.property == None)
   {
-    const LG_ClipboardRequest request = cancelReadNL();
+    const LG_ClipboardRequest request = cancelReadNL(true);
     LG_UNLOCK(x11cb.lock);
-    app_clipboardAbort(request);
+    lgClipboard_abort(request);
     return;
   }
 
@@ -536,9 +922,9 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
       &after,
       &data) != Success)
   {
-    const LG_ClipboardRequest request = cancelReadNL();
+    const LG_ClipboardRequest request = cancelReadNL(true);
     LG_UNLOCK(x11cb.lock);
-    app_clipboardAbort(request);
+    lgClipboard_abort(request);
     return;
   }
 
@@ -546,32 +932,54 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   {
     if (!data || format != 32 || itemCount < 1)
     {
-      const LG_ClipboardRequest request = cancelReadNL();
+      const LG_ClipboardRequest request = cancelReadNL(true);
       LG_UNLOCK(x11cb.lock);
       if (data)
         XFree(data);
-      app_clipboardAbort(request);
+      lgClipboard_abort(request);
       return;
     }
 
-    size_t capacity = *(const unsigned long *)data;
-    if (capacity < 4096)
-      capacity = 4096;
-    if (capacity > 1048576)
-      capacity = 1048576;
-    x11cb.read.buffer = malloc(capacity);
-    if (!x11cb.read.buffer)
+    const uint64_t hint = *(const unsigned long *)data;
+    const uint64_t sizeHint = hint ? hint : LG_CLIPBOARD_SIZE_UNKNOWN;
+    const LG_ClipboardData dataType = x11cb.read.type;
+    x11cb.read.incremental = true;
+    x11cb.read.sizeHint    = sizeHint;
+    XFree(data);
+    enum X11ClipboardReadCallResult result;
+    do
+      result = x11CBReadCallNL(X11_CLIPBOARD_READ_BEGIN,
+          dataType, sizeHint, 0, NULL, 0);
+    while (result == X11_CLIPBOARD_READ_CALL_RETRY);
+    if (result == X11_CLIPBOARD_READ_CALL_STALE)
     {
-      const LG_ClipboardRequest request = cancelReadNL();
       LG_UNLOCK(x11cb.lock);
-      XFree(data);
-      app_clipboardAbort(request);
       return;
     }
-    x11cb.read.capacity    = capacity;
-    x11cb.read.incremental = true;
+    if (result == X11_CLIPBOARD_READ_CALL_BLOCKED)
+    {
+      LG_UNLOCK(x11cb.lock);
+      return;
+    }
+    if (result != X11_CLIPBOARD_READ_CALL_ACCEPTED)
+    {
+      cancelReadNL(false);
+      LG_UNLOCK(x11cb.lock);
+      return;
+    }
+    x11cb.read.begun = true;
+    const bool processProperty = x11cb.read.propertyPending;
+    const Window processWindow = x11cb.read.window;
+    x11cb.read.propertyPending = false;
     LG_UNLOCK(x11cb.lock);
-    XFree(data);
+    if (processProperty)
+      x11CBSelectionIncr((XPropertyEvent)
+      {
+        .display = x11.display,
+        .window  = processWindow,
+        .atom    = x11atoms.SEL_DATA,
+        .state   = PropertyNewValue,
+      });
     return;
   }
 
@@ -583,17 +991,17 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   const LG_ClipboardRequest request = x11cb.read.request;
   const bool valid = dataType != LG_CLIPBOARD_DATA_NONE &&
     dataType == x11cb.read.type && format == 8 && (!itemCount || data);
-  cancelReadNL();
+  cancelReadNL(false);
   LG_UNLOCK(x11cb.lock);
 
   if (!valid)
   {
     DEBUG_WARN("Invalid clipboard data");
-    app_clipboardAbort(request);
+    lgClipboard_abort(request);
     goto out;
   }
 
-  app_clipboardData(request, dataType, data, itemCount);
+  lgClipboard_data(request, dataType, data, itemCount);
 
 out:
   if (data)
@@ -604,7 +1012,7 @@ void x11CBNotice(LG_ClipboardData type)
 {
   LG_LOCK(x11cb.lock);
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
-    cancelReadNL() : LG_CLIPBOARD_REQUEST_INVALID;
+    cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   clearTargetsNL();
   x11cb.aCurSelection  = BadValue;
   x11cb.haveRequest    = true;
@@ -613,7 +1021,7 @@ void x11CBNotice(LG_ClipboardData type)
   XFlush(x11.display);
   LG_UNLOCK(x11cb.lock);
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    app_clipboardAbort(oldRequest);
+    lgClipboard_abort(oldRequest);
 }
 
 void x11CBRelease(void)
@@ -637,13 +1045,13 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
 
   LG_LOCK(x11cb.lock);
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
-    cancelReadNL() : LG_CLIPBOARD_REQUEST_INVALID;
+    cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   if (x11cb.aCurSelection == BadValue)
   {
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      app_clipboardAbort(oldRequest);
-    app_clipboardAbort(request);
+      lgClipboard_abort(oldRequest);
+    lgClipboard_abort(request);
     return;
   }
 
@@ -653,8 +1061,8 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   {
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      app_clipboardAbort(oldRequest);
-    app_clipboardAbort(request);
+      lgClipboard_abort(oldRequest);
+    lgClipboard_abort(request);
     return;
   }
 
@@ -676,5 +1084,154 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   LG_UNLOCK(x11cb.lock);
 
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    app_clipboardAbort(oldRequest);
+    lgClipboard_abort(oldRequest);
+}
+
+void x11CBRequestReady(LG_ClipboardRequest request)
+{
+  LG_LOCK(x11cb.lock);
+  if (x11cb.read.request != request)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  if (x11cb.read.calling)
+  {
+    x11cb.read.readyPending = true;
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  if (!x11cb.read.blocked)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+  x11cb.read.blocked = false;
+  const bool begin = !x11cb.read.begun;
+  const bool end = x11cb.read.endPending;
+  const LG_ClipboardData type = x11cb.read.type;
+  const uint64_t sizeHint = x11cb.read.sizeHint;
+  const uint64_t offset = x11cb.read.offset;
+  const size_t pendingSize = x11cb.read.pendingSize;
+  const unsigned long pendingUnits = x11cb.read.pendingUnits;
+  const bool pendingMore = x11cb.read.pendingMore;
+  uint8_t * pending = NULL;
+
+  /* The provider call runs without x11cb.lock.  Request cancellation or a
+   * selection replacement may therefore clear and free read.pending while
+   * the call is in progress.  Give the call its own bounded copy so teardown
+   * can remain immediate without invalidating the callback's data. */
+  if (pendingSize)
+  {
+    pending = malloc(pendingSize);
+    if (!pending)
+    {
+      const LG_ClipboardRequest abort = cancelReadNL(true);
+      LG_UNLOCK(x11cb.lock);
+      lgClipboard_abort(abort);
+      return;
+    }
+    memcpy(pending, x11cb.read.pending, pendingSize);
+  }
+
+  enum X11ClipboardReadOperation operation;
+  if (begin)
+    operation = X11_CLIPBOARD_READ_BEGIN;
+  else if (pendingSize)
+    operation = X11_CLIPBOARD_READ_CHUNK;
+  else if (end)
+    operation = X11_CLIPBOARD_READ_END;
+  else
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+  enum X11ClipboardReadCallResult result;
+  do
+    result = x11CBReadCallNL(operation, type, sizeHint,
+        offset, pending, pendingSize);
+  while (result == X11_CLIPBOARD_READ_CALL_RETRY);
+  free(pending);
+  if (result == X11_CLIPBOARD_READ_CALL_STALE)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  if (result == X11_CLIPBOARD_READ_CALL_BLOCKED)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  if (result != X11_CLIPBOARD_READ_CALL_ACCEPTED)
+  {
+    cancelReadNL(false);
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+  bool processProperty = false;
+  Window window = None;
+  if (begin)
+    x11cb.read.begun = true;
+  else if (pendingSize)
+  {
+    x11cb.read.offset += pendingSize;
+    free(x11cb.read.pending);
+    x11cb.read.pending      = NULL;
+    x11cb.read.pendingSize  = 0;
+    x11cb.read.pendingUnits = 0;
+    x11cb.read.pendingMore  = false;
+    if (pendingMore)
+    {
+      if (!advanceReadPropertyNL(pendingUnits))
+      {
+        const struct X11ClipboardRead read = clearReadNL();
+        LG_UNLOCK(x11cb.lock);
+        free(read.pending);
+        lgClipboard_abort(read.request);
+        return;
+      }
+      processProperty = true;
+      window = x11cb.read.window;
+    }
+    else
+      x11cb.read.propertyOffset = 0;
+  }
+  else
+  {
+    cancelReadNL(false);
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+  if (x11cb.read.propertyPending && x11cb.read.incremental &&
+      !x11cb.read.blocked && !x11cb.read.pendingSize &&
+      !x11cb.read.endPending)
+  {
+    x11cb.read.propertyPending = false;
+    processProperty = true;
+    window = x11cb.read.window;
+  }
+  LG_UNLOCK(x11cb.lock);
+
+  if (processProperty)
+    x11CBSelectionIncr((XPropertyEvent)
+    {
+      .display = x11.display,
+      .window  = window,
+      .atom    = x11atoms.SEL_DATA,
+      .state   = PropertyNewValue,
+    });
+}
+
+void x11CBRequestCancel(LG_ClipboardRequest request,
+    LG_ClipboardCancelReason reason)
+{
+  (void)reason;
+  LG_LOCK(x11cb.lock);
+  if (x11cb.read.request == request)
+    cancelReadNL(false);
+  LG_UNLOCK(x11cb.lock);
 }

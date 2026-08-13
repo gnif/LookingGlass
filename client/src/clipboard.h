@@ -45,6 +45,9 @@ LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
 void lgClipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size);
 void lgClipboard_abort(LG_ClipboardRequest request);
+/* request is published before provider dispatch. Its storage must remain
+ * valid until this function returns and may be observed by stream callbacks
+ * before then. */
 bool lgClipboard_requestStream(LG_ClipboardData type,
     const LG_ClipboardStreamOps * stream, void * opaque,
     LG_ClipboardRequest * request);
