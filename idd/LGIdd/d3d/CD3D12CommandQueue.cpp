@@ -236,8 +236,11 @@ void CD3D12CommandSlot::Cancel()
   SetEvent(m_availableEvent.Get());
 }
 
-bool CD3D12CommandSlot::Execute()
+bool CD3D12CommandSlot::Execute(D12Sync * sync)
 {
+  if (sync)
+    *sync = D12Sync {};
+
   State expected = STATE_RECORDING;
   if (!Atomic::CAS(m_state, expected, STATE_SUBMITTED,
       std::memory_order_acq_rel))
@@ -256,7 +259,7 @@ bool CD3D12CommandSlot::Execute()
     return false;
   }
 
-  if (m_queue->Submit(*this))
+  if (m_queue->Submit(*this, sync))
     return true;
 
   if (!Atomic::Load(m_submitted, std::memory_order_acquire))
@@ -572,7 +575,7 @@ void CD3D12CommandQueue::WaitForIdle()
   }
 }
 
-bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
+bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot, D12Sync * sync)
 {
   bool result = false;
   CSRWExclusiveLock lock(m_submitLock);
@@ -610,6 +613,14 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
       Atomic::Store(m_failed, true, std::memory_order_release);
       slot.OnCompletion(false);
       break;
+    }
+
+    // Capture the immutable point while submission is serialized. The slot
+    // may complete and be acquired again as soon as we leave this scope.
+    if (sync)
+    {
+      sync->fence = m_fence;
+      sync->value = fenceTarget;
     }
 
     hr = m_fence->SetEventOnCompletion(fenceTarget, slot.m_event.Get());

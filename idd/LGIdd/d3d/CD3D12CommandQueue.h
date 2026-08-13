@@ -35,6 +35,32 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 
 class CD3D12CommandQueue;
 
+enum class D12SyncState : uint8_t
+{
+  PENDING,
+  READY,
+  FAILED,
+};
+
+struct D12Sync
+{
+  ComPtr<ID3D12Fence> fence;
+  UINT64              value = 0;
+
+  bool Valid() const { return fence && value; }
+  D12SyncState State() const
+  {
+    if (!Valid())
+      return D12SyncState::FAILED;
+    const UINT64 completed = fence->GetCompletedValue();
+    if (completed == UINT64_MAX)
+      return D12SyncState::FAILED;
+    return completed >= value ?
+      D12SyncState::READY : D12SyncState::PENDING;
+  }
+  bool Done() const { return State() == D12SyncState::READY; }
+};
+
 class CD3D12CommandSlot
 {
   friend class CD3D12CommandQueue;
@@ -104,7 +130,7 @@ class CD3D12CommandSlot
 
     bool Acquire();
     void Cancel();
-    bool Execute();
+    bool Execute(D12Sync * sync = nullptr);
 
     bool BeginTiming();
     void EndTiming();
@@ -162,7 +188,7 @@ class CD3D12CommandQueue
     bool                    m_timingSupported = false;
 
     bool InitTiming(ID3D12Device3 * device, UINT slotCount);
-    bool Submit(CD3D12CommandSlot& slot);
+    bool Submit(CD3D12CommandSlot& slot, D12Sync * sync);
     bool SnapshotTiming(CD3D12CommandSlot& slot) const;
     bool GetGPUTimes(const CD3D12CommandSlot& slot,
       uint64_t& start, uint64_t& end) const;

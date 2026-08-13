@@ -91,9 +91,9 @@ struct GraphLeaf
   FrameCfg  cfg;
 };
 
-// FrameDesc is resource-free. It can cross graph nodes without retaining the
-// acquired IddCx texture and is paired with owned texture storage separately.
-struct FrameDesc
+// All products derived from one capture retain the same immutable content.
+// It contains no acquired IddCx or Direct3D resource.
+struct FrameContent
 {
   uint64_t       serial                  = 0;
   uint64_t       captureTime             = 0;
@@ -101,6 +101,19 @@ struct FrameDesc
   RECT           rects[FRAME_DAMAGE_MAX] = {};
   unsigned       count                   = 0;
   D12FrameFormat format                  = {};
+};
+
+using FrameContentRef = std::shared_ptr<const FrameContent>;
+
+// FrameDesc adds one graph node's representation and damage to the shared
+// content identity. It remains resource-free.
+struct FrameDesc
+{
+  FrameContentRef content;
+  FrameDamage     damage                  = FrameDamage::NONE;
+  RECT            rects[FRAME_DAMAGE_MAX] = {};
+  unsigned        count                   = 0;
+  D12FrameFormat  format                  = {};
 };
 
 struct LeafDesc
@@ -140,7 +153,8 @@ public:
   bool Same(const GraphCfg& cfg) const;
   bool Want(FrameSignal signal) const;
   bool Need(FrameOp op) const;
-  bool Desc(unsigned leaf, const FrameDesc& frame, LeafDesc& desc) const;
+  bool Desc(unsigned leaf, const FrameContentRef& content,
+    LeafDesc& desc) const;
 
   const GraphCfg& Cfg() const { return m_cfg; }
   const GraphNode * Nodes(unsigned& count) const;

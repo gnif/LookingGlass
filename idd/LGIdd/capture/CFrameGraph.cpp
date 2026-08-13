@@ -20,6 +20,8 @@
 
 #include "capture/CFrameGraph.h"
 
+#include <cstring>
+
 bool Frame::Same(const GraphCfg& left, const GraphCfg& right)
 {
   return
@@ -311,13 +313,35 @@ bool CFrameGraph::Want(FrameSignal signal) const
   return false;
 }
 
-bool CFrameGraph::Desc(unsigned leaf, const FrameDesc& frame,
+bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
   LeafDesc& desc) const
 {
-  if (!m_sealed || leaf >= m_leafCount || !frame.serial ||
-      frame.format.width != m_cfg.srcWidth ||
-      frame.format.height != m_cfg.srcHeight ||
-      !Frame::Valid(frame.damage, frame.rects, frame.count,
+  if (!content)
+    return false;
+
+  const D12FrameFormat& source = content->format;
+  FrameProfile sourceProfile;
+  const bool validProfile = D12::Profile(source,
+    FrameStorage::D3D12_TEXTURE, sourceProfile);
+  if (!validProfile || !Frame::Same(sourceProfile, m_cfg.src))
+    return false;
+
+  if (!m_sealed                                             ||
+      leaf                         >= m_leafCount           ||
+      !content->serial                                      ||
+      source.width                 != m_cfg.srcWidth        ||
+      source.height                != m_cfg.srcHeight       ||
+      source.dataWidth             != m_cfg.srcWidth        ||
+      source.dataHeight            != m_cfg.srcHeight       ||
+      source.pitch                 != 0                     ||
+      source.desc.Dimension        !=
+        D3D12_RESOURCE_DIMENSION_TEXTURE2D                  ||
+      source.desc.Width            != m_cfg.srcWidth        ||
+      source.desc.Height           != m_cfg.srcHeight       ||
+      source.desc.DepthOrArraySize != 1                     ||
+      source.desc.MipLevels        != 1                     ||
+      source.desc.SampleDesc.Count != 1                     ||
+      !Frame::Valid(content->damage, content->rects, content->count,
         m_cfg.srcWidth, m_cfg.srcHeight))
     return false;
 
@@ -327,10 +351,32 @@ bool CFrameGraph::Desc(unsigned leaf, const FrameDesc& frame,
   desc.epoch   = route.epoch;
   desc.node    = route.node;
   desc.profile = route.cfg.profile;
-  desc.frame   = frame;
+
+  desc.frame         = FrameDesc {};
+  desc.frame.content = content;
+  desc.frame.damage  = content->damage;
+  desc.frame.count   = content->count;
+  if (content->count)
+    memcpy(desc.frame.rects, content->rects,
+      content->count * sizeof(*content->rects));
+  desc.frame.format  = content->format;
+
+  // A scaled checkpoint has a different damage coordinate space. Until the
+  // executor owns exact edge transforms, preserve correctness by making any
+  // partial source damage a full node update.
+  if (desc.frame.damage == FrameDamage::RECTS &&
+      (node.width != m_cfg.srcWidth || node.height != m_cfg.srcHeight))
+  {
+    desc.frame.damage = FrameDamage::FULL;
+    desc.frame.count  = 0;
+  }
 
   D12FrameFormat& format = desc.frame.format;
-  return D12::Set(format, node.profile, node.width, node.height);
+  if (!D12::Set(format, node.profile, node.width, node.height))
+    return false;
+  // Calibration/LUT nodes have already consumed this transform.
+  format.colorTransform.reset();
+  return true;
 }
 
 const GraphNode * CFrameGraph::Nodes(unsigned& count) const

@@ -100,6 +100,9 @@
     <ClInclude Include="capture\CFrameGraph.h">
       <Filter>Capture</Filter>
     </ClInclude>
+    <ClInclude Include="capture\CFrameTex.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
     <ClInclude Include="capture\CFrameProcessor.h">
       <Filter>Capture</Filter>
     </ClInclude>
@@ -277,6 +280,9 @@
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameGraph.cpp">
+      <Filter>Capture</Filter>
+    </ClCompile>
+    <ClCompile Include="capture\CFrameTex.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
     <ClCompile Include="capture\CFrameProcessor.cpp">
