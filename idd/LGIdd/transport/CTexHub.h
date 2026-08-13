@@ -71,10 +71,11 @@ private:
 
   struct FaultRec
   {
-    BackendId    id    = 0;
-    uint32_t     epoch = 0;
-    FrameCfg     cfg;
-    CfgResult    result = CfgResult::ACCEPTED;
+    BackendId id      = 0;
+    uint32_t  epoch   = 0;
+    FrameCfg  cfg;
+    CfgResult result  = CfgResult::ACCEPTED;
+    uint64_t  retryAt = 0;
   };
 
   struct Failure
@@ -125,6 +126,9 @@ private:
 
   CfgResult Faulted(BackendId id, uint32_t epoch,
     const FrameCfg& cfg) const;
+  bool Active(uint64_t generation, BackendId id, uint32_t epoch,
+    const FrameCfg& cfg) const;
+  void Retry(uint64_t now);
   bool TakeFailure(BackendId& id, uint32_t& epoch);
   void Rebind(BackendId id, uint32_t epoch);
 

@@ -30,8 +30,10 @@
 #include <new>
 #include <utility>
 
-static const uint64_t RETRY_DELAY_MS = 500;
-static const uint64_t SERVICE_RETRY_DELAY_MS = 250;
+static const uint64_t RETRY_DELAY_MS            = 500;
+static const uint64_t FRAME_RETRY_DELAY_MS      = 500;
+static const uint64_t SERVICE_RETRY_DELAY_MS    = 250;
+static std::atomic<uint64_t> s_graphGeneration  = 0;
 
 class CSourceEvents final : public ITransportEvents
 {
@@ -135,9 +137,25 @@ void CTransportManager::BumpFrameRev()
   Atomic::Next(m_frameRev, std::memory_order_release);
 }
 
-uint64_t CTransportManager::NextGraph()
+void CTransportManager::ScheduleFrameRetry(Entry& entry)
 {
-  return Seq::Inc(m_graphSerial);
+  CSRWExclusiveLock entryLock(entry.lock);
+  if (!entry.frameRetryAt)
+    entry.frameRetryAt = GetTickCount64() + FRAME_RETRY_DELAY_MS;
+}
+
+void CTransportManager::RetryFrame(Entry& entry, uint64_t now)
+{
+  bool retry = false;
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    if (!entry.frameRetryAt || now < entry.frameRetryAt)
+      return;
+    entry.frameRetryAt = 0;
+    retry = entry.state == State::READY && entry.frameAdded;
+  }
+  if (retry)
+    BumpFrameRev();
 }
 
 CTransportManager::~CTransportManager()
@@ -771,6 +789,7 @@ void CTransportManager::RemoveServices(Entry& entry)
     entry.texSink        = nullptr;
     entry.controlAdded   = false;
     entry.inputAdded     = false;
+    entry.frameRetryAt   = 0;
   }
 
   m_input.RevokeInteraction(id, epoch);
@@ -1098,13 +1117,14 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
 
   struct Route
   {
-    Entry                     * entry     = nullptr;
+    Entry                     * entry        = nullptr;
     std::shared_ptr<ITransport> transport;
     BackendId                   id           = 0;
     uint32_t                    epoch        = 0;
     bool                        required     = false;
     bool                        primary      = false;
     bool                        prepared     = false;
+    bool                        selected     = false;
     bool                        eligible     = false;
     ITexSink                  * texSink      = nullptr;
     FrameProfile                profiles[FRAME_PROFILE_MAX] = {};
@@ -1238,9 +1258,30 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
           }
         }
 
+        const bool tex = route.texSink != nullptr;
+        const GraphLeaf * previous = graph.FindLeaf(
+          route.id, route.epoch, tex, candidate);
+        if (previous && previous->required == route.required &&
+            previous->primary == route.primary &&
+            (!tex || m_tex.Active(graph.Generation(),
+              route.id, route.epoch, candidate)))
+        {
+          if (!next.Add(route.id, route.epoch, route.required,
+                route.primary, tex, graph.Same(cfg), candidate))
+          {
+            routeResult = CfgResult::FAILED;
+            break;
+          }
+          routeResult    = CfgResult::ACCEPTED;
+          route.selected = true;
+          break;
+        }
+
         routeResult = route.transport->Probe(candidate);
         if (routeResult == CfgResult::NEXT)
           continue;
+        if (routeResult == CfgResult::REJECTED)
+          ScheduleFrameRetry(*route.entry);
         if (routeResult != CfgResult::ACCEPTED)
           break;
 
@@ -1250,21 +1291,24 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
           route.transport->Abort();
           continue;
         }
+        if (routeResult == CfgResult::REJECTED)
+          ScheduleFrameRetry(*route.entry);
         if (routeResult != CfgResult::ACCEPTED)
           break;
 
         if (!next.Add(route.id, route.epoch, route.required,
-              route.primary, route.texSink != nullptr, candidate))
+              route.primary, tex, false, candidate))
         {
           route.transport->Abort();
           routeResult = CfgResult::FAILED;
           break;
         }
         route.prepared = true;
+        route.selected = true;
         break;
       }
 
-      if (route.prepared)
+      if (route.selected)
         continue;
 
       route.transport->Abort();
@@ -1285,14 +1329,14 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
     result = CfgResult::FAILED;
 
   if (result == CfgResult::ACCEPTED &&
-      !next.Stamp(NextGraph()))
+      !next.Stamp(Atomic::Next(s_graphGeneration)))
     result = CfgResult::FAILED;
 
   CTexHub::Bind binds[FRAME_MAX_SINKS];
   unsigned bindCount = 0;
   if (result == CfgResult::ACCEPTED)
     for (unsigned i = 0; i < routeCount; ++i)
-      if (routes[i].prepared)
+      if (routes[i].selected)
       {
         CTexHub::Bind& bind = binds[bindCount++];
         bind.owner = routes[i].transport;
@@ -1315,8 +1359,15 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
   if (result == CfgResult::ACCEPTED)
   {
     for (unsigned i = 0; i < routeCount; ++i)
+    {
       if (routes[i].prepared)
         routes[i].transport->Commit();
+      if (routes[i].selected)
+      {
+        CSRWExclusiveLock entryLock(routes[i].entry->lock);
+        routes[i].entry->frameRetryAt = 0;
+      }
+    }
     graph = next;
     m_tex.Commit(texStage);
     if (activationReady)
@@ -1360,12 +1411,14 @@ ITransport::ProcessResult CTransportManager::Process(
 
   const uint64_t now = GetTickCount64();
   m_recovery.Tick(now);
+  m_tex.Retry(now);
   HandleServiceFailures();
   Entry * entries[FRAME_MAX_SINKS] = {};
   const unsigned count = Entries(entries);
   for (unsigned i = 0; i < count; ++i)
   {
     Entry& entry = *entries[i];
+    RetryFrame(entry, now);
     if (!BeginCall(entry, Call::PROCESS, false))
       continue;
 

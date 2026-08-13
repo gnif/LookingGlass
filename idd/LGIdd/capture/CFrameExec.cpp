@@ -319,7 +319,8 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
 
   CfgResult Init(const CFrameGraph& source,
     const std::shared_ptr<CD3D11Device>& d11Device,
-    const std::shared_ptr<CD3D12Device>& d12Device, CTexHub& texHub)
+    const std::shared_ptr<CD3D12Device>& d12Device, CTexHub& texHub,
+    bool inheritedFull)
   {
     d11    = d11Device;
     d12    = d12Device;
@@ -329,14 +330,15 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
     if (!d11 || !d12 || !device || !graph.Generation())
       return CfgResult::FAILED;
 
-    const GraphNode * nodes = graph.Nodes(nodeCount);
+    const GraphNode * nodes  = graph.Nodes(nodeCount);
     const GraphLeaf * leaves = graph.Leaves(leafCount);
     if (!nodes || !leaves || !nodeCount ||
         nodeCount > FRAME_GRAPH_MAX_NODES ||
         leafCount > TRANSPORT_MAX_INSTANCES)
       return CfgResult::REJECTED;
 
-    unsigned texLeaves = 0;
+    unsigned texLeaves  = 0;
+    bool     continuous = true;
     for (unsigned leaf = 0; leaf < leafCount; ++leaf)
       if (leaves[leaf].tex)
       {
@@ -347,11 +349,14 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
         d11Node[leaves[leaf].node] |=
           leaves[leaf].cfg.profile.storage ==
             FrameStorage::D3D11_TEXTURE;
+        continuous &= leaves[leaf].continuous;
         ++texLeaves;
       }
 
     if (!texLeaves)
       return CfgResult::ACCEPTED;
+    Atomic::Store(forceFull, inheritedFull || !continuous,
+      std::memory_order_relaxed);
     if (!nodes[0].texRefs || !queue.Init(device.Get(),
         D3D12_COMMAND_LIST_TYPE_DIRECT, L"Frame Graph",
         CD3D12CommandSlot::FAST, EXEC_LANES, false, true))
@@ -411,6 +416,12 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
 
     live = true;
     return CfgResult::ACCEPTED;
+  }
+
+  bool NeedsFull()
+  {
+    CSRWExclusiveLock lock(runLock);
+    return Atomic::Load(forceFull, std::memory_order_acquire);
   }
 
   FrameContentRef Content(uint64_t serial, const D12FrameFormat& format,
@@ -689,14 +700,16 @@ CfgResult CFrameExec::Prep(const CFrameGraph& graph) noexcept
 {
   std::shared_ptr<CD3D11Device> d11;
   std::shared_ptr<CD3D12Device> d12;
-  CTexHub * hub = nullptr;
+  std::shared_ptr<Core>         active;
+  CTexHub                      * hub = nullptr;
   {
     CSRWSharedLock lock(m_lock);
     if (m_pending)
       return CfgResult::REJECTED;
-    d11 = m_d11;
-    d12 = m_d12;
-    hub = m_hub;
+    d11    = m_d11;
+    d12    = m_d12;
+    active = m_active;
+    hub    = m_hub;
   }
   if (!d11 || !d12 || !hub)
     return CfgResult::FAILED;
@@ -716,7 +729,8 @@ CfgResult CFrameExec::Prep(const CFrameGraph& graph) noexcept
   CfgResult result = CfgResult::FAILED;
   try
   {
-    result = next->Init(graph, d11, d12, *hub);
+    result = next->Init(graph, d11, d12, *hub,
+      !active || active->NeedsFull());
   }
   catch (...)
   {

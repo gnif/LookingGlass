@@ -33,6 +33,8 @@
 
 namespace
 {
+  static const uint64_t ROUTE_RETRY_DELAY_MS = 500;
+
   template<typename T, std::size_t N>
   T& Append(T (&items)[N], unsigned& count)
   {
@@ -50,6 +52,13 @@ struct CTexSet
 {
   struct Route
   {
+    enum class State : uint8_t
+    {
+      ACTIVE,
+      FAULTED,
+      DROPPED,
+    };
+
     std::shared_ptr<ITransport> owner;
     ITexSink                  * sink     = nullptr;
     BackendId                   id       = 0;
@@ -60,8 +69,7 @@ struct CTexSet
     FrameCfg                    cfg;
     bool                        required = false;
     bool                        primary  = false;
-    bool                        active   = false;
-    bool                        dropped  = false;
+    State                       state    = State::ACTIVE;
     CfgResult                   fault    = CfgResult::ACCEPTED;
     unsigned                    calls    = 0;
     HANDLE                      idle     = nullptr;
@@ -184,7 +192,8 @@ bool CTexHub::Enter(const FrameIn& frame, bool lease,
 
   CSRWExclusiveLock lock(set->lock);
   route = Find(*set, frame);
-  if (route >= set->count || !set->routes[route].active || !lease ||
+  if (route >= set->count ||
+      set->routes[route].state != CTexSet::Route::State::ACTIVE || !lease ||
       frame.graph != set->generation)
     return false;
 
@@ -228,6 +237,30 @@ CfgResult CTexHub::Faulted(BackendId id, uint32_t epoch,
   return CfgResult::ACCEPTED;
 }
 
+bool CTexHub::Active(uint64_t generation, BackendId id,
+  uint32_t epoch, const FrameCfg& cfg) const
+{
+  std::shared_ptr<CTexSet> set;
+  {
+    CSRWSharedLock lock(m_lock);
+    set = m_active;
+  }
+  if (!set || !generation || set->generation != generation)
+    return false;
+
+  CSRWSharedLock lock(set->lock);
+  for (unsigned i = 0; i < set->count; ++i)
+  {
+    const CTexSet::Route& route = set->routes[i];
+    if (route.id    == id                                  &&
+        route.epoch == epoch                               &&
+        route.state == CTexSet::Route::State::ACTIVE       &&
+        Frame::Same(route.cfg, cfg))
+      return true;
+  }
+  return false;
+}
+
 void CTexHub::Rebind(BackendId id, uint32_t epoch)
 {
   if (!id || !epoch)
@@ -243,6 +276,39 @@ void CTexHub::Rebind(BackendId id, uint32_t epoch)
     m_faults[i] = m_faults[--m_faultCount];
     m_faults[m_faultCount] = FaultRec {};
   }
+  for (unsigned i = 0; i < m_failureCount;)
+  {
+    if (m_failures[i].id != id || m_failures[i].epoch != epoch)
+    {
+      ++i;
+      continue;
+    }
+    m_failures[i] = m_failures[--m_failureCount];
+    m_failures[m_failureCount] = Failure {};
+  }
+}
+
+void CTexHub::Retry(uint64_t now)
+{
+  bool wake = false;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    for (unsigned i = 0; i < m_faultCount;)
+    {
+      const FaultRec& fault = m_faults[i];
+      if (fault.result != CfgResult::REJECTED || !fault.retryAt ||
+          now < fault.retryAt)
+      {
+        ++i;
+        continue;
+      }
+      m_faults[i] = m_faults[--m_faultCount];
+      m_faults[m_faultCount] = FaultRec {};
+      wake = true;
+    }
+  }
+  if (wake)
+    Bump();
 }
 
 void CTexHub::Leave(
@@ -267,13 +333,14 @@ void CTexHub::Disable(const std::shared_ptr<CTexSet>& set,
   CTexSet::Route failed;
   {
     CSRWExclusiveLock lock(set->lock);
-    if (route < set->count && !set->routes[route].dropped &&
-        (set->routes[route].active ||
+    if (route < set->count &&
+        set->routes[route].state != CTexSet::Route::State::DROPPED &&
+        (set->routes[route].state == CTexSet::Route::State::ACTIVE ||
          (result == PushResult::FAILED &&
           set->routes[route].fault == CfgResult::REJECTED)))
     {
       CTexSet::Route& target = set->routes[route];
-      target.active = false;
+      target.state  = CTexSet::Route::State::FAULTED;
       target.fault  = result == PushResult::FAILED ?
         CfgResult::FAILED : CfgResult::REJECTED;
       failed.id     = target.id;
@@ -286,11 +353,13 @@ void CTexHub::Disable(const std::shared_ptr<CTexSet>& set,
     return;
 
   FaultRec record;
-  record.id     = failed.id;
-  record.epoch  = failed.epoch;
-  record.cfg    = failed.cfg;
-  record.result = result == PushResult::FAILED ?
+  record.id      = failed.id;
+  record.epoch   = failed.epoch;
+  record.cfg     = failed.cfg;
+  record.result  = result == PushResult::FAILED ?
     CfgResult::FAILED : CfgResult::REJECTED;
+  record.retryAt = result == PushResult::REJECTED ?
+    GetTickCount64() + ROUTE_RETRY_DELAY_MS : 0;
 
   bool wake = false;
   {
@@ -303,6 +372,7 @@ void CTexHub::Disable(const std::shared_ptr<CTexSet>& set,
             m_faults[i].result != CfgResult::FAILED)
         {
           m_faults[i].result = CfgResult::FAILED;
+          m_faults[i].retryAt = 0;
           wake = true;
         }
         if (result != PushResult::FAILED)
@@ -438,7 +508,7 @@ CfgResult CTexHub::Prep(const CFrameGraph& graph,
     target.cfg      = route.cfg;
     target.required = route.required;
     target.primary  = route.primary;
-    target.active   = true;
+    target.state    = CTexSet::Route::State::ACTIVE;
     target.idle     = CreateEvent(nullptr, TRUE, TRUE, nullptr);
     if (!target.idle)
       return CfgResult::FAILED;
@@ -616,9 +686,8 @@ void CTexHub::Drop(BackendId id, uint32_t epoch)
       if (set->routes[i].id == id && set->routes[i].epoch == epoch)
       {
         CTexSet::Route& target = set->routes[i];
-        changed       |= target.active;
-        target.active  = false;
-        target.dropped = true;
+        changed     |= target.state == CTexSet::Route::State::ACTIVE;
+        target.state = CTexSet::Route::State::DROPPED;
         if (target.calls)
         {
           ResetEvent(target.idle);

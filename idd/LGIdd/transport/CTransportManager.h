@@ -103,20 +103,21 @@ private:
     State                       state   = State::CLOSED;
     uint32_t                    epoch   = 1;
     uint64_t                    retryAt = 0;
-    bool                        controlAdded  = false;
-    bool                        controlFailed = false;
-    bool                        controlAbsent = false;
-    bool                        inputAdded    = false;
-    bool                        inputFailed   = false;
-    bool                        inputAbsent   = false;
-    bool                        frameAdded     = false;
-    bool                        frameLegacy    = false;
-    ITexSink                  * texSink        = nullptr;
-    bool                        frameAbsent    = false;
-    uint64_t                    serviceRetryAt = 0;
-    bool                        exposed      = false;
-    bool                        setupDone    = false;
-    bool                        syncPending  = false;
+    bool                        controlAdded     = false;
+    bool                        controlFailed    = false;
+    bool                        controlAbsent    = false;
+    bool                        inputAdded       = false;
+    bool                        inputFailed      = false;
+    bool                        inputAbsent      = false;
+    bool                        frameAdded       = false;
+    bool                        frameLegacy      = false;
+    ITexSink                  * texSink          = nullptr;
+    bool                        frameAbsent      = false;
+    uint64_t                    frameRetryAt     = 0;
+    uint64_t                    serviceRetryAt   = 0;
+    bool                        exposed          = false;
+    bool                        setupDone        = false;
+    bool                        syncPending      = false;
     bool                        recoveryAttached = false;
     std::shared_ptr<const FrameCaps> frameCaps;
     DirectFrameBufferMemory     directMemory;
@@ -143,7 +144,6 @@ private:
   bool                                 m_started     = false;
   bool                                 m_stopping    = false;
   bool                                 m_stopped     = false;
-  uint64_t                             m_graphSerial = 0;
 
   unsigned Entries(Entry * entries[FRAME_MAX_SINKS]) const;
   Entry * Primary() const;
@@ -169,7 +169,8 @@ private:
   void RemoveServices(Entry& entry);
   void Expose(Entry& entry);
   void BumpFrameRev();
-  uint64_t NextGraph();
+  void ScheduleFrameRetry(Entry& entry);
+  void RetryFrame(Entry& entry, uint64_t now);
 
 public:
   CTransportManager();

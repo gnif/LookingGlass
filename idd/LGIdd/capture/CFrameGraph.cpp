@@ -241,7 +241,7 @@ unsigned CFrameGraph::Checkpoint(const FrameProfile& requested)
 }
 
 bool CFrameGraph::Add(BackendId id, uint32_t epoch, bool required,
-  bool primary, bool tex, const FrameCfg& cfg)
+  bool primary, bool tex, bool continuous, const FrameCfg& cfg)
 {
   if (!id || !epoch || !Can(cfg) ||
       m_leafCount == TRANSPORT_MAX_INSTANCES)
@@ -260,14 +260,15 @@ bool CFrameGraph::Add(BackendId id, uint32_t epoch, bool required,
   }
 
   GraphLeaf& leaf = m_leaves[m_leafCount++];
-  leaf          = GraphLeaf {};
-  leaf.id       = id;
-  leaf.epoch    = epoch;
-  leaf.node     = node;
-  leaf.required = required;
-  leaf.primary  = primary;
-  leaf.tex      = tex;
-  leaf.cfg      = cfg;
+  leaf            = GraphLeaf {};
+  leaf.id         = id;
+  leaf.epoch      = epoch;
+  leaf.node       = node;
+  leaf.required   = required;
+  leaf.primary    = primary;
+  leaf.tex        = tex;
+  leaf.continuous = continuous;
+  leaf.cfg        = cfg;
 
   for (unsigned current = node;
        current != FRAME_GRAPH_ROOT; current = m_nodes[current].parent)
@@ -299,7 +300,8 @@ bool CFrameGraph::Seal()
 
 bool CFrameGraph::Stamp(uint64_t generation)
 {
-  if (!m_sealed || m_generation || !generation)
+  if (!m_sealed || m_generation || !generation ||
+      !m_leafCount || !m_nodeCount)
     return false;
   m_generation = generation;
   return true;
@@ -307,12 +309,29 @@ bool CFrameGraph::Stamp(uint64_t generation)
 
 bool CFrameGraph::Same(const GraphCfg& cfg) const
 {
-  return m_sealed && Frame::Same(m_cfg, cfg);
+  return Ready() && Frame::Same(m_cfg, cfg);
+}
+
+const GraphLeaf * CFrameGraph::FindLeaf(BackendId id, uint32_t epoch,
+  bool tex, const FrameCfg& frame) const
+{
+  if (!Ready())
+    return nullptr;
+  for (unsigned i = 0; i < m_leafCount; ++i)
+  {
+    const GraphLeaf& leaf = m_leaves[i];
+    if (leaf.id    == id    &&
+        leaf.epoch == epoch &&
+        leaf.tex   == tex   &&
+        Frame::Same(leaf.cfg, frame))
+      return &leaf;
+  }
+  return nullptr;
 }
 
 bool CFrameGraph::Need(FrameOp op) const
 {
-  if (!m_sealed || op == FrameOp::SRC)
+  if (!Ready() || op == FrameOp::SRC)
     return false;
   for (unsigned i = 1; i < m_nodeCount; ++i)
     if (m_nodes[i].op == op && m_nodes[i].refs)
@@ -322,7 +341,7 @@ bool CFrameGraph::Need(FrameOp op) const
 
 bool CFrameGraph::Want(FrameSignal signal) const
 {
-  if (!m_sealed)
+  if (!Ready())
     return false;
   for (unsigned i = 0; i < m_leafCount; ++i)
     if (m_leaves[i].cfg.profile.signal == signal)
@@ -332,7 +351,7 @@ bool CFrameGraph::Want(FrameSignal signal) const
 
 bool CFrameGraph::Shared(unsigned node) const
 {
-  if (!m_sealed || !node || node >= m_nodeCount ||
+  if (!Ready() || !node || node >= m_nodeCount ||
       !m_nodes[node].texRefs)
     return false;
   for (unsigned i = 0; i < m_leafCount; ++i)
@@ -346,7 +365,7 @@ bool CFrameGraph::Shared(unsigned node) const
 bool CFrameGraph::Desc(unsigned nodeIndex,
   const FrameContentRef& content, FrameDesc& desc) const
 {
-  if (!content)
+  if (!Ready() || !content)
     return false;
 
   const D12FrameFormat& source = content->format;
@@ -358,8 +377,7 @@ bool CFrameGraph::Desc(unsigned nodeIndex,
   if (!validProfile || !Frame::Same(sourceProfile, m_cfg.src))
     return false;
 
-  if (!m_sealed                                                ||
-      !nodeIndex                                               ||
+  if (!nodeIndex                                               ||
       nodeIndex                    >= m_nodeCount              ||
       !content->serial                                         ||
       source.width                 != m_cfg.srcWidth           ||
@@ -412,7 +430,7 @@ bool CFrameGraph::Desc(unsigned nodeIndex,
 bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
   LeafDesc& desc) const
 {
-  if (!m_sealed || leaf >= m_leafCount)
+  if (!Ready() || leaf >= m_leafCount)
     return false;
 
   const GraphLeaf& route = m_leaves[leaf];
@@ -430,12 +448,12 @@ bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
 
 const GraphNode * CFrameGraph::Nodes(unsigned& count) const
 {
-  count = m_sealed ? m_nodeCount : 0;
+  count = Ready() ? m_nodeCount : 0;
   return count ? m_nodes : nullptr;
 }
 
 const GraphLeaf * CFrameGraph::Leaves(unsigned& count) const
 {
-  count = m_sealed ? m_leafCount : 0;
+  count = Ready() ? m_leafCount : 0;
   return count ? m_leaves : nullptr;
 }

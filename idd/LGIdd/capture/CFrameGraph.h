@@ -85,12 +85,14 @@ struct GraphNode
 
 struct GraphLeaf
 {
-  BackendId id       = 0;
-  uint32_t  epoch    = 0;
-  unsigned  node     = 0;
-  bool      required = false;
-  bool      primary  = false;
-  bool      tex      = false;
+  BackendId id         = 0;
+  uint32_t  epoch      = 0;
+  unsigned  node       = 0;
+  bool      required   = false;
+  bool      primary    = false;
+  bool      tex        = false;
+  // Partial damage remains valid across the preceding graph generation.
+  bool      continuous = false;
   FrameCfg  cfg;
 };
 
@@ -152,10 +154,13 @@ public:
   bool Begin(const GraphCfg& cfg);
   bool Can(const FrameCfg& cfg) const;
   bool Add(BackendId id, uint32_t epoch, bool required, bool primary,
-    bool tex, const FrameCfg& cfg);
+    bool tex, bool continuous, const FrameCfg& cfg);
   bool Seal();
   bool Stamp(uint64_t generation);
+  bool Ready() const { return m_sealed && m_generation; }
   bool Same(const GraphCfg& cfg) const;
+  const GraphLeaf * FindLeaf(BackendId id, uint32_t epoch, bool tex,
+    const FrameCfg& frame) const;
   bool Want(FrameSignal signal) const;
   bool Need(FrameOp op) const;
   bool Shared(unsigned node) const;
@@ -165,7 +170,7 @@ public:
     LeafDesc& desc) const;
 
   const GraphCfg& Cfg() const { return m_cfg; }
-  uint64_t Generation() const { return m_generation; }
+  uint64_t Generation() const { return Ready() ? m_generation : 0; }
   const GraphNode * Nodes(unsigned& count) const;
   const GraphLeaf * Leaves(unsigned& count) const;
 };
