@@ -175,6 +175,9 @@
     <ClInclude Include="transport\FrameCaps.h">
       <Filter>Transport</Filter>
     </ClInclude>
+    <ClInclude Include="transport\FrameProfile.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
     <ClInclude Include="transport\IControlSink.h">
       <Filter>Transport</Filter>
     </ClInclude>

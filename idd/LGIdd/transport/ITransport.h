@@ -22,6 +22,7 @@
 
 #include "transport/DirectFrameBufferMemory.h"
 #include "transport/FrameCaps.h"
+#include "transport/FrameProfile.h"
 #include "transport/TransportConfig.h"
 
 #include <memory>

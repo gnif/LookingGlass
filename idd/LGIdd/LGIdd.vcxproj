@@ -121,6 +121,7 @@
     <ClInclude Include="transport\CTransportManager.h" />
     <ClInclude Include="transport\DirectFrameBufferMemory.h" />
     <ClInclude Include="transport\FrameCaps.h" />
+    <ClInclude Include="transport\FrameProfile.h" />
     <ClInclude Include="transport\IControlSink.h" />
     <ClInclude Include="transport\IControlTransport.h" />
     <ClInclude Include="transport\IFrameSink.h" />
