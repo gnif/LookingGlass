@@ -22,6 +22,7 @@
 
 #include "postprocess/CPostProcessor.h"
 
+#include <cstddef>
 
 #define POST_PROCESS_THREADS_STR "8"
 
@@ -39,6 +40,18 @@ namespace PostProcessUtil
     const D3D12_RESOURCE_DESC& desc, ComPtr<ID3D12Resource>& resource);
   bool CreateDefaultBuffer(const ComPtr<ID3D12Device3>& device,
     UINT64 size, ComPtr<ID3D12Resource>& resource);
+  HRESULT CreateUploadBuffer(const ComPtr<ID3D12Device3>& device,
+    size_t size, ComPtr<ID3D12Resource>& resource);
+  HRESULT Upload(const ComPtr<ID3D12Resource>& resource,
+    const void * data, size_t size);
+
+  D3D12_DESCRIPTOR_RANGE Range(
+    D3D12_DESCRIPTOR_RANGE_TYPE type, UINT shaderRegister);
+
+  static constexpr unsigned Groups(unsigned value)
+  {
+    return (value + (Threads - 1)) / Threads;
+  }
 }
 
 class CComputeEffect : public CPostProcessEffect
@@ -48,8 +61,8 @@ protected:
   ComPtr<ID3D12PipelineState>  m_pso;
   ComPtr<ID3D12DescriptorHeap> m_descHeap;
   ComPtr<ID3D12Resource>       m_dst;
-  unsigned m_threadsX = 0;
-  unsigned m_threadsY = 0;
+  unsigned                     m_threadsX = 0;
+  unsigned                     m_threadsY = 0;
 
   bool InitCompute(const ComPtr<ID3D12Device3>& device,
     const D3D12_DESCRIPTOR_RANGE * ranges, UINT rangeCount,
@@ -57,6 +70,16 @@ protected:
     const char * shader);
 
   void Bind(const ComPtr<ID3D12GraphicsCommandList>& commandList);
+  void Dispatch(const ComPtr<ID3D12GraphicsCommandList>& commandList);
+
+  D3D12_CPU_DESCRIPTOR_HANDLE Handle(
+    const ComPtr<ID3D12Device3>& device, UINT index) const;
+  void CBV(const ComPtr<ID3D12Device3>& device, UINT index,
+    ID3D12Resource * resource, size_t size) const;
+  void SRV(const ComPtr<ID3D12Device3>& device, UINT index,
+    ID3D12Resource * resource, DXGI_FORMAT format) const;
+  void UAV(const ComPtr<ID3D12Device3>& device, UINT index,
+    ID3D12Resource * resource, DXGI_FORMAT format) const;
 
   void TransitionDst(const ComPtr<ID3D12GraphicsCommandList>& commandList,
     D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after);

@@ -22,25 +22,16 @@
 
 #include "CDebug.h"
 
-#include <cstring>
-
 using namespace PostProcessUtil;
 
 bool CHDR16to10Effect::Init(const ComPtr<ID3D12Device3>& device)
 {
-  D3D12_DESCRIPTOR_RANGE ranges[3] = {};
-  ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-  ranges[0].NumDescriptors = 1;
-  ranges[0].BaseShaderRegister = 0;
-  ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-  ranges[1].NumDescriptors = 1;
-  ranges[1].BaseShaderRegister = 0;
-  ranges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-  ranges[2].NumDescriptors = 1;
-  ranges[2].BaseShaderRegister = 0;
-  ranges[2].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+  D3D12_DESCRIPTOR_RANGE ranges[] =
+  {
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0),
+  };
 
   const char * shader =
     "cbuffer Constants : register(b0)\n"
@@ -77,35 +68,18 @@ bool CHDR16to10Effect::Init(const ComPtr<ID3D12Device3>& device)
   if (!InitCompute(device, ranges, ARRAYSIZE(ranges), nullptr, 0, shader))
     return false;
 
-  D3D12_HEAP_PROPERTIES heapProps = {};
-  heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Width = AlignTo(sizeof(m_consts),
+  const size_t size = AlignTo(sizeof(m_consts),
     (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  desc.Height = 1;
-  desc.DepthOrArraySize = 1;
-  desc.MipLevels = 1;
-  desc.SampleDesc.Count = 1;
-  desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-  HRESULT hr = device->CreateCommittedResource(&heapProps,
-    D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-    nullptr, IID_PPV_ARGS(&m_constBuffer));
+  HRESULT hr = CreateUploadBuffer(device, size, m_constBuffer);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to create HDR16to10 constant buffer");
     return false;
   }
 
-  void * data = nullptr;
-  D3D12_RANGE readRange = { 0, 0 };
-  hr = m_constBuffer->Map(0, &readRange, &data);
+  hr = Upload(m_constBuffer, &m_consts, sizeof(m_consts));
   if (FAILED(hr))
     return false;
-  std::memcpy(data, &m_consts, sizeof(m_consts));
-  m_constBuffer->Unmap(0, nullptr);
 
   return true;
 }
@@ -124,8 +98,8 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
   if (!CreateDefaultTexture(device, desc, m_dst))
     return PostProcessStatus::FAILED;
 
-  m_threadsX = ((unsigned)desc.Width  + (Threads - 1)) / Threads;
-  m_threadsY = ((unsigned)desc.Height + (Threads - 1)) / Threads;
+  m_threadsX = Groups((unsigned)desc.Width);
+  m_threadsY = Groups(desc.Height);
 
   dst.desc   = desc;
   dst.format = FRAME_TYPE_RGBA10;
@@ -151,33 +125,10 @@ ComPtr<ID3D12Resource> CHDR16to10Effect::Run(
   TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-  D3D12_CPU_DESCRIPTOR_HANDLE handle =
-    m_descHeap->GetCPUDescriptorHandleForHeapStart();
-  const UINT inc = device->GetDescriptorHandleIncrementSize(
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-  cbvDesc.BufferLocation = m_constBuffer->GetGPUVirtualAddress();
-  cbvDesc.SizeInBytes = (UINT)AlignTo(sizeof(m_consts),
-    (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  device->CreateConstantBufferView(&cbvDesc, handle);
-  handle.ptr += inc;
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Format = DXGI_FORMAT_R16G16B16A16_FLOAT;
-  srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Texture2D.MipLevels = 1;
-  device->CreateShaderResourceView(src.Get(), &srvDesc, handle);
-  handle.ptr += inc;
-
-  D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-  uavDesc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
-  uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-  device->CreateUnorderedAccessView(m_dst.Get(), nullptr, &uavDesc, handle);
-
-  Bind(commandList);
-  commandList->Dispatch(m_threadsX, m_threadsY, 1);
+  CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
+  SRV(device, 1, src.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT);
+  UAV(device, 2, m_dst.Get(), DXGI_FORMAT_R10G10B10A2_UNORM);
+  Dispatch(commandList);
 
   TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);

@@ -78,8 +78,8 @@ struct CRGB24Effect::State
 
   static bool IsEligible(const D12FrameFormat& format)
   {
-    if (format.hdr ||
-        format.desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
+    if (format.hdr                                                   ||
+        format.desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D  ||
         format.desc.Format    != DXGI_FORMAT_B8G8R8A8_UNORM)
       return false;
 
@@ -123,16 +123,17 @@ struct CRGB24Effect::State
   {
     CSRWExclusiveLock guard(lock);
 
-    const bool formatChanged = !formatValid ||
-      format.resourceDimension != next.desc.Dimension        ||
-      format.resourceWidth     != next.desc.Width            ||
-      format.resourceHeight    != next.desc.Height           ||
-      format.resourceFormat    != next.desc.Format           ||
-      format.width             != next.width                 ||
-      format.height            != next.height                ||
-      format.format            != next.format                ||
-      format.hdr               != next.hdr                   ||
-      format.hdrPQ             != next.hdrPQ                 ||
+    const bool formatChanged =
+      !formatValid                                            ||
+      format.resourceDimension != next.desc.Dimension         ||
+      format.resourceWidth     != next.desc.Width             ||
+      format.resourceHeight    != next.desc.Height            ||
+      format.resourceFormat    != next.desc.Format            ||
+      format.width             != next.width                  ||
+      format.height            != next.height                 ||
+      format.format            != next.format                 ||
+      format.hdr               != next.hdr                    ||
+      format.hdrPQ             != next.hdrPQ                  ||
       format.colorTransform    != next.colorTransform;
 
     if (formatChanged)
@@ -194,7 +195,8 @@ struct CRGB24Effect::State
           const uint64_t threshold         = relativeThreshold > 50000ULL ?
             relativeThreshold : 50000ULL;
           // Prefer the bandwidth saving unless native is meaningfully faster.
-          const bool     usePacked         = packedMean <= nativeMean ||
+          const bool usePacked =
+            packedMean <= nativeMean              ||
             packedMean - nativeMean <= threshold;
 
           DEBUG_INFO(
@@ -281,15 +283,11 @@ bool CRGB24Effect::Init(const ComPtr<ID3D12Device3>& device)
   if (!g_settings.ReadBoolValue(L"AllowRGB24", true))
     return false;
 
-  D3D12_DESCRIPTOR_RANGE ranges[2] = {};
-  ranges[0].RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-  ranges[0].NumDescriptors                    = 1;
-  ranges[0].BaseShaderRegister                = 0;
-  ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[1].RangeType                         = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-  ranges[1].NumDescriptors                    = 1;
-  ranges[1].BaseShaderRegister                = 0;
-  ranges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+  D3D12_DESCRIPTOR_RANGE ranges[] =
+  {
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0),
+  };
 
   const char * shader =
     "Texture2D<float4> src : register(t0);\n"
@@ -483,7 +481,8 @@ PostProcessStatus CRGB24Effect::SetFormat(const ComPtr<ID3D12Device3>& device,
 
   const UINT64 packedPitch = AlignTo<UINT64>(
     src.desc.Width * 3, D3D12_TEXTURE_DATA_PITCH_ALIGNMENT);
-  if (!src.desc.Height || packedPitch > LONG_MAX ||
+  if (!src.desc.Height                              ||
+      packedPitch > LONG_MAX                        ||
       packedPitch > UINT64_MAX / src.desc.Height)
   {
     m_state->Reject();
@@ -495,7 +494,8 @@ PostProcessStatus CRGB24Effect::SetFormat(const ComPtr<ID3D12Device3>& device,
   const UINT64 maxUAVSize =
     (1ULL << D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP) *
       sizeof(uint32_t);
-  if (bufferSize > UINT32_MAX || bufferSize > maxUAVSize)
+  if (bufferSize > UINT32_MAX ||
+      bufferSize > maxUAVSize)
   {
     m_state->Reject();
     m_dst.Reset();
@@ -510,8 +510,8 @@ PostProcessStatus CRGB24Effect::SetFormat(const ComPtr<ID3D12Device3>& device,
   }
 
   const unsigned dataWidth = (unsigned)(packedPitch / 4);
-  m_threadsX = (dataWidth       + (Threads - 1)) / Threads;
-  m_threadsY = (src.desc.Height + (Threads - 1)) / Threads;
+  m_threadsX = Groups(dataWidth);
+  m_threadsY = Groups(src.desc.Height);
   m_width    = (unsigned)src.desc.Width;
   m_height   = src.desc.Height;
   m_pitch    = (unsigned)packedPitch;
@@ -535,18 +535,7 @@ ComPtr<ID3D12Resource> CRGB24Effect::Run(const ComPtr<ID3D12Device3>& device,
   TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-  D3D12_CPU_DESCRIPTOR_HANDLE handle =
-    m_descHeap->GetCPUDescriptorHandleForHeapStart();
-  const UINT inc = device->GetDescriptorHandleIncrementSize(
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Format                  = DXGI_FORMAT_B8G8R8A8_UNORM;
-  srvDesc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Texture2D.MipLevels     = 1;
-  device->CreateShaderResourceView(src.Get(), &srvDesc, handle);
-  handle.ptr += inc;
+  SRV(device, 0, src.Get(), DXGI_FORMAT_B8G8R8A8_UNORM);
 
   D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
   uavDesc.Format                      = DXGI_FORMAT_R32_TYPELESS;
@@ -555,10 +544,10 @@ ComPtr<ID3D12Resource> CRGB24Effect::Run(const ComPtr<ID3D12Device3>& device,
   uavDesc.Buffer.StructureByteStride  = 0;
   uavDesc.Buffer.CounterOffsetInBytes = 0;
   uavDesc.Buffer.Flags                = D3D12_BUFFER_UAV_FLAG_RAW;
-  device->CreateUnorderedAccessView(m_dst.Get(), nullptr, &uavDesc, handle);
+  device->CreateUnorderedAccessView(
+    m_dst.Get(), nullptr, &uavDesc, Handle(device, 1));
 
-  Bind(commandList);
-  commandList->Dispatch(m_threadsX, m_threadsY, 1);
+  Dispatch(commandList);
 
   TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);

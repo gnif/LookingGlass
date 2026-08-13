@@ -34,60 +34,17 @@ namespace
     TRANSFER_SRGB,
     TRANSFER_PQ,
   };
-
-  bool CreateUploadBuffer(const ComPtr<ID3D12Device3>& device, size_t size,
-    ComPtr<ID3D12Resource>& resource)
-  {
-    D3D12_HEAP_PROPERTIES heapProps = {};
-    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-    D3D12_RESOURCE_DESC desc = {};
-    desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-    desc.Width = size;
-    desc.Height = 1;
-    desc.DepthOrArraySize = 1;
-    desc.MipLevels = 1;
-    desc.SampleDesc.Count = 1;
-    desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-    const HRESULT hr = device->CreateCommittedResource(&heapProps,
-      D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-      nullptr, IID_PPV_ARGS(&resource));
-    return SUCCEEDED(hr);
-  }
-
-  bool Upload(const ComPtr<ID3D12Resource>& resource,
-    const void * data, size_t size)
-  {
-    void * dst = nullptr;
-    const D3D12_RANGE readRange = { 0, 0 };
-    if (FAILED(resource->Map(0, &readRange, &dst)))
-      return false;
-    std::memcpy(dst, data, size);
-    resource->Unmap(0, nullptr);
-    return true;
-  }
 }
 
 bool CColorTransformEffect::Init(const ComPtr<ID3D12Device3>& device)
 {
-  D3D12_DESCRIPTOR_RANGE ranges[4] = {};
-  ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-  ranges[0].NumDescriptors = 1;
-  ranges[0].BaseShaderRegister = 0;
-  ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-  ranges[1].NumDescriptors = 1;
-  ranges[1].BaseShaderRegister = 0;
-  ranges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-  ranges[2].NumDescriptors = 1;
-  ranges[2].BaseShaderRegister = 1;
-  ranges[2].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[3].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-  ranges[3].NumDescriptors = 1;
-  ranges[3].BaseShaderRegister = 0;
-  ranges[3].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+  D3D12_DESCRIPTOR_RANGE ranges[] =
+  {
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 1),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0),
+  };
 
   const char * shader =
     "cbuffer Constants : register(b0)\n"
@@ -194,8 +151,9 @@ bool CColorTransformEffect::Init(const ComPtr<ID3D12Device3>& device)
 
   const size_t constSize = AlignTo(sizeof(m_consts),
     (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  if (!CreateUploadBuffer(device, constSize, m_constBuffer) ||
-      !CreateUploadBuffer(device, sizeof(float) * 4096 * 4, m_lutBuffer))
+  if (FAILED(CreateUploadBuffer(device, constSize, m_constBuffer)) ||
+      FAILED(CreateUploadBuffer(
+        device, sizeof(float) * 4096 * 4, m_lutBuffer)))
   {
     DEBUG_ERROR("Failed to create color transform buffers");
     return false;
@@ -261,8 +219,8 @@ PostProcessStatus CColorTransformEffect::SetFormat(
 
   m_srcFormat = src.desc.Format;
   m_dstFormat = dstFormat;
-  m_threadsX = ((unsigned)desc.Width  + (Threads - 1)) / Threads;
-  m_threadsY = ((unsigned)desc.Height + (Threads - 1)) / Threads;
+  m_threadsX  = Groups((unsigned)desc.Width);
+  m_threadsY  = Groups(desc.Height);
 
   dst.desc   = desc;
   dst.format = frameType;
@@ -285,8 +243,8 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
   // upload buffers are guaranteed not to be in use by the GPU.
   if (m_uploadPending)
   {
-    if (!Upload(m_constBuffer, &m_consts, sizeof(m_consts)) ||
-        !Upload(m_lutBuffer, m_lut, sizeof(m_lut)))
+    if (FAILED(Upload(m_constBuffer, &m_consts, sizeof(m_consts))) ||
+        FAILED(Upload(m_lutBuffer, m_lut, sizeof(m_lut))))
       DEBUG_ERROR("Failed to upload display color transform");
     else
       m_uploadPending = false;
@@ -295,41 +253,19 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
   TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-  D3D12_CPU_DESCRIPTOR_HANDLE handle =
-    m_descHeap->GetCPUDescriptorHandleForHeapStart();
-  const UINT inc = device->GetDescriptorHandleIncrementSize(
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-  cbvDesc.BufferLocation = m_constBuffer->GetGPUVirtualAddress();
-  cbvDesc.SizeInBytes = (UINT)AlignTo(sizeof(m_consts),
-    (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  device->CreateConstantBufferView(&cbvDesc, handle);
-  handle.ptr += inc;
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Format = m_srcFormat;
-  srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Texture2D.MipLevels = 1;
-  device->CreateShaderResourceView(src.Get(), &srvDesc, handle);
-  handle.ptr += inc;
+  CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
+  SRV(device, 1, src.Get(), m_srcFormat);
 
   D3D12_SHADER_RESOURCE_VIEW_DESC lutDesc = {};
-  lutDesc.Format = DXGI_FORMAT_R32G32B32A32_FLOAT;
-  lutDesc.ViewDimension = D3D12_SRV_DIMENSION_BUFFER;
+  lutDesc.Format                  = DXGI_FORMAT_R32G32B32A32_FLOAT;
+  lutDesc.ViewDimension           = D3D12_SRV_DIMENSION_BUFFER;
   lutDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  lutDesc.Buffer.NumElements = 4096;
-  device->CreateShaderResourceView(m_lutBuffer.Get(), &lutDesc, handle);
-  handle.ptr += inc;
+  lutDesc.Buffer.NumElements      = 4096;
+  device->CreateShaderResourceView(
+    m_lutBuffer.Get(), &lutDesc, Handle(device, 2));
 
-  D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-  uavDesc.Format = m_dstFormat;
-  uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-  device->CreateUnorderedAccessView(m_dst.Get(), nullptr, &uavDesc, handle);
-
-  Bind(commandList);
-  commandList->Dispatch(m_threadsX, m_threadsY, 1);
+  UAV(device, 3, m_dst.Get(), m_dstFormat);
+  Dispatch(commandList);
 
   TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);

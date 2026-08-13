@@ -73,6 +73,52 @@ namespace PostProcessUtil
     desc.Flags              = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
     return CreateDefaultResource(device, desc, resource);
   }
+
+  HRESULT CreateUploadBuffer(const ComPtr<ID3D12Device3>& device,
+    size_t size, ComPtr<ID3D12Resource>& resource)
+  {
+    D3D12_HEAP_PROPERTIES heapProps = {};
+    heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
+
+    D3D12_RESOURCE_DESC desc = {};
+    desc.Dimension        = D3D12_RESOURCE_DIMENSION_BUFFER;
+    desc.Width            = size;
+    desc.Height           = 1;
+    desc.DepthOrArraySize = 1;
+    desc.MipLevels        = 1;
+    desc.SampleDesc.Count = 1;
+    desc.Layout           = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
+
+    return device->CreateCommittedResource(&heapProps,
+      D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
+      nullptr, IID_PPV_ARGS(&resource));
+  }
+
+  HRESULT Upload(const ComPtr<ID3D12Resource>& resource,
+    const void * data, size_t size)
+  {
+    void * dst = nullptr;
+    const D3D12_RANGE readRange = { 0, 0 };
+    const HRESULT hr = resource->Map(0, &readRange, &dst);
+    if (FAILED(hr))
+      return hr;
+
+    std::memcpy(dst, data, size);
+    resource->Unmap(0, nullptr);
+    return S_OK;
+  }
+
+  D3D12_DESCRIPTOR_RANGE Range(
+    D3D12_DESCRIPTOR_RANGE_TYPE type, UINT shaderRegister)
+  {
+    D3D12_DESCRIPTOR_RANGE range = {};
+    range.RangeType                         = type;
+    range.NumDescriptors                    = 1;
+    range.BaseShaderRegister                = shaderRegister;
+    range.OffsetInDescriptorsFromTableStart =
+      D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+    return range;
+  }
 }
 
 bool CComputeEffect::InitCompute(const ComPtr<ID3D12Device3>& device,
@@ -81,13 +127,16 @@ bool CComputeEffect::InitCompute(const ComPtr<ID3D12Device3>& device,
   const char * shader)
 {
   D3D12_ROOT_PARAMETER rootParam = {};
-  rootParam.ParameterType    = D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
-  rootParam.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
+  rootParam.ParameterType                       =
+    D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
+  rootParam.ShaderVisibility                    =
+    D3D12_SHADER_VISIBILITY_ALL;
   rootParam.DescriptorTable.NumDescriptorRanges = rangeCount;
   rootParam.DescriptorTable.pDescriptorRanges   = ranges;
 
   D3D12_VERSIONED_ROOT_SIGNATURE_DESC rootSignatureDesc = {};
-  rootSignatureDesc.Version = D3D_ROOT_SIGNATURE_VERSION_1;
+  rootSignatureDesc.Version                    =
+    D3D_ROOT_SIGNATURE_VERSION_1;
   rootSignatureDesc.Desc_1_0.NumParameters     = 1;
   rootSignatureDesc.Desc_1_0.pParameters       = &rootParam;
   rootSignatureDesc.Desc_1_0.NumStaticSamplers = samplerCount;
@@ -140,7 +189,7 @@ bool CComputeEffect::InitCompute(const ComPtr<ID3D12Device3>& device,
   }
 
   D3D12_COMPUTE_PIPELINE_STATE_DESC psoDesc = {};
-  psoDesc.pRootSignature = m_rootSignature.Get();
+  psoDesc.pRootSignature     = m_rootSignature.Get();
   psoDesc.CS.pShaderBytecode = blob->GetBufferPointer();
   psoDesc.CS.BytecodeLength  = blob->GetBufferSize();
 
@@ -178,6 +227,54 @@ void CComputeEffect::Bind(const ComPtr<ID3D12GraphicsCommandList>& commandList)
   commandList->SetComputeRootSignature(m_rootSignature.Get());
   commandList->SetComputeRootDescriptorTable(
     0, m_descHeap->GetGPUDescriptorHandleForHeapStart());
+}
+
+void CComputeEffect::Dispatch(
+  const ComPtr<ID3D12GraphicsCommandList>& commandList)
+{
+  Bind(commandList);
+  commandList->Dispatch(m_threadsX, m_threadsY, 1);
+}
+
+D3D12_CPU_DESCRIPTOR_HANDLE CComputeEffect::Handle(
+  const ComPtr<ID3D12Device3>& device, UINT index) const
+{
+  D3D12_CPU_DESCRIPTOR_HANDLE handle =
+    m_descHeap->GetCPUDescriptorHandleForHeapStart();
+  handle.ptr += index * device->GetDescriptorHandleIncrementSize(
+    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+  return handle;
+}
+
+void CComputeEffect::CBV(const ComPtr<ID3D12Device3>& device, UINT index,
+  ID3D12Resource * resource, size_t size) const
+{
+  D3D12_CONSTANT_BUFFER_VIEW_DESC desc = {};
+  desc.BufferLocation = resource->GetGPUVirtualAddress();
+  desc.SizeInBytes    = (UINT)PostProcessUtil::AlignTo(size,
+    (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
+  device->CreateConstantBufferView(&desc, Handle(device, index));
+}
+
+void CComputeEffect::SRV(const ComPtr<ID3D12Device3>& device, UINT index,
+  ID3D12Resource * resource, DXGI_FORMAT format) const
+{
+  D3D12_SHADER_RESOURCE_VIEW_DESC desc = {};
+  desc.Format                  = format;
+  desc.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
+  desc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
+  desc.Texture2D.MipLevels     = 1;
+  device->CreateShaderResourceView(resource, &desc, Handle(device, index));
+}
+
+void CComputeEffect::UAV(const ComPtr<ID3D12Device3>& device, UINT index,
+  ID3D12Resource * resource, DXGI_FORMAT format) const
+{
+  D3D12_UNORDERED_ACCESS_VIEW_DESC desc = {};
+  desc.Format        = format;
+  desc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
+  device->CreateUnorderedAccessView(
+    resource, nullptr, &desc, Handle(device, index));
 }
 
 void CComputeEffect::TransitionDst(

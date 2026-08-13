@@ -27,7 +27,6 @@
 #include <cmath>
 #include <cwchar>
 #include <cwctype>
-#include <cstring>
 
 using namespace PostProcessUtil;
 
@@ -108,19 +107,12 @@ bool CDownsampleEffect::Init(const ComPtr<ID3D12Device3>& device)
   sampler.ShaderRegister   = 0;
   sampler.ShaderVisibility = D3D12_SHADER_VISIBILITY_ALL;
 
-  D3D12_DESCRIPTOR_RANGE ranges[3] = {};
-  ranges[0].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_CBV;
-  ranges[0].NumDescriptors = 1;
-  ranges[0].BaseShaderRegister = 0;
-  ranges[0].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[1].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
-  ranges[1].NumDescriptors = 1;
-  ranges[1].BaseShaderRegister = 0;
-  ranges[1].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
-  ranges[2].RangeType = D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-  ranges[2].NumDescriptors = 1;
-  ranges[2].BaseShaderRegister = 0;
-  ranges[2].OffsetInDescriptorsFromTableStart = D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND;
+  D3D12_DESCRIPTOR_RANGE ranges[] =
+  {
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_CBV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_SRV, 0),
+    Range(D3D12_DESCRIPTOR_RANGE_TYPE_UAV, 0),
+  };
 
   const char * shader =
     "cbuffer Constants       : register(b0)\n"
@@ -144,22 +136,9 @@ bool CDownsampleEffect::Init(const ComPtr<ID3D12Device3>& device)
   if (!InitCompute(device, ranges, ARRAYSIZE(ranges), &sampler, 1, shader))
     return false;
 
-  D3D12_HEAP_PROPERTIES heapProps = {};
-  heapProps.Type = D3D12_HEAP_TYPE_UPLOAD;
-
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Width = AlignTo(sizeof(m_consts),
+  const size_t size = AlignTo(sizeof(m_consts),
     (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  desc.Height = 1;
-  desc.DepthOrArraySize = 1;
-  desc.MipLevels = 1;
-  desc.SampleDesc.Count = 1;
-  desc.Layout = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-  HRESULT hr = device->CreateCommittedResource(&heapProps,
-    D3D12_HEAP_FLAG_NONE, &desc, D3D12_RESOURCE_STATE_GENERIC_READ,
-    nullptr, IID_PPV_ARGS(&m_constBuffer));
+  const HRESULT hr = CreateUploadBuffer(device, size, m_constBuffer);
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to create Downsample constant buffer");
@@ -189,26 +168,21 @@ PostProcessStatus CDownsampleEffect::SetFormat(
   m_consts.width  = (float)rule->targetX;
   m_consts.height = (float)rule->targetY;
 
-  void * data = nullptr;
-  D3D12_RANGE readRange = { 0, 0 };
-  HRESULT hr = m_constBuffer->Map(0, &readRange, &data);
+  const HRESULT hr = Upload(m_constBuffer, &m_consts, sizeof(m_consts));
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to map Downsample constant buffer");
     return PostProcessStatus::FAILED;
   }
-  std::memcpy(data, &m_consts, sizeof(m_consts));
-  m_constBuffer->Unmap(0, nullptr);
-
-  m_threadsX = ((unsigned)desc.Width  + (Threads - 1)) / Threads;
-  m_threadsY = ((unsigned)desc.Height + (Threads - 1)) / Threads;
+  m_threadsX = Groups((unsigned)desc.Width);
+  m_threadsY = Groups(desc.Height);
   m_format   = src.desc.Format;
   m_scaleX   = (double)desc.Width  / src.desc.Width;
   m_scaleY   = (double)desc.Height / src.desc.Height;
   m_width    = (unsigned)desc.Width;
   m_height   = desc.Height;
 
-  dst.desc        = desc;
+  dst.desc   = desc;
   dst.width  = (unsigned)desc.Width;
   dst.height = desc.Height;
   return PostProcessStatus::SUCCESS;
@@ -244,33 +218,10 @@ ComPtr<ID3D12Resource> CDownsampleEffect::Run(
   TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
-  D3D12_CPU_DESCRIPTOR_HANDLE handle =
-    m_descHeap->GetCPUDescriptorHandleForHeapStart();
-  const UINT inc = device->GetDescriptorHandleIncrementSize(
-    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
-
-  D3D12_CONSTANT_BUFFER_VIEW_DESC cbvDesc = {};
-  cbvDesc.BufferLocation = m_constBuffer->GetGPUVirtualAddress();
-  cbvDesc.SizeInBytes = (UINT)AlignTo(sizeof(m_consts),
-    (size_t)D3D12_CONSTANT_BUFFER_DATA_PLACEMENT_ALIGNMENT);
-  device->CreateConstantBufferView(&cbvDesc, handle);
-  handle.ptr += inc;
-
-  D3D12_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
-  srvDesc.Format = m_format;
-  srvDesc.ViewDimension = D3D12_SRV_DIMENSION_TEXTURE2D;
-  srvDesc.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
-  srvDesc.Texture2D.MipLevels = 1;
-  device->CreateShaderResourceView(src.Get(), &srvDesc, handle);
-  handle.ptr += inc;
-
-  D3D12_UNORDERED_ACCESS_VIEW_DESC uavDesc = {};
-  uavDesc.Format = m_format;
-  uavDesc.ViewDimension = D3D12_UAV_DIMENSION_TEXTURE2D;
-  device->CreateUnorderedAccessView(m_dst.Get(), nullptr, &uavDesc, handle);
-
-  Bind(commandList);
-  commandList->Dispatch(m_threadsX, m_threadsY, 1);
+  CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
+  SRV(device, 1, src.Get(), m_format);
+  UAV(device, 2, m_dst.Get(), m_format);
+  Dispatch(commandList);
 
   TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);

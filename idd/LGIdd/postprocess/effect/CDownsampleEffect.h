@@ -30,9 +30,9 @@ class CDownsampleEffect : public CComputeEffect
 private:
   struct Rule
   {
-    bool greater = false;
-    unsigned x = 0;
-    unsigned y = 0;
+    bool     greater = false;
+    unsigned x       = 0;
+    unsigned y       = 0;
     unsigned targetX = 0;
     unsigned targetY = 0;
   };
