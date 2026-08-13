@@ -77,6 +77,7 @@
     <ClInclude Include="InputPipeProtocol.h" />
     <ClInclude Include="PipeMsg.h" />
     <ClInclude Include="RefreshRate.h" />
+    <ClInclude Include="Seq.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

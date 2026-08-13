@@ -23,6 +23,7 @@
 #include "transport/lgmp/CLGMPHost.h"
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "Seq.h"
 
 #include "common/KVMFRInput.h"
 #include "common/LGMPConfig.h"
@@ -127,17 +128,16 @@ void CLGMPInputTransport::UpdateTargetState(
   const InputTargetState& state)
 {
   CSRWExclusiveLock lock(m_statusLock);
-  if (state.state == m_targetState.state &&
-      state.available == m_targetState.available &&
-      state.owned == m_targetState.owned &&
-      state.owner.client == m_targetState.owner.client &&
+  if (state.state            == m_targetState.state            &&
+      state.available        == m_targetState.available        &&
+      state.owned            == m_targetState.owned            &&
+      state.owner.client     == m_targetState.owner.client     &&
       state.owner.generation == m_targetState.owner.generation)
     return;
 
   if (state.state != m_targetState.state)
   {
-    if (++m_endpointGeneration == 0)
-      ++m_endpointGeneration;
+    Seq::Inc(m_endpointGeneration);
   }
   m_targetState = state;
   m_statusDirty = true;
@@ -183,9 +183,7 @@ bool CLGMPInputTransport::PublishStatus()
   status.maxButtons = KVMFR_INPUT_MOUSE_BUTTON_COUNT;
   memcpy(lgmpHostMemPtr(memory), &status, sizeof(status));
 
-  uint32_t serial = m_statusSerial + 1;
-  if (!serial)
-    ++serial;
+  const uint32_t serial = Seq::Next(m_statusSerial);
   const LGMP_STATUS result = lgmpHostQueuePost(m_queue, serial, memory);
   if (result == LGMP_OK)
   {
@@ -263,8 +261,7 @@ bool CLGMPInputTransport::Start(IInputTarget& target)
   {
     CSRWExclusiveLock statusLock(m_statusLock);
     m_targetState = target.GetState({});
-    if (++m_endpointGeneration == 0)
-      ++m_endpointGeneration;
+    Seq::Inc(m_endpointGeneration);
     m_statusDirty = true;
   }
   m_statusFailed.store(false, std::memory_order_release);
@@ -505,9 +502,7 @@ bool CLGMPInputTransport::ProcessMessage(
     return true;
   }
 
-  uint32_t expectedSequence = m_ownerSequence + 1;
-  if (!expectedSequence)
-    expectedSequence = 1;
+  const uint32_t expectedSequence = Seq::Next(m_ownerSequence);
   if (message.sequence != expectedSequence)
   {
     ++m_statistics.sequenceErrors;

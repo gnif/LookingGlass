@@ -21,6 +21,7 @@
 #include "transport/CControlHub.h"
 
 #include "CDebug.h"
+#include "Seq.h"
 
 #include <algorithm>
 #include <cstring>
@@ -105,12 +106,6 @@ DWORD WINAPI CControlHub::WorkerProc(void * opaque)
   return 0;
 }
 
-uint64_t CControlHub::NextRevision(uint64_t revision)
-{
-  ++revision;
-  return revision ? revision : 1;
-}
-
 bool CControlHub::TokenMatches(
   const Sink& sink, const ControlToken& token)
 {
@@ -159,12 +154,12 @@ bool CControlHub::Add(
     selected->deliveredShape     = 0;
     selected->deliveredTransform = 0;
     memset(selected->retryAt, 0, sizeof(selected->retryAt));
-    selected->nextWork = 0;
-    selected->bindingSerial = NextRevision(selected->bindingSerial);
-    selected->replaySerial  = NextRevision(selected->replaySerial);
-    selected->calling  = false;
-    selected->active   = false;
-    selected->failed   = false;
+    selected->nextWork       = 0;
+    selected->bindingSerial  = Seq::Next(selected->bindingSerial);
+    selected->replaySerial   = Seq::Next(selected->replaySerial);
+    selected->calling        = false;
+    selected->active         = false;
+    selected->failed         = false;
     selected->failurePending = false;
   }
   control.SetControlEvents(this, token);
@@ -174,10 +169,10 @@ bool CControlHub::Add(
     if (selected->target == &control && selected->backend == backend &&
         selected->epoch == epoch && selected->reserved && !selected->failed)
     {
-      selected->replaySerial = NextRevision(selected->replaySerial);
-      selected->active   = true;
-      selected->reserved = false;
-      attached = true;
+      selected->replaySerial = Seq::Next(selected->replaySerial);
+      selected->active       = true;
+      selected->reserved     = false;
+      attached               = true;
     }
   }
   if (!attached)
@@ -285,7 +280,7 @@ void CControlHub::OnControlReplay(const ControlToken& token)
     sink.deliveredPosition  = 0;
     sink.deliveredShape     = 0;
     sink.deliveredTransform = 0;
-    sink.replaySerial = NextRevision(sink.replaySerial);
+    sink.replaySerial       = Seq::Next(sink.replaySerial);
     memset(sink.retryAt, 0, sizeof(sink.retryAt));
     SetEvent(sink.wake);
     return;
@@ -529,14 +524,14 @@ void CControlHub::SendCursor(const IDARG_OUT_QUERY_HWCURSOR& info,
     m_state.cursor.X               = info.X;
     m_state.cursor.Y               = info.Y;
     m_state.sdrWhiteLevel          = sdrWhiteLevel;
-    m_state.positionRevision = NextRevision(m_state.positionRevision);
+    m_state.positionRevision       = Seq::Next(m_state.positionRevision);
 
     if (shape)
     {
       m_state.cursor.IsCursorShapeUpdated = info.IsCursorShapeUpdated;
       m_state.cursor.CursorShapeInfo      = info.CursorShapeInfo;
-      m_state.cursorData = std::move(cursorData);
-      m_state.shapeRevision = NextRevision(m_state.shapeRevision);
+      m_state.cursorData                  = std::move(cursorData);
+      m_state.shapeRevision               = Seq::Next(m_state.shapeRevision);
     }
   }
 
@@ -550,8 +545,8 @@ void CControlHub::SetColorTransform(
 {
   {
     CSRWExclusiveLock lock(m_stateLock);
-    m_state.transform = std::move(transform);
-    m_state.transformRevision = NextRevision(m_state.transformRevision);
+    m_state.transform         = std::move(transform);
+    m_state.transformRevision = Seq::Next(m_state.transformRevision);
   }
   WakeAll(WorkType::TRANSFORM);
 }

@@ -20,6 +20,8 @@
 
 #include "transport/CRecoveryHub.h"
 
+#include "Seq.h"
+
 #include <Windows.h>
 
 namespace
@@ -99,16 +101,6 @@ bool CRecoveryHub::ActionMatchesLocked(
     action.active == m_operation.action.active;
 }
 
-uint64_t CRecoveryHub::NextNonzero(uint64_t& value)
-{
-  uint64_t result = value++;
-  if (!result)
-    result = value++;
-  if (!value)
-    ++value;
-  return result;
-}
-
 uint32_t CRecoveryHub::NextSerial()
 {
   uint32_t result = m_nextSerial;
@@ -134,7 +126,7 @@ void CRecoveryHub::SetWaitingLocked(Request& request,
   request.source      = source;
   request.session     = session;
   request.operation   = operation;
-  request.sequence    = NextNonzero(m_nextSequence);
+  request.sequence    = Seq::Take(m_nextSequence);
   request.serial      = serial;
   request.active      = active;
   request.state       = SlotState::WAITING;
@@ -264,9 +256,9 @@ RecoveryAdmission CRecoveryHub::Submit(const SourceKey& source,
   }
 
   m_operation = Operation {};
-  m_operation.phase = OperationPhase::IN_FLIGHT;
-  m_operation.id    = NextNonzero(m_nextOperation);
-  m_operation.action.route    = NextNonzero(m_nextRoute);
+  m_operation.phase           = OperationPhase::IN_FLIGHT;
+  m_operation.id              = Seq::Take(m_nextOperation);
+  m_operation.action.route    = Seq::Take(m_nextRoute);
   m_operation.action.session  = m_session;
   m_operation.action.serial   = NextSerial();
   m_operation.action.active   = active;

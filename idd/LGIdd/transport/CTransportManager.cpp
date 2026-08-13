@@ -21,6 +21,7 @@
 #include "transport/CTransportManager.h"
 
 #include "CDebug.h"
+#include "Seq.h"
 
 #include <Windows.h>
 #include <new>
@@ -737,9 +738,7 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.inputAbsent   = false;
     entry.frameAbsent   = false;
     entry.serviceRetryAt = 0;
-    ++entry.epoch;
-    if (!entry.epoch)
-      ++entry.epoch;
+    Seq::Inc(entry.epoch);
   }
 
   if (OpenEntry(entry) != OpenResult::SUCCESS)

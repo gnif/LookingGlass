@@ -106,7 +106,6 @@ private:
   unsigned FindSourceLocked(const SourceKey& source) const;
   unsigned FindFreeLocked() const;
   bool ActionMatchesLocked(const RecoveryAction& action) const;
-  uint64_t NextNonzero(uint64_t& value);
   uint32_t NextSerial();
   void ClearRequestLocked(Request& request);
   void SetWaitingLocked(Request& request, const SourceKey& source,

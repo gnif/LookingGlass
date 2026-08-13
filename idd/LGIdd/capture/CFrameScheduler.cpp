@@ -21,6 +21,7 @@
 #include "capture/CFrameScheduler.h"
 
 #include "CDebug.h"
+#include "Seq.h"
 
 #include <string.h>
 
@@ -210,8 +211,7 @@ bool CFrameScheduler::ElectOwner(uint64_t now, uint32_t resetClientID)
   {
     if (m_scheduling)
     {
-      if (!++m_epoch)
-        ++m_epoch;
+      Seq::Inc(m_epoch);
       m_schedule.epoch = m_epoch;
     }
     m_nextDeadline  = m_scheduling ? fastest->nextDelivery : 0;
@@ -517,8 +517,7 @@ void CFrameScheduler::AdvanceDeadlineSerial(uint64_t count)
     return;
 
   for (; epochAdvances; --epochAdvances)
-    if (!++m_epoch)
-      ++m_epoch;
+    Seq::Inc(m_epoch);
   m_schedule.epoch = m_epoch;
 
   Client * client = FindClient(m_schedule.clientID);

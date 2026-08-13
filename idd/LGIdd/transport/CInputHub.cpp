@@ -21,6 +21,7 @@
 #include "transport/CInputHub.h"
 
 #include "input/IInputSink.h"
+#include "Seq.h"
 
 static bool SameClient(const SourceKey& left, const SourceKey& right)
 {
@@ -510,9 +511,7 @@ void CInputHub::InvalidateInteraction()
 
 void CInputHub::AdvanceInteractionSerial()
 {
-  ++m_interactionSerial;
-  if (!m_interactionSerial)
-    ++m_interactionSerial;
+  Seq::Inc(m_interactionSerial);
 }
 
 bool CInputHub::CheckState()

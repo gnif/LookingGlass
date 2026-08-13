@@ -104,7 +104,6 @@ private:
   bool             m_valid     = false;
 
   static DWORD WINAPI WorkerProc(void * opaque);
-  static uint64_t NextRevision(uint64_t revision);
   static bool TokenMatches(const Sink& sink, const ControlToken& token);
 
   bool BeginWork(Sink& sink, Work& work, DWORD& wait);
