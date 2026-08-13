@@ -31,6 +31,13 @@ private:
   } m_consts = { 80.0f };
   ComPtr<ID3D12Resource> m_constBuffer;
 
+  PostProcessStatus Set(const ComPtr<ID3D12Device3>& device,
+    const D12FrameFormat& src, D12FrameFormat& dst, bool own);
+  bool Draw(const ComPtr<ID3D12Device3>& device,
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+    RECT dirtyRects[], unsigned * nbDirtyRects);
+
 public:
   const char * GetName() const override { return "HDR16to10"; }
 
@@ -38,9 +45,17 @@ public:
 
   PostProcessStatus SetFormat(const ComPtr<ID3D12Device3>& device,
     const D12FrameFormat& src, D12FrameFormat& dst) override;
+  // Configures shader state without allocating the legacy-owned output.
+  PostProcessStatus Cfg(const ComPtr<ID3D12Device3>& device,
+    const D12FrameFormat& src, D12FrameFormat& dst);
 
   ComPtr<ID3D12Resource> Run(const ComPtr<ID3D12Device3>& device,
     const ComPtr<ID3D12GraphicsCommandList>& commandList,
     const ComPtr<ID3D12Resource>& src, RECT dirtyRects[],
     unsigned * nbDirtyRects) override;
+  // dst must match Cfg's output and be in COMMON; Run restores COMMON.
+  bool Run(const ComPtr<ID3D12Device3>& device,
+    const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+    RECT dirtyRects[], unsigned * nbDirtyRects);
 };

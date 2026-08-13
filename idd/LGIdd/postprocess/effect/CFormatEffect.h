@@ -22,56 +22,28 @@
 
 #include "CComputeEffect.h"
 
-enum class CalPart : uint8_t
-{
-  ALL,
-  MATRIX,
-  LUT,
-};
-
-class CColorTransformEffect : public CComputeEffect
+class CFormatEffect : public CComputeEffect
 {
 private:
-  struct Consts
-  {
-    float matrix[3][4];
-    float scalar;
-    UINT  matrixEnabled;
-    UINT  lutEnabled;
-    UINT  inputTransfer;
-    UINT  outputTransfer;
-  } m_consts = {};
-  float m_lut[4096][4] = {};
-  bool  m_uploadPending = false;
+  D3D12_RESOURCE_DESC m_srcDesc   = {};
+  DXGI_FORMAT         m_srcFormat = DXGI_FORMAT_UNKNOWN;
+  DXGI_FORMAT         m_dstFormat = DXGI_FORMAT_UNKNOWN;
 
-  ComPtr<ID3D12Resource> m_constBuffer;
-  ComPtr<ID3D12Resource> m_lutBuffer;
-  DXGI_FORMAT            m_srcFormat = DXGI_FORMAT_UNKNOWN;
-  DXGI_FORMAT            m_dstFormat = DXGI_FORMAT_UNKNOWN;
-  CalPart                m_part;
-  bool                   m_keepSignal;
-
-  PostProcessStatus Set(const ComPtr<ID3D12Device3>& device,
-    const D12FrameFormat& src, D12FrameFormat& dst, bool own);
+  bool IsSrc(ID3D12Resource * src) const;
   bool Draw(const ComPtr<ID3D12Device3>& device,
     const ComPtr<ID3D12GraphicsCommandList>& commandList,
     const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
     RECT dirtyRects[], unsigned * nbDirtyRects);
 
 public:
-  explicit CColorTransformEffect(CalPart part = CalPart::ALL,
-    bool keepSignal = false) :
-    m_part(part), m_keepSignal(keepSignal) {}
-
-  const char * GetName() const override { return "ColorTransform"; }
+  const char * GetName() const override { return "Format"; }
 
   bool Init(const ComPtr<ID3D12Device3>& device);
 
   PostProcessStatus SetFormat(const ComPtr<ID3D12Device3>& device,
     const D12FrameFormat& src, D12FrameFormat& dst) override;
-  // Configures shader state without allocating the legacy-owned output.
   PostProcessStatus Cfg(const ComPtr<ID3D12Device3>& device,
-    const D12FrameFormat& src, D12FrameFormat& dst);
+    const D12FrameFormat& src, const D12FrameFormat& dst);
 
   ComPtr<ID3D12Resource> Run(const ComPtr<ID3D12Device3>& device,
     const ComPtr<ID3D12GraphicsCommandList>& commandList,

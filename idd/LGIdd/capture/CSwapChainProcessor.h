@@ -25,6 +25,7 @@
 #include "d3d/CD3D12Device.h"
 #include "display/IddCxCompat.h"
 #include "d3d/CInteropResourcePool.h"
+#include "capture/CFrameExec.h"
 #include "capture/CFrameGraph.h"
 #include "capture/CFrameProcessor.h"
 #include "postprocess/D12FrameFormat.h"
@@ -57,6 +58,7 @@ private:
   HANDLE                           m_newFrameEvent;
 
   CInteropResourcePool             m_resPool;
+  CFrameExec                       m_exec;
   CFrameGraph                      m_graph;
   GraphCfg                         m_graphCfg;
   bool                             m_haveGraphCfg    = false;

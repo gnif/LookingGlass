@@ -157,6 +157,20 @@ PostProcessStatus CDownsampleEffect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
+  return Set(device, src, dst, true);
+}
+
+PostProcessStatus CDownsampleEffect::Cfg(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst)
+{
+  return Set(device, src, dst, false);
+}
+
+PostProcessStatus CDownsampleEffect::Set(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst, bool own)
+{
   unsigned targetX = m_targetX;
   unsigned targetY = m_targetY;
   if (!targetX || !targetY)
@@ -174,9 +188,12 @@ PostProcessStatus CDownsampleEffect::SetFormat(
   D3D12_RESOURCE_DESC desc = src.desc;
   desc.Width  = targetX;
   desc.Height = targetY;
-  desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
+  desc.Flags  = own ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS :
+    dst.desc.Flags;
+  if (!(desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
+    return PostProcessStatus::FAILED;
 
-  if (!CreateDefaultTexture(device, desc, m_dst))
+  if (own && !CreateDefaultTexture(device, desc, m_dst))
     return PostProcessStatus::FAILED;
 
   m_consts.width  = (float)targetX;
@@ -190,6 +207,7 @@ PostProcessStatus CDownsampleEffect::SetFormat(
   }
   m_threadsX = Groups((unsigned)desc.Width);
   m_threadsY = Groups(desc.Height);
+  m_outDesc  = desc;
   m_format   = src.desc.Format;
   m_scaleX   = (double)desc.Width  / src.desc.Width;
   m_scaleY   = (double)desc.Height / src.desc.Height;
@@ -226,18 +244,42 @@ ComPtr<ID3D12Resource> CDownsampleEffect::Run(
   const ComPtr<ID3D12Resource>& src, RECT dirtyRects[],
   unsigned * nbDirtyRects)
 {
+  if (!m_dst || !Draw(device, commandList, src, m_dst.Get(),
+      dirtyRects, nbDirtyRects))
+    return nullptr;
+  return m_dst;
+}
+
+bool CDownsampleEffect::Run(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
+  if (!device || !commandList || !src || src.Get() == dst || !IsDst(dst))
+    return false;
+  return Draw(device, commandList, src, dst,
+    dirtyRects, nbDirtyRects);
+}
+
+bool CDownsampleEffect::Draw(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
   UNREFERENCED_PARAMETER(dirtyRects);
   UNREFERENCED_PARAMETER(nbDirtyRects);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
   SRV(device, 1, src.Get(), m_format);
-  UAV(device, 2, m_dst.Get(), m_format);
+  UAV(device, 2, dst, m_format);
   Dispatch(commandList);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);
-  return m_dst;
+  return true;
 }

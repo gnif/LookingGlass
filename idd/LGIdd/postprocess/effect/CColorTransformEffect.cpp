@@ -166,6 +166,20 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
+  return Set(device, src, dst, true);
+}
+
+PostProcessStatus CColorTransformEffect::Cfg(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst)
+{
+  return Set(device, src, dst, false);
+}
+
+PostProcessStatus CColorTransformEffect::Set(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst, bool own)
+{
   const auto transform = D12::Transform(src.colorTransform);
   if (!transform)
     return PostProcessStatus::BYPASS_EFFECT;
@@ -205,10 +219,15 @@ PostProcessStatus CColorTransformEffect::SetFormat(
 
   D3D12_RESOURCE_DESC desc = src.desc;
   desc.Format = dstFormat;
-  desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-  if (!m_dst || m_dst->GetDesc().Width  != desc.Width  ||
-                m_dst->GetDesc().Height != desc.Height ||
-                m_dst->GetDesc().Format != desc.Format)
+  desc.Flags  = own ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS :
+    dst.desc.Flags;
+  if (!(desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
+    return PostProcessStatus::FAILED;
+  if (own &&
+      (!m_dst                                      ||
+       m_dst->GetDesc().Width  != desc.Width       ||
+       m_dst->GetDesc().Height != desc.Height      ||
+       m_dst->GetDesc().Format != desc.Format))
   {
     if (!CreateDefaultTexture(device, desc, m_dst))
       return PostProcessStatus::FAILED;
@@ -216,9 +235,9 @@ PostProcessStatus CColorTransformEffect::SetFormat(
 
   std::memcpy(m_consts.matrix, transform->matrix,
     sizeof(m_consts.matrix));
-  m_consts.scalar         = transform->scalar;
-  m_consts.matrixEnabled  = matrixEnabled;
-  m_consts.lutEnabled     = lutEnabled;
+  m_consts.scalar        = transform->scalar;
+  m_consts.matrixEnabled = matrixEnabled;
+  m_consts.lutEnabled    = lutEnabled;
   const UINT inputTransfer = src.hdrPQ ? TRANSFER_PQ :
     (src.hdr ? TRANSFER_LINEAR : TRANSFER_SRGB);
   m_consts.inputTransfer  = inputTransfer;
@@ -230,6 +249,7 @@ PostProcessStatus CColorTransformEffect::SetFormat(
 
   m_srcFormat = src.desc.Format;
   m_dstFormat = dstFormat;
+  m_outDesc   = desc;
   m_threadsX  = Groups((unsigned)desc.Width);
   m_threadsY  = Groups(desc.Height);
 
@@ -246,6 +266,30 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
   const ComPtr<ID3D12Resource>& src, RECT dirtyRects[],
   unsigned * nbDirtyRects)
 {
+  if (!m_dst || !Draw(device, commandList, src, m_dst.Get(),
+      dirtyRects, nbDirtyRects))
+    return nullptr;
+  return m_dst;
+}
+
+bool CColorTransformEffect::Run(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
+  if (!device || !commandList || !src || src.Get() == dst || !IsDst(dst))
+    return false;
+  return Draw(device, commandList, src, dst,
+    dirtyRects, nbDirtyRects);
+}
+
+bool CColorTransformEffect::Draw(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
   UNREFERENCED_PARAMETER(dirtyRects);
   UNREFERENCED_PARAMETER(nbDirtyRects);
 
@@ -261,7 +305,7 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
       m_uploadPending = false;
   }
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
@@ -275,10 +319,10 @@ ComPtr<ID3D12Resource> CColorTransformEffect::Run(
   device->CreateShaderResourceView(
     m_lutBuffer.Get(), &lutDesc, Handle(device, 2));
 
-  UAV(device, 3, m_dst.Get(), m_dstFormat);
+  UAV(device, 3, dst, m_dstFormat);
   Dispatch(commandList);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);
-  return m_dst;
+  return true;
 }

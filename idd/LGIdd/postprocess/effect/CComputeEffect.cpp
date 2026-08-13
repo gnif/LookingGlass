@@ -281,10 +281,26 @@ void CComputeEffect::TransitionDst(
   const ComPtr<ID3D12GraphicsCommandList>& commandList,
   D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after)
 {
+  TransitionDst(commandList, m_dst.Get(), before, after);
+}
+
+bool CComputeEffect::IsDst(ID3D12Resource * dst) const
+{
+  if (!dst)
+    return false;
+
+  return D12::Same(dst->GetDesc(), m_outDesc);
+}
+
+void CComputeEffect::TransitionDst(
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  ID3D12Resource * dst, D3D12_RESOURCE_STATES before,
+  D3D12_RESOURCE_STATES after)
+{
   D3D12_RESOURCE_BARRIER barrier = {};
   barrier.Type  = D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;
   barrier.Flags = D3D12_RESOURCE_BARRIER_FLAG_NONE;
-  barrier.Transition.pResource   = m_dst.Get();
+  barrier.Transition.pResource   = dst;
   barrier.Transition.StateBefore = before;
   barrier.Transition.StateAfter  = after;
   barrier.Transition.Subresource = D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES;

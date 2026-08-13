@@ -75,7 +75,9 @@ struct GraphNode
 {
   FrameOp      op      = FrameOp::SRC;
   unsigned     parent  = FRAME_GRAPH_ROOT;
+  // refs covers every route; texRefs is the direct texture-route closure.
   unsigned     refs    = 0;
+  unsigned     texRefs = 0;
   unsigned     width   = 0;
   unsigned     height  = 0;
   FrameProfile profile;
@@ -88,6 +90,7 @@ struct GraphLeaf
   unsigned  node     = 0;
   bool      required = false;
   bool      primary  = false;
+  bool      tex      = false;
   FrameCfg  cfg;
 };
 
@@ -149,13 +152,15 @@ public:
   bool Begin(const GraphCfg& cfg);
   bool Can(const FrameCfg& cfg) const;
   bool Add(BackendId id, uint32_t epoch, bool required, bool primary,
-    const FrameCfg& cfg);
+    bool tex, const FrameCfg& cfg);
   bool Seal();
   bool Stamp(uint64_t generation);
   bool Same(const GraphCfg& cfg) const;
   bool Want(FrameSignal signal) const;
   bool Need(FrameOp op) const;
   bool Shared(unsigned node) const;
+  bool Desc(unsigned node, const FrameContentRef& content,
+    FrameDesc& desc) const;
   bool Desc(unsigned leaf, const FrameContentRef& content,
     LeafDesc& desc) const;
 

@@ -43,6 +43,7 @@
     <ClCompile Include="display\CMonitorContext.cpp" />
     <ClCompile Include="capture\CFrameBufferPool.cpp" />
     <ClCompile Include="capture\CFrameBufferResource.cpp" />
+    <ClCompile Include="capture\CFrameExec.cpp" />
     <ClCompile Include="capture\CFrameGraph.cpp" />
     <ClCompile Include="capture\CFrameTex.cpp" />
     <ClCompile Include="capture\CFrameProcessor.cpp" />
@@ -62,6 +63,7 @@
     <ClCompile Include="postprocess\effect\CColorTransformEffect.cpp" />
     <ClCompile Include="postprocess\effect\CComputeEffect.cpp" />
     <ClCompile Include="postprocess\effect\CDownsampleEffect.cpp" />
+    <ClCompile Include="postprocess\effect\CFormatEffect.cpp" />
     <ClCompile Include="postprocess\effect\CHDR16to10Effect.cpp" />
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp" />
     <ClCompile Include="transport\CControlHub.cpp" />
@@ -99,6 +101,7 @@
     <ClInclude Include="display\CMonitorContext.h" />
     <ClInclude Include="capture\CFrameBufferPool.h" />
     <ClInclude Include="capture\CFrameBufferResource.h" />
+    <ClInclude Include="capture\CFrameExec.h" />
     <ClInclude Include="capture\CFrameGraph.h" />
     <ClInclude Include="capture\CFrameTex.h" />
     <ClInclude Include="capture\CFrameProcessor.h" />
@@ -119,6 +122,7 @@
     <ClInclude Include="postprocess\effect\CColorTransformEffect.h" />
     <ClInclude Include="postprocess\effect\CComputeEffect.h" />
     <ClInclude Include="postprocess\effect\CDownsampleEffect.h" />
+    <ClInclude Include="postprocess\effect\CFormatEffect.h" />
     <ClInclude Include="postprocess\effect\CHDR16to10Effect.h" />
     <ClInclude Include="postprocess\effect\CRGB24Effect.h" />
     <ClInclude Include="transport\CControlHub.h" />

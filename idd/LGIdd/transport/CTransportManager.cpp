@@ -809,15 +809,15 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     const bool frameService =
       (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
     entry.transport.reset();
-    entry.directMemory = DirectFrameBufferMemory {};
+    entry.directMemory      = DirectFrameBufferMemory {};
     entry.directMemoryValid = false;
-    entry.setupDone    = false;
-    entry.controlFailed = false;
-    entry.controlAbsent = false;
-    entry.inputFailed   = false;
-    entry.inputAbsent   = false;
-    entry.frameAbsent   = false;
-    entry.serviceRetryAt = 0;
+    entry.setupDone         = false;
+    entry.controlFailed     = false;
+    entry.controlAbsent     = false;
+    entry.inputFailed       = false;
+    entry.inputAbsent       = false;
+    entry.frameAbsent       = false;
+    entry.serviceRetryAt    = 0;
     Seq::Inc(entry.epoch);
     if (frameService)
       BumpFrameRev();
@@ -1254,7 +1254,7 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
           break;
 
         if (!next.Add(route.id, route.epoch, route.required,
-              route.primary, candidate))
+              route.primary, route.texSink != nullptr, candidate))
         {
           route.transport->Abort();
           routeResult = CfgResult::FAILED;

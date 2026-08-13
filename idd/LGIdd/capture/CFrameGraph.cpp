@@ -241,7 +241,7 @@ unsigned CFrameGraph::Checkpoint(const FrameProfile& requested)
 }
 
 bool CFrameGraph::Add(BackendId id, uint32_t epoch, bool required,
-  bool primary, const FrameCfg& cfg)
+  bool primary, bool tex, const FrameCfg& cfg)
 {
   if (!id || !epoch || !Can(cfg) ||
       m_leafCount == TRANSPORT_MAX_INSTANCES)
@@ -266,11 +266,16 @@ bool CFrameGraph::Add(BackendId id, uint32_t epoch, bool required,
   leaf.node     = node;
   leaf.required = required;
   leaf.primary  = primary;
+  leaf.tex      = tex;
   leaf.cfg      = cfg;
 
   for (unsigned current = node;
        current != FRAME_GRAPH_ROOT; current = m_nodes[current].parent)
+  {
     ++m_nodes[current].refs;
+    if (tex)
+      ++m_nodes[current].texRefs;
+  }
   return true;
 }
 
@@ -283,6 +288,9 @@ bool CFrameGraph::Seal()
   for (unsigned i = 0; i < m_leafCount; ++i)
     if (!m_leaves[i].id || !m_leaves[i].epoch ||
         !m_leaves[i].node || m_leaves[i].node >= m_nodeCount)
+      return false;
+  for (unsigned i = 0; i < m_nodeCount; ++i)
+    if (!m_nodes[i].refs || m_nodes[i].texRefs > m_nodes[i].refs)
       return false;
 
   m_sealed = true;
@@ -324,17 +332,19 @@ bool CFrameGraph::Want(FrameSignal signal) const
 
 bool CFrameGraph::Shared(unsigned node) const
 {
-  if (!m_sealed || !node || node >= m_nodeCount)
+  if (!m_sealed || !node || node >= m_nodeCount ||
+      !m_nodes[node].texRefs)
     return false;
   for (unsigned i = 0; i < m_leafCount; ++i)
-    if (m_leaves[i].node                == node &&
+    if (m_leaves[i].tex                         &&
+        m_leaves[i].node                == node &&
         m_leaves[i].cfg.profile.storage == FrameStorage::D3D11_TEXTURE)
       return true;
   return false;
 }
 
-bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
-  LeafDesc& desc) const
+bool CFrameGraph::Desc(unsigned nodeIndex,
+  const FrameContentRef& content, FrameDesc& desc) const
 {
   if (!content)
     return false;
@@ -343,59 +353,78 @@ bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
   FrameProfile sourceProfile;
   const bool validProfile = D12::Profile(source,
     FrameStorage::D3D12_TEXTURE, sourceProfile);
+  const auto effectiveTransform =
+    D12::Transform(source.colorTransform);
   if (!validProfile || !Frame::Same(sourceProfile, m_cfg.src))
     return false;
 
-  if (!m_sealed                                             ||
-      leaf                         >= m_leafCount           ||
-      !content->serial                                      ||
-      source.width                 != m_cfg.srcWidth        ||
-      source.height                != m_cfg.srcHeight       ||
-      source.dataWidth             != m_cfg.srcWidth        ||
-      source.dataHeight            != m_cfg.srcHeight       ||
-      source.pitch                 != 0                     ||
+  if (!m_sealed                                                ||
+      !nodeIndex                                               ||
+      nodeIndex                    >= m_nodeCount              ||
+      !content->serial                                         ||
+      source.width                 != m_cfg.srcWidth           ||
+      source.height                != m_cfg.srcHeight          ||
+      source.dataWidth             != m_cfg.srcWidth           ||
+      source.dataHeight            != m_cfg.srcHeight          ||
+      source.pitch                 != 0                        ||
       source.desc.Dimension        !=
-        D3D12_RESOURCE_DIMENSION_TEXTURE2D                  ||
-      source.desc.Width            != m_cfg.srcWidth        ||
-      source.desc.Height           != m_cfg.srcHeight       ||
-      source.desc.DepthOrArraySize != 1                     ||
-      source.desc.MipLevels        != 1                     ||
-      source.desc.SampleDesc.Count != 1                     ||
+        D3D12_RESOURCE_DIMENSION_TEXTURE2D                     ||
+      source.desc.Width            != m_cfg.srcWidth           ||
+      source.desc.Height           != m_cfg.srcHeight          ||
+      source.desc.DepthOrArraySize != 1                        ||
+      source.desc.MipLevels        != 1                        ||
+      source.desc.SampleDesc.Count != 1                        ||
+      effectiveTransform           != m_cfg.transform          ||
       !Frame::Valid(content->damage, content->rects, content->count,
         m_cfg.srcWidth, m_cfg.srcHeight))
     return false;
 
-  const GraphLeaf& route = m_leaves[leaf];
-  const GraphNode& node  = m_nodes[route.node];
-  desc.id      = route.id;
-  desc.epoch   = route.epoch;
-  desc.node    = route.node;
-  desc.profile = route.cfg.profile;
-
-  desc.frame         = FrameDesc {};
-  desc.frame.content = content;
-  desc.frame.damage  = content->damage;
-  desc.frame.count   = content->count;
+  const GraphNode& node = m_nodes[nodeIndex];
+  FrameDesc result;
+  result.content = content;
+  result.damage  = content->damage;
+  result.count   = content->count;
   if (content->count)
-    memcpy(desc.frame.rects, content->rects,
+    memcpy(result.rects, content->rects,
       content->count * sizeof(*content->rects));
-  desc.frame.format  = content->format;
+  result.format  = content->format;
 
   // A scaled checkpoint has a different damage coordinate space. Until the
   // executor owns exact edge transforms, preserve correctness by making any
   // partial source damage a full node update.
-  if (desc.frame.damage == FrameDamage::RECTS &&
+  if (result.damage == FrameDamage::RECTS &&
       (node.width != m_cfg.srcWidth || node.height != m_cfg.srcHeight))
   {
-    desc.frame.damage = FrameDamage::FULL;
-    desc.frame.count  = 0;
+    result.damage = FrameDamage::FULL;
+    result.count  = 0;
   }
 
-  D12FrameFormat& format = desc.frame.format;
-  if (!D12::Set(format, node.profile, node.width, node.height))
+  D12FrameFormat& output = result.format;
+  if (!D12::Set(output, node.profile, node.width, node.height))
     return false;
   // Calibration/LUT nodes have already consumed this transform.
-  format.colorTransform.reset();
+  output.colorTransform.reset();
+
+  desc = result;
+  return true;
+}
+
+bool CFrameGraph::Desc(unsigned leaf, const FrameContentRef& content,
+  LeafDesc& desc) const
+{
+  if (!m_sealed || leaf >= m_leafCount)
+    return false;
+
+  const GraphLeaf& route = m_leaves[leaf];
+  LeafDesc result;
+  if (!Desc(route.node, content, result.frame))
+    return false;
+
+  result.id      = route.id;
+  result.epoch   = route.epoch;
+  result.node    = route.node;
+  result.profile = route.cfg.profile;
+  desc = result;
   return true;
 }
 

@@ -490,6 +490,24 @@ void CTexHub::Abort(CTexStage& stage) noexcept
   drop.reset();
 }
 
+void CTexHub::Fault(
+  const FrameIn& frame, PushResult result) noexcept
+{
+  if (result != PushResult::REJECTED && result != PushResult::FAILED)
+    return;
+
+  std::shared_ptr<CTexSet> set;
+  unsigned index;
+  ITexSink * sink = nullptr;
+  if (!Enter(frame, true, set, index, sink))
+  {
+    if (set)
+      Leave(set, TRANSPORT_MAX_INSTANCES);
+    return;
+  }
+  Finish(set, index, result);
+}
+
 PushResult CTexHub::Push(FrameIn frame, TexLease lease) noexcept
 {
   std::shared_ptr<CTexSet> set;

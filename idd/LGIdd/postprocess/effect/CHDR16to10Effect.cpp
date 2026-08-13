@@ -88,16 +88,34 @@ PostProcessStatus CHDR16to10Effect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
+  return Set(device, src, dst, true);
+}
+
+PostProcessStatus CHDR16to10Effect::Cfg(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst)
+{
+  return Set(device, src, dst, false);
+}
+
+PostProcessStatus CHDR16to10Effect::Set(
+  const ComPtr<ID3D12Device3>& device,
+  const D12FrameFormat& src, D12FrameFormat& dst, bool own)
+{
   if (src.desc.Format != DXGI_FORMAT_R16G16B16A16_FLOAT || !src.hdr)
     return PostProcessStatus::BYPASS_EFFECT;
 
   D3D12_RESOURCE_DESC desc = src.desc;
   desc.Format = DXGI_FORMAT_R10G10B10A2_UNORM;
-  desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
-
-  if (!CreateDefaultTexture(device, desc, m_dst))
+  desc.Flags  = own ? D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS :
+    dst.desc.Flags;
+  if (!(desc.Flags & D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS))
     return PostProcessStatus::FAILED;
 
+  if (own && !CreateDefaultTexture(device, desc, m_dst))
+    return PostProcessStatus::FAILED;
+
+  m_outDesc  = desc;
   m_threadsX = Groups((unsigned)desc.Width);
   m_threadsY = Groups(desc.Height);
 
@@ -119,18 +137,42 @@ ComPtr<ID3D12Resource> CHDR16to10Effect::Run(
   const ComPtr<ID3D12Resource>& src, RECT dirtyRects[],
   unsigned * nbDirtyRects)
 {
+  if (!m_dst || !Draw(device, commandList, src, m_dst.Get(),
+      dirtyRects, nbDirtyRects))
+    return nullptr;
+  return m_dst;
+}
+
+bool CHDR16to10Effect::Run(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
+  if (!device || !commandList || !src || src.Get() == dst || !IsDst(dst))
+    return false;
+  return Draw(device, commandList, src, dst,
+    dirtyRects, nbDirtyRects);
+}
+
+bool CHDR16to10Effect::Draw(
+  const ComPtr<ID3D12Device3>& device,
+  const ComPtr<ID3D12GraphicsCommandList>& commandList,
+  const ComPtr<ID3D12Resource>& src, ID3D12Resource * dst,
+  RECT dirtyRects[], unsigned * nbDirtyRects)
+{
   UNREFERENCED_PARAMETER(dirtyRects);
   UNREFERENCED_PARAMETER(nbDirtyRects);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_COMMON,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_COMMON,
     D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
 
   CBV(device, 0, m_constBuffer.Get(), sizeof(m_consts));
   SRV(device, 1, src.Get(), DXGI_FORMAT_R16G16B16A16_FLOAT);
-  UAV(device, 2, m_dst.Get(), DXGI_FORMAT_R10G10B10A2_UNORM);
+  UAV(device, 2, dst, DXGI_FORMAT_R10G10B10A2_UNORM);
   Dispatch(commandList);
 
-  TransitionDst(commandList, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+  TransitionDst(commandList, dst, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
     D3D12_RESOURCE_STATE_COMMON);
-  return m_dst;
+  return true;
 }

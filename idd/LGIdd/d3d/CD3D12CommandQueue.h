@@ -201,7 +201,12 @@ class CD3D12CommandQueue
       UINT slotCount, bool enableTiming = false, bool sharedFence = false);
     void DeInit();
 
+    CD3D12CommandSlot * Try(UINT slotIndex);
     CD3D12CommandSlot * Acquire(UINT slotIndex);
     CD3D12CommandSlot * Acquire();
+    bool Failed() const
+    {
+      return Atomic::Load(m_failed, std::memory_order_acquire);
+    }
     void WaitForIdle();
 };

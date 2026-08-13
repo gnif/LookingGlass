@@ -97,6 +97,9 @@
     <ClInclude Include="capture\CFrameBufferResource.h">
       <Filter>Capture</Filter>
     </ClInclude>
+    <ClInclude Include="capture\CFrameExec.h">
+      <Filter>Capture</Filter>
+    </ClInclude>
     <ClInclude Include="capture\CFrameGraph.h">
       <Filter>Capture</Filter>
     </ClInclude>
@@ -155,6 +158,9 @@
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
     <ClInclude Include="postprocess\effect\CDownsampleEffect.h">
+      <Filter>Post-processing\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="postprocess\effect\CFormatEffect.h">
       <Filter>Post-processing\Effects</Filter>
     </ClInclude>
     <ClInclude Include="postprocess\effect\CHDR16to10Effect.h">
@@ -294,6 +300,9 @@
     <ClCompile Include="capture\CFrameBufferResource.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
+    <ClCompile Include="capture\CFrameExec.cpp">
+      <Filter>Capture</Filter>
+    </ClCompile>
     <ClCompile Include="capture\CFrameGraph.cpp">
       <Filter>Capture</Filter>
     </ClCompile>
@@ -349,6 +358,9 @@
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>
     <ClCompile Include="postprocess\effect\CDownsampleEffect.cpp">
+      <Filter>Post-processing\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="postprocess\effect\CFormatEffect.cpp">
       <Filter>Post-processing\Effects</Filter>
     </ClCompile>
     <ClCompile Include="postprocess\effect\CHDR16to10Effect.cpp">

@@ -297,11 +297,13 @@ CFrameTex::CFrameTex(uint64_t graphValue, uint64_t poolValue,
   const FrameProfile& profileValue,
   const FrameDesc& frameValue, const FrameTime& timeValue,
   const ComPtr<ID3D12Resource>& res,
-  const D12Sync& sync, D3D12_RESOURCE_STATES state, bool sharedValue) :
+  const D12Sync& sync, D3D12_RESOURCE_STATES state, bool sharedValue,
+  const std::shared_ptr<void>& hold) :
   m_res(res),
   m_sync(sync),
   m_state(state),
   m_shared(sharedValue),
+  m_hold(hold),
   graph(graphValue),
   pool(poolValue),
   node(nodeValue),
@@ -378,7 +380,8 @@ ID3D12Resource * TexWrite::Get() const
 }
 
 bool TexWrite::Seal(const FrameDesc& frame, const FrameTime& time,
-  const D12Sync& sync, TexLease& lease)
+  const D12Sync& sync, TexLease& lease,
+  const std::shared_ptr<void>& hold)
 {
   if (!m_core || !sync.Valid())
     return false;
@@ -404,7 +407,7 @@ bool TexWrite::Seal(const FrameDesc& frame, const FrameTime& time,
   // pool descriptor, including producer-only UAV creation capability.
   desc.format.desc = resource->GetDesc();
 
-  const unsigned index = m_index;
+  const unsigned index      = m_index;
   const uint64_t generation = m_version;
   if (!core->Seal(index, generation, sync))
   {
@@ -415,7 +418,7 @@ bool TexWrite::Seal(const FrameDesc& frame, const FrameTime& time,
 
   CFrameTex * raw = new (std::nothrow) CFrameTex(core->graph, core->id,
     core->node, m_index, m_version, core->profile, desc, time, resource,
-    sync, core->read, core->shared);
+    sync, core->read, core->shared, hold);
   if (!raw)
   {
     core->Drop(index, generation);
@@ -443,6 +446,13 @@ bool TexWrite::Seal(const FrameDesc& frame, const FrameTime& time,
   Clear();
   lease = TexLease(product);
   return true;
+}
+
+void TexWrite::Fail(const D12Sync& sync)
+{
+  if (m_core)
+    m_core->Fail(m_index, m_version, sync);
+  Clear();
 }
 
 void TexWrite::Cancel()

@@ -61,6 +61,7 @@ protected:
   ComPtr<ID3D12PipelineState>  m_pso;
   ComPtr<ID3D12DescriptorHeap> m_descHeap;
   ComPtr<ID3D12Resource>       m_dst;
+  D3D12_RESOURCE_DESC          m_outDesc = {};
   unsigned                     m_threadsX = 0;
   unsigned                     m_threadsY = 0;
 
@@ -81,6 +82,11 @@ protected:
   void UAV(const ComPtr<ID3D12Device3>& device, UINT index,
     ID3D12Resource * resource, DXGI_FORMAT format) const;
 
+  bool IsDst(ID3D12Resource * dst) const;
+
   void TransitionDst(const ComPtr<ID3D12GraphicsCommandList>& commandList,
     D3D12_RESOURCE_STATES before, D3D12_RESOURCE_STATES after);
+  void TransitionDst(const ComPtr<ID3D12GraphicsCommandList>& commandList,
+    ID3D12Resource * dst, D3D12_RESOURCE_STATES before,
+    D3D12_RESOURCE_STATES after);
 };

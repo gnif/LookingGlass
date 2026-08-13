@@ -59,13 +59,15 @@ private:
   ComPtr<ID3D12Resource>  m_res;
   D12Sync                 m_sync;
   D3D12_RESOURCE_STATES   m_state;
-  bool                     m_shared;
+  bool                    m_shared;
+  std::shared_ptr<void>    m_hold;
 
   CFrameTex(uint64_t graph, uint64_t pool, unsigned node, unsigned slot,
     uint64_t version, const FrameProfile& profile, const FrameDesc& frame,
     const FrameTime& time, const ComPtr<ID3D12Resource>& res,
     const D12Sync& sync,
-    D3D12_RESOURCE_STATES state, bool shared);
+    D3D12_RESOURCE_STATES state, bool shared,
+    const std::shared_ptr<void>& hold);
 
 public:
   CFrameTex(const CFrameTex&) = delete;
@@ -141,15 +143,17 @@ public:
   // Seal only after producer commands restore the texture to the pool's
   // configured immutable state and Execute returns this exact sync point.
   bool Seal(const FrameDesc& frame, const FrameTime& time,
-    const D12Sync& sync, TexLease& lease);
+    const D12Sync& sync, TexLease& lease,
+    const std::shared_ptr<void>& hold = {});
+  void Fail(const D12Sync& sync);
   void Cancel();
 };
 
 // One pool owns interchangeable textures for a single graph node. Reset stops
 // acquisition and drains every sealed producer point. Existing writers and
 // leases keep the retired core alive. Reset invalidates writers; a writer
-// which already submitted must still Seal so its point is safely drained,
-// but it will not publish a product from the retired generation.
+// which already submitted must still Seal or Fail so its point is safely
+// drained, but it will not publish a product from the retired generation.
 // The configured state is the promised state presented to every consumer;
 // it is not queried from D3D12. Consumers may read but never transition or
 // write a shared product.

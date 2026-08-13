@@ -161,6 +161,12 @@ bool CSwapChainProcessor::InitializePipeline()
     return false;
 
   m_resPool.Init(m_dx11Device, m_dx12Device);
+  if (!m_exec.Init(m_dx11Device, m_dx12Device,
+      m_devContext->GetTransport().Tex()))
+  {
+    DEBUG_ERROR("Failed to initialize the frame graph executor");
+    return false;
+  }
   const bool enableEffects = !m_dx11Device->IsSoftware();
   if (!enableEffects)
     DEBUG_INFO("Software render adapter: post-processing disabled");
@@ -233,6 +239,7 @@ CSwapChainProcessor::~CSwapChainProcessor()
   // Drain in-flight GPU work / completion callbacks before releasing the
   // resources they reference. The swap chain was already released in the
   // worker epilogue, so this does not hold an IddCx frame.
+  m_exec.Reset();
   if (m_dx12Device)
   {
     m_dx12Device->WaitForIdle();
@@ -565,7 +572,7 @@ void CSwapChainProcessor::CfgGraph()
 
   m_graphPending = false;
   const CfgResult result =
-    transport.Cfg(m_graphCfg, m_graphRev, m_graph);
+    transport.Cfg(m_graphCfg, m_graphRev, m_graph, &m_exec);
   if (result == CfgResult::ACCEPTED)
   {
     m_graphRetryAt = 0;
@@ -659,6 +666,8 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   D12FrameFormat srcFormat = {};
   srcFormat.desc           = srcDesc;
+  srcFormat.dataWidth      = (unsigned)srcDesc.Width;
+  srcFormat.dataHeight     = srcDesc.Height;
   srcFormat.width          = (unsigned)srcDesc.Width;
   srcFormat.height         = srcDesc.Height;
   srcFormat.format         = D12::Type(srcDesc.Format);
@@ -824,6 +833,22 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
 
   if (needsReconfigure || postProcessFormatChanged || frameMetadataChanged)
     m_transport.ForceFrame();
+
+  const FrameDamage texDamage = noImageUpdate ? FrameDamage::NONE :
+    (fullDamage || !resolvedDirtyRectCount ?
+      FrameDamage::FULL : FrameDamage::RECTS);
+  const unsigned texRectCount = texDamage == FrameDamage::RECTS ?
+    resolvedDirtyRectCount : 0;
+  // This call is a no-op for the current legacy-only LGMP graph. When a
+  // texture route is selected, every read of the borrowed source is submitted
+  // here before FinishedProcessingFrame releases the IddCx surface.
+  const TexResult texResult = m_exec.Run(*srcRes, srcFormat, captureTime,
+    postProcessStart, texDamage, dirtyRects, texRectCount);
+  if (texResult == TexResult::FAILED && m_haveGraphCfg)
+  {
+    m_graphPending = true;
+    m_graphRetryAt = CFrameScheduler::Nanotime() + GRAPH_RETRY_NS;
+  }
 
   const FrameSubmission submission =
   {

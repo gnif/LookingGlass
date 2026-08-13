@@ -90,19 +90,18 @@ private:
   std::shared_ptr<CTexSet>      m_active;
   std::shared_ptr<CTexSet>      m_pending;
   std::atomic<uint64_t>       & m_rev;
-  HANDLE                        m_idle                              = nullptr;
-  unsigned                      m_calls                             = 0;
-  bool                          m_open                              = true;
-  bool                          m_changing                          = false;
-  bool                          m_stopped                           = false;
-  FaultRec                      m_faults[MAX_FAULTS]                = {};
-  unsigned                      m_faultCount                        = 0;
-  Failure                       m_failures[TRANSPORT_MAX_INSTANCES] = {};
-  unsigned                      m_failureCount                      = 0;
+  HANDLE                        m_idle                                  = nullptr;
+  unsigned                      m_calls                                 = 0;
+  bool                          m_open                                  = true;
+  bool                          m_changing                              = false;
+  bool                          m_stopped                               = false;
+  FaultRec                      m_faults[MAX_FAULTS]                    = {};
+  unsigned                      m_faultCount                            = 0;
+  Failure                       m_failures[TRANSPORT_MAX_INSTANCES]     = {};
+  unsigned                      m_failureCount                          = 0;
 
   static bool Match(const FaultRec& fault, BackendId id, uint32_t epoch,
     const FrameCfg& cfg, bool anyCfg = false);
-
   bool Enter(const FrameIn& frame, bool lease,
     std::shared_ptr<CTexSet>& set, unsigned& route, ITexSink *& sink);
   void Finish(const std::shared_ptr<CTexSet>& set, unsigned route,
@@ -135,6 +134,7 @@ private:
   void Stop();
 
 public:
+  void Fault(const FrameIn& frame, PushResult result) noexcept;
   PushResult Push(FrameIn frame, TexLease lease) noexcept;
   PushResult Push(FrameIn frame, D11Lease lease) noexcept;
 };

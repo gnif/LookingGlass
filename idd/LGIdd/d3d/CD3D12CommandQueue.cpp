@@ -507,6 +507,21 @@ void CD3D12CommandQueue::DeInit()
   m_qpcFrequency    = 0;
 }
 
+CD3D12CommandSlot * CD3D12CommandQueue::Try(UINT slotIndex)
+{
+  if (slotIndex >= m_slotCount)
+    return nullptr;
+
+  CD3D12CommandSlot& slot = m_slots[slotIndex];
+  if (slot.Acquire())
+    return &slot;
+
+  // The GPU may already be finished while its thread-pool callback is
+  // still pending. Complete it here without waiting for callback dispatch.
+  slot.OnCompletion(false);
+  return slot.Acquire() ? &slot : nullptr;
+}
+
 CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
 {
   if (slotIndex >= m_slotCount)
@@ -515,14 +530,8 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
   const ULONGLONG deadline = GetTickCount64() + 100;
   for (;;)
   {
-    if (m_slots[slotIndex].Acquire())
-      return &m_slots[slotIndex];
-
-    // The GPU may already be finished while its thread-pool callback is
-    // still pending. Complete it here before sleeping on callback dispatch.
-    m_slots[slotIndex].OnCompletion(false);
-    if (m_slots[slotIndex].Acquire())
-      return &m_slots[slotIndex];
+    if (CD3D12CommandSlot * slot = Try(slotIndex))
+      return slot;
     if (Atomic::Load(m_failed, std::memory_order_acquire))
       break;
 
@@ -549,16 +558,7 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire()
   // The unindexed path is used for immediate software publication. Keep at
   // most one copy in flight so a newer frame is dropped instead of queued
   // behind bandwidth-bound work which is already stale.
-  CD3D12CommandSlot& slot = m_slots[0];
-  if (slot.Acquire())
-    return &slot;
-
-  // Complete already-fenced work without waiting for callback dispatch.
-  slot.OnCompletion(false);
-  if (slot.Acquire())
-    return &slot;
-
-  return nullptr;
+  return Try(0);
 }
 
 void CD3D12CommandQueue::WaitForIdle()
