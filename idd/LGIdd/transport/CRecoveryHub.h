@@ -96,7 +96,6 @@ private:
   bool             m_knownValid    = false;
   bool             m_monitorReady  = false;
 
-  static bool SameSource(const SourceKey& left, const SourceKey& right);
   static bool SameEpoch(
     const SourceKey& source, BackendId backend, uint32_t epoch);
   static bool SameRequest(const Request& request, const SourceKey& source,

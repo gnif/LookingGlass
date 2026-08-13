@@ -45,13 +45,6 @@ CRecoveryHub::CRecoveryHub() :
 {
 }
 
-bool CRecoveryHub::SameSource(
-  const SourceKey& left, const SourceKey& right)
-{
-  return left.backend == right.backend && left.epoch == right.epoch &&
-    left.client == right.client && left.generation == right.generation;
-}
-
 bool CRecoveryHub::SameEpoch(
   const SourceKey& source, BackendId backend, uint32_t epoch)
 {
@@ -61,7 +54,7 @@ bool CRecoveryHub::SameEpoch(
 bool CRecoveryHub::SameRequest(const Request& request,
   const SourceKey& source, uint64_t session, uint32_t serial, bool active)
 {
-  return SameSource(request.source, source) && request.session == session &&
+  return request.source == source && request.session == session &&
     request.serial == serial && request.active == active;
 }
 
@@ -83,7 +76,7 @@ unsigned CRecoveryHub::FindSourceLocked(const SourceKey& source) const
 {
   for (unsigned i = 0; i < MAX_REQUESTS; ++i)
     if (m_requests[i].state != SlotState::FREE &&
-        SameSource(m_requests[i].source, source))
+        m_requests[i].source == source)
       return i;
   return MAX_REQUESTS;
 }

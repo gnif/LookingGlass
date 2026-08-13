@@ -22,16 +22,12 @@
 
 #include "input/IInputSink.h"
 
-static bool SameSource(const SourceKey& left, const SourceKey& right)
-{
-  return left.backend == right.backend && left.epoch == right.epoch &&
-    left.client == right.client && left.generation == right.generation;
-}
-
 static bool SameClient(const SourceKey& left, const SourceKey& right)
 {
-  return left.backend == right.backend && left.epoch == right.epoch &&
-    left.client == right.client;
+  return
+    left.backend == right.backend &&
+    left.epoch   == right.epoch   &&
+    left.client  == right.client;
 }
 
 CInputHub::CInputHub()
@@ -307,7 +303,7 @@ void CInputHub::CommitInteraction(
   const SourceKey& source, const InteractionPermit& permit)
 {
   if (!source.backend || !source.epoch || !source.client || !permit.serial ||
-      !SameSource(source, permit.source))
+      source != permit.source)
     return;
 
   CSRWExclusiveLock lock(m_lock);
@@ -497,7 +493,7 @@ bool CInputHub::BindingPresent(const SourceKey& source) const
 
 bool CInputHub::OwnerValid(const SourceKey& source) const
 {
-  return SourceValid(source) && SameSource(m_owner, source);
+  return SourceValid(source) && m_owner == source;
 }
 
 void CInputHub::ClearInteraction()
@@ -558,8 +554,7 @@ InputTargetState CInputHub::GetState(const SourceKey& source)
     return result;
   if (!m_owner.backend)
     result.available = true;
-  else if (source.client && source.generation &&
-      SameSource(m_owner, source))
+  else if (source.client && source.generation && m_owner == source)
   {
     result.available = true;
     result.owned     = true;
@@ -600,7 +595,7 @@ InputResult CInputHub::Claim(const SourceKey& source)
   if (!CheckState())
     return InputResult::UNAVAILABLE;
   if (m_owner.backend)
-    return SameSource(m_owner, source) ?
+    return m_owner == source ?
       InputResult::ACCEPTED : InputResult::BUSY;
   if (!m_sink->Reset() || m_sink->GetState() != m_sinkState)
   {

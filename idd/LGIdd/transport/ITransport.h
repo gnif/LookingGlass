@@ -40,6 +40,20 @@ struct SourceKey
   uint32_t  generation = 0;
 };
 
+inline bool operator==(const SourceKey& left, const SourceKey& right)
+{
+  return
+    left.backend    == right.backend    &&
+    left.epoch      == right.epoch      &&
+    left.client     == right.client     &&
+    left.generation == right.generation;
+}
+
+inline bool operator!=(const SourceKey& left, const SourceKey& right)
+{
+  return !(left == right);
+}
+
 enum class InteractionResult
 {
   ACCEPTED,
