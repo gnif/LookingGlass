@@ -20,6 +20,7 @@
 
 #include "ipc/CInputPipeServer.h"
 
+#include "config/CSettings.h"
 #include "CDebug.h"
 #include "CSRWLock.h"
 #include "InputPipeProtocol.h"
@@ -503,6 +504,9 @@ void CInputPipeServer::LogStatistics()
 
   if (!(enqueued || relativeCoalesced || absoluteCoalesced || resyncs ||
       resyncDiscarded || sent || stale || writeFailed || slowWrites))
+    return;
+
+  if (!g_settings.ShouldLogStatistics())
     return;
 
   const double writeMs = m_performanceFrequency.QuadPart ?

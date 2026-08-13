@@ -20,6 +20,7 @@
 
 #include "transport/lgmp/CLGMPInputTransport.h"
 
+#include "config/CSettings.h"
 #include "transport/lgmp/CLGMPHost.h"
 #include "Atomic.h"
 #include "CDebug.h"
@@ -642,6 +643,9 @@ void CLGMPInputTransport::LogStatistics(ULONGLONG now)
 
   if (!statistics.messages && !statistics.claims &&
       !statistics.releases && !statistics.deliveryFailures)
+    return;
+
+  if (!g_settings.ShouldLogStatistics())
     return;
 
   const double elapsed =

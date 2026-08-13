@@ -27,8 +27,6 @@
 
 CSettings g_settings;
 
-#define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
-
 CSettings::CSettings()
 {
 }
@@ -107,7 +105,7 @@ bool CSettings::SetExtraMode(const DisplayMode& mode)
   DWORD disp = 0;
   LONG  ec = RegCreateKeyExW(
     HKEY_LOCAL_MACHINE,
-    LGIDD_REGKEY,
+    RegistryKey(),
     0, NULL, REG_OPTION_NON_VOLATILE,
     KEY_SET_VALUE,
     NULL, &hKey, &disp);
@@ -142,7 +140,7 @@ std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defa
   HKEY hKey = nullptr;
   LONG ec = RegOpenKeyExW(
     HKEY_LOCAL_MACHINE,
-    LGIDD_REGKEY,
+    RegistryKey(),
     0,
     KEY_QUERY_VALUE,
     &hKey
@@ -188,51 +186,6 @@ std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defa
   return std::wstring(buf.data());
 }
 
-bool CSettings::ReadBoolValue(const wchar_t* name, bool defaultValue)
-{
-  HKEY hKey = nullptr;
-  LONG ec = RegOpenKeyExW(
-    HKEY_LOCAL_MACHINE,
-    LGIDD_REGKEY,
-    0,
-    KEY_QUERY_VALUE,
-    &hKey
-  );
-
-  if (ec != ERROR_SUCCESS)
-    return defaultValue;
-
-  DWORD type = 0;
-  DWORD cb = 0;
-
-  ec = RegQueryValueExW(hKey, name, nullptr, &type, nullptr, &cb);
-  if (ec != ERROR_SUCCESS || type != REG_DWORD || cb != sizeof(DWORD))
-  {
-    RegCloseKey(hKey);
-    return defaultValue;
-  }
-
-  DWORD value = 0;
-  DWORD type2 = 0;
-  DWORD cb2 = sizeof(value);
-
-  ec = RegQueryValueExW(
-    hKey,
-    name,
-    nullptr,
-    &type2,
-    reinterpret_cast<LPBYTE>(&value),
-    &cb2
-  );
-
-  RegCloseKey(hKey);
-
-  if (ec != ERROR_SUCCESS || type2 != REG_DWORD || cb2 != sizeof(DWORD))
-    return defaultValue;
-
-  return value != 0;
-}
-
 bool CSettings::GetExtraMode(DisplayMode& mode)
 {
   std::wstring extraMode = ReadStringValue(L"ExtraMode", NULL);
@@ -250,7 +203,7 @@ unsigned CSettings::GetDefaultRefreshMilliHz() const
 {
   HKEY hKey = nullptr;
   LONG status = RegOpenKeyExW(
-    HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
+    HKEY_LOCAL_MACHINE, RegistryKey(), 0, KEY_QUERY_VALUE, &hKey);
   if (status != ERROR_SUCCESS)
     return 60000;
 
@@ -291,7 +244,8 @@ bool CSettings::ReadMultiStringValue(const wchar_t * name,
   std::vector<std::wstring>& out) const
 {
   HKEY hKey = nullptr;
-  LONG st   = RegOpenKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE, &hKey);
+  LONG st   = RegOpenKeyExW(
+    HKEY_LOCAL_MACHINE, RegistryKey(), 0, KEY_QUERY_VALUE, &hKey);
   if (st != ERROR_SUCCESS)
     return false;
 

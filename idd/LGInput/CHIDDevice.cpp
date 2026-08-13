@@ -21,6 +21,7 @@
 #include "CHIDDevice.h"
 
 #include "CDebug.h"
+#include "config/CSettings.h"
 #include "CSRWLock.h"
 #include "HIDReports.h"
 #include "ipc/CInputPipeClient.h"
@@ -669,6 +670,9 @@ void CHIDDevice::LogStatistics()
       statistics.staleAbsoluteCompacted ||
       statistics.keyboardDuplicates || statistics.consumerDuplicates ||
       statistics.overflows || statistics.resetDiscarded))
+    return;
+
+  if (!CSettings::ShouldLogStatistics())
     return;
 
   DEBUG_TRACE("HID reports: %llu direct, %llu queued, peak %zu; "

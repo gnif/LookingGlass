@@ -47,9 +47,61 @@ class CSettings
     unsigned GetDefaultRefreshMilliHz() const;
 
     std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue = nullptr);
-    bool ReadBoolValue(const wchar_t* name, bool defaultValue = false);
+    static bool ReadBoolValue(
+      const wchar_t * name, bool defaultValue = false)
+    {
+      HKEY hKey   = nullptr;
+      LONG status = RegOpenKeyExW(
+        HKEY_LOCAL_MACHINE,
+        RegistryKey(),
+        0,
+        KEY_QUERY_VALUE,
+        &hKey);
+      if (status != ERROR_SUCCESS)
+        return defaultValue;
+
+      DWORD type = 0;
+      DWORD size = 0;
+      status = RegQueryValueExW(
+        hKey, name, nullptr, &type, nullptr, &size);
+      if (status != ERROR_SUCCESS ||
+          type   != REG_DWORD     ||
+          size   != sizeof(DWORD))
+      {
+        RegCloseKey(hKey);
+        return defaultValue;
+      }
+
+      DWORD value     = 0;
+      DWORD valueType = 0;
+      DWORD valueSize = sizeof(value);
+      status = RegQueryValueExW(
+        hKey,
+        name,
+        nullptr,
+        &valueType,
+        reinterpret_cast<LPBYTE>(&value),
+        &valueSize);
+      RegCloseKey(hKey);
+      if (status    != ERROR_SUCCESS ||
+          valueType != REG_DWORD     ||
+          valueSize != sizeof(value))
+        return defaultValue;
+
+      return value != 0;
+    }
+
+    static bool ShouldLogStatistics()
+    {
+      return ReadBoolValue(L"LogStatistics");
+    }
 
   private:
+    static const wchar_t * RegistryKey()
+    {
+      return L"SOFTWARE\\LookingGlass\\IDD";
+    }
+
     bool ReadMultiStringValue(const wchar_t * name,
       std::vector<std::wstring>& out) const;
     bool ReadModesValue(std::vector<std::wstring> &out) const;

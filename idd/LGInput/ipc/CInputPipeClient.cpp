@@ -21,6 +21,7 @@
 #include "CInputPipeClient.h"
 
 #include "CDebug.h"
+#include "config/CSettings.h"
 #include "InputPipeProtocol.h"
 #include "../CHIDDevice.h"
 #include "../HIDReports.h"
@@ -335,7 +336,8 @@ void CInputPipeClient::LogStatistics(bool force)
   m_statSubmitFailed   = 0;
   m_lastStatistics     = now;
 
-  if (received || malformed || sequenceResets || submitFailed)
+  if ((received || malformed || sequenceResets || submitFailed) &&
+      CSettings::ShouldLogStatistics())
   {
     DEBUG_TRACE("LGInput pipe receive: %llu reports, %llu malformed, "
       "%llu sequence resets, %llu HID submit failures",

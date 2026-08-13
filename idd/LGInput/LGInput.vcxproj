@@ -80,7 +80,7 @@
       <WppRecorderEnabled>true</WppRecorderEnabled>
       <WppScanConfigurationData Condition="'%(ClCompile.ScanConfigurationData)' == ''">Trace.h</WppScanConfigurationData>
       <AdditionalOptions>/EHsc /D_ATL_NO_WIN_SUPPORT %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalIncludeDirectories>$(ProjectDir)..\LGCommon;$(ProjectDir)..\..\common\include;$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\LGCommon;$(ProjectDir)..\LGIdd;$(ProjectDir)..\..\common\include;$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib</AdditionalDependencies>

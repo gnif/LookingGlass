@@ -20,6 +20,7 @@
 
 #include "capture/CFrameScheduler.h"
 
+#include "config/CSettings.h"
 #include "CDebug.h"
 #include "Seq.h"
 
@@ -991,6 +992,9 @@ void CFrameScheduler::LogStatistics(uint64_t now)
   m_lastLogSkipped   = m_skippedFrames;
   m_lastLogPublished = m_publishedFrames;
   lock.Unlock();
+
+  if (!g_settings.ShouldLogStatistics())
+    return;
 
   const double acquiredRate =
     static_cast<double>(acquired) * 1000000000.0 / elapsed;
