@@ -70,6 +70,7 @@
     <ClCompile Include="RefreshRate.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Atomic.h" />
     <ClInclude Include="CDebug.h" />
     <ClInclude Include="CPipeEndpoint.h" />
     <ClInclude Include="CSRWLock.h" />

@@ -20,10 +20,10 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 
 #include <Windows.h>
-#include <atomic>
 #include <stdint.h>
 
 extern "C" {
@@ -173,7 +173,7 @@ public:
     bool allowReadyReplacement = true) override;
   bool HasPublishedFrame() const override
   {
-    return m_readyFrameIndex.load(std::memory_order_acquire) >= 0;
+    return Atomic::Load(m_readyFrameIndex, std::memory_order_acquire) >= 0;
   }
   void ProcessDeliveries() override;
   bool GetPendingDeliveryTarget(

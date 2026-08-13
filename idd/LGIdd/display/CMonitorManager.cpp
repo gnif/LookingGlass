@@ -21,6 +21,7 @@
 #include "display/CMonitorManager.h"
 
 #include "display/CMonitorContext.h"
+#include "Atomic.h"
 #include "CDebug.h"
 
 bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
@@ -133,7 +134,7 @@ CMonitorManager::ReplugAction CMonitorManager::Replug()
   {
     // Either no monitor yet, or one is already pending; build it now and
     // cancel any queued rebuild so we do not create two.
-    m_createQueued.store(0);
+    Atomic::Store(m_createQueued, 0);
     return ReplugAction::CREATE;
   }
 
@@ -163,7 +164,7 @@ CMonitorManager::ReplugAction CMonitorManager::Replug()
   // If there was no swap chain there will be no unassign callback to queue
   // the rebuild. Otherwise OnSwapChainReleased does so after teardown drains.
   if (rebuild)
-    m_createQueued.store(1);
+    Atomic::Store(m_createQueued, 1);
 
   return ReplugAction::NONE;
 }
@@ -205,7 +206,7 @@ void CMonitorManager::OnSwapChainReleased()
   }
 
   if (rebuild)
-    m_createQueued.store(1);
+    Atomic::Store(m_createQueued, 1);
 }
 
 CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
@@ -249,15 +250,15 @@ CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
 
 void CMonitorManager::QueueReplug()
 {
-  m_replugQueued.store(1);
+  Atomic::Store(m_replugQueued, 1);
 }
 
 CMonitorManager::DeferredAction CMonitorManager::TakeDeferredAction()
 {
-  if (m_createQueued.exchange(0))
+  if (Atomic::Swap(m_createQueued, 0))
     return DeferredAction::CREATE;
 
-  if (m_replugQueued.exchange(0))
+  if (Atomic::Swap(m_replugQueued, 0))
     return DeferredAction::REPLUG;
 
   return DeferredAction::NONE;

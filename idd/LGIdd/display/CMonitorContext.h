@@ -20,13 +20,13 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
 
-#include <atomic>
 #include <memory>
 #include <mutex>
 
@@ -71,7 +71,8 @@ public:
   void UnassignSwapChain();
   bool IsAssignmentCurrent(UINT64 generation) const
   {
-    return m_assignmentGeneration.load(std::memory_order_acquire) == generation;
+    return Atomic::Load(
+      m_assignmentGeneration, std::memory_order_acquire) == generation;
   }
 
   CDeviceContext * GetDeviceContext() { return m_devContext; }

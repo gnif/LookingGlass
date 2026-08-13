@@ -48,8 +48,8 @@ NTSTATUS CMonitorContext::AssignSwapChain(
   // new generation is established.
   DetachSwapChain();
 
-  const UINT64 assignmentGeneration =
-    m_assignmentGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+  const UINT64 assignmentGeneration = Atomic::FetchAdd(
+    m_assignmentGeneration, 1, std::memory_order_acq_rel) + 1;
 
   // Build the D3D11 device into a local so the member is never observed
   // half-constructed. The worker binds it before performing the expensive
@@ -96,7 +96,8 @@ void CMonitorContext::DetachSwapChain()
   // Invalidate setup in progress before waiting for m_lock. This also lets a
   // worker about to call SetDevice observe an unassign whose callback is
   // blocked waiting for the processor to be published.
-  m_assignmentGeneration.fetch_add(1, std::memory_order_acq_rel);
+  Atomic::FetchAdd(
+    m_assignmentGeneration, 1, std::memory_order_acq_rel);
 
   // Detach under the lock, then destroy outside it. Destroying the processor
   // joins its worker thread, whose teardown (WdfObjectDelete) re-enters this

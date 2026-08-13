@@ -26,6 +26,7 @@
 #include "transport/IFrameTransport.h"
 #include "transport/IInputTransport.h"
 #include "transport/TransportFactory.h"
+#include "Atomic.h"
 #include "CDebug.h"
 
 #include <dxgi1_2.h>
@@ -168,7 +169,7 @@ void CDeviceContext::InitAdapter()
   }
 
   LONG initExpected = 0;
-  if (!m_initInProgress.compare_exchange_strong(initExpected, 1))
+  if (!Atomic::CAS(m_initInProgress, initExpected, 1))
   {
     DEBUG_TRACE("Adapter initialization skipped: initialization already in progress");
     return;
@@ -182,7 +183,7 @@ void CDeviceContext::InitAdapter()
     if (!m_transport)
     {
       DEBUG_ERROR("Failed to create the frame transport");
-      m_initInProgress.store(0);
+      Atomic::Store(m_initInProgress, 0);
       return;
     }
 
@@ -196,7 +197,7 @@ void CDeviceContext::InitAdapter()
       }
       else
         DEBUG_ERROR("Failed to open the frame transport");
-      m_initInProgress.store(0);
+      Atomic::Store(m_initInProgress, 0);
       return;
     }
     m_transportOpened = true;
@@ -268,13 +269,13 @@ void CDeviceContext::InitAdapter()
   DEBUG_TRACE("Initializing frame transport metadata");
   if (!InitializeTransport())
   {
-    m_initInProgress.store(0);
+    Atomic::Store(m_initInProgress, 0);
     return;
   }
   DEBUG_TRACE("Loading configured display modes");
   if (!m_displayConfiguration.Load(*m_transport))
   {
-    m_initInProgress.store(0);
+    Atomic::Store(m_initInProgress, 0);
     return;
   }
   DEBUG_TRACE("Initializing monitor EDID");
@@ -347,7 +348,7 @@ void CDeviceContext::InitAdapter()
   if (!NT_SUCCESS(status))
   {
     DEBUG_ERROR_HR(status, "IddCxAdapterInitAsync Failed");
-    m_initInProgress.store(0);
+    Atomic::Store(m_initInProgress, 0);
     return;
   }
 
@@ -355,7 +356,7 @@ void CDeviceContext::InitAdapter()
   if (!m_adapter)
   {
     DEBUG_ERROR("IddCxAdapterInitAsync succeeded without returning an adapter object");
-    m_initInProgress.store(0);
+    Atomic::Store(m_initInProgress, 0);
     return;
   }
 
@@ -367,7 +368,7 @@ void CDeviceContext::InitAdapter()
 
   // Adapter is up; no need to keep retrying.
   StopInitRetry();
-  m_initInProgress.store(0);
+  Atomic::Store(m_initInProgress, 0);
   DEBUG_INFO("Adapter initialization request complete; returning to IddCx");
 }
 

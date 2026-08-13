@@ -217,12 +217,12 @@ bool CPipeEndpoint::Start(
     PublishPipe(pipe);
   }
 
-  m_running.store(true);
+  Atomic::Store(m_running, true);
   m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
   if (!m_thread)
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe thread");
-    m_running.store(false);
+    Atomic::Store(m_running, false);
 
     {
       CSRWExclusiveLock lock(m_pipeLock);
@@ -245,8 +245,8 @@ bool CPipeEndpoint::Start(
 
 void CPipeEndpoint::Stop()
 {
-  m_running.store(false);
-  m_connected.store(false);
+  Atomic::Store(m_running, false);
+  Atomic::Store(m_connected, false);
   if (m_stopEvent)
     SetEvent(m_stopEvent);
 
@@ -284,7 +284,7 @@ void CPipeEndpoint::Stop()
     m_writeEvent = nullptr;
   }
 
-  m_connected.store(false);
+  Atomic::Store(m_connected, false);
 }
 
 bool CPipeEndpoint::Send(const void * message, size_t size)
@@ -303,7 +303,7 @@ bool CPipeEndpoint::Send(const void * message, size_t size)
     success = result == PipeIoResult::Success;
     if (!success)
     {
-      m_connected.store(false);
+      Atomic::Store(m_connected, false);
       CancelIoEx(m_pipe, nullptr);
     }
   }
@@ -323,8 +323,8 @@ void CPipeEndpoint::Thread()
   else
     RunClient();
 
-  m_running.store(false);
-  m_connected.store(false);
+  Atomic::Store(m_running, false);
+  Atomic::Store(m_connected, false);
 }
 
 HANDLE CPipeEndpoint::CreateServerPipe()
@@ -421,14 +421,14 @@ void CPipeEndpoint::RunServer()
         WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
       break;
 
-    m_connected.store(true);
+    Atomic::Store(m_connected, true);
     DEBUG_INFO("Named pipe client connected: %ls", m_pipeName.c_str());
     if (m_handler)
       m_handler->OnPipeConnected();
 
     ReadMessages(pipe);
 
-    m_connected.store(false);
+    Atomic::Store(m_connected, false);
     if (m_handler)
       m_handler->OnPipeDisconnected();
     DEBUG_INFO("Named pipe client disconnected: %ls", m_pipeName.c_str());
@@ -504,7 +504,7 @@ void CPipeEndpoint::RunClient()
     }
 
     PublishPipe(pipe);
-    m_connected.store(true);
+    Atomic::Store(m_connected, true);
     retryDelay = CLIENT_RETRY_INITIAL_MS;
     lastConnectError = ERROR_SUCCESS;
     DEBUG_INFO("Named pipe connected: %ls", m_pipeName.c_str());
@@ -513,7 +513,7 @@ void CPipeEndpoint::RunClient()
 
     ReadMessages(pipe);
 
-    m_connected.store(false);
+    Atomic::Store(m_connected, false);
     if (m_handler)
       m_handler->OnPipeDisconnected();
     DEBUG_INFO("Named pipe disconnected: %ls", m_pipeName.c_str());

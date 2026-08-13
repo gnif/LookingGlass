@@ -23,6 +23,9 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="Atomic.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="CDebug.h">
       <Filter>Header Files</Filter>
     </ClInclude>

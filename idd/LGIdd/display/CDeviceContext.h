@@ -20,11 +20,12 @@
 
 #pragma once
 
+#include "Atomic.h"
+
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
 
-#include <atomic>
 #include <memory>
 #include <stddef.h>
 #include <stdint.h>

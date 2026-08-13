@@ -20,11 +20,12 @@
 
 #pragma once
 
+#include "Atomic.h"
+
 #include <Windows.h>
 #include <wdf.h>
 #include <wrl.h>
 #include <d3d12.h>
-#include <atomic>
 #include <stdint.h>
 
 #include "capture/CFrameScheduler.h"
@@ -112,15 +113,17 @@ class CFrameBufferResource
     }
     void ResetCompletion()
     {
-      m_completionHandled.store(false, std::memory_order_release);
+      Atomic::Store(
+        m_completionHandled, false, std::memory_order_release);
     }
     void MarkCompletion()
     {
-      m_completionHandled.store(true, std::memory_order_release);
+      Atomic::Store(
+        m_completionHandled, true, std::memory_order_release);
     }
     bool CompletionHandled() const
     {
-      return m_completionHandled.load(std::memory_order_acquire);
+      return Atomic::Load(m_completionHandled, std::memory_order_acquire);
     }
     void     SetCandidateIndex(unsigned index) { m_candidateIndex = index; }
     unsigned GetCandidateIndex() const         { return m_candidateIndex; }

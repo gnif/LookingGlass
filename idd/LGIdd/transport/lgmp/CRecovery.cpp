@@ -22,6 +22,7 @@
 
 #include "transport/lgmp/CIVSHMEM.h"
 #include "platform/CPlatformInfo.h"
+#include "Atomic.h"
 #include "CDebug.h"
 #include "VersionInfo.h"
 
@@ -37,36 +38,6 @@ namespace
 {
   static const uint64_t HELPER_TIMEOUT_MS = 30000;
   CSRWLock l_wireLock;
-
-  uint32_t AtomicRead(uint32_t& value)
-  {
-    return static_cast<uint32_t>(InterlockedCompareExchange(
-      (volatile LONG *)&value, 0, 0));
-  }
-
-  void AtomicWrite(uint32_t& value, uint32_t data)
-  {
-    InterlockedExchange((volatile LONG *)&value, static_cast<LONG>(data));
-  }
-
-  void AtomicIncrement(uint32_t& value)
-  {
-    InterlockedIncrement((volatile LONG *)&value);
-  }
-
-  uint32_t AtomicAdd(uint32_t& value, uint32_t data)
-  {
-    return static_cast<uint32_t>(InterlockedExchangeAdd(
-      (volatile LONG *)&value, static_cast<LONG>(data))) + data;
-  }
-
-  bool AtomicCompareExchange(
-    uint32_t& value, uint32_t expected, uint32_t data)
-  {
-    return static_cast<uint32_t>(InterlockedCompareExchange(
-      (volatile LONG *)&value, static_cast<LONG>(data),
-      static_cast<LONG>(expected))) == expected;
-  }
 
   uint64_t CreateSession(const void * memory, uint64_t previous)
   {
@@ -89,13 +60,13 @@ namespace
 
 bool CRecovery::OwnsSession()
 {
-  if (AtomicRead(m_data->header.ready) != KVMFR_R_READY)
+  if (Atomic::Load(m_data->header.ready) != KVMFR_R_READY)
     return false;
 
   const uint64_t session = m_data->header.session;
-  MemoryBarrier();
+  Atomic::Fence();
   return session == m_session &&
-    AtomicRead(m_data->header.ready) == KVMFR_R_READY;
+    Atomic::Load(m_data->header.ready) == KVMFR_R_READY;
 }
 
 bool CRecovery::ReadRequest(
@@ -103,14 +74,14 @@ bool CRecovery::ReadRequest(
 {
   for (unsigned i = 0; i < 4; ++i)
   {
-    const uint32_t serial = AtomicRead(source.serial);
+    const uint32_t serial = Atomic::Load(source.serial);
     if (!serial || (serial & 1U))
       return false;
 
     const uint32_t type    = source.request;
     const uint64_t session = source.session;
-    MemoryBarrier();
-    if (AtomicRead(source.serial) == serial)
+    Atomic::Fence();
+    if (Atomic::Load(source.serial) == serial)
     {
       result.serial  = serial;
       result.request = type;
@@ -126,7 +97,7 @@ bool CRecovery::ReadStatus(KVMFRRStatus& source, KVMFRRStatus& result)
 {
   for (unsigned i = 0; i < 4; ++i)
   {
-    const uint32_t serial = AtomicRead(source.serial);
+    const uint32_t serial = Atomic::Load(source.serial);
     if (!serial || (serial & 1U))
       continue;
 
@@ -135,8 +106,8 @@ bool CRecovery::ReadStatus(KVMFRRStatus& source, KVMFRRStatus& result)
     result.state      = source.state;
     result.error      = source.error;
     result.session    = source.session;
-    MemoryBarrier();
-    if (AtomicRead(source.serial) == serial)
+    Atomic::Fence();
+    if (Atomic::Load(source.serial) == serial)
     {
       result.serial = serial;
       return true;
@@ -154,10 +125,7 @@ bool CRecovery::SerialNewer(uint32_t serial, uint32_t reference)
 
 uint32_t CRecovery::NextTicket()
 {
-  uint32_t ticket = AtomicAdd(m_data->req.ticket, 2U);
-  if (!ticket)
-    ticket = AtomicAdd(m_data->req.ticket, 2U);
-  return ticket;
+  return Atomic::Next(m_data->req.ticket, 2U);
 }
 
 void CRecovery::Publish(uint32_t serial, uint32_t request,
@@ -168,13 +136,13 @@ void CRecovery::Publish(uint32_t serial, uint32_t request,
   if (!published)
     published = KVMFR_R_REQ_FIRST;
 
-  AtomicWrite(m_data->status.serial, writing);
+  Atomic::Store(m_data->status.serial, writing);
   m_data->status.ackRequest = request;
   m_data->status.state      = state;
   m_data->status.error      = error;
   m_data->status.session    = m_session;
   m_data->status.ackSerial  = serial;
-  AtomicWrite(m_data->status.serial, published);
+  Atomic::Store(m_data->status.serial, published);
   m_statusSerial = published;
 }
 
@@ -192,7 +160,7 @@ bool CRecovery::Initialize(CIVSHMEM& ivshmem)
     return false;
   }
 
-  const uint32_t oldReady = AtomicRead(m_data->header.ready);
+  const uint32_t oldReady = Atomic::Load(m_data->header.ready);
   const bool oldValid = oldReady == KVMFR_R_READY &&
     memcmp(m_data->header.magic, KVMFR_R_MAGIC,
       sizeof(m_data->header.magic)) == 0 &&
@@ -220,7 +188,7 @@ bool CRecovery::Initialize(CIVSHMEM& ivshmem)
     }
   }
 
-  AtomicWrite(m_data->header.ready, 0);
+  Atomic::Store(m_data->header.ready, 0);
   if (oldValid)
   {
     ZeroMemory(&m_data->header, sizeof(m_data->header));
@@ -233,8 +201,7 @@ bool CRecovery::Initialize(CIVSHMEM& ivshmem)
     {
       KVMFRRRequest request = {};
       if (ReadRequest(m_data->requests[i], request))
-        AtomicCompareExchange(
-          m_data->requests[i].serial, request.serial, 0);
+        Atomic::CAS(m_data->requests[i].serial, request.serial, 0);
     }
   }
   else
@@ -264,7 +231,7 @@ bool CRecovery::Initialize(CIVSHMEM& ivshmem)
     KVMFR_R_STATE_SWITCHING, KVMFR_R_ERR_NONE);
 
   m_nextHeartbeat = GetTickCount64() + KVMFR_R_HEARTBEAT_MS;
-  AtomicWrite(m_data->header.ready, KVMFR_R_READY);
+  Atomic::Store(m_data->header.ready, KVMFR_R_READY);
 
   DEBUG_INFO("Recovery channel initialized (session %llu%s)",
     (unsigned long long)m_session,
@@ -289,7 +256,7 @@ CRecovery::Request CRecovery::Process()
   const uint64_t now = GetTickCount64();
   if (now >= m_nextHeartbeat)
   {
-    AtomicIncrement(m_data->header.heartbeat);
+    Atomic::Inc(m_data->header.heartbeat);
     m_nextHeartbeat = now + KVMFR_R_HEARTBEAT_MS;
   }
 
@@ -371,8 +338,7 @@ CRecovery::Request CRecovery::Process()
   // slot without a corresponding acknowledgement.
   for (unsigned i = 0; i < KVMFR_R_REQ_SLOTS; ++i)
     if (stable[i])
-      AtomicCompareExchange(
-        m_data->requests[i].serial, requests[i].serial, 0);
+      Atomic::CAS(m_data->requests[i].serial, requests[i].serial, 0);
 
   if (m_waiting && now >= m_deadline)
   {

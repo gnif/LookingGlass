@@ -20,12 +20,12 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CPipeEndpoint.h"
 #include "CSRWLock.h"
 #include "InputPipeProtocol.h"
 #include "input/IInputSink.h"
 
-#include <atomic>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -115,7 +115,7 @@ public:
 
   uint64_t GetState() const override
   {
-    return m_state.load(std::memory_order_acquire);
+    return Atomic::Load(m_state, std::memory_order_acquire);
   }
 
   bool SendMouseRelative(

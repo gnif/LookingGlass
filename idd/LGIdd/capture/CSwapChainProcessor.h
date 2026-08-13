@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "d3d/CD3D11Device.h"
 #include "d3d/CD3D12Device.h"
 #include "display/IddCxCompat.h"
@@ -30,7 +31,6 @@
 
 #include <Windows.h>
 #include <wrl.h>
-#include <atomic>
 #include <memory>
 
 using namespace Microsoft::WRL;

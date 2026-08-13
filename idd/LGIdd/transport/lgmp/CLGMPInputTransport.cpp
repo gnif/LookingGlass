@@ -21,6 +21,7 @@
 #include "transport/lgmp/CLGMPInputTransport.h"
 
 #include "transport/lgmp/CLGMPHost.h"
+#include "Atomic.h"
 #include "CDebug.h"
 #include "CSRWLock.h"
 #include "Seq.h"
@@ -201,10 +202,11 @@ bool CLGMPInputTransport::PublishStatus()
 
 void CLGMPInputTransport::FlushStatus()
 {
-  if (m_statusFailed.load(std::memory_order_acquire) || PublishStatus())
+  if (Atomic::Load(m_statusFailed, std::memory_order_acquire) ||
+      PublishStatus())
     return;
 
-  m_statusFailed.store(true, std::memory_order_release);
+  Atomic::Store(m_statusFailed, true, std::memory_order_release);
   CSRWSharedLock lock(m_lifecycleLock);
   if (m_stopEvent)
     SetEvent(m_stopEvent);
@@ -264,7 +266,7 @@ bool CLGMPInputTransport::Start(IInputTarget& target)
     Seq::Inc(m_endpointGeneration);
     m_statusDirty = true;
   }
-  m_statusFailed.store(false, std::memory_order_release);
+  Atomic::Store(m_statusFailed, false, std::memory_order_release);
   m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
   if (!m_thread)
   {
@@ -693,7 +695,7 @@ void CLGMPInputTransport::Thread()
     }
     if (!PublishStatus())
     {
-      m_statusFailed.store(true, std::memory_order_release);
+      Atomic::Store(m_statusFailed, true, std::memory_order_release);
       failed = true;
       break;
     }
@@ -716,7 +718,7 @@ void CLGMPInputTransport::Thread()
       _countof(waitHandles), waitHandles, FALSE, INFINITE);
     if (wait == WAIT_FIRST_OBJECT_VALUE)
     {
-      failed = m_statusFailed.load(std::memory_order_acquire);
+      failed = Atomic::Load(m_statusFailed, std::memory_order_acquire);
       break;
     }
     if (wait != WAIT_FIRST_OBJECT_VALUE + 1)

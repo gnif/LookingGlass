@@ -20,6 +20,7 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "transport/ITransport.h"
 #include "transport/lgmp/CIVSHMEM.h"
 #include "transport/lgmp/CLGMPControl.h"
@@ -27,8 +28,6 @@
 #include "transport/lgmp/CLGMPHost.h"
 #include "transport/lgmp/CLGMPInputTransport.h"
 #include "transport/lgmp/CRecovery.h"
-
-#include <atomic>
 
 class CLGMPTransport final : public ITransport
 {

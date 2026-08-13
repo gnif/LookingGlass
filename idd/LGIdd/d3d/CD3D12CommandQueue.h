@@ -20,13 +20,13 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 
 #include <Windows.h>
 #include <wdf.h>
 #include <wrl.h>
 #include <d3d12.h>
-#include <atomic>
 #include <stdint.h>
 
 using namespace Microsoft::WRL;
@@ -123,15 +123,15 @@ class CD3D12CommandSlot
 
     bool IsIdle() const
     {
-      const State state = m_state.load(std::memory_order_acquire);
+      const State state = Atomic::Load(m_state, std::memory_order_acquire);
       return state == STATE_FREE ||
         (state == STATE_FAILED &&
-         !m_submitted.load(std::memory_order_acquire));
+         !Atomic::Load(m_submitted, std::memory_order_acquire));
     }
 
     bool HasSubmittedWork() const
     {
-      return m_submitted.load(std::memory_order_acquire);
+      return Atomic::Load(m_submitted, std::memory_order_acquire);
     }
 
     ComPtr<ID3D12GraphicsCommandList> GetGfxList() { return m_gfxList; }

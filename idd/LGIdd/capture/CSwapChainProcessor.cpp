@@ -20,6 +20,7 @@
 
 #include "capture/CSwapChainProcessor.h"
 #include "capture/CFrameProcessorUtil.h"
+#include "Atomic.h"
 #include "CSRWLock.h"
 #include "display/IddCxCompat.h"
 #include "display/CDeviceContext.h"
@@ -355,7 +356,8 @@ void CSwapChainProcessor::SwapChainThreadCore()
         surface        = buffer.MetaData.pSurface;
         colorSpace     = buffer.MetaData.SurfaceColorSpace;
         sdrWhiteLevel  = buffer.MetaData.SdrWhiteLevel;
-        m_sdrWhiteLevel.store(sdrWhiteLevel, std::memory_order_relaxed);
+        Atomic::Store(
+          m_sdrWhiteLevel, sdrWhiteLevel, std::memory_order_relaxed);
         UpdateHDRMetadata(buffer.MetaData);
       }
     }
@@ -865,7 +867,8 @@ bool CSwapChainProcessor::QueryHWCursor()
   in.ShapeBufferSizeInBytes = 512 * 512 * 4;
 
   IDARG_OUT_QUERY_HWCURSOR out = {};
-  UINT cursorWhiteLevel = m_sdrWhiteLevel.load(std::memory_order_relaxed);
+  UINT cursorWhiteLevel =
+    Atomic::Load(m_sdrWhiteLevel, std::memory_order_relaxed);
   NTSTATUS status;
 #ifdef HAS_IDDCX_110
   if (m_devContext->HasIddCx110DDIs())

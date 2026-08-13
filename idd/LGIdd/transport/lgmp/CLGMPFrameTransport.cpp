@@ -23,6 +23,7 @@
 #include "transport/lgmp/CIVSHMEM.h"
 #include "transport/lgmp/CLGMPFrameCaps.h"
 #include "transport/lgmp/CLGMPHost.h"
+#include "Atomic.h"
 #include "CDebug.h"
 
 #include <cstring>
@@ -196,13 +197,13 @@ bool CLGMPFrameTransport::Setup(size_t alignSize)
     m_frame[i]->offset = (uint32_t)alignOffset;
     m_frameBuffer[i] = reinterpret_cast<LGMPBuffer *>(
       reinterpret_cast<uint8_t *>(m_frame[i]) + alignOffset);
-    m_frameInFlight[i].store(false, std::memory_order_release);
+    Atomic::Store(m_frameInFlight[i], false, std::memory_order_release);
     m_frameCompleted[i] = false;
   }
 
   m_maxFrameSize = maxFrameSize;
-  m_submittedFrameIndex.store(-1, std::memory_order_release);
-  m_readyFrameIndex.store(-1, std::memory_order_release);
+  Atomic::Store(m_submittedFrameIndex, -1, std::memory_order_release);
+  Atomic::Store(m_readyFrameIndex, -1, std::memory_order_release);
   m_deferredOwnerFrameIndex = -1;
   m_framePublishSequence = 0;
   m_frameReadySequence   = 0;
@@ -222,8 +223,8 @@ void CLGMPFrameTransport::DeInit()
 
   {
     CSRWExclusiveLock lock(m_framePublishLock);
-    m_submittedFrameIndex.store(-1, std::memory_order_release);
-    m_readyFrameIndex.store(-1, std::memory_order_release);
+    Atomic::Store(m_submittedFrameIndex, -1, std::memory_order_release);
+    Atomic::Store(m_readyFrameIndex, -1, std::memory_order_release);
     m_deferredOwnerFrameIndex = -1;
     m_framePublishSequence = 0;
     m_frameReadySequence   = 0;
@@ -238,7 +239,7 @@ void CLGMPFrameTransport::DeInit()
 
   for (int i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
   {
-    m_frameInFlight[i].store(false, std::memory_order_release);
+    Atomic::Store(m_frameInFlight[i], false, std::memory_order_release);
     lgmpHostMemFree(&m_frameMemory[i]);
     m_frame[i]       = nullptr;
     m_frameBuffer[i] = nullptr;
@@ -571,14 +572,15 @@ int CLGMPFrameTransport::FindAvailableFrameBuffer(
   bool allowReady) const
 {
   const LONG readyFrameIndex =
-    m_readyFrameIndex.load(std::memory_order_acquire);
+    Atomic::Load(m_readyFrameIndex, std::memory_order_acquire);
   int      available     = -1;
   uint64_t newestPublish = 0;
   for (unsigned frameIndex = 0;
        frameIndex < LGMP_Q_FRAME_BUFFER_LEN; ++frameIndex)
   {
     if (static_cast<LONG>(frameIndex) == readyFrameIndex ||
-        m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
+        Atomic::Load(
+          m_frameInFlight[frameIndex], std::memory_order_acquire) ||
         FrameBufferReferenced(frameIndex))
       continue;
 
@@ -591,7 +593,8 @@ int CLGMPFrameTransport::FindAvailableFrameBuffer(
   }
 
   if (available >= 0 || !allowReady || readyFrameIndex < 0 ||
-      m_frameInFlight[readyFrameIndex].load(std::memory_order_acquire) ||
+      Atomic::Load(
+        m_frameInFlight[readyFrameIndex], std::memory_order_acquire) ||
       FrameBufferReferenced(static_cast<unsigned>(readyFrameIndex)))
     return available;
 
@@ -610,7 +613,8 @@ int CLGMPFrameTransport::FindNewestCompletedFrame(
        frameIndex < LGMP_Q_FRAME_BUFFER_LEN; ++frameIndex)
   {
     if (frameIndex == excludeFrameIndex || !m_frameCompleted[frameIndex] ||
-        m_frameInFlight[frameIndex].load(std::memory_order_acquire))
+        Atomic::Load(
+          m_frameInFlight[frameIndex], std::memory_order_acquire))
       continue;
 
     if (newestFrame < 0 ||
@@ -679,9 +683,10 @@ bool CLGMPFrameTransport::GetPendingDeliveryTarget(uint64_t now,
 
   CSRWSharedLock lock(m_framePublishLock);
   const LONG frameIndex =
-    m_readyFrameIndex.load(std::memory_order_acquire);
+    Atomic::Load(m_readyFrameIndex, std::memory_order_acquire);
   if (frameIndex < 0 ||
-      m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
+      Atomic::Load(
+        m_frameInFlight[frameIndex], std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
     return false;
 
@@ -705,9 +710,10 @@ bool CLGMPFrameTransport::RetryPendingDelivery(uint64_t now, bool& retry)
 
   CSRWExclusiveLock lock(m_framePublishLock);
   const LONG frameIndex =
-    m_readyFrameIndex.load(std::memory_order_acquire);
+    Atomic::Load(m_readyFrameIndex, std::memory_order_acquire);
   if (frameIndex < 0 ||
-      m_frameInFlight[frameIndex].load(std::memory_order_acquire) ||
+      Atomic::Load(
+        m_frameInFlight[frameIndex], std::memory_order_acquire) ||
       lgmpHostQueuePending(m_frameQueue) != 0)
     return false;
 
@@ -747,14 +753,14 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
     FindAvailableFrameBuffer(allowReady);
   bool expected = false;
   const bool acquired = availableFrameIndex >= 0 &&
-    m_frameInFlight[availableFrameIndex].compare_exchange_strong(
-      expected, true, std::memory_order_acq_rel);
+    Atomic::CAS(m_frameInFlight[availableFrameIndex], expected, true,
+      std::memory_order_acq_rel);
   if (acquired)
   {
     const LONG readyFrameIndex =
-      m_readyFrameIndex.load(std::memory_order_acquire);
+      Atomic::Load(m_readyFrameIndex, std::memory_order_acquire);
     if (availableFrameIndex == readyFrameIndex)
-      m_readyFrameIndex.store(
+      Atomic::Store(m_readyFrameIndex,
         FindNewestCompletedFrame(
           static_cast<unsigned>(availableFrameIndex)),
         std::memory_order_release);
@@ -872,7 +878,7 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
   fi->scheduleGeneration     = 0;
   fi->scheduleEpoch          = 0;
   fi->scheduleDeadlineSerial = 0;
-  InterlockedExchange((volatile LONG *)&fi->timingValid, 0);
+  Atomic::Store(fi->timingValid, 0);
   fi->rotation = FRAME_ROT_0;
   fi->type     = dstFormat.format;
 
@@ -1015,7 +1021,7 @@ bool CLGMPFrameTransport::PublishFrameBuffer(unsigned frameIndex,
     m_frameDelivered[frameIndex]  = deliveredToOwner;
     m_deferredOwnerFrameIndex = schedule.clientID && !deliveredToOwner ?
       static_cast<LONG>(frameIndex) : -1;
-    m_submittedFrameIndex.store(
+    Atomic::Store(m_submittedFrameIndex,
       static_cast<LONG>(frameIndex), std::memory_order_release);
   }
   lock.Unlock();
@@ -1046,15 +1052,18 @@ bool CLGMPFrameTransport::RepublishFrameBuffer(
   LONG frameIndex = m_deferredOwnerFrameIndex;
   if (frameIndex >= 0 &&
       !m_frameCompleted[frameIndex] &&
-      !m_frameInFlight[frameIndex].load(std::memory_order_acquire))
+      !Atomic::Load(
+        m_frameInFlight[frameIndex], std::memory_order_acquire))
   {
     m_deferredOwnerFrameIndex = -1;
     frameIndex = -1;
   }
   if (frameIndex < 0)
-    frameIndex = m_readyFrameIndex.load(std::memory_order_acquire);
+    frameIndex = Atomic::Load(
+      m_readyFrameIndex, std::memory_order_acquire);
   if (frameIndex < 0 ||
-      m_frameInFlight[frameIndex].load(std::memory_order_acquire))
+      Atomic::Load(
+        m_frameInFlight[frameIndex], std::memory_order_acquire))
     return false;
 
   CFrameScheduler::Schedule deliverySchedule = schedule;
@@ -1188,12 +1197,12 @@ void CLGMPFrameTransport::AbortFrameBuffer(unsigned frameIndex)
 
   CSRWExclusiveLock lock(m_framePublishLock);
   m_frameBuffer[frameIndex]->wp = 0;
-  InterlockedExchange(
-    (volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
+  Atomic::Store(m_frame[frameIndex]->timingValid, 0);
   m_frameCompleted[frameIndex] = false;
   if (m_deferredOwnerFrameIndex == static_cast<LONG>(frameIndex))
     m_deferredOwnerFrameIndex = -1;
-  m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  Atomic::Store(
+    m_frameInFlight[frameIndex], false, std::memory_order_release);
 }
 
 void CLGMPFrameTransport::FailFrameBuffer(unsigned frameIndex)
@@ -1201,8 +1210,7 @@ void CLGMPFrameTransport::FailFrameBuffer(unsigned frameIndex)
   if (frameIndex >= LGMP_Q_FRAME_BUFFER_LEN)
     return;
 
-  InterlockedExchange(
-    (volatile LONG *)&m_frame[frameIndex]->timingValid, 0);
+  Atomic::Store(m_frame[frameIndex]->timingValid, 0);
   FinalizeFrameBuffer(frameIndex);
   AbortFrameBuffer(frameIndex);
 }
@@ -1228,14 +1236,15 @@ void CLGMPFrameTransport::CompleteFrameBuffer(
     // Completion callbacks may run out of order. Never replace a newer ready
     // frame with an older submission.
     const LONG readyFrameIndex =
-      m_readyFrameIndex.load(std::memory_order_acquire);
+      Atomic::Load(m_readyFrameIndex, std::memory_order_acquire);
     if (sequence &&
         (readyFrameIndex < 0 ||
           sequence > m_frameLastPublishSequence[readyFrameIndex]))
-      m_readyFrameIndex.store(
+      Atomic::Store(m_readyFrameIndex,
         static_cast<LONG>(frameIndex), std::memory_order_release);
   }
-  m_frameInFlight[frameIndex].store(false, std::memory_order_release);
+  Atomic::Store(
+    m_frameInFlight[frameIndex], false, std::memory_order_release);
   const bool newerThanReady =
     sequence && sequence > m_frameReadySequence;
   if (result == FrameDone::READY && newerThanReady)
@@ -1276,7 +1285,7 @@ void CLGMPFrameTransport::SetFrameTiming(unsigned frameIndex,
   frame->timingFlags  = phaseValid ?
     KVMFR_FRAME_TIMING_PHASE_VALID : 0;
   frame->timingSerial = frame->frameSerial;
-  InterlockedExchange((volatile LONG *)&frame->timingValid, 1);
+  Atomic::Store(frame->timingValid, 1);
 }
 
 void CLGMPFrameTransport::WriteFrameBuffer(unsigned frameIndex, void * src,

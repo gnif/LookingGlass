@@ -147,11 +147,12 @@ void CD3D12CommandSlot::DeInit()
 
 bool CD3D12CommandSlot::Acquire()
 {
-  if (!m_queue || m_queue->m_failed.load(std::memory_order_acquire))
+  if (!m_queue || Atomic::Load(
+      m_queue->m_failed, std::memory_order_acquire))
     return false;
 
   State expected = STATE_FREE;
-  if (!m_state.compare_exchange_strong(expected, STATE_RECORDING,
+  if (!Atomic::CAS(m_state, expected, STATE_RECORDING,
       std::memory_order_acq_rel))
     return false;
 
@@ -165,7 +166,7 @@ bool CD3D12CommandSlot::Acquire()
   m_timestampFrequency  = 0;
   m_calibrationGPU      = 0;
   m_calibrationCPU      = 0;
-  m_submitted.store(false, std::memory_order_release);
+  Atomic::Store(m_submitted, false, std::memory_order_release);
 
   for (UINT i = 0; i < MAX_FENCE_WAITS; ++i)
   {
@@ -180,8 +181,8 @@ bool CD3D12CommandSlot::Acquire()
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to reset the CommandAllocator (%ls)", m_name);
-    m_queue->m_failed.store(true, std::memory_order_release);
-    m_state.store(STATE_FAILED, std::memory_order_release);
+    Atomic::Store(m_queue->m_failed, true, std::memory_order_release);
+    Atomic::Store(m_state, STATE_FAILED, std::memory_order_release);
     return false;
   }
 
@@ -189,8 +190,8 @@ bool CD3D12CommandSlot::Acquire()
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to reset the CommandList (%ls)", m_name);
-    m_queue->m_failed.store(true, std::memory_order_release);
-    m_state.store(STATE_FAILED, std::memory_order_release);
+    Atomic::Store(m_queue->m_failed, true, std::memory_order_release);
+    Atomic::Store(m_state, STATE_FAILED, std::memory_order_release);
     return false;
   }
 
@@ -201,7 +202,7 @@ bool CD3D12CommandSlot::Acquire()
 void CD3D12CommandSlot::Cancel()
 {
   State expected = STATE_RECORDING;
-  if (!m_state.compare_exchange_strong(expected, STATE_CANCELLING,
+  if (!Atomic::CAS(m_state, expected, STATE_CANCELLING,
       std::memory_order_acq_rel))
   {
     DEBUG_ERROR("Command slot cancelled while not recording (%ls)", m_name);
@@ -223,23 +224,23 @@ void CD3D12CommandSlot::Cancel()
   {
     DEBUG_ERROR_HR(hr, "Failed to close the cancelled CommandList (%ls)",
       m_name);
-    m_queue->m_failed.store(true, std::memory_order_release);
-    m_state.store(STATE_FAILED, std::memory_order_release);
+    Atomic::Store(m_queue->m_failed, true, std::memory_order_release);
+    Atomic::Store(m_state, STATE_FAILED, std::memory_order_release);
     return;
   }
 
   m_completionCallback  = nullptr;
   m_completionParams[0] = nullptr;
   m_completionParams[1] = nullptr;
-  m_submitted.store(false, std::memory_order_release);
-  m_state.store(STATE_FREE, std::memory_order_release);
+  Atomic::Store(m_submitted, false, std::memory_order_release);
+  Atomic::Store(m_state, STATE_FREE, std::memory_order_release);
   SetEvent(m_availableEvent.Get());
 }
 
 bool CD3D12CommandSlot::Execute()
 {
   State expected = STATE_RECORDING;
-  if (!m_state.compare_exchange_strong(expected, STATE_SUBMITTED,
+  if (!Atomic::CAS(m_state, expected, STATE_SUBMITTED,
       std::memory_order_acq_rel))
   {
     DEBUG_ERROR("Command slot executed while not recording (%ls)", m_name);
@@ -251,17 +252,17 @@ bool CD3D12CommandSlot::Execute()
   if (FAILED(hr))
   {
     DEBUG_ERROR_HR(hr, "Failed to close the CommandList (%ls)", m_name);
-    m_queue->m_failed.store(true, std::memory_order_release);
-    m_state.store(STATE_FAILED, std::memory_order_release);
+    Atomic::Store(m_queue->m_failed, true, std::memory_order_release);
+    Atomic::Store(m_state, STATE_FAILED, std::memory_order_release);
     return false;
   }
 
   if (m_queue->Submit(*this))
     return true;
 
-  if (!m_submitted.load(std::memory_order_acquire))
+  if (!Atomic::Load(m_submitted, std::memory_order_acquire))
   {
-    m_state.store(STATE_FREE, std::memory_order_release);
+    Atomic::Store(m_state, STATE_FREE, std::memory_order_release);
     SetEvent(m_availableEvent.Get());
   }
   return false;
@@ -270,7 +271,7 @@ bool CD3D12CommandSlot::Execute()
 bool CD3D12CommandSlot::WaitFor(ID3D12Fence * fence, UINT64 value)
 {
   if (!fence || !value ||
-      m_state.load(std::memory_order_acquire) != STATE_RECORDING)
+      Atomic::Load(m_state, std::memory_order_acquire) != STATE_RECORDING)
     return false;
 
   if (m_fenceWaitCount == MAX_FENCE_WAITS)
@@ -331,7 +332,7 @@ bool CD3D12CommandSlot::GetGPUTimes(
 
 void CD3D12CommandSlot::OnCompletion(bool timeout)
 {
-  if (!m_queue || !m_submitted.load(std::memory_order_acquire))
+  if (!m_queue || !Atomic::Load(m_submitted, std::memory_order_acquire))
     return;
 
   const UINT64 completed = m_queue->m_fence->GetCompletedValue();
@@ -339,13 +340,13 @@ void CD3D12CommandSlot::OnCompletion(bool timeout)
     return;
 
   State expected = STATE_SUBMITTED;
-  if (!m_state.compare_exchange_strong(expected, STATE_COMPLETING,
+  if (!Atomic::CAS(m_state, expected, STATE_COMPLETING,
       std::memory_order_acq_rel))
     return;
 
   m_completionResult = !timeout && completed != UINT64_MAX;
   if (!m_completionResult)
-    m_queue->m_failed.store(true, std::memory_order_release);
+    Atomic::Store(m_queue->m_failed, true, std::memory_order_release);
 
   if (m_completionCallback)
     m_completionCallback(this, m_completionResult,
@@ -354,8 +355,8 @@ void CD3D12CommandSlot::OnCompletion(bool timeout)
   m_completionCallback  = nullptr;
   m_completionParams[0] = nullptr;
   m_completionParams[1] = nullptr;
-  m_submitted.store(false, std::memory_order_release);
-  m_state.store(STATE_FREE, std::memory_order_release);
+  Atomic::Store(m_submitted, false, std::memory_order_release);
+  Atomic::Store(m_state, STATE_FREE, std::memory_order_release);
   SetEvent(m_availableEvent.Get());
 }
 
@@ -518,7 +519,7 @@ CD3D12CommandSlot * CD3D12CommandQueue::Acquire(UINT slotIndex)
     m_slots[slotIndex].OnCompletion(false);
     if (m_slots[slotIndex].Acquire())
       return &m_slots[slotIndex];
-    if (m_failed.load(std::memory_order_acquire))
+    if (Atomic::Load(m_failed, std::memory_order_acquire))
       break;
 
     const ULONGLONG now = GetTickCount64();
@@ -579,7 +580,7 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
 
   do
   {
-    if (m_failed.load(std::memory_order_relaxed))
+    if (Atomic::Load(m_failed, std::memory_order_relaxed))
       break;
 
     for (UINT i = 0; i < slot.m_fenceWaitCount; ++i)
@@ -589,16 +590,16 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
       if (FAILED(hr))
       {
         DEBUG_ERROR_HR(hr, "Failed to queue a fence wait (%ls)", m_name);
-        m_failed.store(true, std::memory_order_release);
+        Atomic::Store(m_failed, true, std::memory_order_release);
         break;
       }
     }
-    if (m_failed.load(std::memory_order_relaxed))
+    if (Atomic::Load(m_failed, std::memory_order_relaxed))
       break;
 
     const UINT64 fenceTarget = ++m_fenceValue;
     slot.m_fenceTarget       = fenceTarget;
-    slot.m_submitted.store(true, std::memory_order_release);
+    Atomic::Store(slot.m_submitted, true, std::memory_order_release);
 
     ID3D12CommandList * lists[] = { slot.m_cmdList.Get() };
     m_queue->ExecuteCommandLists(1, lists);
@@ -607,7 +608,7 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
     if (FAILED(hr))
     {
       DEBUG_ERROR_HR(hr, "Failed to signal the CommandQueue (%ls)", m_name);
-      m_failed.store(true, std::memory_order_release);
+      Atomic::Store(m_failed, true, std::memory_order_release);
       slot.OnCompletion(false);
       break;
     }
@@ -621,10 +622,10 @@ bool CD3D12CommandQueue::Submit(CD3D12CommandSlot& slot)
       // The work is already submitted and fenced. Poll only on this rare
       // error path so allocator, callback, and framebuffer ownership remain
       // valid until completion or confirmed device removal.
-      while (slot.m_submitted.load(std::memory_order_acquire))
+      while (Atomic::Load(slot.m_submitted, std::memory_order_acquire))
       {
         slot.OnCompletion(false);
-        if (slot.m_submitted.load(std::memory_order_acquire))
+        if (Atomic::Load(slot.m_submitted, std::memory_order_acquire))
           Sleep(1);
       }
 

@@ -11,6 +11,7 @@
 
 #include "transport/CFrameHub.h"
 
+#include "Atomic.h"
 #include "CDebug.h"
 
 static const uint64_t RETRY_NS = 1000000ULL;
@@ -46,8 +47,9 @@ CFrameHub::~CFrameHub()
   for (Sink& sink : m_sinks)
   {
     const BackendId backend =
-      sink.backend.load(std::memory_order_acquire);
-    const uint32_t epoch = sink.epoch.load(std::memory_order_acquire);
+      Atomic::Load(sink.backend, std::memory_order_acquire);
+    const uint32_t epoch =
+      Atomic::Load(sink.epoch, std::memory_order_acquire);
     if (backend && epoch)
       Unbind(backend, epoch);
   }
@@ -72,13 +74,15 @@ bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
     CSRWExclusiveLock lock(m_listLock);
     if (primary)
     {
-      if (!m_sinks[0].active.load(std::memory_order_acquire) &&
+      if (!Atomic::Load(
+            m_sinks[0].active, std::memory_order_acquire) &&
           !m_sinks[0].reserved)
         selected = &m_sinks[0];
     }
     else
       for (unsigned i = 1; i < FRAME_MAX_SINKS; ++i)
-        if (!m_sinks[i].active.load(std::memory_order_acquire) &&
+        if (!Atomic::Load(
+              m_sinks[i].active, std::memory_order_acquire) &&
             !m_sinks[i].reserved)
         {
           selected = &m_sinks[i];
@@ -93,10 +97,10 @@ bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
   {
     CSRWExclusiveLock lock(selected->callLock);
     selected->target        = &target;
-    selected->backend.store(backend, std::memory_order_release);
-    selected->epoch.store(epoch, std::memory_order_release);
+    Atomic::Store(selected->backend, backend, std::memory_order_release);
+    Atomic::Store(selected->epoch, epoch, std::memory_order_release);
     selected->primary       = primary;
-    selected->outstanding.store(0, std::memory_order_release);
+    Atomic::Store(selected->outstanding, 0, std::memory_order_release);
     SetEvent(selected->drained);
   }
   {
@@ -120,7 +124,7 @@ bool CFrameHub::Bind(BackendId backend, uint32_t epoch, bool primary,
   target.SetFrameScheduleEvent(m_wakeEvent);
   {
     CSRWExclusiveLock lock(m_listLock);
-    selected->active.store(true, std::memory_order_release);
+    Atomic::Store(selected->active, true, std::memory_order_release);
     selected->reserved = false;
   }
   target.ForceFrame();
@@ -134,11 +138,11 @@ void CFrameHub::Unbind(BackendId backend, uint32_t epoch)
   {
     CSRWExclusiveLock lock(m_listLock);
     for (Sink& sink : m_sinks)
-      if (sink.active.load(std::memory_order_acquire) &&
-          sink.backend.load(std::memory_order_acquire) == backend &&
-          sink.epoch.load(std::memory_order_acquire) == epoch)
+      if (Atomic::Load(sink.active, std::memory_order_acquire) &&
+          Atomic::Load(sink.backend, std::memory_order_acquire) == backend &&
+          Atomic::Load(sink.epoch, std::memory_order_acquire) == epoch)
       {
-        sink.active.store(false, std::memory_order_release);
+        Atomic::Store(sink.active, false, std::memory_order_release);
         sink.reserved = true;
         selected = &sink;
         break;
@@ -184,8 +188,8 @@ void CFrameHub::Unbind(BackendId backend, uint32_t epoch)
   {
     CSRWExclusiveLock lock(selected->callLock);
     selected->target        = nullptr;
-    selected->backend.store(0, std::memory_order_release);
-    selected->epoch.store(0, std::memory_order_release);
+    Atomic::Store(selected->backend, 0, std::memory_order_release);
+    Atomic::Store(selected->epoch, 0, std::memory_order_release);
     selected->primary       = false;
   }
   {
@@ -211,7 +215,7 @@ unsigned CFrameHub::Snapshot(SinkRef refs[FRAME_MAX_SINKS]) const
   unsigned count = 0;
   CSRWSharedLock lock(m_listLock);
   for (unsigned i = 0; i < FRAME_MAX_SINKS; ++i)
-    if (m_sinks[i].active.load(std::memory_order_acquire))
+    if (Atomic::Load(m_sinks[i].active, std::memory_order_acquire))
       refs[count++] = {
         const_cast<Sink *>(&m_sinks[i]), i, m_sinks[i].primary };
   return count;
@@ -233,7 +237,7 @@ void CFrameHub::ReleaseTarget(Batch& batch, BatchTarget& target)
     CSRWExclusiveLock lock(target.sink->laneLock);
     target.sink->lanes[target.resourceLane].busy = false;
   }
-  if (target.sink->outstanding.fetch_sub(
+  if (Atomic::FetchSub(target.sink->outstanding,
         1, std::memory_order_acq_rel) == 1)
     SetEvent(target.sink->drained);
 
@@ -341,7 +345,7 @@ void CFrameHub::FillLane(Sink& sink, unsigned laneIndex,
     {
       lane.phase = Sink::ResourceLane::PENDING;
       cancel = lane.cancelRequested ||
-        !sink.active.load(std::memory_order_acquire);
+        !Atomic::Load(sink.active, std::memory_order_acquire);
     }
   }
 
@@ -468,7 +472,8 @@ void CFrameHub::CompleteLane(Sink& sink, unsigned laneIndex,
       lane.busy            = false;
     }
   }
-  if (sink.outstanding.fetch_sub(1, std::memory_order_acq_rel) == 1)
+  if (Atomic::FetchSub(sink.outstanding,
+        1, std::memory_order_acq_rel) == 1)
     SetEvent(sink.drained);
   SetEvent(m_wakeEvent);
 }
@@ -481,8 +486,9 @@ void CFrameHub::OnFrameDone(const FrameToken& token, FrameDone result,
 
   for (Sink& sink : m_sinks)
   {
-    if (sink.backend.load(std::memory_order_acquire) != token.backend ||
-        sink.epoch.load(std::memory_order_acquire) != token.epoch)
+    if (Atomic::Load(sink.backend, std::memory_order_acquire) !=
+          token.backend ||
+        Atomic::Load(sink.epoch, std::memory_order_acquire) != token.epoch)
       continue;
 
     unsigned laneIndex = FRAME_SINK_BUFFERS;
@@ -525,7 +531,8 @@ size_t CFrameHub::GetMaxFrameSize() const
     if (refs[i].primary)
     {
       CSRWSharedLock call(refs[i].sink->callLock);
-      if (refs[i].sink->active.load(std::memory_order_acquire) &&
+      if (Atomic::Load(
+            refs[i].sink->active, std::memory_order_acquire) &&
           refs[i].sink->target)
         return refs[i].sink->target->GetMaxFrameSize();
     }
@@ -534,21 +541,16 @@ size_t CFrameHub::GetMaxFrameSize() const
 
 uint64_t CFrameHub::NextContentSerial()
 {
-  uint64_t serial = m_nextContent.fetch_add(
-    1, std::memory_order_acq_rel) + 1;
-  if (!serial)
-    serial = m_nextContent.fetch_add(
-      1, std::memory_order_acq_rel) + 1;
-  return serial;
+  return Atomic::Next(m_nextContent, std::memory_order_acq_rel);
 }
 
 void CFrameHub::FrameProductReady(uint64_t contentSerial)
 {
-  uint64_t newest = m_newestContent.load(std::memory_order_acquire);
+  uint64_t newest =
+    Atomic::Load(m_newestContent, std::memory_order_acquire);
   while (ContentAfter(contentSerial, newest) &&
-         !m_newestContent.compare_exchange_weak(newest,
-           contentSerial, std::memory_order_acq_rel,
-           std::memory_order_acquire))
+         !Atomic::CASWeak(m_newestContent, newest, contentSerial,
+           std::memory_order_acq_rel, std::memory_order_acquire))
   {
   }
   SetEvent(m_wakeEvent);
@@ -557,13 +559,14 @@ void CFrameHub::FrameProductReady(uint64_t contentSerial)
 bool CFrameHub::NeedsFrame() const
 {
   const uint64_t newest =
-    m_newestContent.load(std::memory_order_acquire);
+    Atomic::Load(m_newestContent, std::memory_order_acquire);
   SinkRef refs[FRAME_MAX_SINKS];
   const unsigned count = Snapshot(refs);
   for (unsigned i = 0; i < count; ++i)
   {
     CSRWSharedLock call(refs[i].sink->callLock);
-    if (!refs[i].sink->active.load(std::memory_order_acquire) ||
+    if (!Atomic::Load(
+          refs[i].sink->active, std::memory_order_acquire) ||
         !refs[i].sink->target)
       continue;
     const size_t maxFrameSize = refs[i].sink->target->GetMaxFrameSize();
@@ -590,7 +593,8 @@ bool CFrameHub::GetFramePlan(
   {
     Sink& sink = *refs[i].sink;
     CSRWSharedLock call(sink.callLock);
-    if (!sink.active.load(std::memory_order_acquire) || !sink.target)
+    if (!Atomic::Load(sink.active, std::memory_order_acquire) ||
+        !sink.target)
       continue;
 
     sink.target->ProcessDeliveries();
@@ -641,8 +645,10 @@ bool CFrameHub::GetFramePlan(
       continue;
     FramePlanTarget& request = plan.targets[plan.count++];
     request.sink     = refs[i].index;
-    request.backend  = sink.backend.load(std::memory_order_acquire);
-    request.epoch    = sink.epoch.load(std::memory_order_acquire);
+    request.backend  = Atomic::Load(
+      sink.backend, std::memory_order_acquire);
+    request.epoch    = Atomic::Load(
+      sink.epoch, std::memory_order_acquire);
     request.schedule = schedule;
     request.commitSchedule = schedule;
     request.periodic = periodic;
@@ -660,7 +666,8 @@ bool CFrameHub::GetImmediateFramePlan(uint64_t now, FramePlan& plan)
   {
     Sink& sink = *refs[i].sink;
     CSRWSharedLock call(sink.callLock);
-    if (!sink.active.load(std::memory_order_acquire) || !sink.target)
+    if (!Atomic::Load(sink.active, std::memory_order_acquire) ||
+        !sink.target)
       continue;
 
     sink.target->ProcessDeliveries();
@@ -684,8 +691,10 @@ bool CFrameHub::GetImmediateFramePlan(uint64_t now, FramePlan& plan)
       continue;
     FramePlanTarget& request = plan.targets[plan.count++];
     request.sink           = refs[i].index;
-    request.backend        = sink.backend.load(std::memory_order_acquire);
-    request.epoch          = sink.epoch.load(std::memory_order_acquire);
+    request.backend        = Atomic::Load(
+      sink.backend, std::memory_order_acquire);
+    request.epoch          = Atomic::Load(
+      sink.epoch, std::memory_order_acquire);
     request.schedule       = schedule;
     request.schedule.deliveryDeadlineSerial = 0;
     request.schedule.phaseEligible          = false;
@@ -708,9 +717,12 @@ void CFrameHub::MissFramePlan(const FramePlan& plan, uint64_t now)
       continue;
     Sink& sink = m_sinks[request.sink];
     CSRWSharedLock call(sink.callLock);
-    if (sink.active.load(std::memory_order_acquire) && sink.target &&
-        sink.backend.load(std::memory_order_acquire) == request.backend &&
-        sink.epoch.load(std::memory_order_acquire) == request.epoch)
+    if (Atomic::Load(sink.active, std::memory_order_acquire) &&
+        sink.target &&
+        Atomic::Load(sink.backend, std::memory_order_acquire) ==
+          request.backend &&
+        Atomic::Load(sink.epoch, std::memory_order_acquire) ==
+          request.epoch)
       sink.target->FrameMissed(
         request.commitSchedule, now, request.periodic);
   }
@@ -736,11 +748,8 @@ bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
       continue;
     candidate.active = true;
     candidate.count  = 0;
-    candidate.serial = m_nextSerial.fetch_add(
-      1, std::memory_order_acq_rel) + 1;
-    if (!candidate.serial)
-      candidate.serial = m_nextSerial.fetch_add(
-        1, std::memory_order_acq_rel) + 1;
+    candidate.serial = Atomic::Next(
+      m_nextSerial, std::memory_order_acq_rel);
     for (BatchTarget& target : candidate.targets)
       target = {};
     prepared.token = {
@@ -761,9 +770,12 @@ bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
       continue;
     Sink& sink = m_sinks[request.sink];
     CSRWExclusiveLock call(sink.callLock);
-    if (!sink.active.load(std::memory_order_acquire) || !sink.target ||
-        sink.backend.load(std::memory_order_acquire) != request.backend ||
-        sink.epoch.load(std::memory_order_acquire) != request.epoch ||
+    if (!Atomic::Load(sink.active, std::memory_order_acquire) ||
+        !sink.target ||
+        Atomic::Load(sink.backend, std::memory_order_acquire) !=
+          request.backend ||
+        Atomic::Load(sink.epoch, std::memory_order_acquire) !=
+          request.epoch ||
         !sink.target->FrameBufferAvailable(
           request.schedule, allowReadyReplacement))
       continue;
@@ -882,7 +894,7 @@ bool CFrameHub::PrepareFrameBatch(const FramePlan& plan,
       target.frameType  = dstFormat.format;
       target.periodic   = request.periodic;
       target.active     = true;
-      if (sink.outstanding.fetch_add(
+      if (Atomic::FetchAdd(sink.outstanding,
             1, std::memory_order_acq_rel) == 0)
         ResetEvent(sink.drained);
 
@@ -928,9 +940,10 @@ uint32_t CFrameHub::PublishFrameBatch(const FrameBatchToken& token)
     CSRWExclusiveLock call(target.sink->callLock);
     bool delivered = false;
     const bool valid = target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
+      Atomic::Load(target.sink->backend, std::memory_order_acquire) ==
         target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch;
+      Atomic::Load(target.sink->epoch, std::memory_order_acquire) ==
+        target.epoch;
     if (!valid || !target.sink->target->PublishFrameBuffer(
           target.localSlot, target.deliverySchedule, delivered))
     {
@@ -980,10 +993,10 @@ void CFrameHub::CommitFrameBatch(const FrameBatchToken& token)
     {
       CSRWExclusiveLock call(target.sink->callLock);
       if (target.sink->target &&
-          target.sink->backend.load(std::memory_order_acquire) ==
-            target.backend &&
-          target.sink->epoch.load(std::memory_order_acquire) ==
-            target.epoch)
+          Atomic::Load(target.sink->backend,
+            std::memory_order_acquire) == target.backend &&
+          Atomic::Load(target.sink->epoch,
+            std::memory_order_acquire) == target.epoch)
         target.sink->target->CommitFrameBuffer(target.localSlot,
           target.schedule, target.periodic, target.delivered);
     }
@@ -1022,9 +1035,10 @@ void CFrameHub::AbortFrameBatch(const FrameBatchToken& token)
       continue;
     CSRWExclusiveLock call(target.sink->callLock);
     if (target.sink->target &&
-        target.sink->backend.load(std::memory_order_acquire) ==
-          target.backend &&
-        target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+        Atomic::Load(target.sink->backend,
+          std::memory_order_acquire) == target.backend &&
+        Atomic::Load(target.sink->epoch,
+          std::memory_order_acquire) == target.epoch)
       target.sink->target->AbortFrameBuffer(target.localSlot);
     {
       CSRWExclusiveLock state(target.sink->laneLock);
@@ -1049,9 +1063,10 @@ void CFrameHub::FailFrameBatch(const FrameBatchToken& token)
       continue;
     CSRWExclusiveLock call(target.sink->callLock);
     if (target.sink->target &&
-        target.sink->backend.load(std::memory_order_acquire) ==
-          target.backend &&
-        target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+        Atomic::Load(target.sink->backend,
+          std::memory_order_acquire) == target.backend &&
+        Atomic::Load(target.sink->epoch,
+          std::memory_order_acquire) == target.epoch)
     {
       if (target.published)
         target.sink->target->FailFrameBuffer(target.localSlot);
@@ -1080,9 +1095,10 @@ void CFrameHub::WriteFrameTarget(const FrameBatchToken& token,
   BatchTarget& target = batch.targets[index];
   CSRWSharedLock call(target.sink->callLock);
   if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
+      Atomic::Load(target.sink->backend, std::memory_order_acquire) ==
         target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+      Atomic::Load(target.sink->epoch, std::memory_order_acquire) ==
+        target.epoch)
     target.sink->target->WriteFrameBuffer(
       target.localSlot, src, offset, len, setWritePos);
 }
@@ -1101,9 +1117,10 @@ void CFrameHub::WriteFrameTargetRows(const FrameBatchToken& token,
   BatchTarget& target = batch.targets[index];
   CSRWSharedLock call(target.sink->callLock);
   if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
+      Atomic::Load(target.sink->backend, std::memory_order_acquire) ==
         target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+      Atomic::Load(target.sink->epoch, std::memory_order_acquire) ==
+        target.epoch)
     target.sink->target->WriteFrameBufferRows(target.localSlot, src,
       offset, rowBytes, pitch, rows);
 }
@@ -1121,9 +1138,10 @@ void CFrameHub::FinalizeFrameTarget(
   BatchTarget& target = batch.targets[index];
   CSRWSharedLock call(target.sink->callLock);
   if (target.sink->target &&
-      target.sink->backend.load(std::memory_order_acquire) ==
+      Atomic::Load(target.sink->backend, std::memory_order_acquire) ==
         target.backend &&
-      target.sink->epoch.load(std::memory_order_acquire) == target.epoch)
+      Atomic::Load(target.sink->epoch, std::memory_order_acquire) ==
+        target.epoch)
     target.sink->target->FinalizeFrameBuffer(target.localSlot);
 }
 
@@ -1201,7 +1219,8 @@ void CFrameHub::ObserveFrame(uint64_t now)
   for (unsigned i = 0; i < count; ++i)
   {
     CSRWSharedLock call(refs[i].sink->callLock);
-    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+    if (Atomic::Load(
+          refs[i].sink->active, std::memory_order_acquire) &&
         refs[i].sink->target)
       refs[i].sink->target->ObserveFrame(now);
   }
@@ -1214,7 +1233,8 @@ void CFrameHub::ForceFrame()
   for (unsigned i = 0; i < count; ++i)
   {
     CSRWSharedLock call(refs[i].sink->callLock);
-    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+    if (Atomic::Load(
+          refs[i].sink->active, std::memory_order_acquire) &&
         refs[i].sink->target)
       refs[i].sink->target->ForceFrame();
   }
@@ -1227,7 +1247,8 @@ void CFrameHub::FrameSuperseded()
   for (unsigned i = 0; i < count; ++i)
   {
     CSRWSharedLock call(refs[i].sink->callLock);
-    if (refs[i].sink->active.load(std::memory_order_acquire) &&
+    if (Atomic::Load(
+          refs[i].sink->active, std::memory_order_acquire) &&
         refs[i].sink->target)
       refs[i].sink->target->FrameSuperseded();
   }

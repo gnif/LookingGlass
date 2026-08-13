@@ -34,7 +34,7 @@ bool CInputPipeServer::Init()
 {
   DeInit();
 
-  m_state.store(0, std::memory_order_release);
+  Atomic::Store(m_state, 0, std::memory_order_release);
   m_performanceFrequency.QuadPart = 0;
   if (!QueryPerformanceFrequency(&m_performanceFrequency))
     m_performanceFrequency.QuadPart = 0;
@@ -183,7 +183,7 @@ bool CInputPipeServer::QueueRawLocked(
     (m_queueHead + m_queueCount) % QUEUE_LENGTH;
   m_queue[index].type       = type;
   m_queue[index].state      =
-    m_state.load(std::memory_order_relaxed);
+    Atomic::Load(m_state, std::memory_order_relaxed);
   m_queue[index].payload    = payload;
   m_queue[index].pureMotion = pureMotion;
   ++m_queueCount;
@@ -236,11 +236,11 @@ void CInputPipeServer::ResyncLocked()
   m_statResyncDiscarded += m_queueCount;
   m_queueHead  = 0;
   m_queueCount = 0;
-  uint64_t state = m_state.load(std::memory_order_relaxed);
+  uint64_t state = Atomic::Load(m_state, std::memory_order_relaxed);
   while (state & 1)
   {
-    if (m_state.compare_exchange_weak(
-        state, state + 2, std::memory_order_acq_rel))
+    if (Atomic::CASWeak(
+        m_state, state, state + 2, std::memory_order_acq_rel))
     {
       QueueResetLocked();
       return;
@@ -260,7 +260,7 @@ bool CInputPipeServer::SendMouseRelative(
       deltaY > LG_INPUT_MOUSE_DELTA_MAX ||
       wheel < LG_INPUT_MOUSE_WHEEL_MIN_TOTAL ||
       wheel > LG_INPUT_MOUSE_WHEEL_MAX ||
-      !(m_state.load(std::memory_order_acquire) & 1))
+      !(Atomic::Load(m_state, std::memory_order_acquire) & 1))
     return false;
 
   KVMFRInputPayload payload = {};
@@ -272,7 +272,8 @@ bool CInputPipeServer::SendMouseRelative(
   CSRWExclusiveLock lock(m_queueLock);
   const bool pureMotion = wheel == 0 && buttons == m_relativeButtons;
   const bool switching  = m_mouseMode == MouseMode::ABSOLUTE_INPUT;
-  bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
+  bool queued =
+    (Atomic::Load(m_state, std::memory_order_relaxed) & 1) != 0;
   if (queued && switching && m_absoluteButtons)
   {
     KVMFRInputPayload neutral = {};
@@ -307,7 +308,7 @@ bool CInputPipeServer::SendMouseAbsolute(
       y > LG_INPUT_MOUSE_ABSOLUTE_MAX ||
       wheel < LG_INPUT_MOUSE_WHEEL_MIN_TOTAL ||
       wheel > LG_INPUT_MOUSE_WHEEL_MAX ||
-      !(m_state.load(std::memory_order_acquire) & 1))
+      !(Atomic::Load(m_state, std::memory_order_acquire) & 1))
     return false;
 
   KVMFRInputPayload payload = {};
@@ -319,7 +320,8 @@ bool CInputPipeServer::SendMouseAbsolute(
   CSRWExclusiveLock lock(m_queueLock);
   const bool pureMotion = wheel == 0 && buttons == m_absoluteButtons;
   const bool switching  = m_mouseMode == MouseMode::RELATIVE_INPUT;
-  bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
+  bool queued =
+    (Atomic::Load(m_state, std::memory_order_relaxed) & 1) != 0;
   if (queued && switching && m_relativeButtons)
   {
     const KVMFRInputPayload neutral = {};
@@ -348,7 +350,7 @@ bool CInputPipeServer::SendKeyboard(
   uint8_t modifiers,
   const uint8_t * keys)
 {
-  if (!keys || !(m_state.load(std::memory_order_acquire) & 1))
+  if (!keys || !(Atomic::Load(m_state, std::memory_order_acquire) & 1))
     return false;
 
   KVMFRInputPayload payload = {};
@@ -361,7 +363,8 @@ bool CInputPipeServer::SendKeyboard(
   }
 
   CSRWExclusiveLock lock(m_queueLock);
-  const bool queued = (m_state.load(std::memory_order_relaxed) & 1) &&
+  const bool queued =
+    (Atomic::Load(m_state, std::memory_order_relaxed) & 1) &&
     QueueLocked(LG_INPUT_PIPE_MESSAGE_KEYBOARD, payload, false);
   if (!queued)
     ResyncLocked();
@@ -370,11 +373,12 @@ bool CInputPipeServer::SendKeyboard(
 
 bool CInputPipeServer::Reset()
 {
-  if (!(m_state.load(std::memory_order_acquire) & 1))
+  if (!(Atomic::Load(m_state, std::memory_order_acquire) & 1))
     return false;
 
   CSRWExclusiveLock lock(m_queueLock);
-  bool queued = (m_state.load(std::memory_order_relaxed) & 1) != 0;
+  bool queued =
+    (Atomic::Load(m_state, std::memory_order_relaxed) & 1) != 0;
   if (queued)
     queued = QueueResetLocked();
   if (!queued)
@@ -412,7 +416,8 @@ bool CInputPipeServer::Send(const QueueItem& item)
   LARGE_INTEGER end   = {};
   {
     CSRWSharedLock lock(m_connectionLock);
-    const uint64_t state = m_state.load(std::memory_order_acquire);
+    const uint64_t state =
+      Atomic::Load(m_state, std::memory_order_acquire);
     current = (state & 1) && item.state == state;
     if (current)
     {
@@ -527,13 +532,13 @@ void CInputPipeServer::LogStatistics()
 void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
 {
   CSRWExclusiveLock connectionLock(m_connectionLock);
-  uint64_t current = m_state.load(std::memory_order_relaxed);
+  uint64_t current = Atomic::Load(m_state, std::memory_order_relaxed);
   for (;;)
   {
     if (!(current & 1) || (requireMatch && state != current))
       return;
-    if (m_state.compare_exchange_weak(
-        current, current + 1, std::memory_order_acq_rel))
+    if (Atomic::CASWeak(
+        m_state, current, current + 1, std::memory_order_acq_rel))
       break;
   }
 
@@ -581,7 +586,7 @@ void CInputPipeServer::OnPipeConnected()
   CSRWExclusiveLock connectionLock(m_connectionLock);
   CSRWExclusiveLock queueLock(m_queueLock);
 
-  uint64_t state = m_state.load(std::memory_order_relaxed);
+  uint64_t state = Atomic::Load(m_state, std::memory_order_relaxed);
   if (state & 1)
     ++state;
   ++state;
@@ -597,7 +602,7 @@ void CInputPipeServer::OnPipeConnected()
     m_queue[index].state = state;
   }
   if (reset)
-    m_state.store(state, std::memory_order_release);
+    Atomic::Store(m_state, state, std::memory_order_release);
 
   if (!reset)
     DEBUG_WARN("Failed to queue LGInput endpoint neutralization");

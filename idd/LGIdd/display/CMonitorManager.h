@@ -20,11 +20,11 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
-#include <atomic>
 #include <vector>
 
 #include "config/CSettings.h"

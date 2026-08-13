@@ -20,13 +20,13 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 #include "transport/IInputSource.h"
 #include "common/LGMPConfig.h"
 
 #include <Windows.h>
 
-#include <atomic>
 #include <stdint.h>
 
 extern "C" {

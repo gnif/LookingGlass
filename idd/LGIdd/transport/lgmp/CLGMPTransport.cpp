@@ -20,6 +20,7 @@
 
 #include "transport/lgmp/CLGMPTransport.h"
 
+#include "Atomic.h"
 #include "CDebug.h"
 #include "common/KVMFR.h"
 #include "common/KVMFRRecovery.h"
@@ -90,7 +91,7 @@ bool CLGMPTransport::Setup(size_t alignment)
   if (!m_frames.Setup(alignment))
     return false;
 
-  m_ready.store(true, std::memory_order_release);
+  Atomic::Store(m_ready, true, std::memory_order_release);
   return true;
 }
 
@@ -109,7 +110,7 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
   // Before the swap chain establishes the frame-buffer alignment, service
   // only the protocol-independent recovery channel. This preserves the old
   // transport startup boundary while keeping recovery available immediately.
-  if (!m_ready.load(std::memory_order_acquire))
+  if (!Atomic::Load(m_ready, std::memory_order_acquire))
     return ProcessResult::OK;
 
   const LGMP_STATUS processStatus = m_host.Process();
@@ -224,7 +225,7 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
 
 void CLGMPTransport::Stop()
 {
-  m_ready.store(false, std::memory_order_release);
+  Atomic::Store(m_ready, false, std::memory_order_release);
   m_input.Stop();
 }
 

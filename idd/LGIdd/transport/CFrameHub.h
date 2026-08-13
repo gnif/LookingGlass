@@ -20,12 +20,11 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 #include "transport/IFrameSink.h"
 #include "transport/IFrameTransport.h"
 #include "transport/ITransport.h"
-
-#include <atomic>
 
 class CFrameHub final : public IFrameTransport, public IFrameEvents
 {

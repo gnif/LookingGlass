@@ -20,11 +20,11 @@
 
 #pragma once
 
+#include "Atomic.h"
 #include "CSRWLock.h"
 
 #include <Windows.h>
 
-#include <atomic>
 #include <stddef.h>
 #include <string>
 
@@ -66,8 +66,8 @@ public:
     _In_reads_bytes_(size) const void * message,
     _In_ size_t size);
 
-  bool IsRunning() const { return m_running.load(); }
-  bool IsConnected() const { return m_connected.load(); }
+  bool IsRunning() const { return Atomic::Load(m_running); }
+  bool IsConnected() const { return Atomic::Load(m_connected); }
 
   void SetHandler(_In_opt_ IPipeEndpointHandler * handler)
   {
