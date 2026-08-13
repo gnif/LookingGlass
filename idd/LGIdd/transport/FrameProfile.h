@@ -153,10 +153,14 @@ namespace Frame
 
 enum class CfgResult : uint8_t
 {
+  // The proposed route may be prepared or committed.
   ACCEPTED,
   // The transport declined this profile and permits another candidate.
   NEXT,
+  // The route is unavailable without affecting sibling routes.
   REJECTED,
+  // Preserve the active route and offer the proposal again later.
   RETRY,
+  // The frame component failed; required policy decides escalation.
   FAILED,
 };

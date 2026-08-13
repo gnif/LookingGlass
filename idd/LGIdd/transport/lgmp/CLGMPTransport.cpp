@@ -49,6 +49,20 @@ static bool TranslateFrameScheduleFlags(
   return true;
 }
 
+static const FrameProfile FRAME_PROFILES[] =
+{
+  {
+    FrameStorage::D3D12_TEXTURE,
+    FramePixel::BGRA8,
+    FrameSignal::SRGB,
+  },
+  {
+    FrameStorage::D3D12_TEXTURE,
+    FramePixel::RGB10A2,
+    FrameSignal::PQ_BT2020,
+  },
+};
+
 CLGMPTransport::CLGMPTransport(const TransportInstance& config) :
   m_config(config),
   m_control(m_host),
@@ -226,6 +240,8 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
 void CLGMPTransport::Stop()
 {
   Atomic::Store(m_ready, false, std::memory_order_release);
+  Abort();
+  m_hasActive = false;
   m_input.Stop();
 }
 
@@ -281,6 +297,62 @@ void CLGMPTransport::RecoveryStatus(const SourceKey& source,
 
   m_recovery.SetStatus(
     session, serial, active, wireState, wireError);
+}
+
+const FrameProfile * CLGMPTransport::Profiles(unsigned& count) const
+{
+  count = ARRAYSIZE(FRAME_PROFILES);
+  return FRAME_PROFILES;
+}
+
+CfgResult CLGMPTransport::Probe(const FrameCfg& cfg) const
+{
+  if (!cfg.width || !cfg.height)
+    return CfgResult::REJECTED;
+
+  switch (cfg.mode)
+  {
+    case GpuMode::HARDWARE:
+      for (const FrameProfile& profile : FRAME_PROFILES)
+        if (Frame::Same(cfg.profile, profile))
+          return CfgResult::ACCEPTED;
+      break;
+
+    case GpuMode::SOFTWARE:
+      if (Frame::Same(cfg.profile, FRAME_PROFILES[0]))
+        return CfgResult::ACCEPTED;
+      break;
+
+    default:
+      return CfgResult::REJECTED;
+  }
+  return CfgResult::NEXT;
+}
+
+CfgResult CLGMPTransport::Prepare(const FrameCfg& cfg)
+{
+  m_hasPending = false;
+  const CfgResult result = Probe(cfg);
+  if (result != CfgResult::ACCEPTED)
+    return result;
+
+  m_pendingCfg = cfg;
+  m_hasPending = true;
+  return CfgResult::ACCEPTED;
+}
+
+void CLGMPTransport::Commit()
+{
+  if (!m_hasPending)
+    return;
+  m_activeCfg  = m_pendingCfg;
+  m_hasActive  = true;
+  m_hasPending = false;
+}
+
+void CLGMPTransport::Abort()
+{
+  m_hasPending = false;
 }
 
 std::shared_ptr<const FrameCaps> CLGMPTransport::GetFrameCaps() const

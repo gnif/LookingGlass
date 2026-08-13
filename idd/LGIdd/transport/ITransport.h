@@ -148,6 +148,16 @@ public:
   virtual void RecoveryStatus(const SourceKey&, uint64_t, uint32_t,
     bool, Recovery, uint32_t) {}
 
+  // Profiles is an immutable, ordered preference list whose pointer remains
+  // valid for the lifetime of this instance.
+  // Probe has no side effects. Prepare changes pending state only; Commit
+  // promotes it without failure, while Abort preserves the active route.
+  virtual const FrameProfile * Profiles(unsigned& count) const = 0;
+  virtual CfgResult Probe(const FrameCfg& cfg) const = 0;
+  virtual CfgResult Prepare(const FrameCfg& cfg) = 0;
+  virtual void Commit() = 0;
+  virtual void Abort() = 0;
+
   // Frame capabilities describe the configured instance, not transient
   // runtime state. CanUseMode answers are immutable for the returned
   // object's lifetime, and recreating an instance from the same descriptor

@@ -42,6 +42,10 @@ private:
   CLGMPInputTransport m_input;
   CRecovery           m_recovery;
   std::atomic<bool>   m_ready = false;
+  FrameCfg            m_activeCfg;
+  FrameCfg            m_pendingCfg;
+  bool                m_hasActive  = false;
+  bool                m_hasPending = false;
 
 public:
   explicit CLGMPTransport(const TransportInstance& config);
@@ -59,6 +63,12 @@ public:
   void RecoveryStatus(const SourceKey& source,
     uint64_t session, uint32_t serial, bool active,
     Recovery state, uint32_t error) override;
+
+  const FrameProfile * Profiles(unsigned& count) const override;
+  CfgResult Probe(const FrameCfg& cfg) const override;
+  CfgResult Prepare(const FrameCfg& cfg) override;
+  void Commit() override;
+  void Abort() override;
 
   std::shared_ptr<const FrameCaps> GetFrameCaps() const override;
   DirectFrameBufferMemory GetDirectMemory() const override;
