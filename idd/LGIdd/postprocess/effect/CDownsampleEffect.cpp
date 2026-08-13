@@ -96,7 +96,10 @@ const CDownsampleEffect::Rule * CDownsampleEffect::MatchRule(
 
 bool CDownsampleEffect::Init(const ComPtr<ID3D12Device3>& device, bool report)
 {
-  if (!ParseRules(g_settings.ReadStringValue(L"Downsample"), report))
+  if ((!m_targetX && m_targetY) || (m_targetX && !m_targetY))
+    return false;
+  if (!m_targetX &&
+      !ParseRules(g_settings.ReadStringValue(L"Downsample"), report))
     return false;
 
   D3D12_STATIC_SAMPLER_DESC sampler = {};
@@ -154,21 +157,30 @@ PostProcessStatus CDownsampleEffect::SetFormat(
   const ComPtr<ID3D12Device3>& device,
   const D12FrameFormat& src, D12FrameFormat& dst)
 {
-  const Rule * rule = MatchRule((unsigned)src.desc.Width, src.desc.Height);
-  if (!rule ||
-      (rule->targetX == src.desc.Width && rule->targetY == src.desc.Height))
+  unsigned targetX = m_targetX;
+  unsigned targetY = m_targetY;
+  if (!targetX || !targetY)
+  {
+    const Rule * rule =
+      MatchRule((unsigned)src.desc.Width, src.desc.Height);
+    if (!rule)
+      return PostProcessStatus::BYPASS_EFFECT;
+    targetX = rule->targetX;
+    targetY = rule->targetY;
+  }
+  if (targetX == src.desc.Width && targetY == src.desc.Height)
     return PostProcessStatus::BYPASS_EFFECT;
 
   D3D12_RESOURCE_DESC desc = src.desc;
-  desc.Width  = rule->targetX;
-  desc.Height = rule->targetY;
+  desc.Width  = targetX;
+  desc.Height = targetY;
   desc.Flags  = D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS;
 
   if (!CreateDefaultTexture(device, desc, m_dst))
     return PostProcessStatus::FAILED;
 
-  m_consts.width  = (float)rule->targetX;
-  m_consts.height = (float)rule->targetY;
+  m_consts.width  = (float)targetX;
+  m_consts.height = (float)targetY;
 
   const HRESULT hr = Upload(m_constBuffer, &m_consts, sizeof(m_consts));
   if (FAILED(hr))

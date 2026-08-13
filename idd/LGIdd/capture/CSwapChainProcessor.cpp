@@ -63,6 +63,7 @@ static bool MakeGraphCfg(const D12FrameFormat& source,
   cfg.srcWidth   = source.width;
   cfg.srcHeight  = source.height;
   cfg.src        = src;
+  cfg.transform  = D12::Transform(source.colorTransform);
   cfg.width      = checkpoint.width;
   cfg.height     = checkpoint.height;
   cfg.checkpoint = output;

@@ -170,6 +170,13 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   if (!transform)
     return PostProcessStatus::BYPASS_EFFECT;
 
+  const bool matrixEnabled =
+    m_part != CalPart::LUT && transform->matrixEnabled;
+  const bool lutEnabled    =
+    m_part != CalPart::MATRIX && transform->lutEnabled;
+  if (!matrixEnabled && !lutEnabled)
+    return PostProcessStatus::BYPASS_EFFECT;
+
   DXGI_FORMAT dstFormat;
   FrameType frameType;
   switch (src.desc.Format)
@@ -184,10 +191,12 @@ PostProcessStatus CColorTransformEffect::SetFormat(
       frameType = src.format;
       break;
     case DXGI_FORMAT_R16G16B16A16_FLOAT:
-      // The client wire format is HDR10. Perform the XYZ adjustment before
-      // the BT.2020 rotation, and its LUT after PQ encoding, in one pass.
-      dstFormat = DXGI_FORMAT_R10G10B10A2_UNORM;
-      frameType = FRAME_TYPE_RGBA10;
+      // The legacy chain targets HDR10 in this pass. A graph CAL node keeps
+      // the linear scRGB signal so its HDR10 child remains independently
+      // selectable by transport demand.
+      dstFormat = m_keepSignal ? DXGI_FORMAT_R16G16B16A16_FLOAT :
+        DXGI_FORMAT_R10G10B10A2_UNORM;
+      frameType = m_keepSignal ? FRAME_TYPE_RGBA16F : FRAME_TYPE_RGBA10;
       break;
     default:
       DEBUG_ERROR("Unsupported color transform source format %u", src.desc.Format);
@@ -208,11 +217,13 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   std::memcpy(m_consts.matrix, transform->matrix,
     sizeof(m_consts.matrix));
   m_consts.scalar         = transform->scalar;
-  m_consts.matrixEnabled  = transform->matrixEnabled;
-  m_consts.lutEnabled     = transform->lutEnabled;
-  m_consts.inputTransfer  = src.hdrPQ ? TRANSFER_PQ :
+  m_consts.matrixEnabled  = matrixEnabled;
+  m_consts.lutEnabled     = lutEnabled;
+  const UINT inputTransfer = src.hdrPQ ? TRANSFER_PQ :
     (src.hdr ? TRANSFER_LINEAR : TRANSFER_SRGB);
-  m_consts.outputTransfer = src.hdr ? TRANSFER_PQ : TRANSFER_SRGB;
+  m_consts.inputTransfer  = inputTransfer;
+  m_consts.outputTransfer = m_keepSignal ? inputTransfer :
+    (src.hdr ? TRANSFER_PQ : TRANSFER_SRGB);
 
   std::memcpy(m_lut, transform->lut, sizeof(m_lut));
   m_uploadPending = true;
@@ -225,7 +236,7 @@ PostProcessStatus CColorTransformEffect::SetFormat(
   dst.desc   = desc;
   dst.format = frameType;
   if (src.hdr)
-    dst.hdrPQ = true;
+    dst.hdrPQ = m_keepSignal ? src.hdrPQ : true;
   return PostProcessStatus::SUCCESS;
 }
 

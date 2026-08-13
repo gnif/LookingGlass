@@ -28,6 +28,7 @@ bool Frame::Same(const GraphCfg& left, const GraphCfg& right)
     left.srcWidth  == right.srcWidth                     &&
     left.srcHeight == right.srcHeight                    &&
     Frame::Same(left.src, right.src)                     &&
+    left.transform == right.transform                    &&
     left.width     == right.width                        &&
     left.height    == right.height                       &&
     Frame::Same(left.checkpoint, right.checkpoint);
@@ -141,60 +142,99 @@ unsigned CFrameGraph::Checkpoint(const FrameProfile& requested)
 {
   const FrameProfile profile =
     Frame::Store(requested, FrameStorage::D3D12_TEXTURE);
+  FrameProfile current = m_cfg.src;
   unsigned parent = 0;
-  FrameOp op;
+
+  const D12ColorTransform * transform = m_cfg.transform.get();
+  if (transform && transform->matrixEnabled)
+  {
+    // The common matrix stage preserves the source signal. A transfer-domain
+    // LUT is applied after each branch has selected scRGB or HDR10.
+    if (current.signal == FrameSignal::SRGB &&
+        current.pixel == FramePixel::BGRA8)
+      current.pixel = FramePixel::RGBA8;
+    parent = AddNode(FrameOp::CAL, 0,
+      m_cfg.srcWidth, m_cfg.srcHeight, current);
+    if (parent == FRAME_GRAPH_ROOT)
+      return FRAME_GRAPH_ROOT;
+  }
+
+  // Without calibration the established path filters linear scRGB before
+  // HDR10 encoding. This scale node is also shared by scRGB and HDR10 leaves.
+  const bool earlyScale = !transform &&
+    (m_cfg.srcWidth != m_cfg.width || m_cfg.srcHeight != m_cfg.height);
+  if (earlyScale)
+  {
+    parent = AddNode(FrameOp::SCALE, parent,
+      m_cfg.width, m_cfg.height, current);
+    if (parent == FRAME_GRAPH_ROOT)
+      return FRAME_GRAPH_ROOT;
+  }
+
   switch (profile.signal)
   {
     case FrameSignal::SRGB:
-      op = FrameOp::SDR;
-      parent = AddNode(FrameOp::SDR, 0, m_cfg.width, m_cfg.height,
-        m_cfg.checkpoint);
-      if (parent == FRAME_GRAPH_ROOT)
-        return FRAME_GRAPH_ROOT;
-      if (Frame::Same(profile, m_cfg.checkpoint))
-        return parent;
       break;
 
     case FrameSignal::SCRGB_LINEAR:
-    {
-      op = FrameOp::SCRGB;
-      FrameProfile scRGB;
-      scRGB.storage = FrameStorage::D3D12_TEXTURE;
-      scRGB.pixel   = FramePixel::RGBA16F;
-      scRGB.signal  = FrameSignal::SCRGB_LINEAR;
-      return AddNode(
-        op, 0, m_cfg.width, m_cfg.height, scRGB);
-    }
+      break;
 
     case FrameSignal::PQ_BT2020:
-      op = FrameOp::HDR10;
       if (m_cfg.src.signal == FrameSignal::SCRGB_LINEAR)
       {
-        FrameProfile scRGB;
-        scRGB.storage = FrameStorage::D3D12_TEXTURE;
-        scRGB.pixel   = FramePixel::RGBA16F;
-        scRGB.signal  = FrameSignal::SCRGB_LINEAR;
-        parent = AddNode(
-          FrameOp::SCRGB, 0, m_cfg.width, m_cfg.height, scRGB);
+        const unsigned width  = earlyScale ? m_cfg.width : m_cfg.srcWidth;
+        const unsigned height = earlyScale ? m_cfg.height : m_cfg.srcHeight;
+        parent = AddNode(FrameOp::HDR10, parent,
+          width, height, profile);
         if (parent == FRAME_GRAPH_ROOT)
           return FRAME_GRAPH_ROOT;
-      }
-      else
-      {
-        parent = AddNode(FrameOp::HDR10, 0,
-          m_cfg.width, m_cfg.height, m_cfg.checkpoint);
-        if (parent == FRAME_GRAPH_ROOT)
-          return FRAME_GRAPH_ROOT;
-        if (Frame::Same(profile, m_cfg.checkpoint))
-          return parent;
+        current = profile;
       }
       break;
 
     default:
       return FRAME_GRAPH_ROOT;
   }
-  return AddNode(
-    op, parent, m_cfg.width, m_cfg.height, profile);
+
+  if (transform && transform->lutEnabled)
+  {
+    if (current.signal == FrameSignal::SRGB &&
+        current.pixel == FramePixel::BGRA8)
+      current.pixel = FramePixel::RGBA8;
+    parent = AddNode(FrameOp::LUT, parent,
+      m_cfg.srcWidth, m_cfg.srcHeight, current);
+    if (parent == FRAME_GRAPH_ROOT)
+      return FRAME_GRAPH_ROOT;
+  }
+
+  if (!earlyScale &&
+      (m_cfg.srcWidth != m_cfg.width || m_cfg.srcHeight != m_cfg.height))
+  {
+    parent = AddNode(FrameOp::SCALE, parent,
+      m_cfg.width, m_cfg.height, current);
+    if (parent == FRAME_GRAPH_ROOT)
+      return FRAME_GRAPH_ROOT;
+  }
+
+  if (parent != 0 && Frame::Same(current, profile))
+    return parent;
+
+  FrameOp op;
+  switch (profile.signal)
+  {
+    case FrameSignal::SRGB:
+      op = FrameOp::SDR;
+      break;
+    case FrameSignal::SCRGB_LINEAR:
+      op = FrameOp::SCRGB;
+      break;
+    case FrameSignal::PQ_BT2020:
+      op = FrameOp::HDR10;
+      break;
+    default:
+      return FRAME_GRAPH_ROOT;
+  }
+  return AddNode(op, parent, m_cfg.width, m_cfg.height, profile);
 }
 
 bool CFrameGraph::Add(BackendId id, uint32_t epoch, bool required,
@@ -249,6 +289,26 @@ bool CFrameGraph::Seal()
 bool CFrameGraph::Same(const GraphCfg& cfg) const
 {
   return m_sealed && Frame::Same(m_cfg, cfg);
+}
+
+bool CFrameGraph::Need(FrameOp op) const
+{
+  if (!m_sealed || op == FrameOp::SRC)
+    return false;
+  for (unsigned i = 1; i < m_nodeCount; ++i)
+    if (m_nodes[i].op == op && m_nodes[i].refs)
+      return true;
+  return false;
+}
+
+bool CFrameGraph::Want(FrameSignal signal) const
+{
+  if (!m_sealed)
+    return false;
+  for (unsigned i = 0; i < m_leafCount; ++i)
+    if (m_leaves[i].cfg.profile.signal == signal)
+      return true;
+  return false;
 }
 
 bool CFrameGraph::Desc(unsigned leaf, const FrameDesc& frame,

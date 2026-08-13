@@ -31,11 +31,14 @@
 static const unsigned FRAME_DAMAGE_MAX = 256;
 static const unsigned FRAME_GRAPH_ROOT = UINT_MAX;
 static const unsigned FRAME_GRAPH_MAX_NODES =
-  1 + 2 * TRANSPORT_MAX_INSTANCES;
+  1 + 5 * TRANSPORT_MAX_INSTANCES;
 
 enum class FrameOp : uint8_t
 {
   SRC,
+  CAL,
+  LUT,
+  SCALE,
   SDR,
   SCRGB,
   HDR10,
@@ -50,14 +53,15 @@ enum class FrameDamage : uint8_t
 
 struct GraphCfg
 {
-  GpuMode      mode      = GpuMode::HARDWARE;
-  LUID         adapter   = {};
-  unsigned     srcWidth  = 0;
-  unsigned     srcHeight = 0;
-  FrameProfile src;
-  unsigned     width     = 0;
-  unsigned     height    = 0;
-  FrameProfile checkpoint;
+  GpuMode                                  mode      = GpuMode::HARDWARE;
+  LUID                                     adapter   = {};
+  unsigned                                 srcWidth  = 0;
+  unsigned                                 srcHeight = 0;
+  FrameProfile                             src;
+  std::shared_ptr<const D12ColorTransform> transform;
+  unsigned                                 width     = 0;
+  unsigned                                 height    = 0;
+  FrameProfile                             checkpoint;
 };
 
 namespace Frame
@@ -134,6 +138,8 @@ public:
     const FrameCfg& cfg);
   bool Seal();
   bool Same(const GraphCfg& cfg) const;
+  bool Want(FrameSignal signal) const;
+  bool Need(FrameOp op) const;
   bool Desc(unsigned leaf, const FrameDesc& frame, LeafDesc& desc) const;
 
   const GraphCfg& Cfg() const { return m_cfg; }

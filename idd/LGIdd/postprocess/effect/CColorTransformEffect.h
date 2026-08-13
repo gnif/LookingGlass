@@ -22,6 +22,13 @@
 
 #include "CComputeEffect.h"
 
+enum class CalPart : uint8_t
+{
+  ALL,
+  MATRIX,
+  LUT,
+};
+
 class CColorTransformEffect : public CComputeEffect
 {
 private:
@@ -41,8 +48,14 @@ private:
   ComPtr<ID3D12Resource> m_lutBuffer;
   DXGI_FORMAT            m_srcFormat = DXGI_FORMAT_UNKNOWN;
   DXGI_FORMAT            m_dstFormat = DXGI_FORMAT_UNKNOWN;
+  CalPart                m_part;
+  bool                   m_keepSignal;
 
 public:
+  explicit CColorTransformEffect(CalPart part = CalPart::ALL,
+    bool keepSignal = false) :
+    m_part(part), m_keepSignal(keepSignal) {}
+
   const char * GetName() const override { return "ColorTransform"; }
 
   bool Init(const ComPtr<ID3D12Device3>& device);

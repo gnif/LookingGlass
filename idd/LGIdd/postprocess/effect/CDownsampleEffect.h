@@ -43,18 +43,24 @@ private:
     float height;
   } m_consts = {};
 
-  std::vector<Rule> m_rules;
-  ComPtr<ID3D12Resource> m_constBuffer;
-  DXGI_FORMAT m_format = DXGI_FORMAT_UNKNOWN;
-  double m_scaleX = 1.0;
-  double m_scaleY = 1.0;
-  unsigned m_width = 0;
-  unsigned m_height = 0;
+  std::vector<Rule>       m_rules;
+  ComPtr<ID3D12Resource>  m_constBuffer;
+  DXGI_FORMAT             m_format   = DXGI_FORMAT_UNKNOWN;
+  double                  m_scaleX   = 1.0;
+  double                  m_scaleY   = 1.0;
+  unsigned                m_width    = 0;
+  unsigned                m_height   = 0;
+  unsigned                m_targetX  = 0;
+  unsigned                m_targetY  = 0;
 
   bool ParseRules(const std::wstring& value, bool report);
   const Rule * MatchRule(unsigned width, unsigned height) const;
 
 public:
+  CDownsampleEffect() = default;
+  CDownsampleEffect(unsigned width, unsigned height) :
+    m_targetX(width), m_targetY(height) {}
+
   const char * GetName() const override { return "Downsample"; }
 
   bool Init(const ComPtr<ID3D12Device3>& device, bool report = true);
