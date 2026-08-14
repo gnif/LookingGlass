@@ -59,7 +59,7 @@
 #include "app.h"
 #include "audio.h"
 #include "keybind.h"
-#include "clipboard.h"
+#include "core/clipboard.h"
 #include "kb.h"
 #include "egl_dynprocs.h"
 #include "gl_dynprocs.h"

@@ -108,7 +108,7 @@ add_executable(lgmp-clipboard-tests
   ../transports/LGMP/clipboard.c
 )
 target_include_directories(lgmp-clipboard-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
 )
 target_link_libraries(lgmp-clipboard-tests
   ${EXE_FLAGS}

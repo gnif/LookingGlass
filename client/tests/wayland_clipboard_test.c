@@ -20,8 +20,8 @@
 
 #include "wayland.h"
 #include "test.h"
-#include "../src/clipboard.h"
-#include "../src/clipboard_files.h"
+#include "core/clipboard.h"
+#include "core/clipboard_files.h"
 
 #include "common/debug.h"
 

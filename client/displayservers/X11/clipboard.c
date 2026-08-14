@@ -28,8 +28,8 @@
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 
-#include "../../src/clipboard.h"
-#include "../../src/clipboard_files.h"
+#include "core/clipboard.h"
+#include "core/clipboard_files.h"
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/KVMFRClipboard.h"

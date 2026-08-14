@@ -21,7 +21,7 @@
 #include "transport_fallback.h"
 
 #include "audio.h"
-#include "clipboard.h"
+#include "core/clipboard.h"
 #include "input.h"
 #include "sw_surface.h"
 

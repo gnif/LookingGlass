@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "../transports/LGMP/clipboard.h"
+#include "clipboard.h"
 
 #include "common/KVMFRClipboard.h"
 #include "common/LGMPConfig.h"

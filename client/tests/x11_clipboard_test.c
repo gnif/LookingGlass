@@ -22,8 +22,8 @@
 #include "clipboard.h"
 #include "test.h"
 #include "x11.h"
-#include "../src/clipboard.h"
-#include "../src/clipboard_files.h"
+#include "core/clipboard.h"
+#include "core/clipboard_files.h"
 
 #include "common/debug.h"
 

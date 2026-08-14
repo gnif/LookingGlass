@@ -20,8 +20,8 @@
 
 #define FUSE_USE_VERSION 310
 
-#include "clipboard_files.h"
-#include "clipboard.h"
+#include "core/clipboard_files.h"
+#include "core/clipboard.h"
 
 #include "common/KVMFRClipboard.h"
 #include "common/debug.h"

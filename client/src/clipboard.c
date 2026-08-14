@@ -18,8 +18,8 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "clipboard.h"
-#include "clipboard_files.h"
+#include "core/clipboard.h"
+#include "core/clipboard_files.h"
 #include "main.h"
 
 #include "common/debug.h"
