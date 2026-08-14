@@ -666,13 +666,17 @@ bool CFrameHub::GetFramePlan(
   return plan.count != 0;
 }
 
-bool CFrameHub::GetImmediateFramePlan(uint64_t now, FramePlan& plan)
+bool CFrameHub::GetImmediatePrimaryFramePlan(
+  uint64_t now, FramePlan& plan)
 {
   plan = {};
   SinkRef refs[FRAME_MAX_SINKS];
   const unsigned count = Snapshot(refs);
   for (unsigned i = 0; i < count; ++i)
   {
+    if (!refs[i].primary)
+      continue;
+
     Sink& sink = *refs[i].sink;
     CSRWSharedLock call(sink.callLock);
     if (!Atomic::Load(sink.active, std::memory_order_acquire) ||
@@ -693,8 +697,9 @@ bool CFrameHub::GetImmediateFramePlan(uint64_t now, FramePlan& plan)
     CFrameScheduler::Schedule schedule = {};
     bool periodic  = false;
     bool republish = false;
-    sink.target->GetPublishTarget(
-      now, target, schedule, periodic, republish);
+    if (!sink.target->GetPublishTarget(
+          now, target, schedule, periodic, republish))
+      continue;
 
     if (plan.count == FRAME_MAX_SINKS)
       continue;

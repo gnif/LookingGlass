@@ -1214,15 +1214,28 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
   {
     Entry& entry = *entries[i];
     bool frameService = false;
-    bool required = false;
+    bool required     = false;
+    bool primary      = false;
     {
       CSRWSharedLock entryLock(entry.lock);
       frameService =
         (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
       required = entry.required;
+      primary  = entry.primary;
     }
+    // Software capture writes directly into the primary frame target.
+    // Secondary routes add fan-out work and can require staging copies.
     if (!frameService)
       continue;
+    if (cfg.mode == GpuMode::SOFTWARE && !primary)
+    {
+      if (required)
+      {
+        result = CfgResult::REJECTED;
+        break;
+      }
+      continue;
+    }
 
     if (!BeginCall(entry, Call::CFG, true))
     {

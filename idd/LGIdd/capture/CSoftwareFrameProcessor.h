@@ -22,77 +22,24 @@
 
 #include "capture/CFrameProcessor.h"
 
+#include <atomic>
+
 class CSoftwareFrameProcessor final : public CFrameProcessor
 {
 private:
-  enum ProductState
+  struct CopyContext
   {
-    PRODUCT_FREE,
-    PRODUCT_PREPARING,
-    PRODUCT_READY,
-    PRODUCT_PUBLISHING,
-    PRODUCT_RETAINED,
-    PRODUCT_COMPLETING,
+    FrameCopyBatch    batch;
+    uint64_t          timingStart         = 0;
+    std::atomic<bool> completionDone      = false;
+    std::atomic<bool> completionSucceeded = false;
   };
 
-  struct Product
-  {
-    ProductState           state        = PRODUCT_FREE;
-    ProductState           restoreState = PRODUCT_FREE;
-    ProductState           completedState = PRODUCT_FREE;
-    ComPtr<ID3D12Resource> resource;
-    D12FrameFormat         srcFormat    = {};
-    D12FrameFormat         dstFormat    = {};
-    RECT                   dirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned               nbDirtyRects = 0;
-    RECT                   previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-    unsigned               nbPreviousDirtyRects = 0;
-    unsigned               pitch        = 0;
-    size_t                 frameSize    = 0;
-    uint64_t               sequence     = 0;
-    uint64_t               captureTime  = 0;
-    uint64_t               postProcessStart = 0;
-    uint64_t               prepareCopyStart = 0;
-    uint64_t               prepareReady = 0;
-    uint64_t               prepareGPUStart = 0;
-    uint64_t               prepareGPUEnd = 0;
-    uint64_t               timingStart  = 0;
-    unsigned               timingEffectIndex = 0;
-    uint64_t               timingToken  = 0;
-    bool                   prepareTimingValid = false;
-    bool                   sourceReady = false;
-    bool                   batchCommitted = false;
-    bool                   productNotified = false;
-    bool                   executeActive = false;
-    bool                   completionDone = false;
-    bool                   completionSucceeded = false;
-    FrameCopyBatch         batch        = {};
-  };
-
-  Product          m_products[CAPTURE_PIPELINE_SLOTS];
-  mutable CSRWLock m_productLock;
-  Wrappers::Event  m_productAvailableEvent;
+  // The unindexed copy-slot API permits exactly one in-flight submission.
+  CopyContext m_copy;
 
   static void CompletionFunction(
     CD3D12CommandSlot * slot, bool result, void * param1, void * param2);
-  int AcquireProduct();
-  int WaitForProduct();
-  void RestoreProduct(unsigned productIndex, ProductState state);
-  void FinishProduct(
-    unsigned productIndex, bool publishing, bool result);
-  void MarkSourceReady(unsigned productIndex, uint64_t sequence);
-  void MarkBatchCommitted(unsigned productIndex, uint64_t sequence);
-  bool EnsureProductResource(unsigned productIndex, size_t frameSize);
-  bool BeginExecute(unsigned productIndex, uint64_t sequence,
-    ProductState state);
-  void EndExecute(unsigned productIndex, uint64_t sequence,
-    bool& completed, bool& succeeded);
-  bool PrepareBatch(Product& product, unsigned productIndex,
-    const FramePlan& plan, uint64_t copyStart);
-  void CompleteBatch(CD3D12CommandSlot * slot, Product& product,
-    unsigned productIndex, bool publishing, bool result);
-  void ResetProducts();
-  void SignalProductState(bool available = false);
 
 public:
   CSoftwareFrameProcessor(IFrameTransport * transport,
@@ -101,10 +48,7 @@ public:
     CSRWLock * pipelineLock, HANDLE terminateEvent);
 
   bool Submit(const FrameSubmission& submission) override;
-  bool HasReadyFrame() const override;
-  bool Publish(const FramePlan& plan, uint64_t publishStart) override;
+  bool HasReadyFrame() const override { return false; }
+  bool Publish(const FramePlan&, uint64_t) override { return false; }
   bool UsesCadence() const override { return false; }
-  bool IsValid() const override;
-  void Reset() override;
-  void ResetPipeline() override;
 };

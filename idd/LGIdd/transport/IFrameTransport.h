@@ -58,7 +58,7 @@ public:
   virtual bool NeedsFrame() const = 0;
   virtual bool GetFramePlan(
     uint64_t now, bool productReady, FramePlan& plan) = 0;
-  virtual bool GetImmediateFramePlan(
+  virtual bool GetImmediatePrimaryFramePlan(
     uint64_t now, FramePlan& plan) = 0;
   virtual void MissFramePlan(const FramePlan& plan, uint64_t now) = 0;
 

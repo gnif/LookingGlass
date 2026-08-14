@@ -187,7 +187,7 @@ public:
   bool NeedsFrame() const override;
   bool GetFramePlan(
     uint64_t now, bool productReady, FramePlan& plan) override;
-  bool GetImmediateFramePlan(
+  bool GetImmediatePrimaryFramePlan(
     uint64_t now, FramePlan& plan) override;
   void MissFramePlan(const FramePlan& plan, uint64_t now) override;
   bool PrepareFrameBatch(const FramePlan& plan,

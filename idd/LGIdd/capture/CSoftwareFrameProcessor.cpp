@@ -24,13 +24,7 @@
 #include "CSRWLock.h"
 #include "CDebug.h"
 
-#include <cstring>
 #include <utility>
-
-using namespace Microsoft::WRL;
-
-static_assert(CAPTURE_PIPELINE_SLOTS == 2,
-  "Software frame products assume two pipeline slots");
 
 CSoftwareFrameProcessor::CSoftwareFrameProcessor(
     IFrameTransport * transport, std::shared_ptr<CD3D12Device> dx12,
@@ -39,407 +33,31 @@ CSoftwareFrameProcessor::CSoftwareFrameProcessor(
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent)
 {
-  m_productAvailableEvent.Attach(
-    CreateEvent(nullptr, FALSE, FALSE, nullptr));
 }
 
-void CSoftwareFrameProcessor::SignalProductState(bool available)
+void CSoftwareFrameProcessor::CompletionFunction(
+  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
 {
-  SetEvent(m_readyEvent.Get());
-  if (available)
-    SetEvent(m_productAvailableEvent.Get());
-}
+  auto processor = static_cast<CSoftwareFrameProcessor *>(param1);
+  auto context   = static_cast<CopyContext *>(param2);
+  const FrameCopyBatch batch = context->batch;
 
-int CSoftwareFrameProcessor::AcquireProduct()
-{
-  CSRWExclusiveLock lock(m_productLock);
-  for (unsigned i = 0; i < ARRAYSIZE(m_products); ++i)
-    if (m_products[i].state == PRODUCT_FREE)
-    {
-      Product& product          = m_products[i];
-      product.state             = PRODUCT_PREPARING;
-      product.restoreState      = PRODUCT_FREE;
-      product.completedState    = PRODUCT_FREE;
-      product.sequence          = m_transport->NextContentSerial();
-      product.sourceReady       = false;
-      product.batchCommitted    = false;
-      product.productNotified   = false;
-      product.executeActive     = false;
-      product.completionDone    = false;
-      product.completionSucceeded = false;
-      product.batch             = {};
-      return static_cast<int>(i);
-    }
-  return -1;
-}
+  CFrameBufferResource * fbRes =
+    batch.accepted == 1U && batch.prepared.count == 1 ?
+      batch.resources[0] : nullptr;
+  if (fbRes)
+    fbRes->MarkCompletion();
+  const bool succeeded = result && fbRes;
 
-int CSoftwareFrameProcessor::WaitForProduct()
-{
-  for (;;)
+  if (succeeded)
   {
-    const int selected = AcquireProduct();
-    if (selected >= 0)
-      return selected;
-
-    HANDLE handles[] =
-    {
-      m_terminateEvent,
-      m_productAvailableEvent.Get(),
-    };
-    const DWORD result = WaitForMultipleObjects(
-      ARRAYSIZE(handles), handles, FALSE, INFINITE);
-    if (result == WAIT_OBJECT_0)
-      return -1;
-    if (result != WAIT_OBJECT_0 + 1)
-    {
-      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
-        "Failed while waiting for a software frame product");
-      return -2;
-    }
-  }
-}
-
-bool CSoftwareFrameProcessor::IsValid() const
-{
-  return CFrameProcessor::IsValid() && m_productAvailableEvent.Get();
-}
-
-void CSoftwareFrameProcessor::RestoreProduct(
-  unsigned productIndex, ProductState state)
-{
-  if (productIndex >= ARRAYSIZE(m_products))
-    return;
-
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    Product& product = m_products[productIndex];
-    product.state             = state;
-    product.restoreState      = PRODUCT_FREE;
-    product.completedState    = PRODUCT_FREE;
-    product.executeActive     = false;
-    product.batch             = {};
-  }
-  SignalProductState(state == PRODUCT_FREE);
-}
-
-void CSoftwareFrameProcessor::MarkSourceReady(
-  unsigned productIndex, uint64_t sequence)
-{
-  bool notify = false;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    Product& product = m_products[productIndex];
-    if (product.sequence != sequence)
-      return;
-    const bool retained = product.state == PRODUCT_RETAINED ||
-      (product.state == PRODUCT_COMPLETING &&
-       product.completionSucceeded &&
-       product.completedState == PRODUCT_RETAINED);
-    if (!retained)
-      return;
-    product.sourceReady = true;
-    if (product.batchCommitted && !product.productNotified)
-    {
-      product.productNotified = true;
-      notify = true;
-    }
-  }
-  if (notify)
-    m_transport->FrameProductReady(sequence);
-}
-
-void CSoftwareFrameProcessor::MarkBatchCommitted(
-  unsigned productIndex, uint64_t sequence)
-{
-  bool notify = false;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    Product& product = m_products[productIndex];
-    if (product.sequence != sequence)
-      return;
-    const bool retained = product.state == PRODUCT_RETAINED ||
-      (product.state == PRODUCT_COMPLETING &&
-       product.completionSucceeded &&
-       product.completedState == PRODUCT_RETAINED);
-    product.batchCommitted = true;
-    if (retained && product.sourceReady && !product.productNotified)
-    {
-      product.productNotified = true;
-      notify = true;
-    }
-  }
-  if (notify)
-    m_transport->FrameProductReady(sequence);
-}
-
-void CSoftwareFrameProcessor::FinishProduct(
-  unsigned productIndex, bool publishing, bool result)
-{
-  bool available;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    Product& product = m_products[productIndex];
-    const ProductState expected =
-      publishing ? PRODUCT_PUBLISHING : PRODUCT_PREPARING;
-    if (product.state != expected)
-      return;
-
-    bool newer = false;
-    for (unsigned i = 0; i < ARRAYSIZE(m_products); ++i)
-    {
-      if (i == productIndex)
-        continue;
-
-      Product& current = m_products[i];
-      const bool completing = current.state == PRODUCT_COMPLETING &&
-        current.completionSucceeded &&
-        current.completedState != PRODUCT_FREE;
-      const bool complete = current.state == PRODUCT_READY ||
-        current.state == PRODUCT_PUBLISHING ||
-        current.state == PRODUCT_RETAINED || completing;
-      if (complete && current.sequence > product.sequence)
-        newer = true;
-      else if (result && complete &&
-          current.state != PRODUCT_PUBLISHING &&
-          current.sequence < product.sequence)
-      {
-        if (current.state == PRODUCT_COMPLETING)
-          current.completedState = PRODUCT_FREE;
-        else
-        {
-          current.state = PRODUCT_FREE;
-          SetEvent(m_productAvailableEvent.Get());
-        }
-      }
-    }
-
-    ProductState completedState;
-    if (newer)
-      completedState = PRODUCT_FREE;
-    else if (!result)
-      completedState = publishing ? product.restoreState : PRODUCT_FREE;
-    else
-      completedState = PRODUCT_RETAINED;
-    product.completionDone      = true;
-    product.completionSucceeded = result;
-    if (product.executeActive)
-    {
-      product.state          = PRODUCT_COMPLETING;
-      product.completedState = completedState;
-    }
-    else
-    {
-      product.state          = completedState;
-      product.completedState = PRODUCT_FREE;
-    }
-    product.restoreState      = PRODUCT_FREE;
-
-    available = m_products[productIndex].state == PRODUCT_FREE;
-    if (!available)
-      for (unsigned i = 0; i < ARRAYSIZE(m_products); ++i)
-        if (i != productIndex &&
-            m_products[i].state == PRODUCT_FREE)
-        {
-          available = true;
-          break;
-        }
-  }
-  SignalProductState(available);
-}
-
-bool CSoftwareFrameProcessor::EnsureProductResource(
-  unsigned productIndex, size_t frameSize)
-{
-  Product& product = m_products[productIndex];
-
-  D3D12_RESOURCE_DESC desc = {};
-  desc.Dimension          = D3D12_RESOURCE_DIMENSION_BUFFER;
-  desc.Width              = frameSize;
-  desc.Height             = 1;
-  desc.DepthOrArraySize   = 1;
-  desc.MipLevels          = 1;
-  desc.Format             = DXGI_FORMAT_UNKNOWN;
-  desc.SampleDesc.Count   = 1;
-  desc.Layout             = D3D12_TEXTURE_LAYOUT_ROW_MAJOR;
-
-  if (product.resource &&
-      D12::Same(product.resource->GetDesc(), desc, D12::DescCmp::CREATE))
-    return true;
-
-  product.resource.Reset();
-
-  D3D12_HEAP_PROPERTIES heapProps = {};
-  heapProps.Type                 = D3D12_HEAP_TYPE_DEFAULT;
-  heapProps.CPUPageProperty      = D3D12_CPU_PAGE_PROPERTY_UNKNOWN;
-  heapProps.MemoryPoolPreference = D3D12_MEMORY_POOL_UNKNOWN;
-  heapProps.CreationNodeMask     = 1;
-  heapProps.VisibleNodeMask      = 1;
-
-  const HRESULT hr = m_dx12->GetDevice()->CreateCommittedResource(
-    &heapProps, D3D12_HEAP_FLAG_NONE, &desc,
-    D3D12_RESOURCE_STATE_COMMON, nullptr,
-    IID_PPV_ARGS(&product.resource));
-  if (FAILED(hr))
-  {
-    DEBUG_ERROR_HR(hr, "Failed to create retained software frame");
-    return false;
-  }
-
-  static const WCHAR * names[] =
-  {
-    L"Software Frame 0",
-    L"Software Frame 1",
-  };
-  product.resource->SetName(names[productIndex]);
-  return true;
-}
-
-bool CSoftwareFrameProcessor::BeginExecute(unsigned productIndex,
-  uint64_t sequence, ProductState state)
-{
-  CSRWExclusiveLock lock(m_productLock);
-  Product& product = m_products[productIndex];
-  if (product.sequence != sequence || product.state != state)
-    return false;
-  product.executeActive       = true;
-  product.completionDone      = false;
-  product.completionSucceeded = false;
-  product.completedState      = PRODUCT_FREE;
-  return true;
-}
-
-void CSoftwareFrameProcessor::EndExecute(unsigned productIndex,
-  uint64_t sequence, bool& completed, bool& succeeded)
-{
-  bool available = false;
-  completed = false;
-  succeeded = false;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    Product& product = m_products[productIndex];
-    if (product.sequence != sequence)
-      return;
-
-    product.executeActive = false;
-    completed = product.completionDone;
-    succeeded = product.completionSucceeded;
-    if (product.state == PRODUCT_COMPLETING)
-    {
-      product.state          = product.completedState;
-      product.completedState = PRODUCT_FREE;
-      available = product.state == PRODUCT_FREE;
-    }
-  }
-  SignalProductState(available);
-}
-
-bool CSoftwareFrameProcessor::PrepareBatch(Product& product,
-  unsigned productIndex, const FramePlan& plan, uint64_t copyStart)
-{
-  FramePlan currentPlan = {};
-  {
-    CSRWSharedLock lock(m_productLock);
-    if (product.state == PRODUCT_READY ||
-        product.state == PRODUCT_RETAINED)
-    {
-      currentPlan = plan;
-      for (unsigned i = 0; i < currentPlan.count; ++i)
-        currentPlan.targets[i].commitSchedule.phaseEligible = false;
-    }
-  }
-  const FramePlan& batchPlan = currentPlan.count ? currentPlan : plan;
-
-  PreparedFrameBatch prepared = {};
-  if (!m_transport->PrepareFrameBatch(batchPlan, product.sequence,
-        product.pitch, product.frameSize, product.srcFormat,
-        product.dstFormat, product.dirtyRects, product.nbDirtyRects,
-        true, prepared))
-    return false;
-
-  FrameCopyBatch& batch = product.batch;
-  batch = {};
-  batch.prepared       = prepared;
-  batch.candidateIndex = productIndex;
-
-  CPostProcessor& postProcessor = m_postProcessors[productIndex];
-  const unsigned bytesPerPixel =
-    product.dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
-  for (unsigned i = 0; i < prepared.count; ++i)
-  {
-    CFrameBufferResource * fbRes =
-      m_frameBuffers.Get(prepared.targets[i], product.frameSize);
-    batch.resources[i] = fbRes;
-    if (!fbRes)
-    {
-      m_transport->AbortFrameBatch(prepared.token);
-      batch = {};
-      DEBUG_ERROR("Failed to get a software frame target resource");
-      return false;
-    }
-
-    RECT copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
-    unsigned nbCopyDirtyRects = 0;
-    const bool fullCopy = CFrameProcessorUtil::BuildCopyDamage(
-      postProcessor, prepared.targets[i].fullCopy,
-      product.previousDirtyRects, product.nbPreviousDirtyRects,
-      product.dirtyRects, product.nbDirtyRects,
-      product.dstFormat.width, product.dstFormat.height,
-      copyDirtyRects, &nbCopyDirtyRects);
-    fbRes->SetTiming(
-      product.captureTime, product.postProcessStart, copyStart);
-    fbRes->SetCandidateIndex(productIndex);
-    fbRes->SetPostProcessSample(product.timingEffectIndex,
-      product.timingToken, fullCopy);
-    fbRes->SetCopyDamage(copyDirtyRects, nbCopyDirtyRects,
-      fullCopy, product.pitch, bytesPerPixel);
-    fbRes->ResetCompletion();
-  }
-
-  batch.accepted = m_transport->PublishFrameBatch(prepared.token);
-  if (!batch.accepted)
-  {
-    batch = {};
-    return false;
-  }
-
-  return true;
-}
-
-void CSoftwareFrameProcessor::CompleteBatch(CD3D12CommandSlot * slot,
-  Product& product, unsigned productIndex, bool publishing, bool result)
-{
-  const FrameCopyBatch batch = product.batch;
-  if (!batch.accepted)
-    return;
-
-  for (unsigned i = 0; i < batch.prepared.count; ++i)
-    if ((batch.accepted & (1U << i)) && batch.resources[i])
-      batch.resources[i]->MarkCompletion();
-
-  if (!result)
-  {
-    return;
-  }
-
-  uint64_t gpuStart = 0;
-  uint64_t gpuEnd   = 0;
-  const bool gpuTimingValid = slot->GetGPUTimes(gpuStart, gpuEnd);
-  bool timingRecorded = false;
-  for (unsigned i = 0; i < batch.prepared.count; ++i)
-  {
-    if (!(batch.accepted & (1U << i)))
-      continue;
-    CFrameBufferResource * fbRes = batch.resources[i];
-    if (!fbRes)
-      continue;
-
     uint64_t stagedCopyTime = 0;
     if (fbRes->GetMap())
     {
       const uint64_t stagedCopyStart = CFrameScheduler::Nanotime();
       if (fbRes->IsFullCopy())
-        m_transport->WriteFrameTarget(batch.prepared.token,
-          i, fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
+        processor->m_transport->WriteFrameTarget(batch.prepared.token,
+          0, fbRes->GetMap(), 0, fbRes->GetFrameSize(), false);
       else
       {
         const unsigned pitch         = fbRes->GetCopyPitch();
@@ -454,318 +72,67 @@ void CSoftwareFrameProcessor::CompleteBatch(CD3D12CommandSlot * slot,
             (size_t)rect->left * bytesPerPixel;
           const size_t rowBytes =
             (size_t)(rect->right - rect->left) * bytesPerPixel;
-          m_transport->WriteFrameTargetRows(batch.prepared.token,
-            i, fbRes->GetMap(), rowOffset, rowBytes, pitch,
-            (unsigned)(rect->bottom - rect->top));
+          processor->m_transport->WriteFrameTargetRows(
+            batch.prepared.token, 0, fbRes->GetMap(), rowOffset,
+            rowBytes, pitch, (unsigned)(rect->bottom - rect->top));
         }
       }
       stagedCopyTime = CFrameScheduler::Nanotime() - stagedCopyStart;
     }
 
+    uint64_t gpuStart = 0;
+    uint64_t gpuEnd   = 0;
     const uint64_t copyReady = CFrameScheduler::Nanotime();
-    m_transport->FinalizeFrameTarget(batch.prepared.token, i);
+    const bool gpuTimingValid = slot->GetGPUTimes(gpuStart, gpuEnd);
+
+    processor->m_transport->FinalizeFrameTarget(
+      batch.prepared.token, 0);
     const uint64_t publishedAt = CFrameScheduler::Nanotime();
-
-    uint64_t postProcessTime = 0;
-    uint64_t copyTime        = 0;
-    uint64_t readyTime       = 0;
-    uint64_t holdTime        = 0;
-    if (!publishing)
+    const uint64_t postProcessStart = fbRes->GetPostProcessStart();
+    const uint64_t copyStart        = fbRes->GetCopyStart();
+    uint64_t postProcessTime = copyStart >= postProcessStart ?
+      copyStart - postProcessStart : 0;
+    uint64_t copyTime = copyReady >= copyStart ?
+      copyReady - copyStart : 0;
+    if (gpuTimingValid && gpuStart >= postProcessStart &&
+        gpuEnd >= gpuStart && gpuEnd <= copyReady)
     {
-      const uint64_t copyStart = fbRes->GetCopyStart();
-      postProcessTime = copyStart >= product.postProcessStart ?
-        copyStart - product.postProcessStart : 0;
-      copyTime = copyReady >= copyStart ?
-        copyReady - copyStart : 0;
-      if (gpuTimingValid && gpuStart >= product.postProcessStart &&
-          gpuEnd >= gpuStart && gpuEnd <= copyReady)
-      {
-        postProcessTime = gpuStart - product.postProcessStart;
-        copyTime        = gpuEnd - gpuStart + stagedCopyTime;
-      }
-      const uint64_t elapsed = publishedAt >= product.postProcessStart ?
-        publishedAt - product.postProcessStart : 0;
-      const uint64_t measured = postProcessTime + copyTime;
-      readyTime = elapsed > measured ? elapsed - measured : 0;
-    }
-    else
-    {
-      const uint64_t publishStart = fbRes->GetCopyStart();
-      postProcessTime = product.prepareCopyStart >=
-          product.postProcessStart ?
-        product.prepareCopyStart - product.postProcessStart : 0;
-      uint64_t prepareCopyTime = product.prepareReady >=
-          product.prepareCopyStart ?
-        product.prepareReady - product.prepareCopyStart : 0;
-      if (product.prepareTimingValid &&
-          product.prepareGPUStart >= product.postProcessStart &&
-          product.prepareGPUEnd >= product.prepareGPUStart &&
-          product.prepareGPUEnd <= product.prepareReady)
-      {
-        postProcessTime =
-          product.prepareGPUStart - product.postProcessStart;
-        prepareCopyTime =
-          product.prepareGPUEnd - product.prepareGPUStart;
-      }
-
-      uint64_t publishCopyTime = copyReady >= publishStart ?
-        copyReady - publishStart : 0;
-      if (gpuTimingValid && gpuStart >= publishStart &&
-          gpuEnd >= gpuStart && gpuEnd <= copyReady)
-        publishCopyTime = gpuEnd - gpuStart + stagedCopyTime;
-      copyTime = prepareCopyTime + publishCopyTime;
-
-      const uint64_t prepareElapsed = product.prepareReady >=
-          product.postProcessStart ?
-        product.prepareReady - product.postProcessStart : 0;
-      const uint64_t prepareMeasured = postProcessTime + prepareCopyTime;
-      const uint64_t prepareWait = prepareElapsed > prepareMeasured ?
-        prepareElapsed - prepareMeasured : 0;
-      const uint64_t publishElapsed = publishedAt >= publishStart ?
-        publishedAt - publishStart : 0;
-      const uint64_t publishWait = publishElapsed > publishCopyTime ?
-        publishElapsed - publishCopyTime : 0;
-      readyTime = prepareWait + publishWait;
-      holdTime = publishStart >= product.prepareReady ?
-        publishStart - product.prepareReady : 0;
+      postProcessTime = gpuStart - postProcessStart;
+      copyTime        = gpuEnd - gpuStart + stagedCopyTime;
     }
 
-    m_transport->SetFrameTargetTiming(batch.prepared.token, i,
-      fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime,
-      holdTime, publishedAt);
-    m_transport->TryRecordFrameTiming(
-      batch.prepared.token, i, publishedAt - fbRes->GetCopyStart());
+    const uint64_t elapsed = publishedAt >= postProcessStart ?
+      publishedAt - postProcessStart : 0;
+    const uint64_t measured  = postProcessTime + copyTime;
+    const uint64_t readyTime = elapsed > measured ?
+      elapsed - measured : 0;
 
-    if (!timingRecorded && product.timingToken && product.timingStart)
-    {
-      uint64_t totalTime = 0;
-      if (!publishing && copyReady >= product.timingStart)
-        totalTime = copyReady - product.timingStart;
-      else if (publishing &&
-          product.prepareReady >= product.timingStart &&
-          copyReady >= fbRes->GetCopyStart())
-        totalTime = (product.prepareReady - product.timingStart) +
-          (copyReady - fbRes->GetCopyStart());
-      if (totalTime)
-      {
-        m_postProcessors[productIndex].RecordTiming(
-          fbRes->GetTimingEffectIndex(), fbRes->GetTimingToken(),
-          fbRes->IsFullCopy(), totalTime);
-        timingRecorded = true;
-      }
-    }
+    processor->m_transport->SetFrameTargetTiming(batch.prepared.token, 0,
+      fbRes->GetCaptureTime(), postProcessTime, copyTime, readyTime, 0,
+      publishedAt);
+    processor->m_transport->TryRecordFrameTiming(
+      batch.prepared.token, 0, publishedAt - copyStart);
 
-    m_transport->CompleteFrameTarget(batch.prepared.token, i, true);
+    if (fbRes->GetTimingToken() && context->timingStart &&
+        copyReady >= context->timingStart)
+      processor->m_postProcessors[0].RecordTiming(
+        fbRes->GetTimingEffectIndex(), fbRes->GetTimingToken(),
+        fbRes->IsFullCopy(), copyReady - context->timingStart);
+
+    processor->m_transport->CompleteFrameTarget(
+      batch.prepared.token, 0, true);
   }
-}
-
-void CSoftwareFrameProcessor::CompletionFunction(
-  CD3D12CommandSlot * slot, bool result, void * param1, void * param2)
-{
-  auto processor = static_cast<CSoftwareFrameProcessor *>(param1);
-  auto product   = static_cast<Product *>(param2);
-  const unsigned productIndex =
-    static_cast<unsigned>(product - processor->m_products);
-
-  bool publishing;
-  uint64_t sequence;
+  else
   {
-    CSRWExclusiveLock lock(processor->m_productLock);
-    if (product->state == PRODUCT_PUBLISHING)
-      publishing = true;
-    else if (product->state == PRODUCT_PREPARING)
-      publishing = false;
-    else
-      return;
-    sequence = product->sequence;
-    if (!publishing)
-    {
-      product->prepareReady = CFrameScheduler::Nanotime();
-      product->prepareTimingValid = result && slot->GetGPUTimes(
-        product->prepareGPUStart, product->prepareGPUEnd);
-    }
-  }
-
-  processor->CompleteBatch(
-    slot, *product, productIndex, publishing, result);
-  if (!result)
-  {
-    if (product->batch.accepted)
-      processor->m_transport->FailFrameBatch(
-        product->batch.prepared.token);
+    if (batch.accepted)
+      processor->m_transport->FailFrameBatch(batch.prepared.token);
     processor->SetFullDamage();
     processor->m_transport->ForceFrame();
   }
-  processor->FinishProduct(productIndex, publishing, result);
-  if (result && !publishing)
-    processor->MarkSourceReady(productIndex, sequence);
-}
 
-bool CSoftwareFrameProcessor::HasReadyFrame() const
-{
-  uint64_t completeSequence  = 0;
-  uint64_t preparingSequence = 0;
-  bool ready = false;
-  {
-    CSRWSharedLock lock(m_productLock);
-    for (const Product& product : m_products)
-    {
-      if ((product.state == PRODUCT_READY ||
-           (product.state == PRODUCT_RETAINED &&
-            product.productNotified)) &&
-          product.sequence > completeSequence)
-        completeSequence = product.sequence;
-      else if ((product.state == PRODUCT_PREPARING ||
-          product.state == PRODUCT_COMPLETING) &&
-          product.sequence > preparingSequence)
-        preparingSequence = product.sequence;
-    }
-    if (completeSequence && preparingSequence <= completeSequence)
-      for (const Product& product : m_products)
-        if (product.state == PRODUCT_READY &&
-            product.sequence == completeSequence)
-        {
-          ready = true;
-          break;
-        }
-  }
-  if (!completeSequence || preparingSequence > completeSequence)
-    return false;
-  return ready || m_transport->NeedsFrame();
-}
-
-bool CSoftwareFrameProcessor::Publish(
-  const FramePlan& plan, uint64_t publishStart)
-{
-  CSRWSharedLock pipelineLock(*m_pipelineLock);
-
-  int selected = -1;
-  uint64_t newestSequence = 0;
-  ProductState restoreState = PRODUCT_FREE;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    for (unsigned i = 0; i < ARRAYSIZE(m_products); ++i)
-      if (m_products[i].state == PRODUCT_READY &&
-          (selected < 0 || m_products[i].sequence > newestSequence))
-      {
-        selected       = static_cast<int>(i);
-        newestSequence = m_products[i].sequence;
-      }
-
-    if (selected < 0 && m_transport->NeedsFrame())
-      for (unsigned i = 0; i < ARRAYSIZE(m_products); ++i)
-        if (m_products[i].state == PRODUCT_RETAINED &&
-            m_products[i].productNotified &&
-            (selected < 0 || m_products[i].sequence > newestSequence))
-        {
-          selected       = static_cast<int>(i);
-          newestSequence = m_products[i].sequence;
-        }
-
-    for (const Product& product : m_products)
-      if ((product.state == PRODUCT_PREPARING ||
-           product.state == PRODUCT_COMPLETING) &&
-          product.sequence > newestSequence)
-      {
-        selected = -1;
-        break;
-      }
-
-    if (selected >= 0)
-    {
-      Product& product = m_products[static_cast<unsigned>(selected)];
-      restoreState         = product.state;
-      product.restoreState = product.state;
-      product.state        = PRODUCT_PUBLISHING;
-      product.batch        = {};
-    }
-  }
-
-  if (selected < 0)
-    return false;
-  const unsigned productIndex = static_cast<unsigned>(selected);
-  Product& product = m_products[productIndex];
-  const uint64_t sequence = product.sequence;
-
-  const auto restoreProduct =
-    [this, productIndex, sequence, restoreState]()
-    {
-      bool available = false;
-      {
-        CSRWExclusiveLock lock(m_productLock);
-        Product& selected = m_products[productIndex];
-        if (selected.state == PRODUCT_PUBLISHING &&
-            selected.sequence == sequence)
-        {
-          selected.state        = restoreState;
-          selected.restoreState = PRODUCT_FREE;
-          selected.batch        = {};
-          available = restoreState == PRODUCT_FREE;
-        }
-      }
-      SignalProductState(available);
-    };
-
-  CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot(productIndex);
-  if (!copySlot)
-  {
-    restoreProduct();
-    return false;
-  }
-
-  if (!PrepareBatch(product, productIndex, plan, publishStart))
-  {
-    copySlot->Cancel();
-    restoreProduct();
-    return false;
-  }
-
-  const FrameBatchToken token = product.batch.prepared.token;
-  copySlot->SetCompletionCallback(
-    &CompletionFunction, this, &product);
-  copySlot->BeginTiming();
-  CPostProcessor& postProcessor = m_postProcessors[productIndex];
-  for (unsigned i = 0; i < product.batch.prepared.count; ++i)
-    if (product.batch.accepted & (1U << i))
-    {
-      CFrameBufferResource * fbRes = product.batch.resources[i];
-      postProcessor.CopyFromCandidate(copySlot->GetGfxList(),
-        fbRes->Get().Get(), product.resource.Get(),
-        fbRes->GetCopyDirtyRects(), fbRes->GetCopyDirtyRectCount(),
-        fbRes->IsFullCopy());
-    }
-  copySlot->EndTiming();
-
-  if (!BeginExecute(productIndex, sequence, PRODUCT_PUBLISHING))
-  {
-    copySlot->Cancel();
-    m_transport->FailFrameBatch(token);
-    return false;
-  }
-  const bool executed = copySlot->Execute();
-  const bool submittedWork = !executed && copySlot->HasSubmittedWork();
-  bool completionDone;
-  bool completionSucceeded;
-  EndExecute(productIndex, sequence,
-    completionDone, completionSucceeded);
-  if (!executed)
-  {
-    if (submittedWork || (completionDone && completionSucceeded))
-      m_transport->CommitFrameBatch(token);
-    else if (!completionDone)
-    {
-      m_transport->FailFrameBatch(token);
-      restoreProduct();
-    }
-    SetFullDamage();
-    m_transport->ForceFrame();
-    return false;
-  }
-
-  if (completionDone && !completionSucceeded)
-    return false;
-  m_transport->CommitFrameBatch(token);
-  return true;
+  context->completionSucceeded.store(
+    succeeded, std::memory_order_relaxed);
+  context->completionDone.store(true, std::memory_order_release);
 }
 
 bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
@@ -773,214 +140,223 @@ bool CSoftwareFrameProcessor::Submit(const FrameSubmission& submission)
   if (submission.noImageUpdate && !HasPendingDamage())
     return true;
 
-  const int selected = submission.noImageUpdate ?
-    WaitForProduct() : AcquireProduct();
-  if (selected == -2)
-    return false;
-  if (selected < 0)
-  {
-    if (WaitForSingleObject(m_terminateEvent, 0) == WAIT_OBJECT_0)
-      return true;
-    if (!submission.noImageUpdate)
-      m_transport->FrameSuperseded();
-    return submission.noImageUpdate;
-  }
-  const unsigned productIndex = static_cast<unsigned>(selected);
-  Product& product = m_products[productIndex];
-
   CSRWSharedLock pipelineLock(*m_pipelineLock);
-  CPostProcessor& postProcessor = m_postProcessors[productIndex];
+  CPostProcessor& postProcessor = m_postProcessors[0];
   const D12FrameFormat& dstFormat = postProcessor.GetOutputFormat();
   const unsigned pitch            = postProcessor.GetOutputPitch();
   const size_t frameSize          = postProcessor.GetOutputSize();
   if (!pitch || !frameSize ||
       frameSize > m_transport->GetMaxFrameSize())
   {
-    RestoreProduct(productIndex, PRODUCT_FREE);
     DEBUG_ERROR("Software frame does not fit in primary frame memory");
     SetFullDamage();
     return false;
   }
 
-  RECT currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbDirtyRects = 0;
-  const bool hasDamage =
-    TakePendingDamage(currentDirtyRects, &nbDirtyRects);
-  CFrameProcessorUtil::ClipDirtyRects(currentDirtyRects,
-    &nbDirtyRects, dstFormat.width, dstFormat.height);
-
-  RECT previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
-  unsigned nbPreviousDirtyRects = 0;
-  GetPreviousDamage(previousDirtyRects, &nbPreviousDirtyRects);
-
-  if (!EnsureProductResource(productIndex, frameSize))
+  enum class BackpressureResult
   {
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    RestoreProduct(productIndex, PRODUCT_FREE);
-    SetFullDamage();
-    return false;
-  }
-
-  CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot(productIndex);
-  if (!copySlot)
+    RETRY,
+    COMPLETE,
+    FAILED,
+  };
+  const auto handleBackpressure = [this, &submission]()
   {
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    RestoreProduct(productIndex, PRODUCT_FREE);
     if (!submission.noImageUpdate)
+    {
       m_transport->FrameSuperseded();
-    return true;
-  }
-
-  if (!submission.source->Signal() || !submission.source->Sync(*copySlot))
-  {
-    copySlot->Cancel();
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    RestoreProduct(productIndex, PRODUCT_FREE);
-    SetFullDamage();
-    return false;
-  }
-
-  product.srcFormat          = submission.sourceFormat;
-  product.dstFormat          = dstFormat;
-  product.nbDirtyRects       = nbDirtyRects;
-  product.nbPreviousDirtyRects = nbPreviousDirtyRects;
-  product.pitch              = pitch;
-  product.frameSize          = frameSize;
-  product.captureTime        = submission.captureTime;
-  product.postProcessStart   = submission.postProcessStart;
-  product.prepareCopyStart   = CFrameScheduler::Nanotime();
-  product.prepareReady       = 0;
-  product.prepareGPUStart    = 0;
-  product.prepareGPUEnd      = 0;
-  product.timingStart        = submission.timingToken ?
-    CFrameScheduler::Nanotime() : 0;
-  product.timingEffectIndex  = submission.timingEffectIndex;
-  product.timingToken        = submission.timingToken;
-  product.prepareTimingValid = false;
-  if (nbDirtyRects)
-    memcpy(product.dirtyRects, currentDirtyRects,
-      nbDirtyRects * sizeof(*product.dirtyRects));
-  if (nbPreviousDirtyRects)
-    memcpy(product.previousDirtyRects, previousDirtyRects,
-      nbPreviousDirtyRects * sizeof(*product.previousDirtyRects));
-
-  FramePlan plan = {};
-  const uint64_t now = CFrameScheduler::Nanotime();
-  if (m_transport->GetImmediateFramePlan(now, plan))
-    PrepareBatch(product, productIndex, plan,
-      product.prepareCopyStart);
-
-  const FrameBatchToken token = product.batch.prepared.token;
-  const bool hasBatch = product.batch.accepted != 0;
-  const uint64_t sequence = product.sequence;
-  bool productValid;
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    productValid = product.state == PRODUCT_PREPARING &&
-      product.sequence == sequence;
-    if (productValid)
-      product.batchCommitted = !hasBatch;
-  }
-  if (!productValid)
-  {
-    copySlot->Cancel();
-    if (hasBatch)
-      m_transport->FailFrameBatch(token);
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    return false;
-  }
-  copySlot->SetCompletionCallback(
-    &CompletionFunction, this, &product);
-  copySlot->BeginTiming();
-  if (hasBatch)
-    for (unsigned i = 0; i < product.batch.prepared.count; ++i)
-      if (product.batch.accepted & (1U << i))
-      {
-        CFrameBufferResource * fbRes = product.batch.resources[i];
-        postProcessor.CopyToFrameBuffer(copySlot->GetGfxList(),
-          fbRes->Get().Get(), submission.source->GetRes().Get(),
-          fbRes->GetCopyDirtyRects(), fbRes->GetCopyDirtyRectCount(),
-          fbRes->IsFullCopy());
-      }
-  postProcessor.CopyToCandidate(copySlot->GetGfxList(),
-    product.resource.Get(), submission.source->GetRes().Get());
-  copySlot->EndTiming();
-
-  if (!BeginExecute(productIndex, sequence, PRODUCT_PREPARING))
-  {
-    copySlot->Cancel();
-    if (hasBatch)
-      m_transport->FailFrameBatch(token);
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    return false;
-  }
-  const bool executed = copySlot->Execute();
-  const bool submittedWork = !executed && copySlot->HasSubmittedWork();
-  bool completionDone;
-  bool completionSucceeded;
-  EndExecute(productIndex, sequence,
-    completionDone, completionSucceeded);
-  if (!executed)
-  {
-    if (submittedWork || (completionDone && completionSucceeded))
-    {
-      if (hasBatch)
-        m_transport->CommitFrameBatch(token);
-      MarkBatchCommitted(productIndex, sequence);
-      CommitDamage(currentDirtyRects, nbDirtyRects);
+      return BackpressureResult::COMPLETE;
     }
-    else if (!completionDone)
+
+    const DWORD result = WaitForSingleObject(m_terminateEvent, 1);
+    if (result == WAIT_TIMEOUT)
+      return BackpressureResult::RETRY;
+    if (result == WAIT_OBJECT_0)
+      return BackpressureResult::COMPLETE;
+    DEBUG_ERROR_HR(HRESULT_FROM_WIN32(GetLastError()),
+      "Failed while waiting to retry software frame publication");
+    return BackpressureResult::FAILED;
+  };
+
+  uint64_t contentSerial = 0;
+  for (;;)
+  {
+    FramePlan plan = {};
+    if (!m_transport->GetImmediatePrimaryFramePlan(
+          CFrameScheduler::Nanotime(), plan))
     {
-      if (hasBatch)
-        m_transport->FailFrameBatch(token);
+      const BackpressureResult result = handleBackpressure();
+      if (result == BackpressureResult::RETRY)
+        continue;
+      return result == BackpressureResult::COMPLETE;
+    }
+    if (plan.count != 1 || !plan.targets[0].primary)
+    {
+      DEBUG_ERROR("Software capture received an invalid primary frame plan");
+      SetFullDamage();
+      return false;
+    }
+
+    CD3D12CommandSlot * copySlot = m_dx12->GetCopySlot();
+    if (!copySlot)
+    {
+      const BackpressureResult result = handleBackpressure();
+      if (result == BackpressureResult::RETRY)
+        continue;
+      return result == BackpressureResult::COMPLETE;
+    }
+    if (!contentSerial)
+      contentSerial = m_transport->NextContentSerial();
+
+    RECT currentDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned nbDirtyRects = 0;
+    const bool hasDamage =
+      TakePendingDamage(currentDirtyRects, &nbDirtyRects);
+    CFrameProcessorUtil::ClipDirtyRects(currentDirtyRects,
+      &nbDirtyRects, dstFormat.width, dstFormat.height);
+
+    RECT previousDirtyRects[LG_MAX_DIRTY_RECTS] = {};
+    unsigned nbPreviousDirtyRects = 0;
+    GetPreviousDamage(previousDirtyRects, &nbPreviousDirtyRects);
+
+    PreparedFrameBatch prepared = {};
+    if (!m_transport->PrepareFrameBatch(plan, contentSerial,
+          pitch, frameSize,
+          submission.sourceFormat, dstFormat,
+          currentDirtyRects, nbDirtyRects, submission.noImageUpdate,
+          prepared))
+    {
+      copySlot->Cancel();
       RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      const BackpressureResult result = handleBackpressure();
+      if (result == BackpressureResult::RETRY)
+        continue;
+      return result == BackpressureResult::COMPLETE;
+    }
+    if (prepared.count != 1 || !prepared.targets[0].direct)
+    {
+      copySlot->Cancel();
+      m_transport->AbortFrameBatch(prepared.token);
+      RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      DEBUG_ERROR("Software capture received an invalid primary frame target");
+      SetFullDamage();
+      return false;
+    }
+
+    CFrameBufferResource * fbRes =
+      m_frameBuffers.Get(prepared.targets[0], frameSize);
+    if (!fbRes)
+    {
+      copySlot->Cancel();
+      m_transport->AbortFrameBatch(prepared.token);
+      RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      DEBUG_ERROR("Failed to get the software frame target resource");
+      SetFullDamage();
+      return false;
+    }
+
+    if (!submission.source->Signal() ||
+        !submission.source->Sync(*copySlot))
+    {
+      copySlot->Cancel();
+      m_transport->AbortFrameBatch(prepared.token);
+      RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      SetFullDamage();
+      return false;
+    }
+
+    const uint64_t timingStart = submission.timingToken ?
+      CFrameScheduler::Nanotime() : 0;
+    RECT copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
+    unsigned nbCopyDirtyRects = 0;
+    const bool fullCopy = CFrameProcessorUtil::BuildCopyDamage(
+      postProcessor, prepared.targets[0].fullCopy,
+      previousDirtyRects, nbPreviousDirtyRects,
+      currentDirtyRects, nbDirtyRects,
+      dstFormat.width, dstFormat.height,
+      copyDirtyRects, &nbCopyDirtyRects);
+
+    const unsigned bytesPerPixel =
+      dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+    const uint64_t copyStart = CFrameScheduler::Nanotime();
+    fbRes->SetTiming(
+      submission.captureTime, submission.postProcessStart, copyStart);
+    fbRes->SetPostProcessSample(
+      submission.timingEffectIndex, submission.timingToken, fullCopy);
+    fbRes->SetCopyDamage(copyDirtyRects, nbCopyDirtyRects,
+      fullCopy, pitch, bytesPerPixel);
+    fbRes->ResetCompletion();
+
+    copySlot->BeginTiming();
+    postProcessor.CopyToFrameBuffer(copySlot->GetGfxList(),
+      fbRes->Get().Get(), submission.source->GetRes().Get(),
+      copyDirtyRects, nbCopyDirtyRects, fullCopy);
+    copySlot->EndTiming();
+
+    const uint32_t accepted =
+      m_transport->PublishFrameBatch(prepared.token);
+    if (accepted != 1U)
+    {
+      copySlot->Cancel();
+      if (accepted)
+        m_transport->FailFrameBatch(prepared.token);
+      RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      const BackpressureResult result = handleBackpressure();
+      if (result == BackpressureResult::RETRY)
+        continue;
+      return result == BackpressureResult::COMPLETE;
+    }
+
+    m_copy.batch              = {};
+    m_copy.batch.prepared     = prepared;
+    m_copy.batch.resources[0] = fbRes;
+    m_copy.batch.accepted     = accepted;
+    m_copy.timingStart        = timingStart;
+    m_copy.completionSucceeded.store(false, std::memory_order_relaxed);
+    m_copy.completionDone.store(false, std::memory_order_release);
+    copySlot->SetCompletionCallback(
+      &CompletionFunction, this, &m_copy);
+
+    const FrameBatchToken token = prepared.token;
+    const bool executed = copySlot->Execute();
+    const bool submittedWork =
+      !executed && copySlot->HasSubmittedWork();
+    const bool completionDone =
+      m_copy.completionDone.load(std::memory_order_acquire);
+    const bool completionSucceeded = completionDone &&
+      m_copy.completionSucceeded.load(std::memory_order_relaxed);
+    if (!executed)
+    {
+      if (completionSucceeded ||
+          (!completionDone && submittedWork))
       {
-        CSRWExclusiveLock lock(m_productLock);
-        if (product.state == PRODUCT_PREPARING &&
-            product.sequence == sequence)
+        m_transport->CommitFrameBatch(token);
+        CommitDamage(currentDirtyRects, nbDirtyRects);
+        RestorePendingDamage(
+          currentDirtyRects, nbDirtyRects, hasDamage);
+      }
+      else
+      {
+        if (!completionDone)
+          m_transport->FailFrameBatch(token);
+        RestorePendingDamage(
+          currentDirtyRects, nbDirtyRects, hasDamage);
+        if (!completionDone)
         {
-          product.state        = PRODUCT_FREE;
-          product.restoreState = PRODUCT_FREE;
-          product.batch        = {};
+          SetFullDamage();
+          m_transport->ForceFrame();
         }
       }
-      SignalProductState(true);
+      return false;
     }
-    SetFullDamage();
-    m_transport->ForceFrame();
-    return false;
-  }
 
-  if (completionDone && !completionSucceeded)
-  {
-    RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
-    return false;
-  }
-  if (hasBatch)
+    if (completionDone && !completionSucceeded)
+    {
+      RestorePendingDamage(currentDirtyRects, nbDirtyRects, hasDamage);
+      return false;
+    }
+
     m_transport->CommitFrameBatch(token);
-  MarkBatchCommitted(productIndex, sequence);
-  CommitDamage(currentDirtyRects, nbDirtyRects);
-  return true;
-}
-
-void CSoftwareFrameProcessor::ResetProducts()
-{
-  {
-    CSRWExclusiveLock lock(m_productLock);
-    for (Product& product : m_products)
-      product = {};
+    CommitDamage(currentDirtyRects, nbDirtyRects);
+    return true;
   }
-  SignalProductState(true);
-}
-
-void CSoftwareFrameProcessor::Reset()
-{
-  ResetProducts();
-  CFrameProcessor::Reset();
-}
-
-void CSoftwareFrameProcessor::ResetPipeline()
-{
-  ResetProducts();
-  CFrameProcessor::Invalidate();
 }
