@@ -41,6 +41,8 @@ namespace
     UINT64_C(116444736000000000);
   static constexpr size_t COPY_BUFFER_BYTES =
     KVMFR_CLIPBOARD_FILE_READ_BYTES;
+  static constexpr ULONG FILE_READ_BYTES =
+    static_cast<ULONG>(KVMFR_CLIPBOARD_FILE_READ_BYTES);
 
   class CThreadImpersonation final
   {
@@ -524,6 +526,111 @@ namespace
     std::shared_ptr<CClipboardFileDatasetLease> m_lease;
     std::mutex m_lock;
     uint64_t m_offset = 0;
+    std::vector<uint8_t> m_cache;
+    uint64_t m_cacheOffset = 0;
+
+    HRESULT ReadProvider(uint64_t offset, void * data, ULONG length)
+    {
+      ULONG actual = 0;
+      const HRESULT result = m_lease->provider->ReadClipboardFile(
+        m_lease->dataset, m_lease->acquisition,
+        m_entry.node, offset, data, length, actual);
+      if (FAILED(result))
+        return result;
+      return actual == length ? S_OK : STG_E_READFAULT;
+    }
+
+    HRESULT ReadLocked(void * data, ULONG length, ULONG * read,
+      bool readAhead)
+    {
+      if (read)
+        *read = 0;
+      if (!length)
+        return S_OK;
+      if (m_offset >= m_entry.size)
+        return S_FALSE;
+
+      const ULONG requested = static_cast<ULONG>((std::min<uint64_t>)(
+        length, m_entry.size - m_offset));
+      const bool direct = !readAhead || length >= FILE_READ_BYTES;
+      uint8_t * output = static_cast<uint8_t *>(data);
+      ULONG completed = 0;
+
+      while (completed < requested)
+      {
+        if (!direct && m_offset >= m_cacheOffset)
+        {
+          const uint64_t relative = m_offset - m_cacheOffset;
+          if (relative < m_cache.size())
+          {
+            const size_t available = m_cache.size() -
+              static_cast<size_t>(relative);
+            const ULONG amount = static_cast<ULONG>((std::min<size_t>)(
+              requested - completed, available));
+            memcpy(output + completed,
+              m_cache.data() + static_cast<size_t>(relative), amount);
+            m_offset += amount;
+            completed += amount;
+            continue;
+          }
+        }
+
+        if (direct)
+        {
+          const ULONG amount = (std::min)(
+            FILE_READ_BYTES, requested - completed);
+          const HRESULT result = ReadProvider(
+            m_offset, output + completed, amount);
+          if (FAILED(result))
+          {
+            if (read)
+              *read = completed;
+            return result;
+          }
+          m_offset += amount;
+          completed += amount;
+          continue;
+        }
+
+        m_cache.clear();
+        m_cacheOffset = 0;
+        const ULONG amount = static_cast<ULONG>((std::min<uint64_t>)(
+          FILE_READ_BYTES, m_entry.size - m_offset));
+        try
+        {
+          m_cache.resize(amount);
+        }
+        catch (const std::bad_alloc&)
+        {
+          m_cache.clear();
+          if (read)
+            *read = completed;
+          return E_OUTOFMEMORY;
+        }
+        catch (const std::length_error&)
+        {
+          m_cache.clear();
+          if (read)
+            *read = completed;
+          return E_OUTOFMEMORY;
+        }
+
+        const HRESULT result = ReadProvider(
+          m_offset, m_cache.data(), amount);
+        if (FAILED(result))
+        {
+          m_cache.clear();
+          if (read)
+            *read = completed;
+          return result;
+        }
+        m_cacheOffset = m_offset;
+      }
+
+      if (read)
+        *read = completed;
+      return completed == length ? S_OK : S_FALSE;
+    }
 
   public:
     CClipboardFileStream(
@@ -566,29 +673,14 @@ namespace
     HRESULT STDMETHODCALLTYPE Read(void * data, ULONG length,
       ULONG * read) override
     {
-      if (read)
-        *read = 0;
       if (!data && length)
+      {
+        if (read)
+          *read = 0;
         return STG_E_INVALIDPOINTER;
+      }
       std::lock_guard<std::mutex> lock(m_lock);
-      if (!length)
-        return S_OK;
-      if (m_offset >= m_entry.size)
-        return S_FALSE;
-      const ULONG requested = static_cast<ULONG>((std::min<uint64_t>)(
-        length, m_entry.size - m_offset));
-      ULONG actual = 0;
-      const HRESULT result = m_lease->provider->ReadClipboardFile(
-        m_lease->dataset, m_lease->acquisition,
-        m_entry.node, m_offset, data, requested, actual);
-      if (FAILED(result))
-        return result;
-      if (actual != requested)
-        return STG_E_READFAULT;
-      m_offset += actual;
-      if (read)
-        *read = actual;
-      return requested == length ? S_OK : S_FALSE;
+      return ReadLocked(data, length, read, true);
     }
 
     HRESULT STDMETHODCALLTYPE Write(const void *, ULONG, ULONG *) override
@@ -672,7 +764,11 @@ namespace
         const ULONG wanted = static_cast<ULONG>((std::min<uint64_t>)(
           remaining, buffer.size()));
         ULONG got = 0;
-        HRESULT result = Read(buffer.data(), wanted, &got);
+        HRESULT result;
+        {
+          std::lock_guard<std::mutex> lock(m_lock);
+          result = ReadLocked(buffer.data(), wanted, &got, false);
+        }
         if (FAILED(result))
           return result;
         if (!got)
