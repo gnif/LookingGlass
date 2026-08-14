@@ -35,13 +35,14 @@
 #include <string.h>
 #include <sys/random.h>
 
-#define CLIPBOARD_PENDING_MAX        128U
-#define CLIPBOARD_PENDING_NORMAL_MAX 64U
-#define CLIPBOARD_GRANTS             KVMFR_CLIPBOARD_SLOT_COUNT
-#define CLIPBOARD_POLL_MS            10U
-#define CLIPBOARD_RETRY_MS           1U
-#define CLIPBOARD_KEEPALIVE_US       UINT64_C(200000)
-#define CLIPBOARD_RELEASE_TIMEOUT_US UINT64_C(100000)
+#define CLIPBOARD_PENDING_MAX         128U
+#define CLIPBOARD_PENDING_NORMAL_MAX  64U
+#define CLIPBOARD_DRAIN_MAX           64U
+#define CLIPBOARD_GRANTS              KVMFR_CLIPBOARD_SLOT_COUNT
+#define CLIPBOARD_IDLE_POLL_MS        10U
+#define CLIPBOARD_ACTIVE_POLL_MS      1U
+#define CLIPBOARD_KEEPALIVE_US        UINT64_C(200000)
+#define CLIPBOARD_RELEASE_TIMEOUT_US  UINT64_C(100000)
 
 struct PendingRecord
 {
@@ -65,6 +66,7 @@ struct FileTransfer
   uint32_t                    sequence;
   bool                        began;
   bool                        blocked;
+  bool                        wireEnded;
 };
 
 struct FileAcquisition
@@ -1418,8 +1420,9 @@ static bool processHeld(LGMPClipboard * clipboard)
   }
 }
 
-static bool processMessage(LGMPClipboard * clipboard)
+static bool processMessage(LGMPClipboard * clipboard, bool * processed)
 {
+  *processed = false;
   LG_LOCK(clipboard->lock);
   if (!clipboard->connected || !clipboard->queue || clipboard->held)
   {
@@ -1440,6 +1443,7 @@ static bool processMessage(LGMPClipboard * clipboard)
     LG_UNLOCK(clipboard->lock);
     return false;
   }
+  *processed = true;
 
   const KVMFRClipboardQueueType type =
     KVMFR_CLIPBOARD_QUEUE_TYPE(message.udata);
@@ -1901,13 +1905,28 @@ static int clipboardThread(void * opaque)
   LGMPClipboard * clipboard = opaque;
   while (!atomic_load_explicit(&clipboard->stop, memory_order_acquire))
   {
-    const bool held = processHeld(clipboard);
-    dispatchRetiredFiles(clipboard);
-    if (!held)
-      break;
-    const bool message = processMessage(clipboard);
-    dispatchRetiredFiles(clipboard);
-    if (!message)
+    bool     running = true;
+    unsigned drained = 0;
+    for (; drained < CLIPBOARD_DRAIN_MAX; ++drained)
+    {
+      if (!processHeld(clipboard))
+      {
+        running = false;
+        break;
+      }
+      dispatchRetiredFiles(clipboard);
+
+      bool processed = false;
+      if (!processMessage(clipboard, &processed))
+      {
+        running = false;
+        break;
+      }
+      dispatchRetiredFiles(clipboard);
+      if (!processed)
+        break;
+    }
+    if (!running)
       break;
 
     LG_ClipboardRequest readyRequest = LG_CLIPBOARD_REQUEST_INVALID;
@@ -1937,7 +1956,10 @@ static int clipboardThread(void * opaque)
           transfer->blocked = false;
           fileReady[fileReadyCount++] = transfer->request.request;
         }
-    const bool retry = clipboard->pendingCount != 0;
+    const bool active = drained == CLIPBOARD_DRAIN_MAX ||
+      clipboard->pendingCount || clipboard->held ||
+      clipboard->writeBlocked || clipboard->fileReads ||
+      clipboard->fileWrites;
     LG_UNLOCK(clipboard->lock);
 
     if (readyRequest != LG_CLIPBOARD_REQUEST_INVALID)
@@ -1948,7 +1970,7 @@ static int clipboardThread(void * opaque)
     if (atomic_load_explicit(&clipboard->stop, memory_order_acquire))
       break;
     lgWaitEvent(clipboard->event,
-      retry ? CLIPBOARD_RETRY_MS : CLIPBOARD_POLL_MS);
+      active ? CLIPBOARD_ACTIVE_POLL_MS : CLIPBOARD_IDLE_POLL_MS);
   }
   dispatchRetiredFiles(clipboard);
   notifyStatus(clipboard);
@@ -2098,7 +2120,7 @@ static void releaseOnDisconnect(LGMPClipboard * clipboard)
     if (status != LGMP_ERR_QUEUE_BUSY && status != LGMP_ERR_QUEUE_FULL)
       return;
     if (clipboard->event)
-      lgWaitEvent(clipboard->event, CLIPBOARD_RETRY_MS);
+      lgWaitEvent(clipboard->event, CLIPBOARD_ACTIVE_POLL_MS);
   }
   while (microtime() < deadline);
 
@@ -2117,7 +2139,7 @@ static void releaseOnDisconnect(LGMPClipboard * clipboard)
     if ((int32_t)(processed - serial) >= 0)
       return;
     if (clipboard->event)
-      lgWaitEvent(clipboard->event, CLIPBOARD_RETRY_MS);
+      lgWaitEvent(clipboard->event, CLIPBOARD_ACTIVE_POLL_MS);
   }
   while (microtime() < deadline);
   DEBUG_WARN("Timed out waiting for LGMP clipboard release");
@@ -2711,6 +2733,7 @@ static LG_ClipboardResult fileDataBegin(void * opaque,
     transfer->responseOffset = 0;
     transfer->sequence       = 0;
     transfer->blocked        = false;
+    transfer->wireEnded      = false;
   }
   LG_UNLOCK(clipboard->lock);
   return valid ? LG_CLIPBOARD_RESULT_ACCEPTED :
@@ -2719,7 +2742,7 @@ static LG_ClipboardResult fileDataBegin(void * opaque,
 
 static LG_ClipboardResult fileDataChunk(void * opaque,
     const LG_ClipboardFileRequest * descriptor, uint64_t responseOffset,
-    const void * data, size_t size)
+    const void * data, size_t size, bool end)
 {
   LGMPClipboard * clipboard = opaque;
   if (!descriptor || !data || !size ||
@@ -2729,11 +2752,13 @@ static LG_ClipboardResult fileDataChunk(void * opaque,
   LG_LOCK(clipboard->lock);
   struct FileTransfer * transfer = fileTransferFindNL(
       clipboard->fileWrites, descriptor->request);
-  if (!transfer || !transfer->began ||
+  if (!transfer || !transfer->began || transfer->wireEnded ||
       !sameFileRequest(&transfer->request, descriptor) ||
       transfer->responseOffset != responseOffset ||
       (transfer->sizeHint != KVMFR_CLIPBOARD_SIZE_UNKNOWN &&
        responseOffset + size > transfer->sizeHint) ||
+      (end && transfer->sizeHint != KVMFR_CLIPBOARD_SIZE_UNKNOWN &&
+       transfer->sizeHint != responseOffset + size) ||
       (descriptor->operation == LG_CLIPBOARD_FILE_READ &&
        responseOffset + size > descriptor->length))
   {
@@ -2746,11 +2771,12 @@ static LG_ClipboardResult fileDataChunk(void * opaque,
   record.transfer            = descriptor->request;
   record.offset              = responseOffset;
   record.sequence            = transfer->sequence;
-  record.size                = transfer->sequence ?
-    KVMFR_CLIPBOARD_SIZE_UNKNOWN : transfer->sizeHint;
+  record.size                = end ? responseOffset + size :
+    transfer->sequence ? KVMFR_CLIPBOARD_SIZE_UNKNOWN : transfer->sizeHint;
   record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
-  record.flags               = transfer->sequence ? 0 :
-    KVMFR_CLIPBOARD_FLAG_BEGIN;
+  record.flags               = (transfer->sequence ? 0 :
+    KVMFR_CLIPBOARD_FLAG_BEGIN) |
+    (end ? KVMFR_CLIPBOARD_FLAG_END : 0);
   record.token               = toWireFileOperation(descriptor->operation);
   record.length              = (uint32_t)size;
   const bool result = enqueueDataNL(clipboard, record, data);
@@ -2758,6 +2784,7 @@ static LG_ClipboardResult fileDataChunk(void * opaque,
   {
     transfer->responseOffset += size;
     ++transfer->sequence;
+    transfer->wireEnded      = end;
   }
   else
     transfer->blocked = true;
@@ -2785,6 +2812,13 @@ static LG_ClipboardResult fileDataEnd(void * opaque,
   {
     LG_UNLOCK(clipboard->lock);
     return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (transfer->wireEnded)
+  {
+    free(fileTransferTakeNL(
+        &clipboard->fileWrites, descriptor->request));
+    LG_UNLOCK(clipboard->lock);
+    return LG_CLIPBOARD_RESULT_ACCEPTED;
   }
   KVMFRClipboardMessage record = { 0 };
   record.type                = KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;

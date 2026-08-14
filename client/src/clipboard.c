@@ -2183,13 +2183,13 @@ LG_ClipboardResult lgClipboard_fileDataBegin(
 
 LG_ClipboardResult lgClipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
-    const void * data, size_t size)
+    const void * data, size_t size, bool end)
 {
   LG_ClipboardResult result = LG_CLIPBOARD_RESULT_FAILED;
   LG_LOCK_SHARED(clipboard.activeLock);
   if (clipboard.active.ops && clipboard.active.ops->fileDataChunk)
     result = clipboard.active.ops->fileDataChunk(
-        clipboard.active.opaque, request, responseOffset, data, size);
+        clipboard.active.opaque, request, responseOffset, data, size, end);
   LG_UNLOCK_SHARED(clipboard.activeLock);
   return result;
 }

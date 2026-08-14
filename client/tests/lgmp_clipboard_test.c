@@ -719,6 +719,7 @@ static bool checkCommit(TestState * state, uint32_t token,
 }
 
 static bool checkFileCommit(TestState * state, uint32_t grantToken,
+    KVMFRClipboardFileOperation operation,
     KVMFRClipboardMessage * commit, KVMFRClipboardMessage * slot,
     const void ** data)
 {
@@ -736,7 +737,7 @@ static bool checkFileCommit(TestState * state, uint32_t grantToken,
   CHECK(slot->flags == commit->flags);
   CHECK(slot->length == commit->length);
   CHECK(slot->sequence == commit->sequence);
-  CHECK(slot->token == KVMFR_CLIPBOARD_FILE_OP_READ);
+  CHECK(slot->token == operation);
   *data = (const uint8_t *)lgmpHostMemPtr(
     state->grantMemory[grantToken - 1]) + sizeof(*slot);
   return true;
@@ -1280,26 +1281,47 @@ static bool testFileStream(TestState * state)
   CHECK(postGrant(state, claimRecord.generation, 1));
   CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->fileDataChunk(state->clipboard,
-        &descriptor, 0, bytes, sizeof(bytes)) ==
+        &descriptor, 0, bytes, sizeof(bytes), true) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   KVMFRClipboardMessage commit;
   KVMFRClipboardMessage slot;
   const void * data;
-  CHECK(checkFileCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
+  CHECK(checkFileCommit(state, 1, KVMFR_CLIPBOARD_FILE_OP_READ,
+        &commit, &slot, &data));
+  CHECK(slot.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
+        KVMFR_CLIPBOARD_FLAG_END));
   CHECK(slot.offset == 0 && slot.sequence == 0 &&
       slot.size == sizeof(bytes));
   CHECK(slot.length == sizeof(bytes));
   CHECK(memcmp(data, bytes, sizeof(bytes)) == 0);
 
+  CHECK(state->ops->fileDataEnd(state->clipboard,
+        &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(noClientData(state));
+
+  const unsigned requests = atomic_load(&state->events.fileRequest);
+  request.transfer = KVMFR_CLIPBOARD_TRANSFER_HELPER | UINT64_C(0x7803);
+  request.offset   = 0;
+  request.size     = KVMFR_CLIPBOARD_FILE_ROOT_NODE;
+  request.flags    = 0;
+  request.token    = KVMFR_CLIPBOARD_FILE_OP_LIST;
+  CHECK(postRecord(state, &request,
+        KVMFR_CLIPBOARD_QUEUE_MESSAGE, NULL));
+  CHECK(waitAtomic(state, &state->events.fileRequest, requests + 1));
+  const LG_ClipboardFileRequest empty = state->events.fileRequestValue;
+  CHECK(empty.operation == LG_CLIPBOARD_FILE_LIST);
+  CHECK(state->ops->fileDataBegin(state->clipboard,
+        &empty, KVMFR_CLIPBOARD_SIZE_UNKNOWN) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(postGrant(state, claimRecord.generation, 1));
   CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->fileDataEnd(state->clipboard,
-        &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(checkFileCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_END);
-  CHECK(slot.offset == sizeof(bytes) && slot.sequence == 1 &&
-      slot.size == sizeof(bytes));
+        &empty, 0) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(checkFileCommit(state, 1, KVMFR_CLIPBOARD_FILE_OP_LIST,
+        &commit, &slot, &data));
+  CHECK(slot.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
+        KVMFR_CLIPBOARD_FLAG_END));
+  CHECK(slot.offset == 0 && slot.sequence == 0 && slot.size == 0);
   CHECK(slot.length == 0);
   return true;
 }

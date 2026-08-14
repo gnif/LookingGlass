@@ -2764,7 +2764,7 @@ static struct LocalDataset * acquiredLocalDatasetNL(uint64_t wireDataset)
 }
 
 static bool sendJobCall(struct LocalJob * job, int operation,
-    uint64_t offset, const void * data, size_t size)
+    uint64_t offset, const void * data, size_t size, bool end)
 {
   for (;;)
   {
@@ -2778,7 +2778,7 @@ static bool sendJobCall(struct LocalJob * job, int operation,
         break;
       case 1:
         result = lgClipboard_fileDataChunk(
-            &job->request, offset, data, size);
+            &job->request, offset, data, size, end);
         break;
       default:
         result = lgClipboard_fileDataEnd(&job->request, offset);
@@ -2796,7 +2796,7 @@ static bool sendJobCall(struct LocalJob * job, int operation,
 static bool sendBufferJob(struct LocalJob * job,
     const uint8_t * data, size_t size)
 {
-  if (!sendJobCall(job, 0, size, NULL, 0))
+  if (!sendJobCall(job, 0, size, NULL, 0, false))
     return false;
   size_t offset = 0;
   while (offset < size)
@@ -2804,11 +2804,12 @@ static bool sendBufferJob(struct LocalJob * job,
     size_t chunk = size - offset;
     if (chunk > FILE_STREAM_CHUNK)
       chunk = FILE_STREAM_CHUNK;
-    if (!sendJobCall(job, 1, offset, data + offset, chunk))
+    const bool end = chunk == size - offset;
+    if (!sendJobCall(job, 1, offset, data + offset, chunk, end))
       return false;
     offset += chunk;
   }
-  return sendJobCall(job, 2, size, NULL, 0);
+  return sendJobCall(job, 2, size, NULL, 0, true);
 }
 
 static LG_ClipboardFileError appendLocalEntry(uint8_t ** data, size_t * size,

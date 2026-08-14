@@ -247,9 +247,12 @@ typedef struct LG_ClipboardOps
       const LG_ClipboardFileRequest * request);
   LG_ClipboardResult (*fileDataBegin)(void * opaque,
       const LG_ClipboardFileRequest * request, uint64_t sizeHint);
+  /* end marks a final non-empty chunk. fileDataEnd must still be called to
+   * complete the producer-side stream; it emits a terminal record only when
+   * the final chunk was not marked, including for an empty response. */
   LG_ClipboardResult (*fileDataChunk)(void * opaque,
       const LG_ClipboardFileRequest * request, uint64_t responseOffset,
-      const void * data, size_t size);
+      const void * data, size_t size, bool end);
   LG_ClipboardResult (*fileDataEnd)(void * opaque,
       const LG_ClipboardFileRequest * request, uint64_t finalSize);
   bool (*fileCancel)(void * opaque, uint64_t dataset,

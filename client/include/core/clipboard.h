@@ -66,7 +66,7 @@ LG_ClipboardResult lgClipboard_fileDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint);
 LG_ClipboardResult lgClipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
-    const void * data, size_t size);
+    const void * data, size_t size, bool end);
 LG_ClipboardResult lgClipboard_fileDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t finalSize);
 bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,

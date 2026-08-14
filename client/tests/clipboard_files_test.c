@@ -53,6 +53,7 @@ static size_t responseSize;
 static size_t responseCapacity;
 static bool responseOpen;
 static bool responseComplete;
+static bool responseWireEnded;
 static unsigned cancelCount;
 static uint64_t cancelledDataset;
 static uint64_t cancelledRequest;
@@ -102,15 +103,16 @@ LG_ClipboardResult lgClipboard_fileDataBegin(
 {
   CHECK(request);
   (void)sizeHint;
-  responseSize = 0;
-  responseOpen = true;
-  responseComplete = false;
+  responseSize      = 0;
+  responseOpen      = true;
+  responseComplete  = false;
+  responseWireEnded = false;
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
 LG_ClipboardResult lgClipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
-    const void * data, size_t size)
+    const void * data, size_t size, bool end)
 {
   CHECK(request);
   CHECK(responseOpen);
@@ -122,12 +124,14 @@ LG_ClipboardResult lgClipboard_fileDataChunk(
   {
     uint8_t * resized = realloc(responseData, wanted);
     CHECK(resized);
-    responseData = resized;
+    responseData     = resized;
     responseCapacity = wanted;
   }
   if (size)
     memcpy(responseData + responseSize, data, size);
   responseSize = wanted;
+  if (end)
+    responseWireEnded = true;
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
@@ -137,7 +141,8 @@ LG_ClipboardResult lgClipboard_fileDataEnd(
   CHECK(request);
   CHECK(responseOpen);
   CHECK(finalSize == responseSize);
-  responseOpen = false;
+  CHECK(!finalSize || responseWireEnded);
+  responseOpen     = false;
   responseComplete = true;
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
@@ -169,13 +174,14 @@ static bool runLocalRequest(uint64_t dataset, uint64_t node,
     LG_ClipboardFileOperation operation, uint64_t offset, uint32_t length)
 {
   static uint64_t requestId = 1;
-  responseSize = 0;
-  responseOpen = false;
-  responseComplete = false;
-  cancelCount = 0;
-  cancelledDataset = 0;
-  cancelledRequest = 0;
-  cancelledReason = LG_CLIPBOARD_FILE_ERROR_NONE;
+  responseSize       = 0;
+  responseOpen       = false;
+  responseComplete   = false;
+  responseWireEnded  = false;
+  cancelCount        = 0;
+  cancelledDataset   = 0;
+  cancelledRequest   = 0;
+  cancelledReason    = LG_CLIPBOARD_FILE_ERROR_NONE;
   const LG_ClipboardFileRequest request =
   {
     .dataset   = dataset,
@@ -187,6 +193,7 @@ static bool runLocalRequest(uint64_t dataset, uint64_t node,
   };
   const bool result = lgClipboardFiles_testLocalRequest(&request);
   CHECK(!result || responseComplete);
+  CHECK(!result || !responseSize || responseWireEnded);
   CHECK(result ? cancelCount == 0U : cancelCount == 1U);
   if (!result)
   {
