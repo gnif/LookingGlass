@@ -34,6 +34,6 @@
 #define LGMP_Q_FRAME_BUFFER_LEN 3
 #define LGMP_Q_POINTER_LEN      32
 #define LGMP_Q_INPUT_LEN        4
-#define LGMP_Q_CLIPBOARD_LEN    8
+#define LGMP_Q_CLIPBOARD_LEN    32
 
 #endif

@@ -26,10 +26,14 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KVMFR_CLIPBOARD_VERSION       1U
-#define KVMFR_CLIPBOARD_SLOT_COUNT    2U
-#define KVMFR_CLIPBOARD_DATA_BYTES    (64U * 1024U)
-#define KVMFR_CLIPBOARD_SIZE_UNKNOWN  UINT64_MAX
+#define KVMFR_CLIPBOARD_VERSION                2U
+#define KVMFR_CLIPBOARD_SLOT_COUNT             8U
+#define KVMFR_CLIPBOARD_DATA_BYTES             (64U * 1024U)
+#define KVMFR_CLIPBOARD_SIZE_UNKNOWN           UINT64_MAX
+#define KVMFR_CLIPBOARD_FILE_READ_BYTES        (1024U * 1024U)
+#define KVMFR_CLIPBOARD_FILE_ROOT_NODE         UINT64_C(0)
+#define KVMFR_CLIPBOARD_FILE_MAX_ACQUISITIONS  8U
+#define KVMFR_CLIPBOARD_FILE_MAX_REQUESTS      32U
 
 /* Transfer IDs are selected by the side which sends REQUEST. Keeping the
  * namespaces disjoint makes a simultaneous transfer in each direction
@@ -48,34 +52,44 @@ static inline int kvmfrClipboardTransferFromClient(uint64_t transfer)
 
 enum
 {
-  KVMFR_CLIPBOARD_FORMAT_NONE = 0,
-  KVMFR_CLIPBOARD_FORMAT_TEXT = 1,
-  KVMFR_CLIPBOARD_FORMAT_PNG  = 2,
-  KVMFR_CLIPBOARD_FORMAT_BMP  = 3,
-  KVMFR_CLIPBOARD_FORMAT_TIFF = 4,
-  KVMFR_CLIPBOARD_FORMAT_JPEG = 5
+  KVMFR_CLIPBOARD_FORMAT_NONE  = 0,
+  KVMFR_CLIPBOARD_FORMAT_TEXT  = 1,
+  KVMFR_CLIPBOARD_FORMAT_PNG   = 2,
+  KVMFR_CLIPBOARD_FORMAT_BMP   = 3,
+  KVMFR_CLIPBOARD_FORMAT_TIFF  = 4,
+  KVMFR_CLIPBOARD_FORMAT_JPEG  = 5,
+  KVMFR_CLIPBOARD_FORMAT_FILES = 6
 };
 
 typedef uint32_t KVMFRClipboardFormat;
 
 enum
 {
-  KVMFR_CLIPBOARD_FORMAT_MASK_TEXT = 1U << 0,
-  KVMFR_CLIPBOARD_FORMAT_MASK_PNG  = 1U << 1,
-  KVMFR_CLIPBOARD_FORMAT_MASK_BMP  = 1U << 2,
-  KVMFR_CLIPBOARD_FORMAT_MASK_TIFF = 1U << 3,
-  KVMFR_CLIPBOARD_FORMAT_MASK_JPEG = 1U << 4,
-  KVMFR_CLIPBOARD_FORMAT_MASK_ALL  =
+  KVMFR_CLIPBOARD_FORMAT_MASK_TEXT  = 1U << 0,
+  KVMFR_CLIPBOARD_FORMAT_MASK_PNG   = 1U << 1,
+  KVMFR_CLIPBOARD_FORMAT_MASK_BMP   = 1U << 2,
+  KVMFR_CLIPBOARD_FORMAT_MASK_TIFF  = 1U << 3,
+  KVMFR_CLIPBOARD_FORMAT_MASK_JPEG  = 1U << 4,
+  KVMFR_CLIPBOARD_FORMAT_MASK_FILES = 1U << 5,
+  KVMFR_CLIPBOARD_FORMAT_MASK_ALL   =
     KVMFR_CLIPBOARD_FORMAT_MASK_TEXT |
     KVMFR_CLIPBOARD_FORMAT_MASK_PNG  |
     KVMFR_CLIPBOARD_FORMAT_MASK_BMP  |
     KVMFR_CLIPBOARD_FORMAT_MASK_TIFF |
-    KVMFR_CLIPBOARD_FORMAT_MASK_JPEG,
+    KVMFR_CLIPBOARD_FORMAT_MASK_JPEG |
+    KVMFR_CLIPBOARD_FORMAT_MASK_FILES,
 };
 
 typedef uint32_t KVMFRClipboardFormatFlags;
 
 static inline int kvmfrClipboardFormatValid(KVMFRClipboardFormat format)
+{
+  return format >= KVMFR_CLIPBOARD_FORMAT_TEXT &&
+    format <= KVMFR_CLIPBOARD_FORMAT_FILES;
+}
+
+static inline int kvmfrClipboardRepresentationFormatValid(
+  KVMFRClipboardFormat format)
 {
   return format >= KVMFR_CLIPBOARD_FORMAT_TEXT &&
     format <= KVMFR_CLIPBOARD_FORMAT_JPEG;
@@ -90,17 +104,23 @@ static inline KVMFRClipboardFormatFlags kvmfrClipboardFormatFlag(
 
 enum
 {
-  KVMFR_CLIPBOARD_MESSAGE_CLAIM       = 1,
-  KVMFR_CLIPBOARD_MESSAGE_RELEASE     = 2,
-  KVMFR_CLIPBOARD_MESSAGE_KEEPALIVE   = 3,
-  KVMFR_CLIPBOARD_MESSAGE_OFFER       = 4,
-  KVMFR_CLIPBOARD_MESSAGE_CLEAR       = 5,
-  KVMFR_CLIPBOARD_MESSAGE_REQUEST     = 6,
-  KVMFR_CLIPBOARD_MESSAGE_DATA        = 7,
-  KVMFR_CLIPBOARD_MESSAGE_COMMIT      = 8,
-  KVMFR_CLIPBOARD_MESSAGE_CANCEL      = 9,
-  KVMFR_CLIPBOARD_MESSAGE_ACK         = 10,
-  KVMFR_CLIPBOARD_MESSAGE_GRANT       = 11
+  KVMFR_CLIPBOARD_MESSAGE_CLAIM         = 1,
+  KVMFR_CLIPBOARD_MESSAGE_RELEASE       = 2,
+  KVMFR_CLIPBOARD_MESSAGE_KEEPALIVE     = 3,
+  KVMFR_CLIPBOARD_MESSAGE_OFFER         = 4,
+  KVMFR_CLIPBOARD_MESSAGE_CLEAR         = 5,
+  KVMFR_CLIPBOARD_MESSAGE_REQUEST       = 6,
+  KVMFR_CLIPBOARD_MESSAGE_DATA          = 7,
+  KVMFR_CLIPBOARD_MESSAGE_COMMIT        = 8,
+  KVMFR_CLIPBOARD_MESSAGE_CANCEL        = 9,
+  KVMFR_CLIPBOARD_MESSAGE_ACK           = 10,
+  KVMFR_CLIPBOARD_MESSAGE_GRANT         = 11,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE  = 12,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED = 13,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE  = 14,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST  = 15,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_DATA     = 16,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL   = 17
 };
 
 typedef uint32_t KVMFRClipboardMessageType;
@@ -134,6 +154,179 @@ typedef struct KVMFRClipboardMessage
   uint32_t                    length;
 }
 KVMFRClipboardMessage;
+
+enum
+{
+  KVMFR_CLIPBOARD_FILE_OP_LIST = 1,
+  KVMFR_CLIPBOARD_FILE_OP_READ = 2
+};
+
+typedef uint32_t KVMFRClipboardFileOperation;
+
+enum
+{
+  KVMFR_CLIPBOARD_FILE_TYPE_REGULAR   = 1,
+  KVMFR_CLIPBOARD_FILE_TYPE_DIRECTORY = 2
+};
+
+typedef uint32_t KVMFRClipboardFileType;
+
+enum
+{
+  KVMFR_CLIPBOARD_FILE_ERROR_NONE          = 0,
+  KVMFR_CLIPBOARD_FILE_ERROR_NOT_FOUND     = 1,
+  KVMFR_CLIPBOARD_FILE_ERROR_ACCESS        = 2,
+  KVMFR_CLIPBOARD_FILE_ERROR_NOT_DIRECTORY = 3,
+  KVMFR_CLIPBOARD_FILE_ERROR_IS_DIRECTORY  = 4,
+  KVMFR_CLIPBOARD_FILE_ERROR_IO            = 5,
+  KVMFR_CLIPBOARD_FILE_ERROR_INVALID       = 6,
+  KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY     = 7,
+  KVMFR_CLIPBOARD_FILE_ERROR_NO_SPACE      = 8,
+  KVMFR_CLIPBOARD_FILE_ERROR_DISCONNECTED  = 9,
+  KVMFR_CLIPBOARD_FILE_ERROR_CANCELLED     = 10,
+  KVMFR_CLIPBOARD_FILE_ERROR_NOT_SUPPORTED = 11,
+  KVMFR_CLIPBOARD_FILE_ERROR_STALE         = 12
+};
+
+typedef uint32_t KVMFRClipboardFileError;
+
+static inline int kvmfrClipboardFileErrorValid(
+  KVMFRClipboardFileError error)
+{
+  return error <= KVMFR_CLIPBOARD_FILE_ERROR_STALE;
+}
+
+/*
+ * A LIST response is a stream of these headers, each immediately followed by
+ * nameLength bytes of an unescaped UTF-8 path component and then zero padding
+ * to the next eight-byte boundary. Node zero is the dataset's synthetic root
+ * and is never returned as an entry. Times are nanoseconds since the Unix
+ * epoch. A zero creation time means the source cannot report it.
+ */
+typedef struct KVMFRClipboardFileEntry
+{
+  uint64_t node;
+  uint64_t size;
+  uint64_t createdNs;
+  uint64_t modifiedNs;
+  KVMFRClipboardFileType type;
+  uint32_t nameLength;
+}
+KVMFRClipboardFileEntry;
+
+#define KVMFR_CLIPBOARD_FILE_ENTRY_ALIGN 8U
+#define KVMFR_CLIPBOARD_FILE_ENTRY_BYTES(nameLength) \
+  ((uint64_t)(sizeof(KVMFRClipboardFileEntry) + (uint64_t)(nameLength) + \
+    (KVMFR_CLIPBOARD_FILE_ENTRY_ALIGN - 1U)) & \
+    ~(uint64_t)(KVMFR_CLIPBOARD_FILE_ENTRY_ALIGN - 1U))
+
+/* File message field use:
+ *
+ * FILE_ACQUIRE / FILE_ACQUIRED / FILE_RELEASE:
+ *   clipboardGeneration identifies the immutable dataset and transfer is the
+ *   acquisition ID selected by the requester. format is FILES. ACQUIRED token
+ *   is a KVMFRClipboardFileError; all other fields are zero.
+ *
+ * FILE_REQUEST:
+ *   clipboardGeneration identifies the acquired dataset, transfer is a unique
+ *   request ID, size is the opaque node ID, token is LIST or READ, and format
+ *   is FILES. LIST requires offset and flags to be zero. READ uses offset as
+ *   the file offset and flags as the requested byte count (at most
+ *   KVMFR_CLIPBOARD_FILE_READ_BYTES). length is always zero because REQUEST
+ *   has no attached payload.
+ *
+ * FILE_DATA:
+ *   clipboardGeneration, transfer, format and token echo FILE_REQUEST. offset
+ *   is relative to this response (not the source file), sequence starts at
+ *   zero, and size follows DATA's BEGIN/END total-size rules. Chunks for
+ *   different request IDs may be interleaved.
+ *
+ * FILE_CANCEL:
+ *   clipboardGeneration and transfer identify an acquisition or request,
+ *   format is FILES, and token is a non-zero KVMFRClipboardFileError.
+ */
+
+static inline int kvmfrClipboardFileOperationValid(
+  KVMFRClipboardFileOperation operation)
+{
+  return operation == KVMFR_CLIPBOARD_FILE_OP_LIST ||
+    operation == KVMFR_CLIPBOARD_FILE_OP_READ;
+}
+
+static inline int kvmfrClipboardFileTransferValid(uint64_t transfer)
+{
+  return transfer != 0;
+}
+
+static inline int kvmfrClipboardFileMessageType(
+  KVMFRClipboardMessageType type)
+{
+  return type >= KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE &&
+    type <= KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL;
+}
+
+static inline int kvmfrClipboardFileMessageValid(
+  const KVMFRClipboardMessage * message)
+{
+  if (!message || message->version != KVMFR_CLIPBOARD_VERSION ||
+      !message->clipboardGeneration ||
+      !kvmfrClipboardFileTransferValid(message->transfer) ||
+      message->format != KVMFR_CLIPBOARD_FORMAT_FILES ||
+      message->length > KVMFR_CLIPBOARD_DATA_BYTES)
+    return 0;
+
+  switch (message->type)
+  {
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE:
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE:
+      return !message->sequence && !message->offset && !message->size &&
+        !message->flags && !message->token && !message->length;
+
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED:
+      return !message->sequence && !message->offset && !message->size &&
+        !message->flags &&
+        kvmfrClipboardFileErrorValid(message->token) && !message->length;
+
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST:
+      if (message->sequence ||
+          !kvmfrClipboardFileOperationValid(message->token) ||
+          message->length ||
+          (message->token == KVMFR_CLIPBOARD_FILE_OP_READ &&
+            !message->size))
+        return 0;
+      if (message->token == KVMFR_CLIPBOARD_FILE_OP_LIST)
+        return !message->offset && !message->flags;
+      return message->flags &&
+        message->flags <= KVMFR_CLIPBOARD_FILE_READ_BYTES &&
+        message->offset <= UINT64_MAX - message->flags;
+
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_DATA:
+    {
+      if (!kvmfrClipboardFileOperationValid(message->token) ||
+          (message->flags & ~(KVMFR_CLIPBOARD_FLAG_BEGIN |
+            KVMFR_CLIPBOARD_FLAG_END)) ||
+          (!message->length &&
+            !(message->flags & KVMFR_CLIPBOARD_FLAG_END)) ||
+          message->offset > UINT64_MAX - message->length)
+        return 0;
+      const uint64_t end = message->offset + message->length;
+      if (message->flags & KVMFR_CLIPBOARD_FLAG_END)
+        return message->size == end;
+      if (!(message->flags & KVMFR_CLIPBOARD_FLAG_BEGIN))
+        return message->size == KVMFR_CLIPBOARD_SIZE_UNKNOWN;
+      return message->size == KVMFR_CLIPBOARD_SIZE_UNKNOWN ||
+        message->size >= end;
+    }
+
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL:
+      return !message->sequence && !message->offset && !message->size &&
+        !message->flags && message->token &&
+        kvmfrClipboardFileErrorValid(message->token) && !message->length;
+
+    default:
+      return 0;
+  }
+}
 
 /* Type-specific fields:
  * OFFER:  token is KVMFRClipboardFormatFlags.
@@ -186,6 +379,8 @@ typedef uint32_t KVMFRClipboardQueueType;
 #if defined(__cplusplus)
 static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
+static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
+  "KVMFR clipboard file entry layout changed");
 static_assert(sizeof(KVMFRClipboardStatus) == 32,
   "KVMFR clipboard status layout changed");
 static_assert(sizeof(KVMFRClipboardSlotHeader) == 64,
@@ -195,6 +390,8 @@ static_assert(sizeof(KVMFRClipboardMessage) <= 64,
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
+_Static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
+  "KVMFR clipboard file entry layout changed");
 _Static_assert(sizeof(KVMFRClipboardStatus) == 32,
   "KVMFR clipboard status layout changed");
 _Static_assert(sizeof(KVMFRClipboardSlotHeader) == 64,
