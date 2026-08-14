@@ -187,10 +187,14 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
       <RuntimeTypeInfo>false</RuntimeTypeInfo>
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
+    <Link>
+      <AdditionalDependencies>%(AdditionalDependencies);Ole32.lib;Shell32.lib;Wtsapi32.lib</AdditionalDependencies>
+    </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="CButton.cpp" />
     <ClCompile Include="CCheckbox.cpp" />
+    <ClCompile Include="CClipboardFiles.cpp" />
     <ClCompile Include="CClipboardManager.cpp" />
     <ClCompile Include="CConfigWindow.cpp" />
     <ClCompile Include="CEditWidget.cpp" />
@@ -208,6 +212,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
   <ItemGroup>
     <ClInclude Include="CButton.h" />
     <ClInclude Include="CCheckbox.h" />
+    <ClInclude Include="CClipboardFiles.h" />
     <ClInclude Include="CClipboardManager.h" />
     <ClInclude Include="CConfigWindow.h" />
     <ClInclude Include="CEditWidget.h" />
