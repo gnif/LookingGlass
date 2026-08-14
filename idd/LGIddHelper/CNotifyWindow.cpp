@@ -196,8 +196,13 @@ LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
     switch (TrackPopupMenu(m_menu, TPM_RETURNCMD | TPM_NONOTIFY, x, y, 0, m_hwnd, NULL))
     {
     case ID_MENU_SHOW_LOG:
-      ShellExecute(m_hwnd, L"open", g_debug.logDir(), NULL, NULL, SW_NORMAL);
+    {
+      const std::wstring logDir =
+        CDebug::GetLogDir(CDebug::Location::ProgramData);
+      if (!logDir.empty())
+        ShellExecute(m_hwnd, L"open", logDir.c_str(), NULL, NULL, SW_NORMAL);
       break;
+    }
     case ID_MENU_SHOW_CONFIG:
       DEBUG_INFO("Config window opened");
       m_config.reset(new CConfigWindow());

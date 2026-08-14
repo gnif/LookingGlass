@@ -101,7 +101,7 @@ inline static void iso8601(wchar_t *buf, size_t count)
   wcsftime(buf, count, L"%Y-%m-%d %H:%M:%SZ", &utc);
 }
 
-inline static std::wstring getLogPath(CDebug::Location location)
+std::wstring CDebug::GetLogDir(Location location)
 {
   PWSTR pszPath;
   const KNOWNFOLDERID& folder = location == CDebug::Location::LocalAppData ?
@@ -133,7 +133,7 @@ inline static std::wstring getLogPath(CDebug::Location location)
 
 void CDebug::Init(const wchar_t * name, Location location)
 {
-  m_logDir = getLogPath(location);
+  m_logDir = GetLogDir(location);
 
   // don't redirect the debug output if running under a debugger
   if (IsDebuggerPresent())

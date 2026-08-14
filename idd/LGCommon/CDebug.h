@@ -22,6 +22,7 @@
 
 #include <Windows.h>
 #include <fstream>
+#include <string>
 
 class CDebug
 {
@@ -51,7 +52,8 @@ class CDebug
       LEVEL_MAX
     };
 
-    const wchar_t *logDir() { return m_logDir.c_str(); }
+    const wchar_t *logDir() const { return m_logDir.c_str(); }
+    static std::wstring GetLogDir(Location location);
     void Init(const wchar_t * name,
       Location location = Location::ProgramData);
     void Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args);
