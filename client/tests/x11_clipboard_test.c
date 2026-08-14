@@ -388,7 +388,8 @@ int XGetWindowProperty(Display * display, Window window, Atom property,
   CHECK(window != None);
   CHECK(property != None);
   CHECK(offset >= 0);
-  CHECK(length == ~0L || length == (64U * 1024U + 3U) / 4U);
+  CHECK(length == ~0L || length ==
+    (KVMFR_CLIPBOARD_REPRESENTATION_BYTES + 3U) / 4U);
   CHECK(delete);
   CHECK(requestedType == AnyPropertyType);
   CHECK(rec.propPos < rec.propN);
@@ -1215,7 +1216,7 @@ static void testIncrLargeProperty(void)
   property(window);
 
   CHECK(rec.streamChunkN == 2);
-  CHECK(rec.streamMaxChunk == 64U * 1024U);
+  CHECK(rec.streamMaxChunk == KVMFR_CLIPBOARD_REPRESENTATION_BYTES);
   CHECK(rec.dataN == 1);
   CHECK(rec.data[0].size == size);
   CHECK(memcmp(rec.data[0].data, data, size) == 0);

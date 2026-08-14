@@ -81,6 +81,7 @@
     <ClInclude Include="CSRWLock.h" />
     <ClInclude Include="DefaultDisplayModes.h" />
     <ClInclude Include="InputPipeProtocol.h" />
+    <ClInclude Include="LGIddAuthority.h" />
     <ClInclude Include="PipeMsg.h" />
     <ClInclude Include="RefreshRate.h" />
     <ClInclude Include="Seq.h" />

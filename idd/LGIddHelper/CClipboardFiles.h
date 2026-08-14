@@ -45,25 +45,6 @@ struct ClipboardRemoteFileEntry
   std::wstring name;
 };
 
-class CClipboardUserImpersonation final
-{
-private:
-  class Impl;
-  std::unique_ptr<Impl> m_impl;
-  DWORD m_error = ERROR_SUCCESS;
-
-public:
-  explicit CClipboardUserImpersonation(KVMFRClipboardFileError& error);
-  ~CClipboardUserImpersonation();
-
-  CClipboardUserImpersonation(const CClipboardUserImpersonation&) = delete;
-  CClipboardUserImpersonation& operator=(
-    const CClipboardUserImpersonation&) = delete;
-
-  bool Active() const;
-  DWORD Error() const;
-};
-
 class CLocalClipboardFiles final
 {
 public:

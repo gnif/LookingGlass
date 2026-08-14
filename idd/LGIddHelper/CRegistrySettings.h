@@ -41,7 +41,7 @@ public:
   CRegistrySettings();
   ~CRegistrySettings();
 
-  LSTATUS open();
+  LSTATUS open(bool writable = false);
   bool isOpen() { return !!hKey; }
 
   std::vector<DisplayMode> getDefaultModes();

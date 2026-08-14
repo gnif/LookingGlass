@@ -27,11 +27,14 @@
 #include <wdf.h>
 #include <IddCx.h>
 #include <avrt.h>
+#include <bcrypt.h>
 #include <wrl.h>
+#include <limits>
 #include <memory>
 #include <utility>
 
 #include "CDebug.h"
+#include "ClipboardRing.h"
 #include "display/CDisplayConfiguration.h"
 #include "display/IddCxCompat.h"
 #include "display/CDeviceContext.h"
@@ -42,7 +45,275 @@
 
 WDFDEVICE l_wdfDevice = nullptr;
 
-static const UINT IDDCX_VERSION_1_10 = 0x1A00;
+static const UINT IDDCX_VERSION_1_10        = 0x1A00;
+static uint64_t   l_authorityInstanceId[2]  = {};
+static uint64_t   l_authorityProcessCreated = 0;
+
+static uint64_t FileTimeValue(const FILETIME& value)
+{
+  ULARGE_INTEGER result = {};
+  result.LowPart  = value.dwLowDateTime;
+  result.HighPart = value.dwHighDateTime;
+  return result.QuadPart;
+}
+
+static NTSTATUS InitAuthorityIdentity()
+{
+  FILETIME created = {};
+  FILETIME exited  = {};
+  FILETIME kernel  = {};
+  FILETIME user    = {};
+  if (!GetProcessTimes(GetCurrentProcess(),
+      &created, &exited, &kernel, &user))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to query the LGIdd host process creation time");
+    return STATUS_UNSUCCESSFUL;
+  }
+
+  for (unsigned attempt = 0; attempt < 2; ++attempt)
+  {
+    const NTSTATUS status = BCryptGenRandom(nullptr,
+      reinterpret_cast<PUCHAR>(l_authorityInstanceId),
+      sizeof(l_authorityInstanceId), BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    if (!NT_SUCCESS(status))
+    {
+      DEBUG_ERROR_HR(HRESULT_FROM_NT(status),
+        "Failed to generate the LGIdd authority instance identifier");
+      return status;
+    }
+    if (l_authorityInstanceId[0] && l_authorityInstanceId[1])
+    {
+      l_authorityProcessCreated = FileTimeValue(created);
+      return STATUS_SUCCESS;
+    }
+  }
+
+  DEBUG_ERROR_HR(ERROR_INVALID_DATA,
+    "Generated an invalid LGIdd authority instance identifier");
+  return STATUS_DATA_ERROR;
+}
+
+static bool AuthorityInstanceMatches(const uint64_t (&instanceId)[2])
+{
+  return instanceId[0] == l_authorityInstanceId[0] &&
+    instanceId[1] == l_authorityInstanceId[1];
+}
+
+static void LGIddAuthorityFileCleanup(WDFFILEOBJECT fileObject)
+{
+  g_pipe.CloseClipboardAuthorityFile(fileObject);
+}
+
+static void LGIddAuthorityIoDeviceControl(WDFDEVICE device,
+  WDFREQUEST request, size_t outputLength, size_t inputLength,
+  ULONG controlCode)
+{
+  UNREFERENCED_PARAMETER(device);
+
+  NTSTATUS      status      = STATUS_INVALID_DEVICE_REQUEST;
+  ULONG_PTR     information = 0;
+  WDFFILEOBJECT fileObject  = WdfRequestGetFileObject(request);
+  if (!fileObject)
+  {
+    DEBUG_WARN(
+      "LGIdd authority request has no file object");
+    WdfRequestComplete(request, STATUS_INVALID_HANDLE);
+    return;
+  }
+
+  switch (controlCode)
+  {
+    case IOCTL_LG_IDD_AUTHORITY_GET_HOST:
+    {
+      if (inputLength || outputLength < sizeof(LGIddAuthorityHost))
+      {
+        DEBUG_WARN(
+          "Rejected malformed LGIdd authority host request");
+        status = STATUS_BUFFER_TOO_SMALL;
+        break;
+      }
+
+      LGIddAuthorityHost * host = nullptr;
+      status = WdfRequestRetrieveOutputBuffer(request, sizeof(*host),
+        reinterpret_cast<void **>(&host), nullptr);
+      if (!NT_SUCCESS(status))
+      {
+        DEBUG_WARN_HR(HRESULT_FROM_NT(status),
+          "Failed to retrieve the LGIdd authority host output buffer");
+        break;
+      }
+
+      ZeroMemory(host, sizeof(*host));
+      host->size           = sizeof(*host);
+      host->version        = LG_IDD_AUTHORITY_VERSION;
+      host->processId      = GetCurrentProcessId();
+      host->processCreated = l_authorityProcessCreated;
+      host->instanceId[0]  = l_authorityInstanceId[0];
+      host->instanceId[1]  = l_authorityInstanceId[1];
+      information          = sizeof(*host);
+      status               = STATUS_SUCCESS;
+      break;
+    }
+
+    case IOCTL_LG_IDD_AUTHORITY_REGISTER:
+    {
+      if (inputLength != sizeof(LGIddAuthorityRegistration) || outputLength)
+      {
+        DEBUG_WARN(
+          "Rejected malformed LGIdd authority registration request");
+        status = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+      }
+
+      void * input = nullptr;
+      status = WdfRequestRetrieveInputBuffer(request,
+        sizeof(LGIddAuthorityRegistration), &input, nullptr);
+      if (!NT_SUCCESS(status))
+      {
+        DEBUG_WARN_HR(HRESULT_FROM_NT(status),
+          "Failed to retrieve the LGIdd authority registration buffer");
+        break;
+      }
+      const LGIddAuthorityRegistration * registration =
+        static_cast<const LGIddAuthorityRegistration *>(input);
+      if (registration->size != sizeof(*registration) ||
+          registration->version != LG_IDD_AUTHORITY_VERSION ||
+          registration->reserved ||
+          !AuthorityInstanceMatches(registration->instanceId) ||
+          !registration->mappingId[0] || !registration->mappingId[1] ||
+          !registration->mappingHandle ||
+          registration->mappingHandle >
+            static_cast<uint64_t>(
+              (std::numeric_limits<uintptr_t>::max)()) ||
+          registration->mappingHandle == static_cast<uint64_t>(
+            reinterpret_cast<uintptr_t>(INVALID_HANDLE_VALUE)))
+      {
+        DEBUG_WARN(
+          "Rejected invalid LGIdd authority registration data");
+        status = STATUS_DATA_ERROR;
+        break;
+      }
+
+      HANDLE rawMapping = reinterpret_cast<HANDLE>(
+        static_cast<uintptr_t>(registration->mappingHandle));
+      const auto closeInjectedMapping = [rawMapping]()
+      {
+        if (!CloseHandle(rawMapping))
+        {
+          const DWORD error = GetLastError();
+          DEBUG_WARN_HR(error,
+            "Failed to consume the injected clipboard authority handle");
+          return false;
+        }
+        return true;
+      };
+      const ClipboardMapping * view = static_cast<const ClipboardMapping *>(
+        MapViewOfFileFromApp(rawMapping,
+          FILE_MAP_READ | FILE_MAP_WRITE, 0, sizeof(ClipboardMapping)));
+      if (!view)
+      {
+        const DWORD error = GetLastError();
+        DEBUG_WARN_HR(error,
+          "Failed to validate the injected clipboard authority handle");
+        closeInjectedMapping();
+        status = STATUS_INVALID_HANDLE;
+        break;
+      }
+      const uint64_t authorityId[2] =
+        { view->authorityId[0], view->authorityId[1] };
+      if (!UnmapViewOfFile(view))
+      {
+        const DWORD error = GetLastError();
+        DEBUG_WARN_HR(error,
+          "Failed to unmap the injected clipboard authority handle");
+        closeInjectedMapping();
+        status = STATUS_UNSUCCESSFUL;
+        break;
+      }
+      if (!authorityId[0] || !authorityId[1])
+      {
+        DEBUG_WARN("Rejected clipboard mapping without an authority ID");
+        closeInjectedMapping();
+        status = STATUS_DATA_ERROR;
+        break;
+      }
+
+      HANDLE mapping = nullptr;
+      if (!DuplicateHandle(GetCurrentProcess(), rawMapping,
+          GetCurrentProcess(), &mapping,
+          SECTION_MAP_READ | SECTION_MAP_WRITE, FALSE, 0))
+      {
+        const DWORD error = GetLastError();
+        DEBUG_WARN_HR(error,
+          "Failed to privatize the injected clipboard authority handle");
+        closeInjectedMapping();
+        status = STATUS_INVALID_HANDLE;
+        break;
+      }
+      if (!closeInjectedMapping())
+      {
+        CloseHandle(mapping);
+        status = STATUS_UNSUCCESSFUL;
+        break;
+      }
+
+      if (!g_pipe.RegisterClipboardAuthority(fileObject, mapping,
+          registration->session, registration->mappingId, authorityId))
+      {
+        CloseHandle(mapping);
+        status = STATUS_ACCESS_DENIED;
+        break;
+      }
+
+      status = STATUS_SUCCESS;
+      break;
+    }
+
+    case IOCTL_LG_IDD_AUTHORITY_CLEAR:
+    {
+      if (inputLength != sizeof(LGIddAuthorityClear) || outputLength)
+      {
+        DEBUG_WARN(
+          "Rejected malformed LGIdd authority clear request");
+        status = STATUS_INFO_LENGTH_MISMATCH;
+        break;
+      }
+
+      void * input = nullptr;
+      status = WdfRequestRetrieveInputBuffer(request,
+        sizeof(LGIddAuthorityClear), &input, nullptr);
+      if (!NT_SUCCESS(status))
+      {
+        DEBUG_WARN_HR(HRESULT_FROM_NT(status),
+          "Failed to retrieve the LGIdd authority clear buffer");
+        break;
+      }
+      const LGIddAuthorityClear * clear =
+        static_cast<const LGIddAuthorityClear *>(input);
+      if (clear->size != sizeof(*clear) ||
+          clear->version != LG_IDD_AUTHORITY_VERSION ||
+          !AuthorityInstanceMatches(clear->instanceId))
+      {
+        DEBUG_WARN(
+          "Rejected invalid LGIdd authority clear data");
+        status = STATUS_DATA_ERROR;
+        break;
+      }
+
+      if (!g_pipe.ClearClipboardAuthority(fileObject))
+      {
+        status = STATUS_ACCESS_DENIED;
+        break;
+      }
+      status = STATUS_SUCCESS;
+      break;
+    }
+  }
+
+  WdfRequestCompleteWithInformation(request, status, information);
+}
 
 static bool LGIddCanUseIddCx110DDIs(UINT iddCxVersion)
 {
@@ -283,6 +554,13 @@ NTSTATUS LGIddMonitorUnassignSwapChain(IDDCX_MONITOR monitor)
 NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
 {
   NTSTATUS status;
+  if (!l_authorityInstanceId[0] || !l_authorityInstanceId[1])
+  {
+    status = InitAuthorityIdentity();
+    if (!NT_SUCCESS(status))
+      return status;
+  }
+
   IDARG_OUT_GETVERSION ver;
   status = IddCxGetVersion(&ver);
   if (FAILED(status))
@@ -302,6 +580,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   IDD_CX_CLIENT_CONFIG config;
   IDD_CX_CLIENT_CONFIG_INIT(&config);
   config.EvtIddCxAdapterInitFinished               = LGIddAdapterInitFinished;
+  config.EvtIddCxDeviceIoControl                   = LGIddAuthorityIoDeviceControl;
   config.EvtIddCxMonitorGetDefaultDescriptionModes = LGIddMonitorGetDefaultModes;
   config.EvtIddCxMonitorAssignSwapChain            = LGIddMonitorAssignSwapChain;
   config.EvtIddCxMonitorUnassignSwapChain          = LGIddMonitorUnassignSwapChain;
@@ -328,6 +607,16 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   if (!NT_SUCCESS(status))
     return status;
 
+  WDF_FILEOBJECT_CONFIG fileConfig;
+  WDF_FILEOBJECT_CONFIG_INIT(&fileConfig,
+    WDF_NO_EVENT_CALLBACK, WDF_NO_EVENT_CALLBACK,
+    LGIddAuthorityFileCleanup);
+  WDF_OBJECT_ATTRIBUTES fileAttributes;
+  WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(
+    &fileAttributes, LGIddAuthorityFileContext);
+  WdfDeviceInitSetFileObjectConfig(
+    deviceInit, &fileConfig, &fileAttributes);
+
   WDF_OBJECT_ATTRIBUTES deviceAttributes;
   WDF_OBJECT_ATTRIBUTES_INIT_CONTEXT_TYPE(&deviceAttributes, CDeviceContextWrapper);
   deviceAttributes.EvtCleanupCallback = [](WDFOBJECT object)
@@ -335,6 +624,7 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
     auto * wrapper = WdfObjectGet_CDeviceContextWrapper(object);
     if (wrapper)
     {
+      g_pipe.ClearClipboardAuthority();
       g_pipe.SetDeviceContext(nullptr);
       wrapper->Cleanup();
     }
@@ -345,6 +635,15 @@ NTSTATUS LGIddCreateDevice(_Inout_ PWDFDEVICE_INIT deviceInit)
   status = WdfDeviceCreate(&deviceInit, &deviceAttributes, &device);
   if (!NT_SUCCESS(status))
     return status;
+
+  status = WdfDeviceCreateDeviceInterface(
+    device, &GUID_DEVINTERFACE_LGIdd, nullptr);
+  if (!NT_SUCCESS(status))
+  {
+    DEBUG_ERROR_HR(HRESULT_FROM_NT(status),
+      "Failed to create the LGIdd authority device interface");
+    return status;
+  }
 
   /*
    * Construct the device context and cache the WDF device BEFORE calling

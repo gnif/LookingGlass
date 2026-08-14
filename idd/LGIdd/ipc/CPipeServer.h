@@ -32,6 +32,14 @@
 
 class CDeviceContext;
 
+struct LGIddAuthorityFileContext
+{
+  bool closing;
+};
+
+WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(
+  LGIddAuthorityFileContext, LGIddAuthorityGetFileContext)
+
 class CPipeServer : private IPipeEndpointHandler,
   public IClipboardChannelDoorbell
 {
@@ -56,14 +64,33 @@ class CPipeServer : private IPipeEndpointHandler,
     void *          m_recoveryOpaque  = nullptr;
     uint64_t        m_recoveryRoute   = 0;
 
+    CSRWLock      m_authorityLock;
+    WDFFILEOBJECT m_authorityOwner        = nullptr;
+    HANDLE        m_authorityMapping      = nullptr;
+    DWORD         m_authoritySession      = 0xFFFFFFFFU;
+    uint64_t      m_authorityMappingId[2] = {};
+    uint64_t      m_authorityId[2]        = {};
+
+    PSECURITY_DESCRIPTOR m_pipeSecurityDescriptor  = nullptr;
+    SECURITY_ATTRIBUTES  m_pipeSecurity            = {};
+    HANDLE               m_pendingClipboardMapping = nullptr;
+    uint64_t             m_pendingClipboardEpoch   = 0;
+    uint64_t             m_clientAuthorityId[2]    = {};
+
     void WriteMsg(const LGPipeMsg & msg);
     void QueueMsgLocked(const LGPipeMsg & msg);
 
     void HandleReloadSettings();
     void HandleRecovery(const LGPipeMsg & msg);
+    bool ClearClipboardAuthorityInternal(
+      WDFFILEOBJECT owner, bool closing);
 
     void OnPipeConnected() override;
     void OnPipeDisconnected() override;
+    bool PipeClientAuthenticationRequired() const override { return true; }
+    bool AuthenticatePipeClient(HANDLE pipe,
+      const void * message, size_t size) override;
+    bool PipeClientStillAuthorized(HANDLE pipe) override;
     bool OnPipeMessage(const void * message, size_t size) override;
 
   public:
@@ -75,6 +102,12 @@ class CPipeServer : private IPipeEndpointHandler,
     void SetDeviceContext(CDeviceContext * context);
     void SetRecoveryHandler(RecoveryHandler handler, void * opaque);
     void ClearRecoveryHandler(void * opaque);
+
+    bool RegisterClipboardAuthority(WDFFILEOBJECT owner, HANDLE mapping,
+      DWORD session, const uint64_t (&mappingId)[2],
+      const uint64_t (&authorityId)[2]);
+    bool ClearClipboardAuthority(WDFFILEOBJECT owner = nullptr);
+    void CloseClipboardAuthorityFile(WDFFILEOBJECT owner);
 
     bool SetCursorPos(int32_t x, int32_t y);
     void SetDisplayMode(

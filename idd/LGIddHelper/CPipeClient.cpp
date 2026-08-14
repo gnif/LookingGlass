@@ -391,6 +391,12 @@ bool CPipeClient::Init()
     return false;
   }
 
+  {
+    CSRWExclusiveLock lock(m_clipboardSetupLock);
+    if (!PrepareClipboardMappingLocked())
+      return false;
+  }
+
   m_endpoint.SetHandler(this);
   return m_endpoint.Start(
     LG_PIPE_NAME,
@@ -477,6 +483,44 @@ void CPipeClient::WriteMsg(const LGPipeMsg& msg)
   m_endpoint.Send(&msg, sizeof(msg));
 }
 
+bool CPipeClient::PipeServerIsAuthorized(HANDLE pipe)
+{
+  DWORD session = 0xFFFFFFFFU;
+  if (!GetNamedPipeServerSessionId(pipe, &session))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error, "Failed to identify named pipe server session");
+    return false;
+  }
+  if (session != 0)
+  {
+    DEBUG_WARN(
+      "Rejected named pipe server outside the service session");
+    return false;
+  }
+  return true;
+}
+
+bool CPipeClient::BuildPipeClientHello(void * message, size_t size)
+{
+  CSRWSharedLock setupLock(m_clipboardSetupLock);
+  if (!message || size != sizeof(LGPipeMsg) ||
+      !m_clipboardMapping || !m_clipboardEpoch)
+  {
+    DEBUG_ERROR("Clipboard mapping was not prepared before pipe connection");
+    return false;
+  }
+
+  LGPipeMsg& hello           = *static_cast<LGPipeMsg *>(message);
+  hello                      = {};
+  hello.size                 = sizeof(hello);
+  hello.type                 = LGPipeMsg::HELLO;
+  hello.hello.version        = LGPipeMsg::PROTOCOL_VERSION;
+  hello.hello.authorityId[0] = m_clipboardAuthorityId[0];
+  hello.hello.authorityId[1] = m_clipboardAuthorityId[1];
+  return true;
+}
+
 void CPipeClient::OnPipeConnected()
 {
   bool hasStatus;
@@ -489,82 +533,6 @@ void CPipeClient::OnPipeConnected()
 
   if (hasStatus)
     WriteMsg(status);
-
-  if (!m_clipboardEnabled)
-    return;
-
-  CSRWExclusiveLock setupLock(m_clipboardSetupLock);
-  ResetClipboardSetupLocked();
-
-  LARGE_INTEGER size = {};
-  size.QuadPart = sizeof(ClipboardMapping);
-  m_clipboardMapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr,
-    PAGE_READWRITE, size.HighPart, size.LowPart, nullptr);
-  if (!m_clipboardMapping)
-  {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to create the clipboard mapping");
-    return;
-  }
-
-  ClipboardMapping * view = static_cast<ClipboardMapping *>(MapViewOfFile(
-    m_clipboardMapping, FILE_MAP_ALL_ACCESS, 0, 0,
-    sizeof(ClipboardMapping)));
-  if (!view)
-  {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to initialize the clipboard mapping");
-    ResetClipboardSetupLocked();
-    return;
-  }
-
-  ++m_clipboardEpochCounter;
-  if (!m_clipboardEpochCounter)
-    ++m_clipboardEpochCounter;
-  m_clipboardEpoch = m_clipboardEpochCounter;
-  CClipboardRing::Initialize(*view, m_clipboardEpoch);
-  UnmapViewOfFile(view);
-
-  DWORD serverPid = 0;
-  if (!GetNamedPipeServerProcessId(m_endpoint.NativeHandle(), &serverPid))
-  {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to identify the clipboard mapping target");
-    ResetClipboardSetupLocked();
-    return;
-  }
-
-  HANDLE target = OpenProcess(PROCESS_DUP_HANDLE, FALSE, serverPid);
-  HANDLE remote = nullptr;
-  if (!target || !DuplicateHandle(GetCurrentProcess(),
-      m_clipboardMapping, target, &remote, 0, FALSE,
-      DUPLICATE_SAME_ACCESS))
-  {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to share the clipboard mapping with the IDD");
-    if (target)
-      CloseHandle(target);
-    ResetClipboardSetupLocked();
-    return;
-  }
-
-  LGPipeMsg setup = {};
-  setup.size                  = sizeof(setup);
-  setup.type                  = LGPipeMsg::CLIPBOARD_SETUP;
-  setup.clipboardSetup.handle =
-    static_cast<uint64_t>(reinterpret_cast<uintptr_t>(remote));
-  setup.clipboardSetup.bytes = sizeof(ClipboardMapping);
-  const bool sent = m_endpoint.Send(&setup, sizeof(setup));
-  if (!sent)
-  {
-    DEBUG_WARN("Failed to send clipboard mapping setup");
-    HANDLE reclaimed = nullptr;
-    if (DuplicateHandle(target, remote, GetCurrentProcess(), &reclaimed,
-        0, FALSE, DUPLICATE_SAME_ACCESS | DUPLICATE_CLOSE_SOURCE))
-      CloseHandle(reclaimed);
-    ResetClipboardSetupLocked();
-  }
-  CloseHandle(target);
 }
 
 void CPipeClient::OnPipeDisconnected()
@@ -589,6 +557,12 @@ bool CPipeClient::ShouldReconnect()
   const bool attached = IsLGIddDeviceAttached();
   if (!attached)
     DEBUG_INFO("Looking Glass Indirect Display Device was removed");
+  else
+  {
+    CSRWExclusiveLock lock(m_clipboardSetupLock);
+    if (!m_clipboardMapping && !PrepareClipboardMappingLocked())
+      DEBUG_WARN("Clipboard mapping is not ready for reconnection");
+  }
   return attached;
 }
 
@@ -840,13 +814,46 @@ bool CPipeClient::OnPipeMessage(const void * message, size_t size)
         return true;
       }
 
-      HANDLE mapping = nullptr;
-      if (!m_clipboardMapping ||
-          !DuplicateHandle(GetCurrentProcess(), m_clipboardMapping,
-          GetCurrentProcess(), &mapping, 0, FALSE, DUPLICATE_SAME_ACCESS) ||
-          !m_clipboard.Attach(mapping, m_clipboardEpoch, true, *this))
+      if (!m_clipboardEnabled)
       {
-        DEBUG_ERROR("Failed to activate the clipboard mapping");
+        const uint64_t epoch = m_clipboardEpoch;
+        ResetClipboardSetupLocked();
+        setupLock.Unlock();
+
+        LGPipeMsg failure = {};
+        failure.size                  = sizeof(failure);
+        failure.type                  = LGPipeMsg::CLIPBOARD_READY;
+        failure.clipboardReady.epoch  = epoch;
+        failure.clipboardReady.status = ERROR_NOT_SUPPORTED;
+        m_endpoint.Send(&failure, sizeof(failure));
+        return true;
+      }
+
+      HANDLE mapping       = nullptr;
+      DWORD  failureStatus = ERROR_SUCCESS;
+      if (!m_clipboardMapping)
+      {
+        failureStatus = ERROR_NOT_READY;
+        DEBUG_ERROR_HR(failureStatus,
+          "Service-owned clipboard mapping is unavailable");
+      }
+      else if (!DuplicateHandle(GetCurrentProcess(), m_clipboardMapping,
+          GetCurrentProcess(), &mapping, 0, FALSE, DUPLICATE_SAME_ACCESS))
+      {
+        failureStatus = GetLastError();
+        DEBUG_ERROR_HR(failureStatus,
+          "Failed to duplicate the service-owned clipboard mapping");
+      }
+      else if (!m_clipboard.Attach(
+          mapping, m_clipboardEpoch, true, *this))
+      {
+        failureStatus = ERROR_INVALID_DATA;
+        DEBUG_ERROR_HR(failureStatus,
+          "Failed to activate the service-owned clipboard mapping");
+      }
+
+      if (failureStatus != ERROR_SUCCESS)
+      {
         const uint64_t epoch = m_clipboardEpoch;
         ResetClipboardSetupLocked();
         setupLock.Unlock();
@@ -857,7 +864,7 @@ bool CPipeClient::OnPipeMessage(const void * message, size_t size)
         failure.size                  = sizeof(failure);
         failure.type                  = LGPipeMsg::CLIPBOARD_READY;
         failure.clipboardReady.epoch  = epoch;
-        failure.clipboardReady.status = ERROR_NOT_READY;
+        failure.clipboardReady.status = failureStatus;
         m_endpoint.Send(&failure, sizeof(failure));
       }
       return true;
@@ -897,13 +904,87 @@ void CPipeClient::ClipboardResetPeer(uint64_t epoch, uint32_t reason)
   m_endpoint.Send(&msg, sizeof(msg));
 }
 
+bool CPipeClient::PrepareClipboardMappingLocked()
+{
+  if (m_clipboardMapping)
+    return true;
+  if (!m_clipboardMappingId[0] || !m_clipboardMappingId[1])
+  {
+    DEBUG_ERROR("Invalid service-owned clipboard mapping identifier");
+    return false;
+  }
+
+  wchar_t mappingName[128];
+  const int nameResult = _snwprintf_s(
+    mappingName, _countof(mappingName), _TRUNCATE,
+    L"Global\\LookingGlassIDDClipboard-%016llx%016llx",
+    static_cast<unsigned long long>(m_clipboardMappingId[0]),
+    static_cast<unsigned long long>(m_clipboardMappingId[1]));
+  if (nameResult < 0)
+  {
+    DEBUG_ERROR_HR(ERROR_INSUFFICIENT_BUFFER,
+      "Failed to format service-owned clipboard mapping name");
+    return false;
+  }
+
+  m_clipboardMapping = OpenFileMappingW(
+    FILE_MAP_READ | FILE_MAP_WRITE, FALSE, mappingName);
+  if (!m_clipboardMapping)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to open service-owned clipboard mapping");
+    return false;
+  }
+
+  ClipboardMapping * view = static_cast<ClipboardMapping *>(MapViewOfFile(
+    m_clipboardMapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
+    sizeof(ClipboardMapping)));
+  if (!view)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to initialize service-owned clipboard mapping");
+    ResetClipboardSetupLocked();
+    return false;
+  }
+
+  m_clipboardAuthorityId[0] = view->authorityId[0];
+  m_clipboardAuthorityId[1] = view->authorityId[1];
+  if (!m_clipboardAuthorityId[0] || !m_clipboardAuthorityId[1])
+  {
+    DEBUG_ERROR("Invalid clipboard authority identifier");
+    UnmapViewOfFile(view);
+    ResetClipboardSetupLocked();
+    return false;
+  }
+
+  ++m_clipboardEpochCounter;
+  if (!m_clipboardEpochCounter)
+    ++m_clipboardEpochCounter;
+  m_clipboardEpoch = m_clipboardEpochCounter;
+  CClipboardRing::Initialize(
+    *view, m_clipboardEpoch, m_clipboardAuthorityId);
+  if (!UnmapViewOfFile(view))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to unmap initialized service-owned clipboard mapping");
+    ResetClipboardSetupLocked();
+    return false;
+  }
+  return true;
+}
+
 void CPipeClient::ResetClipboardSetupLocked()
 {
   m_clipboard.Detach();
   if (m_clipboardMapping)
     CloseHandle(m_clipboardMapping);
-  m_clipboardMapping = nullptr;
-  m_clipboardEpoch = 0;
+  m_clipboardMapping        = nullptr;
+  m_clipboardEpoch          = 0;
+  m_clipboardAuthorityId[0] = 0;
+  m_clipboardAuthorityId[1] = 0;
 }
 
 void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)

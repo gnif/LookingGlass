@@ -19,29 +19,340 @@
  */
 
 #include "ipc/CPipeServer.h"
+#include "CClipboardRing.h"
 #include "CDebug.h"
 #include "CSRWLock.h"
 #include "display/CDeviceContext.h"
 
+#include <sddl.h>
+#include <vector>
+
 CPipeServer g_pipe;
+
+namespace
+{
+  static constexpr DWORD NO_CONSOLE_SESSION = 0xFFFFFFFFU;
+}
 
 bool CPipeServer::Init()
 {
+  DeInit();
+
+  // Only the driver identities may create/manage the endpoint. Interactive
+  // users receive client read/write access, then the first HELLO is matched
+  // against the SYSTEM service's device-bound clipboard authority.
+  static constexpr wchar_t PIPE_SECURITY[] =
+    L"D:P(A;;GA;;;SY)(A;;GA;;;LS)(A;;GA;;;NS)(A;;GA;;;UD)"
+    L"(A;;GRGW;;;IU)";
+  if (!ConvertStringSecurityDescriptorToSecurityDescriptorW(
+      PIPE_SECURITY, SDDL_REVISION_1,
+      &m_pipeSecurityDescriptor, nullptr))
+  {
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to create named pipe security descriptor");
+    return false;
+  }
+  m_pipeSecurity.nLength              = sizeof(m_pipeSecurity);
+  m_pipeSecurity.lpSecurityDescriptor = m_pipeSecurityDescriptor;
+  m_pipeSecurity.bInheritHandle       = FALSE;
+
   m_endpoint.SetHandler(this);
-  return m_endpoint.Start(
+  if (m_endpoint.Start(
     LG_PIPE_NAME,
     CPipeEndpoint::Mode::Server,
-    sizeof(LGPipeMsg));
+    sizeof(LGPipeMsg),
+    &m_pipeSecurity,
+    FILE_FLAG_FIRST_PIPE_INSTANCE,
+    PIPE_REJECT_REMOTE_CLIENTS))
+    return true;
+
+  LocalFree(m_pipeSecurityDescriptor);
+  m_pipeSecurityDescriptor = nullptr;
+  m_pipeSecurity = {};
+  return false;
 }
 
 void CPipeServer::DeInit()
 {
   m_endpoint.Stop();
-  m_clipboard.Detach();
+  ClearClipboardAuthority();
+  if (m_pipeSecurityDescriptor)
+  {
+    LocalFree(m_pipeSecurityDescriptor);
+    m_pipeSecurityDescriptor = nullptr;
+    m_pipeSecurity = {};
+  }
+}
+
+bool CPipeServer::RegisterClipboardAuthority(WDFFILEOBJECT owner,
+  HANDLE mapping, DWORD session, const uint64_t (&mappingId)[2],
+  const uint64_t (&authorityId)[2])
+{
+  if (!owner || !mapping || mapping == INVALID_HANDLE_VALUE ||
+      session == NO_CONSOLE_SESSION || !session ||
+      !mappingId[0] || !mappingId[1] ||
+      !authorityId[0] || !authorityId[1])
+  {
+    DEBUG_WARN(
+      "Rejected invalid clipboard authority registration");
+    return false;
+  }
+
+  const ClipboardMapping * view = static_cast<const ClipboardMapping *>(
+    MapViewOfFileFromApp(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0,
+      sizeof(ClipboardMapping)));
+  if (!view)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to map the clipboard authority section");
+    return false;
+  }
+  if (!UnmapViewOfFile(view))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to unmap the clipboard authority section");
+    return false;
+  }
+
+  CSRWExclusiveLock lock(m_authorityLock);
+  const LGIddAuthorityFileContext * fileContext =
+    LGIddAuthorityGetFileContext(owner);
+  if (fileContext->closing)
+  {
+    DEBUG_WARN(
+      "Rejected clipboard authority registration for a closing file");
+    return false;
+  }
+  if (m_authorityOwner || m_authorityMapping)
+  {
+    DEBUG_WARN(
+      "Clipboard authority is already registered");
+    return false;
+  }
+
+  m_authorityOwner        = owner;
+  m_authorityMapping      = mapping;
+  m_authoritySession      = session;
+  m_authorityMappingId[0] = mappingId[0];
+  m_authorityMappingId[1] = mappingId[1];
+  m_authorityId[0]        = authorityId[0];
+  m_authorityId[1]        = authorityId[1];
+  DEBUG_INFO("Registered clipboard authority for session %lu", session);
+  return true;
+}
+
+bool CPipeServer::ClearClipboardAuthority(WDFFILEOBJECT owner)
+{
+  return ClearClipboardAuthorityInternal(owner, false);
+}
+
+void CPipeServer::CloseClipboardAuthorityFile(WDFFILEOBJECT owner)
+{
+  (void) ClearClipboardAuthorityInternal(owner, true);
+}
+
+bool CPipeServer::ClearClipboardAuthorityInternal(
+  WDFFILEOBJECT owner, bool closing)
+{
+  HANDLE authority = nullptr;
+  HANDLE pending   = nullptr;
+  {
+    CSRWExclusiveLock lock(m_authorityLock);
+    if (closing)
+    {
+      if (!owner)
+      {
+        DEBUG_WARN(
+          "Cannot close an unspecified clipboard authority file");
+        return false;
+      }
+      LGIddAuthorityGetFileContext(owner)->closing = true;
+      if (m_authorityOwner != owner)
+        return true;
+    }
+
+    if (owner && m_authorityOwner && m_authorityOwner != owner)
+    {
+      DEBUG_WARN(
+        "Rejected clipboard authority clear from a different file object");
+      return false;
+    }
+
+    authority = m_authorityMapping;
+    pending   = m_pendingClipboardMapping;
+
+    m_authorityOwner          = nullptr;
+    m_authorityMapping        = nullptr;
+    m_authoritySession        = NO_CONSOLE_SESSION;
+    m_authorityMappingId[0]   = 0;
+    m_authorityMappingId[1]   = 0;
+    m_authorityId[0]          = 0;
+    m_authorityId[1]          = 0;
+    m_pendingClipboardMapping = nullptr;
+    m_pendingClipboardEpoch   = 0;
+    m_clientAuthorityId[0]    = 0;
+    m_clientAuthorityId[1]    = 0;
+
+    m_endpoint.DisconnectClient();
+    m_clipboard.Detach();
+  }
+
+  if (pending)
+    CloseHandle(pending);
+  if (authority)
+    CloseHandle(authority);
+  if (authority || pending)
+    DEBUG_INFO("Cleared clipboard authority");
+  return true;
+}
+
+bool CPipeServer::AuthenticatePipeClient(
+  HANDLE pipe, const void * message, size_t size)
+{
+  (void)pipe;
+  if (size != sizeof(LGPipeMsg))
+  {
+    DEBUG_WARN(
+      "Rejected Helper HELLO frame with %llu bytes, expected %llu",
+      static_cast<unsigned long long>(size),
+      static_cast<unsigned long long>(sizeof(LGPipeMsg)));
+    return false;
+  }
+  const LGPipeMsg& hello = *static_cast<const LGPipeMsg *>(message);
+  if (hello.size != sizeof(hello) || hello.type != LGPipeMsg::HELLO ||
+      hello.hello.version != LGPipeMsg::PROTOCOL_VERSION ||
+      !hello.hello.authorityId[0] || !hello.hello.authorityId[1])
+  {
+    DEBUG_WARN(
+      "Rejected malformed Helper HELLO: size=%u type=%u version=%u",
+      hello.size, static_cast<unsigned>(hello.type), hello.hello.version);
+    return false;
+  }
+
+  CSRWExclusiveLock lock(m_authorityLock);
+  if (!m_authorityOwner || !m_authorityMapping ||
+      m_authorityId[0] != hello.hello.authorityId[0] ||
+      m_authorityId[1] != hello.hello.authorityId[1])
+  {
+    DEBUG_WARN(
+      "Named pipe client does not match the clipboard authority");
+    return false;
+  }
+
+  HANDLE mapping = nullptr;
+  if (!DuplicateHandle(GetCurrentProcess(), m_authorityMapping,
+      GetCurrentProcess(), &mapping,
+      SECTION_MAP_READ | SECTION_MAP_WRITE, FALSE, 0))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to duplicate the authorized clipboard mapping");
+    return false;
+  }
+
+  const ClipboardMapping * view = static_cast<const ClipboardMapping *>(
+    MapViewOfFileFromApp(mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0,
+      sizeof(ClipboardMapping)));
+  if (!view)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to validate the registered clipboard mapping");
+    CloseHandle(mapping);
+    return false;
+  }
+
+  const uint64_t epoch = view->epoch;
+  const bool valid = CClipboardRing::Valid(*view, epoch);
+  if (!UnmapViewOfFile(view))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to unmap the validated clipboard mapping");
+    CloseHandle(mapping);
+    return false;
+  }
+  if (!valid || !epoch)
+  {
+    DEBUG_WARN(
+      "Rejected an uninitialized registered clipboard mapping");
+    CloseHandle(mapping);
+    return false;
+  }
+
+  if (m_pendingClipboardMapping)
+    CloseHandle(m_pendingClipboardMapping);
+  m_pendingClipboardMapping = mapping;
+  m_pendingClipboardEpoch   = epoch;
+  m_clientAuthorityId[0]    = hello.hello.authorityId[0];
+  m_clientAuthorityId[1]    = hello.hello.authorityId[1];
+  DEBUG_INFO("Authenticated clipboard Helper for session %lu",
+    m_authoritySession);
+  return true;
+}
+
+bool CPipeServer::PipeClientStillAuthorized(HANDLE pipe)
+{
+  (void)pipe;
+  CSRWSharedLock lock(m_authorityLock);
+  if (!m_authorityOwner || !m_authorityMapping ||
+      !m_clientAuthorityId[0] || !m_clientAuthorityId[1])
+  {
+    DEBUG_WARN(
+      "Named pipe client authorization state is incomplete");
+    return false;
+  }
+  if (m_clientAuthorityId[0] != m_authorityId[0] ||
+      m_clientAuthorityId[1] != m_authorityId[1])
+  {
+    DEBUG_WARN(
+      "Named pipe client session authorization expired");
+    return false;
+  }
+  return true;
 }
 
 void CPipeServer::OnPipeConnected()
 {
+  if (!PipeClientStillAuthorized(m_endpoint.NativeHandle()))
+  {
+    DEBUG_WARN("Named pipe client authorization expired before activation");
+    return;
+  }
+
+  uint64_t epoch = 0;
+  bool ready     = false;
+  {
+    CSRWExclusiveLock lock(m_authorityLock);
+    HANDLE mapping = m_pendingClipboardMapping;
+    epoch = m_pendingClipboardEpoch;
+    m_pendingClipboardMapping = nullptr;
+    m_pendingClipboardEpoch   = 0;
+
+    const bool authorityMatches = m_authorityOwner &&
+      m_authorityMapping &&
+      m_authorityId[0] == m_clientAuthorityId[0] &&
+      m_authorityId[1] == m_clientAuthorityId[1];
+    if (authorityMatches && mapping)
+      ready = m_clipboard.Attach(mapping, epoch, false, *this);
+    else
+    {
+      if (mapping)
+        CloseHandle(mapping);
+      DEBUG_ERROR("Authenticated clipboard mapping is missing or expired");
+    }
+  }
+
+  LGPipeMsg clipboardReady = {};
+  clipboardReady.size                  = sizeof(clipboardReady);
+  clipboardReady.type                  = LGPipeMsg::CLIPBOARD_READY;
+  clipboardReady.clipboardReady.epoch  = epoch;
+  clipboardReady.clipboardReady.status = ready ?
+    ERROR_SUCCESS : ERROR_INVALID_DATA;
+  m_endpoint.Send(&clipboardReady, sizeof(clipboardReady));
+
   CSRWExclusiveLock lock(m_queueLock);
   std::vector<LGPipeMsg> queued;
   queued.swap(m_queue);
@@ -63,7 +374,16 @@ void CPipeServer::OnPipeConnected()
 
 void CPipeServer::OnPipeDisconnected()
 {
-  m_clipboard.Detach();
+  {
+    CSRWExclusiveLock lock(m_authorityLock);
+    m_clipboard.Detach();
+    if (m_pendingClipboardMapping)
+      CloseHandle(m_pendingClipboardMapping);
+    m_pendingClipboardMapping = nullptr;
+    m_pendingClipboardEpoch   = 0;
+    m_clientAuthorityId[0]    = 0;
+    m_clientAuthorityId[1]    = 0;
+  }
 }
 
 bool CPipeServer::OnPipeMessage(const void * message, size_t size)
@@ -89,51 +409,23 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
       return true;
 
     case LGPipeMsg::CLIPBOARD_SETUP:
-    {
-      HANDLE transferred = reinterpret_cast<HANDLE>(
-        static_cast<uintptr_t>(msg.clipboardSetup.handle));
-      HANDLE mapping = transferred;
-      uint64_t epoch = 0;
-      if (transferred &&
-          msg.clipboardSetup.bytes == sizeof(ClipboardMapping))
-      {
-        ClipboardMapping * view = static_cast<ClipboardMapping *>(
-          MapViewOfFile(mapping, FILE_MAP_READ, 0, 0,
-            sizeof(ClipboardMapping)));
-        if (view)
-        {
-          epoch = view->epoch;
-          UnmapViewOfFile(view);
-        }
-      }
-      else if (transferred)
-      {
-        CloseHandle(transferred);
-        mapping = nullptr;
-      }
-
-      // The transferred handle has exactly one owner from this point:
-      // Attach consumes it on both success and failure paths.
-      const bool ready = m_clipboard.Attach(
-        mapping, epoch, false, *this);
-      LGPipeMsg reply = {};
-      reply.size                  = sizeof(reply);
-      reply.type                  = LGPipeMsg::CLIPBOARD_READY;
-      reply.clipboardReady.epoch  = epoch;
-      reply.clipboardReady.status = ready ? ERROR_SUCCESS : ERROR_INVALID_DATA;
-      m_endpoint.Send(&reply, sizeof(reply));
-      return true;
-    }
+      // Legacy SETUP names a handle in this process. Never interpret a value
+      // supplied by an unprivileged client as a local driver handle.
+      DEBUG_WARN("Rejected legacy clipboard mapping setup");
+      return false;
 
     case LGPipeMsg::CLIPBOARD_READY:
       // READY normally travels IDD to Helper. A failure in the reverse
       // direction reports that Helper activation failed after IDD attach.
-      if (msg.clipboardReady.status != ERROR_SUCCESS &&
-          msg.clipboardReady.epoch == m_clipboard.Epoch())
+      if (msg.clipboardReady.status != ERROR_SUCCESS)
       {
-        m_clipboard.Reset(
-          msg.clipboardReady.epoch, msg.clipboardReady.status);
-        m_clipboard.Detach();
+        CSRWExclusiveLock lock(m_authorityLock);
+        if (msg.clipboardReady.epoch == m_clipboard.Epoch())
+        {
+          m_clipboard.Reset(
+            msg.clipboardReady.epoch, msg.clipboardReady.status);
+          m_clipboard.Detach();
+        }
       }
       return true;
 
@@ -148,7 +440,7 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
 
     default:
       DEBUG_ERROR("Unknown message type %d", msg.type);
-      return true;
+      return false;
   }
 }
 

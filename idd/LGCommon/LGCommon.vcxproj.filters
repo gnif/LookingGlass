@@ -56,6 +56,9 @@
     <ClInclude Include="InputPipeProtocol.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="LGIddAuthority.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="PipeMsg.h">
       <Filter>Header Files</Filter>
     </ClInclude>

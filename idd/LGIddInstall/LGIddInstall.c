@@ -134,15 +134,16 @@ void debugWinError(const wchar_t *desc, HRESULT status)
 bool ensureKeyWithAce()
 {
   bool result = false;
-  const PCWSTR accountName = L"NT AUTHORITY\\USER MODE DRIVERS";
 
-  HKEY hKey = NULL;
-  DWORD disp = 0;
-  REGSAM sam = KEY_READ | KEY_WRITE | WRITE_DAC | READ_CONTROL | KEY_WOW64_64KEY;
-  PACL oldDacl = NULL;
-  PSECURITY_DESCRIPTOR psd = NULL;
-  PACL newDacl = NULL;
-  PSID pSid = NULL;
+  HKEY                 hKey           = NULL;
+  DWORD                disp           = 0;
+  REGSAM               sam            = KEY_READ | KEY_WRITE | WRITE_DAC |
+    READ_CONTROL | KEY_WOW64_64KEY;
+  PACL                 oldDacl        = NULL;
+  PSECURITY_DESCRIPTOR psd            = NULL;
+  PACL                 newDacl        = NULL;
+  PSID                 driverSid      = NULL;
+  PSID                 interactiveSid = NULL;
 
   DWORD ec = RegCreateKeyExW(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, NULL, 0, sam, NULL, &hKey, &disp);
   if (ec != ERROR_SUCCESS)
@@ -158,22 +159,52 @@ bool ensureKeyWithAce()
     goto cleanup;
   }
 
-  pSid = malloc(SECURITY_MAX_SID_SIZE);
-  DWORD cbSid = SECURITY_MAX_SID_SIZE;
-  if (!CreateWellKnownSid(WinUserModeDriversSid, NULL, pSid, &cbSid))
+  driverSid = malloc(SECURITY_MAX_SID_SIZE);
+  if (!driverSid)
   {
-    debugWinError(L"CreateWellKnownSid", GetLastError());
+    debugWinError(L"malloc(USER MODE DRIVERS SID)", ERROR_OUTOFMEMORY);
+    goto cleanup;
+  }
+  DWORD cbSid = SECURITY_MAX_SID_SIZE;
+  if (!CreateWellKnownSid(
+      WinUserModeDriversSid, NULL, driverSid, &cbSid))
+  {
+    debugWinError(L"CreateWellKnownSid(WinUserModeDriversSid)",
+      GetLastError());
     goto cleanup;
   }
 
-  EXPLICIT_ACCESSW ea = {0};
-  ea.grfAccessPermissions = KEY_ALL_ACCESS;
-  ea.grfAccessMode        = GRANT_ACCESS;
-  ea.grfInheritance       = SUB_CONTAINERS_AND_OBJECTS_INHERIT;
-  ea.Trustee.TrusteeForm  = TRUSTEE_IS_SID;
-  ea.Trustee.ptstrName    = (LPWSTR)pSid;
+  interactiveSid = malloc(SECURITY_MAX_SID_SIZE);
+  if (!interactiveSid)
+  {
+    debugWinError(L"malloc(INTERACTIVE SID)", ERROR_OUTOFMEMORY);
+    goto cleanup;
+  }
+  cbSid = SECURITY_MAX_SID_SIZE;
+  if (!CreateWellKnownSid(
+      WinInteractiveSid, NULL, interactiveSid, &cbSid))
+  {
+    debugWinError(L"CreateWellKnownSid(WinInteractiveSid)",
+      GetLastError());
+    goto cleanup;
+  }
 
-  ec = SetEntriesInAclW(1, &ea, oldDacl, &newDacl);
+  EXPLICIT_ACCESSW ea[2] = {0};
+  ea[0].grfAccessPermissions = KEY_QUERY_VALUE | KEY_SET_VALUE;
+  ea[0].grfAccessMode        = SET_ACCESS;
+  ea[0].grfInheritance       = NO_INHERITANCE;
+  ea[0].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+  ea[0].Trustee.ptstrName    = (LPWSTR)driverSid;
+
+  // The interactive Helper may update values on this exact key, but cannot
+  // create subkeys, delete it, or change its security descriptor.
+  ea[1].grfAccessPermissions = KEY_QUERY_VALUE | KEY_SET_VALUE;
+  ea[1].grfAccessMode        = SET_ACCESS;
+  ea[1].grfInheritance       = NO_INHERITANCE;
+  ea[1].Trustee.TrusteeForm  = TRUSTEE_IS_SID;
+  ea[1].Trustee.ptstrName    = (LPWSTR)interactiveSid;
+
+  ec = SetEntriesInAclW(ARRAYSIZE(ea), ea, oldDacl, &newDacl);
   if (ec != ERROR_SUCCESS)
   {
     debugWinError(L"SetEntriesInAclW", ec);
@@ -193,9 +224,14 @@ bool ensureKeyWithAce()
   result = true;
 
   cleanup:
-  if (newDacl) LocalFree(newDacl);
-  if (pSid)    free(pSid);
-  if (psd)     LocalFree(psd);
+  if (newDacl)
+    LocalFree(newDacl);
+  if (interactiveSid)
+    free(interactiveSid);
+  if (driverSid)
+    free(driverSid);
+  if (psd)
+    LocalFree(psd);
   RegCloseKey(hKey);
 
   return result;

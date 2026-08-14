@@ -36,6 +36,36 @@ public:
   virtual void OnPipeConnected() {}
   virtual void OnPipeDisconnected() {}
   virtual bool ShouldReconnect() { return true; }
+  virtual bool PipeServerIsAuthorized(_In_ HANDLE pipe)
+  {
+    (void) pipe;
+    return true;
+  }
+  virtual bool PipeClientHelloRequired() const { return false; }
+  virtual bool BuildPipeClientHello(
+    _Out_writes_bytes_(size) void * message,
+    _In_ size_t size)
+  {
+    (void) message;
+    (void) size;
+    return true;
+  }
+  virtual bool PipeClientAuthenticationRequired() const { return false; }
+  virtual bool AuthenticatePipeClient(
+    _In_ HANDLE pipe,
+    _In_reads_bytes_(size) const void * message,
+    _In_ size_t size)
+  {
+    (void) pipe;
+    (void) message;
+    (void) size;
+    return true;
+  }
+  virtual bool PipeClientStillAuthorized(_In_ HANDLE pipe)
+  {
+    (void) pipe;
+    return true;
+  }
   virtual bool OnPipeMessage(
     _In_reads_bytes_(size) const void * message,
     _In_ size_t size) = 0;
@@ -59,8 +89,12 @@ public:
   bool Start(
     _In_z_ const wchar_t * pipeName,
     _In_ Mode mode,
-    _In_ size_t messageSize);
+    _In_ size_t messageSize,
+    _In_opt_ const SECURITY_ATTRIBUTES * serverSecurity = nullptr,
+    _In_ DWORD serverOpenMode = 0,
+    _In_ DWORD serverPipeMode = 0);
   void Stop();
+  void DisconnectClient();
 
   bool Send(
     _In_reads_bytes_(size) const void * message,
@@ -82,12 +116,15 @@ private:
     Success,
     Disconnected,
     Stopped,
+    TimedOut,
     Error,
   };
 
   static const DWORD CLIENT_RETRY_INITIAL_MS;
   static const DWORD CLIENT_RETRY_MAX_MS;
   static const DWORD SERVER_RETRY_MS;
+  static const DWORD AUTHENTICATION_TIMEOUT_MS;
+  static const DWORD AUTHORIZATION_POLL_MS;
   static const DWORD WRITE_TIMEOUT_MS;
   static const DWORD WAIT_FIRST_OBJECT_VALUE;
 
@@ -103,7 +140,8 @@ private:
     _In_ HANDLE ioEvent,
     _Out_writes_bytes_(messageSize) void * message,
     _In_ DWORD messageSize,
-    _Out_ DWORD * bytesRead);
+    _Out_ DWORD * bytesRead,
+    _In_ DWORD timeoutMs = INFINITE);
   PipeIoResult WriteMessage(
     _In_ HANDLE pipe,
     _In_reads_bytes_(messageSize) const void * message,
@@ -120,10 +158,14 @@ private:
   void PublishPipe(_In_ HANDLE pipe);
   void ClosePipe(_In_ HANDLE pipe);
 
-  std::wstring m_pipeName;
-  size_t m_messageSize = 0;
-  Mode m_mode = Mode::Client;
-  IPipeEndpointHandler * m_handler = nullptr;
+  std::wstring           m_pipeName;
+  size_t                 m_messageSize       = 0;
+  Mode                   m_mode              = Mode::Client;
+  IPipeEndpointHandler * m_handler           = nullptr;
+  SECURITY_ATTRIBUTES    m_serverSecurity    = {};
+  bool                   m_hasServerSecurity = false;
+  DWORD                  m_serverOpenMode    = 0;
+  DWORD                  m_serverPipeMode    = 0;
 
   std::atomic<bool> m_running { false };
   std::atomic<bool> m_connected { false };

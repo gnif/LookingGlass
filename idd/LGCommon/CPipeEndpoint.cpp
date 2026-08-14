@@ -26,11 +26,13 @@
 #include <stdint.h>
 #include <vector>
 
-const DWORD CPipeEndpoint::CLIENT_RETRY_INITIAL_MS = 100;
-const DWORD CPipeEndpoint::CLIENT_RETRY_MAX_MS = 2000;
-const DWORD CPipeEndpoint::SERVER_RETRY_MS = 1000;
-const DWORD CPipeEndpoint::WRITE_TIMEOUT_MS = 250;
-const DWORD CPipeEndpoint::WAIT_FIRST_OBJECT_VALUE = 0;
+const DWORD CPipeEndpoint::CLIENT_RETRY_INITIAL_MS   = 100;
+const DWORD CPipeEndpoint::CLIENT_RETRY_MAX_MS       = 2000;
+const DWORD CPipeEndpoint::SERVER_RETRY_MS           = 1000;
+const DWORD CPipeEndpoint::AUTHENTICATION_TIMEOUT_MS = 2000;
+const DWORD CPipeEndpoint::AUTHORIZATION_POLL_MS     = 1000;
+const DWORD CPipeEndpoint::WRITE_TIMEOUT_MS          = 250;
+const DWORD CPipeEndpoint::WAIT_FIRST_OBJECT_VALUE   = 0;
 
 bool CPipeEndpoint::IsDisconnectedError(DWORD error)
 {
@@ -55,7 +57,12 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WaitForOverlapped(
     CancelIoEx(pipe, overlapped);
     if (GetOverlappedResult(pipe, overlapped, transferred, TRUE))
       return PipeIoResult::Success;
-    DEBUG_WARN("Named pipe write timed out");
+    const DWORD error = GetLastError();
+    if (error == ERROR_OPERATION_ABORTED)
+      return PipeIoResult::TimedOut;
+    if (IsDisconnectedError(error))
+      return PipeIoResult::Disconnected;
+    DEBUG_WARN_HR(error, "Failed to cancel timed-out named pipe I/O");
     return PipeIoResult::Error;
   }
 
@@ -94,7 +101,8 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::ReadMessage(
   HANDLE ioEvent,
   void * message,
   DWORD messageSize,
-  DWORD * bytesRead)
+  DWORD * bytesRead,
+  DWORD timeoutMs)
 {
   ResetEvent(ioEvent);
   OVERLAPPED overlapped = {};
@@ -106,7 +114,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::ReadMessage(
   const DWORD error = GetLastError();
   if (error == ERROR_IO_PENDING)
     return WaitForOverlapped(
-      pipe, ioEvent, &overlapped, bytesRead);
+      pipe, ioEvent, &overlapped, bytesRead, timeoutMs);
 
   if (error == ERROR_OPERATION_ABORTED &&
       WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
@@ -167,6 +175,8 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
       bytesWritten);
     result = PipeIoResult::Error;
   }
+  else if (result == PipeIoResult::TimedOut)
+    DEBUG_WARN("Named pipe write timed out");
 
   return result;
 }
@@ -179,27 +189,39 @@ CPipeEndpoint::~CPipeEndpoint()
 bool CPipeEndpoint::Start(
   const wchar_t * pipeName,
   Mode mode,
-  size_t messageSize)
+  size_t messageSize,
+  const SECURITY_ATTRIBUTES * serverSecurity,
+  DWORD serverOpenMode,
+  DWORD serverPipeMode)
 {
   Stop();
 
   if (!pipeName || !*pipeName || !messageSize || messageSize > MAXDWORD)
     return false;
 
-  m_pipeName = pipeName;
-  m_mode = mode;
-  m_messageSize = messageSize;
-  m_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  m_writeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  if (!m_stopEvent || !m_writeEvent)
+  m_pipeName           = pipeName;
+  m_mode               = mode;
+  m_messageSize        = messageSize;
+  m_hasServerSecurity  = serverSecurity != nullptr;
+  m_serverSecurity     = serverSecurity ? *serverSecurity :
+    SECURITY_ATTRIBUTES {};
+  m_serverOpenMode     = serverOpenMode;
+  m_serverPipeMode     = serverPipeMode;
+  m_stopEvent          = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!m_stopEvent)
   {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe events");
-    if (m_writeEvent)
-      CloseHandle(m_writeEvent);
-    if (m_stopEvent)
-      CloseHandle(m_stopEvent);
-    m_writeEvent = nullptr;
-    m_stopEvent  = nullptr;
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error, "Failed to create the named pipe stop event");
+    return false;
+  }
+
+  m_writeEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  if (!m_writeEvent)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error, "Failed to create the named pipe write event");
+    CloseHandle(m_stopEvent);
+    m_stopEvent = nullptr;
     return false;
   }
 
@@ -287,6 +309,19 @@ void CPipeEndpoint::Stop()
   Atomic::Store(m_connected, false);
 }
 
+void CPipeEndpoint::DisconnectClient()
+{
+  Atomic::Store(m_connected, false);
+  CSRWSharedLock lock(m_pipeLock);
+  if (m_pipe != INVALID_HANDLE_VALUE &&
+      !CancelIoEx(m_pipe, nullptr))
+  {
+    const DWORD error = GetLastError();
+    if (error != ERROR_NOT_FOUND)
+      DEBUG_WARN_HR(error, "Failed to cancel named pipe client I/O");
+  }
+}
+
 bool CPipeEndpoint::Send(const void * message, size_t size)
 {
   if (!message || size != m_messageSize || !IsRunning() || !IsConnected())
@@ -340,13 +375,14 @@ HANDLE CPipeEndpoint::CreateServerPipe()
 
   HANDLE pipe = CreateNamedPipeW(
     m_pipeName.c_str(),
-    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
-    PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT,
+    PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED | m_serverOpenMode,
+    PIPE_TYPE_MESSAGE | PIPE_READMODE_MESSAGE | PIPE_WAIT |
+      m_serverPipeMode,
     1,
     bufferSize,
     bufferSize,
     0,
-    nullptr);
+    m_hasServerSecurity ? &m_serverSecurity : nullptr);
   if (pipe == INVALID_HANDLE_VALUE)
     DEBUG_ERROR_HR(GetLastError(), "Failed to create named pipe %ls", m_pipeName.c_str());
   return pipe;
@@ -420,12 +456,78 @@ void CPipeEndpoint::RunServer()
       continue;
     }
 
-    if (!IsRunning())
-      break;
-
     if (!IsRunning() ||
         WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
       break;
+
+    bool authenticated = false;
+    if (m_handler && m_handler->PipeClientAuthenticationRequired())
+    {
+      std::vector<uint8_t> message(m_messageSize);
+      DWORD bytesRead = 0;
+      const PipeIoResult authResult = ReadMessage(
+        pipe,
+        ioEvent,
+        message.data(),
+        static_cast<DWORD>(message.size()),
+        &bytesRead,
+        AUTHENTICATION_TIMEOUT_MS);
+      if (authResult == PipeIoResult::Success &&
+          bytesRead != message.size())
+      {
+        DEBUG_WARN(
+          "Named pipe authentication frame has %lu bytes, expected %llu",
+          bytesRead,
+          static_cast<unsigned long long>(message.size()));
+      }
+      if (authResult != PipeIoResult::Success ||
+          bytesRead != message.size() ||
+          !m_handler->AuthenticatePipeClient(
+            pipe, message.data(), message.size()))
+      {
+        if (authResult == PipeIoResult::TimedOut)
+          DEBUG_WARN("Named pipe client authentication timed out");
+        else if (authResult == PipeIoResult::Success)
+          DEBUG_WARN("Named pipe client authentication failed");
+        if (!DisconnectNamedPipe(pipe))
+        {
+          const DWORD error = GetLastError();
+          if (error != ERROR_PIPE_NOT_CONNECTED)
+          {
+            DEBUG_WARN_HR(error,
+              "Failed to disconnect unauthenticated named pipe client");
+            ClosePipe(pipe);
+            pipe = INVALID_HANDLE_VALUE;
+          }
+        }
+        if (authResult == PipeIoResult::Stopped || !IsRunning())
+          break;
+        continue;
+      }
+      authenticated = true;
+    }
+
+    if (!IsRunning() ||
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE ||
+        (m_handler && !m_handler->PipeClientStillAuthorized(pipe)))
+    {
+      if (authenticated && m_handler)
+        m_handler->OnPipeDisconnected();
+      if (!DisconnectNamedPipe(pipe))
+      {
+        const DWORD error = GetLastError();
+        if (error != ERROR_PIPE_NOT_CONNECTED)
+        {
+          DEBUG_WARN_HR(error,
+            "Failed to disconnect unauthorized named pipe client");
+          ClosePipe(pipe);
+          pipe = INVALID_HANDLE_VALUE;
+        }
+      }
+      if (!IsRunning())
+        break;
+      continue;
+    }
 
     Atomic::Store(m_connected, true);
     DEBUG_INFO("Named pipe client connected: %ls", m_pipeName.c_str());
@@ -494,12 +596,57 @@ void CPipeEndpoint::RunClient()
     DWORD mode = PIPE_READMODE_MESSAGE;
     if (!SetNamedPipeHandleState(pipe, &mode, nullptr, nullptr))
     {
-      DEBUG_WARN_HR(GetLastError(), "Failed to set named pipe message mode");
+      const DWORD error = GetLastError();
+      DEBUG_WARN_HR(error, "Failed to set named pipe message mode");
       CloseHandle(pipe);
       if (!WaitForRetry(retryDelay))
         break;
       retryDelay = (std::min)(retryDelay * 2, CLIENT_RETRY_MAX_MS);
       continue;
+    }
+
+    if (m_handler && !m_handler->PipeServerIsAuthorized(pipe))
+    {
+      DEBUG_WARN("Rejected unauthorized named pipe server: %ls",
+        m_pipeName.c_str());
+      CloseHandle(pipe);
+      if (!WaitForRetry(retryDelay))
+        break;
+      retryDelay = (std::min)(retryDelay * 2, CLIENT_RETRY_MAX_MS);
+      continue;
+    }
+
+    if (!IsRunning() ||
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+    {
+      CloseHandle(pipe);
+      break;
+    }
+
+    if (m_handler && m_handler->PipeClientHelloRequired())
+    {
+      std::vector<uint8_t> hello(m_messageSize);
+      if (!m_handler->BuildPipeClientHello(hello.data(), hello.size()))
+      {
+        DEBUG_WARN("Failed to build named pipe client HELLO");
+        CloseHandle(pipe);
+        if (!WaitForRetry(retryDelay))
+          break;
+        retryDelay = (std::min)(retryDelay * 2, CLIENT_RETRY_MAX_MS);
+        continue;
+      }
+
+      const PipeIoResult helloResult = WriteMessage(
+        pipe, hello.data(), static_cast<DWORD>(hello.size()));
+      if (helloResult != PipeIoResult::Success)
+      {
+        DEBUG_WARN("Failed to send named pipe client HELLO");
+        CloseHandle(pipe);
+        if (!WaitForRetry(retryDelay))
+          break;
+        retryDelay = (std::min)(retryDelay * 2, CLIENT_RETRY_MAX_MS);
+        continue;
+      }
     }
 
     if (!IsRunning() ||
@@ -549,7 +696,18 @@ bool CPipeEndpoint::ReadMessages(HANDLE pipe)
       ioEvent,
       message.data(),
       static_cast<DWORD>(message.size()),
-      &bytesRead);
+      &bytesRead,
+      m_handler && m_handler->PipeClientAuthenticationRequired() ?
+        AUTHORIZATION_POLL_MS : INFINITE);
+    if (result == PipeIoResult::TimedOut)
+    {
+      if (m_handler && !m_handler->PipeClientStillAuthorized(pipe))
+      {
+        success = false;
+        break;
+      }
+      continue;
+    }
     if (result != PipeIoResult::Success)
     {
       success = result == PipeIoResult::Disconnected ||
@@ -570,6 +728,12 @@ bool CPipeEndpoint::ReadMessages(HANDLE pipe)
     if (!IsRunning() ||
         WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
       break;
+
+    if (m_handler && !m_handler->PipeClientStillAuthorized(pipe))
+    {
+      success = false;
+      break;
+    }
 
     if (m_handler && !m_handler->OnPipeMessage(
           message.data(), message.size()))

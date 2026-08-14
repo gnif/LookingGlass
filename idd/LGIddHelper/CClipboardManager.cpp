@@ -79,12 +79,6 @@ namespace
     ~ComScope() { if (initialized) CoUninitialize(); }
   };
 
-  struct ClipboardDataObjectScope
-  {
-    IDataObject * object = nullptr;
-    ~ClipboardDataObjectScope() { if (object) object->Release(); }
-  };
-
   struct ClipboardStorageScope
   {
     STGMEDIUM medium = {};
@@ -106,7 +100,14 @@ namespace
     ~ClipboardTaskStringScope() { CoTaskMemFree(value); }
   };
 
-  bool ClipboardDataObjectHasFileFormats(IDataObject * object,
+  enum ClipboardFileCandidate : uint32_t
+  {
+    CLIPBOARD_FILE_CANDIDATE_NONE  = 0,
+    CLIPBOARD_FILE_CANDIDATE_HDROP = 1U << 0,
+    CLIPBOARD_FILE_CANDIDATE_SHELL = 1U << 1,
+  };
+
+  uint32_t ClipboardDataObjectFileCandidates(IDataObject * object,
     DWORD sequence, HRESULT& enumError)
   {
     enumError = E_INVALIDARG;
@@ -116,7 +117,7 @@ namespace
         "Failed to inspect local clipboard file formats: "
         "stage=IDataObject sequence=%lu",
         static_cast<unsigned long>(sequence));
-      return false;
+      return CLIPBOARD_FILE_CANDIDATE_NONE;
     }
 
     ClipboardComScope<IEnumFORMATETC> formats;
@@ -129,15 +130,17 @@ namespace
         "Failed to inspect local clipboard file formats: "
         "stage=IDataObject::EnumFormatEtc sequence=%lu",
         static_cast<unsigned long>(sequence));
-      return false;
+      return CLIPBOARD_FILE_CANDIDATE_NONE;
     }
 
+    HRESULT registrationError = S_OK;
     const UINT shellIDList    = RegisterClipboardFormatW(CFSTR_SHELLIDLIST);
     if (!shellIDList)
     {
       const DWORD formatError = GetLastError();
-      DEBUG_ERROR_HR(formatError ? HRESULT_FROM_WIN32(formatError) :
-          E_UNEXPECTED,
+      registrationError = formatError ? HRESULT_FROM_WIN32(formatError) :
+        E_UNEXPECTED;
+      DEBUG_ERROR_HR(registrationError,
         "Failed to inspect local clipboard file formats: "
         "stage=RegisterClipboardFormatW(CFSTR_SHELLIDLIST) sequence=%lu",
         static_cast<unsigned long>(sequence));
@@ -147,39 +150,44 @@ namespace
     if (!fileDescriptor)
     {
       const DWORD formatError = GetLastError();
-      DEBUG_ERROR_HR(formatError ? HRESULT_FROM_WIN32(formatError) :
-          E_UNEXPECTED,
+      const HRESULT formatHRESULT = formatError ?
+        HRESULT_FROM_WIN32(formatError) : E_UNEXPECTED;
+      if (SUCCEEDED(registrationError))
+        registrationError = formatHRESULT;
+      DEBUG_ERROR_HR(formatHRESULT,
         "Failed to inspect local clipboard file formats: "
         "stage=RegisterClipboardFormatW(CFSTR_FILEDESCRIPTORW) sequence=%lu",
         static_cast<unsigned long>(sequence));
     }
+
+    uint32_t candidates = CLIPBOARD_FILE_CANDIDATE_NONE;
     for (;;)
     {
       FORMATETC format = {};
       ULONG fetched    = 0;
       enumError = formats.object->Next(1, &format, &fetched);
-      const bool files = fetched == 1U &&
-        (format.cfFormat == CF_HDROP ||
-         (shellIDList && format.cfFormat == shellIDList) ||
-         (fileDescriptor && format.cfFormat == fileDescriptor));
-      CoTaskMemFree(format.ptd);
-      if (files)
-      {
-        enumError = S_OK;
-        return true;
-      }
-      if (enumError == S_FALSE)
-      {
-        enumError = S_OK;
-        return false;
-      }
       if (FAILED(enumError))
       {
         DEBUG_ERROR_HR(enumError,
           "Failed to inspect local clipboard file formats: "
           "stage=IEnumFORMATETC::Next sequence=%lu",
           static_cast<unsigned long>(sequence));
-        return false;
+        CoTaskMemFree(format.ptd);
+        return candidates;
+      }
+      if (fetched == 1U)
+      {
+        if (format.cfFormat == CF_HDROP)
+          candidates |= CLIPBOARD_FILE_CANDIDATE_HDROP;
+        if ((shellIDList && format.cfFormat == shellIDList) ||
+            (fileDescriptor && format.cfFormat == fileDescriptor))
+          candidates |= CLIPBOARD_FILE_CANDIDATE_SHELL;
+      }
+      CoTaskMemFree(format.ptd);
+      if (enumError == S_FALSE)
+      {
+        enumError = registrationError;
+        return candidates;
       }
       if (!fetched)
       {
@@ -188,9 +196,38 @@ namespace
           "Failed to inspect local clipboard file formats: "
           "stage=IEnumFORMATETC::Next sequence=%lu fetched=0",
           static_cast<unsigned long>(sequence));
-        return false;
+        return candidates;
       }
     }
+  }
+
+  int CountClipboardFormatsLogged(const char * stage, DWORD sequence)
+  {
+    SetLastError(ERROR_SUCCESS);
+    const int count = CountClipboardFormats();
+    if (count)
+      return count;
+
+    const DWORD error = GetLastError();
+    if (error)
+      DEBUG_ERROR_HR(HRESULT_FROM_WIN32(error),
+        "Failed to count clipboard formats: stage=%s sequence=%lu",
+        stage, static_cast<unsigned long>(sequence));
+    return 0;
+  }
+
+  void FreeClipboardDrop(HGLOBAL memory, DWORD sequence)
+  {
+    SetLastError(ERROR_SUCCESS);
+    const HGLOBAL result = GlobalFree(memory);
+    if (!result)
+      return;
+
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error ? HRESULT_FROM_WIN32(error) : E_UNEXPECTED,
+      "Failed to capture local clipboard files: "
+      "stage=GlobalFree(DROPFILES) sequence=%lu",
+      static_cast<unsigned long>(sequence));
   }
 
   HRESULT ClipboardFileHRESULT(KVMFRClipboardFileError error)
@@ -3281,32 +3318,24 @@ void CClipboardManager::HandleFileDataObject(UIWork& work)
   m_ownedSequence = GetClipboardSequenceNumber();
 }
 
-bool CClipboardManager::OpenClipboardRetry(DWORD * error,
-  const char * stage, bool useWindow) const
+HRESULT CClipboardManager::OpenClipboardRetry(const char * stage) const
 {
+  HRESULT result = CLIPBRD_E_CANT_OPEN;
   for (unsigned int attempt = 0; attempt != 8; ++attempt)
   {
-    if (OpenClipboard(useWindow ? m_hwnd : nullptr))
-    {
-      if (error)
-        *error = ERROR_SUCCESS;
-      return true;
-    }
+    if (OpenClipboard(m_hwnd))
+      return S_OK;
     const DWORD openError = GetLastError();
-    DEBUG_ERROR_HR(openError ? HRESULT_FROM_WIN32(openError) :
-        CLIPBRD_E_CANT_OPEN,
+    result = openError ? HRESULT_FROM_WIN32(openError) :
+      CLIPBRD_E_CANT_OPEN;
+    DEBUG_ERROR_HR(result,
       "OpenClipboard failed: stage=%s attempt=%u",
-      stage ? stage : "unspecified", attempt + 1U);
+      stage, attempt + 1U);
     if (attempt + 1U == 8U)
-    {
-      if (error)
-        *error = openError;
-      SetLastError(openError);
-      return false;
-    }
+      return result;
     Sleep(5U << (std::min)(attempt, 5U));
   }
-  return false;
+  return result;
 }
 
 bool CClipboardManager::IsOurClipboard()
@@ -3323,7 +3352,8 @@ bool CClipboardManager::IsOurClipboard()
   }
 
   if (!m_formatOrigin || !m_remoteGeneration ||
-      !IsClipboardFormatAvailable(m_formatOrigin) || !OpenClipboardRetry())
+      !IsClipboardFormatAvailable(m_formatOrigin) ||
+      FAILED(OpenClipboardRetry("IsOurClipboard")))
     return false;
 
   bool ours = false;
@@ -3383,26 +3413,10 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
     return nullptr;
   }
 
-  CClipboardUserImpersonation user(error);
-  if (!user.Active())
-  {
-    const DWORD userError = user.Error();
-    oleError = userError ? HRESULT_FROM_WIN32(userError) :
-      ClipboardFileHRESULT(error);
-    DEBUG_ERROR_HR(oleError,
-      "Failed to capture local clipboard files: "
-      "stage=impersonate-interactive-user sequence=%lu rawFormats=%d "
-      "fileError=%u", static_cast<unsigned long>(sequence),
-      rawFormatCount, static_cast<unsigned int>(error));
-    return nullptr;
-  }
-
   // Acquire the clipboard before probing CF_HDROP. Explorer can still hold
   // the clipboard when WM_CLIPBOARDUPDATE is delivered, in which case an
   // unlocked IsClipboardFormatAvailable probe can observe no formats.
-  DWORD openError = ERROR_SUCCESS;
-  if (!OpenClipboardRetry(&openError, "CaptureClipboardFiles(CF_HDROP)",
-      false))
+  if (FAILED(OpenClipboardRetry("CaptureClipboardFiles(CF_HDROP)")))
   {
     oleError = CLIPBRD_E_CANT_OPEN;
     retryStage = "OpenClipboard";
@@ -3415,7 +3429,8 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
   int openedRawFormatCount = 0;
   if (GetClipboardSequenceNumber() == sequence)
   {
-    openedRawFormatCount = CountClipboardFormats();
+    openedRawFormatCount = CountClipboardFormatsLogged(
+      "CaptureClipboardFiles(CF_HDROP)", sequence);
     win32Candidate = IsClipboardFormatAvailable(CF_HDROP) != FALSE;
     if (win32Candidate)
     {
@@ -3463,14 +3478,19 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
       static_cast<unsigned long>(GetClipboardSequenceNumber()));
   }
 
-  if (!CloseClipboard())
+  const BOOL closed = CloseClipboard();
+  if (!closed)
   {
     const DWORD closeError = GetLastError();
-    DEBUG_ERROR_HR(closeError ? HRESULT_FROM_WIN32(closeError) :
-        CLIPBRD_E_CANT_CLOSE,
+    oleError = closeError ? HRESULT_FROM_WIN32(closeError) :
+      CLIPBRD_E_CANT_CLOSE;
+    error = closeError == ERROR_ACCESS_DENIED ?
+      KVMFR_CLIPBOARD_FILE_ERROR_ACCESS : KVMFR_CLIPBOARD_FILE_ERROR_IO;
+    DEBUG_ERROR_HR(oleError,
       "Failed to capture local clipboard files: stage=CloseClipboard "
       "sequence=%lu rawFormats=%d",
       static_cast<unsigned long>(sequence), rawFormatCount);
+    return nullptr;
   }
   if (files)
     return files;
@@ -3488,7 +3508,7 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
     return nullptr;
   }
 
-  ClipboardDataObjectScope object;
+  ClipboardComScope<IDataObject> object;
   oleError = OleGetClipboard(&object.object);
   if (FAILED(oleError) || !object.object)
   {
@@ -3503,66 +3523,94 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
     return nullptr;
   }
 
-  FORMATETC format = {
-    static_cast<CLIPFORMAT>(CF_HDROP),
-    nullptr,
-    DVASPECT_CONTENT,
-    -1,
-    TYMED_HGLOBAL,
-  };
-  ClipboardStorageScope storage;
-  const HRESULT hdropError = object.object->GetData(
-    &format, &storage.medium);
-  if (FAILED(hdropError))
+  HRESULT candidateError = S_OK;
+  const uint32_t candidates = ClipboardDataObjectFileCandidates(
+    object.object, sequence, candidateError);
+  const bool optimistic = FAILED(candidateError);
+  if (!optimistic && !win32Candidate &&
+      candidates == CLIPBOARD_FILE_CANDIDATE_NONE)
   {
-    DEBUG_ERROR_HR(hdropError,
-      "Failed to capture local clipboard files: "
-      "stage=IDataObject::GetData(CF_HDROP) sequence=%lu rawFormats=%d",
-      static_cast<unsigned long>(sequence), rawFormatCount);
-  }
-  if (hdropError == CLIPBRD_E_CANT_OPEN)
-  {
-    oleError = hdropError;
-    retryStage = "IDataObject::GetData(CF_HDROP)";
+    error = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
+    oleError = S_FALSE;
     return nullptr;
   }
 
-  if (SUCCEEDED(hdropError))
+  HRESULT hdropError  = S_FALSE;
+  bool hdropAttempted = false;
+  if (optimistic || win32Candidate ||
+      (candidates & CLIPBOARD_FILE_CANDIDATE_HDROP))
   {
-    storage.acquired = true;
-    if (storage.medium.tymed == TYMED_HGLOBAL && storage.medium.hGlobal)
+    hdropAttempted = true;
+    FORMATETC format = {
+      static_cast<CLIPFORMAT>(CF_HDROP),
+      nullptr,
+      DVASPECT_CONTENT,
+      -1,
+      TYMED_HGLOBAL,
+    };
+    ClipboardStorageScope storage;
+    hdropError = object.object->GetData(&format, &storage.medium);
+    if (FAILED(hdropError))
     {
-      std::shared_ptr<CLocalClipboardFiles> files =
-        CLocalClipboardFiles::Capture(
-        static_cast<HDROP>(storage.medium.hGlobal), error);
-      if (files)
-      {
-        viaOLE = true;
-        oleError = S_OK;
-        return files;
-      }
-      oleError = ClipboardFileHRESULT(error);
-      DEBUG_ERROR_HR(oleError,
+      DEBUG_ERROR_HR(hdropError,
         "Failed to capture local clipboard files: "
-        "stage=CLocalClipboardFiles::Capture(CF_HDROP/ole) sequence=%lu "
-        "rawFormats=%d fileError=%u",
-        static_cast<unsigned long>(sequence), rawFormatCount,
-        static_cast<unsigned int>(error));
-      return nullptr;
+        "stage=IDataObject::GetData(CF_HDROP) sequence=%lu rawFormats=%d",
+        static_cast<unsigned long>(sequence), rawFormatCount);
+      if (hdropError == CLIPBRD_E_CANT_OPEN)
+      {
+        oleError = hdropError;
+        retryStage = "IDataObject::GetData(CF_HDROP)";
+        return nullptr;
+      }
+    }
+    else
+    {
+      storage.acquired = true;
+      if (storage.medium.tymed != TYMED_HGLOBAL ||
+          !storage.medium.hGlobal)
+      {
+        oleError = DV_E_TYMED;
+        error = KVMFR_CLIPBOARD_FILE_ERROR_INVALID;
+        DEBUG_ERROR_HR(oleError,
+          "Failed to capture local clipboard files: "
+          "stage=IDataObject::GetData(CF_HDROP)/STGMEDIUM sequence=%lu "
+          "rawFormats=%d tymed=0x%08lx hasHGlobal=%u",
+          static_cast<unsigned long>(sequence), rawFormatCount,
+          static_cast<unsigned long>(storage.medium.tymed),
+          storage.medium.hGlobal ? 1U : 0U);
+        return nullptr;
+      }
+
+      files = CLocalClipboardFiles::Capture(
+        static_cast<HDROP>(storage.medium.hGlobal), error);
+      if (!files)
+      {
+        oleError = ClipboardFileHRESULT(error);
+        DEBUG_ERROR_HR(oleError,
+          "Failed to capture local clipboard files: "
+          "stage=CLocalClipboardFiles::Capture(CF_HDROP/ole) sequence=%lu "
+          "rawFormats=%d fileError=%u",
+          static_cast<unsigned long>(sequence), rawFormatCount,
+          static_cast<unsigned int>(error));
+        return nullptr;
+      }
+
+      viaOLE = true;
+      oleError = S_OK;
+      return files;
     }
   }
 
-  if (SUCCEEDED(hdropError))
+  if (!optimistic &&
+      !(candidates & CLIPBOARD_FILE_CANDIDATE_SHELL))
   {
-    oleError = DV_E_TYMED;
-    error = KVMFR_CLIPBOARD_FILE_ERROR_INVALID;
-    DEBUG_ERROR_HR(oleError,
-      "Failed to capture local clipboard files: "
-      "stage=IDataObject::GetData(CF_HDROP)/STGMEDIUM sequence=%lu "
-      "rawFormats=%d tymed=0x%08lx hasHGlobal=%u",
-      static_cast<unsigned long>(sequence), rawFormatCount,
-      static_cast<unsigned long>(storage.medium.tymed),
-      storage.medium.hGlobal ? 1U : 0U);
+    if (hdropAttempted)
+      oleError = hdropError;
+    else
+    {
+      error = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
+      oleError = S_FALSE;
+    }
     return nullptr;
   }
 
@@ -3589,17 +3637,6 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
     oleError = FAILED(shellError) ? shellError : E_UNEXPECTED;
     if (oleError == CLIPBRD_E_CANT_OPEN)
       retryStage = "SHCreateShellItemArrayFromDataObject";
-    HRESULT enumError = S_OK;
-    const bool fileCandidate = win32Candidate ||
-      hdropError != DV_E_FORMATETC ||
-      ClipboardDataObjectHasFileFormats(object.object, sequence, enumError);
-    if (!fileCandidate && SUCCEEDED(enumError) &&
-        oleError != CLIPBRD_E_CANT_OPEN)
-    {
-      error = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
-      oleError = S_FALSE;
-      return nullptr;
-    }
     return nullptr;
   }
 
@@ -3707,16 +3744,7 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
     DEBUG_ERROR_HR(oleError,
       "Failed to capture local clipboard files: stage=GlobalLock(DROPFILES) "
       "sequence=%lu", static_cast<unsigned long>(sequence));
-    SetLastError(ERROR_SUCCESS);
-    HGLOBAL freeResult = GlobalFree(drop);
-    if (freeResult)
-    {
-      const DWORD freeError = GetLastError();
-      DEBUG_ERROR_HR(freeError ? HRESULT_FROM_WIN32(freeError) : E_UNEXPECTED,
-        "Failed to capture local clipboard files: "
-        "stage=GlobalFree(DROPFILES) sequence=%lu",
-        static_cast<unsigned long>(sequence));
-    }
+    FreeClipboardDrop(drop, sequence);
     return nullptr;
   }
   header->pFiles = sizeof(*header);
@@ -3733,10 +3761,15 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
   const DWORD unlockError = unlocked ? ERROR_SUCCESS : GetLastError();
   if (!unlocked && unlockError != ERROR_SUCCESS)
   {
-    DEBUG_ERROR_HR(HRESULT_FROM_WIN32(unlockError),
+    oleError = HRESULT_FROM_WIN32(unlockError);
+    error = unlockError == ERROR_ACCESS_DENIED ?
+      KVMFR_CLIPBOARD_FILE_ERROR_ACCESS : KVMFR_CLIPBOARD_FILE_ERROR_IO;
+    DEBUG_ERROR_HR(oleError,
       "Failed to capture local clipboard files: "
       "stage=GlobalUnlock(DROPFILES) sequence=%lu",
       static_cast<unsigned long>(sequence));
+    FreeClipboardDrop(drop, sequence);
+    return nullptr;
   }
 
   files = CLocalClipboardFiles::Capture(static_cast<HDROP>(drop), error);
@@ -3749,16 +3782,7 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
       "fileError=%u", static_cast<unsigned long>(sequence),
       static_cast<unsigned int>(error));
   }
-  SetLastError(ERROR_SUCCESS);
-  HGLOBAL freeResult = GlobalFree(drop);
-  if (freeResult)
-  {
-    const DWORD freeError = GetLastError();
-    DEBUG_ERROR_HR(freeError ? HRESULT_FROM_WIN32(freeError) : E_UNEXPECTED,
-      "Failed to capture local clipboard files: "
-      "stage=GlobalFree(DROPFILES) sequence=%lu",
-      static_cast<unsigned long>(sequence));
-  }
+  FreeClipboardDrop(drop, sequence);
   if (!files)
     return nullptr;
   viaOLE = true;
@@ -3829,7 +3853,8 @@ void CClipboardManager::PublishLocalClipboard()
   const DWORD before = GetClipboardSequenceNumber();
   uint32_t formats = EnumerateFormats();
   const uint32_t recognizedFormats = formats;
-  const int rawFormatCount = CountClipboardFormats();
+  const int rawFormatCount = CountClipboardFormatsLogged(
+    "PublishLocalClipboard", before);
   const DWORD after = GetClipboardSequenceNumber();
   if (before != after)
   {
@@ -4132,11 +4157,8 @@ bool CClipboardManager::ApplyRemoteOffer(uint32_t formats,
     m_oleClipboard->Release();
     m_oleClipboard = nullptr;
   }
-  if (!OpenClipboardRetry())
-  {
-    DEBUG_WARN_HR(GetLastError(), "Failed to open the clipboard");
+  if (FAILED(OpenClipboardRetry("ApplyRemoteOffer")))
     return false;
-  }
 
   m_applyingRemote = true;
   const bool emptied = EmptyClipboard() != FALSE;
@@ -4200,7 +4222,8 @@ bool CClipboardManager::ApplyRemoteOffer(uint32_t formats,
     if (!error)
       error = ERROR_INVALID_DATA;
     SetLastError(error);
-    DEBUG_WARN_HR(error, "Failed to replace the clipboard");
+    DEBUG_WARN_HR(HRESULT_FROM_WIN32(error),
+      "Failed to replace the clipboard");
     return false;
   }
   m_ownedSequence = GetClipboardSequenceNumber();
@@ -4217,7 +4240,8 @@ void CClipboardManager::ClearOwnedClipboard()
     m_oleClipboard->Release();
     m_oleClipboard = nullptr;
   }
-  if (m_hwnd && GetClipboardOwner() == m_hwnd && OpenClipboardRetry())
+  if (m_hwnd && GetClipboardOwner() == m_hwnd &&
+      SUCCEEDED(OpenClipboardRetry("ClearOwnedClipboard")))
   {
     m_applyingRemote = true;
     EmptyClipboard();
@@ -4271,8 +4295,14 @@ std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
     SetLastError(ERROR_RETRY);
     return nullptr;
   }
-  if (!OpenClipboardRetry())
+  const HRESULT openResult = OpenClipboardRetry("CaptureFormat");
+  if (FAILED(openResult))
+  {
+    const DWORD openError = HRESULT_FACILITY(openResult) == FACILITY_WIN32 ?
+      static_cast<DWORD>(HRESULT_CODE(openResult)) : ERROR_BUSY;
+    SetLastError(openError);
     return nullptr;
+  }
 
   if (GetClipboardSequenceNumber() != sequence)
   {
@@ -4576,7 +4606,7 @@ void CClipboardManager::RenderFormat(UINT windowsFormat, uint64_t deadline)
 
 void CClipboardManager::RenderAllFormats()
 {
-  if (!OpenClipboardRetry())
+  if (FAILED(OpenClipboardRetry("RenderAllFormats")))
     return;
   if (GetClipboardOwner() != m_hwnd)
   {

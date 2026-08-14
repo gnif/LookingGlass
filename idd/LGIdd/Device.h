@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "public.h"
+#include "LGIddAuthority.h"
 
 #include <Windows.h>
 

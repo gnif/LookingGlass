@@ -43,13 +43,15 @@ struct LGPipeMsg
     CLIPBOARD_SETUP,
     CLIPBOARD_READY,
     CLIPBOARD_KICK,
-    CLIPBOARD_RESET
+    CLIPBOARD_RESET,
+    HELLO
   }
   type;
 
   enum : uint32_t
   {
-    RECOVERY_ACTIVE = 0x1U
+    RECOVERY_ACTIVE  = 0x1U,
+    PROTOCOL_VERSION = 2U
   };
 
   union
@@ -92,6 +94,7 @@ struct LGPipeMsg
 
     struct
     {
+      // Legacy setup carries a handle already duplicated into the receiver.
       uint64_t handle;
       uint32_t bytes;
     }
@@ -117,8 +120,15 @@ struct LGPipeMsg
       uint32_t reason;
     }
     clipboardReset;
+
+    struct
+    {
+      uint32_t version;
+      uint64_t authorityId[2];
+    }
+    hello;
   };
 };
 #pragma pack(pop)
 
-static_assert(sizeof(LGPipeMsg) == 20, "LGPipeMsg wire layout changed");
+static_assert(sizeof(LGPipeMsg) == 28, "LGPipeMsg wire layout changed");

@@ -22,7 +22,6 @@
 
 #include <ShlObj.h>
 #include <strsafe.h>
-#include <WtsApi32.h>
 
 #include <algorithm>
 #include <cstring>
@@ -41,7 +40,7 @@ namespace
   static constexpr uint64_t WINDOWS_EPOCH_TICKS =
     UINT64_C(116444736000000000);
   static constexpr size_t COPY_BUFFER_BYTES =
-    static_cast<size_t>(64U) * 1024U;
+    KVMFR_CLIPBOARD_FILE_READ_BYTES;
 
   class CThreadImpersonation final
   {
@@ -165,14 +164,6 @@ namespace
   {
     token = nullptr;
     winError = ERROR_SUCCESS;
-    DWORD sessionId = 0;
-    if (!ProcessIdToSessionId(GetCurrentProcessId(), &sessionId))
-    {
-      winError = GetLastError();
-      error = TokenError(winError);
-      return false;
-    }
-
     HANDLE processToken = nullptr;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE,
         &processToken))
@@ -182,83 +173,11 @@ namespace
       return false;
     }
 
-    HANDLE brokerToken = nullptr;
-    const bool brokerDuplicated = DuplicateTokenEx(processToken,
-      TOKEN_QUERY | TOKEN_ADJUST_PRIVILEGES | TOKEN_IMPERSONATE, nullptr,
-      SecurityImpersonation, TokenImpersonation, &brokerToken) != FALSE;
-    const DWORD brokerError = brokerDuplicated ? ERROR_SUCCESS :
-      GetLastError();
-    CloseHandle(processToken);
-    if (!brokerDuplicated)
-    {
-      winError = brokerError;
-      error = TokenError(brokerError);
-      return false;
-    }
-
-    LUID privilege = {};
-    if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &privilege))
-    {
-      winError = GetLastError();
-      CloseHandle(brokerToken);
-      error = TokenError(winError);
-      return false;
-    }
-
-    TOKEN_PRIVILEGES privileges = {};
-    privileges.PrivilegeCount = 1;
-    privileges.Privileges[0].Luid = privilege;
-    privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
-    SetLastError(ERROR_SUCCESS);
-    const bool adjusted = AdjustTokenPrivileges(brokerToken, FALSE,
-      &privileges, 0, nullptr, nullptr) != FALSE;
-    const DWORD adjustError = GetLastError();
-    if (!adjusted || adjustError != ERROR_SUCCESS)
-    {
-      CloseHandle(brokerToken);
-      winError = adjustError ? adjustError : ERROR_ACCESS_DENIED;
-      error = TokenError(winError);
-      return false;
-    }
-
-    CThreadImpersonation brokerImpersonation(brokerToken);
-    if (!brokerImpersonation.Active())
-    {
-      const DWORD brokerImpersonationError = brokerImpersonation.Error();
-      CloseHandle(brokerToken);
-      winError = brokerImpersonationError;
-      error = TokenError(winError);
-      return false;
-    }
-
-    HANDLE sourceToken = nullptr;
-    const bool queried = WTSQueryUserToken(sessionId, &sourceToken) != FALSE;
-    const DWORD queryError = queried ? ERROR_SUCCESS : GetLastError();
-    if (!brokerImpersonation.Finish())
-    {
-      const DWORD restoreError = brokerImpersonation.Error();
-      if (sourceToken)
-        CloseHandle(sourceToken);
-      CloseHandle(brokerToken);
-      winError = restoreError;
-      error = TokenError(winError);
-      return false;
-    }
-    CloseHandle(brokerToken);
-    if (!queried || !sourceToken)
-    {
-      if (sourceToken)
-        CloseHandle(sourceToken);
-      winError = queryError ? queryError : ERROR_ACCESS_DENIED;
-      error = TokenError(winError);
-      return false;
-    }
-
-    const bool duplicated = DuplicateTokenEx(sourceToken,
+    const bool duplicated = DuplicateTokenEx(processToken,
       TOKEN_QUERY | TOKEN_IMPERSONATE, nullptr, SecurityImpersonation,
       TokenImpersonation, &token) != FALSE;
     const DWORD duplicateError = duplicated ? ERROR_SUCCESS : GetLastError();
-    CloseHandle(sourceToken);
+    CloseHandle(processToken);
     if (!duplicated)
     {
       winError = duplicateError;
@@ -1160,61 +1079,6 @@ namespace
     HRESULT STDMETHODCALLTYPE EnumDAdvise(IEnumSTATDATA **) override
       { return OLE_E_ADVISENOTSUPPORTED; }
   };
-}
-
-class CClipboardUserImpersonation::Impl
-{
-public:
-  HANDLE token;
-  CThreadImpersonation impersonation;
-
-  explicit Impl(HANDLE token) :
-    token(token), impersonation(token)
-  {
-  }
-
-  ~Impl()
-  {
-    impersonation.Finish();
-    CloseHandle(token);
-  }
-};
-
-CClipboardUserImpersonation::CClipboardUserImpersonation(
-  KVMFRClipboardFileError& error)
-{
-  HANDLE token = nullptr;
-  if (!CaptureUserToken(token, error, m_error))
-    return;
-  try
-  {
-    m_impl = std::make_unique<Impl>(token);
-  }
-  catch (const std::bad_alloc&)
-  {
-    CloseHandle(token);
-    m_error = ERROR_OUTOFMEMORY;
-    error = KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY;
-    return;
-  }
-  if (!m_impl->impersonation.Active())
-  {
-    m_error = m_impl->impersonation.Error();
-    m_impl.reset();
-    error = TokenError(m_error);
-  }
-}
-
-CClipboardUserImpersonation::~CClipboardUserImpersonation() = default;
-
-bool CClipboardUserImpersonation::Active() const
-{
-  return m_impl && m_impl->impersonation.Active();
-}
-
-DWORD CClipboardUserImpersonation::Error() const
-{
-  return m_error;
 }
 
 CLocalClipboardFiles::CLocalClipboardFiles(HANDLE userToken) :

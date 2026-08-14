@@ -61,6 +61,7 @@ public:
     if (!m_lock)
       return;
 
+    _Analysis_assume_lock_acquired_(*m_lock);
     ReleaseSRWLockShared(m_lock);
     m_lock = nullptr;
   }
@@ -114,6 +115,7 @@ public:
     if (!m_lock)
       return;
 
+    _Analysis_assume_lock_acquired_(*m_lock);
     ReleaseSRWLockExclusive(m_lock);
     m_lock = nullptr;
   }

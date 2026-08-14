@@ -32,7 +32,8 @@ enum class ClipboardRingReadResult
 class CClipboardRing
 {
 public:
-  static void Initialize(ClipboardMapping& mapping, uint64_t epoch);
+  static void Initialize(ClipboardMapping& mapping, uint64_t epoch,
+    const uint64_t (&authorityId)[2]);
   static bool Valid(const ClipboardMapping& mapping, uint64_t epoch);
 
   static ClipboardRingSlot * BeginWrite(

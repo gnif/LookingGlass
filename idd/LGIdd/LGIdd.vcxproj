@@ -91,7 +91,6 @@
   <ItemGroup>
     <ClInclude Include="Device.h" />
     <ClInclude Include="Driver.h" />
-    <ClInclude Include="Public.h" />
     <ClInclude Include="Trace.h" />
     <ClInclude Include="input\IInputSink.h" />
     <ClInclude Include="ipc\CInputPipeServer.h" />
@@ -279,6 +278,7 @@
   <PropertyGroup>
     <LGPackageToolOutDir Condition="'$(Platform)'=='x64'">$([MSBuild]::NormalizeDirectory('$(LGDriverSolutionDir)$(Platform)\$(LGBaseConfiguration)'))</LGPackageToolOutDir>
     <LGPackageToolOutDir Condition="'$(Platform)'=='Win32'">$([MSBuild]::NormalizeDirectory('$(LGDriverSolutionDir)$(LGBaseConfiguration)'))</LGPackageToolOutDir>
+    <InfVerif_AdditionalOptions>/sw2084</InfVerif_AdditionalOptions>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -289,7 +289,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;bcrypt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -304,7 +304,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;bcrypt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -319,7 +319,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;bcrypt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>
@@ -334,7 +334,7 @@
       <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)LGCommon;$(ProjectDir)..\..\repos\LGMP\lgmp\include;$(ProjectDir)..\..\vendor;$(ProjectDir)..\..\common\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);OneCoreUAP.lib;avrt.lib;bcrypt.lib;d3d12.lib;d3dcompiler.lib</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA1</FileDigestAlgorithm>

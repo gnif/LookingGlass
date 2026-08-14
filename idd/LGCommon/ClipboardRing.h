@@ -26,7 +26,7 @@
 #include <stdint.h>
 
 static constexpr uint32_t LG_CLIPBOARD_MAPPING_MAGIC = 0x4c474342U;
-static constexpr uint32_t LG_CLIPBOARD_MAPPING_VERSION = 3U;
+static constexpr uint32_t LG_CLIPBOARD_MAPPING_VERSION = 4U;
 
 struct ClipboardRingSlot
 {
@@ -51,7 +51,8 @@ struct alignas(64) ClipboardMapping
   uint32_t slotCount;
   uint32_t reserved0;
   uint64_t epoch;
-  uint8_t reserved1[32];
+  uint64_t authorityId[2];
+  uint8_t reserved1[16];
   ClipboardRing helperToIdd;
   ClipboardRing iddToHelper;
 };

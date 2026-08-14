@@ -32,6 +32,12 @@ class CDebug
 
   public:
 
+    enum class Location
+    {
+      ProgramData,
+      LocalAppData,
+    };
+
     enum Level
     {
       LEVEL_NONE = 0,
@@ -46,7 +52,8 @@ class CDebug
     };
 
     const wchar_t *logDir() { return m_logDir.c_str(); }
-    void Init(const wchar_t * name);
+    void Init(const wchar_t * name,
+      Location location = Location::ProgramData);
     void Log_va(CDebug::Level level, const char *function, int line, const wchar_t *fmt, va_list args);
     void Log(CDebug::Level level, const char *function, int line, const wchar_t *fmt, ...);
     void Log_va(CDebug::Level level, const char *function, int line, const char *fmt, va_list args);

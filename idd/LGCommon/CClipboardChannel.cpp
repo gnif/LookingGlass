@@ -154,7 +154,8 @@ bool CClipboardChannel::Attach(HANDLE mapping, uint64_t epoch,
 
   CSRWExclusiveLock lock(m_lifecycleLock);
   ClipboardMapping * view = static_cast<ClipboardMapping *>(MapViewOfFile(
-    mapping, FILE_MAP_ALL_ACCESS, 0, 0, sizeof(ClipboardMapping)));
+    mapping, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0,
+    sizeof(ClipboardMapping)));
   if (!view)
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to map clipboard channel");

@@ -295,8 +295,7 @@ private:
   void RetryLocalClipboard();
   void RetryRemoteOffer();
 
-  bool OpenClipboardRetry(DWORD * error = nullptr,
-    const char * stage = nullptr, bool useWindow = true) const;
+  HRESULT OpenClipboardRetry(const char * stage) const;
   bool IsOurClipboard();
   uint32_t EnumerateFormats() const;
   std::shared_ptr<CLocalClipboardFiles> CaptureClipboardFiles(

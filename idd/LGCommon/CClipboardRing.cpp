@@ -25,15 +25,18 @@
 #include <string.h>
 
 void CClipboardRing::Initialize(
-  ClipboardMapping& mapping, uint64_t epoch)
+  ClipboardMapping& mapping, uint64_t epoch,
+  const uint64_t (&authorityId)[2])
 {
   memset(&mapping, 0, sizeof(mapping));
-  mapping.magic     = LG_CLIPBOARD_MAPPING_MAGIC;
-  mapping.version   = LG_CLIPBOARD_MAPPING_VERSION;
-  mapping.size      = sizeof(mapping);
-  mapping.slotBytes = KVMFR_CLIPBOARD_DATA_BYTES;
-  mapping.slotCount = KVMFR_CLIPBOARD_SLOT_COUNT;
-  mapping.epoch     = epoch;
+  mapping.magic          = LG_CLIPBOARD_MAPPING_MAGIC;
+  mapping.version        = LG_CLIPBOARD_MAPPING_VERSION;
+  mapping.size           = sizeof(mapping);
+  mapping.slotBytes      = KVMFR_CLIPBOARD_DATA_BYTES;
+  mapping.slotCount      = KVMFR_CLIPBOARD_SLOT_COUNT;
+  mapping.epoch          = epoch;
+  mapping.authorityId[0] = authorityId[0];
+  mapping.authorityId[1] = authorityId[1];
 }
 
 bool CClipboardRing::Valid(
@@ -44,6 +47,7 @@ bool CClipboardRing::Valid(
       mapping.size      != sizeof(mapping)               ||
       mapping.slotBytes != KVMFR_CLIPBOARD_DATA_BYTES    ||
       mapping.slotCount != KVMFR_CLIPBOARD_SLOT_COUNT    ||
+      !mapping.authorityId[0] || !mapping.authorityId[1]  ||
       !mapping.epoch || mapping.epoch != epoch)
     return false;
 

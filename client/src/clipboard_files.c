@@ -62,6 +62,9 @@
 #define FILE_URI_MIME            "text/uri-list"
 #define FILE_KDE_CUT_MIME        "application/x-kde-cutselection"
 
+_Static_assert(FILE_REQUEST_MAX <= UINT32_MAX,
+    "clipboard FUSE read size exceeds the FUSE protocol field");
+
 enum RemoteReply
 {
   REMOTE_REPLY_INITIAL,
@@ -1569,8 +1572,15 @@ static void fuseReleasedir(fuse_req_t request, fuse_ino_t ino,
   releaseRemoteHandle(request, info);
 }
 
+static void fuseInit(void * userData, struct fuse_conn_info * connection)
+{
+  (void)userData;
+  connection->max_read = FILE_REQUEST_MAX;
+}
+
 static const struct fuse_lowlevel_ops fuseOps =
 {
+  .init         = fuseInit,
   .lookup       = fuseLookup,
   .forget       = fuseForget,
   .forget_multi = fuseForgetMulti,
@@ -3460,11 +3470,19 @@ bool lgClipboardFiles_init(void)
     goto failed;
   }
   chmod(files.mountpoint, 0700);
+  char mountOptions[160];
+  const int optionsLength = snprintf(mountOptions, sizeof(mountOptions),
+      "ro,nodev,nosuid,noexec,default_permissions,auto_unmount,max_read=%u",
+      (unsigned)FILE_REQUEST_MAX);
+  if (optionsLength < 0 || (size_t)optionsLength >= sizeof(mountOptions))
+  {
+    DEBUG_ERROR("Failed to format clipboard FUSE mount options");
+    goto failed;
+  }
   struct fuse_args args = FUSE_ARGS_INIT(0, NULL);
   if (fuse_opt_add_arg(&args, "looking-glass-client") < 0 ||
       fuse_opt_add_arg(&args, "-o") < 0 ||
-      fuse_opt_add_arg(&args,
-        "ro,nodev,nosuid,noexec,default_permissions,auto_unmount") < 0)
+      fuse_opt_add_arg(&args, mountOptions) < 0)
   {
     fuse_opt_free_args(&args);
     goto failed;

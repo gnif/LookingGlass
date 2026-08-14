@@ -73,6 +73,7 @@
     <TargetName>LGInput</TargetName>
     <DebuggerFlavor>DbgengRemoteDebugger</DebuggerFlavor>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
+    <InfVerif_AdditionalOptions>/sw2084</InfVerif_AdditionalOptions>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>

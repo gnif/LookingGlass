@@ -45,7 +45,7 @@ bool CConfigWindow::registerClass()
 
 CConfigWindow::CConfigWindow() : m_scale(1)
 {
-  LSTATUS error = m_settings.open();
+  LSTATUS error = m_settings.open(true);
   if (error != ERROR_SUCCESS)
     DEBUG_ERROR_HR(error, "Failed to load settings");
   else

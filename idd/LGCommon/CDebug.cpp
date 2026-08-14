@@ -21,6 +21,7 @@
 #include <Windows.h>
 #include <string>
 
+#include <cerrno>
 #include <stdio.h>
 #include <malloc.h>
 #include <strsafe.h>
@@ -100,25 +101,39 @@ inline static void iso8601(wchar_t *buf, size_t count)
   wcsftime(buf, count, L"%Y-%m-%d %H:%M:%SZ", &utc);
 }
 
-inline static std::wstring getLogPath()
+inline static std::wstring getLogPath(CDebug::Location location)
 {
   PWSTR pszPath;
-  if (FAILED(SHGetKnownFolderPath(FOLDERID_ProgramData, 0, NULL, &pszPath)))
+  const KNOWNFOLDERID& folder = location == CDebug::Location::LocalAppData ?
+    FOLDERID_LocalAppData : FOLDERID_ProgramData;
+  const HRESULT folderResult =
+    SHGetKnownFolderPath(folder, KF_FLAG_CREATE, NULL, &pszPath);
+  if (FAILED(folderResult))
   {
-    DEBUG_ERROR("Failed to get ProgramData path");
+    DEBUG_ERROR_HR(folderResult, "Failed to get the log directory root");
     return L"";
   }
 
   std::wstring result(pszPath);
   CoTaskMemFree(pszPath);
 
-  result += L"\\Looking Glass (IDD)\\";
+  result += L"\\Looking Glass (IDD)";
+  if (!CreateDirectoryW(result.c_str(), nullptr))
+  {
+    const DWORD directoryError = GetLastError();
+    if (directoryError != ERROR_ALREADY_EXISTS)
+    {
+      DEBUG_ERROR_HR(directoryError, "Failed to create the log directory");
+      return L"";
+    }
+  }
+  result += L"\\";
   return result;
 }
 
-void CDebug::Init(const wchar_t * name)
+void CDebug::Init(const wchar_t * name, Location location)
 {
-  m_logDir = getLogPath();
+  m_logDir = getLogPath(location);
 
   // don't redirect the debug output if running under a debugger
   if (IsDebuggerPresent())
@@ -150,10 +165,13 @@ void CDebug::Init(const wchar_t * name)
   }
 
   /// open the new log file
+  errno = 0;
   std::ofstream stream(logFile, std::ios::out | std::ios::trunc);
+  const int openError = errno;
   if (!stream.is_open())
   {
-    DEBUG_ERROR_HR(GetLastError(), "Failed to open the log file %s", logFile.c_str());
+    DEBUG_ERROR(L"Failed to open the log file %s (errno=%d)",
+      logFile.c_str(), openError ? openError : EIO);
     return;
   }
 
@@ -336,10 +354,12 @@ void CDebug::LogStrHR(CDebug::Level level, HRESULT hr, const char *function, int
   wchar_t *result;
   if (aswprintf(&result, wide ? L"%s (0x%08lX (%u): %s)" : L"%S (0x%08lX (%u): %s)", str, hr, hr, hrBuffer) < 0)
   {
+    LocalFree(hrBuffer);
     Write(L"Out of memory while logging");
     return;
   }
 
+  LocalFree(hrBuffer);
   LogStr(level, function, line, true, result);
   free(result);
 }

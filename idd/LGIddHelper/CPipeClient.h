@@ -35,10 +35,12 @@ private:
   CPipeEndpoint      m_endpoint;
   CClipboardChannel  m_clipboard;
   CSRWLock           m_clipboardSetupLock;
-  HANDLE             m_clipboardMapping      = nullptr;
-  uint64_t           m_clipboardEpoch        = 0;
-  uint64_t           m_clipboardEpochCounter = 0;
-  bool               m_clipboardEnabled      = false;
+  HANDLE             m_clipboardMapping        = nullptr;
+  uint64_t           m_clipboardEpoch          = 0;
+  uint64_t           m_clipboardEpochCounter   = 0;
+  uint64_t           m_clipboardMappingId[2]   = {};
+  uint64_t           m_clipboardAuthorityId[2] = {};
+  bool               m_clipboardEnabled        = false;
   CSRWLock           m_displayLock;
 
   bool      m_recoveryActive    = false;
@@ -58,11 +60,15 @@ private:
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
   void HandleSetRecovery(const LGPipeMsg& msg);
+  bool PrepareClipboardMappingLocked();
   void ResetClipboardSetupLocked();
 
   void OnPipeConnected() override;
   void OnPipeDisconnected() override;
   bool ShouldReconnect() override;
+  bool PipeServerIsAuthorized(HANDLE pipe) override;
+  bool PipeClientHelloRequired() const override { return true; }
+  bool BuildPipeClientHello(void * message, size_t size) override;
   bool OnPipeMessage(const void * message, size_t size) override;
 
 public:
@@ -72,6 +78,11 @@ public:
 
   bool Init();
   void DeInit();
+  void SetClipboardMappingId(uint64_t high, uint64_t low)
+  {
+    m_clipboardMappingId[0] = high;
+    m_clipboardMappingId[1] = low;
+  }
   bool IsRunning() { return m_endpoint.IsRunning(); }
 
   CClipboardChannel& Clipboard() { return m_clipboard; }

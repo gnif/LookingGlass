@@ -58,9 +58,6 @@
     <ClInclude Include="Driver.h">
       <Filter>Driver</Filter>
     </ClInclude>
-    <ClInclude Include="Public.h">
-      <Filter>Driver</Filter>
-    </ClInclude>
     <ClInclude Include="Trace.h">
       <Filter>Driver</Filter>
     </ClInclude>

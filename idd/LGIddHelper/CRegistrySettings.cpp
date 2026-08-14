@@ -39,10 +39,13 @@ CRegistrySettings::~CRegistrySettings()
     RegCloseKey(hKey);
 }
 
-LSTATUS CRegistrySettings::open()
+LSTATUS CRegistrySettings::open(bool writable)
 {
   HKEY key;
-  LSTATUS result = RegOpenKeyEx(HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, KEY_QUERY_VALUE | KEY_SET_VALUE, &key);
+  const REGSAM access = KEY_QUERY_VALUE |
+    (writable ? KEY_SET_VALUE : 0);
+  LSTATUS result = RegOpenKeyEx(
+    HKEY_LOCAL_MACHINE, LGIDD_REGKEY, 0, access, &key);
 
   if (result == ERROR_SUCCESS)
     hKey = key;
