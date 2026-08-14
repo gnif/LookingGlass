@@ -21,16 +21,20 @@
 #pragma once
 
 #include "CClipboardChannel.h"
+#include "CClipboardFiles.h"
 
 #include <Windows.h>
 
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <deque>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class CClipboardSpool;
@@ -38,6 +42,9 @@ class CClipboardSpool;
 class CClipboardManager final : private IClipboardChannelHandler
 {
 private:
+  struct MarshaledDataObject;
+  class RemoteFileProvider;
+
   enum class WorkType
   {
     STATE,
@@ -45,6 +52,8 @@ private:
     RECORD,
     SEND,
     SEND_DATA,
+    SEND_FILE_DATA,
+    CANCEL_FILE_MANIFEST,
   };
 
   enum class UIType
@@ -53,6 +62,8 @@ private:
     OFFER,
     CLEAR,
     REQUEST,
+    FILE_OFFER,
+    FILES,
   };
 
   struct Work
@@ -64,6 +75,7 @@ private:
     KVMFRClipboardMessage record = {};
     std::vector<uint8_t> data;
     std::shared_ptr<CClipboardSpool> spool;
+    std::shared_ptr<std::vector<uint8_t>> fileData;
     uint64_t deadline = 0;
   };
 
@@ -73,6 +85,7 @@ private:
     bool available = false;
     uint64_t epoch = 0;
     KVMFRClipboardMessage record = {};
+    std::shared_ptr<MarshaledDataObject> dataObject;
   };
 
   struct PendingCancel
@@ -110,13 +123,55 @@ private:
     ~IncomingTransfer();
   };
 
+  struct IncomingFileRequest
+  {
+    uint64_t dataset = 0;
+    uint64_t transfer = 0;
+    uint64_t node = 0;
+    KVMFRClipboardFileOperation operation = 0;
+    uint64_t nextOffset = 0;
+    uint32_t nextSequence = 0;
+    uint64_t sizeHint = KVMFR_CLIPBOARD_SIZE_UNKNOWN;
+    uint32_t requestedBytes = 0;
+    bool began = false;
+    bool complete = false;
+    bool manifest = false;
+    KVMFRClipboardFileError error = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
+    HANDLE event = nullptr;
+    std::vector<uint8_t> data;
+
+    ~IncomingFileRequest();
+  };
+
+  struct RemoteFileManifest
+  {
+    uint64_t dataset = 0;
+    uint64_t acquisition = 0;
+    uint64_t currentRequest = 0;
+    uint64_t currentParent = 0;
+    uint64_t deadline = 0;
+    KVMFRClipboardMessage offer = {};
+    std::deque<uint64_t> directories;
+    std::vector<ClipboardRemoteFileEntry> entries;
+    std::unordered_set<uint64_t> nodes;
+  };
+
+  struct OutgoingFileRequest
+  {
+    uint64_t dataset = 0;
+    bool cancelled = false;
+  };
+
   static constexpr UINT WM_CLIPBOARD_WORK = WM_APP + 0x4c;
   static constexpr size_t MAX_WORK = 16;
   static constexpr size_t MAX_UI_WORK = 16;
-  static constexpr size_t MAX_PENDING_CANCEL = 8;
+  static constexpr size_t MAX_PENDING_CANCEL =
+    KVMFR_CLIPBOARD_FILE_MAX_REQUESTS +
+    KVMFR_CLIPBOARD_FILE_MAX_ACQUISITIONS + 1U;
   static constexpr size_t MAX_PENDING_CONTROL = 16;
   static constexpr DWORD RENDER_TIMEOUT_MS = 15000;
   static constexpr DWORD SEND_TIMEOUT_MS = RENDER_TIMEOUT_MS;
+  static constexpr DWORD FILE_MANIFEST_TIMEOUT_MS = 30000;
 
   HWND m_hwnd;
   CClipboardChannel& m_channel;
@@ -142,6 +197,20 @@ private:
   std::shared_ptr<IncomingTransfer> m_incoming;
   std::mutex m_outgoingLock;
 
+  std::mutex m_fileLock;
+  std::unordered_map<uint64_t, std::shared_ptr<CLocalClipboardFiles>>
+    m_localFileDatasets;
+  std::unordered_map<uint64_t, uint64_t> m_localFileAcquisitions;
+  std::unordered_map<uint64_t, std::shared_ptr<IncomingFileRequest>>
+    m_incomingFileRequests;
+  std::unordered_map<uint64_t, uint64_t> m_remoteFileAcquisitions;
+  std::unordered_map<uint64_t, OutgoingFileRequest> m_outgoingFileRequests;
+  std::unique_ptr<RemoteFileManifest> m_remoteFileManifest;
+  std::shared_ptr<RemoteFileProvider> m_remoteFileProvider;
+  uint64_t m_localFileDataset = 0;
+  IDataObject * m_oleClipboard = nullptr;
+  bool m_oleInitialized = false;
+
   UINT m_formatPNG = 0;
   UINT m_formatJPEG = 0;
   UINT m_formatOrigin = 0;
@@ -152,6 +221,8 @@ private:
   uint64_t m_epoch = 0;
   uint64_t m_localGeneration = 0;
   DWORD m_localSequence = 0;
+  DWORD m_localRetrySequence = 0;
+  uint64_t m_localRetryDeadline = 0;
   uint64_t m_remoteGeneration = 0;
   uint32_t m_remoteFormats = 0;
   DWORD m_ownedSequence = 0;
@@ -166,11 +237,14 @@ private:
   void Thread();
 
   bool QueueWork(Work&& work);
+  bool QueueCancellation(const KVMFRClipboardMessage& record,
+    uint64_t deadline);
   bool QueueCancel(const KVMFRClipboardMessage& record, uint32_t reason,
     uint64_t deadline = 0);
   void QueueControl(WorkType type, bool available,
     uint64_t epoch, uint32_t reason);
   bool QueueUI(UIWork&& work);
+  void DiscardPendingRemoteUI();
   void DrainUI();
   void ProcessWork(Work&& work);
   void ProcessRecord(const KVMFRClipboardMessage& record,
@@ -179,6 +253,32 @@ private:
     const uint8_t * data);
   void ProcessSend(Work&& work);
   void ProcessSendData(Work&& work);
+  void ProcessSendFileData(Work&& work);
+  void ProcessFileRecord(const KVMFRClipboardMessage& record,
+    const uint8_t * data);
+  void ProcessFileData(const KVMFRClipboardMessage& record,
+    const uint8_t * data);
+  bool QueueFileCancel(const KVMFRClipboardMessage& record,
+    KVMFRClipboardFileError error);
+  void HandleFileAcquire(const KVMFRClipboardMessage& record);
+  void HandleFileRelease(const KVMFRClipboardMessage& record);
+  void HandleFileRequest(const KVMFRClipboardMessage& record);
+  void StartRemoteFileOffer(const KVMFRClipboardMessage& record);
+  void StartRemoteFileList(uint64_t parent);
+  void ContinueRemoteFileManifest(
+    const std::shared_ptr<IncomingFileRequest>& request);
+  void FinishRemoteFileManifest();
+  void FailRemoteFileManifest(KVMFRClipboardFileError error);
+  DWORD RemoteFileManifestWait() const;
+  void CheckRemoteFileManifestTimeout();
+  void CancelFileRequests(KVMFRClipboardFileError error,
+    uint64_t transfer = 0);
+  HRESULT ReadRemoteFile(uint64_t dataset, uint64_t acquisition,
+    uint64_t node, uint64_t offset, void * data, ULONG length, ULONG& read);
+  void ReleaseRemoteFileDataset(uint64_t dataset, uint64_t acquisition);
+  uint64_t NextHelperTransfer();
+  void PruneLocalFileDatasets();
+  void RetireLocalFileDataset();
   void CancelIncoming(uint32_t reason, uint64_t transfer = 0);
   void ReleaseOutgoing(uint64_t transfer);
 
@@ -186,21 +286,30 @@ private:
   void HandleOffer(const KVMFRClipboardMessage& record);
   void HandleClear(const KVMFRClipboardMessage& record);
   void HandleRequest(const KVMFRClipboardMessage& record);
+  void HandlePendingFileOffer(const KVMFRClipboardMessage& record);
+  void HandleFileDataObject(UIWork& work);
   void HandleClipboardUpdate();
   void HandleDestroyClipboard();
   void RenderFormat(UINT format, uint64_t deadline = 0);
   void RenderAllFormats();
+  void RetryLocalClipboard();
   void RetryRemoteOffer();
 
   bool OpenClipboardRetry() const;
   bool IsOurClipboard();
   uint32_t EnumerateFormats() const;
+  std::shared_ptr<CLocalClipboardFiles> CaptureClipboardFiles(
+    DWORD sequence, bool& viaOLE, bool& openedOLE,
+    KVMFRClipboardFileError& error, DWORD& winError, HRESULT& oleError);
   void PublishLocalClipboard();
   void PublishClear(uint64_t generation);
   bool ApplyRemoteOffer(uint32_t formats, uint64_t generation);
   void ClearOwnedClipboard();
   void InvalidateOutgoing(uint32_t reason);
   void InvalidateLocalClipboard(uint32_t reason);
+  void ClearLocalRetry();
+  void DeferLocalClipboard(DWORD sequence, bool openedOLE);
+  void ExpireLocalRetry(DWORD sequence);
   void ClearRemoteRetry();
   bool SetOriginMarker(uint64_t generation) const;
 

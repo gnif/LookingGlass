@@ -19,6 +19,7 @@
  */
 
 #include <Windows.h>
+#include <Ole2.h>
 #include <wrl.h>
 #include <UserEnv.h>
 
@@ -57,6 +58,11 @@ static HandleT<HANDLENullTraits> l_process;
 static HandleT<EventTraits>      l_childStopEvent;
 static DWORD                     l_desiredSession = NO_CONSOLE_SESSION;
 static DWORD                     l_childSession   = NO_CONSOLE_SESSION;
+
+struct OleScope
+{
+  ~OleScope() { OleUninitialize(); }
+};
 
 static bool Launch(DWORD sessionId);
 static bool StopChild();
@@ -120,6 +126,23 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
       DEBUG_ERROR_HR(GetLastError(), "Failed to open the child stop event");
       return EXIT_FAILURE;
     }
+  }
+
+  const HRESULT ole = OleInitialize(nullptr);
+  if (FAILED(ole))
+  {
+    DEBUG_ERROR_HR(ole, "Failed to initialize OLE");
+    return EXIT_FAILURE;
+  }
+  const OleScope oleScope;
+
+  const HRESULT security = CoInitializeSecurity(nullptr, 0, nullptr, nullptr,
+    RPC_C_AUTHN_LEVEL_NONE, RPC_C_IMP_LEVEL_IDENTIFY, nullptr, EOAC_NONE,
+    nullptr);
+  if (FAILED(security))
+  {
+    DEBUG_ERROR_HR(security, "Failed to initialize COM security");
+    return EXIT_FAILURE;
   }
 
   if (!CNotifyWindow::registerClass())

@@ -188,7 +188,7 @@ copy /Y "$(ProjectDir)VERSION" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd
       <CallingConvention>StdCall</CallingConvention>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>%(AdditionalDependencies);Ole32.lib;Shell32.lib;Wtsapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies);Bcrypt.lib;Ole32.lib;Shell32.lib;Wtsapi32.lib</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
