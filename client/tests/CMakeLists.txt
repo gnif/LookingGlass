@@ -211,6 +211,7 @@ if(ENABLE_WAYLAND)
     teardown
     teardown-external
     self-copy
+    self-copy-late
     ignored
     invalidate-lock
     dnd

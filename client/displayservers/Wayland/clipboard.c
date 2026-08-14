@@ -339,12 +339,10 @@ static void dataDeviceHandleSelection(void * opaque,
     for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
       free(extra->mimetypes[i]);
     free(extra);
+    /* Publishing already retired the old offer, so a delayed self-copy echo
+     * must not invalidate a newer local selection. */
     if (!selfCopy)
       waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_FORCE);
-    else
-      /* This is the compositor echoing the source we just installed. It is
-       * not a new local clipboard owner and must not send a provider CLEAR. */
-      waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_SILENT);
     wl_data_offer_destroy(offer);
     return;
   }

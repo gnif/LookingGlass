@@ -759,6 +759,51 @@ static void testSelfCopy(void)
   finish();
 }
 
+static void testLateSelfCopy(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+
+  struct Proxy * local = textOffer();
+  CHECK(rec.noticeN == 1);
+  CHECK(!wlCb.selectionSource);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+  CHECK(!local->dead);
+
+  /* The compositor may deliver our marked echo after a newer external
+   * selection. The stale echo must not discard that local selection. */
+  struct Proxy * echo = newOffer();
+  offerMime(echo, "text/plain");
+  offerMime(echo, wlCb.lgMimetype);
+  selectOffer(echo);
+
+  CHECK(rec.noticeN == 1);
+  CHECK(rec.releaseN == 0);
+  CHECK(!wlCb.selectionSource);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+  CHECK(wlCb.mimetypes[LG_CLIPBOARD_DATA_TEXT]);
+  CHECK(!local->dead);
+  CHECK(echo->dead);
+
+  const uint8_t data[] = "new local selection";
+  proto.receiveData = data;
+  proto.receiveSize = sizeof(data) - 1;
+  waylandCBRequest(102, LG_CLIPBOARD_DATA_TEXT);
+  CHECK(proto.receiveN == 1);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.request == 102);
+  CHECK(rec.streamData.size == sizeof(data) - 1);
+  CHECK(rec.streamData.endN == 1);
+  CHECK(memcmp(rec.streamData.data, data, sizeof(data) - 1) == 0);
+
+  CHECK(proto.dirtyDestroyN == 0);
+  finish();
+}
+
 static void testIgnoredOffer(void)
 {
   start();
@@ -1329,6 +1374,7 @@ static const struct Test tests[] =
   { "teardown"  , testTeardown  },
   { "teardown-external", testTeardownExternalOwner },
   { "self-copy" , testSelfCopy  },
+  { "self-copy-late", testLateSelfCopy },
   { "ignored"   , testIgnoredOffer },
   { "invalidate-lock", testInvalidateSerialization },
   { "dnd"       , testDnd       },
