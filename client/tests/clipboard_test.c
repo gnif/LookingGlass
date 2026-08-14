@@ -627,7 +627,7 @@ static void testRequest(void)
   lgClipboard_free();
 }
 
-static void testRemoteReplacesLocal(void)
+static void testRemoteKeepsLocalRequest(void)
 {
   init();
   bind(&p);
@@ -651,17 +651,17 @@ static void testRemoteReplacesLocal(void)
   notice(&q, types, 1);
   CHECK(d.notice == 1);
 
-  /* Rebinding after a remote notice must not replay the superseded local
-   * offer back to the provider. */
-  lgClipboard_setTransport(&plainOps, &r);
-  CHECK(r.attach == 1);
-  CHECK(r.notice == 0);
-  CHECK(r.release == 1);
+  /* The two clipboard directions have independent generations. A late
+   * request can still refer to the local offer advertised before this remote
+   * notice, so its type must remain serviceable. */
+  CHECK(q.ev->request(q.evCtx, 43, LG_CLIPBOARD_DATA_TEXT));
+  CHECK(d.request == 1);
+  CHECK(d.reqType[0] == LG_CLIPBOARD_DATA_TEXT);
 
   lgClipboard_free();
 }
 
-static void testPendingRemoteReplacesLocal(void)
+static void testPendingRemoteKeepsLocalRequest(void)
 {
   init();
   bind(&p);
@@ -677,10 +677,11 @@ static void testPendingRemoteReplacesLocal(void)
   lgClipboard_setLocalAvailable(true);
   CHECK(d.notice == 1);
 
-  lgClipboard_setTransport(&plainOps, &q);
-  CHECK(q.attach == 1);
-  CHECK(q.notice == 0);
-  CHECK(q.release == 1);
+  /* Publishing a notice which arrived while the local clipboard was
+   * unavailable must likewise retain the local request allow-list. */
+  CHECK(p.ev->request(p.evCtx, 44, LG_CLIPBOARD_DATA_TEXT));
+  CHECK(d.request == 1);
+  CHECK(d.reqType[0] == LG_CLIPBOARD_DATA_TEXT);
 
   lgClipboard_free();
 }
@@ -1129,8 +1130,8 @@ static const struct Test tests[] =
 {
   { "preference", testPreference },
   { "request"   , testRequest    },
-  { "remote-local", testRemoteReplacesLocal },
-  { "pending-remote", testPendingRemoteReplacesLocal },
+  { "remote-local", testRemoteKeepsLocalRequest },
+  { "pending-remote", testPendingRemoteKeepsLocalRequest },
   { "invalid"   , testInvalid    },
   { "cancel"    , testCancel     },
   { "generation", testGeneration },

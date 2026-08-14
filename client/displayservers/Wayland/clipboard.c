@@ -194,7 +194,6 @@ static bool hasImageMimetype(char ** mimetypes)
 
 enum ClipboardInvalidateMode
 {
-  CLIPBOARD_INVALIDATE_SILENT,
   CLIPBOARD_INVALIDATE_CONDITIONAL,
   CLIPBOARD_INVALIDATE_FORCE,
 };
@@ -339,8 +338,9 @@ static void dataDeviceHandleSelection(void * opaque,
     for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
       free(extra->mimetypes[i]);
     free(extra);
-    /* Publishing already retired the old offer, so a delayed self-copy echo
-     * must not invalidate a newer local selection. */
+    /* A self-copy offer only echoes the source that we published. It must not
+     * release the provider or disturb the external offer for a generation
+     * which the guest may still request. */
     if (!selfCopy)
       waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_FORCE);
     wl_data_offer_destroy(offer);
@@ -664,6 +664,12 @@ static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode)
 {
   char * mimetypes[LG_CLIPBOARD_DATA_NONE];
   LG_LOCK(wlCb.lock);
+  const bool remoteSelection = wlCb.selectionSource != NULL;
+  if (mode == CLIPBOARD_INVALIDATE_CONDITIONAL && remoteSelection)
+  {
+    LG_UNLOCK(wlCb.lock);
+    return;
+  }
   struct ClipboardRead * read = clipboardReadTakeCurrentNL();
   struct wl_data_offer * offer = wlCb.offer;
   wlCb.offer = NULL;
@@ -1214,11 +1220,6 @@ static void waylandCBPublish(LG_ClipboardData type)
   for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
     wl_data_source_offer(source, *mimetype);
   wl_data_source_offer(source, wlCb.lgMimetype);
-
-  /* Publishing a remote selection supersedes the old external offer. Retire
-   * it before set_selection so a simultaneous focus loss cannot release the
-   * provider while this remote source is active. */
-  waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_SILENT);
 
   LG_LOCK(wlCb.lock);
   if (wlCb.dataDevice)

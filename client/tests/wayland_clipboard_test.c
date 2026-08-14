@@ -706,12 +706,22 @@ static void testSelfCopy(void)
   waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
   struct Proxy * source = &proto.source[0];
   CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+  CHECK(!local->dead);
+
+  /* A remote notice and its self echo must not erase the Wayland offer for a
+   * local clipboard generation that Windows can still request. */
+  const uint8_t localData[] = "local clipboard";
+  proto.receiveData = localData;
+  proto.receiveSize = sizeof(localData) - 1;
 
   /* Losing focus before the compositor echoes our source must not release
    * the remote clipboard. */
   waylandCBInvalidate();
   CHECK(rec.releaseN == 0);
   CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+  CHECK(!local->dead);
 
   struct Proxy * echo = newOffer();
   offerMime(echo, "text/plain");
@@ -721,17 +731,28 @@ static void testSelfCopy(void)
   CHECK(rec.noticeN == 1);
   CHECK(rec.releaseN == 0);
   CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
-  CHECK(!wlCb.offer);
-  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
-    CHECK(!wlCb.mimetypes[i]);
-  CHECK(local->dead);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+  CHECK(wlCb.mimetypes[LG_CLIPBOARD_DATA_TEXT]);
+  CHECK(!local->dead);
   CHECK(echo->dead);
-  CHECK(proto.offerDestroyN == 2);
+  CHECK(proto.offerDestroyN == 1);
   CHECK(!echo->user);
 
   waylandCBInvalidate();
   CHECK(rec.releaseN == 0);
   CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+  CHECK(wlCb.offer == (struct wl_data_offer *)local);
+
+  waylandCBRequest(102, LG_CLIPBOARD_DATA_TEXT);
+  CHECK(proto.receiveN == 1);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.streamData.request == 102);
+  CHECK(rec.streamData.size == sizeof(localData) - 1);
+  CHECK(rec.streamData.endN == 1);
+  CHECK(memcmp(rec.streamData.data, localData,
+      sizeof(localData) - 1) == 0);
 
   int fds[2];
   CHECK(pipe(fds) == 0);
@@ -754,6 +775,8 @@ static void testSelfCopy(void)
   selectOffer(NULL);
   CHECK(rec.releaseN == 1);
   CHECK(!wlCb.selectionSource);
+  CHECK(local->dead);
+  CHECK(proto.offerDestroyN == 2);
 
   CHECK(proto.dirtyDestroyN == 0);
   finish();

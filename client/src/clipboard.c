@@ -485,10 +485,6 @@ static void eventNotice(void * opaque,
   generation = clipboard.remoteGeneration;
   transfer = clearRemoteRequestNL();
   notice = clipboard.localAvailable && g_params.clipboardToLocal;
-  /* Once published, the remote notice replaces the local clipboard. Do not
-   * replay that stale local offer if the provider is rebound. */
-  if (notice)
-    clipboard.localTypeCount = 0;
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
@@ -1226,10 +1222,6 @@ void lgClipboard_setLocalAvailable(bool available)
   notice = available && clipboard.remoteNotice &&
     g_params.clipboardToLocal;
   type = clipboard.remoteType;
-  /* A pending remote notice replaces the local clipboard when it becomes
-   * publishable. Do not replay the superseded local offer afterwards. */
-  if (notice)
-    clipboard.localTypeCount = 0;
   if (!available)
     transfer = clearRemoteRequestNL();
   LG_UNLOCK(clipboard.stateLock);
