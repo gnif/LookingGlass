@@ -152,7 +152,6 @@ private:
   uint64_t m_epoch = 0;
   uint64_t m_localGeneration = 0;
   DWORD m_localSequence = 0;
-  uint64_t m_remoteControlGeneration = 0;
   uint64_t m_remoteGeneration = 0;
   uint32_t m_remoteFormats = 0;
   DWORD m_ownedSequence = 0;

@@ -878,8 +878,12 @@ bool CClipboardManager::QueueUI(UIWork&& work)
           queued.epoch == work.epoch;
       else if (same && (work.type == UIType::OFFER ||
                         work.type == UIType::CLEAR))
+      {
         same = queued.record.clipboardGeneration ==
           work.record.clipboardGeneration;
+        if (same && work.type == UIType::OFFER)
+          same = queued.record.token == work.record.token;
+      }
       else if (same && work.type == UIType::REQUEST)
         same = queued.record.transfer == work.record.transfer;
       if (!same)
@@ -1490,7 +1494,6 @@ void CClipboardManager::HandleState(bool available, uint64_t epoch)
     ClearRemoteRetry();
     InvalidateLocalClipboard(ERROR_DEVICE_NOT_CONNECTED);
     ClearOwnedClipboard();
-    m_remoteControlGeneration = 0;
     return;
   }
 
@@ -1503,44 +1506,21 @@ void CClipboardManager::HandleOffer(
   if (!m_available || !record.clipboardGeneration ||
       !record.token || (record.token & ~KVMFR_CLIPBOARD_FORMAT_MASK_ALL))
     return;
-  if (m_remoteControlGeneration &&
-      record.clipboardGeneration < m_remoteControlGeneration)
-    return;
 
-  const bool newOffer =
-    m_pendingRemoteOffer.clipboardGeneration != record.clipboardGeneration;
-  if (newOffer)
-  {
-    ClearRemoteRetry();
-    m_remoteControlGeneration = record.clipboardGeneration;
-    m_pendingRemoteOffer = record;
-    m_remoteRetryDeadline = GetTickCount64() + REMOTE_RETRY_TIMEOUT_MS;
-    InvalidateLocalClipboard(ERROR_OPERATION_ABORTED);
-  }
-
-  if (ApplyRemoteOffer(record.token, record.clipboardGeneration))
-  {
-    ClearRemoteRetry();
-    return;
-  }
-
-  if (GetTickCount64() < m_remoteRetryDeadline &&
-      SetTimer(m_hwnd, REMOTE_RETRY_TIMER, REMOTE_RETRY_MS, nullptr))
-    return;
-
-  DEBUG_WARN("Failed to apply remote clipboard offer");
+  // Clipboard generations identify content within one publisher process;
+  // they restart when the client does. Serialized channel order determines
+  // which publication is current.
   ClearRemoteRetry();
-  PublishLocalClipboard();
+  m_pendingRemoteOffer = record;
+  m_remoteRetryDeadline = GetTickCount64() + REMOTE_RETRY_TIMEOUT_MS;
+  InvalidateLocalClipboard(ERROR_OPERATION_ABORTED);
+  RetryRemoteOffer();
 }
 
 void CClipboardManager::HandleClear(
-  const KVMFRClipboardMessage& record)
+  const KVMFRClipboardMessage&)
 {
-  if (record.clipboardGeneration && m_remoteControlGeneration &&
-      record.clipboardGeneration < m_remoteControlGeneration)
-    return;
   ClearRemoteRetry();
-  m_remoteControlGeneration = record.clipboardGeneration;
   InvalidateLocalClipboard(ERROR_OPERATION_ABORTED);
   ClearOwnedClipboard();
 }
@@ -1789,7 +1769,19 @@ void CClipboardManager::RetryRemoteOffer()
   if (!m_pendingRemoteOffer.clipboardGeneration || !m_available)
     return;
   const KVMFRClipboardMessage offer = m_pendingRemoteOffer;
-  HandleOffer(offer);
+  if (ApplyRemoteOffer(offer.token, offer.clipboardGeneration))
+  {
+    ClearRemoteRetry();
+    return;
+  }
+
+  if (GetTickCount64() < m_remoteRetryDeadline &&
+      SetTimer(m_hwnd, REMOTE_RETRY_TIMER, REMOTE_RETRY_MS, nullptr))
+    return;
+
+  DEBUG_WARN("Failed to apply remote clipboard offer");
+  ClearRemoteRetry();
+  PublishLocalClipboard();
 }
 
 bool CClipboardManager::SetOriginMarker(uint64_t generation) const
