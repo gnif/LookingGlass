@@ -362,8 +362,6 @@ bool CLGMPInputTransport::Claim(
   RenewLease();
   UpdateTargetState(m_target->GetState(source));
   ++m_statistics.claims;
-  DEBUG_INFO("Input owner %u generation %u acquired",
-    m_ownerClientID, m_ownerGeneration);
   return true;
 }
 
@@ -372,14 +370,11 @@ void CLGMPInputTransport::RenewLease()
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
 }
 
-void CLGMPInputTransport::ReleaseOwner(
-  bool reset, const char * reason)
+void CLGMPInputTransport::ReleaseOwner(bool reset)
 {
   if (!m_ownerClientID)
     return;
 
-  const uint32_t clientID   = m_ownerClientID;
-  const uint32_t generation = m_ownerGeneration;
   if (m_target)
   {
     m_target->Release(Owner(), reset);
@@ -391,8 +386,6 @@ void CLGMPInputTransport::ReleaseOwner(
   m_ownerSequence   = 0;
   m_ownerDeadline   = 0;
   ++m_statistics.releases;
-  DEBUG_INFO("Input owner %u generation %u released (%s)",
-    clientID, generation, reason);
 }
 
 void CLGMPInputTransport::CheckOwner()
@@ -408,12 +401,12 @@ void CLGMPInputTransport::CheckOwner()
 
   if (!state.available || !state.owned)
   {
-    ReleaseOwner(false, "input ownership changed");
+    ReleaseOwner(false);
     return;
   }
 
   if (GetTickCount64() >= m_ownerDeadline)
-    ReleaseOwner(true, "lease expired");
+    ReleaseOwner(true);
 }
 
 bool CLGMPInputTransport::ValidatePayload(
@@ -472,7 +465,7 @@ bool CLGMPInputTransport::ProcessMessage(
   {
     ++m_statistics.malformedMessage;
     if (owner)
-      ReleaseOwner(true, "invalid input message");
+      ReleaseOwner(true);
     return false;
   }
 
@@ -493,7 +486,7 @@ bool CLGMPInputTransport::ProcessMessage(
         return true;
 
       ++m_statistics.sequenceErrors;
-      ReleaseOwner(true, "sequence discontinuity");
+      ReleaseOwner(true);
       return false;
     }
     return Claim(sourceClientID, message);
@@ -509,7 +502,7 @@ bool CLGMPInputTransport::ProcessMessage(
   if (message.sequence != expectedSequence)
   {
     ++m_statistics.sequenceErrors;
-    ReleaseOwner(true, "sequence discontinuity");
+    ReleaseOwner(true);
     return false;
   }
 
@@ -518,7 +511,7 @@ bool CLGMPInputTransport::ProcessMessage(
   switch (message.type)
   {
     case KVMFR_INPUT_MESSAGE_RELEASE:
-      ReleaseOwner(true, "client release");
+      ReleaseOwner(true);
       return true;
 
     case KVMFR_INPUT_MESSAGE_KEEPALIVE:
@@ -563,7 +556,7 @@ bool CLGMPInputTransport::ProcessMessage(
   if (result != InputResult::ACCEPTED)
   {
     ++m_statistics.deliveryFailures;
-    ReleaseOwner(true, "input delivery failed");
+    ReleaseOwner(true);
     return false;
   }
 
@@ -603,7 +596,7 @@ bool CLGMPInputTransport::DrainMessages(bool& received)
       DEBUG_WARN("Ignoring invalid KVMFR input message size");
       ++m_statistics.malformedSize;
       if (sourceClientID == m_ownerClientID)
-        ReleaseOwner(true, "invalid input message");
+        ReleaseOwner(true);
     }
     else
     {
@@ -733,7 +726,7 @@ void CLGMPInputTransport::Thread()
     }
   }
 
-  ReleaseOwner(true, "transport stopped");
+  ReleaseOwner(true);
   UpdateTargetState({});
   PublishStatus();
   if (failed && m_target)

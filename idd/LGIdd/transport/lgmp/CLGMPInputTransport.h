@@ -98,7 +98,7 @@ private:
   bool Claim(uint32_t sourceClientID,
     const KVMFRInputMessage& message);
   void RenewLease();
-  void ReleaseOwner(bool reset, const char * reason);
+  void ReleaseOwner(bool reset);
   void CheckOwner();
   void Thread();
 
