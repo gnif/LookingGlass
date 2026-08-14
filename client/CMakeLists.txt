@@ -27,6 +27,7 @@ include(UninstallTarget)
 
 find_package(PkgConfig)
 pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
 
 option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
@@ -177,6 +178,7 @@ set(SOURCES
   src/font.c
   src/util.c
   src/clipboard.c
+  src/clipboard_files.c
   src/kb.c
   src/kb_hid.c
   src/gl_dynprocs.c
@@ -252,6 +254,7 @@ add_custom_command(TARGET looking-glass-client POST_BUILD
 target_link_libraries(looking-glass-client
   ${EXE_FLAGS}
   PkgConfig::FONTCONFIG
+  PkgConfig::FUSE3
   lg_resources
   lg_common
   displayservers

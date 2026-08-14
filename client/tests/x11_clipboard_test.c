@@ -23,6 +23,7 @@
 #include "test.h"
 #include "x11.h"
 #include "../src/clipboard.h"
+#include "../src/clipboard_files.h"
 
 #include "common/debug.h"
 
@@ -56,6 +57,9 @@
 #define A_BMP       102UL
 #define A_TIFF      103UL
 #define A_JPEG      104UL
+#define A_URI       105UL
+#define A_GNOME     106UL
+#define A_KDE       107UL
 
 struct WindowLog
 {
@@ -136,6 +140,7 @@ struct Log
   unsigned int       grabN;
   unsigned int       ungrabN;
   unsigned int       selectN;
+  unsigned int       structureSelectN;
   LG_ClipboardData   requestType;
   const LG_ClipboardStreamOps * requestStream;
   void              * requestOpaque;
@@ -159,6 +164,18 @@ struct Log
   bool                requestCancelSync;
   bool                requestBeginSync;
   bool                fixesOK;
+  bool                fileSetOK;
+  bool                presentationOK;
+  unsigned int        fileSetN;
+  unsigned int        fileClearN;
+  unsigned int        presentationAcquireN;
+  unsigned int        presentationDeliveredN;
+  unsigned int        presentationReleaseN;
+  uint64_t            presentationDelivered[8];
+  uint64_t            presentationReleased[8];
+  char                fileMime[80];
+  uint8_t             fileData[MAX_TRANSFER];
+  size_t              fileSize;
 };
 
 struct X11DSState x11;
@@ -201,6 +218,12 @@ Atom XInternAtom(Display * display, const char * name, Bool onlyIfExists)
     return A_TIFF;
   if (!strcmp(name, "image/jpeg"))
     return A_JPEG;
+  if (!strcmp(name, "text/uri-list"))
+    return A_URI;
+  if (!strcmp(name, "x-special/gnome-copied-files"))
+    return A_GNOME;
+  if (!strcmp(name, "application/x-kde-cutselection"))
+    return A_KDE;
   CHECK(false);
   return None;
 }
@@ -277,7 +300,10 @@ int XConvertSelection(Display * display, Atom selection, Atom target,
 int XSelectInput(Display * display, Window window, long mask)
 {
   CHECK(display == x11.display);
-  CHECK(mask == PropertyChangeMask);
+  CHECK(mask == PropertyChangeMask ||
+      mask == (PropertyChangeMask | StructureNotifyMask));
+  if (mask & StructureNotifyMask)
+    ++rec.structureSelectN;
   CHECK(window != None);
   return Success;
 }
@@ -549,6 +575,67 @@ bool lgClipboard_requestReady(LG_ClipboardRequest request)
   return true;
 }
 
+bool lgClipboardFiles_setLocal(const char * mime,
+    const void * data, size_t size)
+{
+  CHECK(mime);
+  CHECK(!size || data);
+  CHECK(size <= sizeof(rec.fileData));
+  ++rec.fileSetN;
+  snprintf(rec.fileMime, sizeof(rec.fileMime), "%s", mime);
+  rec.fileSize = size;
+  if (size)
+    memcpy(rec.fileData, data, size);
+  return rec.fileSetOK;
+}
+
+void lgClipboardFiles_clearLocal(void)
+{
+  ++rec.fileClearN;
+}
+
+uint64_t lgClipboardFiles_remotePresentationAcquire(void)
+{
+  ++rec.presentationAcquireN;
+  return rec.presentationOK ? 2001U : 0;
+}
+
+bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+    const char * mime, char ** data, size_t * size)
+{
+  CHECK(presentation >= 2001U);
+  const char * value;
+  if (!strcmp(mime, "text/uri-list"))
+    value = "file:///run/user/1000/looking-glass/guest.txt\r\n";
+  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+    value = "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
+  else if (!strcmp(mime, "application/x-kde-cutselection"))
+    value = "0";
+  else
+    return false;
+  *size = strlen(value);
+  *data = malloc(*size);
+  CHECK(*data);
+  memcpy(*data, value, *size);
+  return true;
+}
+
+void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
+{
+  CHECK(presentation);
+  CHECK(rec.presentationDeliveredN <
+      ARRAY_LENGTH(rec.presentationDelivered));
+  rec.presentationDelivered[rec.presentationDeliveredN++] = presentation;
+}
+
+void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
+{
+  CHECK(presentation);
+  CHECK(rec.presentationReleaseN <
+      ARRAY_LENGTH(rec.presentationReleased));
+  rec.presentationReleased[rec.presentationReleaseN++] = presentation;
+}
+
 static struct Property * prop(void)
 {
   CHECK(rec.propN < ARRAY_LENGTH(rec.prop));
@@ -633,6 +720,17 @@ static void owner(Window owner)
   CHECK(x11CBEventThread((const XEvent *)&event));
 }
 
+static void selectionClear(Window owner)
+{
+  rec.owner = owner;
+  XEvent event = {};
+  event.xselectionclear.type      = SelectionClear;
+  event.xselectionclear.display   = x11.display;
+  event.xselectionclear.window    = x11.window;
+  event.xselectionclear.selection = x11atoms.CLIPBOARD;
+  CHECK(x11CBEventThread(&event));
+}
+
 static void discover(Window ownerWindow,
     const unsigned long * targets, size_t count)
 {
@@ -676,12 +774,14 @@ static void start(void)
   memset(&x11, 0, sizeof(x11));
   memset(&x11atoms, 0, sizeof(x11atoms));
   memset(&rec, 0, sizeof(rec));
-  rec.nextWindow  = 1000;
-  rec.requestOK   = true;
-  rec.fixesOK     = true;
-  rec.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
-  rec.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
-  rec.endResult   = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.nextWindow     = 1000;
+  rec.requestOK      = true;
+  rec.fixesOK        = true;
+  rec.beginResult    = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.chunkResult    = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.endResult      = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.fileSetOK      = true;
+  rec.presentationOK = true;
 
   pthread_mutex_lock(&readRaceLock);
   readRacePause   = false;
@@ -725,6 +825,189 @@ static void testTargets(void)
   CHECK(rec.destroyN == 1);
   CHECK(rec.freeN == 1);
   finish();
+}
+
+static void testFileImport(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT, A_URI };
+  discover(601, targets, ARRAY_LENGTH(targets));
+  CHECK(rec.convertN == 2);
+  const struct ConvertLog * convert = &rec.convert[1];
+  CHECK(convert->target == A_URI);
+  CHECK(convert->property == x11atoms.SEL_DATA);
+  CHECK(rec.noticeN == 0);
+
+  const char payload[] =
+    "file:///home/user/first.txt\r\nfile:///home/user/second.txt\r\n";
+  prop8(A_URI, payload, sizeof(payload) - 1U);
+  selection(convert->requestor, A_URI, x11atoms.SEL_DATA);
+  CHECK(rec.fileSetN == 1);
+  CHECK(strcmp(rec.fileMime, "text/uri-list") == 0);
+  CHECK(rec.fileSize == sizeof(payload) - 1U);
+  CHECK(memcmp(rec.fileData, payload, sizeof(payload) - 1U) == 0);
+  CHECK(rec.noticeN == 0);
+  finish();
+}
+
+static void testFileImportIncr(void)
+{
+  start();
+  const unsigned long targets[] = { A_URI, A_TEXT, A_GNOME };
+  discover(602, targets, ARRAY_LENGTH(targets));
+  CHECK(rec.convertN == 2);
+  const struct ConvertLog * convert = &rec.convert[1];
+  CHECK(convert->target == A_GNOME);
+
+  const unsigned long capacity = 128;
+  prop32(x11atoms.INCR, &capacity, 1);
+  selection(convert->requestor, A_GNOME, x11atoms.SEL_DATA);
+  CHECK(rec.fileSetN == 0);
+
+  const char first[] = "copy\nfile:///home/user/";
+  const char second[] = "large%20file.txt\r\n";
+  prop8(A_GNOME, first, sizeof(first) - 1U);
+  property(convert->requestor);
+  CHECK(rec.fileSetN == 0);
+  prop8(A_GNOME, second, sizeof(second) - 1U);
+  property(convert->requestor);
+  propNull(A_GNOME, 8, 0);
+  property(convert->requestor);
+
+  CHECK(rec.fileSetN == 1);
+  CHECK(strcmp(rec.fileMime,
+      "x-special/gnome-copied-files") == 0);
+  CHECK(rec.fileSize == sizeof(first) + sizeof(second) - 2U);
+  CHECK(memcmp(rec.fileData,
+      "copy\nfile:///home/user/large%20file.txt\r\n",
+      rec.fileSize) == 0);
+  CHECK(rec.noticeN == 0);
+  finish();
+}
+
+static void testFileSource(void)
+{
+  start();
+  x11CBNotice(LG_CLIPBOARD_DATA_FILES);
+  CHECK(rec.owner == x11.window);
+  CHECK(rec.presentationAcquireN == 1);
+  CHECK(rec.presentationReleaseN == 0);
+
+  selectionRequest(x11atoms.TARGETS, 710);
+  CHECK(rec.changeN == 1);
+  CHECK(rec.change[0].format == 32);
+  CHECK(rec.change[0].count == 4);
+  const Atom * targets = (const Atom *)rec.change[0].data;
+  CHECK(targets[0] == x11atoms.TARGETS);
+  CHECK(targets[1] == A_URI);
+  CHECK(targets[2] == A_GNOME);
+  CHECK(targets[3] == A_KDE);
+
+  selectionRequest(A_URI, 711);
+  CHECK(rec.presentationAcquireN == 2);
+  CHECK(rec.structureSelectN == 1);
+  CHECK(rec.changeN == 2);
+  CHECK(rec.change[1].type == x11atoms.INCR);
+  CHECK(rec.change[1].format == 32);
+  CHECK(rec.change[1].count == 1);
+  CHECK(rec.sendN == 2);
+
+  propertyState(900, 711, PropertyDelete);
+  CHECK(rec.changeN == 3);
+  CHECK(rec.change[2].type == A_URI);
+  CHECK(rec.change[2].format == 8);
+  const char expected[] =
+    "file:///run/user/1000/looking-glass/guest.txt\r\n";
+  CHECK(rec.change[2].size == sizeof(expected) - 1U);
+  CHECK(memcmp(rec.change[2].data,
+      expected, sizeof(expected) - 1U) == 0);
+
+  propertyState(900, 711, PropertyDelete);
+  CHECK(rec.changeN == 4);
+  CHECK(rec.change[3].type == A_URI);
+  CHECK(rec.change[3].count == 0);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationDelivered[0] == 2001U);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.presentationReleased[0] == 2001U);
+
+  selectionRequest(A_KDE, 712);
+  CHECK(rec.presentationAcquireN == 3);
+  CHECK(rec.structureSelectN == 2);
+  CHECK(rec.changeN == 5);
+  CHECK(rec.change[4].type == x11atoms.INCR);
+  propertyState(900, 712, PropertyDelete);
+  CHECK(rec.changeN == 6);
+  CHECK(rec.change[5].type == A_KDE);
+  CHECK(rec.change[5].size == 1);
+  CHECK(rec.change[5].data[0] == '0');
+  propertyState(900, 712, PropertyDelete);
+  CHECK(rec.changeN == 7);
+  CHECK(rec.change[6].type == A_KDE);
+  CHECK(rec.change[6].count == 0);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationReleaseN == 2);
+  CHECK(rec.presentationReleased[1] == 2001U);
+
+  x11CBNotice(LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.presentationReleaseN == 3);
+  CHECK(rec.presentationReleased[2] == 2001U);
+  finish();
+  CHECK(rec.presentationReleaseN == 3);
+}
+
+static void testFileSourceActiveReplacement(void)
+{
+  start();
+  x11CBNotice(LG_CLIPBOARD_DATA_FILES);
+  selectionRequest(A_URI, 713);
+  CHECK(rec.changeN == 1);
+  CHECK(rec.change[0].type == x11atoms.INCR);
+  CHECK(rec.presentationAcquireN == 2);
+  CHECK(rec.presentationReleaseN == 0);
+
+  x11CBNotice(LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.changeN == 1);
+
+  selectionClear(901);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.changeN == 1);
+
+  propertyState(900, 713, PropertyDelete);
+  CHECK(rec.changeN == 2);
+  CHECK(rec.change[1].type == A_URI);
+  CHECK(rec.change[1].size > 0);
+  CHECK(rec.presentationDeliveredN == 0);
+
+  propertyState(900, 713, PropertyDelete);
+  CHECK(rec.changeN == 3);
+  CHECK(rec.change[2].type == A_URI);
+  CHECK(rec.change[2].count == 0);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationDelivered[0] == 2001U);
+  CHECK(rec.presentationReleaseN == 2);
+  CHECK(rec.presentationReleased[1] == 2001U);
+  finish();
+  CHECK(rec.presentationReleaseN == 2);
+
+  start();
+  x11CBNotice(LG_CLIPBOARD_DATA_FILES);
+  selectionRequest(A_URI, 714);
+  CHECK(rec.changeN == 1);
+  CHECK(rec.presentationAcquireN == 2);
+
+  XEvent destroyed = {};
+  destroyed.xdestroywindow.type    = DestroyNotify;
+  destroyed.xdestroywindow.display = x11.display;
+  destroyed.xdestroywindow.window  = 900;
+  CHECK(x11CBEventThread(&destroyed));
+  CHECK(rec.changeN == 1);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.presentationDeliveredN == 0);
+
+  finish();
+  CHECK(rec.presentationReleaseN == 2);
 }
 
 static void testNormal(void)
@@ -1146,18 +1429,22 @@ struct Test
 
 static const struct Test tests[] =
 {
-  { "targets"  , testTargets   },
-  { "normal"   , testNormal    },
-  { "incr"     , testIncr      },
-  { "incr-block", testIncrBlocked },
-  { "incr-ready", testIncrReadyRace },
-  { "incr-cancel", testIncrCancelRace },
-  { "incr-large", testIncrLargeProperty },
-  { "malformed", testMalformed },
-  { "replace"  , testReplace   },
-  { "source"   , testSource    },
-  { "source-early", testSourceBeginDuringRequest },
-  { "teardown" , testTeardown  },
+  { "targets"                   , testTargets                     },
+  { "file-import"               , testFileImport                  },
+  { "file-incr"                 , testFileImportIncr              },
+  { "file-source"               , testFileSource                  },
+  { "file-source-active-replace", testFileSourceActiveReplacement },
+  { "normal"                    , testNormal                      },
+  { "incr"                      , testIncr                        },
+  { "incr-block"                , testIncrBlocked                 },
+  { "incr-ready"                , testIncrReadyRace               },
+  { "incr-cancel"               , testIncrCancelRace              },
+  { "incr-large"                , testIncrLargeProperty           },
+  { "malformed"                 , testMalformed                   },
+  { "replace"                   , testReplace                     },
+  { "source"                    , testSource                      },
+  { "source-early"              , testSourceBeginDuringRequest    },
+  { "teardown"                  , testTeardown                    },
 };
 
 int main(int argc, char ** argv)

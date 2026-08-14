@@ -287,11 +287,21 @@ struct WaylandDSState
 
 struct WCBTransfer
 {
-  LG_ClipboardData        type;
+  atomic_uint              references;
+  LG_ClipboardData         type;
   const char            ** mimetypes;
   struct wl_data_source  * source;
   struct WCBTransfer     * next;
+  uint64_t                 filePresentation;
+  char                   * fileUri;
+  size_t                   fileUriSize;
+  char                   * fileGnome;
+  size_t                   fileGnomeSize;
+  char                   * fileKde;
+  size_t                   fileKdeSize;
 };
+
+struct ClipboardFileImport;
 
 struct ClipboardRead
 {
@@ -311,18 +321,19 @@ struct ClipboardRead
 
 struct WCBState
 {
-  struct wl_data_device * dataDevice;
-  char                    lgMimetype[64];
+  struct wl_data_device       * dataDevice;
+  char                          lgMimetype[64];
 
-  char                 * mimetypes[LG_CLIPBOARD_DATA_NONE];
-  struct wl_data_offer * offer;
-  struct wl_data_offer * dndOffer;
+  char                        * mimetypes[LG_CLIPBOARD_DATA_NONE];
+  struct wl_data_offer        * offer;
+  struct wl_data_offer        * dndOffer;
 
-  struct wl_data_source * selectionSource;
-  struct WCBTransfer    * sources;
+  struct wl_data_source       * selectionSource;
+  struct WCBTransfer          * sources;
 
-  LG_Lock                lock;
-  struct ClipboardRead * currentRead;
+  LG_Lock                       lock;
+  struct ClipboardRead        * currentRead;
+  struct ClipboardFileImport  * fileImport;
 };
 
 extern struct WaylandDSState wlWm;

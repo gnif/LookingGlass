@@ -26,6 +26,7 @@
 
 #include <pthread.h>
 #include <stdbool.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,6 +62,8 @@ struct Provider
   unsigned int                 cancel;
   unsigned int                 ready;
   unsigned int                 request;
+  unsigned int                 fileOffer;
+  uint64_t                     fileDataset[MAX_CALL];
   LG_ClipboardData             noticeTypes[LG_CLIPBOARD_DATA_NONE];
   size_t                       noticeCount;
   LG_ClipboardRequest          reqId[MAX_CALL];
@@ -86,21 +89,24 @@ struct Provider
 
 struct Display
 {
-  unsigned int        notice;
-  unsigned int        release;
-  unsigned int        request;
-  unsigned int        ready;
-  unsigned int        cancel;
-  LG_ClipboardData    noticeType[MAX_CALL];
-  LG_ClipboardRequest reqId[MAX_CALL];
-  LG_ClipboardData    reqType[MAX_CALL];
-  bool                autoData;
-  LG_ClipboardData    autoType;
-  const void        * autoBuf;
-  size_t              autoSize;
-  bool                autoBegin;
-  LG_ClipboardResult  readyResult;
+  unsigned int             notice;
+  unsigned int             release;
+  unsigned int             request;
+  unsigned int             ready;
+  unsigned int             cancel;
+  LG_ClipboardData         noticeType[MAX_CALL];
+  LG_ClipboardRequest      reqId[MAX_CALL];
+  LG_ClipboardData         reqType[MAX_CALL];
+  bool                     autoData;
+  LG_ClipboardData         autoType;
+  const void             * autoBuf;
+  size_t                   autoSize;
+  bool                     autoBegin;
+  LG_ClipboardResult       readyResult;
   LG_ClipboardCancelReason cancelReason;
+  atomic_bool              blockCancel;
+  atomic_bool              cancelEntered;
+  atomic_bool              releaseCancel;
 };
 
 struct Reply
@@ -137,6 +143,12 @@ static struct Provider p;
 static struct Provider q;
 static struct Provider r;
 static struct Display  d;
+
+extern unsigned lgClipboardFilesStubRemoteOfferCount;
+extern unsigned lgClipboardFilesStubRemoteClearCount;
+extern uint64_t lgClipboardFilesStubRemoteDataset;
+extern bool lgClipboardFilesStubRemoteReady;
+extern bool lgClipboardFilesStubRemoteOfferResult;
 
 struct AppState  g_state;
 struct AppParams g_params;
@@ -255,6 +267,15 @@ static bool notify(void * opaque, const LG_ClipboardData types[],
   ++provider->notice;
   provider->noticeCount = count;
   memcpy(provider->noticeTypes, types, count * sizeof(*types));
+  return provider->callOK;
+}
+
+static bool offerFiles(void * opaque, uint64_t dataset)
+{
+  struct Provider * provider = opaque;
+  CHECK(dataset);
+  CHECK(provider->fileOffer < MAX_CALL);
+  provider->fileDataset[provider->fileOffer++] = dataset;
   return provider->callOK;
 }
 
@@ -406,6 +427,18 @@ static const LG_ClipboardOps streamOps =
   .request     = request,
 };
 
+static const LG_ClipboardOps fileOps =
+{
+  .name        = "files",
+  .attach      = attach,
+  .detach      = detach,
+  .release     = release,
+  .notifyTypes = notify,
+  .offerFiles  = offerFiles,
+  .data        = data,
+  .request     = request,
+};
+
 static void dsNotice(LG_ClipboardData type)
 {
   CHECK(d.notice < MAX_CALL);
@@ -439,6 +472,13 @@ static void dsRequestCancel(LG_ClipboardRequest id,
     LG_ClipboardCancelReason reason)
 {
   (void)id;
+  if (atomic_load_explicit(&d.blockCancel, memory_order_acquire))
+  {
+    atomic_store_explicit(
+        &d.cancelEntered, true, memory_order_release);
+    while (!atomic_load_explicit(&d.releaseCancel, memory_order_acquire))
+      usleep(1000);
+  }
   ++d.cancel;
   d.cancelReason = reason;
 }
@@ -469,10 +509,18 @@ static void init(void)
   initProvider(&p);
   initProvider(&q);
   initProvider(&r);
+  atomic_init(&d.blockCancel, false);
+  atomic_init(&d.cancelEntered, false);
+  atomic_init(&d.releaseCancel, false);
+  lgClipboardFilesStubRemoteOfferCount = 0;
+  lgClipboardFilesStubRemoteClearCount = 0;
+  lgClipboardFilesStubRemoteDataset = 0;
+  lgClipboardFilesStubRemoteReady = false;
+  lgClipboardFilesStubRemoteOfferResult = true;
   g_state.ds                  = &dsOps;
   g_params.clipboardToVM      = true;
   g_params.clipboardToLocal   = true;
-  lgClipboard_init();
+  CHECK(lgClipboard_init());
   lgClipboard_setLocalAvailable(true);
 }
 
@@ -586,6 +634,214 @@ static void testPreference(void)
   CHECK(r.detach == 1);
   CHECK(p.attach == 3);
 
+  lgClipboard_free();
+}
+
+static void testFilePublication(void)
+{
+  init();
+  lgClipboard_setFallback(&fileOps, &p);
+
+  const uint64_t dataset = UINT64_C(0x123456789abcdef);
+  lgClipboard_notifyFiles(dataset);
+  CHECK(p.fileOffer == 1);
+  CHECK(p.fileDataset[0] == dataset);
+
+  const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
+  lgClipboard_notifyTypes(files, 1);
+  CHECK(p.notice == 0);
+  CHECK(p.fileOffer == 1);
+
+  lgClipboard_setTransport(&plainOps, &r);
+  CHECK(r.attach == 1);
+  CHECK(r.release == 1);
+  const uint64_t replacement = dataset + 1U;
+  lgClipboard_notifyFiles(replacement);
+  CHECK(r.release == 2);
+  lgClipboard_dropTransport();
+  CHECK(p.attach == 2);
+  CHECK(p.fileOffer == 2);
+  CHECK(p.fileDataset[1] == replacement);
+
+  lgClipboard_setTransport(&fileOps, &q);
+  CHECK(q.attach == 1);
+  CHECK(q.fileOffer == 1);
+  CHECK(q.fileDataset[0] == replacement);
+
+  lgClipboard_dropTransport();
+  CHECK(p.attach == 3);
+  CHECK(p.fileOffer == 3);
+  CHECK(p.fileDataset[2] == replacement);
+
+  lgClipboard_free();
+}
+
+static void testFileReplacement(void)
+{
+  init();
+  bind(&p);
+  lgClipboardFilesStubRemoteReady = true;
+
+  const uint64_t first = UINT64_C(0x2000000000000001);
+  p.ev->fileOffer(p.evCtx, first);
+  CHECK(lgClipboardFilesStubRemoteOfferCount == 1);
+  CHECK(lgClipboardFilesStubRemoteDataset == first);
+  const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
+  p.ev->notice(p.evCtx, files, 1);
+  CHECK(d.notice == 1);
+  CHECK(d.noticeType[0] == LG_CLIPBOARD_DATA_FILES);
+
+  const LG_ClipboardData text[] = { LG_CLIPBOARD_DATA_TEXT };
+  p.ev->notice(p.evCtx, text, 1);
+  CHECK(lgClipboardFilesStubRemoteClearCount == 1);
+  CHECK(lgClipboardFilesStubRemoteDataset == 0);
+  CHECK(d.notice == 2);
+  CHECK(d.noticeType[1] == LG_CLIPBOARD_DATA_TEXT);
+
+  const uint64_t mixedDataset = first + 1U;
+  p.ev->fileOffer(p.evCtx, mixedDataset);
+  const LG_ClipboardData mixed[] =
+  {
+    LG_CLIPBOARD_DATA_TEXT,
+    LG_CLIPBOARD_DATA_FILES,
+  };
+  p.ev->notice(p.evCtx, mixed, 2);
+  CHECK(lgClipboardFilesStubRemoteClearCount == 1);
+  CHECK(lgClipboardFilesStubRemoteDataset == mixedDataset);
+  CHECK(d.notice == 3);
+  CHECK(d.noticeType[2] == LG_CLIPBOARD_DATA_FILES);
+
+  p.ev->notice(p.evCtx, text, 1);
+  CHECK(lgClipboardFilesStubRemoteClearCount == 2);
+  CHECK(lgClipboardFilesStubRemoteDataset == 0);
+  CHECK(d.notice == 4);
+  CHECK(d.noticeType[3] == LG_CLIPBOARD_DATA_TEXT);
+  lgClipboard_free();
+}
+
+static void testFileFailure(void)
+{
+  init();
+  bind(&p);
+
+  const LG_ClipboardData text[] = { LG_CLIPBOARD_DATA_TEXT };
+  p.ev->notice(p.evCtx, text, 1);
+  CHECK(d.notice == 1);
+  CHECK(d.release == 0);
+
+  const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
+  const uint64_t first = UINT64_C(0x2100000000000001);
+  p.ev->fileOffer(p.evCtx, first);
+  p.ev->notice(p.evCtx, files, 1);
+  CHECK(d.notice == 1);
+  CHECK(d.release == 0);
+
+  const uint64_t second = first + 1U;
+  p.ev->fileOffer(p.evCtx, second);
+  p.ev->notice(p.evCtx, files, 1);
+  CHECK(d.notice == 1);
+  CHECK(d.release == 0);
+
+  lgClipboard_fileRemoteFailed(first);
+  CHECK(d.release == 0);
+  CHECK(lgClipboardFilesStubRemoteDataset == second);
+
+  lgClipboard_fileRemoteFailed(second);
+  CHECK(d.release == 1);
+  lgClipboard_fileRemoteFailed(second);
+  CHECK(d.release == 1);
+
+  p.ev->notice(p.evCtx, text, 1);
+  CHECK(d.notice == 2);
+  lgClipboardFilesStubRemoteOfferResult = false;
+  const unsigned previousClears = lgClipboardFilesStubRemoteClearCount;
+  p.ev->fileOffer(p.evCtx, second + 1U);
+  CHECK(lgClipboardFilesStubRemoteClearCount == previousClears + 1U);
+  p.ev->notice(p.evCtx, files, 1);
+  CHECK(d.notice == 2);
+  CHECK(d.release == 2);
+
+  p.ev->notice(p.evCtx, text, 1);
+  CHECK(d.notice == 3);
+  lgClipboardFilesStubRemoteOfferResult = true;
+  const uint64_t pending = second + 2U;
+  p.ev->fileOffer(p.evCtx, pending);
+  lgClipboard_fileRemoteFailed(pending);
+  CHECK(d.release == 2);
+  p.ev->notice(p.evCtx, files, 1);
+  CHECK(d.notice == 3);
+  CHECK(d.release == 3);
+
+  lgClipboard_free();
+}
+
+struct CallbackSerializationTask
+{
+  atomic_bool switched;
+  atomic_bool availabilityChanged;
+};
+
+static void * switchClipboardProvider(void * opaque)
+{
+  struct CallbackSerializationTask * task = opaque;
+  lgClipboard_setTransport(&plainOps, &q);
+  atomic_store_explicit(&task->switched, true, memory_order_release);
+  return NULL;
+}
+
+static void * clearClipboardAvailability(void * opaque)
+{
+  struct CallbackSerializationTask * task = opaque;
+  lgClipboard_setLocalAvailable(false);
+  atomic_store_explicit(
+      &task->availabilityChanged, true, memory_order_release);
+  return NULL;
+}
+
+static void waitAtomicBool(const atomic_bool * value)
+{
+  for (unsigned i = 0; i < 1000U; ++i)
+  {
+    if (atomic_load_explicit(value, memory_order_acquire))
+      return;
+    usleep(1000);
+  }
+  CHECK(false);
+}
+
+static void testCallbackSerialization(void)
+{
+  init();
+  bind(&p);
+  const LG_ClipboardData text[] = { LG_CLIPBOARD_DATA_TEXT };
+  lgClipboard_notifyTypes(text, 1);
+  CHECK(p.ev->request(p.evCtx, 1, LG_CLIPBOARD_DATA_TEXT));
+  CHECK(d.request == 1);
+
+  atomic_store_explicit(&d.blockCancel, true, memory_order_release);
+  struct CallbackSerializationTask task;
+  atomic_init(&task.switched, false);
+  atomic_init(&task.availabilityChanged, false);
+  pthread_t switchThread;
+  CHECK(pthread_create(&switchThread, NULL,
+        switchClipboardProvider, &task) == 0);
+  waitAtomicBool(&d.cancelEntered);
+
+  pthread_t availabilityThread;
+  CHECK(pthread_create(&availabilityThread, NULL,
+        clearClipboardAvailability, &task) == 0);
+  usleep(20000);
+  CHECK(!atomic_load_explicit(
+        &task.availabilityChanged, memory_order_acquire));
+
+  atomic_store_explicit(&d.releaseCancel, true, memory_order_release);
+  CHECK(pthread_join(switchThread, NULL) == 0);
+  CHECK(pthread_join(availabilityThread, NULL) == 0);
+  CHECK(atomic_load_explicit(&task.switched, memory_order_acquire));
+  CHECK(atomic_load_explicit(
+        &task.availabilityChanged, memory_order_acquire));
+  CHECK(d.cancel == 1);
+  CHECK(d.cancelReason == LG_CLIPBOARD_CANCEL_UNAVAILABLE);
   lgClipboard_free();
 }
 
@@ -1129,6 +1385,10 @@ struct Test
 static const struct Test tests[] =
 {
   { "preference", testPreference },
+  { "file-publication", testFilePublication },
+  { "file-replacement", testFileReplacement },
+  { "file-failure", testFileFailure },
+  { "callback-serial", testCallbackSerialization },
   { "request"   , testRequest    },
   { "remote-local", testRemoteKeepsLocalRequest },
   { "pending-remote", testPendingRemoteKeepsLocalRequest },

@@ -21,6 +21,7 @@
 #include "wayland.h"
 #include "test.h"
 #include "../src/clipboard.h"
+#include "../src/clipboard_files.h"
 
 #include "common/debug.h"
 
@@ -158,6 +159,18 @@ struct Log
   bool                 expectReleaseLocked;
   bool                 firing;
   unsigned int         releaseLockedN;
+  unsigned int         fileSetN;
+  unsigned int         fileClearN;
+  unsigned int         presentationAcquireN;
+  unsigned int         presentationDeliveredN;
+  unsigned int         presentationReleaseN;
+  uint64_t             presentationDelivered[MAX_SOURCE];
+  uint64_t             presentationReleased[MAX_SOURCE];
+  char                 fileMime[80];
+  uint8_t              fileData[MAX_TRANSFER];
+  size_t               fileSize;
+  bool                 fileSetOK;
+  bool                 presentationOK;
 };
 
 struct WaylandDSState wlWm;
@@ -556,6 +569,67 @@ bool lgClipboard_requestReady(LG_ClipboardRequest request)
   return true;
 }
 
+bool lgClipboardFiles_setLocal(const char * mime,
+    const void * data, size_t size)
+{
+  CHECK(mime);
+  CHECK(!size || data);
+  CHECK(size <= sizeof(rec.fileData));
+  ++rec.fileSetN;
+  snprintf(rec.fileMime, sizeof(rec.fileMime), "%s", mime);
+  rec.fileSize = size;
+  if (size)
+    memcpy(rec.fileData, data, size);
+  return rec.fileSetOK;
+}
+
+void lgClipboardFiles_clearLocal(void)
+{
+  ++rec.fileClearN;
+}
+
+uint64_t lgClipboardFiles_remotePresentationAcquire(void)
+{
+  ++rec.presentationAcquireN;
+  return rec.presentationOK ? 1000U + rec.presentationAcquireN : 0;
+}
+
+bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+    const char * mime, char ** data, size_t * size)
+{
+  CHECK(presentation >= 1001U);
+  const char * value;
+  if (!strcmp(mime, "text/uri-list"))
+    value = "file:///run/user/1000/looking-glass/guest.txt\r\n";
+  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+    value = "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
+  else if (!strcmp(mime, "application/x-kde-cutselection"))
+    value = "0";
+  else
+    return false;
+  *size = strlen(value);
+  *data = malloc(*size);
+  CHECK(*data);
+  memcpy(*data, value, *size);
+  return true;
+}
+
+void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
+{
+  CHECK(presentation);
+  CHECK(rec.presentationDeliveredN <
+      ARRAY_LENGTH(rec.presentationDelivered));
+  rec.presentationDelivered[rec.presentationDeliveredN++] = presentation;
+}
+
+void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
+{
+  CHECK(presentation);
+  CHECK(rec.presentationReleaseN <
+      ARRAY_LENGTH(rec.presentationReleased));
+  rec.presentationReleased[rec.presentationReleaseN++] = presentation;
+}
+
 static const struct wl_data_device_listener * deviceListener(void)
 {
   CHECK(proto.device.listener);
@@ -620,6 +694,8 @@ static void start(void)
   rec.beginResult        = LG_CLIPBOARD_RESULT_ACCEPTED;
   rec.chunkResult        = LG_CLIPBOARD_RESULT_ACCEPTED;
   rec.endResult          = LG_CLIPBOARD_RESULT_ACCEPTED;
+  rec.fileSetOK          = true;
+  rec.presentationOK     = true;
   proto.manager.kind     = PROXY_MANAGER;
   proto.device.kind      = PROXY_DEVICE;
   wlWm.dataDeviceManager =
@@ -695,6 +771,121 @@ static void testMime(void)
   finish();
   CHECK(proto.offerDestroyN == 1);
   CHECK(proto.dirtyDestroyN == 0);
+}
+
+static void testFileImport(void)
+{
+  start();
+  const char payload[] =
+    "copy\nfile:///home/user/first.txt\r\nfile:///home/user/second.txt\r\n";
+  proto.receiveData = payload;
+  proto.receiveSize = sizeof(payload) - 1U;
+
+  struct Proxy * offer = newOffer();
+  offerMime(offer, "text/plain;charset=utf-8");
+  offerMime(offer, "text/uri-list");
+  offerMime(offer, "x-special/gnome-copied-files");
+  offerMime(offer, "application/x-kde-cutselection");
+  selectOffer(offer);
+
+  CHECK(rec.noticeN == 0);
+  CHECK(proto.receiveN == 1);
+  CHECK(strcmp(proto.receiveMime,
+      "x-special/gnome-copied-files") == 0);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.fileSetN == 1);
+  CHECK(strcmp(rec.fileMime,
+      "x-special/gnome-copied-files") == 0);
+  CHECK(rec.fileSize == sizeof(payload) - 1U);
+  CHECK(memcmp(rec.fileData, payload, sizeof(payload) - 1U) == 0);
+
+  finish();
+}
+
+static void testFileSource(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_FILES);
+  CHECK(rec.presentationAcquireN == 1);
+  CHECK(rec.presentationReleaseN == 0);
+  CHECK(proto.sourceN == 1);
+  struct Proxy * source = &proto.source[0];
+  CHECK(source->mimeN == 4);
+  CHECK(strcmp(source->mime[0],
+      "x-special/gnome-copied-files") == 0);
+  CHECK(strcmp(source->mime[1], "text/uri-list") == 0);
+  CHECK(strcmp(source->mime[2],
+      "application/x-kde-cutselection") == 0);
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/uri-list", fds[1]);
+  CHECK(rec.pollN == 1);
+  CHECK(rec.poll[0].events == EPOLLOUT);
+  pollFire(0, EPOLLOUT);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationDelivered[0] == 1001U);
+  const char expected[] =
+    "file:///run/user/1000/looking-glass/guest.txt\r\n";
+  char actual[sizeof(expected)] = { 0 };
+  CHECK(read(fds[0], actual, sizeof(actual)) ==
+      (ssize_t)(sizeof(expected) - 1U));
+  CHECK(memcmp(actual, expected, sizeof(expected) - 1U) == 0);
+  CHECK(read(fds[0], actual, 1) == 0);
+  CHECK(close(fds[0]) == 0);
+
+  int kde[2];
+  CHECK(pipe(kde) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source,
+      "application/x-kde-cutselection", kde[1]);
+  CHECK(rec.pollN == 2);
+  pollFire(1, EPOLLOUT);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(read(kde[0], actual, sizeof(actual)) == 1);
+  CHECK(actual[0] == '0');
+  CHECK(read(kde[0], actual, 1) == 0);
+  CHECK(close(kde[0]) == 0);
+
+  sourceListener(source)->cancelled(source->data,
+      (struct wl_data_source *)source);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.presentationReleased[0] == 1001U);
+  finish();
+  CHECK(rec.presentationReleaseN == 1);
+}
+
+static void testFileSourceReplacement(void)
+{
+  start();
+  waylandCBNotice(LG_CLIPBOARD_DATA_FILES);
+  struct Proxy * first = &proto.source[0];
+  CHECK(rec.presentationReleaseN == 0);
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(first)->send(first->data,
+      (struct wl_data_source *)first, "text/uri-list", fds[1]);
+
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.presentationReleaseN == 0);
+  CHECK(((struct WCBTransfer *)first->data)->filePresentation == 1001U);
+
+  sourceListener(first)->cancelled(first->data,
+      (struct wl_data_source *)first);
+  CHECK(rec.presentationReleaseN == 0);
+
+  pollFire(0, EPOLLOUT);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationDelivered[0] == 1001U);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.presentationReleased[0] == 1001U);
+  char value[64];
+  CHECK(read(fds[0], value, sizeof(value)) > 0);
+  CHECK(close(fds[0]) == 0);
+  finish();
 }
 
 static void testSelfCopy(void)
@@ -1381,6 +1572,9 @@ struct Test
 static const struct Test tests[] =
 {
   { "mime"      , testMime      },
+  { "file-import", testFileImport },
+  { "file-source", testFileSource },
+  { "file-replace", testFileSourceReplacement },
   { "replace"   , testReplace   },
   { "read-eof"  , testReadEOF   },
   { "read-block", testReadBlocked },

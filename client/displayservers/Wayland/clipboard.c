@@ -30,6 +30,7 @@
 #include <wayland-client.h>
 
 #include "../../src/clipboard.h"
+#include "../../src/clipboard_files.h"
 #include "common/debug.h"
 #include "common/KVMFRClipboard.h"
 
@@ -75,6 +76,14 @@ static const char * jpegMimetypes[] =
   NULL,
 };
 
+static const char * fileMimetypes[] =
+{
+  "x-special/gnome-copied-files",
+  "text/uri-list",
+  "application/x-kde-cutselection",
+  NULL,
+};
+
 static const char ** cbTypeToMimetypes(enum LG_ClipboardData type)
 {
   switch (type)
@@ -89,6 +98,8 @@ static const char ** cbTypeToMimetypes(enum LG_ClipboardData type)
       return tiffMimetypes;
     case LG_CLIPBOARD_DATA_JPEG:
       return jpegMimetypes;
+    case LG_CLIPBOARD_DATA_FILES:
+      return fileMimetypes;
     default:
       DEBUG_ERROR("invalid clipboard type");
       abort();
@@ -141,6 +152,10 @@ static bool isTextMimetype(const char * mimetype)
 
 static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
 {
+  if (!strcmp(mimetype, "x-special/gnome-copied-files") ||
+      !strcmp(mimetype, "text/uri-list"))
+    return LG_CLIPBOARD_DATA_FILES;
+
   if (isTextMimetype(mimetype))
     return LG_CLIPBOARD_DATA_TEXT;
 
@@ -164,6 +179,7 @@ static bool isImageCbtype(enum LG_ClipboardData type)
   switch (type)
   {
     case LG_CLIPBOARD_DATA_TEXT:
+    case LG_CLIPBOARD_DATA_FILES:
       return false;
     case LG_CLIPBOARD_DATA_PNG:
     case LG_CLIPBOARD_DATA_BMP:
@@ -244,6 +260,146 @@ static void clipboardReadCleanup(void * opaque)
   clipboardReadRelease(data);
 }
 
+struct ClipboardFileImport
+{
+  int                    fd;
+  struct wl_data_offer * offer;
+  char                 * mime;
+  uint8_t              * data;
+  size_t                 size;
+  size_t                 capacity;
+};
+
+static bool fileImportGrow(struct ClipboardFileImport * import,
+    size_t wanted)
+{
+  if (wanted <= import->capacity)
+    return true;
+  size_t capacity = import->capacity ? import->capacity : 4096U;
+  while (capacity < wanted)
+  {
+    if (capacity > SIZE_MAX / 2U)
+    {
+      capacity = wanted;
+      break;
+    }
+    capacity *= 2U;
+  }
+  uint8_t * data = realloc(import->data, capacity);
+  if (!data)
+    return false;
+  import->data     = data;
+  import->capacity = capacity;
+  return true;
+}
+
+static void fileImportCleanup(void * opaque)
+{
+  struct ClipboardFileImport * import = opaque;
+  close(import->fd);
+  free(import->mime);
+  free(import->data);
+  free(import);
+}
+
+static void fileImportCallback(uint32_t events, void * opaque)
+{
+  struct ClipboardFileImport * import = opaque;
+  bool complete = false;
+  bool failed = (events & EPOLLERR) != 0;
+  while (!failed)
+  {
+    if (import->size > SIZE_MAX - 4096U)
+      break;
+    if (!fileImportGrow(import, import->size + 4096U))
+      break;
+    const ssize_t bytes = read(import->fd,
+        import->data + import->size, import->capacity - import->size);
+    if (bytes > 0)
+    {
+      import->size += (size_t)bytes;
+      continue;
+    }
+    if (!bytes)
+    {
+      complete = true;
+      break;
+    }
+    if (errno == EINTR)
+      continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return;
+    failed = true;
+  }
+
+  LG_LOCK(wlCb.lock);
+  const bool current = wlCb.fileImport == import &&
+    wlCb.offer == import->offer;
+  if (wlCb.fileImport == import)
+    wlCb.fileImport = NULL;
+  LG_UNLOCK(wlCb.lock);
+  if (current && (!complete ||
+      !lgClipboardFiles_setLocal(import->mime,
+        import->data, import->size)))
+  {
+    lgClipboardFiles_clearLocal();
+    lgClipboard_release();
+  }
+  if (current)
+    waylandPollUnregister(import->fd);
+}
+
+static bool fileImportStart(struct wl_data_offer * offer, const char * mime)
+{
+  int fds[2];
+  if (pipe(fds) < 0)
+    return false;
+  const int flags        = fcntl(fds[0], F_GETFL);
+  const int readFdFlags  = fcntl(fds[0], F_GETFD);
+  const int writeFdFlags = fcntl(fds[1], F_GETFD);
+  struct ClipboardFileImport * import = calloc(1, sizeof(*import));
+  if (!import || flags < 0 || readFdFlags < 0 || writeFdFlags < 0 ||
+      fcntl(fds[0], F_SETFL, flags | O_NONBLOCK) < 0 ||
+      fcntl(fds[0], F_SETFD, readFdFlags | FD_CLOEXEC) < 0 ||
+      fcntl(fds[1], F_SETFD, writeFdFlags | FD_CLOEXEC) < 0)
+  {
+    free(import);
+    close(fds[0]);
+    close(fds[1]);
+    return false;
+  }
+  import->fd    = fds[0];
+  import->offer = offer;
+  import->mime  = strdup(mime);
+  if (!import->mime)
+  {
+    fileImportCleanup(import);
+    close(fds[1]);
+    return false;
+  }
+  wl_data_offer_receive(offer, mime, fds[1]);
+  close(fds[1]);
+
+  LG_LOCK(wlCb.lock);
+  const bool installed = wlCb.offer == offer;
+  struct ClipboardFileImport * old = installed ? wlCb.fileImport : NULL;
+  bool registered = false;
+  if (installed)
+  {
+    wlCb.fileImport = import;
+    registered = waylandPollRegisterWithCleanup(import->fd,
+        fileImportCallback, import, fileImportCleanup, EPOLLIN);
+    if (!registered)
+      wlCb.fileImport = old;
+  }
+  LG_UNLOCK(wlCb.lock);
+  if (registered && old)
+    waylandPollUnregister(old->fd);
+  if (!registered)
+    fileImportCleanup(import);
+  return registered;
+}
+
 // Destination client handlers.
 
 static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
@@ -276,7 +432,14 @@ static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
     return;
 
   if (data->mimetypes[type])
-    return;
+  {
+    if (type != LG_CLIPBOARD_DATA_FILES ||
+        strcmp(mimetype, "x-special/gnome-copied-files") ||
+        !strcmp(data->mimetypes[type],
+          "x-special/gnome-copied-files"))
+      return;
+    free(data->mimetypes[type]);
+  }
 
   data->mimetypes[type] = strdup(mimetype);
 }
@@ -356,6 +519,8 @@ static void dataDeviceHandleSelection(void * opaque,
   char * oldMimetypes[LG_CLIPBOARD_DATA_NONE];
   LG_LOCK(wlCb.lock);
   struct ClipboardRead * read = clipboardReadTakeCurrentNL();
+  struct ClipboardFileImport * oldImport = wlCb.fileImport;
+  wlCb.fileImport = NULL;
   struct wl_data_offer * oldOffer = wlCb.offer;
   memcpy(oldMimetypes, wlCb.mimetypes, sizeof(oldMimetypes));
   wlCb.selectionSource = NULL;
@@ -373,12 +538,22 @@ static void dataDeviceHandleSelection(void * opaque,
     clipboardReadRetire(read);
     lgClipboard_abort(request);
   }
+  if (oldImport)
+    waylandPollUnregister(oldImport->fd);
   if (oldOffer && oldOffer != offer)
     wl_data_offer_destroy(oldOffer);
   for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
     free(oldMimetypes[i]);
-
-  lgClipboard_notifyTypes(types, idx);
+  if (wlCb.mimetypes[LG_CLIPBOARD_DATA_FILES])
+  {
+    if (!fileImportStart(offer, wlCb.mimetypes[LG_CLIPBOARD_DATA_FILES]))
+    {
+      lgClipboardFiles_clearLocal();
+      lgClipboard_release();
+    }
+  }
+  else
+    lgClipboard_notifyTypes(types, idx);
 }
 
 static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
@@ -671,11 +846,13 @@ static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode)
     return;
   }
   struct ClipboardRead * read = clipboardReadTakeCurrentNL();
+  struct ClipboardFileImport * import = wlCb.fileImport;
+  wlCb.fileImport = NULL;
   struct wl_data_offer * offer = wlCb.offer;
   wlCb.offer = NULL;
   memcpy(mimetypes, wlCb.mimetypes, sizeof(mimetypes));
   memset(wlCb.mimetypes, 0, sizeof(wlCb.mimetypes));
-  const bool hadLocal = read || offer || hasAnyMimetype(mimetypes);
+  const bool hadLocal = read || import || offer || hasAnyMimetype(mimetypes);
   const bool notifyProvider = mode == CLIPBOARD_INVALIDATE_FORCE ||
     (mode == CLIPBOARD_INVALIDATE_CONDITIONAL && hadLocal);
   const LG_ClipboardRequest request = read ? read->request :
@@ -693,6 +870,10 @@ static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode)
     lgClipboard_release();
   }
   LG_UNLOCK(wlCb.lock);
+
+  if (import)
+    waylandPollUnregister(import->fd);
+  lgClipboardFiles_clearLocal();
 
   if (read && !notifyProvider)
     lgClipboard_abort(request);
@@ -997,6 +1178,138 @@ static const LG_ClipboardStreamOps clipboardWriteStream =
   .cancel = clipboardWriteCancel,
 };
 
+struct ClipboardFileWrite
+{
+  int                  fd;
+  uint8_t            * data;
+  size_t               size;
+  size_t               offset;
+  struct WCBTransfer * transfer;
+  bool                 deliversUri;
+  bool                 complete;
+};
+
+static void fileTransferDestroy(struct WCBTransfer * transfer)
+{
+  if (transfer->filePresentation)
+    lgClipboardFiles_remotePresentationRelease(transfer->filePresentation);
+  free(transfer->fileUri);
+  free(transfer->fileGnome);
+  free(transfer->fileKde);
+  free(transfer);
+}
+
+static void fileTransferRetain(struct WCBTransfer * transfer)
+{
+  atomic_fetch_add_explicit(
+      &transfer->references, 1, memory_order_relaxed);
+}
+
+static void fileTransferRelease(struct WCBTransfer * transfer)
+{
+  if (atomic_fetch_sub_explicit(
+      &transfer->references, 1, memory_order_acq_rel) == 1)
+    fileTransferDestroy(transfer);
+}
+
+static void clipboardFileWriteCleanup(void * opaque)
+{
+  struct ClipboardFileWrite * write = opaque;
+  if (write->complete && write->deliversUri)
+    lgClipboardFiles_remotePresentationDelivered(
+        write->transfer->filePresentation);
+  close(write->fd);
+  free(write->data);
+  fileTransferRelease(write->transfer);
+  free(write);
+}
+
+static void clipboardFileWriteCallback(uint32_t events, void * opaque)
+{
+  struct ClipboardFileWrite * output = opaque;
+  if (events & (EPOLLERR | EPOLLHUP))
+  {
+    waylandPollUnregister(output->fd);
+    return;
+  }
+  while (output->offset < output->size)
+  {
+    const ssize_t bytes = write(output->fd,
+        output->data + output->offset, output->size - output->offset);
+    if (bytes > 0)
+    {
+      output->offset += (size_t)bytes;
+      continue;
+    }
+    if (bytes < 0 && errno == EINTR)
+      continue;
+    if (bytes < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+      return;
+    waylandPollUnregister(output->fd);
+    return;
+  }
+  output->complete = true;
+  waylandPollUnregister(output->fd);
+}
+
+static bool clipboardFileWriteStart(int fd, const void * data, size_t size,
+    struct WCBTransfer * transfer, bool deliversUri)
+{
+  struct ClipboardFileWrite * output = calloc(1, sizeof(*output));
+  if (!output)
+    return false;
+  output->data = size ? malloc(size) : NULL;
+  if (size && !output->data)
+  {
+    free(output);
+    return false;
+  }
+  if (size)
+    memcpy(output->data, data, size);
+  output->fd          = fd;
+  output->size        = size;
+  output->transfer    = transfer;
+  output->deliversUri = deliversUri;
+  fileTransferRetain(transfer);
+  const int flags = fcntl(fd, F_GETFL);
+  const int fdFlags = fcntl(fd, F_GETFD);
+  if (flags < 0 || fdFlags < 0 ||
+      fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ||
+      fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC) < 0 ||
+      !waylandPollRegisterWithCleanup(fd, clipboardFileWriteCallback,
+        output, clipboardFileWriteCleanup, EPOLLOUT))
+  {
+    free(output->data);
+    fileTransferRelease(output->transfer);
+    free(output);
+    return false;
+  }
+  return true;
+}
+
+static bool fileTransferPayload(const struct WCBTransfer * transfer,
+    const char * mime, const char ** data, size_t * size)
+{
+  if (!strcmp(mime, "text/uri-list"))
+  {
+    *data = transfer->fileUri;
+    *size = transfer->fileUriSize;
+  }
+  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+  {
+    *data = transfer->fileGnome;
+    *size = transfer->fileGnomeSize;
+  }
+  else if (!strcmp(mime, "application/x-kde-cutselection"))
+  {
+    *data = transfer->fileKde;
+    *size = transfer->fileKdeSize;
+  }
+  else
+    return false;
+  return *data != NULL;
+}
+
 static void clipboardWriteCleanup(void * opaque)
 {
   struct ClipboardWrite * data = opaque;
@@ -1092,6 +1405,19 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     const char * mimetype, int fd)
 {
   struct WCBTransfer * transfer = (struct WCBTransfer *) data;
+  if (transfer->type == LG_CLIPBOARD_DATA_FILES)
+  {
+    const char * payload;
+    size_t size;
+    const bool deliversUri = !strcmp(mimetype, "text/uri-list") ||
+      !strcmp(mimetype, "x-special/gnome-copied-files");
+    if (fileTransferPayload(transfer, mimetype, &payload, &size) &&
+        clipboardFileWriteStart(fd, payload, size,
+          transfer, deliversUri))
+      return;
+    close(fd);
+    return;
+  }
   if (containsMimetype(transfer->mimetypes, mimetype))
   {
     struct ClipboardWrite * data = calloc(1, sizeof(*data));
@@ -1178,7 +1504,7 @@ static void dataSourceHandleCancelled(void * data,
     wlCb.selectionSource = NULL;
   LG_UNLOCK(wlCb.lock);
 
-  free(transfer);
+  fileTransferRelease(transfer);
   wl_data_source_destroy(source);
 }
 
@@ -1188,34 +1514,53 @@ static const struct wl_data_source_listener dataSourceListener = {
   .cancelled = dataSourceHandleCancelled,
 };
 
-static void waylandCBPublish(LG_ClipboardData type)
+static bool waylandCBPublish(LG_ClipboardData type)
 {
-  struct WCBTransfer * transfer = malloc(sizeof(*transfer));
+  struct WCBTransfer * transfer = calloc(1, sizeof(*transfer));
   if (!transfer)
   {
     DEBUG_ERROR("Out of memory when allocating WCBTransfer");
-    return;
+    return false;
   }
+  atomic_init(&transfer->references, 1);
 
   transfer->mimetypes = cbTypeToMimetypes(type);
   transfer->type      = type;
   transfer->next      = NULL;
+  if (type == LG_CLIPBOARD_DATA_FILES)
+    transfer->filePresentation =
+      lgClipboardFiles_remotePresentationAcquire();
+  if (type == LG_CLIPBOARD_DATA_FILES &&
+      (!transfer->filePresentation ||
+       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+          "text/uri-list",
+          &transfer->fileUri, &transfer->fileUriSize) ||
+       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+          "x-special/gnome-copied-files",
+          &transfer->fileGnome, &transfer->fileGnomeSize) ||
+       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+          "application/x-kde-cutselection",
+          &transfer->fileKde, &transfer->fileKdeSize)))
+  {
+    fileTransferRelease(transfer);
+    return false;
+  }
 
   struct wl_data_source * source =
     wl_data_device_manager_create_data_source(wlWm.dataDeviceManager);
   if (!source)
   {
     DEBUG_ERROR("Failed to create clipboard data source");
-    free(transfer);
-    return;
+    fileTransferRelease(transfer);
+    return false;
   }
   transfer->source = source;
   if (wl_data_source_add_listener(source, &dataSourceListener, transfer) < 0)
   {
     DEBUG_ERROR("Failed to listen to clipboard data source");
     wl_data_source_destroy(source);
-    free(transfer);
-    return;
+    fileTransferRelease(transfer);
+    return false;
   }
   for (const char ** mimetype = transfer->mimetypes; *mimetype; mimetype++)
     wl_data_source_offer(source, *mimetype);
@@ -1230,17 +1575,19 @@ static void waylandCBPublish(LG_ClipboardData type)
     wl_data_device_set_selection(wlCb.dataDevice, source,
       wlWm.keyboardEnterSerial);
     LG_UNLOCK(wlCb.lock);
-    return;
+    return true;
   }
   LG_UNLOCK(wlCb.lock);
 
   wl_data_source_destroy(source);
-  free(transfer);
+  fileTransferRelease(transfer);
+  return false;
 }
 
 void waylandCBNotice(LG_ClipboardData type)
 {
-  waylandCBPublish(type);
+  if (!waylandCBPublish(type))
+    waylandCBRelease();
 }
 
 void waylandCBRelease(void)
@@ -1260,6 +1607,7 @@ void waylandCBFree(void)
   char * mimetypes[LG_CLIPBOARD_DATA_NONE];
   LG_LOCK(wlCb.lock);
   struct ClipboardRead * read = clipboardReadTakeCurrentNL();
+  struct ClipboardFileImport * import = wlCb.fileImport;
   struct wl_data_offer * offer = wlCb.offer;
   struct wl_data_offer * dndOffer = wlCb.dndOffer;
   struct wl_data_device * dataDevice = wlCb.dataDevice;
@@ -1267,16 +1615,20 @@ void waylandCBFree(void)
   if (dataDevice && wlCb.selectionSource)
     wl_data_device_set_selection(dataDevice, NULL,
       wlWm.keyboardEnterSerial);
-  wlCb.offer      = NULL;
-  wlCb.dndOffer   = NULL;
-  wlCb.dataDevice = NULL;
+  wlCb.offer           = NULL;
+  wlCb.dndOffer        = NULL;
+  wlCb.dataDevice      = NULL;
   wlCb.selectionSource = NULL;
   wlCb.sources         = NULL;
+  wlCb.fileImport      = NULL;
   memcpy(mimetypes, wlCb.mimetypes, sizeof(mimetypes));
   memset(wlCb.mimetypes, 0, sizeof(wlCb.mimetypes));
   LG_UNLOCK(wlCb.lock);
 
   clipboardReadRetire(read);
+  if (import)
+    waylandPollUnregister(import->fd);
+  lgClipboardFiles_clearLocal();
   if (offer)
     wl_data_offer_destroy(offer);
   if (dndOffer && dndOffer != offer)
@@ -1287,7 +1639,7 @@ void waylandCBFree(void)
   {
     struct WCBTransfer * next = sources->next;
     wl_data_source_destroy(sources->source);
-    free(sources);
+    fileTransferRelease(sources);
     sources = next;
   }
   for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)

@@ -32,6 +32,7 @@ typedef enum LG_ClipboardData
   LG_CLIPBOARD_DATA_BMP,
   LG_CLIPBOARD_DATA_TIFF,
   LG_CLIPBOARD_DATA_JPEG,
+  LG_CLIPBOARD_DATA_FILES,
 
   LG_CLIPBOARD_DATA_NONE
 }
@@ -64,6 +65,42 @@ typedef enum LG_ClipboardCancelReason
   LG_CLIPBOARD_CANCEL_INVALID = 3,
 }
 LG_ClipboardCancelReason;
+
+typedef enum LG_ClipboardFileOperation
+{
+  LG_CLIPBOARD_FILE_LIST = 1,
+  LG_CLIPBOARD_FILE_READ = 2,
+}
+LG_ClipboardFileOperation;
+
+typedef enum LG_ClipboardFileError
+{
+  LG_CLIPBOARD_FILE_ERROR_NONE = 0,
+  LG_CLIPBOARD_FILE_ERROR_NOT_FOUND,
+  LG_CLIPBOARD_FILE_ERROR_ACCESS,
+  LG_CLIPBOARD_FILE_ERROR_NOT_DIRECTORY,
+  LG_CLIPBOARD_FILE_ERROR_IS_DIRECTORY,
+  LG_CLIPBOARD_FILE_ERROR_IO,
+  LG_CLIPBOARD_FILE_ERROR_INVALID,
+  LG_CLIPBOARD_FILE_ERROR_NO_MEMORY,
+  LG_CLIPBOARD_FILE_ERROR_NO_SPACE,
+  LG_CLIPBOARD_FILE_ERROR_DISCONNECTED,
+  LG_CLIPBOARD_FILE_ERROR_CANCELLED,
+  LG_CLIPBOARD_FILE_ERROR_NOT_SUPPORTED,
+  LG_CLIPBOARD_FILE_ERROR_STALE,
+}
+LG_ClipboardFileError;
+
+typedef struct LG_ClipboardFileRequest
+{
+  uint64_t dataset;
+  uint64_t request;
+  uint64_t node;
+  uint64_t offset;
+  uint32_t length;
+  LG_ClipboardFileOperation operation;
+}
+LG_ClipboardFileRequest;
 
 /* A consumer of a provider-to-client stream. Callbacks are serialized and
  * buffers are borrowed only for the duration of chunk(). A callback which
@@ -116,6 +153,28 @@ typedef struct LG_ClipboardEventOps
   void (*release)(void * opaque);
   bool (*request)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type);
+
+  /* File datasets use independent, multiplexed request streams. Dataset and
+   * node identifiers are opaque outside the publisher. */
+  void (*fileOffer)(void * opaque, uint64_t dataset);
+  void (*fileAcquire)(void * opaque, uint64_t dataset,
+      uint64_t acquisition);
+  void (*fileAcquired)(void * opaque, uint64_t dataset,
+      uint64_t acquisition, LG_ClipboardFileError error);
+  void (*fileRelease)(void * opaque, uint64_t dataset,
+      uint64_t acquisition);
+  void (*fileRequest)(void * opaque,
+      const LG_ClipboardFileRequest * request);
+  LG_ClipboardResult (*fileDataBegin)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t sizeHint);
+  LG_ClipboardResult (*fileDataChunk)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t responseOffset,
+      const void * data, size_t size);
+  LG_ClipboardResult (*fileDataEnd)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t finalSize);
+  void (*fileDataReady)(void * opaque, uint64_t request);
+  void (*fileCancel)(void * opaque, uint64_t dataset,
+      uint64_t request, LG_ClipboardFileError reason);
 }
 LG_ClipboardEventOps;
 
@@ -144,6 +203,9 @@ typedef struct LG_ClipboardOps
   /* All outbound arrays and data are borrowed only until the call returns. */
   bool (*notifyTypes)(void * opaque, const LG_ClipboardData types[],
       size_t count);
+  /* Publishes an immutable local file dataset. The nonzero dataset ID is
+   * process-unique and is used as the wire clipboard generation. */
+  bool (*offerFiles)(void * opaque, uint64_t dataset);
   /* Data is a complete response to a remote request. NONE with no payload
    * reports that the request could not be completed. This operation is the
    * legacy whole-buffer alternative to the stream operation group below. */
@@ -174,6 +236,24 @@ typedef struct LG_ClipboardOps
    * or release first. */
   bool (*request)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type);
+
+  bool (*fileAcquire)(void * opaque, uint64_t dataset,
+      uint64_t acquisition);
+  bool (*fileAcquired)(void * opaque, uint64_t dataset,
+      uint64_t acquisition, LG_ClipboardFileError error);
+  bool (*fileRelease)(void * opaque, uint64_t dataset,
+      uint64_t acquisition);
+  bool (*fileRequest)(void * opaque,
+      const LG_ClipboardFileRequest * request);
+  LG_ClipboardResult (*fileDataBegin)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t sizeHint);
+  LG_ClipboardResult (*fileDataChunk)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t responseOffset,
+      const void * data, size_t size);
+  LG_ClipboardResult (*fileDataEnd)(void * opaque,
+      const LG_ClipboardFileRequest * request, uint64_t finalSize);
+  bool (*fileCancel)(void * opaque, uint64_t dataset,
+      uint64_t request, LG_ClipboardFileError reason);
 }
 LG_ClipboardOps;
 

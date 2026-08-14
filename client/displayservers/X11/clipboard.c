@@ -29,6 +29,7 @@
 #include <X11/Xatom.h>
 
 #include "../../src/clipboard.h"
+#include "../../src/clipboard_files.h"
 #include "common/array.h"
 #include "common/debug.h"
 #include "common/KVMFRClipboard.h"
@@ -67,19 +68,39 @@ struct X11ClipboardWrite
   bool                       ready;
   bool                       endPending;
   bool                       creating;
+  bool                       file;
+  uint8_t                  * fileData;
+  size_t                     fileSize;
+  uint64_t                   filePresentation;
+};
+
+struct X11ClipboardFileImport
+{
+  Window        window;
+  Atom          target;
+  const char  * mime;
+  long          propertyOffset;
+  uint8_t     * data;
+  size_t        size;
+  size_t        capacity;
+  bool          incremental;
 };
 
 struct X11ClipboardState
 {
-  LG_Lock          lock;
-  Atom             aCurSelection;
-  Atom             aTypes[LG_CLIPBOARD_DATA_NONE];
-  Window           targetsWindow;
-  LG_ClipboardData type;
-  bool             haveRequest;
+  LG_Lock                       lock;
+  Atom                          aCurSelection;
+  Atom                          aTypes[LG_CLIPBOARD_DATA_NONE];
+  Atom                          aFileGnome;
+  Atom                          aFileKde;
+  Window                        targetsWindow;
+  LG_ClipboardData              type;
+  bool                          haveRequest;
+  uint64_t                      filePresentation;
 
-  struct X11ClipboardRead   read;
-  struct X11ClipboardWrite * writes;
+  struct X11ClipboardRead       read;
+  struct X11ClipboardWrite    * writes;
+  struct X11ClipboardFileImport fileImport;
 };
 
 static const char * atomTypes[] =
@@ -88,8 +109,13 @@ static const char * atomTypes[] =
   "image/png",
   "image/bmp",
   "image/tiff",
-  "image/jpeg"
+  "image/jpeg",
+  "text/uri-list",
 };
+
+static const char fileGnomeMime[] = "x-special/gnome-copied-files";
+static const char fileKdeMime[]   = "application/x-kde-cutselection";
+static const char fileUriMime[]   = "text/uri-list";
 
 static struct X11ClipboardState x11cb;
 
@@ -104,6 +130,23 @@ static bool writeLinkedNL(const struct X11ClipboardWrite * write);
 static void writeRemoveNL(struct X11ClipboardWrite * write);
 static bool advanceReadPropertyNL(unsigned long units);
 static void clearTargetsNL(void);
+static void clearFileImportNL(void);
+static struct X11ClipboardWrite * takeFileWritesNL(void);
+static struct X11ClipboardWrite * takeFileWritesForWindowNL(Window window);
+static void cancelFileWrites(
+    struct X11ClipboardWrite * writes, bool terminate);
+static void x11CBFileImportIncr(const XPropertyEvent e);
+
+static const char * fileMimeForAtom(Atom atom)
+{
+  if (atom == x11cb.aTypes[LG_CLIPBOARD_DATA_FILES])
+    return fileUriMime;
+  if (atom == x11cb.aFileGnome)
+    return fileGnomeMime;
+  if (atom == x11cb.aFileKde)
+    return fileKdeMime;
+  return NULL;
+}
 
 bool x11CBEventThread(const XEvent * xe)
 {
@@ -121,11 +164,30 @@ bool x11CBEventThread(const XEvent * xe)
       x11CBSelectionNotify(xe->xselection);
       return true;
 
+    case DestroyNotify:
+    {
+      LG_LOCK(x11cb.lock);
+      struct X11ClipboardWrite * writes =
+        takeFileWritesForWindowNL(xe->xdestroywindow.window);
+      LG_UNLOCK(x11cb.lock);
+      if (!writes)
+        return false;
+      cancelFileWrites(writes, false);
+      return true;
+    }
+
     case PropertyNotify:
       if (xe->xproperty.state == PropertyNewValue &&
           xe->xproperty.atom == x11atoms.SEL_DATA)
       {
-        x11CBSelectionIncr(xe->xproperty);
+        LG_LOCK(x11cb.lock);
+        const bool fileImport = x11cb.fileImport.window &&
+          xe->xproperty.window == x11cb.fileImport.window;
+        LG_UNLOCK(x11cb.lock);
+        if (fileImport)
+          x11CBFileImportIncr(xe->xproperty);
+        else
+          x11CBSelectionIncr(xe->xproperty);
         return true;
       }
       if (xe->xproperty.state == PropertyDelete)
@@ -134,12 +196,47 @@ bool x11CBEventThread(const XEvent * xe)
         LG_LOCK(x11cb.lock);
         struct X11ClipboardWrite * write;
         for (write = x11cb.writes; write; write = write->next)
-          if (write->request        != LG_CLIPBOARD_REQUEST_INVALID &&
-              xe->xproperty.window == write->event.xselection.requestor &&
+          if (xe->xproperty.window == write->event.xselection.requestor &&
               xe->xproperty.atom   == write->event.xselection.property)
             break;
         if (write)
         {
+          if (write->file)
+          {
+            const size_t remaining = write->fileSize - (size_t)write->offset;
+            if (remaining)
+            {
+              const size_t chunk = remaining > KVMFR_CLIPBOARD_DATA_BYTES ?
+                KVMFR_CLIPBOARD_DATA_BYTES : remaining;
+              XChangeProperty(x11.display,
+                  write->event.xselection.requestor,
+                  write->event.xselection.property,
+                  write->event.xselection.target, 8, PropModeReplace,
+                  write->fileData + (size_t)write->offset, (int)chunk);
+              write->offset += chunk;
+              XFlush(x11.display);
+              LG_UNLOCK(x11cb.lock);
+              return true;
+            }
+
+            XChangeProperty(x11.display,
+                write->event.xselection.requestor,
+                write->event.xselection.property,
+                write->event.xselection.target, 8, PropModeReplace,
+                NULL, 0);
+            XFlush(x11.display);
+            if (write->event.xselection.target != x11cb.aFileKde)
+              lgClipboardFiles_remotePresentationDelivered(
+                  write->filePresentation);
+            const uint64_t presentation = write->filePresentation;
+            writeRemoveNL(write);
+            LG_UNLOCK(x11cb.lock);
+            lgClipboardFiles_remotePresentationRelease(presentation);
+            free(write->fileData);
+            free(write);
+            return true;
+          }
+
           write->ready = true;
           if (write->blocked)
           {
@@ -184,6 +281,15 @@ bool x11CBInit(void)
       DEBUG_ERROR("failed to get atom for type: %s", atomTypes[i]);
       return false;
     }
+  }
+
+  x11cb.aFileGnome = XInternAtom(x11.display, fileGnomeMime, False);
+  x11cb.aFileKde   = XInternAtom(x11.display, fileKdeMime, False);
+  if (x11cb.aFileGnome == BadAlloc || x11cb.aFileGnome == BadValue ||
+      x11cb.aFileKde == BadAlloc || x11cb.aFileKde == BadValue)
+  {
+    DEBUG_ERROR("failed to get clipboard file atoms");
+    return false;
   }
 
   // use xfixes to get clipboard change notifications
@@ -372,9 +478,15 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
   // target list requested
   if (e.target == x11atoms.TARGETS)
   {
-    Atom targets[2];
+    Atom targets[4];
     targets[0] = x11atoms.TARGETS;
     targets[1] = x11cb.aTypes[requestType];
+    int count = 2;
+    if (requestType == LG_CLIPBOARD_DATA_FILES)
+    {
+      targets[count++] = x11cb.aFileGnome;
+      targets[count++] = x11cb.aFileKde;
+    }
 
     XChangeProperty(
       e.display,
@@ -384,10 +496,96 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
       32,
       PropModeReplace,
       (unsigned char*)targets,
-      ARRAY_LENGTH(targets)
+      count
     );
 
     goto send;
+  }
+
+  const char * fileMime = fileMimeForAtom(e.target);
+  if (requestType == LG_CLIPBOARD_DATA_FILES && fileMime)
+  {
+    char * data = NULL;
+    size_t size = 0;
+    uint64_t writePresentation = 0;
+    LG_LOCK(x11cb.lock);
+    const uint64_t presentation = x11cb.filePresentation;
+    bool available = x11cb.haveRequest &&
+      x11cb.type == LG_CLIPBOARD_DATA_FILES && presentation;
+    if (available)
+    {
+      writePresentation =
+        lgClipboardFiles_remotePresentationAcquire();
+      available = writePresentation == presentation &&
+        lgClipboardFiles_getRemotePresentation(writePresentation,
+          fileMime, &data, &size);
+    }
+    LG_UNLOCK(x11cb.lock);
+    if (!available)
+    {
+      free(data);
+      if (writePresentation)
+        lgClipboardFiles_remotePresentationRelease(writePresentation);
+      goto nodata;
+    }
+
+    struct X11ClipboardWrite * write = calloc(1, sizeof(*write));
+    if (!write)
+    {
+      free(data);
+      lgClipboardFiles_remotePresentationRelease(writePresentation);
+      DEBUG_ERROR("out of memory");
+      goto nodata;
+    }
+    write->event            = *s;
+    write->request          = LG_CLIPBOARD_REQUEST_INVALID;
+    write->type             = LG_CLIPBOARD_DATA_FILES;
+    write->file             = true;
+    write->fileData         = (uint8_t *)data;
+    write->fileSize         = size;
+    write->filePresentation = writePresentation;
+    write->begun            = true;
+
+    LG_LOCK(x11cb.lock);
+    bool duplicate = false;
+    for (struct X11ClipboardWrite * current = x11cb.writes;
+        current; current = current->next)
+    {
+      duplicate = current->event.xselection.requestor == e.requestor &&
+        current->event.xselection.property            == e.property;
+      if (duplicate)
+        break;
+    }
+    if (!duplicate && x11cb.haveRequest &&
+        x11cb.type == LG_CLIPBOARD_DATA_FILES &&
+        x11cb.filePresentation == presentation)
+    {
+      write->next  = x11cb.writes;
+      x11cb.writes = write;
+      const unsigned long hint = size > UINT32_MAX ?
+        UINT32_MAX : (unsigned long)size;
+      XChangeProperty(x11.display, e.requestor, e.property,
+          x11atoms.INCR, 32, PropModeReplace,
+          (const unsigned char *)&hint, 1);
+      XSelectInput(x11.display, e.requestor,
+          PropertyChangeMask | StructureNotifyMask);
+    }
+    else
+      duplicate = true;
+    LG_UNLOCK(x11cb.lock);
+
+    if (duplicate)
+    {
+      free(write->fileData);
+      lgClipboardFiles_remotePresentationRelease(
+          write->filePresentation);
+      free(write);
+      goto nodata;
+    }
+
+    x11CBWriteSend(s);
+    free(s);
+    return;
   }
 
   // look to see if we can satisfy the data type
@@ -467,7 +665,22 @@ send:
 
 static void x11CBSelectionClear(const XSelectionClearEvent e)
 {
-  (void)e;
+  if (e.selection != x11atoms.CLIPBOARD)
+    return;
+
+  LG_LOCK(x11cb.lock);
+  if (XGetSelectionOwner(x11.display, x11atoms.CLIPBOARD) == x11.window)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+  x11cb.haveRequest = false;
+  const uint64_t presentation = x11cb.filePresentation;
+  x11cb.filePresentation = 0;
+  LG_UNLOCK(x11cb.lock);
+
+  if (presentation)
+    lgClipboardFiles_remotePresentationRelease(presentation);
 }
 
 /* x11cb.lock must be held. */
@@ -529,6 +742,298 @@ static void clearTargetsNL(void)
 
   XDestroyWindow(x11.display, x11cb.targetsWindow);
   x11cb.targetsWindow = 0;
+}
+
+/* x11cb.lock must be held. */
+static struct X11ClipboardFileImport takeFileImportNL(void)
+{
+  const struct X11ClipboardFileImport import = x11cb.fileImport;
+  x11cb.fileImport = (struct X11ClipboardFileImport) { 0 };
+  if (import.window)
+    XDestroyWindow(x11.display, import.window);
+  return import;
+}
+
+/* x11cb.lock must be held. */
+static void clearFileImportNL(void)
+{
+  const struct X11ClipboardFileImport import = takeFileImportNL();
+  free(import.data);
+}
+
+/* x11cb.lock must be held. */
+static struct X11ClipboardWrite * takeFileWritesNL(void)
+{
+  struct X11ClipboardWrite * result = NULL;
+  struct X11ClipboardWrite ** link = &x11cb.writes;
+  while (*link)
+  {
+    struct X11ClipboardWrite * write = *link;
+    if (!write->file)
+    {
+      link = &write->next;
+      continue;
+    }
+
+    *link = write->next;
+    write->next = result;
+    result = write;
+  }
+  return result;
+}
+
+/* x11cb.lock must be held. */
+static struct X11ClipboardWrite * takeFileWritesForWindowNL(Window window)
+{
+  struct X11ClipboardWrite * result = NULL;
+  struct X11ClipboardWrite ** link = &x11cb.writes;
+  while (*link)
+  {
+    struct X11ClipboardWrite * write = *link;
+    if (!write->file ||
+        write->event.xselection.requestor != window)
+    {
+      link = &write->next;
+      continue;
+    }
+
+    *link = write->next;
+    write->next = result;
+    result = write;
+  }
+  return result;
+}
+
+static void cancelFileWrites(
+    struct X11ClipboardWrite * writes, bool terminate)
+{
+  const bool flush = terminate && writes;
+  while (writes)
+  {
+    struct X11ClipboardWrite * next = writes->next;
+    if (terminate)
+      XChangeProperty(x11.display, writes->event.xselection.requestor,
+          writes->event.xselection.property,
+          writes->event.xselection.target, 8, PropModeReplace, NULL, 0);
+    lgClipboardFiles_remotePresentationRelease(
+        writes->filePresentation);
+    free(writes->fileData);
+    free(writes);
+    writes = next;
+  }
+  if (flush)
+    XFlush(x11.display);
+}
+
+static bool fileImportGrowNL(size_t wanted)
+{
+  if (wanted <= x11cb.fileImport.capacity)
+    return true;
+  size_t capacity = x11cb.fileImport.capacity ?
+    x11cb.fileImport.capacity : 4096U;
+  while (capacity < wanted)
+  {
+    if (capacity > SIZE_MAX / 2U)
+    {
+      capacity = wanted;
+      break;
+    }
+    capacity *= 2U;
+  }
+  uint8_t * data = realloc(x11cb.fileImport.data, capacity);
+  if (!data)
+    return false;
+  x11cb.fileImport.data     = data;
+  x11cb.fileImport.capacity = capacity;
+  return true;
+}
+
+static bool startFileImport(Atom target)
+{
+  const char * mime = fileMimeForAtom(target);
+  if (!mime)
+    return false;
+
+  LG_LOCK(x11cb.lock);
+  clearFileImportNL();
+  if (x11cb.aCurSelection == BadValue)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return false;
+  }
+
+  const Window window = XCreateSimpleWindow(
+      x11.display, x11.window, 0, 0, 1, 1, 0, 0, 0);
+  if (!window)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return false;
+  }
+
+  x11cb.fileImport = (struct X11ClipboardFileImport)
+  {
+    .window = window,
+    .target = target,
+    .mime   = mime,
+  };
+  XSelectInput(x11.display, window, PropertyChangeMask);
+  XConvertSelection(x11.display, x11cb.aCurSelection, target,
+      x11atoms.SEL_DATA, window, CurrentTime);
+  XFlush(x11.display);
+  LG_UNLOCK(x11cb.lock);
+  return true;
+}
+
+static void finishFileImport(struct X11ClipboardFileImport import,
+    const void * data, size_t size)
+{
+  if (!lgClipboardFiles_setLocal(import.mime, data, size))
+  {
+    lgClipboardFiles_clearLocal();
+    lgClipboard_release();
+  }
+  free(import.data);
+}
+
+static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
+{
+  Atom type;
+  int format;
+  unsigned long itemCount;
+  unsigned long after;
+  unsigned char * data = NULL;
+
+  LG_LOCK(x11cb.lock);
+  if (!x11cb.fileImport.window || e.requestor != x11cb.fileImport.window)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return false;
+  }
+
+  if (e.target != x11cb.fileImport.target ||
+      e.property != x11atoms.SEL_DATA ||
+      XGetWindowProperty(e.display, e.requestor, e.property, 0, ~0L,
+        True, AnyPropertyType, &type, &format, &itemCount, &after,
+        &data) != Success)
+  {
+    const struct X11ClipboardFileImport failed = takeFileImportNL();
+    LG_UNLOCK(x11cb.lock);
+    if (data)
+      XFree(data);
+    free(failed.data);
+    lgClipboard_release();
+    return true;
+  }
+
+  if (type == x11atoms.INCR)
+  {
+    if (!data || format != 32 || itemCount < 1 || after)
+    {
+      const struct X11ClipboardFileImport failed = takeFileImportNL();
+      LG_UNLOCK(x11cb.lock);
+      if (data)
+        XFree(data);
+      free(failed.data);
+      lgClipboard_release();
+      return true;
+    }
+    x11cb.fileImport.incremental = true;
+    XFree(data);
+    LG_UNLOCK(x11cb.lock);
+    return true;
+  }
+
+  const bool valid = type == x11cb.fileImport.target && format == 8 &&
+    !after && (!itemCount || data);
+  const struct X11ClipboardFileImport import = takeFileImportNL();
+  LG_UNLOCK(x11cb.lock);
+  if (valid)
+    finishFileImport(import, data, itemCount);
+  else
+  {
+    free(import.data);
+    lgClipboard_release();
+  }
+  if (data)
+    XFree(data);
+  return true;
+}
+
+static void x11CBFileImportIncr(const XPropertyEvent e)
+{
+  Atom type;
+  int format;
+  unsigned long itemCount;
+  unsigned long after;
+  unsigned char * data = NULL;
+
+  LG_LOCK(x11cb.lock);
+  if (!x11cb.fileImport.window || !x11cb.fileImport.incremental ||
+      e.window != x11cb.fileImport.window || e.atom != x11atoms.SEL_DATA)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+readProperty:
+  if (XGetWindowProperty(e.display, e.window, e.atom,
+      x11cb.fileImport.propertyOffset,
+      (KVMFR_CLIPBOARD_DATA_BYTES + 3U) / 4U,
+      True, AnyPropertyType, &type, &format, &itemCount, &after,
+      &data) != Success || (itemCount && !data) || (!itemCount && after) ||
+      type != x11cb.fileImport.target || format != 8 ||
+      itemCount > SIZE_MAX ||
+      (size_t)itemCount > SIZE_MAX - x11cb.fileImport.size ||
+      !fileImportGrowNL(x11cb.fileImport.size + (size_t)itemCount))
+  {
+    const struct X11ClipboardFileImport failed = takeFileImportNL();
+    LG_UNLOCK(x11cb.lock);
+    if (data)
+      XFree(data);
+    free(failed.data);
+    lgClipboard_release();
+    return;
+  }
+
+  if (itemCount)
+  {
+    memcpy(x11cb.fileImport.data + x11cb.fileImport.size,
+        data, (size_t)itemCount);
+    x11cb.fileImport.size += (size_t)itemCount;
+  }
+  if (data)
+  {
+    XFree(data);
+    data = NULL;
+  }
+
+  if (after)
+  {
+    const unsigned long units = itemCount / 4U +
+      (itemCount % 4U != 0);
+    if (units > LONG_MAX ||
+        x11cb.fileImport.propertyOffset > LONG_MAX - (long)units)
+    {
+      const struct X11ClipboardFileImport failed = takeFileImportNL();
+      LG_UNLOCK(x11cb.lock);
+      free(failed.data);
+      lgClipboard_release();
+      return;
+    }
+    x11cb.fileImport.propertyOffset += (long)units;
+    goto readProperty;
+  }
+
+  x11cb.fileImport.propertyOffset = 0;
+  if (itemCount)
+  {
+    LG_UNLOCK(x11cb.lock);
+    return;
+  }
+
+  const struct X11ClipboardFileImport import = takeFileImportNL();
+  LG_UNLOCK(x11cb.lock);
+  finishFileImport(import, import.data, import.size);
 }
 
 enum X11ClipboardReadOperation
@@ -781,6 +1286,10 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
     cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   clearTargetsNL();
+  clearFileImportNL();
+  x11cb.haveRequest = false;
+  const uint64_t presentation = x11cb.filePresentation;
+  x11cb.filePresentation = 0;
 
   if (e.owner == 0)
   {
@@ -790,6 +1299,9 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
       lgClipboard_abort(oldRequest);
+    if (presentation)
+      lgClipboardFiles_remotePresentationRelease(presentation);
+    lgClipboardFiles_clearLocal();
     lgClipboard_release();
     return;
   }
@@ -806,6 +1318,9 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
       lgClipboard_abort(oldRequest);
+    if (presentation)
+      lgClipboardFiles_remotePresentationRelease(presentation);
+    lgClipboardFiles_clearLocal();
     lgClipboard_release();
     return;
   }
@@ -823,6 +1338,9 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
 
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
     lgClipboard_abort(oldRequest);
+  if (presentation)
+    lgClipboardFiles_remotePresentationRelease(presentation);
+  lgClipboardFiles_clearLocal();
 }
 
 static void x11CBSelectionNotify(const XSelectionEvent e)
@@ -832,6 +1350,9 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   unsigned long itemCount;
   unsigned long after;
   unsigned char * data = NULL;
+
+  if (x11CBFileImportSelectionNotify(e))
+    return;
 
   LG_LOCK(x11cb.lock);
   const bool targetReply = x11cb.targetsWindow &&
@@ -881,6 +1402,29 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
 
     // see if we support any of the targets listed
     const Atom * targets = (const Atom *)data;
+    Atom fileTarget = None;
+    for (unsigned long i = 0; i < itemCount; ++i)
+      if (targets[i] == x11cb.aFileGnome)
+      {
+        fileTarget = x11cb.aFileGnome;
+        break;
+      }
+    if (fileTarget == None)
+      for (unsigned long i = 0; i < itemCount; ++i)
+        if (targets[i] == x11cb.aTypes[LG_CLIPBOARD_DATA_FILES])
+        {
+          fileTarget = x11cb.aTypes[LG_CLIPBOARD_DATA_FILES];
+          break;
+        }
+
+    if (fileTarget != None)
+    {
+      lgClipboardFiles_clearLocal();
+      if (!startFileImport(fileTarget))
+        lgClipboard_release();
+      goto out;
+    }
+
     for(int n = 0; n < LG_CLIPBOARD_DATA_NONE; ++n)
       for(unsigned long i = 0; i < itemCount; ++i)
         if (x11cb.aTypes[n] == targets[i])
@@ -1010,24 +1554,35 @@ out:
 
 void x11CBNotice(LG_ClipboardData type)
 {
+  const uint64_t nextPresentation = type == LG_CLIPBOARD_DATA_FILES ?
+    lgClipboardFiles_remotePresentationAcquire() : 0;
   LG_LOCK(x11cb.lock);
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
     cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   clearTargetsNL();
-  x11cb.aCurSelection  = BadValue;
-  x11cb.haveRequest    = true;
-  x11cb.type           = type;
-  XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD, x11.window, CurrentTime);
+  clearFileImportNL();
+  const uint64_t oldPresentation = x11cb.filePresentation;
+  x11cb.filePresentation = nextPresentation;
+  x11cb.aCurSelection     = BadValue;
+  x11cb.haveRequest       = type != LG_CLIPBOARD_DATA_FILES || nextPresentation;
+  x11cb.type              = type;
+  XSetSelectionOwner(x11.display, x11atoms.CLIPBOARD,
+      x11cb.haveRequest ? x11.window : None, CurrentTime);
   XFlush(x11.display);
   LG_UNLOCK(x11cb.lock);
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
     lgClipboard_abort(oldRequest);
+  if (oldPresentation)
+    lgClipboardFiles_remotePresentationRelease(oldPresentation);
+  lgClipboardFiles_clearLocal();
 }
 
 void x11CBRelease(void)
 {
   LG_LOCK(x11cb.lock);
   x11cb.haveRequest = false;
+  const uint64_t presentation = x11cb.filePresentation;
+  x11cb.filePresentation = 0;
   XGrabServer(x11.display);
   if (XGetSelectionOwner(x11.display, x11atoms.CLIPBOARD) == x11.window)
     XSetSelectionOwner(
@@ -1035,6 +1590,26 @@ void x11CBRelease(void)
   XUngrabServer(x11.display);
   XFlush(x11.display);
   LG_UNLOCK(x11cb.lock);
+  if (presentation)
+    lgClipboardFiles_remotePresentationRelease(presentation);
+}
+
+void x11CBFree(void)
+{
+  x11CBRelease();
+
+  LG_LOCK(x11cb.lock);
+  const LG_ClipboardRequest request = x11cb.read.window ?
+    cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
+  clearTargetsNL();
+  clearFileImportNL();
+  struct X11ClipboardWrite * writes = takeFileWritesNL();
+  LG_UNLOCK(x11cb.lock);
+
+  if (request != LG_CLIPBOARD_REQUEST_INVALID)
+    lgClipboard_abort(request);
+  cancelFileWrites(writes, true);
+  lgClipboardFiles_clearLocal();
 }
 
 void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)

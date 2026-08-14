@@ -195,6 +195,9 @@ if(ENABLE_WAYLAND)
   )
   set(WAYLAND_CLIPBOARD_CASES
     mime
+    file-import
+    file-source
+    file-replace
     replace
     read-eof
     read-block
@@ -241,6 +244,10 @@ if(ENABLE_X11)
   )
   set(X11_CLIPBOARD_CASES
     targets
+    file-import
+    file-incr
+    file-source
+    file-source-active-replace
     normal
     incr
     incr-block
@@ -457,6 +464,7 @@ endforeach()
 
 add_executable(clipboard-tests
   clipboard_test.c
+  clipboard_files_stub.c
   ../src/clipboard.c
 )
 target_compile_definitions(clipboard-tests PRIVATE
@@ -473,6 +481,10 @@ target_link_libraries(clipboard-tests
 )
 set(CLIPBOARD_CASES
   preference
+  file-publication
+  file-replacement
+  file-failure
+  callback-serial
   request
   remote-local
   pending-remote
@@ -496,8 +508,41 @@ foreach(name IN LISTS CLIPBOARD_CASES)
   )
 endforeach()
 
+add_executable(clipboard-files-tests
+  clipboard_files_test.c
+  ../src/clipboard_files.c
+)
+target_include_directories(clipboard-files-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(clipboard-files-tests
+  ${EXE_FLAGS}
+  lg_common
+  PkgConfig::FUSE3
+)
+add_test(NAME clipboard-files-lifecycle
+  COMMAND clipboard-files-tests
+)
+set_tests_properties(clipboard-files-lifecycle PROPERTIES
+  TIMEOUT 10
+)
+add_test(NAME clipboard-files-failures
+  COMMAND clipboard-files-tests failures
+)
+set_tests_properties(clipboard-files-failures PROPERTIES
+  TIMEOUT 10
+)
+add_test(NAME clipboard-files-mount
+  COMMAND clipboard-files-tests mount
+)
+set_tests_properties(clipboard-files-mount PROPERTIES
+  TIMEOUT 10
+  SKIP_RETURN_CODE 77
+)
+
 add_executable(spice-clipboard-tests
   spice_clipboard_test.c
+  clipboard_files_stub.c
   ../src/clipboard.c
   ../transports/SPICE/clipboard.c
 )

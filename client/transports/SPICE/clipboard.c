@@ -103,6 +103,7 @@ static bool lgType(LG_ClipboardData source, PSDataType * type)
     case LG_CLIPBOARD_DATA_BMP  : *type = SPICE_DATA_BMP ; return true;
     case LG_CLIPBOARD_DATA_TIFF : *type = SPICE_DATA_TIFF; return true;
     case LG_CLIPBOARD_DATA_JPEG : *type = SPICE_DATA_JPEG; return true;
+    case LG_CLIPBOARD_DATA_FILES: return false;
     case LG_CLIPBOARD_DATA_NONE : *type = SPICE_DATA_NONE; return true;
   }
 

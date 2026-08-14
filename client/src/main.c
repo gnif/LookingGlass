@@ -3322,7 +3322,8 @@ static int lg_run(void)
   frameTimingInit();
   lgInput_init();
   lgAudio_init();
-  lgClipboard_init();
+  if (!lgClipboard_init())
+    return -1;
 
 #ifdef ENABLE_TESTS
   memset(&l_testCapture, 0, sizeof(l_testCapture));
@@ -4018,8 +4019,6 @@ static void lg_shutdown(void)
     e_startup = NULL;
   }
 
-  lgClipboard_free();
-
   app_releaseAllKeybinds();
   ll_free(g_state.bindings);
 
@@ -4028,6 +4027,10 @@ static void lg_shutdown(void)
     g_state.dsInitialized = false;
     g_state.ds->free();
   }
+
+  /* Clipboard sources own FUSE dataset references and are released by the
+   * display server before the filesystem is unmounted. */
+  lgClipboard_free();
 
   // Input callbacks have stopped; the evdev state and overlays can go
   evdev_free();

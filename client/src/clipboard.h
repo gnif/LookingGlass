@@ -23,7 +23,7 @@
 
 #include "interface/clipboard.h"
 
-void lgClipboard_init(void);
+bool lgClipboard_init(void);
 void lgClipboard_free(void);
 void lgClipboard_setLocalAvailable(bool available);
 
@@ -36,6 +36,7 @@ void lgClipboard_dropTransport(void);
 void lgClipboard_release(void);
 void lgClipboard_notifyTypes(
     const LG_ClipboardData types[], size_t count);
+void lgClipboard_notifyFiles(uint64_t dataset);
 LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
     LG_ClipboardData type, uint64_t sizeHint);
 LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
@@ -54,5 +55,23 @@ bool lgClipboard_requestStream(LG_ClipboardData type,
 bool lgClipboard_requestReady(LG_ClipboardRequest request);
 bool lgClipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque);
+
+/* File-dataset transport entry points used by clipboard_files.c. */
+bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition);
+bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
+    LG_ClipboardFileError error);
+bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition);
+bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request);
+LG_ClipboardResult lgClipboard_fileDataBegin(
+    const LG_ClipboardFileRequest * request, uint64_t sizeHint);
+LG_ClipboardResult lgClipboard_fileDataChunk(
+    const LG_ClipboardFileRequest * request, uint64_t responseOffset,
+    const void * data, size_t size);
+LG_ClipboardResult lgClipboard_fileDataEnd(
+    const LG_ClipboardFileRequest * request, uint64_t finalSize);
+bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
+    LG_ClipboardFileError reason);
+void lgClipboard_fileRemoteReady(uint64_t dataset);
+void lgClipboard_fileRemoteFailed(uint64_t dataset);
 
 #endif

@@ -980,6 +980,7 @@ static void x11Shutdown(void)
 static void x11Free(void)
 {
   x11Shutdown();
+  x11CBFree();
 
   if (x11.jitRender)
   {

@@ -143,7 +143,7 @@ static SpiceClipboard * setup(void)
   g_state.ds                = &displayOps;
   g_params.clipboardToVM    = true;
   g_params.clipboardToLocal = true;
-  lgClipboard_init();
+  CHECK(lgClipboard_init());
   lgClipboard_setLocalAvailable(true);
   lgClipboard_setFallback(spiceClipboard_getOps(), clipboard);
   return clipboard;
