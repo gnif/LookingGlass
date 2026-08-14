@@ -22,6 +22,7 @@
 
 #include "CSRWLock.h"
 #include "transport/IClipboardSource.h"
+#include "transport/lgmp/CLGMPClipboardFiles.h"
 
 #include "common/KVMFRClipboard.h"
 #include "common/LGMPConfig.h"
@@ -39,8 +40,10 @@ class CLGMPHost;
 class CLGMPClipboardTransport final : public IClipboardSource
 {
 private:
-  static constexpr unsigned MEMORY_COUNT = 2;
-  static constexpr unsigned INTERNAL_TARGET_COUNT = 3;
+  static constexpr unsigned MEMORY_COUNT = 8;
+  static constexpr unsigned INTERNAL_TARGET_COUNT =
+    CLGMPClipboardFiles::MAX_ACQUISITIONS +
+    CLGMPClipboardFiles::MAX_REQUESTS + 3;
   static constexpr ULONGLONG OWNER_LEASE_MS = 1000;
   static constexpr DWORD ACTIVE_POLL_MS = 5;
   static constexpr DWORD IDLE_POLL_MS = 50;
@@ -135,6 +138,7 @@ private:
   PendingTarget m_pendingTarget;
   KVMFRClipboardMessage m_internalTarget[INTERNAL_TARGET_COUNT] = {};
   unsigned m_internalTargetCount = 0;
+  CLGMPClipboardFiles m_files;
 
   bool Initialize();
   void DeInit();
@@ -156,6 +160,8 @@ private:
   void QueueTransferCancel(const Transfer& transfer);
   void QueueStaleRequestCancel(
     const KVMFRClipboardMessage& request);
+  void QueueStaleFileRecord(const KVMFRClipboardMessage& record);
+  void QueueFileDisconnect();
   bool QueueInternalTarget(const KVMFRClipboardMessage& record);
   bool PumpInternalTarget();
 

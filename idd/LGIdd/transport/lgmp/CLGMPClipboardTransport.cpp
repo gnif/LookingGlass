@@ -75,7 +75,7 @@ namespace
       kvmfrClipboardTransferFromHelper(message.transfer) :
       kvmfrClipboardTransferFromClient(message.transfer);
     return message.clipboardGeneration && validTransfer &&
-      kvmfrClipboardFormatValid(message.format) &&
+      kvmfrClipboardRepresentationFormatValid(message.format) &&
       !message.offset && !message.size && !message.flags &&
       !message.token && !message.length && !message.sequence;
   }
@@ -83,7 +83,8 @@ namespace
   bool ValidCancel(const KVMFRClipboardMessage& message)
   {
     return message.transfer && !message.offset && !message.size &&
-      (!message.format || kvmfrClipboardFormatValid(message.format)) &&
+      (!message.format ||
+        kvmfrClipboardRepresentationFormatValid(message.format)) &&
       !message.flags && !message.length && !message.sequence;
   }
 
@@ -91,7 +92,8 @@ namespace
   {
     return message.type == KVMFR_CLIPBOARD_MESSAGE_REQUEST ||
       message.type == KVMFR_CLIPBOARD_MESSAGE_DATA ||
-      message.type == KVMFR_CLIPBOARD_MESSAGE_CANCEL;
+      message.type == KVMFR_CLIPBOARD_MESSAGE_CANCEL ||
+      CLGMPClipboardFiles::IsRecord(message);
   }
 }
 
@@ -367,6 +369,39 @@ void CLGMPClipboardTransport::QueueStaleRequestCancel(
   QueueInternalTarget(cancel);
 }
 
+void CLGMPClipboardTransport::QueueStaleFileRecord(
+  const KVMFRClipboardMessage& record)
+{
+  if (!m_target || !m_available || !m_endpointGeneration)
+    return;
+
+  KVMFRClipboardMessage response = {};
+  response.version             = KVMFR_CLIPBOARD_VERSION;
+  response.generation          = m_endpointGeneration;
+  response.clipboardGeneration = record.clipboardGeneration;
+  response.transfer            = record.transfer;
+  response.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
+  response.token               = KVMFR_CLIPBOARD_FILE_ERROR_DISCONNECTED;
+  if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE)
+    response.type = KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED;
+  else if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST)
+    response.type = KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL;
+  else
+    return;
+  QueueInternalTarget(response);
+}
+
+void CLGMPClipboardTransport::QueueFileDisconnect()
+{
+  KVMFRClipboardMessage records[
+    CLGMPClipboardFiles::MAX_ACQUISITIONS +
+    CLGMPClipboardFiles::MAX_REQUESTS] = {};
+  const unsigned count = m_files.Disconnect(records, _countof(records),
+    m_endpointGeneration);
+  for (unsigned i = 0; i < count; ++i)
+    QueueInternalTarget(records[i]);
+}
+
 bool CLGMPClipboardTransport::QueueInternalTarget(
   const KVMFRClipboardMessage& record)
 {
@@ -423,12 +458,14 @@ void CLGMPClipboardTransport::ReleaseOwner(
     clientID, generation, reason);
   if (clearHelper)
   {
+    QueueFileDisconnect();
     QueueTransferCancel(clientToHelper);
     QueueTransferCancel(helperToClient);
     QueueHelperClear();
   }
   else
   {
+    m_files.Reset();
     m_clientClipboardGeneration = 0;
     m_clientFormats = 0;
   }
@@ -441,6 +478,7 @@ void CLGMPClipboardTransport::ResetProtocol(bool keepClipboard)
     ReleaseOwner("endpoint reset", false);
   m_clientToHelper.Clear();
   m_helperToClient.Clear();
+  m_files.Reset();
   m_clientClipboardGeneration = 0;
   m_clientFormats = 0;
   m_discardHelperToClient = 0;
@@ -661,10 +699,18 @@ bool CLGMPClipboardTransport::ValidateOwnedControl(
     case KVMFR_CLIPBOARD_MESSAGE_CANCEL:
       return ValidateInboundRecord(message);
 
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE:
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED:
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE:
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST:
+    case KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL:
+      return ValidateInboundRecord(message);
+
     case KVMFR_CLIPBOARD_MESSAGE_COMMIT:
       return message.token >= 1 && message.token <= MEMORY_COUNT &&
         message.clipboardGeneration && message.transfer &&
-        kvmfrClipboardFormatValid(message.format) &&
+        (kvmfrClipboardRepresentationFormatValid(message.format) ||
+          message.format == KVMFR_CLIPBOARD_FORMAT_FILES) &&
         message.length <= KVMFR_CLIPBOARD_DATA_BYTES &&
         !(message.flags & ~(KVMFR_CLIPBOARD_FLAG_BEGIN |
           KVMFR_CLIPBOARD_FLAG_END)) &&
@@ -678,6 +724,21 @@ bool CLGMPClipboardTransport::ValidateOwnedControl(
 bool CLGMPClipboardTransport::ValidateInboundRecord(
   const KVMFRClipboardMessage& message) const
 {
+  if (CLGMPClipboardFiles::IsRecord(message))
+  {
+    if (m_files.IsStaleTerminal(message,
+        CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER))
+      return true;
+    const bool filesOffered = m_cachedValid &&
+      m_cachedClipboard.type == KVMFR_CLIPBOARD_MESSAGE_OFFER &&
+      (m_helperFormats & KVMFR_CLIPBOARD_FORMAT_MASK_FILES);
+    const uint64_t offeredDataset = filesOffered ?
+      m_cachedClipboard.clipboardGeneration : 0;
+    return m_files.Validate(message,
+      CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER,
+      offeredDataset, filesOffered);
+  }
+
   switch (message.type)
   {
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
@@ -704,6 +765,15 @@ bool CLGMPClipboardTransport::ValidateOutboundRecord(
       message.generation != m_endpointGeneration)
     return false;
 
+  if (CLGMPClipboardFiles::IsRecord(message))
+  {
+    const bool filesOffered = m_clientClipboardGeneration &&
+      (m_clientFormats & KVMFR_CLIPBOARD_FORMAT_MASK_FILES);
+    return m_files.Validate(message,
+      CLGMPClipboardFiles::Direction::HELPER_TO_CLIENT,
+      m_clientClipboardGeneration, filesOffered);
+  }
+
   switch (message.type)
   {
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
@@ -718,7 +788,7 @@ bool CLGMPClipboardTransport::ValidateOutboundRecord(
     case KVMFR_CLIPBOARD_MESSAGE_DATA:
       return message.clipboardGeneration &&
         kvmfrClipboardTransferFromClient(message.transfer) &&
-        kvmfrClipboardFormatValid(message.format) &&
+        kvmfrClipboardRepresentationFormatValid(message.format) &&
         message.length <= KVMFR_CLIPBOARD_DATA_BYTES &&
         !(message.flags & ~(KVMFR_CLIPBOARD_FLAG_BEGIN |
           KVMFR_CLIPBOARD_FLAG_END)) && !message.token &&
@@ -786,6 +856,13 @@ void CLGMPClipboardTransport::AdvanceChunk(
 void CLGMPClipboardTransport::ApplyInbound(
   const KVMFRClipboardMessage& message)
 {
+  if (CLGMPClipboardFiles::IsRecord(message))
+  {
+    m_files.Apply(message,
+      CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER);
+    return;
+  }
+
   switch (message.type)
   {
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
@@ -824,6 +901,13 @@ void CLGMPClipboardTransport::ApplyInbound(
 void CLGMPClipboardTransport::ApplyOutbound(
   const KVMFRClipboardMessage& message)
 {
+  if (CLGMPClipboardFiles::IsRecord(message))
+  {
+    m_files.Apply(message,
+      CLGMPClipboardFiles::Direction::HELPER_TO_CLIENT);
+    return;
+  }
+
   switch (message.type)
   {
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
@@ -977,6 +1061,22 @@ bool CLGMPClipboardTransport::ProcessMessage(
 
   if (!IsOwner(clientID, message.generation))
     return true;
+
+  if (CLGMPClipboardFiles::IsRecord(message) &&
+      CLGMPClipboardFiles::DirectionValid(message,
+        CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER) &&
+      !m_files.TransferActive(message.transfer) &&
+      (message.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ||
+       message.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST) &&
+      !ValidateInboundRecord(message))
+  {
+    // A cancellation or replacement can cross a request which was generated
+    // from the preceding file offer. The already-posted lifecycle record will
+    // cancel the client-side work; consuming this stale request avoids
+    // treating normal cross-queue ordering as a protocol failure.
+    RenewLease();
+    return true;
+  }
   if (!ValidateOwnedControl(message))
   {
     ReleaseOwner("invalid clipboard message", true);
@@ -1009,9 +1109,12 @@ bool CLGMPClipboardTransport::ProcessMessage(
       lgmpHostMemPtr(m_grantMemory[grantIndex]));
     KVMFRClipboardMessage dataMessage = {};
     memcpy(&dataMessage, slot, sizeof(dataMessage));
+    const bool fileData = dataMessage.type ==
+      KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
     const bool matchesCommit =
       dataMessage.version             == KVMFR_CLIPBOARD_VERSION &&
-      dataMessage.type                == KVMFR_CLIPBOARD_MESSAGE_DATA &&
+      (dataMessage.type               == KVMFR_CLIPBOARD_MESSAGE_DATA ||
+       fileData) &&
       dataMessage.generation          == m_ownerGeneration &&
       dataMessage.clipboardGeneration == message.clipboardGeneration &&
       dataMessage.transfer            == message.transfer &&
@@ -1020,13 +1123,25 @@ bool CLGMPClipboardTransport::ProcessMessage(
       dataMessage.format              == message.format &&
       dataMessage.flags               == message.flags &&
       dataMessage.length              == message.length &&
-      dataMessage.sequence            == message.sequence &&
-      !dataMessage.token;
-    if (!matchesCommit ||
-        !kvmfrClipboardTransferFromHelper(dataMessage.transfer) ||
-        !ValidateChunk(m_clientToHelper, dataMessage))
+      dataMessage.sequence            == message.sequence;
+    const bool staleFileData = fileData && m_files.IsStaleTerminal(
+      dataMessage, CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER);
+    const bool validData = fileData ?
+      (staleFileData || m_files.Validate(dataMessage,
+        CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER, 0, false)) :
+      (!dataMessage.token &&
+        kvmfrClipboardTransferFromHelper(dataMessage.transfer) &&
+        ValidateChunk(m_clientToHelper, dataMessage));
+    if (!matchesCommit || !validData)
     {
       ReleaseOwner("invalid clipboard commit", true);
+      return true;
+    }
+
+    if (staleFileData)
+    {
+      grant = {};
+      RenewLease();
       return true;
     }
 
@@ -1037,6 +1152,13 @@ bool CLGMPClipboardTransport::ProcessMessage(
       slot + sizeof(KVMFRClipboardSlotHeader),
       static_cast<int>(grantIndex));
     return false;
+  }
+
+  if (m_files.IsStaleTerminal(message,
+      CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER))
+  {
+    RenewLease();
+    return true;
   }
 
   if (message.type == KVMFR_CLIPBOARD_MESSAGE_REQUEST &&
@@ -1144,7 +1266,11 @@ ClipboardChannelResult CLGMPClipboardTransport::SendControl(
 ClipboardChannelResult CLGMPClipboardTransport::SendData(
   const KVMFRClipboardMessage& record, const uint8_t * data)
 {
-  if (!ValidateChunk(m_helperToClient, record))
+  const bool valid = CLGMPClipboardFiles::IsData(record) ?
+    m_files.Validate(record,
+      CLGMPClipboardFiles::Direction::HELPER_TO_CLIENT, 0, false) :
+    ValidateChunk(m_helperToClient, record);
+  if (!valid)
     return ClipboardChannelResult::FAILED;
 
   PLGMPMemory memory = FindAvailable(m_dataMemory);
@@ -1192,6 +1318,7 @@ ClipboardChannelResult CLGMPClipboardTransport::SendClipboard(
   if (BlockedOwnerLost(record))
   {
     QueueStaleRequestCancel(record);
+    QueueStaleFileRecord(record);
     ClearOutboundBlock();
     Wake();
     return ClipboardChannelResult::ACCEPTED;
@@ -1201,8 +1328,31 @@ ClipboardChannelResult CLGMPClipboardTransport::SendClipboard(
       record.generation != m_endpointGeneration)
     return ClipboardChannelResult::FAILED;
 
-  if (!ValidateOutboundRecord(record) ||
-      (record.length && !data))
+  if (m_files.IsStaleTerminal(record,
+      CLGMPClipboardFiles::Direction::HELPER_TO_CLIENT))
+  {
+    ClearOutboundBlock();
+    return ClipboardChannelResult::ACCEPTED;
+  }
+
+  const bool validOutbound = ValidateOutboundRecord(record);
+  if (!validOutbound && CLGMPClipboardFiles::IsRecord(record) &&
+      CLGMPClipboardFiles::DirectionValid(record,
+        CLGMPClipboardFiles::Direction::HELPER_TO_CLIENT) &&
+      !m_files.TransferActive(record.transfer) &&
+      (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ||
+       record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST))
+  {
+    // The LGMP owner may disappear or replace its dataset before Helper
+    // observes the matching lifecycle record. Fail new work locally without
+    // tearing down the shared Helper clipboard channel.
+    QueueStaleFileRecord(record);
+    ClearOutboundBlock();
+    Wake();
+    return ClipboardChannelResult::ACCEPTED;
+  }
+
+  if (!validOutbound || (record.length && !data))
     return ClipboardChannelResult::FAILED;
 
   if (record.transfer &&
@@ -1248,6 +1398,7 @@ ClipboardChannelResult CLGMPClipboardTransport::SendClipboard(
     if (OwnerScopedLifecycle(record))
     {
       QueueStaleRequestCancel(record);
+      QueueStaleFileRecord(record);
       ClearOutboundBlock();
       Wake();
       return ClipboardChannelResult::ACCEPTED;
@@ -1265,7 +1416,9 @@ ClipboardChannelResult CLGMPClipboardTransport::SendClipboard(
   }
 
   ClipboardChannelResult result;
-  if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA)
+  if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA)
+    result = SendData(record, data);
+  else if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA)
   {
     if (!m_helperToClient.Active() ||
         record.transfer != m_helperToClient.transfer)
@@ -1316,6 +1469,7 @@ void CLGMPClipboardTransport::ClipboardState(
       ReleaseOwner("Helper endpoint changed", false);
     m_clientToHelper.Clear();
     m_helperToClient.Clear();
+    m_files.Reset();
     m_clientClipboardGeneration = 0;
     m_clientFormats = 0;
     m_discardHelperToClient = 0;
@@ -1344,6 +1498,7 @@ void CLGMPClipboardTransport::ClipboardReset(
     ReleaseOwner("Helper reset", false);
   m_clientToHelper.Clear();
   m_helperToClient.Clear();
+  m_files.Reset();
   m_clientClipboardGeneration = 0;
   m_clientFormats = 0;
   m_discardHelperToClient = 0;
@@ -1385,8 +1540,11 @@ void CLGMPClipboardTransport::Thread()
       else if (m_ownerClientID && GetTickCount64() >= m_ownerDeadline)
         ReleaseOwner("lease expired", true);
 
+      // A restarted client can reuse dataset and transfer IDs. Deliver every
+      // old-owner cleanup record before admitting messages from a new owner.
       if (!RetryTarget() || !PumpInternalTarget() ||
-          !DrainMessage() || !PublishStatus() ||
+          (m_internalTargetCount == 0 && !DrainMessage()) ||
+          !PublishStatus() ||
           !ReplayClipboard() || !PostGrants())
       {
         notifyFailed = true;
@@ -1398,7 +1556,7 @@ void CLGMPClipboardTransport::Thread()
         notifyReady = m_target != nullptr;
         readyTarget = m_target;
       }
-      if (m_pendingTarget.valid || m_ownerClientID)
+      if (m_pendingTarget.valid || m_internalTargetCount || m_ownerClientID)
         timeout = ACTIVE_POLL_MS;
     }
 

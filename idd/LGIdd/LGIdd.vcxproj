@@ -78,6 +78,7 @@
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPClipboardTransport.cpp" />
+    <ClCompile Include="transport\lgmp\CLGMPClipboardFiles.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameCaps.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPFrameTransport.cpp" />
@@ -154,6 +155,7 @@
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />
     <ClInclude Include="transport\lgmp\CRecovery.h" />
     <ClInclude Include="transport\lgmp\CLGMPClipboardTransport.h" />
+    <ClInclude Include="transport\lgmp\CLGMPClipboardFiles.h" />
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameCaps.h" />
     <ClInclude Include="transport\lgmp\CLGMPFrameTransport.h" />
