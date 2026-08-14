@@ -211,6 +211,8 @@ if(ENABLE_WAYLAND)
     teardown
     teardown-external
     self-copy
+    ignored
+    invalidate-lock
     dnd
   )
   foreach(name IN LISTS WAYLAND_CLIPBOARD_CASES)
@@ -471,6 +473,8 @@ target_link_libraries(clipboard-tests
 set(CLIPBOARD_CASES
   preference
   request
+  remote-local
+  pending-remote
   invalid
   cancel
   generation

@@ -627,6 +627,64 @@ static void testRequest(void)
   lgClipboard_free();
 }
 
+static void testRemoteReplacesLocal(void)
+{
+  init();
+  bind(&p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+
+  lgClipboard_notifyTypes(types, 1);
+  CHECK(p.notice == 1);
+
+  g_params.clipboardToLocal = false;
+  notice(&p, types, 1);
+  CHECK(d.notice == 0);
+
+  /* A notice which is not published locally must not discard the local
+   * clipboard advertised towards the guest. */
+  lgClipboard_setTransport(&plainOps, &q);
+  CHECK(q.attach == 1);
+  CHECK(q.notice == 1);
+  CHECK(q.release == 0);
+
+  g_params.clipboardToLocal = true;
+  notice(&q, types, 1);
+  CHECK(d.notice == 1);
+
+  /* Rebinding after a remote notice must not replay the superseded local
+   * offer back to the provider. */
+  lgClipboard_setTransport(&plainOps, &r);
+  CHECK(r.attach == 1);
+  CHECK(r.notice == 0);
+  CHECK(r.release == 1);
+
+  lgClipboard_free();
+}
+
+static void testPendingRemoteReplacesLocal(void)
+{
+  init();
+  bind(&p);
+  const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
+
+  lgClipboard_notifyTypes(types, 1);
+  CHECK(p.notice == 1);
+  lgClipboard_setLocalAvailable(false);
+
+  notice(&p, types, 1);
+  CHECK(d.notice == 0);
+
+  lgClipboard_setLocalAvailable(true);
+  CHECK(d.notice == 1);
+
+  lgClipboard_setTransport(&plainOps, &q);
+  CHECK(q.attach == 1);
+  CHECK(q.notice == 0);
+  CHECK(q.release == 1);
+
+  lgClipboard_free();
+}
+
 static void testInvalid(void)
 {
   init();
@@ -1071,6 +1129,8 @@ static const struct Test tests[] =
 {
   { "preference", testPreference },
   { "request"   , testRequest    },
+  { "remote-local", testRemoteReplacesLocal },
+  { "pending-remote", testPendingRemoteReplacesLocal },
   { "invalid"   , testInvalid    },
   { "cancel"    , testCancel     },
   { "generation", testGeneration },

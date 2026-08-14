@@ -155,7 +155,9 @@ struct Log
   bool                 requestOK;
   bool                 requestCancelSync;
   bool                 requestBeginSync;
+  bool                 expectReleaseLocked;
   bool                 firing;
+  unsigned int         releaseLockedN;
 };
 
 struct WaylandDSState wlWm;
@@ -440,6 +442,12 @@ void lgClipboard_notifyTypes(
 
 void lgClipboard_release(void)
 {
+  if (rec.expectReleaseLocked)
+  {
+    CHECK(atomic_flag_test_and_set_explicit(
+        &wlCb.lock, memory_order_acquire));
+    ++rec.releaseLockedN;
+  }
   ++rec.releaseN;
 }
 
@@ -692,9 +700,70 @@ static void testMime(void)
 static void testSelfCopy(void)
 {
   start();
+  struct Proxy * local = textOffer();
+  CHECK(rec.noticeN == 1);
+
+  waylandCBNotice(LG_CLIPBOARD_DATA_TEXT);
+  struct Proxy * source = &proto.source[0];
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+
+  /* Losing focus before the compositor echoes our source must not release
+   * the remote clipboard. */
+  waylandCBInvalidate();
+  CHECK(rec.releaseN == 0);
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+
+  struct Proxy * echo = newOffer();
+  offerMime(echo, "text/plain");
+  offerMime(echo, wlCb.lgMimetype);
+  selectOffer(echo);
+
+  CHECK(rec.noticeN == 1);
+  CHECK(rec.releaseN == 0);
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+  CHECK(!wlCb.offer);
+  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
+    CHECK(!wlCb.mimetypes[i]);
+  CHECK(local->dead);
+  CHECK(echo->dead);
+  CHECK(proto.offerDestroyN == 2);
+  CHECK(!echo->user);
+
+  waylandCBInvalidate();
+  CHECK(rec.releaseN == 0);
+  CHECK(wlCb.selectionSource == (struct wl_data_source *)source);
+
+  int fds[2];
+  CHECK(pipe(fds) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/plain", fds[1]);
+  CHECK(rec.requestN == 1);
+  CHECK(rec.requestType == LG_CLIPBOARD_DATA_TEXT);
+  CHECK(rec.requestStream);
+  CHECK(rec.requestOpaque);
+  CHECK(rec.requestStream->begin(rec.requestOpaque,
+      LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(rec.requestStream->end(rec.requestOpaque, 0) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  uint8_t value;
+  CHECK(read(fds[0], &value, 1) == 0);
+  CHECK(close(fds[0]) == 0);
+  checkClosed(fds[1]);
+
+  selectOffer(NULL);
+  CHECK(rec.releaseN == 1);
+  CHECK(!wlCb.selectionSource);
+
+  CHECK(proto.dirtyDestroyN == 0);
+  finish();
+}
+
+static void testIgnoredOffer(void)
+{
+  start();
   struct Proxy * offer = newOffer();
-  offerMime(offer, "text/plain");
-  offerMime(offer, wlCb.lgMimetype);
+  offerMime(offer, "application/x-unsupported");
   selectOffer(offer);
 
   CHECK(rec.noticeN == 0);
@@ -703,6 +772,21 @@ static void testSelfCopy(void)
   CHECK(proto.offerDestroyN == 1);
   CHECK(!offer->user);
   CHECK(proto.dirtyDestroyN == 0);
+  finish();
+}
+
+static void testInvalidateSerialization(void)
+{
+  start();
+  struct Proxy * offer = textOffer();
+  rec.expectReleaseLocked = true;
+
+  waylandCBInvalidate();
+
+  CHECK(rec.releaseN == 1);
+  CHECK(rec.releaseLockedN == 1);
+  CHECK(offer->dead);
+  CHECK(!wlCb.offer);
   finish();
 }
 
@@ -1245,6 +1329,8 @@ static const struct Test tests[] =
   { "teardown"  , testTeardown  },
   { "teardown-external", testTeardownExternalOwner },
   { "self-copy" , testSelfCopy  },
+  { "ignored"   , testIgnoredOffer },
+  { "invalidate-lock", testInvalidateSerialization },
   { "dnd"       , testDnd       },
 };
 

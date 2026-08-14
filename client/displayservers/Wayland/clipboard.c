@@ -192,6 +192,15 @@ static bool hasImageMimetype(char ** mimetypes)
   return false;
 }
 
+enum ClipboardInvalidateMode
+{
+  CLIPBOARD_INVALIDATE_SILENT,
+  CLIPBOARD_INVALIDATE_CONDITIONAL,
+  CLIPBOARD_INVALIDATE_FORCE,
+};
+
+static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode);
+
 /* wlCb.lock must be held. */
 static struct ClipboardRead * clipboardReadTakeCurrentNL(void)
 {
@@ -312,14 +321,15 @@ static void dataDeviceHandleSelection(void * opaque,
     LG_LOCK(wlCb.lock);
     wlCb.selectionSource = NULL;
     LG_UNLOCK(wlCb.lock);
-    waylandCBInvalidate();
+    waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_FORCE);
     return;
   }
 
   struct DataOffer * extra = wl_data_offer_get_user_data(offer);
-  if (!hasAnyMimetype(extra->mimetypes) || extra->isSelfCopy)
+  const bool selfCopy = extra->isSelfCopy;
+  if (!hasAnyMimetype(extra->mimetypes) || selfCopy)
   {
-    if (!extra->isSelfCopy)
+    if (!selfCopy)
     {
       LG_LOCK(wlCb.lock);
       wlCb.selectionSource = NULL;
@@ -329,7 +339,12 @@ static void dataDeviceHandleSelection(void * opaque,
     for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
       free(extra->mimetypes[i]);
     free(extra);
-    waylandCBInvalidate();
+    if (!selfCopy)
+      waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_FORCE);
+    else
+      /* This is the compositor echoing the source we just installed. It is
+       * not a new local clipboard owner and must not send a provider CLEAR. */
+      waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_SILENT);
     wl_data_offer_destroy(offer);
     return;
   }
@@ -647,7 +662,7 @@ static void clipboardReadCallback(uint32_t events, void * opaque)
   }
 }
 
-void waylandCBInvalidate(void)
+static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode)
 {
   char * mimetypes[LG_CLIPBOARD_DATA_NONE];
   LG_LOCK(wlCb.lock);
@@ -656,21 +671,37 @@ void waylandCBInvalidate(void)
   wlCb.offer = NULL;
   memcpy(mimetypes, wlCb.mimetypes, sizeof(mimetypes));
   memset(wlCb.mimetypes, 0, sizeof(wlCb.mimetypes));
+  const bool hadLocal = read || offer || hasAnyMimetype(mimetypes);
+  const bool notifyProvider = mode == CLIPBOARD_INVALIDATE_FORCE ||
+    (mode == CLIPBOARD_INVALIDATE_CONDITIONAL && hadLocal);
+  const LG_ClipboardRequest request = read ? read->request :
+    LG_CLIPBOARD_REQUEST_INVALID;
+  if (read)
+    clipboardReadRetire(read);
+
+  /* Serialize the provider release with source publication. Clipboard
+   * provider operations may not synchronously deliver event callbacks, so
+   * calling this while holding wlCb.lock cannot re-enter the display server. */
+  if (notifyProvider)
+  {
+    if (read)
+      lgClipboard_abort(request);
+    lgClipboard_release();
+  }
   LG_UNLOCK(wlCb.lock);
 
-  if (read)
-  {
-    const LG_ClipboardRequest request = read->request;
-    clipboardReadRetire(read);
+  if (read && !notifyProvider)
     lgClipboard_abort(request);
-  }
-
-  lgClipboard_release();
 
   if (offer)
     wl_data_offer_destroy(offer);
   for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
     free(mimetypes[i]);
+}
+
+void waylandCBInvalidate(void)
+{
+  waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_CONDITIONAL);
 }
 
 void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
@@ -1186,6 +1217,11 @@ static void waylandCBPublish(LG_ClipboardData type)
     wl_data_source_offer(source, *mimetype);
   wl_data_source_offer(source, wlCb.lgMimetype);
 
+  /* Publishing a remote selection supersedes the old external offer. Retire
+   * it before set_selection so a simultaneous focus loss cannot release the
+   * provider while this remote source is active. */
+  waylandCBInvalidateLocal(CLIPBOARD_INVALIDATE_SILENT);
+
   LG_LOCK(wlCb.lock);
   if (wlCb.dataDevice)
   {
@@ -1194,13 +1230,13 @@ static void waylandCBPublish(LG_ClipboardData type)
     wlCb.selectionSource   = source;
     wl_data_device_set_selection(wlCb.dataDevice, source,
       wlWm.keyboardEnterSerial);
-  }
-  else
-  {
-    wl_data_source_destroy(source);
-    free(transfer);
+    LG_UNLOCK(wlCb.lock);
+    return;
   }
   LG_UNLOCK(wlCb.lock);
+
+  wl_data_source_destroy(source);
+  free(transfer);
 }
 
 void waylandCBNotice(LG_ClipboardData type)
