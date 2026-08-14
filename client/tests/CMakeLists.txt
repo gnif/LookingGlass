@@ -123,8 +123,14 @@ set(LGMP_CLIPBOARD_CASES
   blocked
   cancel
   restart
+  process-restart
+  file-stream
+  file-limits
+  file-owner-loss
+  file-malformed
   disconnect
   malformed
+  file-format
 )
 foreach(name IN LISTS LGMP_CLIPBOARD_CASES)
   add_test(NAME lgmp-clipboard-${name}
