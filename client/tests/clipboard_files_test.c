@@ -59,13 +59,13 @@ static uint64_t cancelledDataset;
 static uint64_t cancelledRequest;
 static LG_ClipboardFileError cancelledReason;
 
-void lgClipboard_notifyFiles(uint64_t dataset)
+void clipboard_notifyFiles(uint64_t dataset)
 {
   CHECK(notices < sizeof(datasets) / sizeof(datasets[0]));
   datasets[notices++] = dataset;
 }
 
-bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
+bool clipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
 {
   ++acquireCount;
   acquiredDataset = dataset;
@@ -73,7 +73,7 @@ bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
   return true;
 }
 
-bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
+bool clipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
     LG_ClipboardFileError error)
 {
   (void)dataset;
@@ -82,7 +82,7 @@ bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
   return false;
 }
 
-bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
+bool clipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
 {
   ++releaseCount;
   releasedDataset = dataset;
@@ -90,7 +90,7 @@ bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
   return true;
 }
 
-bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request)
+bool clipboard_fileRequest(const LG_ClipboardFileRequest * request)
 {
   CHECK(request);
   ++requestCount;
@@ -98,7 +98,7 @@ bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request)
   return remoteRequestSucceeds;
 }
 
-LG_ClipboardResult lgClipboard_fileDataBegin(
+LG_ClipboardResult clipboard_fileDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint)
 {
   CHECK(request);
@@ -110,7 +110,7 @@ LG_ClipboardResult lgClipboard_fileDataBegin(
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
-LG_ClipboardResult lgClipboard_fileDataChunk(
+LG_ClipboardResult clipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
     const void * data, size_t size, bool end)
 {
@@ -135,7 +135,7 @@ LG_ClipboardResult lgClipboard_fileDataChunk(
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
-LG_ClipboardResult lgClipboard_fileDataEnd(
+LG_ClipboardResult clipboard_fileDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t finalSize)
 {
   CHECK(request);
@@ -147,7 +147,7 @@ LG_ClipboardResult lgClipboard_fileDataEnd(
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
-bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
+bool clipboard_fileCancel(uint64_t dataset, uint64_t request,
     LG_ClipboardFileError reason)
 {
   ++cancelCount;
@@ -157,13 +157,13 @@ bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
   return true;
 }
 
-void lgClipboard_fileRemoteReady(uint64_t dataset)
+void clipboard_fileRemoteReady(uint64_t dataset)
 {
   CHECK(dataset == acquiredDataset);
   ++remoteReadyCount;
 }
 
-void lgClipboard_fileRemoteFailed(uint64_t dataset)
+void clipboard_fileRemoteFailed(uint64_t dataset)
 {
   CHECK(dataset);
   ++remoteFailedCount;
@@ -191,7 +191,7 @@ static bool runLocalRequest(uint64_t dataset, uint64_t node,
     .length    = length,
     .operation = operation,
   };
-  const bool result = lgClipboardFiles_testLocalRequest(&request);
+  const bool result = clipboardFiles_testLocalRequest(&request);
   CHECK(!result || responseComplete);
   CHECK(!result || !responseSize || responseWireEnded);
   CHECK(result ? cancelCount == 0U : cancelCount == 1U);
@@ -251,40 +251,40 @@ static void testLocalLifecycle(void)
   CHECK(write(fd, "clipboard", 9) == 9);
   CHECK(close(fd) == 0);
 
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x1234000012340000)));
+  CHECK(clipboardFiles_testInit(UINT64_C(0x1234000012340000)));
   char uri[320];
   const int uriLength = snprintf(uri, sizeof(uri), "file://%s\r\n", path);
   CHECK(uriLength > 0 && (size_t)uriLength < sizeof(uri));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)uriLength));
   CHECK(notices == 1);
   CHECK(datasets[0] != 0);
   CHECK(kvmfrClipboardTransferFromClient(datasets[0]));
 
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
   char gnome[336];
   const int gnomeLength = snprintf(
       gnome, sizeof(gnome), "copy\nfile://%s\n", path);
   CHECK(gnomeLength > 0 && (size_t)gnomeLength < sizeof(gnome));
-  CHECK(lgClipboardFiles_setLocal("x-special/gnome-copied-files",
+  CHECK(clipboardFiles_setLocal("x-special/gnome-copied-files",
         gnome, (size_t)gnomeLength));
   CHECK(notices == 2);
   CHECK(datasets[1] != datasets[0]);
 
   static const char invalid[] = "file:///does/not/exist\n";
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", invalid, sizeof(invalid) - 1U));
-  lgClipboardFiles_clearLocal();
-  lgClipboardFiles_free();
-  lgClipboardFiles_free();
+  clipboardFiles_clearLocal();
+  clipboardFiles_free();
+  clipboardFiles_free();
 
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x5678000056780000)));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_testInit(UINT64_C(0x5678000056780000)));
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)uriLength));
   CHECK(notices == 3);
   CHECK(datasets[2] != datasets[0]);
   CHECK(datasets[2] != datasets[1]);
-  lgClipboardFiles_free();
+  clipboardFiles_free();
 
   CHECK(unlink(path) == 0);
   CHECK(rmdir(directory) == 0);
@@ -309,81 +309,81 @@ static void testLocalUriValidation(void)
   CHECK(symlink("item.txt", link) == 0);
   CHECK(symlink(".", alias) == 0);
 
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x684b2452684b2452)));
+  CHECK(clipboardFiles_testInit(UINT64_C(0x684b2452684b2452)));
   const unsigned before = notices;
   char uri[512];
   int length = snprintf(uri, sizeof(uri),
       "FILE://LOCALHOST%s/item%%20space.txt\r\n", directory);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
 
   length = snprintf(uri, sizeof(uri), "file://%s%%\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s%%0\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s%%GG\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s%%00suffix\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s?query\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s#fragment\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://example.invalid%s\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   static const char root[] = "file:///\n";
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", root, sizeof(root) - 1U));
   length = snprintf(uri, sizeof(uri), "file://%s/\n", directory);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
   length = snprintf(uri, sizeof(uri), "file://%s/./item.txt\n", directory);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s//item.txt\n", directory);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s\n", link);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri),
       "file://%s/alias/item.txt\n", directory);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri), "file://%s\n", spaced);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)length));
   length = snprintf(uri, sizeof(uri),
       "cutx\nfile://%s\n", plain);
   CHECK(length > 0 && (size_t)length < sizeof(uri));
-  CHECK(!lgClipboardFiles_setLocal(
+  CHECK(!clipboardFiles_setLocal(
         "x-special/gnome-copied-files", uri, (size_t)length));
   CHECK(notices == before + 2U);
 
-  lgClipboardFiles_free();
+  clipboardFiles_free();
   CHECK(unlink(alias) == 0);
   CHECK(unlink(link) == 0);
   CHECK(unlink(spaced) == 0);
@@ -404,12 +404,12 @@ static void testLocalSnapshot(void)
   createFile(stable, "stable");
   createFile(changed, "before");
 
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x1a72021b1a72021b)));
+  CHECK(clipboardFiles_testInit(UINT64_C(0x1a72021b1a72021b)));
   char uri[320];
   const int uriLength = snprintf(
       uri, sizeof(uri), "file://%s\r\n", directory);
   CHECK(uriLength > 0 && (size_t)uriLength < sizeof(uri));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)uriLength));
   const uint64_t dataset = datasets[notices - 1U];
 
@@ -441,7 +441,7 @@ static void testLocalSnapshot(void)
         LG_CLIPBOARD_FILE_READ, 0, (uint32_t)stableEntry.size));
   CHECK(responseSize == strlen("stable"));
   CHECK(!memcmp(responseData, "stable", responseSize));
-  lgClipboardFiles_testForceLocalEof();
+  clipboardFiles_testForceLocalEof();
   CHECK(!runLocalRequest(dataset, stableEntry.node,
         LG_CLIPBOARD_FILE_READ, 0, (uint32_t)stableEntry.size));
   CHECK(cancelledReason == LG_CLIPBOARD_FILE_ERROR_IO);
@@ -476,7 +476,7 @@ static void testLocalSnapshot(void)
         LG_CLIPBOARD_FILE_READ, 0, (uint32_t)stableEntry.size));
   CHECK(cancelledReason == LG_CLIPBOARD_FILE_ERROR_STALE);
 
-  lgClipboardFiles_free();
+  clipboardFiles_free();
   CHECK(unlink(replacement) == 0);
   CHECK(rmdir(directory) == 0);
   CHECK(unlink(movedStable) == 0);
@@ -500,12 +500,12 @@ static void testLocalUnsupportedEntry(void)
   CHECK(symlink("target.txt", link) == 0);
   CHECK(mkfifo(fifo, 0600) == 0);
 
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x62d1147362d11473)));
+  CHECK(clipboardFiles_testInit(UINT64_C(0x62d1147362d11473)));
   char uri[320];
   const int uriLength = snprintf(
       uri, sizeof(uri), "file://%s\r\n", directory);
   CHECK(uriLength > 0 && (size_t)uriLength < sizeof(uri));
-  CHECK(lgClipboardFiles_setLocal(
+  CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)uriLength));
   const uint64_t dataset = datasets[notices - 1U];
   CHECK(runLocalRequest(dataset, KVMFR_CLIPBOARD_FILE_ROOT_NODE,
@@ -518,7 +518,7 @@ static void testLocalUnsupportedEntry(void)
         LG_CLIPBOARD_FILE_LIST, 0, 0));
   CHECK(cancelledReason == LG_CLIPBOARD_FILE_ERROR_NOT_SUPPORTED);
 
-  lgClipboardFiles_free();
+  clipboardFiles_free();
   CHECK(unlink(fifo) == 0);
   CHECK(unlink(link) == 0);
   CHECK(unlink(target) == 0);
@@ -530,12 +530,12 @@ static uint64_t completeRemoteOffer(uint64_t dataset, const char * name)
   const unsigned previousAcquires = acquireCount;
   const unsigned previousRequests = requestCount;
   const unsigned previousReady = remoteReadyCount;
-  CHECK(lgClipboardFiles_remoteOffer(dataset));
+  CHECK(clipboardFiles_remoteOffer(dataset));
   CHECK(acquireCount == previousAcquires + 1U);
   CHECK(acquiredDataset == dataset);
   const uint64_t acquisition = acquiredRequest;
 
-  lgClipboardFiles_remoteAcquired(dataset, acquisition,
+  clipboardFiles_remoteAcquired(dataset, acquisition,
       LG_CLIPBOARD_FILE_ERROR_NONE);
   CHECK(requestCount == previousRequests + 1U);
   CHECK(remoteRequest.dataset == dataset);
@@ -558,22 +558,22 @@ static uint64_t completeRemoteOffer(uint64_t dataset, const char * name)
   };
   memcpy(wire, &entry, sizeof(entry));
   memcpy(wire + sizeof(entry), name, nameLength);
-  CHECK(lgClipboardFiles_remoteDataBegin(
+  CHECK(clipboardFiles_remoteDataBegin(
         &remoteRequest, wireSize) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboardFiles_remoteDataChunk(&remoteRequest, 0,
+  CHECK(clipboardFiles_remoteDataChunk(&remoteRequest, 0,
         wire, (size_t)wireSize) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboardFiles_remoteDataEnd(
+  CHECK(clipboardFiles_remoteDataEnd(
         &remoteRequest, wireSize) == LG_CLIPBOARD_RESULT_ACCEPTED);
   free(wire);
   CHECK(remoteReadyCount == previousReady + 1U);
-  CHECK(lgClipboardFiles_remoteReady(dataset));
+  CHECK(clipboardFiles_remoteReady(dataset));
   return acquisition;
 }
 
 static uint64_t beginRemoteOffer(uint64_t dataset)
 {
   const unsigned previousAcquires = acquireCount;
-  CHECK(lgClipboardFiles_remoteOffer(dataset));
+  CHECK(clipboardFiles_remoteOffer(dataset));
   CHECK(acquireCount == previousAcquires + 1U);
   CHECK(acquiredDataset == dataset);
   return acquiredRequest;
@@ -584,7 +584,7 @@ static LG_ClipboardFileRequest beginRemoteList(uint64_t dataset,
 {
   const unsigned previousRequests = requestCount;
   *acquisition = beginRemoteOffer(dataset);
-  lgClipboardFiles_remoteAcquired(dataset, *acquisition,
+  clipboardFiles_remoteAcquired(dataset, *acquisition,
       LG_CLIPBOARD_FILE_ERROR_NONE);
   CHECK(requestCount == previousRequests + 1U);
   CHECK(remoteRequest.dataset == dataset);
@@ -601,12 +601,12 @@ static void checkRemoteFailure(uint64_t dataset,
   CHECK(releaseCount == previousReleases + (acquired ? 1U : 0U));
   if (acquired)
     CHECK(releasedDataset == dataset);
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 0U);
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 0U);
 }
 
 static void testRemoteFailures(void)
 {
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x7315000073150000)));
+  CHECK(clipboardFiles_testInit(UINT64_C(0x7315000073150000)));
   acquireCount = 0;
   releaseCount = 0;
   requestCount = 0;
@@ -619,7 +619,7 @@ static void testRemoteFailures(void)
   uint64_t acquisition = beginRemoteOffer(dataset);
   unsigned previousFailures = remoteFailedCount;
   unsigned previousReleases = releaseCount;
-  lgClipboardFiles_remoteAcquired(dataset, acquisition,
+  clipboardFiles_remoteAcquired(dataset, acquisition,
       LG_CLIPBOARD_FILE_ERROR_ACCESS);
   checkRemoteFailure(dataset, previousFailures, previousReleases, false);
 
@@ -627,7 +627,7 @@ static void testRemoteFailures(void)
   acquisition = beginRemoteOffer(dataset);
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  lgClipboardFiles_remoteCancel(dataset, acquisition,
+  clipboardFiles_remoteCancel(dataset, acquisition,
       LG_CLIPBOARD_FILE_ERROR_CANCELLED);
   checkRemoteFailure(dataset, previousFailures, previousReleases, false);
 
@@ -635,7 +635,7 @@ static void testRemoteFailures(void)
   LG_ClipboardFileRequest request = beginRemoteList(dataset, &acquisition);
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  lgClipboardFiles_remoteCancel(dataset, request.request,
+  clipboardFiles_remoteCancel(dataset, request.request,
       LG_CLIPBOARD_FILE_ERROR_CANCELLED);
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
 
@@ -644,7 +644,7 @@ static void testRemoteFailures(void)
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
   remoteRequestSucceeds = false;
-  lgClipboardFiles_remoteAcquired(dataset, acquisition,
+  clipboardFiles_remoteAcquired(dataset, acquisition,
       LG_CLIPBOARD_FILE_ERROR_NONE);
   remoteRequestSucceeds = true;
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
@@ -655,27 +655,27 @@ static void testRemoteFailures(void)
   malformed.node += 1U;
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  CHECK(lgClipboardFiles_remoteDataBegin(&malformed, 0) ==
+  CHECK(clipboardFiles_remoteDataBegin(&malformed, 0) ==
       LG_CLIPBOARD_RESULT_FAILED);
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
 
   dataset += 1U;
   request = beginRemoteList(dataset, &acquisition);
-  CHECK(lgClipboardFiles_remoteDataBegin(&request, 1) ==
+  CHECK(clipboardFiles_remoteDataBegin(&request, 1) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  CHECK(lgClipboardFiles_remoteDataChunk(&request, 0, NULL, 1) ==
+  CHECK(clipboardFiles_remoteDataChunk(&request, 0, NULL, 1) ==
       LG_CLIPBOARD_RESULT_FAILED);
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
 
   dataset += 1U;
   request = beginRemoteList(dataset, &acquisition);
-  CHECK(lgClipboardFiles_remoteDataBegin(&request, 1) ==
+  CHECK(clipboardFiles_remoteDataBegin(&request, 1) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  CHECK(lgClipboardFiles_remoteDataEnd(&request, 0) ==
+  CHECK(clipboardFiles_remoteDataEnd(&request, 0) ==
       LG_CLIPBOARD_RESULT_FAILED);
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
 
@@ -695,25 +695,25 @@ static void testRemoteFailures(void)
   };
   memcpy(wire, &entry, sizeof(entry));
   memcpy(wire + sizeof(entry), invalidName, sizeof(invalidName) - 1U);
-  CHECK(lgClipboardFiles_remoteDataBegin(&request, wireSize) ==
+  CHECK(clipboardFiles_remoteDataBegin(&request, wireSize) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboardFiles_remoteDataChunk(&request, 0, wire, wireSize) ==
+  CHECK(clipboardFiles_remoteDataChunk(&request, 0, wire, wireSize) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   previousFailures = remoteFailedCount;
   previousReleases = releaseCount;
-  CHECK(lgClipboardFiles_remoteDataEnd(&request, wireSize) ==
+  CHECK(clipboardFiles_remoteDataEnd(&request, wireSize) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   free(wire);
   checkRemoteFailure(dataset, previousFailures, previousReleases, true);
 
-  lgClipboardFiles_free();
+  clipboardFiles_free();
 }
 
 static void checkRemoteUri(uint64_t presentation, const char * name)
 {
   char * uri = NULL;
   size_t size = 0;
-  CHECK(lgClipboardFiles_getRemotePresentation(
+  CHECK(clipboardFiles_getRemotePresentation(
         presentation, "text/uri-list", &uri, &size));
   CHECK(uri);
   CHECK(size == strlen(uri));
@@ -733,7 +733,7 @@ static void * releasePresentation(void * opaque)
   ReleasePresentationTask * task = opaque;
   const int result = pthread_barrier_wait(task->barrier);
   CHECK(result == 0 || result == PTHREAD_BARRIER_SERIAL_THREAD);
-  lgClipboardFiles_remotePresentationRelease(task->presentation);
+  clipboardFiles_remotePresentationRelease(task->presentation);
   return NULL;
 }
 
@@ -759,9 +759,9 @@ static void releasePresentationConcurrently(uint64_t presentation)
 
 static void testRemoteLifecycle(void)
 {
-  CHECK(lgClipboardFiles_testFuseStopWake());
-  CHECK(lgClipboardFiles_testInit(UINT64_C(0x7311000073110000)));
-  CHECK(lgClipboardFiles_testUnsentRemoteOwnership());
+  CHECK(clipboardFiles_testFuseStopWake());
+  CHECK(clipboardFiles_testInit(UINT64_C(0x7311000073110000)));
+  CHECK(clipboardFiles_testUnsentRemoteOwnership());
   acquireCount = 0;
   releaseCount = 0;
   requestCount = 0;
@@ -772,59 +772,59 @@ static void testRemoteLifecycle(void)
     UINT64_C(0x73110001);
   const uint64_t first = completeRemoteOffer(firstDataset, "first.txt");
 
-  CHECK(lgClipboardFiles_testRemoteRead(first, 2, 0, 9));
+  CHECK(clipboardFiles_testRemoteRead(first, 2, 0, 9));
   LG_ClipboardFileRequest shortRead = remoteRequest;
-  CHECK(lgClipboardFiles_remoteDataBegin(&shortRead, 8) ==
+  CHECK(clipboardFiles_remoteDataBegin(&shortRead, 8) ==
       LG_CLIPBOARD_RESULT_FAILED);
 
-  CHECK(lgClipboardFiles_testRemoteRead(first, 2, 0, 9));
+  CHECK(clipboardFiles_testRemoteRead(first, 2, 0, 9));
   shortRead = remoteRequest;
-  CHECK(lgClipboardFiles_remoteDataBegin(&shortRead, 9) ==
+  CHECK(clipboardFiles_remoteDataBegin(&shortRead, 9) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   const uint8_t shortData[8] = { 0 };
-  CHECK(lgClipboardFiles_remoteDataChunk(&shortRead, 0,
+  CHECK(clipboardFiles_remoteDataChunk(&shortRead, 0,
         shortData, sizeof(shortData)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboardFiles_remoteDataEnd(&shortRead, sizeof(shortData)) ==
+  CHECK(clipboardFiles_remoteDataEnd(&shortRead, sizeof(shortData)) ==
       LG_CLIPBOARD_RESULT_FAILED);
 
   const uint64_t firstPresentation =
-    lgClipboardFiles_remotePresentationAcquire();
+    clipboardFiles_remotePresentationAcquire();
   CHECK(firstPresentation == first);
   checkRemoteUri(firstPresentation, "first.txt");
 
   const uint64_t secondDataset = KVMFR_CLIPBOARD_TRANSFER_HELPER |
     UINT64_C(0x73110002);
   completeRemoteOffer(secondDataset, "second.txt");
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 2U);
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 2U);
   CHECK(releaseCount == 0U);
   checkRemoteUri(firstPresentation, "first.txt");
-  lgClipboardFiles_remotePresentationRelease(firstPresentation);
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 1U);
+  clipboardFiles_remotePresentationRelease(firstPresentation);
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 1U);
   CHECK(releaseCount == 1U);
   CHECK(releasedDataset == firstDataset);
   CHECK(releasedAcquisition == first);
 
   const uint64_t secondPresentation =
-    lgClipboardFiles_remotePresentationAcquire();
+    clipboardFiles_remotePresentationAcquire();
   CHECK(secondPresentation != 0);
   checkRemoteUri(secondPresentation, "second.txt");
-  lgClipboardFiles_remotePresentationDelivered(secondPresentation);
-  lgClipboardFiles_remotePresentationRelease(secondPresentation);
+  clipboardFiles_remotePresentationDelivered(secondPresentation);
+  clipboardFiles_remotePresentationRelease(secondPresentation);
   const uint64_t thirdDataset = KVMFR_CLIPBOARD_TRANSFER_HELPER |
     UINT64_C(0x73110003);
   completeRemoteOffer(thirdDataset, "third.txt");
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 2U);
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 2U);
   CHECK(releaseCount == 1U);
-  CHECK(lgClipboardFiles_testBeginRemoteLookup(secondPresentation));
-  lgClipboardFiles_testExpireRemoteDeliveries();
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 2U);
+  CHECK(clipboardFiles_testBeginRemoteLookup(secondPresentation));
+  clipboardFiles_testExpireRemoteDeliveries();
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 2U);
   CHECK(releaseCount == 1U);
-  lgClipboardFiles_testEndRemoteLookup(secondPresentation);
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 1U);
+  clipboardFiles_testEndRemoteLookup(secondPresentation);
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 1U);
   CHECK(releaseCount == 2U);
   CHECK(releasedDataset == secondDataset);
-  lgClipboardFiles_remoteClear();
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 0U);
+  clipboardFiles_remoteClear();
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 0U);
   CHECK(releaseCount == 3U);
 
   for (uint64_t i = 0; i < 10; ++i)
@@ -834,16 +834,16 @@ static void testRemoteLifecycle(void)
     const uint64_t acquisition =
       completeRemoteOffer(dataset, "grace.txt");
     const uint64_t presentation =
-      lgClipboardFiles_remotePresentationAcquire();
+      clipboardFiles_remotePresentationAcquire();
     CHECK(presentation == acquisition);
     checkRemoteUri(presentation, "grace.txt");
-    lgClipboardFiles_remotePresentationDelivered(presentation);
-    lgClipboardFiles_remotePresentationRelease(presentation);
-    CHECK(lgClipboardFiles_testRemoteDatasetCount() <= 5U);
+    clipboardFiles_remotePresentationDelivered(presentation);
+    clipboardFiles_remotePresentationRelease(presentation);
+    CHECK(clipboardFiles_testRemoteDatasetCount() <= 5U);
   }
-  lgClipboardFiles_remoteClear();
-  lgClipboardFiles_testExpireRemoteDeliveries();
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 0U);
+  clipboardFiles_remoteClear();
+  clipboardFiles_testExpireRemoteDeliveries();
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 0U);
 
   for (uint64_t i = 0; i < 16; ++i)
   {
@@ -852,7 +852,7 @@ static void testRemoteLifecycle(void)
     const uint64_t oldAcquisition =
       completeRemoteOffer(oldDataset, "old.txt");
     const uint64_t presentation =
-      lgClipboardFiles_remotePresentationAcquire();
+      clipboardFiles_remotePresentationAcquire();
     CHECK(presentation == oldAcquisition);
     const uint64_t currentDataset = oldDataset + 1U;
     completeRemoteOffer(currentDataset, "current.txt");
@@ -860,27 +860,27 @@ static void testRemoteLifecycle(void)
     releasePresentationConcurrently(presentation);
     CHECK(releaseCount == previousReleases + 1U);
     CHECK(releasedDataset == oldDataset);
-    CHECK(lgClipboardFiles_testRemoteDatasetCount() == 1U);
-    lgClipboardFiles_remoteClear();
-    CHECK(lgClipboardFiles_testRemoteDatasetCount() == 0U);
+    CHECK(clipboardFiles_testRemoteDatasetCount() == 1U);
+    clipboardFiles_remoteClear();
+    CHECK(clipboardFiles_testRemoteDatasetCount() == 0U);
   }
 
   const uint64_t pendingDataset = KVMFR_CLIPBOARD_TRANSFER_HELPER |
     UINT64_C(0x73140001);
-  CHECK(lgClipboardFiles_remoteOffer(pendingDataset));
+  CHECK(clipboardFiles_remoteOffer(pendingDataset));
   CHECK(acquiredDataset == pendingDataset);
   const uint64_t pendingAcquisition = acquiredRequest;
   const uint64_t replacementDataset = pendingDataset + 1U;
   const unsigned previousCancels = cancelCount;
-  CHECK(lgClipboardFiles_remoteOffer(replacementDataset));
+  CHECK(clipboardFiles_remoteOffer(replacementDataset));
   CHECK(cancelCount == previousCancels + 1U);
   CHECK(cancelledDataset == pendingDataset);
   CHECK(cancelledRequest == pendingAcquisition);
   CHECK(cancelledReason == LG_CLIPBOARD_FILE_ERROR_CANCELLED);
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 1U);
-  lgClipboardFiles_remoteClear();
-  CHECK(lgClipboardFiles_testRemoteDatasetCount() == 0U);
-  lgClipboardFiles_free();
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 1U);
+  clipboardFiles_remoteClear();
+  CHECK(clipboardFiles_testRemoteDatasetCount() == 0U);
+  clipboardFiles_free();
 }
 
 static int testMount(void)
@@ -889,8 +889,8 @@ static int testMount(void)
     return 77;
   if (!getenv("XDG_RUNTIME_DIR"))
     CHECK(setenv("XDG_RUNTIME_DIR", "/tmp", 1) == 0);
-  CHECK(lgClipboardFiles_init());
-  lgClipboardFiles_free();
+  CHECK(clipboardFiles_init());
+  clipboardFiles_free();
   return 0;
 }
 

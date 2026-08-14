@@ -1817,8 +1817,8 @@ static void reportPlaybackDebug(LG_USBAudio * audio)
       !audio->playbackInvalidPackets)
     return;
 
-  DEBUG_INFO("USB playback: concealed %" PRIu64
-      " packets, invalid %" PRIu64,
+  DEBUG_INFO("USB playback: concealed %lu"
+      " packets, invalid %lu",
       audio->playbackConcealedPackets,
       audio->playbackInvalidPackets);
   audio->playbackConcealedPackets = 0;

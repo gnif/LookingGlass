@@ -20,97 +20,97 @@
 
 #include "core/clipboard_files.h"
 
-unsigned lgClipboardFilesStubRemoteOfferCount;
-unsigned lgClipboardFilesStubRemoteClearCount;
-uint64_t lgClipboardFilesStubRemoteDataset;
-bool lgClipboardFilesStubRemoteReady;
-bool lgClipboardFilesStubRemoteOfferResult = true;
+unsigned clipboardFilesStubRemoteOfferCount;
+unsigned clipboardFilesStubRemoteClearCount;
+uint64_t clipboardFilesStubRemoteDataset;
+bool clipboardFilesStubRemoteReady;
+bool clipboardFilesStubRemoteOfferResult = true;
 
-bool lgClipboardFiles_init(void) { return true; }
-void lgClipboardFiles_free(void) {}
-bool lgClipboardFiles_setLocal(const char * mime,
+bool clipboardFiles_init(void) { return true; }
+void clipboardFiles_free(void) {}
+bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size)
 {
   (void)mime; (void)data; (void)size; return false;
 }
-void lgClipboardFiles_clearLocal(void) {}
-bool lgClipboardFiles_getRemote(const char * mime, char ** data, size_t * size)
+void clipboardFiles_clearLocal(void) {}
+bool clipboardFiles_getRemote(const char * mime, char ** data, size_t * size)
 {
   (void)mime; (void)data; (void)size; return false;
 }
-uint64_t lgClipboardFiles_remotePresentationAcquire(void) { return 0; }
-bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+uint64_t clipboardFiles_remotePresentationAcquire(void) { return 0; }
+bool clipboardFiles_getRemotePresentation(uint64_t presentation,
     const char * mime, char ** data, size_t * size)
 {
   (void)presentation; (void)mime; (void)data; (void)size; return false;
 }
-void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
+void clipboardFiles_remotePresentationDelivered(uint64_t presentation)
 {
   (void)presentation;
 }
-void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
+void clipboardFiles_remotePresentationRelease(uint64_t presentation)
 {
   (void)presentation;
 }
-bool lgClipboardFiles_remoteReady(uint64_t dataset)
+bool clipboardFiles_remoteReady(uint64_t dataset)
 {
-  return lgClipboardFilesStubRemoteReady &&
-    dataset == lgClipboardFilesStubRemoteDataset;
+  return clipboardFilesStubRemoteReady &&
+    dataset == clipboardFilesStubRemoteDataset;
 }
-bool lgClipboardFiles_remoteOffer(uint64_t dataset)
+bool clipboardFiles_remoteOffer(uint64_t dataset)
 {
-  ++lgClipboardFilesStubRemoteOfferCount;
-  lgClipboardFilesStubRemoteDataset = dataset;
-  return lgClipboardFilesStubRemoteOfferResult;
+  ++clipboardFilesStubRemoteOfferCount;
+  clipboardFilesStubRemoteDataset = dataset;
+  return clipboardFilesStubRemoteOfferResult;
 }
-void lgClipboardFiles_remoteClear(void)
+void clipboardFiles_remoteClear(void)
 {
-  ++lgClipboardFilesStubRemoteClearCount;
-  lgClipboardFilesStubRemoteDataset = 0;
+  ++clipboardFilesStubRemoteClearCount;
+  clipboardFilesStubRemoteDataset = 0;
 }
-void lgClipboardFiles_providerUnavailable(void) {}
-void lgClipboardFiles_remoteAcquired(uint64_t dataset,
+void clipboardFiles_providerUnavailable(void) {}
+void clipboardFiles_remoteAcquired(uint64_t dataset,
     uint64_t acquisition, LG_ClipboardFileError error)
 {
   (void)dataset; (void)acquisition; (void)error;
 }
-LG_ClipboardResult lgClipboardFiles_remoteDataBegin(
+LG_ClipboardResult clipboardFiles_remoteDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint)
 {
   (void)request; (void)sizeHint; return LG_CLIPBOARD_RESULT_FAILED;
 }
-LG_ClipboardResult lgClipboardFiles_remoteDataChunk(
+LG_ClipboardResult clipboardFiles_remoteDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t offset,
     const void * data, size_t size)
 {
   (void)request; (void)offset; (void)data; (void)size;
   return LG_CLIPBOARD_RESULT_FAILED;
 }
-LG_ClipboardResult lgClipboardFiles_remoteDataEnd(
+LG_ClipboardResult clipboardFiles_remoteDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t size)
 {
   (void)request; (void)size; return LG_CLIPBOARD_RESULT_FAILED;
 }
-void lgClipboardFiles_remoteCancel(uint64_t dataset,
+void clipboardFiles_remoteCancel(uint64_t dataset,
     uint64_t request, LG_ClipboardFileError reason)
 {
   (void)dataset; (void)request; (void)reason;
 }
-void lgClipboardFiles_localAcquire(uint64_t dataset, uint64_t acquisition)
+void clipboardFiles_localAcquire(uint64_t dataset, uint64_t acquisition)
 {
   (void)dataset; (void)acquisition;
 }
-void lgClipboardFiles_localRelease(uint64_t dataset, uint64_t acquisition)
+void clipboardFiles_localRelease(uint64_t dataset, uint64_t acquisition)
 {
   (void)dataset; (void)acquisition;
 }
-void lgClipboardFiles_localRequest(const LG_ClipboardFileRequest * request)
+void clipboardFiles_localRequest(const LG_ClipboardFileRequest * request)
 {
   (void)request;
 }
-void lgClipboardFiles_localCancel(uint64_t dataset,
+void clipboardFiles_localCancel(uint64_t dataset,
     uint64_t request, LG_ClipboardFileError reason)
 {
   (void)dataset; (void)request; (void)reason;
 }
-void lgClipboardFiles_localReady(uint64_t request) { (void)request; }
+void clipboardFiles_localReady(uint64_t request) { (void)request; }

@@ -723,7 +723,7 @@ static void preSwapCallback(void * udata)
   if (!written)
     DEBUG_ERROR("Failed to write test capture to: %s", l_testCapture.path);
   else
-    DEBUG_INFO("Wrote test capture for frame %" PRIu64 " to: %s",
+    DEBUG_INFO("Wrote test capture for frame %lu to: %s",
         serial, l_testCapture.path);
   app_setState(APP_STATE_SHUTDOWN);
 #endif
@@ -1142,13 +1142,13 @@ static int renderThread(void * unused)
   {
     lgInput_setTransport(NULL, NULL);
     lgAudio_setTransport(NULL, NULL);
-    lgClipboard_setTransport(NULL, NULL);
+    clipboard_setTransport(NULL, NULL);
   }
   else
   {
     lgInput_dropTransport();
     lgAudio_dropTransport();
-    lgClipboard_dropTransport();
+    clipboard_dropTransport();
   }
 
   core_stopVideoThreads();
@@ -1206,7 +1206,7 @@ int main_cursorThread(void * unused)
       {
         lgInput_dropTransport();
         lgAudio_dropTransport();
-        lgClipboard_dropTransport();
+        clipboard_dropTransport();
         primaryLost();
       }
       else
@@ -1410,7 +1410,7 @@ int main_frameThread(void * unused)
       {
         lgInput_dropTransport();
         lgAudio_dropTransport();
-        lgClipboard_dropTransport();
+        clipboard_dropTransport();
         primaryLost();
       }
       else if (status == LG_TRANSPORT_END)
@@ -3322,7 +3322,7 @@ static int lg_run(void)
   frameTimingInit();
   lgInput_init();
   lgAudio_init();
-  if (!lgClipboard_init())
+  if (!clipboard_init())
     return -1;
 
 #ifdef ENABLE_TESTS
@@ -3654,7 +3654,7 @@ static int lg_run(void)
   g_state.ds->startup();
   const bool clipboardAvailable =
     g_state.ds->cbInit && g_state.ds->cbInit();
-  lgClipboard_setLocalAvailable(clipboardAvailable);
+  clipboard_setLocalAvailable(clipboardAvailable);
 
   if (g_params.captureOnStart)
     core_setGrab(true);
@@ -3876,7 +3876,7 @@ restart:
     g_state.transport.ops->getClipboardOps ?
       g_state.transport.ops->getClipboardOps(
           g_state.transport.handle, &clipboardOpaque) : NULL;
-  lgClipboard_setTransport(clipboardOps, clipboardOpaque);
+  clipboard_setTransport(clipboardOps, clipboardOpaque);
 
   DEBUG_INFO("Starting session");
   atomic_store_explicit(
@@ -3912,7 +3912,7 @@ restart:
     {
       lgInput_dropTransport();
       lgAudio_dropTransport();
-      lgClipboard_dropTransport();
+      clipboard_dropTransport();
       primaryLost();
       break;
     }
@@ -3942,7 +3942,7 @@ restart:
     videoSourceClearCursor(LG_VIDEO_SOURCE_PRIMARY);
     lgInput_dropTransport();
     lgAudio_dropTransport();
-    lgClipboard_dropTransport();
+    clipboard_dropTransport();
     g_state.transport.ops->disconnect(g_state.transport.handle);
 
     if (app_transitionState(APP_STATE_RESTART, APP_STATE_RUNNING))
@@ -3999,19 +3999,19 @@ static void lg_shutdown(void)
         g_state.transport.ops->sessionValid(g_state.transport.handle))
     {
       lgAudio_setTransport(NULL, NULL);
-      lgClipboard_setTransport(NULL, NULL);
+      clipboard_setTransport(NULL, NULL);
     }
     else
     {
       lgAudio_dropTransport();
-      lgClipboard_dropTransport();
+      clipboard_dropTransport();
     }
     lgTransport_destroy(&g_state.transport);
   }
 
   lgInput_free();
   lgAudio_free();
-  lgClipboard_setLocalAvailable(false);
+  clipboard_setLocalAvailable(false);
 
   if (e_startup)
   {
@@ -4030,7 +4030,7 @@ static void lg_shutdown(void)
 
   /* Clipboard sources own FUSE dataset references and are released by the
    * display server before the filesystem is unmounted. */
-  lgClipboard_free();
+  clipboard_free();
 
   // Input callbacks have stopped; the evdev state and overlays can go
   evdev_free();

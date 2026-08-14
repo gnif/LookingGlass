@@ -144,11 +144,11 @@ static struct Provider q;
 static struct Provider r;
 static struct Display  d;
 
-extern unsigned lgClipboardFilesStubRemoteOfferCount;
-extern unsigned lgClipboardFilesStubRemoteClearCount;
-extern uint64_t lgClipboardFilesStubRemoteDataset;
-extern bool lgClipboardFilesStubRemoteReady;
-extern bool lgClipboardFilesStubRemoteOfferResult;
+extern unsigned clipboardFilesStubRemoteOfferCount;
+extern unsigned clipboardFilesStubRemoteClearCount;
+extern uint64_t clipboardFilesStubRemoteDataset;
+extern bool clipboardFilesStubRemoteReady;
+extern bool clipboardFilesStubRemoteOfferResult;
 
 struct AppState  g_state;
 struct AppParams g_params;
@@ -457,14 +457,14 @@ static void dsRequest(LG_ClipboardRequest id, LG_ClipboardData type)
   d.reqId[no]            = id;
   d.reqType[no]          = type;
   if (d.autoData)
-    lgClipboard_data(id, d.autoType, d.autoBuf, d.autoSize);
+    clipboard_data(id, d.autoType, d.autoBuf, d.autoSize);
 }
 
 static void dsRequestReady(LG_ClipboardRequest id)
 {
   ++d.ready;
   if (d.autoBegin)
-    d.readyResult = lgClipboard_dataBegin(
+    d.readyResult = clipboard_dataBegin(
         id, LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN);
 }
 
@@ -512,21 +512,21 @@ static void init(void)
   atomic_init(&d.blockCancel, false);
   atomic_init(&d.cancelEntered, false);
   atomic_init(&d.releaseCancel, false);
-  lgClipboardFilesStubRemoteOfferCount = 0;
-  lgClipboardFilesStubRemoteClearCount = 0;
-  lgClipboardFilesStubRemoteDataset = 0;
-  lgClipboardFilesStubRemoteReady = false;
-  lgClipboardFilesStubRemoteOfferResult = true;
+  clipboardFilesStubRemoteOfferCount = 0;
+  clipboardFilesStubRemoteClearCount = 0;
+  clipboardFilesStubRemoteDataset = 0;
+  clipboardFilesStubRemoteReady = false;
+  clipboardFilesStubRemoteOfferResult = true;
   g_state.ds                  = &dsOps;
   g_params.clipboardToVM      = true;
   g_params.clipboardToLocal   = true;
-  CHECK(lgClipboard_init());
-  lgClipboard_setLocalAvailable(true);
+  CHECK(clipboard_init());
+  clipboard_setLocalAvailable(true);
 }
 
 static void bind(struct Provider * provider)
 {
-  lgClipboard_setFallback(&plainOps, provider);
+  clipboard_setFallback(&plainOps, provider);
   CHECK(provider->attach == 1);
 }
 
@@ -574,7 +574,7 @@ static void onReply(void * opaque, LG_ClipboardData type,
     CHECK(!buf);
 
   if (type != LG_CLIPBOARD_DATA_NONE && reply->next)
-    reply->nested = lgClipboard_request(
+    reply->nested = clipboard_request(
         LG_CLIPBOARD_DATA_TEXT, onReply, reply->next);
 }
 
@@ -589,13 +589,13 @@ static void testPreference(void)
 {
   init();
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
 
-  lgClipboard_setFallback(&statOps, &p);
+  clipboard_setFallback(&statOps, &p);
   CHECK(p.attach == 1);
   CHECK(p.notice == 1);
 
-  lgClipboard_setTransport(&statOps, &q);
+  clipboard_setTransport(&statOps, &q);
   CHECK(p.release == 1);
   CHECK(p.detach == 1);
   CHECK(q.attach == 1);
@@ -611,7 +611,7 @@ static void testPreference(void)
   const LG_ClipboardStatusFn staleFn = q.statFn;
   void * staleCtx = q.statCtx;
   CHECK(staleFn);
-  lgClipboard_dropTransport();
+  clipboard_dropTransport();
   CHECK(q.release == 0);
   CHECK(q.detach == 0);
   CHECK(p.attach == 2);
@@ -624,68 +624,68 @@ static void testPreference(void)
   staleFn(staleCtx, &stale);
   CHECK(p.attach == 2);
 
-  lgClipboard_setTransport(&statOps, &r);
+  clipboard_setTransport(&statOps, &r);
   CHECK(p.release == 2);
   CHECK(p.detach == 2);
   CHECK(r.attach == 1);
-  lgClipboard_setTransport(NULL, NULL);
+  clipboard_setTransport(NULL, NULL);
   CHECK(r.statClear == 1);
   CHECK(r.release == 1);
   CHECK(r.detach == 1);
   CHECK(p.attach == 3);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testFilePublication(void)
 {
   init();
-  lgClipboard_setFallback(&fileOps, &p);
+  clipboard_setFallback(&fileOps, &p);
 
   const uint64_t dataset = UINT64_C(0x123456789abcdef);
-  lgClipboard_notifyFiles(dataset);
+  clipboard_notifyFiles(dataset);
   CHECK(p.fileOffer == 1);
   CHECK(p.fileDataset[0] == dataset);
 
   const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
-  lgClipboard_notifyTypes(files, 1);
+  clipboard_notifyTypes(files, 1);
   CHECK(p.notice == 0);
   CHECK(p.fileOffer == 1);
 
-  lgClipboard_setTransport(&plainOps, &r);
+  clipboard_setTransport(&plainOps, &r);
   CHECK(r.attach == 1);
   CHECK(r.release == 1);
   const uint64_t replacement = dataset + 1U;
-  lgClipboard_notifyFiles(replacement);
+  clipboard_notifyFiles(replacement);
   CHECK(r.release == 2);
-  lgClipboard_dropTransport();
+  clipboard_dropTransport();
   CHECK(p.attach == 2);
   CHECK(p.fileOffer == 2);
   CHECK(p.fileDataset[1] == replacement);
 
-  lgClipboard_setTransport(&fileOps, &q);
+  clipboard_setTransport(&fileOps, &q);
   CHECK(q.attach == 1);
   CHECK(q.fileOffer == 1);
   CHECK(q.fileDataset[0] == replacement);
 
-  lgClipboard_dropTransport();
+  clipboard_dropTransport();
   CHECK(p.attach == 3);
   CHECK(p.fileOffer == 3);
   CHECK(p.fileDataset[2] == replacement);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testFileReplacement(void)
 {
   init();
   bind(&p);
-  lgClipboardFilesStubRemoteReady = true;
+  clipboardFilesStubRemoteReady = true;
 
   const uint64_t first = UINT64_C(0x2000000000000001);
   p.ev->fileOffer(p.evCtx, first);
-  CHECK(lgClipboardFilesStubRemoteOfferCount == 1);
-  CHECK(lgClipboardFilesStubRemoteDataset == first);
+  CHECK(clipboardFilesStubRemoteOfferCount == 1);
+  CHECK(clipboardFilesStubRemoteDataset == first);
   const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
   p.ev->notice(p.evCtx, files, 1);
   CHECK(d.notice == 1);
@@ -693,8 +693,8 @@ static void testFileReplacement(void)
 
   const LG_ClipboardData text[] = { LG_CLIPBOARD_DATA_TEXT };
   p.ev->notice(p.evCtx, text, 1);
-  CHECK(lgClipboardFilesStubRemoteClearCount == 1);
-  CHECK(lgClipboardFilesStubRemoteDataset == 0);
+  CHECK(clipboardFilesStubRemoteClearCount == 1);
+  CHECK(clipboardFilesStubRemoteDataset == 0);
   CHECK(d.notice == 2);
   CHECK(d.noticeType[1] == LG_CLIPBOARD_DATA_TEXT);
 
@@ -706,17 +706,17 @@ static void testFileReplacement(void)
     LG_CLIPBOARD_DATA_FILES,
   };
   p.ev->notice(p.evCtx, mixed, 2);
-  CHECK(lgClipboardFilesStubRemoteClearCount == 1);
-  CHECK(lgClipboardFilesStubRemoteDataset == mixedDataset);
+  CHECK(clipboardFilesStubRemoteClearCount == 1);
+  CHECK(clipboardFilesStubRemoteDataset == mixedDataset);
   CHECK(d.notice == 3);
   CHECK(d.noticeType[2] == LG_CLIPBOARD_DATA_FILES);
 
   p.ev->notice(p.evCtx, text, 1);
-  CHECK(lgClipboardFilesStubRemoteClearCount == 2);
-  CHECK(lgClipboardFilesStubRemoteDataset == 0);
+  CHECK(clipboardFilesStubRemoteClearCount == 2);
+  CHECK(clipboardFilesStubRemoteDataset == 0);
   CHECK(d.notice == 4);
   CHECK(d.noticeType[3] == LG_CLIPBOARD_DATA_TEXT);
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testFileFailure(void)
@@ -742,37 +742,37 @@ static void testFileFailure(void)
   CHECK(d.notice == 1);
   CHECK(d.release == 0);
 
-  lgClipboard_fileRemoteFailed(first);
+  clipboard_fileRemoteFailed(first);
   CHECK(d.release == 0);
-  CHECK(lgClipboardFilesStubRemoteDataset == second);
+  CHECK(clipboardFilesStubRemoteDataset == second);
 
-  lgClipboard_fileRemoteFailed(second);
+  clipboard_fileRemoteFailed(second);
   CHECK(d.release == 1);
-  lgClipboard_fileRemoteFailed(second);
+  clipboard_fileRemoteFailed(second);
   CHECK(d.release == 1);
 
   p.ev->notice(p.evCtx, text, 1);
   CHECK(d.notice == 2);
-  lgClipboardFilesStubRemoteOfferResult = false;
-  const unsigned previousClears = lgClipboardFilesStubRemoteClearCount;
+  clipboardFilesStubRemoteOfferResult = false;
+  const unsigned previousClears = clipboardFilesStubRemoteClearCount;
   p.ev->fileOffer(p.evCtx, second + 1U);
-  CHECK(lgClipboardFilesStubRemoteClearCount == previousClears + 1U);
+  CHECK(clipboardFilesStubRemoteClearCount == previousClears + 1U);
   p.ev->notice(p.evCtx, files, 1);
   CHECK(d.notice == 2);
   CHECK(d.release == 2);
 
   p.ev->notice(p.evCtx, text, 1);
   CHECK(d.notice == 3);
-  lgClipboardFilesStubRemoteOfferResult = true;
+  clipboardFilesStubRemoteOfferResult = true;
   const uint64_t pending = second + 2U;
   p.ev->fileOffer(p.evCtx, pending);
-  lgClipboard_fileRemoteFailed(pending);
+  clipboard_fileRemoteFailed(pending);
   CHECK(d.release == 2);
   p.ev->notice(p.evCtx, files, 1);
   CHECK(d.notice == 3);
   CHECK(d.release == 3);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 struct CallbackSerializationTask
@@ -784,7 +784,7 @@ struct CallbackSerializationTask
 static void * switchClipboardProvider(void * opaque)
 {
   struct CallbackSerializationTask * task = opaque;
-  lgClipboard_setTransport(&plainOps, &q);
+  clipboard_setTransport(&plainOps, &q);
   atomic_store_explicit(&task->switched, true, memory_order_release);
   return NULL;
 }
@@ -792,7 +792,7 @@ static void * switchClipboardProvider(void * opaque)
 static void * clearClipboardAvailability(void * opaque)
 {
   struct CallbackSerializationTask * task = opaque;
-  lgClipboard_setLocalAvailable(false);
+  clipboard_setLocalAvailable(false);
   atomic_store_explicit(
       &task->availabilityChanged, true, memory_order_release);
   return NULL;
@@ -814,7 +814,7 @@ static void testCallbackSerialization(void)
   init();
   bind(&p);
   const LG_ClipboardData text[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(text, 1);
+  clipboard_notifyTypes(text, 1);
   CHECK(p.ev->request(p.evCtx, 1, LG_CLIPBOARD_DATA_TEXT));
   CHECK(d.request == 1);
 
@@ -842,7 +842,7 @@ static void testCallbackSerialization(void)
         &task.availabilityChanged, memory_order_acquire));
   CHECK(d.cancel == 1);
   CHECK(d.cancelReason == LG_CLIPBOARD_CANCEL_UNAVAILABLE);
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testRequest(void)
@@ -857,8 +857,8 @@ static void testRequest(void)
 
   struct Reply a = { 0 };
   struct Reply b = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &a));
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &b));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &a));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &b));
   CHECK(p.request == 2);
   CHECK(p.reqId[0] != LG_CLIPBOARD_REQUEST_INVALID);
   CHECK(p.reqId[0] != p.reqId[1]);
@@ -880,7 +880,7 @@ static void testRequest(void)
   CHECK(b.size == sizeof(two));
   CHECK(memcmp(b.data, two, sizeof(two)) == 0);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testRemoteKeepsLocalRequest(void)
@@ -889,7 +889,7 @@ static void testRemoteKeepsLocalRequest(void)
   bind(&p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
 
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
   CHECK(p.notice == 1);
 
   g_params.clipboardToLocal = false;
@@ -898,7 +898,7 @@ static void testRemoteKeepsLocalRequest(void)
 
   /* A notice which is not published locally must not discard the local
    * clipboard advertised towards the guest. */
-  lgClipboard_setTransport(&plainOps, &q);
+  clipboard_setTransport(&plainOps, &q);
   CHECK(q.attach == 1);
   CHECK(q.notice == 1);
   CHECK(q.release == 0);
@@ -914,7 +914,7 @@ static void testRemoteKeepsLocalRequest(void)
   CHECK(d.request == 1);
   CHECK(d.reqType[0] == LG_CLIPBOARD_DATA_TEXT);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testPendingRemoteKeepsLocalRequest(void)
@@ -923,14 +923,14 @@ static void testPendingRemoteKeepsLocalRequest(void)
   bind(&p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
 
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
   CHECK(p.notice == 1);
-  lgClipboard_setLocalAvailable(false);
+  clipboard_setLocalAvailable(false);
 
   notice(&p, types, 1);
   CHECK(d.notice == 0);
 
-  lgClipboard_setLocalAvailable(true);
+  clipboard_setLocalAvailable(true);
   CHECK(d.notice == 1);
 
   /* Publishing a notice which arrived while the local clipboard was
@@ -939,7 +939,7 @@ static void testPendingRemoteKeepsLocalRequest(void)
   CHECK(d.request == 1);
   CHECK(d.reqType[0] == LG_CLIPBOARD_DATA_TEXT);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testInvalid(void)
@@ -954,12 +954,12 @@ static void testInvalid(void)
 
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
   notice(&p, types, 1);
-  CHECK(!lgClipboard_request(
+  CHECK(!clipboard_request(
       LG_CLIPBOARD_DATA_NONE, onReply, &(struct Reply) { 0 }));
-  CHECK(!lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, NULL, NULL));
+  CHECK(!clipboard_request(LG_CLIPBOARD_DATA_TEXT, NULL, NULL));
 
   struct Reply empty = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &empty));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &empty));
   remoteData(&p, LG_CLIPBOARD_REQUEST_INVALID,
       LG_CLIPBOARD_DATA_TEXT, NULL, 0);
   CHECK(empty.count == 0);
@@ -970,13 +970,13 @@ static void testInvalid(void)
   CHECK(empty.size == 0);
 
   struct Reply wrong = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &wrong));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &wrong));
   remoteData(&p, p.reqId[p.request - 1],
       LG_CLIPBOARD_DATA_PNG, NULL, 0);
   checkNone(&wrong);
 
   struct Reply null = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &null));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &null));
   remoteData(&p, p.reqId[p.request - 1],
       LG_CLIPBOARD_DATA_TEXT, NULL, 1);
   checkNone(&null);
@@ -984,7 +984,7 @@ static void testInvalid(void)
 #if SIZE_MAX > UINT32_MAX
   struct Reply large = { 0 };
   const uint8_t byte = 1;
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &large));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &large));
   remoteData(&p, p.reqId[p.request - 1], LG_CLIPBOARD_DATA_TEXT,
       &byte, (size_t)UINT32_MAX + 1);
   checkNone(&large);
@@ -992,11 +992,11 @@ static void testInvalid(void)
 
   p.reqOK = false;
   struct Reply failed = { 0 };
-  CHECK(!lgClipboard_request(
+  CHECK(!clipboard_request(
       LG_CLIPBOARD_DATA_TEXT, onReply, &failed));
   CHECK(failed.count == 0);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testCancel(void)
@@ -1008,7 +1008,7 @@ static void testCancel(void)
 
   notice(&p, text, 1);
   struct Reply newer = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &newer));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &newer));
   const LG_ClipboardRequest newerId = p.reqId[p.request - 1];
   notice(&p, png, 1);
   checkNone(&newer);
@@ -1016,7 +1016,7 @@ static void testCancel(void)
   CHECK(newer.count == 1);
 
   struct Reply released = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_PNG, onReply, &released));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_PNG, onReply, &released));
   const LG_ClipboardRequest releaseId = p.reqId[p.request - 1];
   p.ev->release(p.evCtx);
   checkNone(&released);
@@ -1025,39 +1025,39 @@ static void testCancel(void)
 
   notice(&p, text, 1);
   struct Reply unavailable = { 0 };
-  CHECK(lgClipboard_request(
+  CHECK(clipboard_request(
       LG_CLIPBOARD_DATA_TEXT, onReply, &unavailable));
   const LG_ClipboardRequest unavailableId = p.reqId[p.request - 1];
-  lgClipboard_setLocalAvailable(false);
+  clipboard_setLocalAvailable(false);
   checkNone(&unavailable);
   remoteData(&p, unavailableId, LG_CLIPBOARD_DATA_TEXT, "x", 1);
   CHECK(unavailable.count == 1);
 
-  lgClipboard_setLocalAvailable(true);
+  clipboard_setLocalAvailable(true);
   notice(&p, text, 1);
   struct Reply switched = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &switched));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &switched));
   const LG_ClipboardRequest switchedId = p.reqId[p.request - 1];
-  lgClipboard_setTransport(&plainOps, &q);
+  clipboard_setTransport(&plainOps, &q);
   checkNone(&switched);
   CHECK(p.oldEv);
   p.oldEv->data(p.oldCtx, switchedId, LG_CLIPBOARD_DATA_TEXT, "x", 1);
   CHECK(switched.count == 1);
   CHECK(d.release == 3);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testGeneration(void)
 {
   init();
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
-  lgClipboard_setFallback(&statOps, &p);
+  clipboard_notifyTypes(types, 1);
+  clipboard_setFallback(&statOps, &p);
   notice(&p, types, 1);
 
   struct Reply old = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &old));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &old));
   const LG_ClipboardRequest oldId = p.reqId[p.request - 1];
   setStatus(&p, true, 2);
   checkNone(&old);
@@ -1069,7 +1069,7 @@ static void testGeneration(void)
   CHECK(old.count == 1);
   notice(&p, types, 1);
   struct Reply next = { 0 };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &next));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &next));
   remoteData(&p, p.reqId[p.request - 1],
       LG_CLIPBOARD_DATA_TEXT, "new", 3);
   CHECK(next.count == 1);
@@ -1077,7 +1077,7 @@ static void testGeneration(void)
   CHECK(next.size == 3);
   CHECK(memcmp(next.data, "new", 3) == 0);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testLocal(void)
@@ -1088,11 +1088,11 @@ static void testLocal(void)
   const LG_ClipboardData many[LG_CLIPBOARD_DATA_NONE + 1] = { 0 };
   const LG_ClipboardData types[] =
     { LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_DATA_PNG };
-  lgClipboard_notifyTypes(NULL, 1);
-  lgClipboard_notifyTypes(bad, 1);
-  lgClipboard_notifyTypes(many, LG_CLIPBOARD_DATA_NONE + 1);
+  clipboard_notifyTypes(NULL, 1);
+  clipboard_notifyTypes(bad, 1);
+  clipboard_notifyTypes(many, LG_CLIPBOARD_DATA_NONE + 1);
   CHECK(p.notice == 0);
-  lgClipboard_notifyTypes(types, 2);
+  clipboard_notifyTypes(types, 2);
   CHECK(p.notice == 1);
 
   CHECK(!p.ev->request(
@@ -1103,9 +1103,9 @@ static void testLocal(void)
   CHECK(!p.ev->request(p.evCtx, 41, LG_CLIPBOARD_DATA_PNG));
 
   const LG_ClipboardRequest first = d.reqId[0];
-  lgClipboard_data(first + 100, LG_CLIPBOARD_DATA_TEXT, "x", 1);
+  clipboard_data(first + 100, LG_CLIPBOARD_DATA_TEXT, "x", 1);
   CHECK(p.data == 0);
-  lgClipboard_data(first, LG_CLIPBOARD_DATA_PNG, "x", 1);
+  clipboard_data(first, LG_CLIPBOARD_DATA_PNG, "x", 1);
   CHECK(p.data == 1);
   CHECK(p.dataId[0] == 40);
   CHECK(p.dataType[0] == LG_CLIPBOARD_DATA_NONE);
@@ -1113,9 +1113,9 @@ static void testLocal(void)
 
   CHECK(p.ev->request(p.evCtx, 41, LG_CLIPBOARD_DATA_PNG));
   const LG_ClipboardRequest second = d.reqId[1];
-  lgClipboard_abort(second + 100);
+  clipboard_abort(second + 100);
   CHECK(p.data == 1);
-  lgClipboard_abort(second);
+  clipboard_abort(second);
   CHECK(p.data == 2);
   CHECK(p.dataId[1] == 41);
   CHECK(p.dataType[1] == LG_CLIPBOARD_DATA_NONE);
@@ -1123,16 +1123,16 @@ static void testLocal(void)
   CHECK(p.ev->request(p.evCtx, 42, LG_CLIPBOARD_DATA_TEXT));
   const LG_ClipboardRequest third = d.reqId[2];
   const uint8_t buf[] = { 5, 6, 7 };
-  lgClipboard_data(third, LG_CLIPBOARD_DATA_TEXT, buf, sizeof(buf));
+  clipboard_data(third, LG_CLIPBOARD_DATA_TEXT, buf, sizeof(buf));
   CHECK(p.data == 3);
   CHECK(p.dataId[2] == 42);
   CHECK(p.dataType[2] == LG_CLIPBOARD_DATA_TEXT);
   CHECK(p.dataSize[2] == sizeof(buf));
   CHECK(memcmp(p.dataBuf[2], buf, sizeof(buf)) == 0);
-  lgClipboard_data(third, LG_CLIPBOARD_DATA_TEXT, buf, sizeof(buf));
+  clipboard_data(third, LG_CLIPBOARD_DATA_TEXT, buf, sizeof(buf));
   CHECK(p.data == 3);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testReentrant(void)
@@ -1144,7 +1144,7 @@ static void testReentrant(void)
 
   struct Reply second = { 0 };
   struct Reply first  = { .next = &second };
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &first));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, onReply, &first));
   remoteData(&p, p.reqId[0], LG_CLIPBOARD_DATA_TEXT, "a", 1);
   CHECK(first.count == 1);
   CHECK(first.nested);
@@ -1152,7 +1152,7 @@ static void testReentrant(void)
   remoteData(&p, p.reqId[1], LG_CLIPBOARD_DATA_TEXT, "b", 1);
   CHECK(second.count == 1);
 
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
   d.autoData = true;
   d.autoType = LG_CLIPBOARD_DATA_TEXT;
   d.autoBuf  = "local";
@@ -1164,27 +1164,27 @@ static void testReentrant(void)
   CHECK(p.dataSize[0] == 5);
   CHECK(memcmp(p.dataBuf[0], "local", 5) == 0);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testStreamLocal(void)
 {
   init();
-  lgClipboard_setFallback(&streamOps, &p);
+  clipboard_setFallback(&streamOps, &p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
 
   CHECK(p.ev->request(p.evCtx, 40, LG_CLIPBOARD_DATA_TEXT));
   const LG_ClipboardRequest transfer = d.reqId[0];
-  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+  CHECK(clipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
       LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_ACCEPTED);
   const uint8_t first[] = { 1, 2 };
   const uint8_t second[] = { 3, 4, 5 };
-  CHECK(lgClipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
+  CHECK(clipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(transfer, sizeof(first),
+  CHECK(clipboard_dataChunk(transfer, sizeof(first),
       second, sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataEnd(transfer,
+  CHECK(clipboard_dataEnd(transfer,
       sizeof(first) + sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(p.begin == 1);
   CHECK(p.streamId == 40);
@@ -1197,9 +1197,9 @@ static void testStreamLocal(void)
 
   CHECK(p.ev->request(p.evCtx, 41, LG_CLIPBOARD_DATA_TEXT));
   const LG_ClipboardRequest invalid = d.reqId[1];
-  CHECK(lgClipboard_dataBegin(invalid, LG_CLIPBOARD_DATA_TEXT, 1) ==
+  CHECK(clipboard_dataBegin(invalid, LG_CLIPBOARD_DATA_TEXT, 1) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(invalid, 1, first, 1) ==
+  CHECK(clipboard_dataChunk(invalid, 1, first, 1) ==
       LG_CLIPBOARD_RESULT_FAILED);
   CHECK(p.cancel == 1);
   CHECK(p.streamId == 41);
@@ -1210,20 +1210,20 @@ static void testStreamLocal(void)
   CHECK(d.cancel == 1);
   CHECK(d.cancelReason == LG_CLIPBOARD_CANCEL_REPLACED);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testStreamBlocked(void)
 {
   init();
-  lgClipboard_setFallback(&streamOps, &p);
+  clipboard_setFallback(&streamOps, &p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
   CHECK(p.ev->request(p.evCtx, 50, LG_CLIPBOARD_DATA_TEXT));
 
   p.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
   uint8_t data[] = { 7, 8, 9 };
-  lgClipboard_data(d.reqId[0], LG_CLIPBOARD_DATA_TEXT,
+  clipboard_data(d.reqId[0], LG_CLIPBOARD_DATA_TEXT,
       data, sizeof(data));
   CHECK(p.begin == 1);
   CHECK(p.chunk == 0);
@@ -1244,30 +1244,30 @@ static void testStreamBlocked(void)
   CHECK(p.ev->request(p.evCtx, 51, LG_CLIPBOARD_DATA_TEXT));
   const LG_ClipboardRequest transfer = d.reqId[1];
   p.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
-  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+  CHECK(clipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
       LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_BLOCKED);
   p.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
   d.autoBegin = true;
   p.ev->dataReady(p.evCtx, 51);
   CHECK(d.ready == 1);
   CHECK(d.readyResult == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataEnd(transfer, 0) ==
+  CHECK(clipboard_dataEnd(transfer, 0) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testStreamRemote(void)
 {
   init();
-  lgClipboard_setFallback(&streamOps, &p);
+  clipboard_setFallback(&streamOps, &p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
   notice(&p, types, 1);
 
   struct StreamSink sink = { 0 };
   initSink(&sink);
   LG_ClipboardRequest id;
-  CHECK(lgClipboard_requestStream(
+  CHECK(clipboard_requestStream(
       LG_CLIPBOARD_DATA_TEXT, &sinkOps, &sink, &id));
   CHECK(id == p.reqId[0]);
   CHECK(p.ev->dataBegin(p.evCtx, id, LG_CLIPBOARD_DATA_TEXT,
@@ -1281,7 +1281,7 @@ static void testStreamRemote(void)
       LG_CLIPBOARD_RESULT_BLOCKED);
   CHECK(sink.chunk == 1);
   sink.chunkResult = LG_CLIPBOARD_RESULT_ACCEPTED;
-  CHECK(lgClipboard_requestReady(id));
+  CHECK(clipboard_requestReady(id));
   CHECK(p.ready == 1);
   CHECK(p.streamId == id);
   CHECK(p.ev->dataChunk(p.evCtx, id, 0, data, sizeof(data)) ==
@@ -1295,19 +1295,19 @@ static void testStreamRemote(void)
 
   struct StreamSink cancel = { 0 };
   initSink(&cancel);
-  CHECK(lgClipboard_requestStream(
+  CHECK(clipboard_requestStream(
       LG_CLIPBOARD_DATA_TEXT, &sinkOps, &cancel, &id));
   p.ev->dataCancel(p.evCtx, id, LG_CLIPBOARD_CANCEL_ABORTED);
   CHECK(cancel.cancel == 1);
   CHECK(cancel.reason == LG_CLIPBOARD_CANCEL_ABORTED);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testRequestPublication(void)
 {
   init();
-  lgClipboard_setFallback(&streamOps, &p);
+  clipboard_setFallback(&streamOps, &p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
   notice(&p, types, 1);
 
@@ -1315,7 +1315,7 @@ static void testRequestPublication(void)
   initSink(&sink);
   sink.requireRequest = true;
   p.earlyBegin = true;
-  CHECK(lgClipboard_requestStream(LG_CLIPBOARD_DATA_TEXT,
+  CHECK(clipboard_requestStream(LG_CLIPBOARD_DATA_TEXT,
       &sinkOps, &sink, &sink.request));
   CHECK(sink.request == p.reqId[0]);
   CHECK(p.earlyResult == LG_CLIPBOARD_RESULT_ACCEPTED);
@@ -1324,7 +1324,7 @@ static void testRequestPublication(void)
       LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(sink.end == 1);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 static void testStreamLegacy(void)
@@ -1332,19 +1332,19 @@ static void testStreamLegacy(void)
   init();
   bind(&p);
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
 
   CHECK(p.ev->request(p.evCtx, 60, LG_CLIPBOARD_DATA_TEXT));
   const LG_ClipboardRequest transfer = d.reqId[0];
   const uint8_t first[] = { 2, 4 };
   const uint8_t second[] = { 6, 8 };
-  CHECK(lgClipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
+  CHECK(clipboard_dataBegin(transfer, LG_CLIPBOARD_DATA_TEXT,
       LG_CLIPBOARD_SIZE_UNKNOWN) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
+  CHECK(clipboard_dataChunk(transfer, 0, first, sizeof(first)) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(transfer, sizeof(first), second,
+  CHECK(clipboard_dataChunk(transfer, sizeof(first), second,
       sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataEnd(transfer, 4) ==
+  CHECK(clipboard_dataEnd(transfer, 4) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(p.data == 1);
   CHECK(p.dataId[0] == 60);
@@ -1357,7 +1357,7 @@ static void testStreamLegacy(void)
   initSink(&sink);
   sink.beginResult = LG_CLIPBOARD_RESULT_BLOCKED;
   LG_ClipboardRequest id;
-  CHECK(lgClipboard_requestStream(
+  CHECK(clipboard_requestStream(
       LG_CLIPBOARD_DATA_TEXT, &sinkOps, &sink, &id));
   const uint8_t remote[] = { 9, 8, 7 };
   remoteData(&p, id, LG_CLIPBOARD_DATA_TEXT, remote, sizeof(remote));
@@ -1365,7 +1365,7 @@ static void testStreamLegacy(void)
   CHECK(sink.chunk == 0);
 
   sink.beginResult = LG_CLIPBOARD_RESULT_ACCEPTED;
-  CHECK(lgClipboard_requestReady(id));
+  CHECK(clipboard_requestReady(id));
   CHECK(p.ready == 0);
   CHECK(sink.begin == 2);
   CHECK(sink.chunk == 1);
@@ -1373,7 +1373,7 @@ static void testStreamLegacy(void)
   CHECK(sink.size == sizeof(remote));
   CHECK(memcmp(sink.data, remote, sizeof(remote)) == 0);
 
-  lgClipboard_free();
+  clipboard_free();
 }
 
 struct Test

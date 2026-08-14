@@ -443,7 +443,7 @@ static void pollFire(unsigned int no, uint32_t events)
       pollCleanup(&rec.poll[i]);
 }
 
-void lgClipboard_notifyTypes(
+void clipboard_notifyTypes(
     const LG_ClipboardData types[], size_t count)
 {
   CHECK(rec.noticeN < ARRAY_LENGTH(rec.notice));
@@ -453,7 +453,7 @@ void lgClipboard_notifyTypes(
   notice->count = count;
 }
 
-void lgClipboard_release(void)
+void clipboard_release(void)
 {
   if (rec.expectReleaseLocked)
   {
@@ -464,13 +464,13 @@ void lgClipboard_release(void)
   ++rec.releaseN;
 }
 
-void lgClipboard_abort(LG_ClipboardRequest request)
+void clipboard_abort(LG_ClipboardRequest request)
 {
   CHECK(rec.abortN < ARRAY_LENGTH(rec.abort));
   rec.abort[rec.abortN++] = request;
 }
 
-void lgClipboard_data(LG_ClipboardRequest request,
+void clipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size)
 {
   CHECK(rec.dataN < ARRAY_LENGTH(rec.data));
@@ -482,7 +482,7 @@ void lgClipboard_data(LG_ClipboardRequest request,
   memcpy(notice->data, data, size);
 }
 
-LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
+LG_ClipboardResult clipboard_dataBegin(LG_ClipboardRequest request,
     LG_ClipboardData type, uint64_t sizeHint)
 {
   struct StreamNotice * stream = &rec.streamData;
@@ -493,7 +493,7 @@ LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
   return rec.beginResult;
 }
 
-LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
+LG_ClipboardResult clipboard_dataChunk(LG_ClipboardRequest request,
     uint64_t offset, const void * data, size_t size)
 {
   const LG_ClipboardResult result = rec.chunkResult;
@@ -518,7 +518,7 @@ LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
   return result;
 }
 
-LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
+LG_ClipboardResult clipboard_dataEnd(LG_ClipboardRequest request,
     uint64_t finalSize)
 {
   const LG_ClipboardResult result = rec.endResult;
@@ -535,7 +535,7 @@ LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
   return result;
 }
 
-bool lgClipboard_requestStream(LG_ClipboardData type,
+bool clipboard_requestStream(LG_ClipboardData type,
     const LG_ClipboardStreamOps * stream, void * opaque,
     LG_ClipboardRequest * request)
 {
@@ -562,14 +562,14 @@ bool lgClipboard_requestStream(LG_ClipboardData type,
   return rec.requestOK;
 }
 
-bool lgClipboard_requestReady(LG_ClipboardRequest request)
+bool clipboard_requestReady(LG_ClipboardRequest request)
 {
   CHECK(request == rec.requestId);
   ++rec.requestReadyN;
   return true;
 }
 
-bool lgClipboardFiles_setLocal(const char * mime,
+bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size)
 {
   CHECK(mime);
@@ -583,18 +583,18 @@ bool lgClipboardFiles_setLocal(const char * mime,
   return rec.fileSetOK;
 }
 
-void lgClipboardFiles_clearLocal(void)
+void clipboardFiles_clearLocal(void)
 {
   ++rec.fileClearN;
 }
 
-uint64_t lgClipboardFiles_remotePresentationAcquire(void)
+uint64_t clipboardFiles_remotePresentationAcquire(void)
 {
   ++rec.presentationAcquireN;
   return rec.presentationOK ? 1000U + rec.presentationAcquireN : 0;
 }
 
-bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+bool clipboardFiles_getRemotePresentation(uint64_t presentation,
     const char * mime, char ** data, size_t * size)
 {
   CHECK(presentation >= 1001U);
@@ -614,7 +614,7 @@ bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
   return true;
 }
 
-void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
+void clipboardFiles_remotePresentationDelivered(uint64_t presentation)
 {
   CHECK(presentation);
   CHECK(rec.presentationDeliveredN <
@@ -622,7 +622,7 @@ void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
   rec.presentationDelivered[rec.presentationDeliveredN++] = presentation;
 }
 
-void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
+void clipboardFiles_remotePresentationRelease(uint64_t presentation)
 {
   CHECK(presentation);
   CHECK(rec.presentationReleaseN <

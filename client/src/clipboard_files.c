@@ -503,13 +503,13 @@ static void performRemoteAction(struct RemoteAction action)
   switch (action.type)
   {
     case REMOTE_ACTION_CANCEL_ACQUISITION:
-      if (!lgClipboard_fileCancel(action.dataset, action.acquisition,
+      if (!clipboard_fileCancel(action.dataset, action.acquisition,
             LG_CLIPBOARD_FILE_ERROR_CANCELLED))
         DEBUG_WARN("Failed to cancel retired clipboard file acquisition");
       break;
 
     case REMOTE_ACTION_RELEASE_ACQUISITION:
-      if (!lgClipboard_fileRelease(action.dataset, action.acquisition))
+      if (!clipboard_fileRelease(action.dataset, action.acquisition))
         DEBUG_WARN("Failed to release retired clipboard file acquisition");
       break;
 
@@ -754,7 +754,7 @@ static void failRemoteRequest(struct RemoteRequest * request, int error)
     return;
   if (request->reply == REMOTE_REPLY_INITIAL)
     DEBUG_WARN("Remote clipboard file root list failed: "
-        "dataset=%" PRIu64 ", request=%" PRIu64 ", error=%d (%s)",
+        "dataset=%lu, request=%lu, error=%d (%s)",
         request->request.dataset, request->request.request,
         error, strerror(error));
   unregisterRemoteInterrupt(request);
@@ -768,7 +768,7 @@ static void failRemoteRequest(struct RemoteRequest * request, int error)
   freeRemoteRequest(request);
   performRemoteAction(action);
   if (failedDataset)
-    lgClipboard_fileRemoteFailed(failedDataset);
+    clipboard_fileRemoteFailed(failedDataset);
 }
 
 static void completeRemoteRequest(struct RemoteRequest * request)
@@ -1014,9 +1014,9 @@ static void finishRemoteRequest(struct RemoteRequest * request)
       if (current)
       {
         DEBUG_INFO("Remote clipboard file root list ready; publishing: "
-            "dataset=%" PRIu64 ", request=%" PRIu64,
+            "dataset=%lu, request=%lu",
             datasetId, requestId);
-        lgClipboard_fileRemoteReady(datasetId);
+        clipboard_fileRemoteReady(datasetId);
       }
       completeRemoteRequest(request);
       return;
@@ -1067,7 +1067,7 @@ static void interruptRemoteRequest(fuse_req_t fuseRequest, void * opaque)
 
   const LG_ClipboardFileRequest descriptor = request->request;
   if (request->transportStarted &&
-      !lgClipboard_fileCancel(descriptor.dataset, descriptor.request,
+      !clipboard_fileCancel(descriptor.dataset, descriptor.request,
         LG_CLIPBOARD_FILE_ERROR_CANCELLED))
     DEBUG_WARN("Failed to cancel interrupted clipboard file request");
   fuse_reply_err(fuseRequest, EINTR);
@@ -1142,7 +1142,7 @@ static bool requestRemote(struct RemoteDataset * dataset,
   struct RemoteRequest * live = files.remoteRequests;
   while (live && live != request)
     live = live->next;
-  const bool sent = live && lgClipboard_fileRequest(&descriptor);
+  const bool sent = live && clipboard_fileRequest(&descriptor);
   if (sent)
     request->transportStarted = true;
   LG_UNLOCK(files.lock);
@@ -2019,7 +2019,7 @@ static struct LocalNode * addLocalNode(struct LocalDataset * dataset,
   return node;
 }
 
-bool lgClipboardFiles_setLocal(const char * mime,
+bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size)
 {
   if (!mime || (!data && size) ||
@@ -2099,7 +2099,7 @@ bool lgClipboardFiles_setLocal(const char * mime,
   const uint64_t datasetId = dataset->dataset;
   LG_UNLOCK(files.lock);
   freeLocalDataset(retired);
-  lgClipboard_notifyFiles(datasetId);
+  clipboard_notifyFiles(datasetId);
   return true;
 
 invalid:
@@ -2107,7 +2107,7 @@ invalid:
   return false;
 }
 
-void lgClipboardFiles_clearLocal(void)
+void clipboardFiles_clearLocal(void)
 {
   LG_LOCK(files.lock);
   struct LocalDataset * retired = NULL;
@@ -2206,7 +2206,7 @@ error:
   return false;
 }
 
-bool lgClipboardFiles_getRemote(const char * mime,
+bool clipboardFiles_getRemote(const char * mime,
     char ** data, size_t * size)
 {
   if (!mime || !data || !size)
@@ -2221,7 +2221,7 @@ bool lgClipboardFiles_getRemote(const char * mime,
   return result;
 }
 
-uint64_t lgClipboardFiles_remotePresentationAcquire(void)
+uint64_t clipboardFiles_remotePresentationAcquire(void)
 {
   LG_LOCK(files.lock);
   struct RemoteDataset * dataset = files.remoteCurrent;
@@ -2233,7 +2233,7 @@ uint64_t lgClipboardFiles_remotePresentationAcquire(void)
   return presentation;
 }
 
-bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+bool clipboardFiles_getRemotePresentation(uint64_t presentation,
     const char * mime, char ** data, size_t * size)
 {
   if (!presentation || !mime || !data || !size)
@@ -2249,7 +2249,7 @@ bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
   return result;
 }
 
-void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
+void clipboardFiles_remotePresentationDelivered(uint64_t presentation)
 {
   if (!presentation)
     return;
@@ -2276,7 +2276,7 @@ void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation)
     reapRemoteDeliveries(true);
 }
 
-void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
+void clipboardFiles_remotePresentationRelease(uint64_t presentation)
 {
   if (!presentation)
     return;
@@ -2289,7 +2289,7 @@ void lgClipboardFiles_remotePresentationRelease(uint64_t presentation)
   performRemoteAction(action);
 }
 
-bool lgClipboardFiles_remoteReady(uint64_t dataset)
+bool clipboardFiles_remoteReady(uint64_t dataset)
 {
   LG_LOCK(files.lock);
   struct RemoteDataset * found = remoteDatasetByIdNL(dataset);
@@ -2314,16 +2314,16 @@ static void cancelRetiredInitialRequest(struct RemoteRequest * request)
     return;
   const LG_ClipboardFileRequest descriptor = request->request;
   if (request->transportStarted &&
-      !lgClipboard_fileCancel(descriptor.dataset, descriptor.request,
+      !clipboard_fileCancel(descriptor.dataset, descriptor.request,
         LG_CLIPBOARD_FILE_ERROR_CANCELLED))
     DEBUG_WARN("Failed to cancel retired clipboard file request");
   unregisterRemoteInterrupt(request);
   completeRemoteRequest(request);
 }
 
-bool lgClipboardFiles_remoteOffer(uint64_t datasetId)
+bool clipboardFiles_remoteOffer(uint64_t datasetId)
 {
-  DEBUG_INFO("Remote clipboard file offer received: dataset=%" PRIu64,
+  DEBUG_INFO("dataset=%lu",
       datasetId);
   if (!datasetId)
     return false;
@@ -2405,16 +2405,16 @@ bool lgClipboardFiles_remoteOffer(uint64_t datasetId)
   cancelRetiredInitialRequest(cancelled);
   performRemoteAction(previousAction);
   reapRemoteDeliveries(true);
-  if (!lgClipboard_fileAcquire(datasetId, acquisition))
+  if (!clipboard_fileAcquire(datasetId, acquisition))
   {
-    lgClipboardFiles_remoteCancel(datasetId, acquisition,
+    clipboardFiles_remoteCancel(datasetId, acquisition,
         LG_CLIPBOARD_FILE_ERROR_DISCONNECTED);
     return false;
   }
   return true;
 }
 
-void lgClipboardFiles_remoteClear(void)
+void clipboardFiles_remoteClear(void)
 {
   LG_LOCK(files.lock);
   struct RemoteDataset * previous = files.remoteCurrent;
@@ -2432,7 +2432,7 @@ void lgClipboardFiles_remoteClear(void)
   performRemoteAction(action);
 }
 
-void lgClipboardFiles_providerUnavailable(void)
+void clipboardFiles_providerUnavailable(void)
 {
   if (!files.initialized)
     return;
@@ -2509,7 +2509,7 @@ void lgClipboardFiles_providerUnavailable(void)
   }
 }
 
-void lgClipboardFiles_remoteAcquired(uint64_t datasetId,
+void clipboardFiles_remoteAcquired(uint64_t datasetId,
     uint64_t acquisition, LG_ClipboardFileError error)
 {
   LG_LOCK(files.lock);
@@ -2530,16 +2530,13 @@ void lgClipboardFiles_remoteAcquired(uint64_t datasetId,
     retireRemoteDatasetNL(dataset) : (struct RemoteAction) { 0 };
   LG_UNLOCK(files.lock);
   if (valid && error)
-    DEBUG_WARN("Remote clipboard file acquisition failed: "
-        "dataset=%" PRIu64 ", acquisition=%" PRIu64 ", error=%u (%s)",
+    DEBUG_WARN("failed: dataset=%lu, acquisition=%lu, error=%u (%s)",
         datasetId, acquisition, (unsigned)error, fileErrorName(error));
   else if (valid)
-    DEBUG_INFO("Remote clipboard file acquisition succeeded: "
-        "dataset=%" PRIu64 ", acquisition=%" PRIu64,
-        datasetId, acquisition);
+    DEBUG_INFO("dataset=%lu, acquisition=%lu", datasetId, acquisition);
   performRemoteAction(action);
   if (failedDataset)
-    lgClipboard_fileRemoteFailed(failedDataset);
+    clipboard_fileRemoteFailed(failedDataset);
   if (!pinned)
     return;
   if (!requestRemote(dataset, root, LG_CLIPBOARD_FILE_LIST,
@@ -2552,7 +2549,7 @@ void lgClipboardFiles_remoteAcquired(uint64_t datasetId,
     LG_UNLOCK(files.lock);
     performRemoteAction(failed);
     if (unsentDataset)
-      lgClipboard_fileRemoteFailed(unsentDataset);
+      clipboard_fileRemoteFailed(unsentDataset);
   }
   releaseRemoteOperation(dataset);
 }
@@ -2569,7 +2566,7 @@ static bool sameRemoteFileRequest(
     request->request.operation == descriptor->operation;
 }
 
-LG_ClipboardResult lgClipboardFiles_remoteDataBegin(
+LG_ClipboardResult clipboardFiles_remoteDataBegin(
     const LG_ClipboardFileRequest * descriptor, uint64_t sizeHint)
 {
   if (!descriptor)
@@ -2595,7 +2592,7 @@ LG_ClipboardResult lgClipboardFiles_remoteDataBegin(
     LG_CLIPBOARD_RESULT_FAILED;
 }
 
-LG_ClipboardResult lgClipboardFiles_remoteDataChunk(
+LG_ClipboardResult clipboardFiles_remoteDataChunk(
     const LG_ClipboardFileRequest * descriptor, uint64_t responseOffset,
     const void * data, size_t size)
 {
@@ -2629,7 +2626,7 @@ LG_ClipboardResult lgClipboardFiles_remoteDataChunk(
     LG_CLIPBOARD_RESULT_FAILED;
 }
 
-LG_ClipboardResult lgClipboardFiles_remoteDataEnd(
+LG_ClipboardResult clipboardFiles_remoteDataEnd(
     const LG_ClipboardFileRequest * descriptor, uint64_t finalSize)
 {
   if (!descriptor)
@@ -2653,7 +2650,7 @@ LG_ClipboardResult lgClipboardFiles_remoteDataEnd(
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
 
-void lgClipboardFiles_remoteCancel(uint64_t dataset,
+void clipboardFiles_remoteCancel(uint64_t dataset,
     uint64_t requestId, LG_ClipboardFileError reason)
 {
   LG_LOCK(files.lock);
@@ -2682,13 +2679,13 @@ void lgClipboardFiles_remoteCancel(uint64_t dataset,
   LG_UNLOCK(files.lock);
   if (acquisition)
     DEBUG_WARN("Remote clipboard file acquisition failed: "
-        "dataset=%" PRIu64 ", acquisition=%" PRIu64 ", error=%u (%s)",
+        "dataset=%lu, acquisition=%lu, error=%u (%s)",
         dataset, requestId, (unsigned)reason, fileErrorName(reason));
   if (acquisition && !request)
   {
     performRemoteAction(action);
     if (failedDataset)
-      lgClipboard_fileRemoteFailed(failedDataset);
+      clipboard_fileRemoteFailed(failedDataset);
     return;
   }
   if (!request || request->request.dataset != dataset)
@@ -2696,16 +2693,16 @@ void lgClipboardFiles_remoteCancel(uint64_t dataset,
     failRemoteRequest(request, EIO);
     performRemoteAction(action);
     if (failedDataset)
-      lgClipboard_fileRemoteFailed(failedDataset);
+      clipboard_fileRemoteFailed(failedDataset);
     return;
   }
   failRemoteRequest(request, errnoFromFileError(reason));
   performRemoteAction(action);
   if (failedDataset)
-    lgClipboard_fileRemoteFailed(failedDataset);
+    clipboard_fileRemoteFailed(failedDataset);
 }
 
-void lgClipboardFiles_localAcquire(uint64_t wireDataset,
+void clipboardFiles_localAcquire(uint64_t wireDataset,
     uint64_t acquisition)
 {
   LG_ClipboardFileError error = LG_CLIPBOARD_FILE_ERROR_STALE;
@@ -2729,10 +2726,10 @@ void lgClipboardFiles_localAcquire(uint64_t wireDataset,
   LG_UNLOCK(files.lock);
   if (error)
     free(item);
-  lgClipboard_fileAcquired(wireDataset, acquisition, error);
+  clipboard_fileAcquired(wireDataset, acquisition, error);
 }
 
-void lgClipboardFiles_localRelease(uint64_t wireDataset,
+void clipboardFiles_localRelease(uint64_t wireDataset,
     uint64_t acquisition)
 {
   LG_LOCK(files.lock);
@@ -2774,14 +2771,14 @@ static bool sendJobCall(struct LocalJob * job, int operation,
     switch (operation)
     {
       case 0:
-        result = lgClipboard_fileDataBegin(&job->request, offset);
+        result = clipboard_fileDataBegin(&job->request, offset);
         break;
       case 1:
-        result = lgClipboard_fileDataChunk(
+        result = clipboard_fileDataChunk(
             &job->request, offset, data, size, end);
         break;
       default:
-        result = lgClipboard_fileDataEnd(&job->request, offset);
+        result = clipboard_fileDataEnd(&job->request, offset);
         break;
     }
     if (result == LG_CLIPBOARD_RESULT_ACCEPTED)
@@ -3256,7 +3253,7 @@ static int localWorker(void * opaque)
         localList(job) : localRead(job);
     if (error && error != LG_CLIPBOARD_FILE_ERROR_CANCELLED &&
         !atomic_load_explicit(&job->cancelled, memory_order_acquire))
-      lgClipboard_fileCancel(job->request.dataset,
+      clipboard_fileCancel(job->request.dataset,
           job->request.request, error);
     LG_LOCK(files.lock);
     struct LocalJob ** link = &files.activeJobs;
@@ -3275,7 +3272,7 @@ static int localWorker(void * opaque)
   }
 }
 
-void lgClipboardFiles_localRequest(
+void clipboardFiles_localRequest(
     const LG_ClipboardFileRequest * request)
 {
   if (!request || !request->request ||
@@ -3289,14 +3286,14 @@ void lgClipboardFiles_localRequest(
         request->length > (uint64_t)INT64_MAX - request->offset)))
   {
     if (request)
-      lgClipboard_fileCancel(request->dataset, request->request,
+      clipboard_fileCancel(request->dataset, request->request,
           LG_CLIPBOARD_FILE_ERROR_INVALID);
     return;
   }
   struct LocalJob * job = calloc(1, sizeof(*job));
   if (!job)
   {
-    lgClipboard_fileCancel(request->dataset, request->request,
+    clipboard_fileCancel(request->dataset, request->request,
         LG_CLIPBOARD_FILE_ERROR_NO_MEMORY);
     return;
   }
@@ -3304,7 +3301,7 @@ void lgClipboardFiles_localRequest(
   if (!job->ready)
   {
     free(job);
-    lgClipboard_fileCancel(request->dataset, request->request,
+    clipboard_fileCancel(request->dataset, request->request,
         LG_CLIPBOARD_FILE_ERROR_NO_MEMORY);
     return;
   }
@@ -3327,11 +3324,11 @@ void lgClipboardFiles_localRequest(
   }
   lgFreeEvent(job->ready);
   free(job);
-  lgClipboard_fileCancel(request->dataset, request->request,
+  clipboard_fileCancel(request->dataset, request->request,
       LG_CLIPBOARD_FILE_ERROR_STALE);
 }
 
-void lgClipboardFiles_localCancel(uint64_t dataset,
+void clipboardFiles_localCancel(uint64_t dataset,
     uint64_t request, LG_ClipboardFileError reason)
 {
   (void)reason;
@@ -3363,7 +3360,7 @@ void lgClipboardFiles_localCancel(uint64_t dataset,
   freeLocalDataset(retired);
 }
 
-void lgClipboardFiles_localReady(uint64_t request)
+void clipboardFiles_localReady(uint64_t request)
 {
   LG_LOCK(files.lock);
   for (struct LocalJob * job = files.activeJobs; job; job = job->next)
@@ -3397,9 +3394,9 @@ static void freeState(void)
   {
     struct RemoteDataset * next = remote->next;
     if (remote->acquired)
-      lgClipboard_fileRelease(remote->dataset, remote->acquisition);
+      clipboard_fileRelease(remote->dataset, remote->acquisition);
     else if (remote->acquiring)
-      lgClipboard_fileCancel(remote->dataset, remote->acquisition,
+      clipboard_fileCancel(remote->dataset, remote->acquisition,
           LG_CLIPBOARD_FILE_ERROR_CANCELLED);
     free(remote);
     remote = next;
@@ -3420,7 +3417,7 @@ static void freeState(void)
   }
 }
 
-bool lgClipboardFiles_init(void)
+bool clipboardFiles_init(void)
 {
   if (filesLockInitialized)
     return false;
@@ -3512,12 +3509,12 @@ bool lgClipboardFiles_init(void)
   return true;
 
 failed:
-  lgClipboardFiles_free();
+  clipboardFiles_free();
   return false;
 }
 
 #ifdef ENABLE_TESTS
-bool lgClipboardFiles_testFuseStopWake(void)
+bool clipboardFiles_testFuseStopWake(void)
 {
   const int stopFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
   if (stopFd < 0)
@@ -3528,12 +3525,12 @@ bool lgClipboardFiles_testFuseStopWake(void)
   return result;
 }
 
-bool lgClipboardFiles_testUnsentRemoteOwnership(void)
+bool clipboardFiles_testUnsentRemoteOwnership(void)
 {
   return finishUnsentRemoteRequest(0);
 }
 
-bool lgClipboardFiles_testInit(uint64_t nonce)
+bool clipboardFiles_testInit(uint64_t nonce)
 {
   if (filesLockInitialized)
     return false;
@@ -3556,7 +3553,7 @@ bool lgClipboardFiles_testInit(uint64_t nonce)
   return true;
 }
 
-size_t lgClipboardFiles_testRemoteDatasetCount(void)
+size_t clipboardFiles_testRemoteDatasetCount(void)
 {
   if (!filesLockInitialized)
     return 0;
@@ -3569,7 +3566,7 @@ size_t lgClipboardFiles_testRemoteDatasetCount(void)
   return count;
 }
 
-void lgClipboardFiles_testExpireRemoteDeliveries(void)
+void clipboardFiles_testExpireRemoteDeliveries(void)
 {
   if (!filesLockInitialized)
     return;
@@ -3582,7 +3579,7 @@ void lgClipboardFiles_testExpireRemoteDeliveries(void)
   reapRemoteDeliveries(false);
 }
 
-bool lgClipboardFiles_testBeginRemoteLookup(uint64_t presentation)
+bool clipboardFiles_testBeginRemoteLookup(uint64_t presentation)
 {
   LG_LOCK(files.lock);
   struct RemoteDataset * dataset =
@@ -3593,7 +3590,7 @@ bool lgClipboardFiles_testBeginRemoteLookup(uint64_t presentation)
   return result;
 }
 
-void lgClipboardFiles_testEndRemoteLookup(uint64_t presentation)
+void clipboardFiles_testEndRemoteLookup(uint64_t presentation)
 {
   LG_LOCK(files.lock);
   struct RemoteDataset * dataset =
@@ -3605,7 +3602,7 @@ void lgClipboardFiles_testEndRemoteLookup(uint64_t presentation)
   performRemoteAction(action);
 }
 
-bool lgClipboardFiles_testRemoteRead(uint64_t presentation,
+bool clipboardFiles_testRemoteRead(uint64_t presentation,
     uint64_t nodeId, uint64_t offset, uint32_t length)
 {
   LG_LOCK(files.lock);
@@ -3625,12 +3622,12 @@ bool lgClipboardFiles_testRemoteRead(uint64_t presentation,
   return result;
 }
 
-void lgClipboardFiles_testForceLocalEof(void)
+void clipboardFiles_testForceLocalEof(void)
 {
   atomic_store_explicit(&forceLocalEof, true, memory_order_release);
 }
 
-bool lgClipboardFiles_testLocalRequest(
+bool clipboardFiles_testLocalRequest(
     const LG_ClipboardFileRequest * request)
 {
   if (!request ||
@@ -3652,7 +3649,7 @@ bool lgClipboardFiles_testLocalRequest(
     request->operation == LG_CLIPBOARD_FILE_LIST ?
     localList(&job) : localRead(&job);
   if (error && error != LG_CLIPBOARD_FILE_ERROR_CANCELLED)
-    lgClipboard_fileCancel(request->dataset, request->request, error);
+    clipboard_fileCancel(request->dataset, request->request, error);
   LG_LOCK(files.lock);
   if (job.dataset->references)
     --job.dataset->references;
@@ -3661,7 +3658,7 @@ bool lgClipboardFiles_testLocalRequest(
 }
 #endif
 
-void lgClipboardFiles_free(void)
+void clipboardFiles_free(void)
 {
   if (!filesLockInitialized)
     return;

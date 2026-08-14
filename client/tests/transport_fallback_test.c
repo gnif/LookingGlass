@@ -400,12 +400,12 @@ void lgAudio_dropFallback(void)
 }
 #endif
 
-void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque)
+void clipboard_setFallback(const LG_ClipboardOps * ops, void * opaque)
 {
   setProvider(&pClipboard, ops, &clipboardOps, opaque);
 }
 
-void lgClipboard_dropFallback(void)
+void clipboard_dropFallback(void)
 {
   atomic_fetch_add(&pClipboard.drop, 1);
 }

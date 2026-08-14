@@ -339,11 +339,11 @@ static void fileImportCallback(uint32_t events, void * opaque)
     wlCb.fileImport = NULL;
   LG_UNLOCK(wlCb.lock);
   if (current && (!complete ||
-      !lgClipboardFiles_setLocal(import->mime,
+      !clipboardFiles_setLocal(import->mime,
         import->data, import->size)))
   {
-    lgClipboardFiles_clearLocal();
-    lgClipboard_release();
+    clipboardFiles_clearLocal();
+    clipboard_release();
   }
   if (current)
     waylandPollUnregister(import->fd);
@@ -536,7 +536,7 @@ static void dataDeviceHandleSelection(void * opaque,
   {
     const LG_ClipboardRequest request = read->request;
     clipboardReadRetire(read);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
   }
   if (oldImport)
     waylandPollUnregister(oldImport->fd);
@@ -548,12 +548,12 @@ static void dataDeviceHandleSelection(void * opaque,
   {
     if (!fileImportStart(offer, wlCb.mimetypes[LG_CLIPBOARD_DATA_FILES]))
     {
-      lgClipboardFiles_clearLocal();
-      lgClipboard_release();
+      clipboardFiles_clearLocal();
+      clipboard_release();
     }
   }
   else
-    lgClipboard_notifyTypes(types, idx);
+    clipboard_notifyTypes(types, idx);
 }
 
 static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
@@ -676,17 +676,17 @@ static enum ClipboardReadCallResult clipboardReadCall(
   switch (operation)
   {
     case CLIPBOARD_READ_BEGIN:
-      result = lgClipboard_dataBegin(
+      result = clipboard_dataBegin(
           request, type, LG_CLIPBOARD_SIZE_UNKNOWN);
       break;
 
     case CLIPBOARD_READ_CHUNK:
-      result = lgClipboard_dataChunk(
+      result = clipboard_dataChunk(
           request, offset, data->buffer, pending);
       break;
 
     case CLIPBOARD_READ_END:
-      result = lgClipboard_dataEnd(request, offset);
+      result = clipboard_dataEnd(request, offset);
       break;
 
     default:
@@ -755,7 +755,7 @@ static void clipboardReadCallback(uint32_t events, void * opaque)
   if (events & EPOLLERR)
   {
     if (clipboardReadClaim(data))
-      lgClipboard_abort(data->request);
+      clipboard_abort(data->request);
     return;
   }
 
@@ -810,7 +810,7 @@ static void clipboardReadCallback(uint32_t events, void * opaque)
         return;
       DEBUG_ERROR("Failed to read from clipboard: %s", strerror(readError));
       if (clipboardReadClaim(data))
-        lgClipboard_abort(data->request);
+        clipboard_abort(data->request);
       return;
     }
     if (!haveOperation)
@@ -866,17 +866,17 @@ static void waylandCBInvalidateLocal(enum ClipboardInvalidateMode mode)
   if (notifyProvider)
   {
     if (read)
-      lgClipboard_abort(request);
-    lgClipboard_release();
+      clipboard_abort(request);
+    clipboard_release();
   }
   LG_UNLOCK(wlCb.lock);
 
   if (import)
     waylandPollUnregister(import->fd);
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
 
   if (read && !notifyProvider)
-    lgClipboard_abort(request);
+    clipboard_abort(request);
 
   if (offer)
     wl_data_offer_destroy(offer);
@@ -899,7 +899,7 @@ void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   if (pipe(fds) < 0)
   {
     DEBUG_ERROR("Failed to get a clipboard pipe: %s", strerror(errno));
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
   const int readFlags   = fcntl(fds[0], F_GETFL);
@@ -913,7 +913,7 @@ void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
     DEBUG_ERROR("Failed to configure clipboard pipe: %s", strerror(errno));
     close(fds[0]);
     close(fds[1]);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
 
@@ -923,7 +923,7 @@ void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
     DEBUG_ERROR("Failed to allocate memory to read clipboard");
     close(fds[0]);
     close(fds[1]);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
 
@@ -956,7 +956,7 @@ void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   {
     const LG_ClipboardRequest oldRequest = old->request;
     clipboardReadRetire(old);
-    lgClipboard_abort(oldRequest);
+    clipboard_abort(oldRequest);
   }
   if (!registered)
   {
@@ -964,7 +964,7 @@ void waylandCBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
       DEBUG_ERROR("Failed to register clipboard read into epoll: %s",
           strerror(errno));
     clipboardReadCleanup(data);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
 }
@@ -1005,7 +1005,7 @@ void waylandCBRequestReady(LG_ClipboardRequest request)
   {
     const LG_ClipboardRequest id = failed->request;
     clipboardReadRetire(failed);
-    lgClipboard_abort(id);
+    clipboard_abort(id);
   }
 }
 
@@ -1192,7 +1192,7 @@ struct ClipboardFileWrite
 static void fileTransferDestroy(struct WCBTransfer * transfer)
 {
   if (transfer->filePresentation)
-    lgClipboardFiles_remotePresentationRelease(transfer->filePresentation);
+    clipboardFiles_remotePresentationRelease(transfer->filePresentation);
   free(transfer->fileUri);
   free(transfer->fileGnome);
   free(transfer->fileKde);
@@ -1216,7 +1216,7 @@ static void clipboardFileWriteCleanup(void * opaque)
 {
   struct ClipboardFileWrite * write = opaque;
   if (write->complete && write->deliversUri)
-    lgClipboardFiles_remotePresentationDelivered(
+    clipboardFiles_remotePresentationDelivered(
         write->transfer->filePresentation);
   close(write->fd);
   free(write->data);
@@ -1369,7 +1369,7 @@ static void clipboardWriteCallback(uint32_t events, void * opaque)
   const LG_ClipboardRequest request = data->request;
   LG_UNLOCK(data->lock);
   if (ready)
-    lgClipboard_requestReady(request);
+    clipboard_requestReady(request);
   return;
 
 error:
@@ -1391,7 +1391,7 @@ error:
   if (fd >= 0)
     waylandPollUnregister(fd);
   if (errorReady)
-    lgClipboard_requestReady(errorRequest);
+    clipboard_requestReady(errorRequest);
 }
 
 static void dataSourceHandleTarget(void * data, struct wl_data_source * source,
@@ -1451,7 +1451,7 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
       LG_LOCK(data->lock);
       data->requesting = true;
       LG_UNLOCK(data->lock);
-      const bool result = lgClipboard_requestStream(transfer->type,
+      const bool result = clipboard_requestStream(transfer->type,
           &clipboardWriteStream, data, &data->request);
 
       int retireFd = -1;
@@ -1529,16 +1529,16 @@ static bool waylandCBPublish(LG_ClipboardData type)
   transfer->next      = NULL;
   if (type == LG_CLIPBOARD_DATA_FILES)
     transfer->filePresentation =
-      lgClipboardFiles_remotePresentationAcquire();
+      clipboardFiles_remotePresentationAcquire();
   if (type == LG_CLIPBOARD_DATA_FILES &&
       (!transfer->filePresentation ||
-       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+       !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "text/uri-list",
           &transfer->fileUri, &transfer->fileUriSize) ||
-       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+       !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "x-special/gnome-copied-files",
           &transfer->fileGnome, &transfer->fileGnomeSize) ||
-       !lgClipboardFiles_getRemotePresentation(transfer->filePresentation,
+       !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "application/x-kde-cutselection",
           &transfer->fileKde, &transfer->fileKdeSize)))
   {
@@ -1628,7 +1628,7 @@ void waylandCBFree(void)
   clipboardReadRetire(read);
   if (import)
     waylandPollUnregister(import->fd);
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
   if (offer)
     wl_data_offer_destroy(offer);
   if (dndOffer && dndOffer != offer)

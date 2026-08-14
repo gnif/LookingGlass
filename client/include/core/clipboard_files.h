@@ -23,63 +23,63 @@
 
 #include "interface/clipboard.h"
 
-bool lgClipboardFiles_init(void);
-void lgClipboardFiles_free(void);
+bool clipboardFiles_init(void);
+void clipboardFiles_free(void);
 
 /* Desktop backends install a local file selection after reading one of the
  * standard URI clipboard representations. The payload is copied. */
-bool lgClipboardFiles_setLocal(const char * mime,
+bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size);
-void lgClipboardFiles_clearLocal(void);
+void clipboardFiles_clearLocal(void);
 
 /* Returns an allocated desktop representation for the current guest offer. */
-bool lgClipboardFiles_getRemote(const char * mime,
+bool clipboardFiles_getRemote(const char * mime,
     char ** data, size_t * size);
-uint64_t lgClipboardFiles_remotePresentationAcquire(void);
-bool lgClipboardFiles_getRemotePresentation(uint64_t presentation,
+uint64_t clipboardFiles_remotePresentationAcquire(void);
+bool clipboardFiles_getRemotePresentation(uint64_t presentation,
     const char * mime, char ** data, size_t * size);
-void lgClipboardFiles_remotePresentationDelivered(uint64_t presentation);
-void lgClipboardFiles_remotePresentationRelease(uint64_t presentation);
-bool lgClipboardFiles_remoteReady(uint64_t dataset);
+void clipboardFiles_remotePresentationDelivered(uint64_t presentation);
+void clipboardFiles_remotePresentationRelease(uint64_t presentation);
+bool clipboardFiles_remoteReady(uint64_t dataset);
 
 /* Events delivered by the active clipboard transport. */
-bool lgClipboardFiles_remoteOffer(uint64_t dataset);
-void lgClipboardFiles_remoteClear(void);
-void lgClipboardFiles_providerUnavailable(void);
-void lgClipboardFiles_remoteAcquired(uint64_t dataset,
+bool clipboardFiles_remoteOffer(uint64_t dataset);
+void clipboardFiles_remoteClear(void);
+void clipboardFiles_providerUnavailable(void);
+void clipboardFiles_remoteAcquired(uint64_t dataset,
     uint64_t acquisition, LG_ClipboardFileError error);
-LG_ClipboardResult lgClipboardFiles_remoteDataBegin(
+LG_ClipboardResult clipboardFiles_remoteDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint);
-LG_ClipboardResult lgClipboardFiles_remoteDataChunk(
+LG_ClipboardResult clipboardFiles_remoteDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
     const void * data, size_t size);
-LG_ClipboardResult lgClipboardFiles_remoteDataEnd(
+LG_ClipboardResult clipboardFiles_remoteDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t finalSize);
-void lgClipboardFiles_remoteCancel(uint64_t dataset,
+void clipboardFiles_remoteCancel(uint64_t dataset,
     uint64_t request, LG_ClipboardFileError reason);
 
-void lgClipboardFiles_localAcquire(uint64_t dataset,
+void clipboardFiles_localAcquire(uint64_t dataset,
     uint64_t acquisition);
-void lgClipboardFiles_localRelease(uint64_t dataset,
+void clipboardFiles_localRelease(uint64_t dataset,
     uint64_t acquisition);
-void lgClipboardFiles_localRequest(
+void clipboardFiles_localRequest(
     const LG_ClipboardFileRequest * request);
-void lgClipboardFiles_localCancel(uint64_t dataset,
+void clipboardFiles_localCancel(uint64_t dataset,
     uint64_t request, LG_ClipboardFileError reason);
-void lgClipboardFiles_localReady(uint64_t request);
+void clipboardFiles_localReady(uint64_t request);
 
 #ifdef ENABLE_TESTS
-bool lgClipboardFiles_testInit(uint64_t nonce);
-bool lgClipboardFiles_testFuseStopWake(void);
-bool lgClipboardFiles_testUnsentRemoteOwnership(void);
-size_t lgClipboardFiles_testRemoteDatasetCount(void);
-void lgClipboardFiles_testExpireRemoteDeliveries(void);
-bool lgClipboardFiles_testBeginRemoteLookup(uint64_t presentation);
-void lgClipboardFiles_testEndRemoteLookup(uint64_t presentation);
-bool lgClipboardFiles_testRemoteRead(uint64_t presentation,
+bool clipboardFiles_testInit(uint64_t nonce);
+bool clipboardFiles_testFuseStopWake(void);
+bool clipboardFiles_testUnsentRemoteOwnership(void);
+size_t clipboardFiles_testRemoteDatasetCount(void);
+void clipboardFiles_testExpireRemoteDeliveries(void);
+bool clipboardFiles_testBeginRemoteLookup(uint64_t presentation);
+void clipboardFiles_testEndRemoteLookup(uint64_t presentation);
+bool clipboardFiles_testRemoteRead(uint64_t presentation,
     uint64_t node, uint64_t offset, uint32_t length);
-void lgClipboardFiles_testForceLocalEof(void);
-bool lgClipboardFiles_testLocalRequest(
+void clipboardFiles_testForceLocalEof(void);
+bool clipboardFiles_testLocalRequest(
     const LG_ClipboardFileRequest * request);
 #endif
 

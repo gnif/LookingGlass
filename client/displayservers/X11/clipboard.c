@@ -227,12 +227,12 @@ bool x11CBEventThread(const XEvent * xe)
                 NULL, 0);
             XFlush(x11.display);
             if (write->event.xselection.target != x11cb.aFileKde)
-              lgClipboardFiles_remotePresentationDelivered(
+              clipboardFiles_remotePresentationDelivered(
                   write->filePresentation);
             const uint64_t presentation = write->filePresentation;
             writeRemoveNL(write);
             LG_UNLOCK(x11cb.lock);
-            lgClipboardFiles_remotePresentationRelease(presentation);
+            clipboardFiles_remotePresentationRelease(presentation);
             free(write->fileData);
             free(write);
             return true;
@@ -249,7 +249,7 @@ bool x11CBEventThread(const XEvent * xe)
         if (write)
         {
           if (request != LG_CLIPBOARD_REQUEST_INVALID)
-            lgClipboard_requestReady(request);
+            clipboard_requestReady(request);
           return true;
         }
       }
@@ -517,9 +517,9 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     if (available)
     {
       writePresentation =
-        lgClipboardFiles_remotePresentationAcquire();
+        clipboardFiles_remotePresentationAcquire();
       available = writePresentation == presentation &&
-        lgClipboardFiles_getRemotePresentation(writePresentation,
+        clipboardFiles_getRemotePresentation(writePresentation,
           fileMime, &data, &size);
     }
     LG_UNLOCK(x11cb.lock);
@@ -527,7 +527,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     {
       free(data);
       if (writePresentation)
-        lgClipboardFiles_remotePresentationRelease(writePresentation);
+        clipboardFiles_remotePresentationRelease(writePresentation);
       goto nodata;
     }
 
@@ -535,7 +535,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     if (!write)
     {
       free(data);
-      lgClipboardFiles_remotePresentationRelease(writePresentation);
+      clipboardFiles_remotePresentationRelease(writePresentation);
       DEBUG_ERROR("out of memory");
       goto nodata;
     }
@@ -579,7 +579,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     if (duplicate)
     {
       free(write->fileData);
-      lgClipboardFiles_remotePresentationRelease(
+      clipboardFiles_remotePresentationRelease(
           write->filePresentation);
       free(write);
       goto nodata;
@@ -627,7 +627,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
         goto nodata;
       }
 
-      const bool result = lgClipboard_requestStream(requestType,
+      const bool result = clipboard_requestStream(requestType,
           &x11CBWriteStream, write, &write->request);
       LG_LOCK(x11cb.lock);
       const bool linked = writeLinkedNL(write);
@@ -682,7 +682,7 @@ static void x11CBSelectionClear(const XSelectionClearEvent e)
   LG_UNLOCK(x11cb.lock);
 
   if (presentation)
-    lgClipboardFiles_remotePresentationRelease(presentation);
+    clipboardFiles_remotePresentationRelease(presentation);
 }
 
 /* x11cb.lock must be held. */
@@ -817,7 +817,7 @@ static void cancelFileWrites(
       XChangeProperty(x11.display, writes->event.xselection.requestor,
           writes->event.xselection.property,
           writes->event.xselection.target, 8, PropModeReplace, NULL, 0);
-    lgClipboardFiles_remotePresentationRelease(
+    clipboardFiles_remotePresentationRelease(
         writes->filePresentation);
     free(writes->fileData);
     free(writes);
@@ -889,10 +889,10 @@ static bool startFileImport(Atom target)
 static void finishFileImport(struct X11ClipboardFileImport import,
     const void * data, size_t size)
 {
-  if (!lgClipboardFiles_setLocal(import.mime, data, size))
+  if (!clipboardFiles_setLocal(import.mime, data, size))
   {
-    lgClipboardFiles_clearLocal();
-    lgClipboard_release();
+    clipboardFiles_clearLocal();
+    clipboard_release();
   }
   free(import.data);
 }
@@ -923,7 +923,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
     if (data)
       XFree(data);
     free(failed.data);
-    lgClipboard_release();
+    clipboard_release();
     return true;
   }
 
@@ -936,7 +936,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
       if (data)
         XFree(data);
       free(failed.data);
-      lgClipboard_release();
+      clipboard_release();
       return true;
     }
     x11cb.fileImport.incremental = true;
@@ -954,7 +954,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
   else
   {
     free(import.data);
-    lgClipboard_release();
+    clipboard_release();
   }
   if (data)
     XFree(data);
@@ -993,7 +993,7 @@ readProperty:
     if (data)
       XFree(data);
     free(failed.data);
-    lgClipboard_release();
+    clipboard_release();
     return;
   }
 
@@ -1019,7 +1019,7 @@ readProperty:
       const struct X11ClipboardFileImport failed = takeFileImportNL();
       LG_UNLOCK(x11cb.lock);
       free(failed.data);
-      lgClipboard_release();
+      clipboard_release();
       return;
     }
     x11cb.fileImport.propertyOffset += (long)units;
@@ -1069,15 +1069,15 @@ static enum X11ClipboardReadCallResult x11CBReadCallNL(
   switch (operation)
   {
     case X11_CLIPBOARD_READ_BEGIN:
-      result = lgClipboard_dataBegin(request, type, sizeHint);
+      result = clipboard_dataBegin(request, type, sizeHint);
       break;
 
     case X11_CLIPBOARD_READ_CHUNK:
-      result = lgClipboard_dataChunk(request, offset, data, size);
+      result = clipboard_dataChunk(request, offset, data, size);
       break;
 
     case X11_CLIPBOARD_READ_END:
-      result = lgClipboard_dataEnd(request, offset);
+      result = clipboard_dataEnd(request, offset);
       break;
 
     default:
@@ -1151,7 +1151,7 @@ readProperty:
     const struct X11ClipboardRead read = clearReadNL();
     LG_UNLOCK(x11cb.lock);
     free(read.pending);
-    lgClipboard_abort(read.request);
+    clipboard_abort(read.request);
     return;
   }
 
@@ -1170,7 +1170,7 @@ readProperty:
     if (data)
       XFree(data);
     free(read.pending);
-    lgClipboard_abort(read.request);
+    clipboard_abort(read.request);
     return;
   }
 
@@ -1206,7 +1206,7 @@ readProperty:
     LG_UNLOCK(x11cb.lock);
     XFree(data);
     free(read.pending);
-    lgClipboard_abort(read.request);
+    clipboard_abort(read.request);
     return;
   }
 
@@ -1217,7 +1217,7 @@ readProperty:
     LG_UNLOCK(x11cb.lock);
     XFree(data);
     free(read.pending);
-    lgClipboard_abort(read.request);
+    clipboard_abort(read.request);
     return;
   }
   memcpy(copy, data, itemCount);
@@ -1261,7 +1261,7 @@ readProperty:
       const struct X11ClipboardRead read = clearReadNL();
       LG_UNLOCK(x11cb.lock);
       free(read.pending);
-      lgClipboard_abort(read.request);
+      clipboard_abort(read.request);
       return;
     }
     goto readProperty;
@@ -1300,11 +1300,11 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     XFlush(x11.display);
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      lgClipboard_abort(oldRequest);
+      clipboard_abort(oldRequest);
     if (presentation)
-      lgClipboardFiles_remotePresentationRelease(presentation);
-    lgClipboardFiles_clearLocal();
-    lgClipboard_release();
+      clipboardFiles_remotePresentationRelease(presentation);
+    clipboardFiles_clearLocal();
+    clipboard_release();
     return;
   }
 
@@ -1319,11 +1319,11 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
     XFlush(x11.display);
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      lgClipboard_abort(oldRequest);
+      clipboard_abort(oldRequest);
     if (presentation)
-      lgClipboardFiles_remotePresentationRelease(presentation);
-    lgClipboardFiles_clearLocal();
-    lgClipboard_release();
+      clipboardFiles_remotePresentationRelease(presentation);
+    clipboardFiles_clearLocal();
+    clipboard_release();
     return;
   }
 
@@ -1339,10 +1339,10 @@ static void x11CBXFixesSelectionNotify(const XFixesSelectionNotifyEvent e)
   LG_UNLOCK(x11cb.lock);
 
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    lgClipboard_abort(oldRequest);
+    clipboard_abort(oldRequest);
   if (presentation)
-    lgClipboardFiles_remotePresentationRelease(presentation);
-  lgClipboardFiles_clearLocal();
+    clipboardFiles_remotePresentationRelease(presentation);
+  clipboardFiles_clearLocal();
 }
 
 static void x11CBSelectionNotify(const XSelectionEvent e)
@@ -1365,7 +1365,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     {
       clearTargetsNL();
       LG_UNLOCK(x11cb.lock);
-      lgClipboard_release();
+      clipboard_release();
       return;
     }
 
@@ -1384,7 +1384,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     {
       clearTargetsNL();
       LG_UNLOCK(x11cb.lock);
-      lgClipboard_release();
+      clipboard_release();
       return;
     }
     clearTargetsNL();
@@ -1395,7 +1395,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     // an array of padded 64-bit values
     if (!data || format != 32)
     {
-      lgClipboard_release();
+      clipboard_release();
       goto out;
     }
 
@@ -1421,9 +1421,9 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
 
     if (fileTarget != None)
     {
-      lgClipboardFiles_clearLocal();
+      clipboardFiles_clearLocal();
       if (!startFileImport(fileTarget))
-        lgClipboard_release();
+        clipboard_release();
       goto out;
     }
 
@@ -1435,7 +1435,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
           break;
         }
 
-    lgClipboard_notifyTypes(types, typeCount);
+    clipboard_notifyTypes(types, typeCount);
     goto out;
   }
   LG_UNLOCK(x11cb.lock);
@@ -1451,7 +1451,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   {
     const LG_ClipboardRequest request = cancelReadNL(true);
     LG_UNLOCK(x11cb.lock);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
 
@@ -1470,7 +1470,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   {
     const LG_ClipboardRequest request = cancelReadNL(true);
     LG_UNLOCK(x11cb.lock);
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     return;
   }
 
@@ -1482,7 +1482,7 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
       LG_UNLOCK(x11cb.lock);
       if (data)
         XFree(data);
-      lgClipboard_abort(request);
+      clipboard_abort(request);
       return;
     }
 
@@ -1543,11 +1543,11 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
   if (!valid)
   {
     DEBUG_WARN("Invalid clipboard data");
-    lgClipboard_abort(request);
+    clipboard_abort(request);
     goto out;
   }
 
-  lgClipboard_data(request, dataType, data, itemCount);
+  clipboard_data(request, dataType, data, itemCount);
 
 out:
   if (data)
@@ -1557,7 +1557,7 @@ out:
 void x11CBNotice(LG_ClipboardData type)
 {
   const uint64_t nextPresentation = type == LG_CLIPBOARD_DATA_FILES ?
-    lgClipboardFiles_remotePresentationAcquire() : 0;
+    clipboardFiles_remotePresentationAcquire() : 0;
   LG_LOCK(x11cb.lock);
   const LG_ClipboardRequest oldRequest = x11cb.read.window ?
     cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
@@ -1573,10 +1573,10 @@ void x11CBNotice(LG_ClipboardData type)
   XFlush(x11.display);
   LG_UNLOCK(x11cb.lock);
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    lgClipboard_abort(oldRequest);
+    clipboard_abort(oldRequest);
   if (oldPresentation)
-    lgClipboardFiles_remotePresentationRelease(oldPresentation);
-  lgClipboardFiles_clearLocal();
+    clipboardFiles_remotePresentationRelease(oldPresentation);
+  clipboardFiles_clearLocal();
 }
 
 void x11CBRelease(void)
@@ -1593,7 +1593,7 @@ void x11CBRelease(void)
   XFlush(x11.display);
   LG_UNLOCK(x11cb.lock);
   if (presentation)
-    lgClipboardFiles_remotePresentationRelease(presentation);
+    clipboardFiles_remotePresentationRelease(presentation);
 }
 
 void x11CBFree(void)
@@ -1609,9 +1609,9 @@ void x11CBFree(void)
   LG_UNLOCK(x11cb.lock);
 
   if (request != LG_CLIPBOARD_REQUEST_INVALID)
-    lgClipboard_abort(request);
+    clipboard_abort(request);
   cancelFileWrites(writes, true);
-  lgClipboardFiles_clearLocal();
+  clipboardFiles_clearLocal();
 }
 
 void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
@@ -1627,8 +1627,8 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   {
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      lgClipboard_abort(oldRequest);
-    lgClipboard_abort(request);
+      clipboard_abort(oldRequest);
+    clipboard_abort(request);
     return;
   }
 
@@ -1638,8 +1638,8 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   {
     LG_UNLOCK(x11cb.lock);
     if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-      lgClipboard_abort(oldRequest);
-    lgClipboard_abort(request);
+      clipboard_abort(oldRequest);
+    clipboard_abort(request);
     return;
   }
 
@@ -1661,7 +1661,7 @@ void x11CBRequest(LG_ClipboardRequest request, LG_ClipboardData type)
   LG_UNLOCK(x11cb.lock);
 
   if (oldRequest != LG_CLIPBOARD_REQUEST_INVALID)
-    lgClipboard_abort(oldRequest);
+    clipboard_abort(oldRequest);
 }
 
 void x11CBRequestReady(LG_ClipboardRequest request)
@@ -1706,7 +1706,7 @@ void x11CBRequestReady(LG_ClipboardRequest request)
     {
       const LG_ClipboardRequest abort = cancelReadNL(true);
       LG_UNLOCK(x11cb.lock);
-      lgClipboard_abort(abort);
+      clipboard_abort(abort);
       return;
     }
     memcpy(pending, x11cb.read.pending, pendingSize);
@@ -1767,7 +1767,7 @@ void x11CBRequestReady(LG_ClipboardRequest request)
         const struct X11ClipboardRead read = clearReadNL();
         LG_UNLOCK(x11cb.lock);
         free(read.pending);
-        lgClipboard_abort(read.request);
+        clipboard_abort(read.request);
         return;
       }
       processProperty = true;

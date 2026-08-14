@@ -23,55 +23,55 @@
 
 #include "interface/clipboard.h"
 
-bool lgClipboard_init(void);
-void lgClipboard_free(void);
-void lgClipboard_setLocalAvailable(bool available);
+bool clipboard_init(void);
+void clipboard_free(void);
+void clipboard_setLocalAvailable(bool available);
 
-void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque);
+void clipboard_setFallback(const LG_ClipboardOps * ops, void * opaque);
 /* Drop functions remove a dead endpoint without invoking it. */
-void lgClipboard_dropFallback(void);
-void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque);
-void lgClipboard_dropTransport(void);
+void clipboard_dropFallback(void);
+void clipboard_setTransport(const LG_ClipboardOps * ops, void * opaque);
+void clipboard_dropTransport(void);
 
-void lgClipboard_release(void);
-void lgClipboard_notifyTypes(
+void clipboard_release(void);
+void clipboard_notifyTypes(
     const LG_ClipboardData types[], size_t count);
-void lgClipboard_notifyFiles(uint64_t dataset);
-LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest request,
+void clipboard_notifyFiles(uint64_t dataset);
+LG_ClipboardResult clipboard_dataBegin(LG_ClipboardRequest request,
     LG_ClipboardData type, uint64_t sizeHint);
-LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest request,
+LG_ClipboardResult clipboard_dataChunk(LG_ClipboardRequest request,
     uint64_t offset, const void * data, size_t size);
-LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest request,
+LG_ClipboardResult clipboard_dataEnd(LG_ClipboardRequest request,
     uint64_t finalSize);
-void lgClipboard_data(LG_ClipboardRequest request,
+void clipboard_data(LG_ClipboardRequest request,
     LG_ClipboardData type, const void * data, size_t size);
-void lgClipboard_abort(LG_ClipboardRequest request);
+void clipboard_abort(LG_ClipboardRequest request);
 /* request is published before provider dispatch. Its storage must remain
  * valid until this function returns and may be observed by stream callbacks
  * before then. */
-bool lgClipboard_requestStream(LG_ClipboardData type,
+bool clipboard_requestStream(LG_ClipboardData type,
     const LG_ClipboardStreamOps * stream, void * opaque,
     LG_ClipboardRequest * request);
-bool lgClipboard_requestReady(LG_ClipboardRequest request);
-bool lgClipboard_request(LG_ClipboardData type,
+bool clipboard_requestReady(LG_ClipboardRequest request);
+bool clipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque);
 
 /* File-dataset transport entry points used by clipboard_files.c. */
-bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition);
-bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
+bool clipboard_fileAcquire(uint64_t dataset, uint64_t acquisition);
+bool clipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
     LG_ClipboardFileError error);
-bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition);
-bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request);
-LG_ClipboardResult lgClipboard_fileDataBegin(
+bool clipboard_fileRelease(uint64_t dataset, uint64_t acquisition);
+bool clipboard_fileRequest(const LG_ClipboardFileRequest * request);
+LG_ClipboardResult clipboard_fileDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint);
-LG_ClipboardResult lgClipboard_fileDataChunk(
+LG_ClipboardResult clipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
     const void * data, size_t size, bool end);
-LG_ClipboardResult lgClipboard_fileDataEnd(
+LG_ClipboardResult clipboard_fileDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t finalSize);
-bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
+bool clipboard_fileCancel(uint64_t dataset, uint64_t request,
     LG_ClipboardFileError reason);
-void lgClipboard_fileRemoteReady(uint64_t dataset);
-void lgClipboard_fileRemoteFailed(uint64_t dataset);
+void clipboard_fileRemoteReady(uint64_t dataset);
+void clipboard_fileRemoteFailed(uint64_t dataset);
 
 #endif

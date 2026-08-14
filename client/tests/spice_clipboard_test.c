@@ -143,15 +143,15 @@ static SpiceClipboard * setup(void)
   g_state.ds                = &displayOps;
   g_params.clipboardToVM    = true;
   g_params.clipboardToLocal = true;
-  CHECK(lgClipboard_init());
-  lgClipboard_setLocalAvailable(true);
-  lgClipboard_setFallback(spiceClipboard_getOps(), clipboard);
+  CHECK(clipboard_init());
+  clipboard_setLocalAvailable(true);
+  clipboard_setFallback(spiceClipboard_getOps(), clipboard);
   return clipboard;
 }
 
 static void teardown(SpiceClipboard ** clipboard)
 {
-  lgClipboard_free();
+  clipboard_free();
   spiceClipboard_setCallbackTarget(NULL);
   spiceClipboard_free(clipboard);
 }
@@ -160,22 +160,22 @@ static void testOutbound(void)
 {
   SpiceClipboard * clipboard = setup();
   const LG_ClipboardData types[] = { LG_CLIPBOARD_DATA_TEXT };
-  lgClipboard_notifyTypes(types, 1);
+  clipboard_notifyTypes(types, 1);
   CHECK(test.grab == 1);
 
   spiceClipboard_request(SPICE_DATA_TEXT);
   CHECK(test.localRequest != LG_CLIPBOARD_REQUEST_INVALID);
   const uint8_t first[]  = { 1, 2 };
   const uint8_t second[] = { 3, 4 };
-  CHECK(lgClipboard_dataBegin(test.localRequest,
+  CHECK(clipboard_dataBegin(test.localRequest,
       LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(test.localRequest,
+  CHECK(clipboard_dataChunk(test.localRequest,
       0, first, sizeof(first)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataChunk(test.localRequest,
+  CHECK(clipboard_dataChunk(test.localRequest,
       sizeof(first), second, sizeof(second)) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(lgClipboard_dataEnd(test.localRequest, 4) ==
+  CHECK(clipboard_dataEnd(test.localRequest, 4) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
 
   CHECK(test.dataStart == 1);
@@ -191,7 +191,7 @@ static void testInbound(void)
   SpiceClipboard * clipboard = setup();
   spiceClipboard_notice(SPICE_DATA_TEXT);
   CHECK(test.notice == 1);
-  CHECK(lgClipboard_request(LG_CLIPBOARD_DATA_TEXT, reply, NULL));
+  CHECK(clipboard_request(LG_CLIPBOARD_DATA_TEXT, reply, NULL));
   CHECK(test.request == 1);
   CHECK(test.requestType == SPICE_DATA_TEXT);
 

@@ -750,15 +750,15 @@ static void logStats(const struct LGMPInputCounters * stats)
   const uint64_t ackAverage = stats->ackSamples ?
     stats->ackTotal / stats->ackSamples : 0;
 
-  DEBUG_TRACE("LGMP input: sent immediate/deferred %" PRIu64 "/%" PRIu64
-    ", queued %" PRIu64 " (high %u), initial busy/full %" PRIu64
-    "/%" PRIu64 ", retry busy/full %" PRIu64 "/%" PRIu64
-    ", coalesced relative/absolute %" PRIu64 "/%" PRIu64
-    ", motion rejected/evicted %" PRIu64 "/%" PRIu64
-    ", overflow failures/resets %" PRIu64 "/%" PRIu64
-    ", published claim/release/keepalive %" PRIu64 "/%" PRIu64
-    "/%" PRIu64 ", terminal failures %" PRIu64
-    ", LGMP ACK average/max %" PRIu64 "/%" PRIu64 " us (%" PRIu64
+  DEBUG_TRACE("LGMP input: sent immediate/deferred %lu/%lu"
+    ", queued %lu (high %u), initial busy/full %lu"
+    "/%lu, retry busy/full %lu/%lu"
+    ", coalesced relative/absolute %lu/%lu"
+    ", motion rejected/evicted %lu/%lu"
+    ", overflow failures/resets %lu/%lu"
+    ", published claim/release/keepalive %lu/%lu"
+    "/%lu, terminal failures %lu"
+    ", LGMP ACK average/max %lu/%lu us (%lu"
     " samples)", stats->immediateSends, stats->deferredSends,
     stats->localEnqueues, stats->pendingHighWater,
     stats->initialBusy, stats->initialFull, stats->retryBusy,

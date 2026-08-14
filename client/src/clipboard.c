@@ -389,7 +389,7 @@ static void resetRemote(void)
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
 
-  lgClipboardFiles_providerUnavailable();
+  clipboardFiles_providerUnavailable();
 
   LG_LOCK(clipboard.callbackLock);
   cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
@@ -522,7 +522,7 @@ static void eventNotice(void * opaque,
   LG_UNLOCK(clipboard.stateLock);
   LG_UNLOCK(clipboard.requestLock);
   if (!hasFiles)
-    lgClipboardFiles_remoteClear();
+    clipboardFiles_remoteClear();
   LG_UNLOCK(clipboard.fileLock);
 
   LG_LOCK(clipboard.callbackLock);
@@ -545,7 +545,7 @@ static void eventNotice(void * opaque,
   if (notice && active)
   {
     if (type != LG_CLIPBOARD_DATA_FILES ||
-        lgClipboardFiles_remoteReady(fileDataset))
+        clipboardFiles_remoteReady(fileDataset))
       g_state.ds->cbNotice(type);
   }
   else if (release && active && g_state.ds->cbRelease)
@@ -948,7 +948,7 @@ static void eventRelease(void * opaque)
   LG_UNLOCK(clipboard.requestLock);
 
   LG_LOCK(clipboard.fileLock);
-  lgClipboardFiles_remoteClear();
+  clipboardFiles_remoteClear();
   LG_UNLOCK(clipboard.fileLock);
 
   LG_LOCK(clipboard.callbackLock);
@@ -1097,13 +1097,13 @@ static void eventFileOffer(void * opaque, uint64_t dataset)
   LG_LOCK(clipboard.stateLock);
   clipboard.remoteFileDataset = dataset;
   LG_UNLOCK(clipboard.stateLock);
-  if (!lgClipboardFiles_remoteOffer(dataset))
+  if (!clipboardFiles_remoteOffer(dataset))
   {
     LG_LOCK(clipboard.stateLock);
     if (clipboard.remoteFileDataset == dataset)
       clipboard.remoteFileDataset = 0;
     LG_UNLOCK(clipboard.stateLock);
-    lgClipboardFiles_remoteClear();
+    clipboardFiles_remoteClear();
   }
   LG_UNLOCK(clipboard.fileLock);
 }
@@ -1117,7 +1117,7 @@ static void eventFileAcquire(void * opaque, uint64_t dataset,
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_localAcquire(dataset, acquisition);
+  clipboardFiles_localAcquire(dataset, acquisition);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1130,7 +1130,7 @@ static void eventFileAcquired(void * opaque, uint64_t dataset,
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_remoteAcquired(dataset, acquisition, error);
+  clipboardFiles_remoteAcquired(dataset, acquisition, error);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1143,7 +1143,7 @@ static void eventFileRelease(void * opaque, uint64_t dataset,
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_localRelease(dataset, acquisition);
+  clipboardFiles_localRelease(dataset, acquisition);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1156,7 +1156,7 @@ static void eventFileRequest(void * opaque,
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_localRequest(request);
+  clipboardFiles_localRequest(request);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1170,7 +1170,7 @@ static LG_ClipboardResult eventFileDataBegin(void * opaque,
     return LG_CLIPBOARD_RESULT_FAILED;
   }
   const LG_ClipboardResult result =
-    lgClipboardFiles_remoteDataBegin(request, sizeHint);
+    clipboardFiles_remoteDataBegin(request, sizeHint);
   LG_UNLOCK(clipboard.fileLock);
   return result;
 }
@@ -1185,7 +1185,7 @@ static LG_ClipboardResult eventFileDataChunk(void * opaque,
     LG_UNLOCK(clipboard.fileLock);
     return LG_CLIPBOARD_RESULT_FAILED;
   }
-  const LG_ClipboardResult result = lgClipboardFiles_remoteDataChunk(
+  const LG_ClipboardResult result = clipboardFiles_remoteDataChunk(
       request, responseOffset, data, size);
   LG_UNLOCK(clipboard.fileLock);
   return result;
@@ -1201,7 +1201,7 @@ static LG_ClipboardResult eventFileDataEnd(void * opaque,
     return LG_CLIPBOARD_RESULT_FAILED;
   }
   const LG_ClipboardResult result =
-    lgClipboardFiles_remoteDataEnd(request, finalSize);
+    clipboardFiles_remoteDataEnd(request, finalSize);
   LG_UNLOCK(clipboard.fileLock);
   return result;
 }
@@ -1214,7 +1214,7 @@ static void eventFileDataReady(void * opaque, uint64_t request)
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_localReady(request);
+  clipboardFiles_localReady(request);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1227,8 +1227,8 @@ static void eventFileCancel(void * opaque, uint64_t dataset,
     LG_UNLOCK(clipboard.fileLock);
     return;
   }
-  lgClipboardFiles_remoteCancel(dataset, request, reason);
-  lgClipboardFiles_localCancel(dataset, request, reason);
+  clipboardFiles_remoteCancel(dataset, request, reason);
+  clipboardFiles_localCancel(dataset, request, reason);
   LG_UNLOCK(clipboard.fileLock);
 }
 
@@ -1386,7 +1386,7 @@ static void setBinding(ClipboardBinding * target,
   LG_UNLOCK(clipboard.registrationLock);
 }
 
-bool lgClipboard_init(void)
+bool clipboard_init(void)
 {
   memset(&clipboard, 0, sizeof(clipboard));
   LG_LOCK_INIT(clipboard.registrationLock);
@@ -1400,7 +1400,7 @@ bool lgClipboard_init(void)
   clipboard.remoteType        = LG_CLIPBOARD_DATA_NONE;
   clipboard.remoteRequestType = LG_CLIPBOARD_DATA_NONE;
   clipboard.requests          = ll_new();
-  if (!lgClipboardFiles_init())
+  if (!clipboardFiles_init())
   {
     DEBUG_ERROR("Failed to initialize clipboard file transfer");
     return false;
@@ -1408,12 +1408,12 @@ bool lgClipboard_init(void)
   return true;
 }
 
-void lgClipboard_free(void)
+void clipboard_free(void)
 {
-  lgClipboard_setLocalAvailable(false);
-  lgClipboard_setTransport(NULL, NULL);
-  lgClipboard_setFallback(NULL, NULL);
-  lgClipboardFiles_free();
+  clipboard_setLocalAvailable(false);
+  clipboard_setTransport(NULL, NULL);
+  clipboard_setFallback(NULL, NULL);
+  clipboardFiles_free();
   LG_LOCK(clipboard.callbackLock);
   cancelRequestsNL(NULL, 0, true, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
   LG_UNLOCK(clipboard.callbackLock);
@@ -1433,7 +1433,7 @@ void lgClipboard_free(void)
   LG_LOCK_FREE(clipboard.registrationLock);
 }
 
-void lgClipboard_setLocalAvailable(bool available)
+void clipboard_setLocalAvailable(bool available)
 {
   bool notice;
   bool release;
@@ -1459,7 +1459,7 @@ void lgClipboard_setLocalAvailable(bool available)
   if (notice)
   {
     if (type != LG_CLIPBOARD_DATA_FILES ||
-        lgClipboardFiles_remoteReady(fileDataset))
+        clipboardFiles_remoteReady(fileDataset))
       g_state.ds->cbNotice(type);
   }
   if (!available)
@@ -1475,7 +1475,7 @@ void lgClipboard_setLocalAvailable(bool available)
   LG_UNLOCK(clipboard.callbackLock);
 }
 
-void lgClipboard_setFallback(const LG_ClipboardOps * ops, void * opaque)
+void clipboard_setFallback(const LG_ClipboardOps * ops, void * opaque)
 {
   setBinding(&clipboard.fallback,
       ops, opaque, fallbackStatusChanged);
@@ -1494,23 +1494,23 @@ static void dropBinding(ClipboardBinding * target)
   LG_UNLOCK(clipboard.registrationLock);
 }
 
-void lgClipboard_dropFallback(void)
+void clipboard_dropFallback(void)
 {
   dropBinding(&clipboard.fallback);
 }
 
-void lgClipboard_setTransport(const LG_ClipboardOps * ops, void * opaque)
+void clipboard_setTransport(const LG_ClipboardOps * ops, void * opaque)
 {
   setBinding(&clipboard.transport,
       ops, opaque, transportStatusChanged);
 }
 
-void lgClipboard_dropTransport(void)
+void clipboard_dropTransport(void)
 {
   dropBinding(&clipboard.transport);
 }
 
-void lgClipboard_release(void)
+void clipboard_release(void)
 {
   if (!g_params.clipboardToVM)
     return;
@@ -1530,14 +1530,14 @@ void lgClipboard_release(void)
   LG_UNLOCK(clipboard.writeLock);
 }
 
-void lgClipboard_notifyTypes(
+void clipboard_notifyTypes(
     const LG_ClipboardData types[], size_t count)
 {
   if (!g_params.clipboardToVM)
     return;
   if (count == 0)
   {
-    lgClipboard_release();
+    clipboard_release();
     return;
   }
   if (!types || count > LG_CLIPBOARD_DATA_NONE)
@@ -1564,7 +1564,7 @@ void lgClipboard_notifyTypes(
   LG_UNLOCK(clipboard.writeLock);
 }
 
-void lgClipboard_notifyFiles(uint64_t dataset)
+void clipboard_notifyFiles(uint64_t dataset)
 {
   if (!g_params.clipboardToVM || !dataset)
     return;
@@ -1827,7 +1827,7 @@ static LG_ClipboardResult pumpRemoteCompat(void)
   }
 }
 
-LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest transfer,
+LG_ClipboardResult clipboard_dataBegin(LG_ClipboardRequest transfer,
     LG_ClipboardData type, uint64_t sizeHint)
 {
   if (!g_params.clipboardToVM ||
@@ -1846,7 +1846,7 @@ LG_ClipboardResult lgClipboard_dataBegin(LG_ClipboardRequest transfer,
   return result;
 }
 
-LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest transfer,
+LG_ClipboardResult clipboard_dataChunk(LG_ClipboardRequest transfer,
     uint64_t offset, const void * data, size_t size)
 {
   if (!g_params.clipboardToVM ||
@@ -1865,7 +1865,7 @@ LG_ClipboardResult lgClipboard_dataChunk(LG_ClipboardRequest transfer,
   return result;
 }
 
-LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest transfer,
+LG_ClipboardResult clipboard_dataEnd(LG_ClipboardRequest transfer,
     uint64_t finalSize)
 {
   if (!g_params.clipboardToVM ||
@@ -1884,7 +1884,7 @@ LG_ClipboardResult lgClipboard_dataEnd(LG_ClipboardRequest transfer,
   return result;
 }
 
-void lgClipboard_data(LG_ClipboardRequest transfer,
+void clipboard_data(LG_ClipboardRequest transfer,
     LG_ClipboardData type, const void * data, size_t size)
 {
   if (!g_params.clipboardToVM ||
@@ -1953,7 +1953,7 @@ void lgClipboard_data(LG_ClipboardRequest transfer,
     DEBUG_WARN("Failed to send remote clipboard data");
 }
 
-void lgClipboard_abort(LG_ClipboardRequest transfer)
+void clipboard_abort(LG_ClipboardRequest transfer)
 {
   if (!g_params.clipboardToVM ||
       transfer == LG_CLIPBOARD_REQUEST_INVALID)
@@ -2049,7 +2049,7 @@ static bool requestClipboard(LG_ClipboardData type,
   return false;
 }
 
-bool lgClipboard_requestStream(LG_ClipboardData type,
+bool clipboard_requestStream(LG_ClipboardData type,
     const LG_ClipboardStreamOps * stream, void * opaque,
     LG_ClipboardRequest * request)
 {
@@ -2058,7 +2058,7 @@ bool lgClipboard_requestStream(LG_ClipboardData type,
   return requestClipboard(type, NULL, stream, opaque, request);
 }
 
-bool lgClipboard_requestReady(LG_ClipboardRequest id)
+bool clipboard_requestReady(LG_ClipboardRequest id)
 {
   if (id == LG_CLIPBOARD_REQUEST_INVALID || !clipboard.requests)
     return false;
@@ -2116,7 +2116,7 @@ bool lgClipboard_requestReady(LG_ClipboardRequest id)
   return result;
 }
 
-bool lgClipboard_request(LG_ClipboardData type,
+bool clipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque)
 {
   if (!replyFn)
@@ -2124,7 +2124,7 @@ bool lgClipboard_request(LG_ClipboardData type,
   return requestClipboard(type, replyFn, NULL, opaque, NULL);
 }
 
-bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
+bool clipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
 {
   bool result = false;
   LG_LOCK_SHARED(clipboard.activeLock);
@@ -2135,7 +2135,7 @@ bool lgClipboard_fileAcquire(uint64_t dataset, uint64_t acquisition)
   return result;
 }
 
-bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
+bool clipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
     LG_ClipboardFileError error)
 {
   bool result = false;
@@ -2147,7 +2147,7 @@ bool lgClipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
   return result;
 }
 
-bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
+bool clipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
 {
   bool result = false;
   LG_LOCK_SHARED(clipboard.activeLock);
@@ -2158,7 +2158,7 @@ bool lgClipboard_fileRelease(uint64_t dataset, uint64_t acquisition)
   return result;
 }
 
-bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request)
+bool clipboard_fileRequest(const LG_ClipboardFileRequest * request)
 {
   bool result = false;
   LG_LOCK_SHARED(clipboard.activeLock);
@@ -2169,7 +2169,7 @@ bool lgClipboard_fileRequest(const LG_ClipboardFileRequest * request)
   return result;
 }
 
-LG_ClipboardResult lgClipboard_fileDataBegin(
+LG_ClipboardResult clipboard_fileDataBegin(
     const LG_ClipboardFileRequest * request, uint64_t sizeHint)
 {
   LG_ClipboardResult result = LG_CLIPBOARD_RESULT_FAILED;
@@ -2181,7 +2181,7 @@ LG_ClipboardResult lgClipboard_fileDataBegin(
   return result;
 }
 
-LG_ClipboardResult lgClipboard_fileDataChunk(
+LG_ClipboardResult clipboard_fileDataChunk(
     const LG_ClipboardFileRequest * request, uint64_t responseOffset,
     const void * data, size_t size, bool end)
 {
@@ -2194,7 +2194,7 @@ LG_ClipboardResult lgClipboard_fileDataChunk(
   return result;
 }
 
-LG_ClipboardResult lgClipboard_fileDataEnd(
+LG_ClipboardResult clipboard_fileDataEnd(
     const LG_ClipboardFileRequest * request, uint64_t finalSize)
 {
   LG_ClipboardResult result = LG_CLIPBOARD_RESULT_FAILED;
@@ -2206,7 +2206,7 @@ LG_ClipboardResult lgClipboard_fileDataEnd(
   return result;
 }
 
-bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
+bool clipboard_fileCancel(uint64_t dataset, uint64_t request,
     LG_ClipboardFileError reason)
 {
   bool result = false;
@@ -2218,7 +2218,7 @@ bool lgClipboard_fileCancel(uint64_t dataset, uint64_t request,
   return result;
 }
 
-void lgClipboard_fileRemoteReady(uint64_t dataset)
+void clipboard_fileRemoteReady(uint64_t dataset)
 {
   LG_LOCK(clipboard.callbackLock);
   LG_LOCK(clipboard.stateLock);
@@ -2232,7 +2232,7 @@ void lgClipboard_fileRemoteReady(uint64_t dataset)
   LG_UNLOCK(clipboard.callbackLock);
 }
 
-void lgClipboard_fileRemoteFailed(uint64_t dataset)
+void clipboard_fileRemoteFailed(uint64_t dataset)
 {
   if (!dataset)
     return;

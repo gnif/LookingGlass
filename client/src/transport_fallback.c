@@ -229,13 +229,13 @@ static void unpublishProviders(LG_TransportFallback * fallback, bool live)
   {
     lgInput_setFallback(NULL, NULL);
     lgAudio_setFallback(NULL, NULL);
-    lgClipboard_setFallback(NULL, NULL);
+    clipboard_setFallback(NULL, NULL);
   }
   else
   {
     lgInput_dropFallback();
     lgAudio_dropFallback();
-    lgClipboard_dropFallback();
+    clipboard_dropFallback();
   }
   fallback->providersPublished = false;
   LG_UNLOCK(fallback->providerLock);
@@ -322,7 +322,7 @@ static bool publishProviders(LG_TransportFallback * fallback)
     fallback->transport.ops->getClipboardOps ?
       fallback->transport.ops->getClipboardOps(
           fallback->transport.handle, &clipboardOpaque) : NULL;
-  lgClipboard_setFallback(clipboardOps, clipboardOpaque);
+  clipboard_setFallback(clipboardOps, clipboardOpaque);
   fallback->providersPublished = true;
   LG_UNLOCK_SHARED(fallback->lock);
   LG_UNLOCK(fallback->providerLock);
