@@ -457,7 +457,7 @@ namespace
     std::vector<uint8_t> buffer;
     try
     {
-      buffer.resize(KVMFR_CLIPBOARD_DATA_BYTES);
+      buffer.resize(KVMFR_CLIPBOARD_REPRESENTATION_BYTES);
     }
     catch (const std::bad_alloc&)
     {
@@ -1653,7 +1653,8 @@ void CClipboardManager::ProcessSendData(Work&& work)
     return;
   }
   const size_t length = static_cast<size_t>((std::min<uint64_t>)(
-    KVMFR_CLIPBOARD_DATA_BYTES, total - work.record.offset));
+    KVMFR_CLIPBOARD_REPRESENTATION_BYTES,
+    total - work.record.offset));
   std::vector<uint8_t> data;
   if (length)
   {

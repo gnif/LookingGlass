@@ -206,8 +206,9 @@ bool x11CBEventThread(const XEvent * xe)
             const size_t remaining = write->fileSize - (size_t)write->offset;
             if (remaining)
             {
-              const size_t chunk = remaining > KVMFR_CLIPBOARD_DATA_BYTES ?
-                KVMFR_CLIPBOARD_DATA_BYTES : remaining;
+              const size_t chunk =
+                remaining > KVMFR_CLIPBOARD_REPRESENTATION_BYTES ?
+                  KVMFR_CLIPBOARD_REPRESENTATION_BYTES : remaining;
               XChangeProperty(x11.display,
                   write->event.xselection.requestor,
                   write->event.xselection.property,
@@ -357,7 +358,8 @@ static LG_ClipboardResult x11CBWriteChunk(void * opaque,
     LG_UNLOCK(x11cb.lock);
     return LG_CLIPBOARD_RESULT_BLOCKED;
   }
-  if (offset != write->offset || size > KVMFR_CLIPBOARD_DATA_BYTES)
+  if (offset != write->offset ||
+      size > KVMFR_CLIPBOARD_REPRESENTATION_BYTES)
   {
     LG_UNLOCK(x11cb.lock);
     return LG_CLIPBOARD_RESULT_FAILED;
@@ -978,7 +980,7 @@ static void x11CBFileImportIncr(const XPropertyEvent e)
 readProperty:
   if (XGetWindowProperty(e.display, e.window, e.atom,
       x11cb.fileImport.propertyOffset,
-      (KVMFR_CLIPBOARD_DATA_BYTES + 3U) / 4U,
+      (KVMFR_CLIPBOARD_REPRESENTATION_BYTES + 3U) / 4U,
       True, AnyPropertyType, &type, &format, &itemCount, &after,
       &data) != Success || (itemCount && !data) || (!itemCount && after) ||
       type != x11cb.fileImport.target || format != 8 ||
@@ -1136,7 +1138,7 @@ readProperty:
       e.window,
       e.atom,
       x11cb.read.propertyOffset,
-      (KVMFR_CLIPBOARD_DATA_BYTES + 3U) / 4U,
+      (KVMFR_CLIPBOARD_REPRESENTATION_BYTES + 3U) / 4U,
       True,   // delete the property
       AnyPropertyType,
       &type,
@@ -1198,7 +1200,7 @@ readProperty:
     return;
   }
 
-  if (itemCount > KVMFR_CLIPBOARD_DATA_BYTES)
+  if (itemCount > KVMFR_CLIPBOARD_REPRESENTATION_BYTES)
   {
     const struct X11ClipboardRead read = clearReadNL();
     LG_UNLOCK(x11cb.lock);

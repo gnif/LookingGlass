@@ -1040,7 +1040,7 @@ struct ClipboardWrite
   bool                pollRegistered;
   bool                streamActive;
   bool                requesting;
-  uint8_t             buffer[KVMFR_CLIPBOARD_DATA_BYTES];
+  uint8_t             buffer[KVMFR_CLIPBOARD_REPRESENTATION_BYTES];
 };
 
 static void clipboardWriteDestroy(struct ClipboardWrite * data)

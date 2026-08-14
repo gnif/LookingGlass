@@ -26,7 +26,7 @@
 #include <stdint.h>
 
 static constexpr uint32_t LG_CLIPBOARD_MAPPING_MAGIC = 0x4c474342U;
-static constexpr uint32_t LG_CLIPBOARD_MAPPING_VERSION = 2U;
+static constexpr uint32_t LG_CLIPBOARD_MAPPING_VERSION = 3U;
 
 struct ClipboardRingSlot
 {

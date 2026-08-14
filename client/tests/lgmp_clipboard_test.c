@@ -35,12 +35,18 @@
 #include <sys/mman.h>
 #include <unistd.h>
 
-#define TEST_SHM_SIZE      (8U * 1024U * 1024U)
-#define TEST_WAIT_MS       2500U
-#define TEST_QUIET_MS      50U
-#define TEST_MEMORY_MAX    128U
-#define SLOT_BYTES         \
+#define TEST_WAIT_MS          2500U
+#define TEST_QUIET_MS         50U
+#define TEST_MEMORY_MAX       128U
+#define SLOT_BYTES            \
   (sizeof(KVMFRClipboardSlotHeader) + KVMFR_CLIPBOARD_DATA_BYTES)
+#define TEST_TRANSIENT_SLOTS  4U
+#define TEST_SHM_OVERHEAD     (1024U * 1024U)
+/* Match the production inbound and outbound slot pools, retain several
+ * synthetic host DATA records at once, and leave room for LGMP metadata. */
+#define TEST_SHM_SIZE         \
+  ((2U * KVMFR_CLIPBOARD_SLOT_COUNT + TEST_TRANSIENT_SLOTS) * SLOT_BYTES + \
+    TEST_SHM_OVERHEAD)
 
 #define CHECK(x) \
   do \
@@ -1219,6 +1225,10 @@ static bool testMalformedFileData(TestState * state)
 
 static bool testFileStream(TestState * state)
 {
+  static uint8_t bytes[KVMFR_CLIPBOARD_FILE_READ_BYTES];
+  for (size_t i = 0; i < sizeof(bytes); ++i)
+    bytes[i] = (uint8_t)(i * 131U + 17U);
+
   KVMFRClipboardMessage claimRecord;
   CHECK(claim(state, 78, false, &claimRecord));
   CHECK(own(state, 78, claimRecord.generation));
@@ -1251,7 +1261,7 @@ static bool testFileStream(TestState * state)
   request.offset              = 123;
   request.size                = 42;
   request.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
-  request.flags               = 3;
+  request.flags               = sizeof(bytes);
   request.token               = KVMFR_CLIPBOARD_FILE_OP_READ;
   CHECK(postRecord(state, &request,
         KVMFR_CLIPBOARD_QUEUE_MESSAGE, NULL));
@@ -1262,14 +1272,13 @@ static bool testFileStream(TestState * state)
   CHECK(descriptor.request == request.transfer);
   CHECK(descriptor.node == 42);
   CHECK(descriptor.offset == 123);
-  CHECK(descriptor.length == 3);
+  CHECK(descriptor.length == sizeof(bytes));
   CHECK(descriptor.operation == LG_CLIPBOARD_FILE_READ);
   CHECK(state->ops->fileDataBegin(state->clipboard,
-        &descriptor, 3) == LG_CLIPBOARD_RESULT_ACCEPTED);
+        &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
 
   CHECK(postGrant(state, claimRecord.generation, 1));
   CHECK(waitMemory(state, state->grantMemory[0]));
-  static const uint8_t bytes[] = { 9, 8, 7 };
   CHECK(state->ops->fileDataChunk(state->clipboard,
         &descriptor, 0, bytes, sizeof(bytes)) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
@@ -1278,16 +1287,19 @@ static bool testFileStream(TestState * state)
   const void * data;
   CHECK(checkFileCommit(state, 1, &commit, &slot, &data));
   CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
-  CHECK(slot.offset == 0 && slot.sequence == 0 && slot.size == 3);
+  CHECK(slot.offset == 0 && slot.sequence == 0 &&
+      slot.size == sizeof(bytes));
+  CHECK(slot.length == sizeof(bytes));
   CHECK(memcmp(data, bytes, sizeof(bytes)) == 0);
 
   CHECK(postGrant(state, claimRecord.generation, 1));
   CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->fileDataEnd(state->clipboard,
-        &descriptor, 3) == LG_CLIPBOARD_RESULT_ACCEPTED);
+        &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(checkFileCommit(state, 1, &commit, &slot, &data));
   CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_END);
-  CHECK(slot.offset == 3 && slot.sequence == 1 && slot.size == 3);
+  CHECK(slot.offset == sizeof(bytes) && slot.sequence == 1 &&
+      slot.size == sizeof(bytes));
   CHECK(slot.length == 0);
   return true;
 }

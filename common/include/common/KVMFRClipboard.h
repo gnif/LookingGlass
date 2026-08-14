@@ -26,9 +26,12 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KVMFR_CLIPBOARD_VERSION                2U
-#define KVMFR_CLIPBOARD_SLOT_COUNT             8U
-#define KVMFR_CLIPBOARD_DATA_BYTES             (64U * 1024U)
+#define KVMFR_CLIPBOARD_VERSION                3U
+#define KVMFR_CLIPBOARD_SLOT_COUNT             1U
+#define KVMFR_CLIPBOARD_DATA_BYTES             (1024U * 1024U)
+/* Keep text and image chunks within the core X11 request limit. File data can
+ * use the full slot without passing through XChangeProperty. */
+#define KVMFR_CLIPBOARD_REPRESENTATION_BYTES   (64U * 1024U)
 #define KVMFR_CLIPBOARD_SIZE_UNKNOWN           UINT64_MAX
 #define KVMFR_CLIPBOARD_FILE_READ_BYTES        (1024U * 1024U)
 #define KVMFR_CLIPBOARD_FILE_ROOT_NODE         UINT64_C(0)

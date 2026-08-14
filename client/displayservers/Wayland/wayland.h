@@ -316,7 +316,7 @@ struct ClipboardRead
   bool                calling;
   bool                readyPending;
   bool                eof;
-  uint8_t             buffer[KVMFR_CLIPBOARD_DATA_BYTES];
+  uint8_t             buffer[KVMFR_CLIPBOARD_REPRESENTATION_BYTES];
 };
 
 struct WCBState

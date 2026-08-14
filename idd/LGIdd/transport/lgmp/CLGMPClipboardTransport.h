@@ -40,7 +40,7 @@ class CLGMPHost;
 class CLGMPClipboardTransport final : public IClipboardSource
 {
 private:
-  static constexpr unsigned MEMORY_COUNT = 8;
+  static constexpr unsigned MEMORY_COUNT = KVMFR_CLIPBOARD_SLOT_COUNT;
   static constexpr unsigned INTERNAL_TARGET_COUNT =
     CLGMPClipboardFiles::MAX_ACQUISITIONS +
     CLGMPClipboardFiles::MAX_REQUESTS + 3;
