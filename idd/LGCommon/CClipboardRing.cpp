@@ -113,8 +113,9 @@ bool CClipboardRing::Valid(const ClipboardRingSlot& slot)
 {
   return slot.header.version == KVMFR_CLIPBOARD_VERSION &&
     slot.header.type >= KVMFR_CLIPBOARD_MESSAGE_CLAIM &&
-    slot.header.type <= KVMFR_CLIPBOARD_MESSAGE_GRANT &&
+    slot.header.type <= KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL &&
     slot.header.length <= KVMFR_CLIPBOARD_DATA_BYTES &&
     (slot.header.type == KVMFR_CLIPBOARD_MESSAGE_DATA ||
+      slot.header.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA ||
       !slot.header.length);
 }

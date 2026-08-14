@@ -30,6 +30,29 @@ namespace
       return kvmfrClipboardTransferFromHelper(record.transfer);
     if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA)
       return kvmfrClipboardTransferFromClient(record.transfer);
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST)
+      return kvmfrClipboardTransferFromHelper(record.transfer);
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA)
+      return kvmfrClipboardTransferFromClient(record.transfer);
+    return true;
+  }
+
+  bool ValidClientDirection(const KVMFRClipboardMessage& record)
+  {
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_REQUEST)
+      return kvmfrClipboardTransferFromClient(record.transfer);
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA)
+      return kvmfrClipboardTransferFromHelper(record.transfer);
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST)
+      return kvmfrClipboardTransferFromClient(record.transfer);
+    if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED ||
+        record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA)
+      return kvmfrClipboardTransferFromHelper(record.transfer);
     return true;
   }
 }
@@ -83,6 +106,25 @@ ClipboardChannelResult CClipboardHub::HoldOrDiscard(
     cancel.format              = record.format;
     cancel.token               = ERROR_DEVICE_NOT_CONNECTED;
     const ClipboardChannelResult result = m_channel.Send(cancel);
+    if (result != ClipboardChannelResult::ACCEPTED)
+      return result;
+  }
+
+  if (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ||
+      record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST)
+  {
+    KVMFRClipboardMessage reject = {};
+    reject.version             = KVMFR_CLIPBOARD_VERSION;
+    reject.type                = record.type ==
+      KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE ?
+        KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED :
+        KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL;
+    reject.generation          = record.generation;
+    reject.clipboardGeneration = record.clipboardGeneration;
+    reject.transfer            = record.transfer;
+    reject.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
+    reject.token               = KVMFR_CLIPBOARD_FILE_ERROR_DISCONNECTED;
+    const ClipboardChannelResult result = m_channel.Send(reject);
     if (result != ClipboardChannelResult::ACCEPTED)
       return result;
   }
@@ -344,7 +386,8 @@ ClipboardChannelResult CClipboardHub::SendClipboard(
   // Keep the shared lock through Send so Unbind cannot advance the binding
   // generation after validation but before the record enters the channel.
   CSRWSharedLock lock(m_lock);
-  if (m_stopped || !m_available || !m_active || !m_running || m_failed ||
+  if (!ValidClientDirection(record) ||
+      m_stopped || !m_available || !m_active || !m_running || m_failed ||
       !m_source || record.generation != m_generation)
     return ClipboardChannelResult::FAILED;
   return m_channel.Send(record, data);

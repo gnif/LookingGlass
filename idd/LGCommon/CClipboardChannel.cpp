@@ -91,14 +91,16 @@ namespace
 
       case KVMFR_CLIPBOARD_MESSAGE_REQUEST:
         return record.clipboardGeneration && record.transfer &&
-          kvmfrClipboardFormatValid(record.format) && !record.offset &&
+          kvmfrClipboardRepresentationFormatValid(record.format) &&
+          !record.offset &&
           !record.size && !record.flags && !record.token &&
           !record.length && !record.sequence;
 
       case KVMFR_CLIPBOARD_MESSAGE_DATA:
       {
         if (!record.clipboardGeneration || !record.transfer ||
-            !kvmfrClipboardFormatValid(record.format) || record.token ||
+            !kvmfrClipboardRepresentationFormatValid(record.format) ||
+            record.token ||
             (record.flags & ~(KVMFR_CLIPBOARD_FLAG_BEGIN |
               KVMFR_CLIPBOARD_FLAG_END)) ||
             (!record.length && !(record.flags & KVMFR_CLIPBOARD_FLAG_END)) ||
@@ -115,8 +117,17 @@ namespace
 
       case KVMFR_CLIPBOARD_MESSAGE_CANCEL:
         return record.transfer && !record.offset && !record.size &&
-          (!record.format || kvmfrClipboardFormatValid(record.format)) &&
+          (!record.format ||
+            kvmfrClipboardRepresentationFormatValid(record.format)) &&
           !record.flags && !record.length && !record.sequence;
+
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE:
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED:
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE:
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST:
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_DATA:
+      case KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL:
+        return kvmfrClipboardFileMessageValid(&record);
 
       default:
         return false;
