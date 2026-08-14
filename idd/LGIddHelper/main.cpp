@@ -137,8 +137,8 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
   const OleScope oleScope;
 
   const HRESULT security = CoInitializeSecurity(nullptr, 0, nullptr, nullptr,
-    RPC_C_AUTHN_LEVEL_NONE, RPC_C_IMP_LEVEL_IDENTIFY, nullptr, EOAC_NONE,
-    nullptr);
+    RPC_C_AUTHN_LEVEL_NONE, RPC_C_IMP_LEVEL_IDENTIFY, nullptr,
+    EOAC_DYNAMIC_CLOAKING, nullptr);
   if (FAILED(security))
   {
     DEBUG_ERROR_HR(security, "Failed to initialize COM security");

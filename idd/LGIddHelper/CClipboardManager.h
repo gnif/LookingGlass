@@ -295,12 +295,14 @@ private:
   void RetryLocalClipboard();
   void RetryRemoteOffer();
 
-  bool OpenClipboardRetry() const;
+  bool OpenClipboardRetry(DWORD * error = nullptr,
+    const char * stage = nullptr, bool useWindow = true) const;
   bool IsOurClipboard();
   uint32_t EnumerateFormats() const;
   std::shared_ptr<CLocalClipboardFiles> CaptureClipboardFiles(
-    DWORD sequence, bool& viaOLE, bool& openedOLE,
-    KVMFRClipboardFileError& error, DWORD& winError, HRESULT& oleError);
+    DWORD sequence, int rawFormatCount, bool& viaOLE,
+    const char *& retryStage, KVMFRClipboardFileError& error,
+    HRESULT& oleError);
   void PublishLocalClipboard();
   void PublishClear(uint64_t generation);
   bool ApplyRemoteOffer(uint32_t formats, uint64_t generation);
@@ -308,7 +310,7 @@ private:
   void InvalidateOutgoing(uint32_t reason);
   void InvalidateLocalClipboard(uint32_t reason);
   void ClearLocalRetry();
-  void DeferLocalClipboard(DWORD sequence, bool openedOLE);
+  void DeferLocalClipboard(DWORD sequence, const char * stage);
   void ExpireLocalRetry(DWORD sequence);
   void ClearRemoteRetry();
   bool SetOriginMarker(uint64_t generation) const;

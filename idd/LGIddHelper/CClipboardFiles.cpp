@@ -47,7 +47,8 @@ namespace
   {
   private:
     HANDLE m_previousToken = nullptr;
-    bool m_active = false;
+    bool m_active           = false;
+    DWORD m_error           = ERROR_SUCCESS;
 
     void ClosePreviousToken()
     {
@@ -76,6 +77,7 @@ namespace
       if (!m_previousToken && SetThreadToken(nullptr, nullptr))
       {
         m_active = false;
+        m_error = error;
         SetLastError(error);
         return false;
       }
@@ -97,7 +99,10 @@ namespace
       {
         const DWORD error = GetLastError();
         if (error != ERROR_NO_TOKEN)
+        {
+          m_error = error;
           return;
+        }
         SetLastError(ERROR_SUCCESS);
       }
 
@@ -107,6 +112,7 @@ namespace
       {
         const DWORD error = GetLastError();
         ClosePreviousToken();
+        m_error = error;
         SetLastError(error);
       }
     }
@@ -125,6 +131,11 @@ namespace
     bool Active() const
     {
       return m_active;
+    }
+
+    DWORD Error() const
+    {
+      return m_error;
     }
 
     bool Finish()
@@ -150,13 +161,15 @@ namespace
   }
 
   bool CaptureUserToken(HANDLE& token,
-    KVMFRClipboardFileError& error)
+    KVMFRClipboardFileError& error, DWORD& winError)
   {
     token = nullptr;
+    winError = ERROR_SUCCESS;
     DWORD sessionId = 0;
     if (!ProcessIdToSessionId(GetCurrentProcessId(), &sessionId))
     {
-      error = TokenError(GetLastError());
+      winError = GetLastError();
+      error = TokenError(winError);
       return false;
     }
 
@@ -164,7 +177,8 @@ namespace
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY | TOKEN_DUPLICATE,
         &processToken))
     {
-      error = TokenError(GetLastError());
+      winError = GetLastError();
+      error = TokenError(winError);
       return false;
     }
 
@@ -177,7 +191,7 @@ namespace
     CloseHandle(processToken);
     if (!brokerDuplicated)
     {
-      SetLastError(brokerError);
+      winError = brokerError;
       error = TokenError(brokerError);
       return false;
     }
@@ -185,9 +199,8 @@ namespace
     LUID privilege = {};
     if (!LookupPrivilegeValueW(nullptr, SE_TCB_NAME, &privilege))
     {
-      const DWORD winError = GetLastError();
+      winError = GetLastError();
       CloseHandle(brokerToken);
-      SetLastError(winError);
       error = TokenError(winError);
       return false;
     }
@@ -197,22 +210,23 @@ namespace
     privileges.Privileges[0].Luid = privilege;
     privileges.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
     SetLastError(ERROR_SUCCESS);
-    if (!AdjustTokenPrivileges(brokerToken, FALSE, &privileges, 0, nullptr,
-        nullptr) || GetLastError() != ERROR_SUCCESS)
+    const bool adjusted = AdjustTokenPrivileges(brokerToken, FALSE,
+      &privileges, 0, nullptr, nullptr) != FALSE;
+    const DWORD adjustError = GetLastError();
+    if (!adjusted || adjustError != ERROR_SUCCESS)
     {
-      const DWORD winError = GetLastError();
       CloseHandle(brokerToken);
-      SetLastError(winError ? winError : ERROR_ACCESS_DENIED);
-      error = TokenError(winError ? winError : ERROR_ACCESS_DENIED);
+      winError = adjustError ? adjustError : ERROR_ACCESS_DENIED;
+      error = TokenError(winError);
       return false;
     }
 
     CThreadImpersonation brokerImpersonation(brokerToken);
     if (!brokerImpersonation.Active())
     {
-      const DWORD winError = GetLastError();
+      const DWORD brokerImpersonationError = brokerImpersonation.Error();
       CloseHandle(brokerToken);
-      SetLastError(winError);
+      winError = brokerImpersonationError;
       error = TokenError(winError);
       return false;
     }
@@ -222,11 +236,11 @@ namespace
     const DWORD queryError = queried ? ERROR_SUCCESS : GetLastError();
     if (!brokerImpersonation.Finish())
     {
-      const DWORD winError = GetLastError();
+      const DWORD restoreError = brokerImpersonation.Error();
       if (sourceToken)
         CloseHandle(sourceToken);
       CloseHandle(brokerToken);
-      SetLastError(winError);
+      winError = restoreError;
       error = TokenError(winError);
       return false;
     }
@@ -235,8 +249,8 @@ namespace
     {
       if (sourceToken)
         CloseHandle(sourceToken);
-      SetLastError(queryError ? queryError : ERROR_ACCESS_DENIED);
-      error = TokenError(queryError ? queryError : ERROR_ACCESS_DENIED);
+      winError = queryError ? queryError : ERROR_ACCESS_DENIED;
+      error = TokenError(winError);
       return false;
     }
 
@@ -247,7 +261,7 @@ namespace
     CloseHandle(sourceToken);
     if (!duplicated)
     {
-      SetLastError(duplicateError);
+      winError = duplicateError;
       error = TokenError(duplicateError);
       return false;
     }
@@ -1148,6 +1162,61 @@ namespace
   };
 }
 
+class CClipboardUserImpersonation::Impl
+{
+public:
+  HANDLE token;
+  CThreadImpersonation impersonation;
+
+  explicit Impl(HANDLE token) :
+    token(token), impersonation(token)
+  {
+  }
+
+  ~Impl()
+  {
+    impersonation.Finish();
+    CloseHandle(token);
+  }
+};
+
+CClipboardUserImpersonation::CClipboardUserImpersonation(
+  KVMFRClipboardFileError& error)
+{
+  HANDLE token = nullptr;
+  if (!CaptureUserToken(token, error, m_error))
+    return;
+  try
+  {
+    m_impl = std::make_unique<Impl>(token);
+  }
+  catch (const std::bad_alloc&)
+  {
+    CloseHandle(token);
+    m_error = ERROR_OUTOFMEMORY;
+    error = KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY;
+    return;
+  }
+  if (!m_impl->impersonation.Active())
+  {
+    m_error = m_impl->impersonation.Error();
+    m_impl.reset();
+    error = TokenError(m_error);
+  }
+}
+
+CClipboardUserImpersonation::~CClipboardUserImpersonation() = default;
+
+bool CClipboardUserImpersonation::Active() const
+{
+  return m_impl && m_impl->impersonation.Active();
+}
+
+DWORD CClipboardUserImpersonation::Error() const
+{
+  return m_error;
+}
+
 CLocalClipboardFiles::CLocalClipboardFiles(HANDLE userToken) :
   m_userToken(userToken)
 {
@@ -1173,7 +1242,8 @@ std::shared_ptr<CLocalClipboardFiles> CLocalClipboardFiles::Capture(
   std::shared_ptr<CLocalClipboardFiles> dataset;
   try
   {
-    if (!CaptureUserToken(userToken, error))
+    DWORD tokenError = ERROR_SUCCESS;
+    if (!CaptureUserToken(userToken, error, tokenError))
       return nullptr;
     CLocalClipboardFiles * raw = new CLocalClipboardFiles(userToken);
     userToken = nullptr;
@@ -1213,7 +1283,7 @@ std::shared_ptr<CLocalClipboardFiles> CLocalClipboardFiles::Capture(
     CThreadImpersonation impersonation(dataset->m_userToken);
     if (!impersonation.Active())
     {
-      error = TokenError(GetLastError());
+      error = TokenError(impersonation.Error());
       return nullptr;
     }
     for (const std::wstring& root : roots)
@@ -1221,7 +1291,7 @@ std::shared_ptr<CLocalClipboardFiles> CLocalClipboardFiles::Capture(
         return nullptr;
     if (!impersonation.Finish())
     {
-      error = TokenError(GetLastError());
+      error = TokenError(impersonation.Error());
       return nullptr;
     }
   }
@@ -1512,14 +1582,14 @@ bool CLocalClipboardFiles::List(uint64_t node, std::vector<uint8_t>& data,
       CThreadImpersonation impersonation(m_userToken);
       if (!impersonation.Active())
       {
-        error = TokenError(GetLastError());
+        error = TokenError(impersonation.Error());
         return false;
       }
       if (!RefreshRoots(error))
         return false;
       if (!impersonation.Finish())
       {
-        error = TokenError(GetLastError());
+        error = TokenError(impersonation.Error());
         return false;
       }
       m_published = true;
@@ -1542,14 +1612,14 @@ bool CLocalClipboardFiles::List(uint64_t node, std::vector<uint8_t>& data,
     CThreadImpersonation impersonation(m_userToken);
     if (!impersonation.Active())
     {
-      error = TokenError(GetLastError());
+      error = TokenError(impersonation.Error());
       return false;
     }
     if (!LoadChildren(index, error))
       return false;
     if (!impersonation.Finish())
     {
-      error = TokenError(GetLastError());
+      error = TokenError(impersonation.Error());
       return false;
     }
     children = &m_nodes[index].children;
@@ -1653,7 +1723,7 @@ bool CLocalClipboardFiles::Read(uint64_t node, uint64_t offset,
   CThreadImpersonation impersonation(m_userToken);
   if (!impersonation.Active())
   {
-    error = TokenError(GetLastError());
+    error = TokenError(impersonation.Error());
     return false;
   }
 
@@ -1758,7 +1828,7 @@ bool CLocalClipboardFiles::Read(uint64_t node, uint64_t offset,
   if (!impersonation.Finish())
   {
     data.clear();
-    error = TokenError(GetLastError());
+    error = TokenError(impersonation.Error());
     return false;
   }
   return true;
