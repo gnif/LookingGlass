@@ -326,7 +326,7 @@ void CClipboardHub::ClipboardState(bool available, uint64_t epoch)
 }
 
 ClipboardChannelResult CClipboardHub::ClipboardRecord(
-  const KVMFRClipboardMessage& record, const uint8_t * data)
+  const KVMFRClipboardMessage& record, std::vector<uint8_t>&& data)
 {
   if (!ValidHelperDirection(record))
     return ClipboardChannelResult::FAILED;
@@ -347,7 +347,8 @@ ClipboardChannelResult CClipboardHub::ClipboardRecord(
   KVMFRClipboardMessage stamped = record;
   stamped.generation = generation;
   const ClipboardChannelResult result =
-    source->SendClipboard(stamped, data);
+    source->SendClipboard(stamped,
+      data.empty() ? nullptr : data.data());
   if (result != ClipboardChannelResult::FAILED)
     return result;
 

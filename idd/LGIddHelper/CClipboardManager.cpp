@@ -1737,7 +1737,7 @@ void CClipboardManager::ProcessSend(Work&& work)
 
   if (result == ClipboardChannelResult::BUSY &&
       GetTickCount64() < work.deadline &&
-      WaitForSingleObject(m_stop, CHANNEL_RETRY_MS) != WAIT_OBJECT_0)
+      m_channel.WaitWritable(m_stop, CHANNEL_RETRY_MS))
   {
     if (work.record.type == KVMFR_CLIPBOARD_MESSAGE_CANCEL)
       QueueCancel(work.record, work.record.token, work.deadline);
@@ -1824,15 +1824,17 @@ void CClipboardManager::ProcessSendData(Work&& work)
     QueueCancel(work.record, ERROR_INVALID_DATA);
     return;
   }
-  const size_t length = static_cast<size_t>((std::min<uint64_t>)(
-    KVMFR_CLIPBOARD_REPRESENTATION_BYTES,
-    total - work.record.offset));
+
+  const uint64_t batchBytes = (std::min<uint64_t>)(
+    static_cast<uint64_t>(KVMFR_CLIPBOARD_REPRESENTATION_BYTES) *
+      KVMFR_CLIPBOARD_SLOT_COUNT,
+    total - work.record.offset);
   std::vector<uint8_t> data;
-  if (length)
+  if (batchBytes)
   {
     try
     {
-      data.resize(length);
+      data.resize(static_cast<size_t>(batchBytes));
     }
     catch (const std::bad_alloc&)
     {
@@ -1840,7 +1842,7 @@ void CClipboardManager::ProcessSendData(Work&& work)
       QueueCancel(work.record, ERROR_OUTOFMEMORY);
       return;
     }
-    if (!work.spool->Read(work.record.offset, data.data(), length))
+    if (!work.spool->Read(work.record.offset, data.data(), data.size()))
     {
       const DWORD error = GetLastError();
       ReleaseOutgoing(work.record.transfer);
@@ -1849,49 +1851,82 @@ void CClipboardManager::ProcessSendData(Work&& work)
     }
   }
 
-  KVMFRClipboardMessage message = work.record;
-  message.type = KVMFR_CLIPBOARD_MESSAGE_DATA;
-  message.token = 0;
-  message.length = static_cast<uint32_t>(length);
-  message.flags = 0;
-  if (!message.offset)
-    message.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
-  if (message.offset + length == total)
-    message.flags |= KVMFR_CLIPBOARD_FLAG_END;
-  message.size = message.flags & KVMFR_CLIPBOARD_FLAG_END ? total :
-    (message.flags & KVMFR_CLIPBOARD_FLAG_BEGIN ? total :
-      KVMFR_CLIPBOARD_SIZE_UNKNOWN);
+  std::array<ClipboardChannelWrite, KVMFR_CLIPBOARD_SLOT_COUNT> batch;
+  size_t batchCount = 0;
+  uint64_t offset = work.record.offset;
+  uint32_t sequence = work.record.sequence;
+  do
+  {
+    ClipboardChannelWrite& write = batch[batchCount++];
+    const size_t length = static_cast<size_t>((std::min<uint64_t>)(
+      KVMFR_CLIPBOARD_REPRESENTATION_BYTES, total - offset));
+    write.record = work.record;
+    write.record.type = KVMFR_CLIPBOARD_MESSAGE_DATA;
+    write.record.token = 0;
+    write.record.offset = offset;
+    write.record.sequence = sequence;
+    write.record.length = static_cast<uint32_t>(length);
+    write.record.flags = 0;
+    if (!offset)
+      write.record.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
+    if (offset + length == total)
+      write.record.flags |= KVMFR_CLIPBOARD_FLAG_END;
+    write.record.size =
+      write.record.flags & KVMFR_CLIPBOARD_FLAG_END ? total :
+      (write.record.flags & KVMFR_CLIPBOARD_FLAG_BEGIN ? total :
+        KVMFR_CLIPBOARD_SIZE_UNKNOWN);
+    write.data = length ? data.data() +
+      static_cast<size_t>(offset - work.record.offset) : nullptr;
+    offset += length;
+    ++sequence;
+  }
+  while (batchCount < batch.size() && offset < total);
 
   ClipboardChannelResult result = ClipboardChannelResult::FAILED;
+  size_t accepted = 0;
   bool stale = false;
   bool timedOut = false;
   {
     std::lock_guard<std::mutex> lock(m_outgoingLock);
     stale = Atomic::Load(m_outgoingTransfer, std::memory_order_acquire) !=
-        message.transfer ||
-      message.clipboardGeneration != Atomic::Load(
+        work.record.transfer ||
+      work.record.clipboardGeneration != Atomic::Load(
         m_liveLocalGeneration, std::memory_order_acquire);
     timedOut = GetTickCount64() >= work.deadline;
     if (!stale && !timedOut)
-      result = m_channel.Send(message,
-        data.empty() ? nullptr : data.data());
+      result = m_channel.SendBatch(batch.data(), batchCount, accepted);
   }
   if (stale)
   {
-    ReleaseOutgoing(message.transfer);
-    QueueCancel(message, ERROR_OPERATION_ABORTED);
+    ReleaseOutgoing(work.record.transfer);
+    QueueCancel(work.record, ERROR_OPERATION_ABORTED);
     return;
   }
   if (timedOut)
   {
-    ReleaseOutgoing(message.transfer);
-    QueueCancel(message, ERROR_TIMEOUT);
+    ReleaseOutgoing(work.record.transfer);
+    QueueCancel(work.record, ERROR_TIMEOUT);
     return;
   }
+
+  KVMFRClipboardMessage progress = work.record;
+  if (accepted)
+  {
+    progress = batch[accepted - 1U].record;
+    work.record.offset = progress.offset + progress.length;
+    work.record.sequence = progress.sequence + 1U;
+    work.deadline = GetTickCount64() + SEND_TIMEOUT_MS;
+    if (progress.flags & KVMFR_CLIPBOARD_FLAG_END)
+    {
+      ReleaseOutgoing(progress.transfer);
+      return;
+    }
+  }
+
   if (result == ClipboardChannelResult::BUSY)
   {
     if (GetTickCount64() < work.deadline &&
-        WaitForSingleObject(m_stop, CHANNEL_RETRY_MS) != WAIT_OBJECT_0)
+        m_channel.WaitWritable(m_stop, CHANNEL_RETRY_MS))
     {
       const KVMFRClipboardMessage record = work.record;
       if (!QueueWork(std::move(work)))
@@ -1909,19 +1944,11 @@ void CClipboardManager::ProcessSendData(Work&& work)
   }
   if (result != ClipboardChannelResult::ACCEPTED)
   {
-    ReleaseOutgoing(work.record.transfer);
-    QueueCancel(work.record, ERROR_DEVICE_NOT_CONNECTED);
-    return;
-  }
-  work.deadline = GetTickCount64() + SEND_TIMEOUT_MS;
-  if (message.flags & KVMFR_CLIPBOARD_FLAG_END)
-  {
-    ReleaseOutgoing(work.record.transfer);
+    ReleaseOutgoing(progress.transfer);
+    QueueCancel(progress, ERROR_DEVICE_NOT_CONNECTED);
     return;
   }
 
-  work.record.offset += length;
-  ++work.record.sequence;
   const KVMFRClipboardMessage record = work.record;
   if (!QueueWork(std::move(work)))
   {
@@ -1985,52 +2012,75 @@ void CClipboardManager::ProcessSendFileData(Work&& work)
     QueueFileCancel(work.record, KVMFR_CLIPBOARD_FILE_ERROR_INVALID);
     return;
   }
-  const size_t length = static_cast<size_t>((std::min<uint64_t>)(
-    KVMFR_CLIPBOARD_DATA_BYTES, total - work.record.offset));
-  KVMFRClipboardMessage message = work.record;
-  message.version = KVMFR_CLIPBOARD_VERSION;
-  message.type = KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
-  message.length = static_cast<uint32_t>(length);
-  message.flags = 0;
-  if (!message.offset)
-    message.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
-  if (message.offset + length == total)
-    message.flags |= KVMFR_CLIPBOARD_FLAG_END;
-  message.size = message.flags & KVMFR_CLIPBOARD_FLAG_END ? total :
-    (message.flags & KVMFR_CLIPBOARD_FLAG_BEGIN ? total :
-      KVMFR_CLIPBOARD_SIZE_UNKNOWN);
 
-  const uint8_t * data = length ?
-    work.fileData->data() + static_cast<size_t>(message.offset) : nullptr;
-  const ClipboardChannelResult result = m_channel.Send(message, data);
+  std::array<ClipboardChannelWrite, KVMFR_CLIPBOARD_SLOT_COUNT> batch;
+  size_t batchCount = 0;
+  uint64_t offset = work.record.offset;
+  uint32_t sequence = work.record.sequence;
+  do
+  {
+    ClipboardChannelWrite& write = batch[batchCount++];
+    const size_t length = static_cast<size_t>((std::min<uint64_t>)(
+      KVMFR_CLIPBOARD_DATA_BYTES, total - offset));
+    write.record = work.record;
+    write.record.version = KVMFR_CLIPBOARD_VERSION;
+    write.record.type = KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
+    write.record.offset = offset;
+    write.record.sequence = sequence;
+    write.record.length = static_cast<uint32_t>(length);
+    write.record.flags = 0;
+    if (!offset)
+      write.record.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
+    if (offset + length == total)
+      write.record.flags |= KVMFR_CLIPBOARD_FLAG_END;
+    write.record.size =
+      write.record.flags & KVMFR_CLIPBOARD_FLAG_END ? total :
+      (write.record.flags & KVMFR_CLIPBOARD_FLAG_BEGIN ? total :
+        KVMFR_CLIPBOARD_SIZE_UNKNOWN);
+    write.data = length ? work.fileData->data() +
+      static_cast<size_t>(offset) : nullptr;
+    offset += length;
+    ++sequence;
+  }
+  while (batchCount < batch.size() && offset < total);
+
+  size_t accepted = 0;
+  const ClipboardChannelResult result =
+    m_channel.SendBatch(batch.data(), batchCount, accepted);
+  KVMFRClipboardMessage progress = work.record;
+  if (accepted)
+  {
+    progress = batch[accepted - 1U].record;
+    work.record.offset = progress.offset + progress.length;
+    work.record.sequence = progress.sequence + 1U;
+    work.deadline = GetTickCount64() + SEND_TIMEOUT_MS;
+    if (progress.flags & KVMFR_CLIPBOARD_FLAG_END)
+    {
+      std::lock_guard<std::mutex> lock(m_fileLock);
+      m_outgoingFileRequests.erase(progress.transfer);
+      return;
+    }
+  }
+
   if (result == ClipboardChannelResult::BUSY &&
       GetTickCount64() < work.deadline &&
-      WaitForSingleObject(m_stop, CHANNEL_RETRY_MS) != WAIT_OBJECT_0)
+      m_channel.WaitWritable(m_stop, CHANNEL_RETRY_MS))
   {
     if (!QueueWork(std::move(work)))
-      QueueFileCancel(message, KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY);
+      QueueFileCancel(progress, KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY);
     return;
   }
   if (result != ClipboardChannelResult::ACCEPTED)
   {
-    QueueFileCancel(message,
+    QueueFileCancel(progress,
       result == ClipboardChannelResult::BUSY ?
         KVMFR_CLIPBOARD_FILE_ERROR_IO :
         KVMFR_CLIPBOARD_FILE_ERROR_DISCONNECTED);
     return;
   }
 
-  if (message.flags & KVMFR_CLIPBOARD_FLAG_END)
-  {
-    std::lock_guard<std::mutex> lock(m_fileLock);
-    m_outgoingFileRequests.erase(message.transfer);
-    return;
-  }
-  work.record.offset += length;
-  ++work.record.sequence;
-  work.deadline = GetTickCount64() + SEND_TIMEOUT_MS;
   if (!QueueWork(std::move(work)))
-    QueueFileCancel(message, KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY);
+    QueueFileCancel(progress, KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY);
 }
 
 void CClipboardManager::ProcessFileRecord(
@@ -2423,15 +2473,30 @@ void CClipboardManager::ProcessFileData(
 
       if (valid && record.length)
       {
-        try
+        if (request->operation == KVMFR_CLIPBOARD_FILE_OP_READ &&
+            request->output)
         {
-          request->data.insert(request->data.end(), data,
-            data + record.length);
+          if (request->nextOffset > request->outputCapacity ||
+              record.length >
+                request->outputCapacity - request->nextOffset)
+            valid = false;
+          else
+            memcpy(request->output +
+              static_cast<size_t>(request->nextOffset), data,
+              record.length);
         }
-        catch (const std::bad_alloc&)
+        else
         {
-          valid = false;
-          request->error = KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY;
+          try
+          {
+            request->data.insert(request->data.end(), data,
+              data + record.length);
+          }
+          catch (const std::bad_alloc&)
+          {
+            valid = false;
+            request->error = KVMFR_CLIPBOARD_FILE_ERROR_NO_MEMORY;
+          }
         }
       }
       if (valid)
@@ -2809,6 +2874,8 @@ HRESULT CClipboardManager::ReadRemoteFile(uint64_t dataset,
   read = 0;
   if (Atomic::Load(m_shutdown))
     return STG_E_READFAULT;
+  if (!output && length)
+    return STG_E_INVALIDPOINTER;
   uint8_t * destination = static_cast<uint8_t *>(output);
   while (length)
   {
@@ -2831,6 +2898,8 @@ HRESULT CClipboardManager::ReadRemoteFile(uint64_t dataset,
     request->node = node;
     request->operation = KVMFR_CLIPBOARD_FILE_OP_READ;
     request->requestedBytes = wanted;
+    request->output = destination;
+    request->outputCapacity = wanted;
     KVMFRClipboardFileError insertError =
       KVMFR_CLIPBOARD_FILE_ERROR_NONE;
     {
@@ -2906,11 +2975,9 @@ HRESULT CClipboardManager::ReadRemoteFile(uint64_t dataset,
     if (request->error != KVMFR_CLIPBOARD_FILE_ERROR_NONE)
       return request->error == KVMFR_CLIPBOARD_FILE_ERROR_ACCESS ?
         STG_E_ACCESSDENIED : STG_E_READFAULT;
-    if (request->data.size() > wanted)
+    if (request->nextOffset > wanted)
       return STG_E_READFAULT;
-    if (!request->data.empty())
-      memcpy(destination, request->data.data(), request->data.size());
-    const ULONG actual = static_cast<ULONG>(request->data.size());
+    const ULONG actual = static_cast<ULONG>(request->nextOffset);
     destination += actual;
     read += actual;
     offset += actual;
@@ -2996,8 +3063,11 @@ void CClipboardManager::ClipboardState(bool available, uint64_t epoch)
 }
 
 ClipboardChannelResult CClipboardManager::ClipboardRecord(
-  const KVMFRClipboardMessage& record, const uint8_t * data)
+  const KVMFRClipboardMessage& record, std::vector<uint8_t>&& data)
 {
+  if (data.size() != record.length)
+    return ClipboardChannelResult::FAILED;
+
   switch (record.type)
   {
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
@@ -3028,8 +3098,7 @@ ClipboardChannelResult CClipboardManager::ClipboardRecord(
     case KVMFR_CLIPBOARD_MESSAGE_DATA:
       if (!record.clipboardGeneration || !record.transfer ||
           !kvmfrClipboardTransferFromHelper(record.transfer) ||
-          !kvmfrClipboardRepresentationFormatValid(record.format) ||
-          (record.length && !data))
+          !kvmfrClipboardRepresentationFormatValid(record.format))
         return ClipboardChannelResult::FAILED;
       break;
 
@@ -3056,8 +3125,7 @@ ClipboardChannelResult CClipboardManager::ClipboardRecord(
           (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST &&
             !kvmfrClipboardTransferFromClient(record.transfer)) ||
           (record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA &&
-            !kvmfrClipboardTransferFromHelper(record.transfer)) ||
-          (record.length && !data))
+            !kvmfrClipboardTransferFromHelper(record.transfer)))
         return ClipboardChannelResult::FAILED;
       break;
     default:
@@ -3068,16 +3136,7 @@ ClipboardChannelResult CClipboardManager::ClipboardRecord(
   work.type = WorkType::RECORD;
   work.record = record;
   if (record.length)
-  {
-    try
-    {
-      work.data.assign(data, data + record.length);
-    }
-    catch (const std::bad_alloc&)
-    {
-      return ClipboardChannelResult::BUSY;
-    }
-  }
+    work.data = std::move(data);
   if (QueueWork(std::move(work)))
     return ClipboardChannelResult::ACCEPTED;
   return Atomic::Load(m_shutdown) ? ClipboardChannelResult::FAILED :

@@ -55,7 +55,7 @@ private:
   void ClipboardState(bool available, uint64_t epoch) override;
   ClipboardChannelResult ClipboardRecord(
     const KVMFRClipboardMessage& record,
-    const uint8_t * data) override;
+    std::vector<uint8_t>&& data) override;
   void ClipboardReset(uint64_t epoch, uint32_t reason) override;
 
 public:

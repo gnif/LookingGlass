@@ -138,6 +138,10 @@ private:
     bool manifest = false;
     KVMFRClipboardFileError error = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
     HANDLE event = nullptr;
+    // Borrowed by a synchronous READ until this request is removed while
+    // holding m_fileLock. Manifest LIST responses retain owned vector data.
+    uint8_t * output = nullptr;
+    uint32_t outputCapacity = 0;
     std::vector<uint8_t> data;
 
     ~IncomingFileRequest();
@@ -322,8 +326,9 @@ private:
     CClipboardSpool& spool);
 
   void ClipboardState(bool available, uint64_t epoch) override;
-  ClipboardChannelResult ClipboardRecord(const KVMFRClipboardMessage& record,
-    const uint8_t * data) override;
+  ClipboardChannelResult ClipboardRecord(
+    const KVMFRClipboardMessage& record,
+    std::vector<uint8_t>&& data) override;
   void ClipboardReset(uint64_t epoch, uint32_t reason) override;
 
 public:

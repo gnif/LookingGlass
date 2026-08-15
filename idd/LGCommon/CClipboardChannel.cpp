@@ -24,13 +24,13 @@
 #include "CDebug.h"
 
 #include <new>
+#include <ntstatus.h>
 #include <string.h>
+#include <utility>
 #include <vector>
 
 namespace
 {
-  static constexpr DWORD WAIT_FIRST_OBJECT_VALUE = 0;
-
   struct ClipboardCallbackScope
   {
     CClipboardChannel      * channel;
@@ -171,15 +171,35 @@ bool CClipboardChannel::Attach(HANDLE mapping, uint64_t epoch,
   }
 
   m_stop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  m_kick = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-  if (!m_stop || !m_kick)
+  if (!m_stop)
   {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to create clipboard channel events");
-    if (m_kick)
-      CloseHandle(m_kick);
-    if (m_stop)
-      CloseHandle(m_stop);
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create clipboard channel stop event");
+    UnmapViewOfFile(view);
+    CloseHandle(mapping);
+    return false;
+  }
+  m_kick = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (!m_kick)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create clipboard channel kick event");
+    CloseHandle(m_stop);
+    m_stop = nullptr;
+    UnmapViewOfFile(view);
+    CloseHandle(mapping);
+    return false;
+  }
+  m_writeReady = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (!m_writeReady)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create clipboard channel credit event");
+    CloseHandle(m_kick);
+    CloseHandle(m_stop);
     m_kick = nullptr;
     m_stop = nullptr;
     UnmapViewOfFile(view);
@@ -212,10 +232,12 @@ bool CClipboardChannel::Attach(HANDLE mapping, uint64_t epoch,
     m_threadId = 0;
     m_view = nullptr;
     m_mapping = nullptr;
+    CloseHandle(m_writeReady);
     CloseHandle(m_kick);
     CloseHandle(m_stop);
     UnmapViewOfFile(view);
     CloseHandle(mapping);
+    m_writeReady = nullptr;
     m_kick = nullptr;
     m_stop = nullptr;
     return false;
@@ -259,6 +281,8 @@ void CClipboardChannel::Detach()
   CSRWExclusiveLock lock(m_lifecycleLock);
   if (m_thread)
     CloseHandle(m_thread);
+  if (m_writeReady)
+    CloseHandle(m_writeReady);
   if (m_kick)
     CloseHandle(m_kick);
   if (m_stop)
@@ -270,6 +294,7 @@ void CClipboardChannel::Detach()
 
   m_thread = nullptr;
   m_threadId = 0;
+  m_writeReady = nullptr;
   m_kick = nullptr;
   m_stop = nullptr;
   m_in = nullptr;
@@ -287,8 +312,21 @@ void CClipboardChannel::Detach()
 void CClipboardChannel::Kick(uint64_t epoch)
 {
   CSRWSharedLock lock(m_lifecycleLock);
-  if (Available() && epoch == m_epoch && m_kick)
-    SetEvent(m_kick);
+  if (Available() && epoch == m_epoch && m_kick && m_writeReady)
+  {
+    if (!SetEvent(m_kick))
+    {
+      const DWORD error = GetLastError();
+      DEBUG_ERROR_HR(error,
+        "Failed to signal clipboard channel receive event");
+    }
+    if (!SetEvent(m_writeReady))
+    {
+      const DWORD error = GetLastError();
+      DEBUG_ERROR_HR(error,
+        "Failed to signal clipboard channel credit event");
+    }
+  }
 }
 
 void CClipboardChannel::Reset(uint64_t epoch, uint32_t reason)
@@ -306,34 +344,85 @@ void CClipboardChannel::Reset(uint64_t epoch, uint32_t reason)
   Fail(instance, reason, false);
 }
 
+bool CClipboardChannel::WaitWritable(HANDLE stop, DWORD timeout)
+{
+  if (!stop || stop == INVALID_HANDLE_VALUE)
+    return false;
+
+  CSRWSharedLock lock(m_lifecycleLock);
+  if (!Available() || !m_writeReady)
+    return false;
+  const HANDLE events[] = { stop, m_writeReady };
+  const DWORD result = WaitForMultipleObjects(
+    ARRAYSIZE(events), events, FALSE, timeout);
+  if (result == WAIT_OBJECT_0)
+    return false;
+  if (result == WAIT_OBJECT_0 + 1 || result == WAIT_TIMEOUT)
+    return true;
+  if (result == WAIT_FAILED)
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to wait for clipboard channel credit");
+  else
+    DEBUG_ERROR("Invalid clipboard channel credit wait result: %lu",
+      static_cast<unsigned long>(result));
+  return false;
+}
+
 ClipboardChannelResult CClipboardChannel::Send(
   const KVMFRClipboardMessage& record, const void * data)
 {
-  if (!ValidRecord(record, data != nullptr))
+  const ClipboardChannelWrite write = { record, data };
+  size_t accepted = 0;
+  return SendBatch(&write, 1, accepted);
+}
+
+ClipboardChannelResult CClipboardChannel::SendBatch(
+  const ClipboardChannelWrite * records, size_t count, size_t& accepted)
+{
+  accepted = 0;
+  if (!records || !count || count > KVMFR_CLIPBOARD_SLOT_COUNT)
     return ClipboardChannelResult::FAILED;
+  for (size_t i = 0; i < count; ++i)
+    if (!ValidRecord(records[i].record, records[i].data != nullptr))
+      return ClipboardChannelResult::FAILED;
 
   CSRWSharedLock lifecycleLock(m_lifecycleLock);
   if (!Available() || !m_out || !m_doorbell)
     return ClipboardChannelResult::FAILED;
 
+  bool failed = false;
   {
     CSRWExclusiveLock writeLock(m_writeLock);
-    uint32_t ticket;
-    ClipboardRingSlot * slot = CClipboardRing::BeginWrite(*m_out, ticket);
-    if (!slot)
-      return ClipboardChannelResult::BUSY;
+    while (accepted < count)
+    {
+      uint32_t ticket;
+      ClipboardRingSlot * slot = CClipboardRing::BeginWrite(*m_out, ticket);
+      if (!slot)
+        break;
 
-    slot->header = record;
-    if (record.length)
-      memcpy(slot->data, data, record.length);
-    if (!CClipboardRing::EndWrite(*m_out, ticket))
-      return ClipboardChannelResult::FAILED;
+      const ClipboardChannelWrite& write = records[accepted];
+      slot->header = write.record;
+      if (write.record.length)
+        memcpy(slot->data, write.data, write.record.length);
+      if (!CClipboardRing::EndWrite(*m_out, ticket))
+      {
+        failed = true;
+        break;
+      }
+      ++accepted;
+    }
   }
 
-  // Once the producer index advances the record belongs to the channel.
-  // Doorbells are only a latency optimization; the peer also polls.
-  m_doorbell->ClipboardKick(m_epoch);
-  return ClipboardChannelResult::ACCEPTED;
+  if (accepted)
+  {
+    // Once the producer index advances the records belong to the channel.
+    // Doorbells are only a latency optimization; the peer also polls.
+    m_doorbell->ClipboardKick(m_epoch);
+  }
+  if (failed)
+    return ClipboardChannelResult::FAILED;
+  return accepted == count ? ClipboardChannelResult::ACCEPTED :
+    ClipboardChannelResult::BUSY;
 }
 
 void CClipboardChannel::SetHandler(IClipboardChannelHandler * handler)
@@ -381,6 +470,23 @@ void CClipboardChannel::ClearHandler(IClipboardChannelHandler * handler)
 
 CClipboardChannel::DrainResult CClipboardChannel::Drain()
 {
+  struct CreditNotifier
+  {
+    bool pending = false;
+    IClipboardChannelDoorbell * doorbell = nullptr;
+    uint64_t epoch = 0;
+
+    void Notify()
+    {
+      if (pending && doorbell)
+        doorbell->ClipboardKick(epoch);
+      pending = false;
+    }
+
+    ~CreditNotifier() { Notify(); }
+  } credit;
+  size_t consumed = 0;
+
   for (;;)
   {
     KVMFRClipboardMessage record = {};
@@ -417,21 +523,25 @@ CClipboardChannel::DrainResult CClipboardChannel::Drain()
 
     ClipboardChannelResult result =
       ValidRecord(record, record.length != 0) ?
-        PublishRecord(record, data.empty() ? nullptr : data.data()) :
+        PublishRecord(record, std::move(data)) :
         ClipboardChannelResult::FAILED;
     if (result == ClipboardChannelResult::BUSY)
       return DrainResult::BUSY;
 
-    IClipboardChannelDoorbell * doorbell;
-    uint64_t epoch;
     {
       CSRWSharedLock lifecycleLock(m_lifecycleLock);
       if (!Available() || !m_in || !m_doorbell)
         return DrainResult::STOPPED;
       if (!CClipboardRing::EndRead(*m_in, ticket))
         return DrainResult::CORRUPT;
-      doorbell = m_doorbell;
-      epoch = m_epoch;
+      credit.pending  = true;
+      credit.doorbell = m_doorbell;
+      credit.epoch    = m_epoch;
+    }
+    if (++consumed == KVMFR_CLIPBOARD_SLOT_COUNT)
+    {
+      credit.Notify();
+      consumed = 0;
     }
 
     if (result == ClipboardChannelResult::FAILED)
@@ -441,8 +551,6 @@ CClipboardChannel::DrainResult CClipboardChannel::Drain()
       // local callback and peer reset outside the ring/lifecycle locks.
       return DrainResult::CORRUPT;
     }
-    else
-      doorbell->ClipboardKick(epoch);
   }
 }
 
@@ -508,6 +616,8 @@ void CClipboardChannel::CleanupDeferredDetach()
 
   if (m_kick)
     CloseHandle(m_kick);
+  if (m_writeReady)
+    CloseHandle(m_writeReady);
   if (m_stop)
     CloseHandle(m_stop);
   if (m_view)
@@ -517,6 +627,7 @@ void CClipboardChannel::CleanupDeferredDetach()
 
   // A later external Detach closes the now-signaled thread handle.
   m_threadId = 0;
+  m_writeReady = nullptr;
   m_kick = nullptr;
   m_stop = nullptr;
   m_in = nullptr;
@@ -546,10 +657,11 @@ void CClipboardChannel::PublishState(bool available, uint64_t epoch)
 }
 
 ClipboardChannelResult CClipboardChannel::PublishRecord(
-  const KVMFRClipboardMessage& record, const uint8_t * data)
+  const KVMFRClipboardMessage& record, std::vector<uint8_t>&& data)
 {
   if (InClipboardCallback(this))
-    return m_handler ? m_handler->ClipboardRecord(record, data) :
+    return m_handler ?
+      m_handler->ClipboardRecord(record, std::move(data)) :
       ClipboardChannelResult::BUSY;
 
   CSRWExclusiveLock lock(m_handlerLock);
@@ -557,7 +669,7 @@ ClipboardChannelResult CClipboardChannel::PublishRecord(
     return ClipboardChannelResult::BUSY;
 
   CClipboardCallbackScope scope(this);
-  return m_handler->ClipboardRecord(record, data);
+  return m_handler->ClipboardRecord(record, std::move(data));
 }
 
 void CClipboardChannel::PublishReset(uint64_t epoch, uint32_t reason)

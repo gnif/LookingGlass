@@ -27,7 +27,9 @@
 #include <Windows.h>
 
 #include <atomic>
+#include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 enum class ClipboardChannelResult
 {
@@ -36,16 +38,24 @@ enum class ClipboardChannelResult
   FAILED,
 };
 
+struct ClipboardChannelWrite
+{
+  KVMFRClipboardMessage record = {};
+  const void *          data   = nullptr;
+};
+
 class IClipboardChannelHandler
 {
 public:
   virtual ~IClipboardChannelHandler() = default;
 
   virtual void ClipboardState(bool available, uint64_t epoch) = 0;
-  // data is borrowed and remains valid only for the duration of this call.
-  // BUSY leaves the shared ring slot occupied so it can be retried later.
+  // data owns record.length bytes and may be moved by the handler. BUSY
+  // leaves the shared ring slot occupied so it can be reconstructed and
+  // retried later.
   virtual ClipboardChannelResult ClipboardRecord(
-    const KVMFRClipboardMessage& record, const uint8_t * data) = 0;
+    const KVMFRClipboardMessage& record,
+    std::vector<uint8_t>&& data) = 0;
   virtual void ClipboardReset(uint64_t epoch, uint32_t reason) = 0;
 };
 
@@ -75,16 +85,17 @@ private:
   CSRWLock m_handlerLock;
   CSRWLock m_writeLock;
 
-  HANDLE             m_mapping = nullptr;
-  ClipboardMapping * m_view    = nullptr;
-  ClipboardRing    * m_in      = nullptr;
-  ClipboardRing    * m_out     = nullptr;
-  HANDLE             m_stop    = nullptr;
-  HANDLE             m_kick    = nullptr;
-  HANDLE             m_thread  = nullptr;
-  DWORD              m_threadId = 0;
-  uint64_t           m_epoch   = 0;
-  uint64_t           m_instance = 0;
+  HANDLE             m_mapping        = nullptr;
+  ClipboardMapping * m_view           = nullptr;
+  ClipboardRing    * m_in             = nullptr;
+  ClipboardRing    * m_out            = nullptr;
+  HANDLE             m_stop           = nullptr;
+  HANDLE             m_kick           = nullptr;
+  HANDLE             m_writeReady     = nullptr;
+  HANDLE             m_thread         = nullptr;
+  DWORD              m_threadId       = 0;
+  uint64_t           m_epoch          = 0;
+  uint64_t           m_instance       = 0;
   bool               m_deferredDetach = false;
 
   IClipboardChannelHandler  * m_handler  = nullptr;
@@ -97,7 +108,8 @@ private:
   void CleanupDeferredDetach();
   void PublishState(bool available, uint64_t epoch);
   ClipboardChannelResult PublishRecord(
-    const KVMFRClipboardMessage& record, const uint8_t * data);
+    const KVMFRClipboardMessage& record,
+    std::vector<uint8_t>&& data);
   void PublishReset(uint64_t epoch, uint32_t reason);
 
   static DWORD WINAPI ThreadProc(void * context);
@@ -114,9 +126,16 @@ public:
   void Detach();
   void Kick(uint64_t epoch);
   void Reset(uint64_t epoch, uint32_t reason);
+  bool WaitWritable(HANDLE stop, DWORD timeout);
 
   ClipboardChannelResult Send(
     const KVMFRClipboardMessage& record, const void * data = nullptr);
+
+  // Publish an ordered prefix of records, bounded by the physical ring
+  // window. BUSY may return a non-zero accepted count; the caller must resume
+  // at that prefix boundary. A single doorbell covers the entire prefix.
+  ClipboardChannelResult SendBatch(const ClipboardChannelWrite * records,
+    size_t count, size_t& accepted);
 
   void SetHandler(IClipboardChannelHandler * handler);
   void ClearHandler(IClipboardChannelHandler * handler);
