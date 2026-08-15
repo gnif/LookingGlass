@@ -31,10 +31,10 @@
 #define KVMFR_CLIPBOARD_VERSION                4U
 #define KVMFR_CLIPBOARD_STREAM_VERSION         1U
 
-/* Physical transport geometry. Keep these independent from the maximum
- * logical request and representation sizes below: one response may span
- * several stream slots. The legacy grant transport uses the same geometry so
- * it remains a bounded fallback while stream adoption is staged. */
+/* Physical stream geometry. Keep these independent from the maximum logical
+ * request and representation sizes below: one response may span several
+ * stream slots. The generic names are also used by the Helper/IDD clipboard
+ * ring, which intentionally has the same geometry. */
 #define KVMFR_CLIPBOARD_STREAM_SLOT_COUNT      4U
 #define KVMFR_CLIPBOARD_STREAM_SLOT_BYTES      (256U * 1024U)
 #define KVMFR_CLIPBOARD_STREAM_WINDOW_BYTES    \
@@ -131,16 +131,13 @@ enum
   KVMFR_CLIPBOARD_MESSAGE_CLEAR         = 5,
   KVMFR_CLIPBOARD_MESSAGE_REQUEST       = 6,
   KVMFR_CLIPBOARD_MESSAGE_DATA          = 7,
-  KVMFR_CLIPBOARD_MESSAGE_COMMIT        = 8,
-  KVMFR_CLIPBOARD_MESSAGE_CANCEL        = 9,
-  KVMFR_CLIPBOARD_MESSAGE_ACK           = 10,
-  KVMFR_CLIPBOARD_MESSAGE_GRANT         = 11,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE  = 12,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED = 13,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE  = 14,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST  = 15,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_DATA     = 16,
-  KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL   = 17
+  KVMFR_CLIPBOARD_MESSAGE_CANCEL        = 8,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRE  = 9,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_ACQUIRED = 10,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_RELEASE  = 11,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST  = 12,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_DATA     = 13,
+  KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL   = 14
 };
 
 typedef uint32_t KVMFRClipboardMessageType;
@@ -153,30 +150,12 @@ enum
 
 typedef uint32_t KVMFRClipboardFlags;
 
-enum
-{
-  KVMFR_CLIPBOARD_TRANSPORT_LEGACY = 1U << 0,
-  KVMFR_CLIPBOARD_TRANSPORT_STREAM = 1U << 1,
-  KVMFR_CLIPBOARD_TRANSPORT_ALL    =
-    KVMFR_CLIPBOARD_TRANSPORT_LEGACY |
-    KVMFR_CLIPBOARD_TRANSPORT_STREAM,
-};
-
-typedef uint32_t KVMFRClipboardTransportFlags;
-
-static inline int kvmfrClipboardTransportValid(
-  KVMFRClipboardTransportFlags transport)
-{
-  return transport && !(transport & (transport - 1U)) &&
-    !(transport & ~KVMFR_CLIPBOARD_TRANSPORT_ALL);
-}
-
 /*
  * Bidirectional control record. Client-to-host records must fit LGMP's
  * 64-byte client message area. Host-to-client records use a small payload
- * pool and the same layout. CLAIM flags select exactly one transport offered
- * by KVMFRClipboardStatus. The selected transport is fixed until RELEASE and
- * a subsequent CLAIM with a new generation.
+ * pool and the same layout. DATA and FILE_DATA records are carried only by
+ * the duplex streams advertised in KVMFRClipboardStatus; all other records
+ * use the clipboard queue. CLAIM flags are reserved and must be zero.
  */
 typedef struct KVMFRClipboardMessage
 {
@@ -369,14 +348,12 @@ static inline int kvmfrClipboardFileMessageValid(
 }
 
 /* Type-specific fields:
- * CLAIM: flags selects exactly one KVMFRClipboardTransportFlags value and
- *        token is the endpoint generation from the latest status.
+ * CLAIM: token is the endpoint generation from the latest status.
  * OFFER:  token is KVMFRClipboardFormatFlags.
  * REQUEST: format and transfer identify the requested representation.
  * DATA: size is an optional total hint on BEGIN and authoritative on END;
  *       offset/length describe this record's borrowed payload.
- * CANCEL: token is a KVMFRClipboardCancelReason-compatible reason.
- * ACK/GRANT: token identifies the acknowledged or writable legacy slot. */
+ * CANCEL: token is a KVMFRClipboardCancelReason-compatible reason. */
 
 enum
 {
@@ -386,11 +363,8 @@ enum
 
 typedef uint32_t KVMFRClipboardStatusFlags;
 
-/* transports advertises available data planes. When HAS_OWNER is set,
- * ownerTransport identifies the single data plane selected by that owner's
- * CLAIM. Stream descriptors are valid only when STREAM is advertised; their
- * slot size includes KVMFRClipboardSlotHeader as well as slotBytes of payload.
- */
+/* The duplex stream descriptors are always valid. Their slot size includes
+ * KVMFRClipboardSlotHeader as well as slotBytes of payload. */
 typedef struct KVMFRClipboardStatus
 {
   uint32_t                     version;
@@ -401,11 +375,9 @@ typedef struct KVMFRClipboardStatus
   uint32_t                     lease;
   KVMFRClipboardFormatFlags    formats;
   uint32_t                     slotBytes;
-  KVMFRClipboardTransportFlags transports;
-  KVMFRClipboardTransportFlags ownerTransport;
   uint32_t                     streamVersion;
   uint32_t                     streamSlotCount;
-  uint32_t                     reserved[4];
+  uint32_t                     reserved[6];
   KVMFRStreamDescriptor        hostToClient;
   KVMFRStreamDescriptor        clientToHost;
 }
@@ -420,9 +392,7 @@ typedef KVMFRClipboardMessage KVMFRClipboardSlotHeader;
 enum
 {
   KVMFR_CLIPBOARD_QUEUE_STATUS  = 1,
-  KVMFR_CLIPBOARD_QUEUE_MESSAGE = 2,
-  KVMFR_CLIPBOARD_QUEUE_GRANT   = 3,
-  KVMFR_CLIPBOARD_QUEUE_DATA    = 4
+  KVMFR_CLIPBOARD_QUEUE_MESSAGE = 2
 };
 
 typedef uint32_t KVMFRClipboardQueueType;
@@ -438,8 +408,8 @@ static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
 static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
   "KVMFR clipboard file entry layout changed");
-static_assert(offsetof(KVMFRClipboardStatus, transports) == 32,
-  "KVMFR clipboard transport status layout changed");
+static_assert(offsetof(KVMFRClipboardStatus, streamVersion) == 32,
+  "KVMFR clipboard stream status layout changed");
 static_assert(offsetof(KVMFRClipboardStatus, hostToClient) == 64,
   "KVMFR clipboard stream discovery layout changed");
 static_assert(sizeof(KVMFRClipboardStatus) == 128,
@@ -453,8 +423,8 @@ _Static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
 _Static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
   "KVMFR clipboard file entry layout changed");
-_Static_assert(offsetof(KVMFRClipboardStatus, transports) == 32,
-  "KVMFR clipboard transport status layout changed");
+_Static_assert(offsetof(KVMFRClipboardStatus, streamVersion) == 32,
+  "KVMFR clipboard stream status layout changed");
 _Static_assert(offsetof(KVMFRClipboardStatus, hostToClient) == 64,
   "KVMFR clipboard stream discovery layout changed");
 _Static_assert(sizeof(KVMFRClipboardStatus) == 128,

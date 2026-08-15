@@ -41,14 +41,14 @@ class CLGMPHost;
 class CLGMPClipboardTransport final : public IClipboardSource
 {
 private:
-  static constexpr unsigned MEMORY_COUNT = KVMFR_CLIPBOARD_SLOT_COUNT;
+  static constexpr unsigned MEMORY_COUNT =
+    KVMFR_CLIPBOARD_STREAM_SLOT_COUNT;
   static constexpr unsigned INTERNAL_TARGET_COUNT =
     CLGMPClipboardFiles::MAX_ACQUISITIONS +
     CLGMPClipboardFiles::MAX_REQUESTS + 3;
   static constexpr ULONGLONG OWNER_LEASE_MS = 1000;
   static constexpr ULONGLONG STREAM_DRAIN_TIMEOUT_MS = 1000;
   static constexpr DWORD ACTIVE_POLL_MS = 5;
-  static constexpr DWORD STREAM_POLL_MS = 1;
   static constexpr DWORD IDLE_POLL_MS = 50;
   static constexpr unsigned STREAM_TARGET_COUNT =
     KVMFR_CLIPBOARD_STREAM_SLOT_COUNT;
@@ -78,18 +78,10 @@ private:
     bool Active() const { return transfer != 0; }
   };
 
-  struct Grant
-  {
-    uint32_t generation = 0;
-    bool offered        = false;
-    bool committed      = false;
-  };
-
   struct PendingTarget
   {
     bool valid       = false;
     bool acknowledge = false;
-    int  grant       = -1;
     KVMFRClipboardMessage record = {};
     uint8_t data[KVMFR_CLIPBOARD_DATA_BYTES] = {};
 
@@ -97,7 +89,6 @@ private:
     {
       valid       = false;
       acknowledge = false;
-      grant       = -1;
       record      = {};
     }
   };
@@ -117,8 +108,6 @@ private:
   PLGMPHostStream m_clientToHostStream = nullptr;
   PLGMPMemory m_statusMemory [MEMORY_COUNT] = {};
   PLGMPMemory m_messageMemory[MEMORY_COUNT] = {};
-  PLGMPMemory m_grantMemory  [MEMORY_COUNT] = {};
-  PLGMPMemory m_dataMemory   [MEMORY_COUNT] = {};
 
   CSRWLock m_lifecycleLock;
   CSRWLock m_lock;
@@ -138,10 +127,8 @@ private:
   uint32_t m_endpointGeneration = 0;
   uint32_t m_ownerClientID       = 0;
   uint32_t m_ownerGeneration     = 0;
-  KVMFRClipboardTransportFlags m_ownerTransport = 0;
   uint32_t m_statusSerial        = 0;
   uint32_t m_messageSerial       = 0;
-  uint32_t m_dataSerial          = 0;
   uint32_t m_helperFormats       = 0;
   uint32_t m_clientFormats       = 0;
   uint32_t m_blockedOwnerClientID   = 0;
@@ -158,7 +145,6 @@ private:
   KVMFRStreamDescriptor m_clientToHostDescriptor = {};
   Transfer m_clientToHelper;
   Transfer m_helperToClient;
-  Grant m_grants[MEMORY_COUNT];
   PendingTarget m_pendingTarget;
   StreamTarget m_streamTarget[STREAM_TARGET_COUNT];
   unsigned m_streamTargetHead  = 0;
@@ -171,13 +157,13 @@ private:
   void DeInit();
   bool InitializeStreams();
   void DeInitStreams();
-  bool BindStreams(uint32_t clientID);
+  bool BindStreams(uint32_t clientID) const;
   bool TryUnbindStreams();
-  void ForceUnbindStreams();
+  void ForceUnbindStreams() const;
 
   static DWORD CALLBACK ThreadProc(void * context);
   void Thread();
-  void Wake();
+  void Wake() const;
 
   bool IsOwner(uint32_t clientID, uint32_t generation) const;
   bool OwnerSubscribed() const;
@@ -210,7 +196,6 @@ private:
   PLGMPMemory FindAvailable(PLGMPMemory (&memory)[MEMORY_COUNT]) const;
   PostResult PostForOwner(uint64_t udata, PLGMPMemory memory);
   bool PublishStatus();
-  bool PostGrants();
   bool ReplayClipboard();
   bool DrainMessage();
   bool ProcessMessage(uint32_t clientID,
@@ -231,7 +216,7 @@ private:
   void ApplyInbound(const KVMFRClipboardMessage& message);
   void ApplyOutbound(const KVMFRClipboardMessage& message);
   bool BeginTarget(const KVMFRClipboardMessage& message,
-    const uint8_t * data, int grant);
+    const uint8_t * data, bool acknowledge);
 
   ClipboardChannelResult SendControl(
     const KVMFRClipboardMessage& record);

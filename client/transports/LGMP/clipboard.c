@@ -40,7 +40,6 @@
 #define CLIPBOARD_PENDING_MAX         128U
 #define CLIPBOARD_PENDING_NORMAL_MAX  64U
 #define CLIPBOARD_DRAIN_MAX           64U
-#define CLIPBOARD_GRANTS              KVMFR_CLIPBOARD_SLOT_COUNT
 #define CLIPBOARD_IDLE_POLL_MS        10U
 #define CLIPBOARD_ACTIVE_POLL_MS      1U
 #define CLIPBOARD_KEEPALIVE_US        UINT64_C(200000)
@@ -49,14 +48,6 @@
 struct PendingRecord
 {
   KVMFRClipboardMessage record;
-};
-
-struct Grant
-{
-  KVMFRClipboardSlotHeader * header;
-  uint8_t                  * data;
-  uint32_t                   token;
-  bool                       available;
 };
 
 struct FileTransfer
@@ -106,8 +97,7 @@ struct LGMPClipboard
   bool                         statusValid;
   bool                         claimed;
   bool                         ownerConfirmed;
-  KVMFRClipboardTransportFlags transports;
-  KVMFRClipboardTransportFlags claimTransport;
+  bool                         releasing;
   KVMFRStreamDescriptor        hostToClientDescriptor;
   KVMFRStreamDescriptor        clientToHostDescriptor;
   uint32_t                     clientID;
@@ -122,7 +112,6 @@ struct LGMPClipboard
   unsigned                     pendingHead;
   unsigned                     pendingCount;
 
-  struct Grant                 grants[CLIPBOARD_GRANTS];
   bool                         writeBlocked;
   LG_ClipboardRequest          writeBlockedRequest;
   LG_ClipboardRequest          writeTransfer;
@@ -136,9 +125,7 @@ struct LGMPClipboard
 
   bool                         held;
   bool                         heldReady;
-  bool                         heldStream;
   enum HeldPhase               heldPhase;
-  LGMPMessage                  heldMessage;
   LGMPStreamBuffer             heldStreamBuffer;
   KVMFRClipboardMessage        heldRecord;
   bool                         heldFile;
@@ -229,12 +216,6 @@ static void detachStreamsNL(LGMPClipboard * clipboard)
 static bool attachStreamsNL(LGMPClipboard * clipboard,
     const KVMFRClipboardStatus * status)
 {
-  if (!(status->transports & KVMFR_CLIPBOARD_TRANSPORT_STREAM))
-  {
-    detachStreamsNL(clipboard);
-    return false;
-  }
-
   if (clipboard->hostToClientStream && clipboard->clientToHostStream &&
       !memcmp(&clipboard->hostToClientDescriptor, &status->hostToClient,
         sizeof(status->hostToClient)) &&
@@ -659,14 +640,6 @@ static bool enqueueTypeNL(LGMPClipboard * clipboard,
   return enqueueRecordNL(clipboard, record);
 }
 
-static struct Grant * availableGrantNL(LGMPClipboard * clipboard)
-{
-  for (unsigned i = 0; i < CLIPBOARD_GRANTS; ++i)
-    if (clipboard->grants[i].available)
-      return &clipboard->grants[i];
-  return NULL;
-}
-
 static bool streamWriteNL(LGMPClipboard * clipboard,
     const KVMFRClipboardMessage * record, const void * data)
 {
@@ -725,32 +698,12 @@ static bool enqueueDataNL(LGMPClipboard * clipboard,
 
   record.version    = KVMFR_CLIPBOARD_VERSION;
   record.generation = clipboard->claimGeneration;
-  if (clipboard->claimTransport == KVMFR_CLIPBOARD_TRANSPORT_STREAM)
-    return streamWriteNL(clipboard, &record, data);
-  if (clipboard->claimTransport != KVMFR_CLIPBOARD_TRANSPORT_LEGACY ||
-      clipboard->pendingCount >= CLIPBOARD_PENDING_NORMAL_MAX)
-    return false;
-
-  struct Grant * grant = availableGrantNL(clipboard);
-  if (!grant)
-    return false;
-
-  memcpy(grant->header, &record, sizeof(record));
-  if (record.length)
-    memcpy(grant->data, data, record.length);
-
-  KVMFRClipboardMessage commit = record;
-  commit.type  = KVMFR_CLIPBOARD_MESSAGE_COMMIT;
-  commit.token = grant->token;
-  pendingAt(clipboard, clipboard->pendingCount++)->record = commit;
-  grant->available = false;
-  return true;
+  return streamWriteNL(clipboard, &record, data);
 }
 
 static bool streamWritableNL(LGMPClipboard * clipboard)
 {
-  if (!clipboard->clientToHostStream ||
-      clipboard->claimTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM)
+  if (!clipboard->clientToHostStream || !clipboard->claimed)
     return false;
 
   LGMPStreamBuffer buffer = { 0 };
@@ -777,11 +730,7 @@ static bool streamWritableNL(LGMPClipboard * clipboard)
 
 static bool dataWritableNL(LGMPClipboard * clipboard)
 {
-  if (clipboard->claimTransport == KVMFR_CLIPBOARD_TRANSPORT_STREAM)
-    return streamWritableNL(clipboard);
-  return clipboard->claimTransport == KVMFR_CLIPBOARD_TRANSPORT_LEGACY &&
-    clipboard->pendingCount < CLIPBOARD_PENDING_NORMAL_MAX &&
-    availableGrantNL(clipboard);
+  return streamWritableNL(clipboard);
 }
 
 static void clearWriteNL(LGMPClipboard * clipboard)
@@ -810,43 +759,43 @@ static void clearReadNL(LGMPClipboard * clipboard)
   clipboard->readBegan               = false;
 }
 
-static void clearProtocolNL(LGMPClipboard * clipboard)
+static void clearDataPlaneNL(LGMPClipboard * clipboard)
 {
-  clipboard->claimed                   = false;
-  clipboard->ownerConfirmed            = false;
-  clipboard->claimTransport            = 0;
-  clipboard->publishedClaimGeneration  = 0;
-  clipboard->pendingHead               = 0;
-  clipboard->pendingCount              = 0;
   clipboard->remoteClipboardGeneration = 0;
   clipboard->remoteFormats             = 0;
   clearWriteNL(clipboard);
   clearReadNL(clipboard);
   clearFilesNL(clipboard);
-  memset(clipboard->grants, 0, sizeof(clipboard->grants));
+}
+
+static void clearProtocolNL(LGMPClipboard * clipboard)
+{
+  clipboard->claimed                   = false;
+  clipboard->ownerConfirmed            = false;
+  clipboard->releasing                 = false;
+  clipboard->publishedClaimGeneration  = 0;
+  clipboard->pendingHead               = 0;
+  clipboard->pendingCount              = 0;
+  clearDataPlaneNL(clipboard);
 }
 
 static bool ensureClaimNL(LGMPClipboard * clipboard)
 {
   if (clipboard->claimed)
     return true;
-  if (!clipboard->connected || !clipboard->available ||
-      !clipboard->transports)
+  if (clipboard->releasing || !clipboard->connected ||
+      !clipboard->available ||
+      !clipboard->hostToClientStream || !clipboard->clientToHostStream)
     return false;
 
   KVMFRClipboardMessage claim = { 0 };
   nextNonzero(&clipboard->claimGeneration);
   claim.type  = KVMFR_CLIPBOARD_MESSAGE_CLAIM;
   claim.token = clipboard->endpointGeneration;
-  claim.flags =
-    (clipboard->transports & KVMFR_CLIPBOARD_TRANSPORT_STREAM) ?
-      KVMFR_CLIPBOARD_TRANSPORT_STREAM :
-      KVMFR_CLIPBOARD_TRANSPORT_LEGACY;
   if (!enqueueRecordNL(clipboard, claim))
     return false;
   clipboard->claimed        = true;
   clipboard->ownerConfirmed = false;
-  clipboard->claimTransport = claim.flags;
   return true;
 }
 
@@ -892,13 +841,10 @@ static void connectionLostNL(LGMPClipboard * clipboard)
   clipboard->connected       = false;
   clipboard->available       = false;
   clipboard->statusValid     = false;
-  clipboard->transports      = 0;
   detachStreamsNL(clipboard);
   clearProtocolNL(clipboard);
   clipboard->held            = false;
   clipboard->heldReady       = false;
-  clipboard->heldStream      = false;
-  memset(&clipboard->heldMessage, 0, sizeof(clipboard->heldMessage));
   memset(&clipboard->heldStreamBuffer, 0,
       sizeof(clipboard->heldStreamBuffer));
   memset(&clipboard->heldRecord, 0, sizeof(clipboard->heldRecord));
@@ -930,35 +876,19 @@ static bool validStatus(const KVMFRClipboardStatus * status)
 {
   const uint32_t validFlags = KVMFR_CLIPBOARD_STATUS_AVAILABLE |
     KVMFR_CLIPBOARD_STATUS_HAS_OWNER;
-  const KVMFRStreamDescriptor emptyDescriptor = { 0 };
-  const uint32_t emptyReserved[4] = { 0 };
+  const uint32_t emptyReserved[6] = { 0 };
   if (status->version != KVMFR_CLIPBOARD_VERSION ||
       status->flags & ~validFlags || !status->generation ||
       status->formats & ~KVMFR_CLIPBOARD_FORMAT_MASK_ALL ||
       !status->lease ||
       status->slotBytes != KVMFR_CLIPBOARD_DATA_BYTES ||
-      !status->transports ||
-      status->transports & ~KVMFR_CLIPBOARD_TRANSPORT_ALL ||
-      memcmp(status->reserved, emptyReserved, sizeof(emptyReserved)))
-    return false;
-
-  const bool streams =
-    (status->transports & KVMFR_CLIPBOARD_TRANSPORT_STREAM) != 0;
-  if (streams)
-  {
-    if (status->streamVersion != KVMFR_CLIPBOARD_STREAM_VERSION ||
-        status->streamSlotCount != KVMFR_CLIPBOARD_STREAM_SLOT_COUNT ||
-        !validStreamDescriptor(&status->hostToClient,
-          LGMP_STREAM_HOST_TO_CLIENT) ||
-        !validStreamDescriptor(&status->clientToHost,
-          LGMP_STREAM_CLIENT_TO_HOST))
-      return false;
-  }
-  else if (status->streamVersion || status->streamSlotCount ||
-      memcmp(&status->hostToClient, &emptyDescriptor,
-        sizeof(emptyDescriptor)) ||
-      memcmp(&status->clientToHost, &emptyDescriptor,
-        sizeof(emptyDescriptor)))
+      status->streamVersion != KVMFR_CLIPBOARD_STREAM_VERSION ||
+      status->streamSlotCount != KVMFR_CLIPBOARD_STREAM_SLOT_COUNT ||
+      memcmp(status->reserved, emptyReserved, sizeof(emptyReserved)) ||
+      !validStreamDescriptor(&status->hostToClient,
+        LGMP_STREAM_HOST_TO_CLIENT) ||
+      !validStreamDescriptor(&status->clientToHost,
+        LGMP_STREAM_CLIENT_TO_HOST))
     return false;
 
   const bool available =
@@ -967,16 +897,12 @@ static bool validStatus(const KVMFRClipboardStatus * status)
     (status->flags & KVMFR_CLIPBOARD_STATUS_HAS_OWNER) != 0;
   if (!available && (status->formats || owner))
     return false;
-  return owner ? status->ownerClientID && status->ownerGeneration &&
-    kvmfrClipboardTransportValid(status->ownerTransport) &&
-    (status->transports & status->ownerTransport) :
-    !status->ownerClientID && !status->ownerGeneration &&
-    !status->ownerTransport;
+  return owner ? status->ownerClientID && status->ownerGeneration :
+    !status->ownerClientID && !status->ownerGeneration;
 }
 
 static bool validateRecord(const LGMPClipboard * clipboard,
-    const KVMFRClipboardMessage * record, size_t size,
-    KVMFRClipboardQueueType queueType, bool stream)
+    const KVMFRClipboardMessage * record, size_t size, bool stream)
 {
   if (size < sizeof(*record) ||
       record->version != KVMFR_CLIPBOARD_VERSION ||
@@ -990,15 +916,10 @@ static bool validateRecord(const LGMPClipboard * clipboard,
   if (record->type == KVMFR_CLIPBOARD_MESSAGE_DATA ||
       record->type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA)
   {
-    const size_t expected = sizeof(*record) +
-      (stream ? record->length : KVMFR_CLIPBOARD_DATA_BYTES);
-    if (size != expected || queueType != KVMFR_CLIPBOARD_QUEUE_DATA ||
-        stream != (clipboard->claimTransport ==
-          KVMFR_CLIPBOARD_TRANSPORT_STREAM))
+    if (!stream || size != sizeof(*record) + record->length)
       return false;
   }
-  else if (queueType != KVMFR_CLIPBOARD_QUEUE_MESSAGE ||
-      size != sizeof(*record) || record->length ||
+  else if (stream || size != sizeof(*record) || record->length ||
       (record->flags &&
        record->type != KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST))
     return false;
@@ -1500,32 +1421,27 @@ static void applyStatusNL(LGMPClipboard * clipboard,
   const bool     wasValid      = clipboard->statusValid;
   const bool     wasAvailable  = clipboard->available;
   const uint32_t oldGeneration = clipboard->endpointGeneration;
-  const KVMFRClipboardTransportFlags oldTransports =
-    clipboard->transports;
   clipboard->statusValid         = true;
   clipboard->statusSerial        = serial;
   const bool streamsAttached = attachStreamsNL(clipboard, status);
   const bool endpointAvailable =
     (status->flags & KVMFR_CLIPBOARD_STATUS_AVAILABLE) != 0;
   clipboard->endpointGeneration = status->generation;
-  clipboard->transports = status->transports;
-  if (!streamsAttached)
-    clipboard->transports &= ~KVMFR_CLIPBOARD_TRANSPORT_STREAM;
 
-  const bool owned = (status->flags & KVMFR_CLIPBOARD_STATUS_HAS_OWNER) &&
-    clipboard->claimed && status->ownerClientID == clipboard->clientID &&
-    status->ownerGeneration == clipboard->claimGeneration &&
-    status->ownerTransport == clipboard->claimTransport;
-  const bool ownedByOther =
-    (status->flags & KVMFR_CLIPBOARD_STATUS_HAS_OWNER) && !owned;
-  const bool selectedUnavailable = clipboard->claimed &&
-    !(clipboard->transports & clipboard->claimTransport);
-  clipboard->available = endpointAvailable && !ownedByOther &&
-    clipboard->transports;
+  const bool hasOwner =
+    (status->flags & KVMFR_CLIPBOARD_STATUS_HAS_OWNER) != 0;
+  const bool owned = hasOwner &&
+    (clipboard->claimed || clipboard->releasing) &&
+    status->ownerClientID == clipboard->clientID &&
+    status->ownerGeneration == clipboard->claimGeneration;
+  const bool ownedByOther = hasOwner && !owned;
+  const bool selectedUnavailable =
+    (clipboard->claimed || clipboard->releasing) && !streamsAttached;
+  clipboard->available = endpointAvailable && streamsAttached &&
+    !ownedByOther && !clipboard->releasing;
   bool restore         = false;
 
-  if (owned && clipboard->claimTransport ==
-      KVMFR_CLIPBOARD_TRANSPORT_STREAM)
+  if (owned)
   {
     const LGMP_STATUS activate = activateStreamsNL(clipboard);
     if (activate != LGMP_OK)
@@ -1540,26 +1456,36 @@ static void applyStatusNL(LGMPClipboard * clipboard,
       ownedByOther || selectedUnavailable)
   {
     clearProtocolNL(clipboard);
-    restore = endpointAvailable && !ownedByOther;
+    restore = endpointAvailable && streamsAttached && !ownedByOther;
   }
-  else if (status->flags & KVMFR_CLIPBOARD_STATUS_HAS_OWNER)
+  else if (hasOwner)
     clipboard->ownerConfirmed = owned;
   else
   {
-    if (clipboard->claimed && clipboard->ownerConfirmed)
+    if (clipboard->releasing)
+    {
+      clipboard->releasing      = false;
+      clipboard->ownerConfirmed = false;
+      clipboard->available      = endpointAvailable && streamsAttached;
+    }
+    else if (clipboard->claimed && clipboard->ownerConfirmed)
     {
       clearProtocolNL(clipboard);
-      restore = endpointAvailable;
+      restore = endpointAvailable && streamsAttached;
     }
-    clipboard->ownerConfirmed = false;
+    else
+      clipboard->ownerConfirmed = false;
   }
+
+  if (!wasAvailable && clipboard->available && !clipboard->claimed &&
+      clipboard->events)
+    restore = true;
 
   if (restore && !restoreClipboardNL(clipboard))
     clearProtocolNL(clipboard);
 
   *changed = !wasValid || wasAvailable != clipboard->available ||
-    oldGeneration != clipboard->endpointGeneration ||
-    oldTransports != clipboard->transports;
+    oldGeneration != clipboard->endpointGeneration;
   if (*changed)
     nextNonzero(&clipboard->providerGeneration);
 }
@@ -1600,7 +1526,6 @@ static bool processHeld(LGMPClipboard * clipboard)
     const uint8_t * data;
     enum HeldPhase phase;
     bool file;
-    bool stream;
     LGMPStreamBuffer streamBuffer;
     LG_ClipboardFileRequest fileRequest;
     LG_LOCK(clipboard->lock);
@@ -1610,11 +1535,9 @@ static bool processHeld(LGMPClipboard * clipboard)
       return true;
     }
     record = clipboard->heldRecord;
-    stream = clipboard->heldStream;
     streamBuffer = clipboard->heldStreamBuffer;
-    data = !record.length ? NULL : stream ?
-      (const uint8_t *)streamBuffer.data + sizeof(record) :
-      (const uint8_t *)clipboard->heldMessage.mem + sizeof(record);
+    data = !record.length ? NULL :
+      (const uint8_t *)streamBuffer.data + sizeof(record);
     phase = clipboard->heldPhase;
     file = clipboard->heldFile;
     fileRequest = clipboard->heldFileRequest;
@@ -1702,13 +1625,9 @@ static bool processHeld(LGMPClipboard * clipboard)
     else if (matchingRead)
       clearReadNL(clipboard);
 
-    const LGMP_STATUS done = stream ?
-      lgmpClientStreamReadRelease(
-        clipboard->hostToClientStream, &streamBuffer) :
-      lgmpClientMessageDone(clipboard->queue);
+    const LGMP_STATUS done = lgmpClientStreamReadRelease(
+      clipboard->hostToClientStream, &streamBuffer);
     clipboard->held = false;
-    clipboard->heldStream = false;
-    memset(&clipboard->heldMessage, 0, sizeof(clipboard->heldMessage));
     memset(&clipboard->heldStreamBuffer, 0,
         sizeof(clipboard->heldStreamBuffer));
     memset(&clipboard->heldRecord, 0, sizeof(clipboard->heldRecord));
@@ -1731,7 +1650,7 @@ static bool processStream(LGMPClipboard * clipboard, bool * processed)
   *processed = false;
   LG_LOCK(clipboard->lock);
   if (!clipboard->connected || clipboard->held ||
-      clipboard->claimTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM ||
+      (!clipboard->claimed && !clipboard->releasing) ||
       !clipboard->hostToClientStream)
   {
     LG_UNLOCK(clipboard->lock);
@@ -1756,12 +1675,23 @@ static bool processStream(LGMPClipboard * clipboard, bool * processed)
   }
   *processed = true;
 
+  if (clipboard->releasing)
+  {
+    status = lgmpClientStreamReadRelease(
+      clipboard->hostToClientStream, &buffer);
+    if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND &&
+        status != LGMP_ERR_STREAM_STALE)
+      connectionFailed(clipboard, status);
+    LG_UNLOCK(clipboard->lock);
+    return status == LGMP_OK || status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE;
+  }
+
   KVMFRClipboardMessage record = { 0 };
   if (buffer.data && buffer.size >= sizeof(record))
     memcpy(&record, buffer.data, sizeof(record));
   const bool valid = buffer.data &&
-    validateRecord(clipboard, &record, buffer.size,
-      KVMFR_CLIPBOARD_QUEUE_DATA, true);
+    validateRecord(clipboard, &record, buffer.size, true);
   if (!valid)
   {
     KVMFRClipboardMessage cancellation = { 0 };
@@ -1810,7 +1740,6 @@ static bool processStream(LGMPClipboard * clipboard, bool * processed)
     record.transfer = clipboard->readRequest;
   clipboard->held             = true;
   clipboard->heldReady        = true;
-  clipboard->heldStream       = true;
   clipboard->heldStreamBuffer = buffer;
   clipboard->heldRecord       = record;
   clipboard->heldFile         = file;
@@ -1875,66 +1804,16 @@ static bool processMessage(LGMPClipboard * clipboard, bool * processed)
     return status == LGMP_OK;
   }
 
-  if (type == KVMFR_CLIPBOARD_QUEUE_GRANT)
+  if (!clipboard->claimed)
   {
-    uint64_t fileReady[CLIPBOARD_PENDING_MAX];
-    size_t fileReadyCount = 0;
-    KVMFRClipboardSlotHeader * header = message.mem;
-    const uint32_t token = KVMFR_CLIPBOARD_QUEUE_SERIAL(message.udata);
-    const bool valid = clipboard->claimTransport ==
-        KVMFR_CLIPBOARD_TRANSPORT_LEGACY &&
-      message.size ==
-        sizeof(*header) + KVMFR_CLIPBOARD_DATA_BYTES &&
-      header->version == KVMFR_CLIPBOARD_VERSION &&
-      header->type == KVMFR_CLIPBOARD_MESSAGE_GRANT &&
-      header->generation == clipboard->claimGeneration &&
-      header->size == KVMFR_CLIPBOARD_DATA_BYTES &&
-      header->token == token && token > 0 &&
-      token <= KVMFR_CLIPBOARD_SLOT_COUNT &&
-      !header->sequence && !header->clipboardGeneration &&
-      !header->transfer && !header->offset && !header->format &&
-      !header->flags && !header->length;
-    bool stored = false;
-    if (valid)
-    {
-      struct Grant * grant = &clipboard->grants[token - 1];
-      if (!grant->available)
-      {
-        grant->header    = header;
-        grant->data      = (uint8_t *)(header + 1);
-        grant->token     = token;
-        grant->available = true;
-        stored = true;
-      }
-    }
     status = lgmpClientMessageDone(clipboard->queue);
-    const bool ready = stored && clipboard->writeBlocked;
-    const LG_ClipboardRequest request = clipboard->writeBlockedRequest;
-    if (ready)
-      clipboard->writeBlocked = false;
-    if (stored)
-      for (struct FileTransfer * transfer = clipboard->fileWrites;
-          transfer && fileReadyCount < CLIPBOARD_PENDING_MAX;
-          transfer = transfer->next)
-        if (transfer->blocked)
-        {
-          transfer->blocked = false;
-          fileReady[fileReadyCount++] = transfer->request.request;
-        }
     if (status != LGMP_OK)
       connectionFailed(clipboard, status);
     LG_UNLOCK(clipboard->lock);
-    if (!stored)
-      DEBUG_WARN("Ignoring invalid LGMP clipboard grant");
-    if (ready)
-      dispatchReady(clipboard, request);
-    for (size_t i = 0; i < fileReadyCount; ++i)
-      dispatchFileReady(clipboard, fileReady[i]);
     return status == LGMP_OK;
   }
 
-  if ((type != KVMFR_CLIPBOARD_QUEUE_MESSAGE &&
-       type != KVMFR_CLIPBOARD_QUEUE_DATA) ||
+  if (type != KVMFR_CLIPBOARD_QUEUE_MESSAGE ||
       message.size < sizeof(KVMFRClipboardMessage))
   {
     status = lgmpClientMessageDone(clipboard->queue);
@@ -1947,8 +1826,7 @@ static bool processMessage(LGMPClipboard * clipboard, bool * processed)
 
   KVMFRClipboardMessage record;
   memcpy(&record, message.mem, sizeof(record));
-  const bool valid = validateRecord(
-    clipboard, &record, message.size, type, false);
+  const bool valid = validateRecord(clipboard, &record, message.size, false);
   if (!valid)
   {
     KVMFRClipboardMessage cancellation = { 0 };
@@ -1965,47 +1843,6 @@ static bool processMessage(LGMPClipboard * clipboard, bool * processed)
       signalWorker(clipboard);
     DEBUG_WARN("Ignoring malformed LGMP clipboard record");
     return status == LGMP_OK;
-  }
-
-  if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA ||
-      record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA)
-  {
-    LG_ClipboardFileRequest fileRequest = { 0 };
-    const bool file = record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
-    const bool chunkValid = file ? validateFileReadChunkNL(
-        clipboard, &record, &fileRequest) :
-      validateReadChunkNL(clipboard, &record);
-    if (!chunkValid)
-    {
-      KVMFRClipboardMessage cancellation = { 0 };
-      bool queued = false;
-      const bool cancelled = file && rejectMalformedFileReadNL(
-          clipboard, &record, &cancellation, &queued);
-      status = lgmpClientMessageDone(clipboard->queue);
-      if (status != LGMP_OK)
-        connectionFailed(clipboard, status);
-      LG_UNLOCK(clipboard->lock);
-      if (cancelled)
-        dispatchFileCancel(clipboard, &cancellation);
-      if (queued)
-        signalWorker(clipboard);
-      DEBUG_WARN("Ignoring stale or malformed LGMP clipboard data");
-      return status == LGMP_OK;
-    }
-    if (!file)
-      record.transfer = clipboard->readRequest;
-    clipboard->held            = true;
-    clipboard->heldReady       = true;
-    clipboard->heldStream      = false;
-    clipboard->heldMessage     = message;
-    clipboard->heldRecord      = record;
-    clipboard->heldFile        = file;
-    clipboard->heldFileRequest = fileRequest;
-    clipboard->heldPhase       =
-      (record.flags & KVMFR_CLIPBOARD_FLAG_BEGIN) ? HELD_PHASE_BEGIN :
-      record.length ? HELD_PHASE_CHUNK : HELD_PHASE_END;
-    LG_UNLOCK(clipboard->lock);
-    return processHeld(clipboard);
   }
 
   status = lgmpClientMessageDone(clipboard->queue);
@@ -2308,9 +2145,25 @@ static bool processMessage(LGMPClipboard * clipboard, bool * processed)
 static int clipboardThread(void * opaque)
 {
   LGMPClipboard * clipboard = opaque;
+  LGMPStreamPollState streamPoll;
+  const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+      (struct LGMPStreamPollConfig)
+      {
+        .spinCount = 32U,
+        .minWaitUs = 50U,
+        .maxWaitUs = 1000U,
+      });
+  if (pollStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to initialize LGMP clipboard polling: %s",
+      lgmpStatusString(pollStatus));
+    return -1;
+  }
+
   while (!atomic_load_explicit(&clipboard->stop, memory_order_acquire))
   {
     bool     running = true;
+    bool     streamProgress = false;
     unsigned drained = 0;
     for (; drained < CLIPBOARD_DRAIN_MAX; ++drained)
     {
@@ -2334,6 +2187,7 @@ static int clipboardThread(void * opaque)
         running = false;
         break;
       }
+      streamProgress |= streamProcessed;
       dispatchRetiredFiles(clipboard);
       if (!queueProcessed && !streamProcessed)
         break;
@@ -2362,6 +2216,8 @@ static int clipboardThread(void * opaque)
     const bool writable =
       (clipboard->writeBlocked || blockedFile) &&
       dataWritableNL(clipboard);
+    if (writable)
+      streamProgress = true;
     if (clipboard->writeBlocked && writable)
     {
       readyRequest = clipboard->writeBlockedRequest;
@@ -2380,6 +2236,8 @@ static int clipboardThread(void * opaque)
       clipboard->pendingCount || clipboard->held ||
       clipboard->writeBlocked || clipboard->fileReads ||
       clipboard->fileWrites;
+    const bool streamActive = clipboard->connected &&
+      (clipboard->claimed || clipboard->releasing);
     LG_UNLOCK(clipboard->lock);
 
     if (readyRequest != LG_CLIPBOARD_REQUEST_INVALID)
@@ -2390,9 +2248,30 @@ static int clipboardThread(void * opaque)
     if (atomic_load_explicit(&clipboard->stop, memory_order_acquire))
       break;
     if (drained == CLIPBOARD_DRAIN_MAX)
+    {
+      if (streamProgress)
+        lgmpStreamPollActivity(&streamPoll);
       continue;
-    lgWaitEvent(clipboard->event,
-      active ? CLIPBOARD_ACTIVE_POLL_MS : CLIPBOARD_IDLE_POLL_MS);
+    }
+
+    bool signaled;
+    if (streamActive)
+    {
+      if (streamProgress)
+        lgmpStreamPollActivity(&streamPoll);
+      const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+      if (!waitUs)
+        continue;
+      signaled = lgWaitEventNS(clipboard->event, waitUs * 1000U);
+    }
+    else
+    {
+      lgmpStreamPollActivity(&streamPoll);
+      signaled = lgWaitEvent(clipboard->event,
+        active ? CLIPBOARD_ACTIVE_POLL_MS : CLIPBOARD_IDLE_POLL_MS);
+    }
+    if (signaled)
+      lgmpStreamPollActivity(&streamPoll);
   }
   dispatchRetiredFiles(clipboard);
   notifyStatus(clipboard);
@@ -2481,9 +2360,9 @@ bool lgmpClipboard_connect(LGMPClipboard * clipboard, uint32_t clientID)
   clipboard->connected             = true;
   clipboard->available             = false;
   clipboard->statusValid           = false;
-  clipboard->transports            = 0;
   clipboard->claimed               = false;
   clipboard->ownerConfirmed        = false;
+  clipboard->releasing             = false;
   clipboard->clientID              = clientID;
   clipboard->endpointGeneration    = 0;
   clipboard->statusSerial          = 0;
@@ -2496,7 +2375,6 @@ bool lgmpClipboard_connect(LGMPClipboard * clipboard, uint32_t clientID)
   clipboard->remoteClipboardGeneration = 0;
   clearReadNL(clipboard);
   clipboard->publishedClaimGeneration = 0;
-  memset(clipboard->grants, 0, sizeof(clipboard->grants));
   atomic_store_explicit(&clipboard->stop, false, memory_order_release);
 
   LGThread * thread;
@@ -2596,10 +2474,8 @@ void lgmpClipboard_disconnect(LGMPClipboard * clipboard)
   LG_LOCK(clipboard->lock);
   if (clipboard->held)
   {
-    const LGMP_STATUS status = clipboard->heldStream ?
-      lgmpClientStreamReadRelease(clipboard->hostToClientStream,
-        &clipboard->heldStreamBuffer) : clipboard->queue ?
-      lgmpClientMessageDone(clipboard->queue) : LGMP_OK;
+    const LGMP_STATUS status = lgmpClientStreamReadRelease(
+      clipboard->hostToClientStream, &clipboard->heldStreamBuffer);
     if (status != LGMP_OK && status != LGMP_ERR_STREAM_STALE &&
         status != LGMP_ERR_STREAM_UNBOUND)
       DEBUG_WARN("Failed to release held clipboard data during "
@@ -2611,10 +2487,8 @@ void lgmpClipboard_disconnect(LGMPClipboard * clipboard)
   clipboard->thread = NULL;
   clipboard->event  = NULL;
   clipboard->held   = false;
-  clipboard->heldStream = false;
   memset(&clipboard->heldStreamBuffer, 0,
     sizeof(clipboard->heldStreamBuffer));
-  clipboard->transports = 0;
   detachStreamsNL(clipboard);
   clearProtocolNL(clipboard);
   LG_UNLOCK(clipboard->lock);
@@ -2688,21 +2562,31 @@ static bool attach(void * opaque, const LG_ClipboardEventOps * events,
 static void detach(void * opaque)
 {
   LGMPClipboard * clipboard = opaque;
-  bool wake = false;
+  bool releaseQueued = false;
+  bool releaseRequired = false;
   LG_LOCK(clipboard->eventLock);
   LG_LOCK(clipboard->lock);
   clipboard->events      = NULL;
   clipboard->eventOpaque = NULL;
   if (clipboard->claimed)
   {
-    wake = enqueueTypeNL(
-      clipboard, KVMFR_CLIPBOARD_MESSAGE_RELEASE);
-    clipboard->claimed = false;
+    releaseRequired = true;
+    KVMFRClipboardMessage release = { 0 };
+    release.type = KVMFR_CLIPBOARD_MESSAGE_RELEASE;
+    releaseQueued = enqueueUrgentRecordNL(clipboard, release);
+    clipboard->claimed   = false;
+    clipboard->releasing = true;
+    clipboard->available = false;
   }
+  clearDataPlaneNL(clipboard);
+  if (clipboard->held)
+    clipboard->heldReady = true;
   LG_UNLOCK(clipboard->lock);
   LG_UNLOCK(clipboard->eventLock);
-  if (wake)
-    signalWorker(clipboard);
+  if (!releaseQueued && releaseRequired)
+    DEBUG_WARN("Failed to queue LGMP clipboard release; ownership will "
+      "expire");
+  signalWorker(clipboard);
 }
 
 static bool releaseClipboard(void * opaque)

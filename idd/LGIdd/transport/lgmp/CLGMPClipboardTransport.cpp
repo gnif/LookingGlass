@@ -49,11 +49,11 @@ namespace
   };
 
   bool EmptyControl(const KVMFRClipboardMessage& message,
-    bool keepToken = false, bool keepFlags = false)
+    bool keepToken = false)
   {
     return !message.clipboardGeneration && !message.transfer &&
       !message.offset && !message.size && !message.format &&
-      (keepFlags || !message.flags) && (keepToken || !message.token) &&
+      !message.flags && (keepToken || !message.token) &&
       !message.length && !message.sequence;
   }
 
@@ -177,10 +177,6 @@ void CLGMPClipboardTransport::DeInit()
 {
   Stop();
   DeInitStreams();
-  for (PLGMPMemory& memory : m_dataMemory)
-    lgmpHostMemFree(&memory);
-  for (PLGMPMemory& memory : m_grantMemory)
-    lgmpHostMemFree(&memory);
   for (PLGMPMemory& memory : m_messageMemory)
     lgmpHostMemFree(&memory);
   for (PLGMPMemory& memory : m_statusMemory)
@@ -242,7 +238,7 @@ void CLGMPClipboardTransport::DeInitStreams()
   m_hostToClientDescriptor = {};
 }
 
-bool CLGMPClipboardTransport::BindStreams(uint32_t clientID)
+bool CLGMPClipboardTransport::BindStreams(uint32_t clientID) const
 {
   if (!m_hostToClientStream || !m_clientToHostStream)
     return false;
@@ -301,7 +297,7 @@ bool CLGMPClipboardTransport::TryUnbindStreams()
   return complete;
 }
 
-void CLGMPClipboardTransport::ForceUnbindStreams()
+void CLGMPClipboardTransport::ForceUnbindStreams() const
 {
   if (m_clientToHostStream)
   {
@@ -321,7 +317,7 @@ void CLGMPClipboardTransport::ForceUnbindStreams()
   }
 }
 
-void CLGMPClipboardTransport::Wake()
+void CLGMPClipboardTransport::Wake() const
 {
   if (m_wakeEvent)
     SetEvent(m_wakeEvent);
@@ -557,7 +553,7 @@ bool CLGMPClipboardTransport::QueueInternalTarget(
   const KVMFRClipboardMessage& record)
 {
   if (!m_pendingTarget.valid && !m_internalTargetCount)
-    return BeginTarget(record, nullptr, -2);
+    return BeginTarget(record, nullptr, false);
   if (m_internalTargetCount == INTERNAL_TARGET_COUNT)
   {
     m_failed = true;
@@ -576,7 +572,7 @@ bool CLGMPClipboardTransport::PumpInternalTarget()
   for (unsigned i = 1; i < m_internalTargetCount; ++i)
     m_internalTarget[i - 1] = m_internalTarget[i];
   m_internalTarget[--m_internalTargetCount] = {};
-  return BeginTarget(record, nullptr, -2);
+  return BeginTarget(record, nullptr, false);
 }
 
 void CLGMPClipboardTransport::ClearStreamTargets()
@@ -606,8 +602,7 @@ bool CLGMPClipboardTransport::QueueStreamTarget(
 bool CLGMPClipboardTransport::ProcessStreamTarget(
   const KVMFRClipboardMessage& record, const uint8_t * data)
 {
-  if (!m_ownerClientID ||
-      m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM)
+  if (!m_ownerClientID)
     return true;
   if (m_ownerReleasing && !m_releaseClearHelper)
     return true;
@@ -638,7 +633,7 @@ bool CLGMPClipboardTransport::ProcessStreamTarget(
 
   KVMFRClipboardMessage forwarded = record;
   forwarded.generation = m_endpointGeneration;
-  if (!BeginTarget(forwarded, data, -2))
+  if (!BeginTarget(forwarded, data, false))
   {
     ReleaseOwner("failed to stage clipboard stream data", true);
     return true;
@@ -666,9 +661,7 @@ bool CLGMPClipboardTransport::PumpStreamTarget()
 bool CLGMPClipboardTransport::DrainStream(bool& received)
 {
   received = false;
-  if (!m_ownerClientID ||
-      m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM ||
-      !m_clientToHostStream)
+  if (!m_ownerClientID || !m_clientToHostStream)
     return true;
 
   for (unsigned drained = 0;
@@ -744,23 +737,11 @@ void CLGMPClipboardTransport::ReleaseOwner(
     m_ownerDrainDeadline  = GetTickCount64() + STREAM_DRAIN_TIMEOUT_MS;
     m_replayPending       = false;
     ClearOutboundBlock();
-    for (Grant& grant : m_grants)
-    {
-      grant.generation = 0;
-      grant.offered    = false;
-      grant.committed  = false;
-    }
   }
   else if (force)
   {
     m_releaseClearHelper |= clearHelper;
     m_ownerReleaseReason = reason;
-  }
-
-  if (m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM)
-  {
-    FinishOwnerRelease();
-    return;
   }
 
   if (force)
@@ -789,7 +770,6 @@ void CLGMPClipboardTransport::FinishOwnerRelease()
   const bool clearHelper      = m_releaseClearHelper;
   m_ownerClientID             = 0;
   m_ownerGeneration           = 0;
-  m_ownerTransport            = 0;
   m_ownerReleasing            = false;
   m_releaseClearHelper        = false;
   m_ownerReleaseReason        = nullptr;
@@ -826,12 +806,6 @@ bool CLGMPClipboardTransport::RetryOwnerRelease()
 {
   if (!m_ownerReleasing)
     return true;
-
-  if (m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_STREAM)
-  {
-    FinishOwnerRelease();
-    return true;
-  }
 
   if (GetTickCount64() >= m_ownerDrainDeadline)
   {
@@ -947,14 +921,10 @@ bool CLGMPClipboardTransport::PublishStatus()
   clipboardStatus.generation      = m_endpointGeneration;
   clipboardStatus.lease           = static_cast<uint32_t>(OWNER_LEASE_MS);
   clipboardStatus.slotBytes       = KVMFR_CLIPBOARD_DATA_BYTES;
-  if (m_hostToClientStream && m_clientToHostStream)
-  {
-    clipboardStatus.transports      = KVMFR_CLIPBOARD_TRANSPORT_STREAM;
-    clipboardStatus.streamVersion   = KVMFR_CLIPBOARD_STREAM_VERSION;
-    clipboardStatus.streamSlotCount = KVMFR_CLIPBOARD_STREAM_SLOT_COUNT;
-    clipboardStatus.hostToClient    = m_hostToClientDescriptor;
-    clipboardStatus.clientToHost    = m_clientToHostDescriptor;
-  }
+  clipboardStatus.streamVersion   = KVMFR_CLIPBOARD_STREAM_VERSION;
+  clipboardStatus.streamSlotCount = KVMFR_CLIPBOARD_STREAM_SLOT_COUNT;
+  clipboardStatus.hostToClient    = m_hostToClientDescriptor;
+  clipboardStatus.clientToHost    = m_clientToHostDescriptor;
   if (m_available)
   {
     clipboardStatus.flags |= KVMFR_CLIPBOARD_STATUS_AVAILABLE;
@@ -965,7 +935,6 @@ bool CLGMPClipboardTransport::PublishStatus()
     clipboardStatus.flags |= KVMFR_CLIPBOARD_STATUS_HAS_OWNER;
     clipboardStatus.ownerClientID   = m_ownerClientID;
     clipboardStatus.ownerGeneration = m_ownerGeneration;
-    clipboardStatus.ownerTransport  = m_ownerTransport;
   }
   memcpy(lgmpHostMemPtr(memory), &clipboardStatus,
     sizeof(clipboardStatus));
@@ -986,48 +955,6 @@ bool CLGMPClipboardTransport::PublishStatus()
   {
     m_statusSerial = serial;
     m_statusDirty = false;
-  }
-  return true;
-}
-
-bool CLGMPClipboardTransport::PostGrants()
-{
-  if (!m_available || !m_ownerClientID || m_ownerReleasing ||
-      m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_LEGACY)
-    return true;
-
-  for (unsigned i = 0; i < MEMORY_COUNT; ++i)
-  {
-    Grant& grant = m_grants[i];
-    if (grant.offered || grant.committed ||
-        lgmpHostQueuePayloadPending(m_queue, m_grantMemory[i]))
-      continue;
-
-    KVMFRClipboardSlotHeader header = {};
-    header.version    = KVMFR_CLIPBOARD_VERSION;
-    header.type       = KVMFR_CLIPBOARD_MESSAGE_GRANT;
-    header.generation = m_ownerGeneration;
-    header.size       = KVMFR_CLIPBOARD_DATA_BYTES;
-    header.token      = i + 1;
-    memcpy(lgmpHostMemPtr(m_grantMemory[i]), &header, sizeof(header));
-
-    const PostResult result = PostForOwner(
-      KVMFR_CLIPBOARD_QUEUE_UDATA(
-        KVMFR_CLIPBOARD_QUEUE_GRANT, i + 1), m_grantMemory[i]);
-    if (result == PostResult::POSTED)
-    {
-      grant.generation = m_ownerGeneration;
-      grant.offered    = true;
-    }
-    else if (result == PostResult::BUSY)
-      return true;
-    else if (result == PostResult::GONE)
-    {
-      ReleaseOwner("subscriber disappeared", true, true);
-      return true;
-    }
-    else
-      return false;
   }
   return true;
 }
@@ -1066,15 +993,11 @@ bool CLGMPClipboardTransport::ReplayClipboard()
 bool CLGMPClipboardTransport::ValidateClaim(
   const KVMFRClipboardMessage& message) const
 {
-  KVMFRClipboardTransportFlags transports = 0;
-  if (m_hostToClientStream && m_clientToHostStream)
-    transports = KVMFR_CLIPBOARD_TRANSPORT_STREAM;
   return message.version == KVMFR_CLIPBOARD_VERSION &&
     message.type == KVMFR_CLIPBOARD_MESSAGE_CLAIM &&
     message.generation && message.token == m_endpointGeneration &&
-    kvmfrClipboardTransportValid(message.flags) &&
-    (message.flags & transports) &&
-    EmptyControl(message, true, true);
+    m_hostToClientStream && m_clientToHostStream &&
+    EmptyControl(message, true);
 }
 
 bool CLGMPClipboardTransport::ValidateOwnedControl(
@@ -1102,17 +1025,6 @@ bool CLGMPClipboardTransport::ValidateOwnedControl(
     case KVMFR_CLIPBOARD_MESSAGE_FILE_REQUEST:
     case KVMFR_CLIPBOARD_MESSAGE_FILE_CANCEL:
       return ValidateInboundRecord(message);
-
-    case KVMFR_CLIPBOARD_MESSAGE_COMMIT:
-      return m_ownerTransport == KVMFR_CLIPBOARD_TRANSPORT_LEGACY &&
-        message.token >= 1 && message.token <= MEMORY_COUNT &&
-        message.clipboardGeneration && message.transfer &&
-        (kvmfrClipboardRepresentationFormatValid(message.format) ||
-          message.format == KVMFR_CLIPBOARD_FORMAT_FILES) &&
-        message.length <= KVMFR_CLIPBOARD_DATA_BYTES &&
-        !(message.flags & ~(KVMFR_CLIPBOARD_FLAG_BEGIN |
-          KVMFR_CLIPBOARD_FLAG_END)) &&
-        AddValid(message.offset, message.length);
 
     default:
       return false;
@@ -1266,12 +1178,16 @@ void CLGMPClipboardTransport::ApplyInbound(
     case KVMFR_CLIPBOARD_MESSAGE_OFFER:
       m_clientClipboardGeneration = message.clipboardGeneration;
       m_clientFormats = message.token;
+      if (m_clientToHelper.Active())
+        m_discardClientToHelper = m_clientToHelper.transfer;
       m_clientToHelper.Clear();
       break;
 
     case KVMFR_CLIPBOARD_MESSAGE_CLEAR:
       m_clientClipboardGeneration = 0;
       m_clientFormats = 0;
+      if (m_clientToHelper.Active())
+        m_discardClientToHelper = m_clientToHelper.transfer;
       m_clientToHelper.Clear();
       break;
 
@@ -1352,7 +1268,8 @@ void CLGMPClipboardTransport::ApplyOutbound(
 }
 
 bool CLGMPClipboardTransport::BeginTarget(
-  const KVMFRClipboardMessage& message, const uint8_t * data, int grant)
+  const KVMFRClipboardMessage& message, const uint8_t * data,
+  bool acknowledge)
 {
   if (m_pendingTarget.valid ||
       (message.length && !data) ||
@@ -1360,8 +1277,7 @@ bool CLGMPClipboardTransport::BeginTarget(
     return false;
 
   m_pendingTarget.valid       = true;
-  m_pendingTarget.acknowledge = grant >= -1;
-  m_pendingTarget.grant       = grant;
+  m_pendingTarget.acknowledge = acknowledge;
   m_pendingTarget.record      = message;
   if (message.length)
     memcpy(m_pendingTarget.data, data, message.length);
@@ -1371,15 +1287,12 @@ bool CLGMPClipboardTransport::BeginTarget(
 void CLGMPClipboardTransport::FinishTarget(bool accepted)
 {
   const KVMFRClipboardMessage message = m_pendingTarget.record;
-  const int grant = m_pendingTarget.grant;
   if (accepted)
   {
     ApplyInbound(message);
     if (m_ownerClientID && !m_ownerReleasing)
       RenewLease();
   }
-  if (grant >= 0 && static_cast<unsigned>(grant) < MEMORY_COUNT)
-    m_grants[grant] = {};
   m_pendingTarget.Clear();
 
   if (!accepted)
@@ -1426,9 +1339,6 @@ void CLGMPClipboardTransport::DropPendingTarget()
     return;
 
   const bool acknowledge = m_pendingTarget.acknowledge;
-  const int grant = m_pendingTarget.grant;
-  if (grant >= 0 && static_cast<unsigned>(grant) < MEMORY_COUNT)
-    m_grants[grant] = {};
   m_pendingTarget.Clear();
   if (acknowledge && m_queue)
   {
@@ -1453,8 +1363,7 @@ bool CLGMPClipboardTransport::ProcessMessage(
       return true;
     }
 
-    if (message.flags == KVMFR_CLIPBOARD_TRANSPORT_STREAM &&
-        !BindStreams(clientID))
+    if (!BindStreams(clientID))
     {
       DeInitStreams();
       m_failed = true;
@@ -1465,7 +1374,6 @@ bool CLGMPClipboardTransport::ProcessMessage(
 
     m_ownerClientID   = clientID;
     m_ownerGeneration = message.generation;
-    m_ownerTransport  = message.flags;
     RenewLease();
     m_statusDirty   = true;
     m_replayPending = m_cachedValid;
@@ -1511,66 +1419,6 @@ bool CLGMPClipboardTransport::ProcessMessage(
     return true;
   }
 
-  if (message.type == KVMFR_CLIPBOARD_MESSAGE_COMMIT)
-  {
-    const unsigned grantIndex = message.token - 1;
-    Grant& grant = m_grants[grantIndex];
-    if (!grant.offered || grant.committed ||
-        grant.generation != m_ownerGeneration)
-    {
-      ReleaseOwner("invalid clipboard grant", true);
-      return true;
-    }
-
-    const uint8_t * slot = static_cast<const uint8_t *>(
-      lgmpHostMemPtr(m_grantMemory[grantIndex]));
-    KVMFRClipboardMessage dataMessage = {};
-    memcpy(&dataMessage, slot, sizeof(dataMessage));
-    const bool fileData = dataMessage.type ==
-      KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
-    const bool matchesCommit =
-      dataMessage.version             == KVMFR_CLIPBOARD_VERSION &&
-      (dataMessage.type               == KVMFR_CLIPBOARD_MESSAGE_DATA ||
-       fileData) &&
-      dataMessage.generation          == m_ownerGeneration &&
-      dataMessage.clipboardGeneration == message.clipboardGeneration &&
-      dataMessage.transfer            == message.transfer &&
-      dataMessage.offset              == message.offset &&
-      dataMessage.size                == message.size &&
-      dataMessage.format              == message.format &&
-      dataMessage.flags               == message.flags &&
-      dataMessage.length              == message.length &&
-      dataMessage.sequence            == message.sequence;
-    const bool staleFileData = fileData && m_files.IsStaleTerminal(
-      dataMessage, CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER);
-    const bool validData = fileData ?
-      (staleFileData || m_files.Validate(dataMessage,
-        CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER, 0, false)) :
-      (!dataMessage.token &&
-        kvmfrClipboardTransferFromHelper(dataMessage.transfer) &&
-        ValidateChunk(m_clientToHelper, dataMessage));
-    if (!matchesCommit || !validData)
-    {
-      ReleaseOwner("invalid clipboard commit", true);
-      return true;
-    }
-
-    if (staleFileData)
-    {
-      grant = {};
-      RenewLease();
-      return true;
-    }
-
-    grant.committed = true;
-    dataMessage.generation = m_endpointGeneration;
-    RenewLease();
-    BeginTarget(dataMessage,
-      slot + sizeof(KVMFRClipboardSlotHeader),
-      static_cast<int>(grantIndex));
-    return false;
-  }
-
   if (m_files.IsStaleTerminal(message,
       CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER))
   {
@@ -1601,7 +1449,7 @@ bool CLGMPClipboardTransport::ProcessMessage(
   KVMFRClipboardMessage forwarded = message;
   forwarded.generation = m_endpointGeneration;
   RenewLease();
-  BeginTarget(forwarded, nullptr, -1);
+  BeginTarget(forwarded, nullptr, true);
   return false;
 }
 
@@ -1692,95 +1540,61 @@ ClipboardChannelResult CLGMPClipboardTransport::SendData(
 
   KVMFRClipboardMessage message = record;
   message.generation = m_ownerGeneration;
-  if (m_ownerTransport == KVMFR_CLIPBOARD_TRANSPORT_STREAM)
+  LGMPStreamBuffer buffer = {};
+  LGMP_STATUS status =
+    lgmpHostStreamWriteAcquire(m_hostToClientStream, &buffer);
+  if (status == LGMP_ERR_STREAM_FULL)
+    return ClipboardChannelResult::BUSY;
+  if (status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE)
   {
-    LGMPStreamBuffer buffer = {};
-    LGMP_STATUS status =
-      lgmpHostStreamWriteAcquire(m_hostToClientStream, &buffer);
-    if (status == LGMP_ERR_STREAM_FULL)
-      return ClipboardChannelResult::BUSY;
-    if (status == LGMP_ERR_STREAM_UNBOUND ||
-        status == LGMP_ERR_STREAM_STALE)
-    {
-      ReleaseOwner("clipboard stream binding lost", true);
-      return ClipboardChannelResult::ACCEPTED;
-    }
-    if (status != LGMP_OK)
-    {
-      Fail("lgmpHostStreamWriteAcquire", status);
-      return ClipboardChannelResult::FAILED;
-    }
-
-    const uint32_t bytes = sizeof(message) + message.length;
-    if (!buffer.data || buffer.capacity < bytes)
-    {
-      const LGMP_STATUS cancel =
-        lgmpHostStreamWriteCancel(m_hostToClientStream, &buffer);
-      if (cancel != LGMP_OK)
-        DEBUG_ERROR("Failed to cancel an undersized host-to-client "
-          "clipboard stream reservation: %s", lgmpStatusString(cancel));
-      DEBUG_ERROR("Host-to-client clipboard stream returned an "
-        "undersized slot: capacity=%u required=%u",
-        buffer.capacity, bytes);
-      m_failed = true;
-      if (m_stopEvent)
-        SetEvent(m_stopEvent);
-      return ClipboardChannelResult::FAILED;
-    }
-
-    memcpy(buffer.data, &message, sizeof(message));
-    if (message.length)
-      memcpy(static_cast<uint8_t *>(buffer.data) + sizeof(message), data,
-        message.length);
-    status = lgmpHostStreamWriteCommit(
-      m_hostToClientStream, &buffer, bytes);
-    if (status == LGMP_OK)
-    {
-      ApplyOutbound(record);
-      return ClipboardChannelResult::ACCEPTED;
-    }
-
-    DEBUG_ERROR("Failed to commit host-to-client clipboard stream data: %s",
-      lgmpStatusString(status));
-    if (status == LGMP_ERR_STREAM_UNBOUND ||
-        status == LGMP_ERR_STREAM_STALE)
-    {
-      ReleaseOwner("clipboard stream binding lost", true);
-      return ClipboardChannelResult::ACCEPTED;
-    }
-    Fail("lgmpHostStreamWriteCommit", status);
+    ReleaseOwner("clipboard stream binding lost", true);
+    return ClipboardChannelResult::ACCEPTED;
+  }
+  if (status != LGMP_OK)
+  {
+    Fail("lgmpHostStreamWriteAcquire", status);
     return ClipboardChannelResult::FAILED;
   }
 
-  if (m_ownerTransport != KVMFR_CLIPBOARD_TRANSPORT_LEGACY)
-    return ClipboardChannelResult::FAILED;
-
-  PLGMPMemory memory = FindAvailable(m_dataMemory);
-  if (!memory)
-    return ClipboardChannelResult::BUSY;
-
-  uint8_t * slot = static_cast<uint8_t *>(lgmpHostMemPtr(memory));
-  memcpy(slot, &message, sizeof(message));
-  if (message.length)
-    memcpy(slot + sizeof(KVMFRClipboardSlotHeader), data, message.length);
-
-  const uint32_t serial = Seq::Next(m_dataSerial);
-  const PostResult result = PostForOwner(
-    KVMFR_CLIPBOARD_QUEUE_UDATA(
-      KVMFR_CLIPBOARD_QUEUE_DATA, serial), memory);
-  if (result == PostResult::POSTED)
+  const uint32_t bytes = sizeof(message) + message.length;
+  if (!buffer.data || buffer.capacity < bytes)
   {
-    m_dataSerial = serial;
+    const LGMP_STATUS cancel =
+      lgmpHostStreamWriteCancel(m_hostToClientStream, &buffer);
+    if (cancel != LGMP_OK)
+      DEBUG_ERROR("Failed to cancel an undersized host-to-client "
+        "clipboard stream reservation: %s", lgmpStatusString(cancel));
+    DEBUG_ERROR("Host-to-client clipboard stream returned an "
+      "undersized slot: capacity=%u required=%u",
+      buffer.capacity, bytes);
+    m_failed = true;
+    if (m_stopEvent)
+      SetEvent(m_stopEvent);
+    return ClipboardChannelResult::FAILED;
+  }
+
+  memcpy(buffer.data, &message, sizeof(message));
+  if (message.length)
+    memcpy(static_cast<uint8_t *>(buffer.data) + sizeof(message), data,
+      message.length);
+  status = lgmpHostStreamWriteCommit(
+    m_hostToClientStream, &buffer, bytes);
+  if (status == LGMP_OK)
+  {
     ApplyOutbound(record);
     return ClipboardChannelResult::ACCEPTED;
   }
-  if (result == PostResult::BUSY)
-    return ClipboardChannelResult::BUSY;
-  if (result == PostResult::GONE)
+
+  DEBUG_ERROR("Failed to commit host-to-client clipboard stream data: %s",
+    lgmpStatusString(status));
+  if (status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE)
   {
-    ReleaseOwner("subscriber disappeared", true, true);
+    ReleaseOwner("clipboard stream binding lost", true);
     return ClipboardChannelResult::ACCEPTED;
   }
+  Fail("lgmpHostStreamWriteCommit", status);
   return ClipboardChannelResult::FAILED;
 }
 
@@ -2002,6 +1816,24 @@ DWORD CALLBACK CLGMPClipboardTransport::ThreadProc(void * context)
 
 void CLGMPClipboardTransport::Thread()
 {
+  LGMPStreamPollState streamPoll = {};
+  const LGMPStreamPollConfig pollConfig =
+  {
+    32U,
+    50U,
+    1000U,
+  };
+  const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+    pollConfig);
+  if (pollStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to initialize LGMP clipboard polling: %s",
+      lgmpStatusString(pollStatus));
+    if (m_target)
+      m_target->ClipboardFailed();
+    return;
+  }
+
   bool notifyFailed = false;
   for (;;)
   {
@@ -2034,7 +1866,7 @@ void CLGMPClipboardTransport::Thread()
           !DrainStream(streamReceived) ||
           !RetryOwnerRelease() ||
           !PublishStatus() ||
-          !ReplayClipboard() || !PostGrants())
+          !ReplayClipboard())
       {
         notifyFailed = true;
         break;
@@ -2048,10 +1880,15 @@ void CLGMPClipboardTransport::Thread()
       if (m_pendingTarget.valid || m_internalTargetCount ||
           m_streamTargetCount || m_ownerClientID)
         timeout = ACTIVE_POLL_MS;
-      if (m_ownerTransport == KVMFR_CLIPBOARD_TRANSPORT_STREAM)
-        timeout = STREAM_POLL_MS;
-      if (streamReceived)
-        timeout = 0;
+      if (m_ownerClientID)
+      {
+        if (streamReceived)
+          lgmpStreamPollActivity(&streamPoll);
+        const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+        timeout = waitUs ? (waitUs + 999U) / 1000U : 0U;
+      }
+      else
+        lgmpStreamPollActivity(&streamPoll);
     }
 
     // ClipboardReceiveReady may synchronously retry SendClipboard, which
@@ -2064,6 +1901,11 @@ void CLGMPClipboardTransport::Thread()
       _countof(handles), handles, FALSE, timeout);
     if (wait == WAIT_FIRST_OBJECT_VALUE)
       break;
+    if (wait == WAIT_FIRST_OBJECT_VALUE + 1)
+    {
+      lgmpStreamPollActivity(&streamPoll);
+      continue;
+    }
     if (wait != WAIT_FIRST_OBJECT_VALUE + 1 && wait != WAIT_TIMEOUT)
     {
       DEBUG_ERROR_HR(GetLastError(),
