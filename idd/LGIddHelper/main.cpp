@@ -24,6 +24,7 @@
 #include <UserEnv.h>
 #include <WtsApi32.h>
 #include <bcrypt.h>
+#include <dbt.h>
 #include <setupapi.h>
 
 #include <array>
@@ -42,6 +43,7 @@ using namespace Microsoft::WRL::Wrappers::HandleTraits;
 #include "CNotifyWindow.h"
 #include "CConfigWindow.h"
 #include "ClipboardRing.h"
+#include "CSRWLock.h"
 #include "LGIddAuthority.h"
 
 #include "common/array.h"
@@ -54,6 +56,7 @@ static SERVICE_STATUS_HANDLE l_svcStatusHandle;
 static SERVICE_STATUS        l_svcStatus;
 static HandleT<EventTraits>  l_svcStopEvent;
 static HandleT<EventTraits>  l_svcSessionChangeEvent;
+static HandleT<EventTraits>  l_svcAuthorityChangeEvent;
 
 bool HandleService();
 static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv);
@@ -67,10 +70,27 @@ static HandleT<EventTraits>      l_childStopEvent;
 static HandleT<EventTraits>      l_childActivationEvent;
 static HandleT<HANDLENullTraits> l_childLifetimeMutex;
 static HandleT<HANDLENullTraits> l_childClipboardMapping;
+static CSRWLock                  l_authorityLock;
 static HANDLE                    l_authorityDevice = INVALID_HANDLE_VALUE;
-static LGIddAuthorityHost        l_authorityHost   = {};
+static HANDLE                    l_authorityNotificationDevice =
+  INVALID_HANDLE_VALUE;
+static HANDLE                    l_authorityHostProcess  = nullptr;
+static HDEVNOTIFY                l_authorityNotification = nullptr;
+static OVERLAPPED              * l_authorityPendingIo    = nullptr;
 static DWORD                     l_desiredSession  = NO_CONSOLE_SESSION;
 static DWORD                     l_childSession    = NO_CONSOLE_SESSION;
+
+enum class AuthorityRemovalState
+{
+  IDLE,
+  REGISTERING,
+  QUERY_REMOVE,
+  REMOVED
+};
+
+static AuthorityRemovalState l_authorityRemovalState =
+  AuthorityRemovalState::IDLE;
+static bool l_authorityRetireNotification = false;
 
 struct OleScope
 {
@@ -83,7 +103,9 @@ static void CloseChildLifetimeMutex();
 static bool RegisterClipboardAuthority(DWORD session,
   const uint64_t (&mappingId)[2], HANDLE mapping);
 static bool VerifyClipboardAuthority();
+static bool ActivateChildWithClipboardAuthority();
 static void ClearClipboardAuthority();
+static void ShutdownClipboardAuthority();
 
 static void CALLBACK DestroyNotifyWindow(PVOID lpParam, BOOLEAN bTimedOut)
 {
@@ -342,11 +364,187 @@ bool HandleService()
   return true;
 }
 
+static void UnregisterAuthorityNotification(HDEVNOTIFY notification)
+{
+  if (!notification)
+    return;
+
+  if (!UnregisterDeviceNotification(notification))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to unregister the LGIdd authority device notification");
+  }
+}
+
+class CAuthorityDeviceNotification
+{
+private:
+  HDEVNOTIFY m_notification = nullptr;
+
+public:
+  ~CAuthorityDeviceNotification()
+  {
+    UnregisterAuthorityNotification(m_notification);
+  }
+
+  void Attach(HDEVNOTIFY notification)
+  {
+    m_notification = notification;
+  }
+
+  HDEVNOTIFY Get() const
+  {
+    return m_notification;
+  }
+
+  HDEVNOTIFY Detach()
+  {
+    const HDEVNOTIFY notification = m_notification;
+    m_notification = nullptr;
+    return notification;
+  }
+
+  CAuthorityDeviceNotification() = default;
+  CAuthorityDeviceNotification(const CAuthorityDeviceNotification&) = delete;
+  CAuthorityDeviceNotification& operator=(
+    const CAuthorityDeviceNotification&) = delete;
+};
+
+static bool CanLaunchClipboardAuthority()
+{
+  CSRWSharedLock lock(l_authorityLock);
+  return l_authorityRemovalState == AuthorityRemovalState::IDLE &&
+    !l_authorityRetireNotification;
+}
+
+static AuthorityRemovalState ProcessAuthorityDeviceChange()
+{
+  HDEVNOTIFY notification = nullptr;
+  AuthorityRemovalState state;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    state = l_authorityRemovalState;
+    if (l_authorityRetireNotification)
+    {
+      notification = l_authorityNotification;
+      l_authorityNotification       = nullptr;
+      l_authorityNotificationDevice = INVALID_HANDLE_VALUE;
+      l_authorityRetireNotification = false;
+    }
+
+    if (state == AuthorityRemovalState::REMOVED)
+      l_authorityRemovalState = AuthorityRemovalState::IDLE;
+  }
+
+  UnregisterAuthorityNotification(notification);
+  return state;
+}
+
+static DWORD HandleAuthorityDeviceEvent(DWORD eventType, LPVOID eventData)
+{
+  const DEV_BROADCAST_HDR * header =
+    static_cast<const DEV_BROADCAST_HDR *>(eventData);
+  if (!header || header->dbch_devicetype != DBT_DEVTYP_HANDLE ||
+      header->dbch_size < offsetof(DEV_BROADCAST_HANDLE, dbch_eventguid))
+    return NO_ERROR;
+
+  const DEV_BROADCAST_HANDLE * event =
+    reinterpret_cast<const DEV_BROADCAST_HANDLE *>(header);
+  HANDLE       closeDevice   = INVALID_HANDLE_VALUE;
+  DWORD        cancelError   = ERROR_SUCCESS;
+  bool         signalService = false;
+  const char * message       = nullptr;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    const bool notificationMatches = l_authorityNotification ?
+      event->dbch_hdevnotify == l_authorityNotification :
+      l_authorityNotificationDevice != INVALID_HANDLE_VALUE &&
+        event->dbch_handle == l_authorityNotificationDevice;
+    if (!notificationMatches)
+      return NO_ERROR;
+
+    switch (eventType)
+    {
+      case DBT_DEVICEQUERYREMOVE:
+        if ((l_authorityRemovalState != AuthorityRemovalState::IDLE &&
+             l_authorityRemovalState != AuthorityRemovalState::REGISTERING) ||
+            event->dbch_handle != l_authorityNotificationDevice)
+          return NO_ERROR;
+
+        l_authorityRemovalState       = AuthorityRemovalState::QUERY_REMOVE;
+        l_authorityRetireNotification = false;
+        closeDevice                   = l_authorityDevice;
+        l_authorityDevice             = INVALID_HANDLE_VALUE;
+        signalService                 = true;
+        message                       =
+          "LGIdd authority device removal requested";
+        break;
+
+      case DBT_DEVICEQUERYREMOVEFAILED:
+        if (l_authorityRemovalState != AuthorityRemovalState::QUERY_REMOVE)
+          return NO_ERROR;
+
+        l_authorityRemovalState       = AuthorityRemovalState::IDLE;
+        l_authorityRetireNotification = true;
+        signalService                 = true;
+        message                       =
+          "LGIdd authority device removal was cancelled";
+        break;
+
+      case DBT_DEVICEREMOVEPENDING:
+      case DBT_DEVICEREMOVECOMPLETE:
+        l_authorityRemovalState       = AuthorityRemovalState::REMOVED;
+        l_authorityRetireNotification = true;
+        closeDevice                   = l_authorityDevice;
+        l_authorityDevice             = INVALID_HANDLE_VALUE;
+        signalService                 = true;
+        message                       = "LGIdd authority device was removed";
+        break;
+
+      default:
+        return NO_ERROR;
+    }
+
+    if (closeDevice != INVALID_HANDLE_VALUE && l_authorityPendingIo)
+    {
+      // The service thread retains the OVERLAPPED and its event until the
+      // cancellation completes; the control handler must not wait for it.
+      if (!CancelIoEx(closeDevice, l_authorityPendingIo))
+      {
+        const DWORD error = GetLastError();
+        if (error != ERROR_NOT_FOUND)
+          cancelError = error;
+      }
+    }
+  }
+
+  if (cancelError)
+    DEBUG_WARN_HR(cancelError,
+      "Failed to cancel LGIdd authority I/O during removal");
+
+  if (closeDevice != INVALID_HANDLE_VALUE && !CloseHandle(closeDevice))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to close the LGIdd authority device during removal");
+  }
+
+  if (message)
+    DEBUG_INFO("%s", message);
+  if (signalService && l_svcAuthorityChangeEvent.IsValid() &&
+      !SetEvent(l_svcAuthorityChangeEvent.Get()))
+  {
+    const DWORD error = GetLastError();
+    DEBUG_WARN_HR(error,
+      "Failed to signal the LGIdd authority device change");
+  }
+  return NO_ERROR;
+}
+
 static DWORD WINAPI SvcCtrlHandler(DWORD dwControl, DWORD dwEventType,
   LPVOID lpEventData, LPVOID lpContext)
 {
-  (void) dwEventType;
-  (void) lpEventData;
   (void) lpContext;
 
   switch (dwControl)
@@ -360,6 +558,9 @@ static DWORD WINAPI SvcCtrlHandler(DWORD dwControl, DWORD dwEventType,
       if (l_svcSessionChangeEvent.IsValid())
         SetEvent(l_svcSessionChangeEvent.Get());
       return NO_ERROR;
+
+    case SERVICE_CONTROL_DEVICEEVENT:
+      return HandleAuthorityDeviceEvent(dwEventType, lpEventData);
 
     case SERVICE_CONTROL_INTERROGATE:
       ReportSvcStatus(l_svcStatus.dwCurrentState, NO_ERROR, 0);
@@ -385,13 +586,6 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     return;
   }
 
-  if (!CPipeClient::IsLGIddDeviceAttached())
-  {
-    DEBUG_INFO("Looking Glass Indirect Display Device not found, not starting.");
-    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
-    return;
-  }
-
   ReportSvcStatus(SERVICE_START_PENDING, NO_ERROR, 0);
   l_svcStopEvent.Attach(CreateEvent(NULL, TRUE, FALSE, NULL));
   if (!l_svcStopEvent.IsValid())
@@ -409,9 +603,19 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     return;
   }
 
+  l_svcAuthorityChangeEvent.Attach(CreateEvent(NULL, FALSE, FALSE, NULL));
+  if (!l_svcAuthorityChangeEvent.IsValid())
+  {
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to create the LGIdd authority device change event");
+    ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
+    return;
+  }
+
   ReportSvcStatus(SERVICE_RUNNING, NO_ERROR, 0);
-  bool running = true;
-  ULONGLONG nextLaunch = 0;
+  bool running           = true;
+  bool deviceUnavailable = false;
+  ULONGLONG nextLaunch   = 0;
   while (running)
   {
     if (WaitForSingleObject(l_svcStopEvent.Get(), 0) == WAIT_OBJECT_0)
@@ -455,31 +659,41 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
     }
 
     if (!l_process.IsValid() &&
+        CanLaunchClipboardAuthority() &&
         l_desiredSession != NO_CONSOLE_SESSION &&
         GetTickCount64() >= nextLaunch)
     {
       if (!CPipeClient::IsLGIddDeviceAttached())
       {
-        DEBUG_INFO("Looking Glass Indirect Display Device has gone away");
-        running = false;
-        break;
-      }
-
-      if (!Launch(l_desiredSession))
+        if (!deviceUnavailable)
+          DEBUG_INFO(
+            "Looking Glass Indirect Display Device unavailable, waiting");
+        deviceUnavailable = true;
         nextLaunch = GetTickCount64() + 1000;
+      }
+      else
+      {
+        if (deviceUnavailable)
+          DEBUG_INFO(
+            "Looking Glass Indirect Display Device is available again");
+        deviceUnavailable = false;
+        if (!Launch(l_desiredSession))
+          nextLaunch = GetTickCount64() + 1000;
+      }
     }
 
     HANDLE waitOn[] =
     {
       l_svcStopEvent.Get(),
       l_svcSessionChangeEvent.Get(),
+      l_svcAuthorityChangeEvent.Get(),
       l_process.Get()
     };
-    DWORD count     = 3;
-    DWORD duration  = 1000;
+    DWORD count    = 4;
+    DWORD duration = 1000;
 
     if (!l_process.IsValid())
-      count    = 2;
+      count = 3;
 
     switch (WaitForMultipleObjects(count, waitOn, FALSE, duration))
     {
@@ -492,8 +706,25 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
       case WAIT_OBJECT_0 + 1:
         break;
 
-      // child application exited
+      // authority device removal state changed
       case WAIT_OBJECT_0 + 2:
+      {
+        const AuthorityRemovalState state = ProcessAuthorityDeviceChange();
+        if (!StopChild())
+        {
+          running = false;
+          break;
+        }
+
+        if (state == AuthorityRemovalState::REMOVED)
+          nextLaunch = GetTickCount64() + 1000;
+        else if (state == AuthorityRemovalState::IDLE)
+          nextLaunch = 0;
+        break;
+      }
+
+      // child application exited
+      case WAIT_OBJECT_0 + 3:
       {
         ClearClipboardAuthority();
         DWORD code;
@@ -518,7 +749,7 @@ static void WINAPI SvcMain(DWORD dwArgc, LPTSTR* lpszArgv)
   }
 
   (void) StopChild();
-  ClearClipboardAuthority();
+  ShutdownClipboardAuthority();
   ReportSvcStatus(SERVICE_STOPPED, NO_ERROR, 0);
 }
 
@@ -958,12 +1189,103 @@ static uint64_t FileTimeValue(const FILETIME& value)
   return result.QuadPart;
 }
 
+static bool AuthorityDeviceIoControl(
+  HANDLE device,
+  DWORD controlCode,
+  void * input,
+  DWORD inputLength,
+  void * output,
+  DWORD outputLength,
+  DWORD * bytes)
+{
+  *bytes = 0;
+  HandleT<EventTraits> ioEvent(CreateEventW(nullptr, TRUE, FALSE, nullptr));
+  if (!ioEvent.IsValid())
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error, "Failed to create an LGIdd authority I/O event");
+    SetLastError(error);
+    return false;
+  }
+
+  OVERLAPPED overlapped = {};
+  overlapped.hEvent = ioEvent.Get();
+
+  BOOL completed;
+  DWORD error;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    if (l_authorityRemovalState != AuthorityRemovalState::REGISTERING ||
+        l_authorityDevice != device)
+    {
+      SetLastError(ERROR_OPERATION_ABORTED);
+      return false;
+    }
+
+    // Linearize submission with query-remove. The lock is released as soon as
+    // the overlapped request has been submitted; completion is awaited below.
+    l_authorityPendingIo = &overlapped;
+    completed = DeviceIoControl(device, controlCode,
+      input, inputLength, output, outputLength, bytes, &overlapped);
+    error = completed ? ERROR_SUCCESS : GetLastError();
+    if (completed || error != ERROR_IO_PENDING)
+      l_authorityPendingIo = nullptr;
+  }
+
+  DWORD wait = WAIT_OBJECT_0;
+  if (!completed && error == ERROR_IO_PENDING)
+  {
+    wait = WaitForSingleObject(ioEvent.Get(), INFINITE);
+    if (wait != WAIT_OBJECT_0)
+    {
+      if (wait == WAIT_FAILED)
+      {
+        error = GetLastError();
+        DEBUG_ERROR_HR(error,
+          "Failed to wait for LGIdd authority I/O completion");
+      }
+      else
+      {
+        DEBUG_ERROR(
+          "Unexpected LGIdd authority I/O wait result 0x%08lx", wait);
+        error = ERROR_OPERATION_ABORTED;
+      }
+    }
+  }
+
+  bool result = false;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    if (l_authorityPendingIo == &overlapped)
+      l_authorityPendingIo = nullptr;
+
+    if (completed &&
+        l_authorityRemovalState == AuthorityRemovalState::REGISTERING &&
+        l_authorityDevice == device)
+      result = true;
+    else if (!completed && error == ERROR_IO_PENDING &&
+        wait == WAIT_OBJECT_0 &&
+        l_authorityRemovalState == AuthorityRemovalState::REGISTERING &&
+        l_authorityDevice == device)
+    {
+      result = GetOverlappedResult(device, &overlapped, bytes, FALSE) != FALSE;
+      error  = result ? ERROR_SUCCESS : GetLastError();
+    }
+    else if ((completed || error == ERROR_IO_PENDING) &&
+        wait == WAIT_OBJECT_0)
+      error = ERROR_OPERATION_ABORTED;
+  }
+
+  SetLastError(error);
+  return result;
+}
+
 static bool QueryAuthorityHost(HANDLE device, LGIddAuthorityHost& host)
 {
   ZeroMemory(&host, sizeof(host));
   DWORD bytes = 0;
-  if (!DeviceIoControl(device, IOCTL_LG_IDD_AUTHORITY_GET_HOST,
-      nullptr, 0, &host, sizeof(host), &bytes, nullptr))
+  if (!AuthorityDeviceIoControl(device, IOCTL_LG_IDD_AUTHORITY_GET_HOST,
+      nullptr, 0, &host, sizeof(host), &bytes))
   {
     const DWORD error = GetLastError();
     DEBUG_ERROR_HR(error, "Failed to query the LGIdd authority host");
@@ -981,7 +1303,7 @@ static bool QueryAuthorityHost(HANDLE device, LGIddAuthorityHost& host)
   return true;
 }
 
-static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
+static HANDLE OpenAuthorityDevice()
 {
   HDEVINFO devices = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_LGIdd,
     nullptr, nullptr, DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -993,7 +1315,7 @@ static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
     return INVALID_HANDLE_VALUE;
   }
 
-  HANDLE device = INVALID_HANDLE_VALUE;
+  std::vector<std::wstring> devicePaths;
   for (DWORD index = 0; ; ++index)
   {
     SP_DEVICE_INTERFACE_DATA interfaceData = {};
@@ -1012,11 +1334,16 @@ static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
     const BOOL sized = SetupDiGetDeviceInterfaceDetailW(
       devices, &interfaceData, nullptr, 0, &detailBytes, nullptr);
     const DWORD detailSizeError = sized ? ERROR_SUCCESS : GetLastError();
-    if (sized || detailSizeError != ERROR_INSUFFICIENT_BUFFER ||
+    if (!sized && detailSizeError != ERROR_INSUFFICIENT_BUFFER)
+    {
+      DEBUG_ERROR_HR(detailSizeError,
+        "Failed to size the LGIdd authority interface path");
+      continue;
+    }
+    if (sized ||
         detailBytes < sizeof(SP_DEVICE_INTERFACE_DETAIL_DATA_W))
     {
-      DEBUG_ERROR_HR(detailSizeError ? detailSizeError : ERROR_INVALID_DATA,
-        "Failed to size the LGIdd authority interface path");
+      DEBUG_ERROR("LGIdd returned an invalid authority interface path size");
       continue;
     }
 
@@ -1027,7 +1354,7 @@ static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
     }
     catch (...)
     {
-      DEBUG_ERROR_HR(ERROR_OUTOFMEMORY,
+      DEBUG_ERROR(
         "Failed to allocate the LGIdd authority interface path");
       break;
     }
@@ -1044,21 +1371,16 @@ static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
       continue;
     }
 
-    device = CreateFileW(detail->DevicePath,
-      GENERIC_READ | GENERIC_WRITE,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (device == INVALID_HANDLE_VALUE)
+    try
     {
-      const DWORD error = GetLastError();
-      DEBUG_ERROR_HR(error, "Failed to open the LGIdd authority interface");
-      continue;
+      devicePaths.emplace_back(detail->DevicePath);
     }
-    if (QueryAuthorityHost(device, host))
+    catch (...)
+    {
+      DEBUG_ERROR(
+        "Failed to retain the LGIdd authority interface path");
       break;
-
-    CloseHandle(device);
-    device = INVALID_HANDLE_VALUE;
+    }
   }
 
   if (!SetupDiDestroyDeviceInfoList(devices))
@@ -1067,10 +1389,32 @@ static HANDLE OpenAuthorityDevice(LGIddAuthorityHost& host)
     DEBUG_WARN_HR(error,
       "Failed to release the LGIdd authority interface list");
   }
+
+  HANDLE device = INVALID_HANDLE_VALUE;
+  for (const std::wstring& devicePath : devicePaths)
+  {
+    device = CreateFileW(devicePath.c_str(),
+      GENERIC_READ | GENERIC_WRITE,
+      FILE_SHARE_READ | FILE_SHARE_WRITE,
+      nullptr, OPEN_EXISTING,
+      FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+    if (device != INVALID_HANDLE_VALUE)
+      break;
+
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error, "Failed to open the LGIdd authority interface");
+  }
+
   if (device == INVALID_HANDLE_VALUE)
-    DEBUG_ERROR_HR(ERROR_NOT_FOUND,
-      "No usable LGIdd authority interface was found");
+    DEBUG_ERROR("No usable LGIdd authority interface was found");
   return device;
+}
+
+static bool AuthorityRegistrationActive(HANDLE device)
+{
+  CSRWSharedLock lock(l_authorityLock);
+  return l_authorityRemovalState == AuthorityRemovalState::REGISTERING &&
+    l_authorityDevice == device;
 }
 
 static bool RegisterClipboardAuthority(DWORD session,
@@ -1078,10 +1422,92 @@ static bool RegisterClipboardAuthority(DWORD session,
 {
   ClearClipboardAuthority();
 
-  LGIddAuthorityHost host = {};
-  HANDLE device = OpenAuthorityDevice(host);
+  bool canRegister;
+  {
+    CSRWSharedLock lock(l_authorityLock);
+    canRegister = l_authorityRemovalState == AuthorityRemovalState::IDLE &&
+      !l_authorityRetireNotification && !l_authorityNotification &&
+      l_authorityDevice == INVALID_HANDLE_VALUE &&
+      !l_authorityHostProcess;
+  }
+  if (!canRegister)
+  {
+    DEBUG_INFO(
+      "Deferring clipboard authority while LGIdd removal is in progress");
+    return false;
+  }
+
+  HANDLE device = OpenAuthorityDevice();
   if (device == INVALID_HANDLE_VALUE)
     return false;
+
+  bool readyToMonitor = false;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    if (l_authorityRemovalState == AuthorityRemovalState::IDLE &&
+        !l_authorityRetireNotification && !l_authorityNotification &&
+        l_authorityDevice == INVALID_HANDLE_VALUE)
+    {
+      l_authorityDevice             = device;
+      l_authorityNotificationDevice = device;
+      l_authorityRemovalState       = AuthorityRemovalState::REGISTERING;
+      readyToMonitor                = true;
+    }
+  }
+  if (!readyToMonitor)
+  {
+    CloseHandle(device);
+    return false;
+  }
+
+  DEV_BROADCAST_HANDLE filter = {};
+  filter.dbch_size       = sizeof(filter);
+  filter.dbch_devicetype = DBT_DEVTYP_HANDLE;
+  filter.dbch_handle     = device;
+
+  CAuthorityDeviceNotification notification;
+  notification.Attach(RegisterDeviceNotificationW(
+    l_svcStatusHandle, &filter, DEVICE_NOTIFY_SERVICE_HANDLE));
+  const DWORD notificationError = notification.Get() ?
+    ERROR_SUCCESS : GetLastError();
+
+  bool monitored = false;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    if (notification.Get())
+    {
+      l_authorityNotification = notification.Detach();
+      monitored =
+        l_authorityRemovalState == AuthorityRemovalState::REGISTERING &&
+        l_authorityDevice == device;
+    }
+  }
+  if (notificationError)
+  {
+    DEBUG_ERROR_HR(notificationError,
+      "Failed to monitor the LGIdd authority interface");
+    ClearClipboardAuthority();
+    return false;
+  }
+  if (!monitored)
+  {
+    DEBUG_INFO(
+      "LGIdd authority device removal interrupted registration");
+    ClearClipboardAuthority();
+    return false;
+  }
+
+  LGIddAuthorityHost host = {};
+  if (!QueryAuthorityHost(device, host))
+  {
+    ClearClipboardAuthority();
+    return false;
+  }
+  if (!AuthorityRegistrationActive(device))
+  {
+    ClearClipboardAuthority();
+    return false;
+  }
 
   HANDLE hostProcess = OpenProcess(PROCESS_DUP_HANDLE |
     PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE,
@@ -1090,7 +1516,7 @@ static bool RegisterClipboardAuthority(DWORD session,
   {
     const DWORD error = GetLastError();
     DEBUG_ERROR_HR(error, "Failed to open the LGIdd authority host process");
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
 
@@ -1104,7 +1530,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(error,
       "Failed to verify the LGIdd authority host process");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
   if (FileTimeValue(created) != host.processCreated)
@@ -1112,7 +1538,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(ERROR_ACCESS_DENIED,
       "LGIdd authority host process identity changed");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
   const DWORD hostWait = WaitForSingleObject(hostProcess, 0);
@@ -1122,7 +1548,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(error,
       "Failed to check the LGIdd authority host process");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
   if (hostWait != WAIT_TIMEOUT)
@@ -1130,7 +1556,13 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(ERROR_PROCESS_ABORTED,
       "LGIdd authority host process exited during registration");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
+    return false;
+  }
+  if (!AuthorityRegistrationActive(device))
+  {
+    CloseHandle(hostProcess);
+    ClearClipboardAuthority();
     return false;
   }
 
@@ -1143,7 +1575,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(error,
       "Failed to duplicate the clipboard mapping into LGIdd");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
 
@@ -1167,7 +1599,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_WARN("The unclaimed LGIdd mapping handle will be reclaimed when "
       "the driver host exits");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
   const DWORD confirmedWait = WaitForSingleObject(hostProcess, 0);
@@ -1179,7 +1611,7 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_WARN("The unclaimed LGIdd mapping handle will be reclaimed when "
       "the driver host exits");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
   if (confirmedWait != WAIT_TIMEOUT)
@@ -1187,28 +1619,46 @@ static bool RegisterClipboardAuthority(DWORD session,
     DEBUG_ERROR_HR(ERROR_PROCESS_ABORTED,
       "LGIdd authority host exited before registration");
     CloseHandle(hostProcess);
-    CloseHandle(device);
+    ClearClipboardAuthority();
     return false;
   }
 
   DWORD bytes = 0;
-  const BOOL registered = DeviceIoControl(device,
+  const BOOL registered = AuthorityDeviceIoControl(device,
     IOCTL_LG_IDD_AUTHORITY_REGISTER,
-    &registration, sizeof(registration), nullptr, 0, &bytes, nullptr);
+    &registration, sizeof(registration), nullptr, 0, &bytes);
   const DWORD registerError = registered ? ERROR_SUCCESS : GetLastError();
-  CloseHandle(hostProcess);
   if (!registered || bytes)
   {
     DEBUG_ERROR_HR(registered ? ERROR_INVALID_DATA : registerError,
       "Failed to register clipboard authority with LGIdd");
     DEBUG_WARN("The unclaimed LGIdd mapping handle will be reclaimed when "
       "the driver host exits");
-    CloseHandle(device);
+    CloseHandle(hostProcess);
+    ClearClipboardAuthority();
     return false;
   }
 
-  l_authorityDevice = device;
-  l_authorityHost   = host;
+  bool published = false;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    if (l_authorityRemovalState == AuthorityRemovalState::REGISTERING &&
+        l_authorityDevice == device && l_authorityNotification)
+    {
+      l_authorityHostProcess  = hostProcess;
+      l_authorityRemovalState = AuthorityRemovalState::IDLE;
+      published               = true;
+    }
+  }
+  if (!published)
+  {
+    DEBUG_INFO(
+      "LGIdd authority device removal interrupted registration");
+    CloseHandle(hostProcess);
+    ClearClipboardAuthority();
+    return false;
+  }
+
   DEBUG_INFO("Registered clipboard authority with LGIdd process %lu",
     host.processId);
   return true;
@@ -1216,47 +1666,120 @@ static bool RegisterClipboardAuthority(DWORD session,
 
 static bool VerifyClipboardAuthority()
 {
-  if (l_authorityDevice == INVALID_HANDLE_VALUE)
-    return false;
-
-  LGIddAuthorityHost current = {};
-  if (!QueryAuthorityHost(l_authorityDevice, current))
-    return false;
-  if (memcmp(&current, &l_authorityHost, sizeof(current)) != 0)
+  HANDLE hostProcess;
   {
-    DEBUG_ERROR_HR(ERROR_ACCESS_DENIED,
-      "LGIdd authority host identity changed");
+    CSRWSharedLock lock(l_authorityLock);
+    if (l_authorityRemovalState != AuthorityRemovalState::IDLE ||
+        l_authorityDevice == INVALID_HANDLE_VALUE ||
+        !l_authorityHostProcess)
+      return false;
+    hostProcess = l_authorityHostProcess;
+  }
+
+  const DWORD wait = WaitForSingleObject(hostProcess, 0);
+  if (wait == WAIT_FAILED)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to check the LGIdd authority host process");
     return false;
   }
-  return true;
+  if (wait != WAIT_TIMEOUT)
+    return false;
+
+  {
+    CSRWSharedLock lock(l_authorityLock);
+    return l_authorityRemovalState == AuthorityRemovalState::IDLE &&
+      l_authorityDevice != INVALID_HANDLE_VALUE &&
+      l_authorityHostProcess == hostProcess;
+  }
+}
+
+static bool ActivateChildWithClipboardAuthority()
+{
+  DWORD hostError       = ERROR_SUCCESS;
+  DWORD activationError = ERROR_SUCCESS;
+  {
+    CSRWSharedLock lock(l_authorityLock);
+    if (l_authorityRemovalState != AuthorityRemovalState::IDLE ||
+        l_authorityDevice == INVALID_HANDLE_VALUE ||
+        !l_authorityHostProcess)
+      return false;
+
+    const DWORD wait = WaitForSingleObject(l_authorityHostProcess, 0);
+    if (wait == WAIT_FAILED)
+      hostError = GetLastError();
+    else if (wait != WAIT_TIMEOUT)
+      return false;
+    else if (SetEvent(l_childActivationEvent.Get()))
+      return true;
+    else
+      activationError = GetLastError();
+  }
+
+  if (hostError)
+  {
+    DEBUG_ERROR_HR(hostError,
+      "Failed to check the LGIdd authority host before child activation");
+    return false;
+  }
+  DEBUG_ERROR_HR(activationError, "Failed to activate the child process");
+  return false;
+}
+
+static void ClearClipboardAuthority(bool shutdown)
+{
+  HANDLE closeHostProcess = nullptr;
+  HDEVNOTIFY notification = nullptr;
+  DWORD closeDeviceError  = ERROR_SUCCESS;
+  {
+    CSRWExclusiveLock lock(l_authorityLock);
+    // No authority I/O can be pending on the service thread here. Keep the
+    // published handle and notification intact until the physical close has
+    // completed, so a waiting query-remove cannot observe a false release.
+    if (l_authorityDevice != INVALID_HANDLE_VALUE &&
+        !CloseHandle(l_authorityDevice))
+      closeDeviceError = GetLastError();
+
+    if (!closeDeviceError)
+    {
+      closeHostProcess       = l_authorityHostProcess;
+      l_authorityDevice      = INVALID_HANDLE_VALUE;
+      l_authorityHostProcess = nullptr;
+
+      if (shutdown ||
+          l_authorityRemovalState == AuthorityRemovalState::IDLE ||
+          l_authorityRemovalState == AuthorityRemovalState::REGISTERING ||
+          l_authorityRetireNotification)
+      {
+        notification                  = l_authorityNotification;
+        l_authorityNotification       = nullptr;
+        l_authorityNotificationDevice = INVALID_HANDLE_VALUE;
+        l_authorityRetireNotification = false;
+      }
+
+      if (shutdown ||
+          l_authorityRemovalState == AuthorityRemovalState::REGISTERING)
+        l_authorityRemovalState = AuthorityRemovalState::IDLE;
+    }
+  }
+
+  if (closeDeviceError)
+    DEBUG_WARN_HR(closeDeviceError,
+      "Failed to close the LGIdd authority device");
+  if (closeHostProcess)
+    CloseHandle(closeHostProcess);
+  UnregisterAuthorityNotification(notification);
 }
 
 static void ClearClipboardAuthority()
 {
-  if (l_authorityDevice == INVALID_HANDLE_VALUE)
-    return;
+  ClearClipboardAuthority(false);
+}
 
-  LGIddAuthorityClear clear = {};
-  clear.size          = sizeof(clear);
-  clear.version       = LG_IDD_AUTHORITY_VERSION;
-  clear.instanceId[0] = l_authorityHost.instanceId[0];
-  clear.instanceId[1] = l_authorityHost.instanceId[1];
-
-  DWORD bytes = 0;
-  if (!DeviceIoControl(l_authorityDevice,
-      IOCTL_LG_IDD_AUTHORITY_CLEAR,
-      &clear, sizeof(clear), nullptr, 0, &bytes, nullptr))
-  {
-    const DWORD error = GetLastError();
-    DEBUG_WARN_HR(error, "Failed to clear clipboard authority in LGIdd");
-  }
-  else if (bytes)
-    DEBUG_WARN(
-      "LGIdd returned unexpected clipboard authority clear data");
-
-  CloseHandle(l_authorityDevice);
-  l_authorityDevice = INVALID_HANDLE_VALUE;
-  ZeroMemory(&l_authorityHost, sizeof(l_authorityHost));
+static void ShutdownClipboardAuthority()
+{
+  ClearClipboardAuthority(true);
 }
 
 static bool Launch(DWORD sessionId)
@@ -1727,10 +2250,10 @@ static bool Launch(DWORD sessionId)
     return false;
   }
 
-  if (!SetEvent(l_childActivationEvent.Get()))
+  if (!ActivateChildWithClipboardAuthority())
   {
-    const DWORD error = GetLastError();
-    DEBUG_ERROR_HR(error, "Failed to activate the child process");
+    DEBUG_WARN(
+      "LGIdd clipboard authority was lost before child activation");
     discardGatedChild();
     return false;
   }
