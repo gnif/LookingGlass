@@ -79,6 +79,7 @@ static const char * jpegMimetypes[] =
 static const char * fileMimetypes[] =
 {
   "x-special/gnome-copied-files",
+  "x-special/mate-copied-files",
   "text/uri-list",
   "application/x-kde-cutselection",
   NULL,
@@ -153,6 +154,7 @@ static bool isTextMimetype(const char * mimetype)
 static enum LG_ClipboardData mimetypeToCbType(const char * mimetype)
 {
   if (!strcmp(mimetype, "x-special/gnome-copied-files") ||
+      !strcmp(mimetype, "x-special/mate-copied-files" ) ||
       !strcmp(mimetype, "text/uri-list"))
     return LG_CLIPBOARD_DATA_FILES;
 
@@ -435,8 +437,9 @@ static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
   {
     if (type != LG_CLIPBOARD_DATA_FILES ||
         strcmp(mimetype, "x-special/gnome-copied-files") ||
-        !strcmp(data->mimetypes[type],
-          "x-special/gnome-copied-files"))
+        strcmp(mimetype, "x-special/mate-copied-files") ||
+        !strcmp(data->mimetypes[type], "x-special/gnome-copied-files") ||
+        !strcmp(data->mimetypes[type], "x-special/mate-copied-files"))
       return;
     free(data->mimetypes[type]);
   }
@@ -1295,7 +1298,9 @@ static bool fileTransferPayload(const struct WCBTransfer * transfer,
     *data = transfer->fileUri;
     *size = transfer->fileUriSize;
   }
-  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+  else if (
+    !strcmp(mime, "x-special/gnome-copied-files") ||
+    !strcmp(mime, "x-special/mate-copied-files" ))
   {
     *data = transfer->fileGnome;
     *size = transfer->fileGnomeSize;
@@ -1409,8 +1414,11 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
   {
     const char * payload;
     size_t size;
-    const bool deliversUri = !strcmp(mimetype, "text/uri-list") ||
-      !strcmp(mimetype, "x-special/gnome-copied-files");
+    const bool deliversUri =
+      !strcmp(mimetype, "text/uri-list"               ) ||
+      !strcmp(mimetype, "x-special/gnome-copied-files") ||
+      !strcmp(mimetype, "x-special/mate-copied-files" );
+
     if (fileTransferPayload(transfer, mimetype, &payload, &size) &&
         clipboardFileWriteStart(fd, payload, size,
           transfer, deliversUri))
@@ -1537,6 +1545,9 @@ static bool waylandCBPublish(LG_ClipboardData type)
           &transfer->fileUri, &transfer->fileUriSize) ||
        !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "x-special/gnome-copied-files",
+          &transfer->fileGnome, &transfer->fileGnomeSize) ||
+       !clipboardFiles_getRemotePresentation(transfer->filePresentation,
+          "x-special/mate-copied-files",
           &transfer->fileGnome, &transfer->fileGnomeSize) ||
        !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "application/x-kde-cutselection",

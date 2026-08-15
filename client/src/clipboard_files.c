@@ -59,6 +59,7 @@
 #define FILE_DELIVERY_GRACE_MAX  4U
 #define FILE_URI_PREFIX          "file://"
 #define FILE_GNOME_MIME          "x-special/gnome-copied-files"
+#define FILE_MATE_MIME           "x-special/mate-copied-files"
 #define FILE_URI_MIME            "text/uri-list"
 #define FILE_KDE_CUT_MIME        "application/x-kde-cutselection"
 
@@ -2022,12 +2023,19 @@ static struct LocalNode * addLocalNode(struct LocalDataset * dataset,
 bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size)
 {
-  if (!mime || (!data && size) ||
-      (strcmp(mime, FILE_URI_MIME) && strcmp(mime, FILE_GNOME_MIME)))
+  if (!mime || (!data && size))
     return false;
+
+  const bool gnome_or_mate =
+    !strcmp(mime, FILE_GNOME_MIME) ||
+    !strcmp(mime, FILE_MATE_MIME );
+
+  if (strcmp(mime, FILE_URI_MIME) && !gnome_or_mate)
+    return false;
+
   const char * text = data;
   size_t offset = 0;
-  if (!strcmp(mime, FILE_GNOME_MIME))
+  if (gnome_or_mate)
   {
     const char * newline = size ? memchr(text, '\n', size) : NULL;
     if (!newline)
@@ -2158,14 +2166,18 @@ static bool getRemoteDatasetNL(struct RemoteDataset * dataset,
     *size = *data ? 1U : 0U;
     return *data != NULL;
   }
-  if (strcmp(mime, FILE_URI_MIME) && strcmp(mime, FILE_GNOME_MIME))
+
+  const bool gnome_or_mate =
+    !strcmp(mime, FILE_GNOME_MIME) ||
+    !strcmp(mime, FILE_MATE_MIME );
+
+  if (strcmp(mime, FILE_URI_MIME) && !gnome_or_mate)
     return false;
 
-  const bool gnome = !strcmp(mime, FILE_GNOME_MIME);
   char * result = NULL;
   size_t used = 0;
   size_t capacity = 0;
-  if (gnome)
+  if (gnome_or_mate)
   {
     if (!grow((void **)&result, &capacity, 5U))
       return false;
@@ -2195,7 +2207,7 @@ static bool getRemoteDatasetNL(struct RemoteDataset * dataset,
       goto error;
     }
 
-    if (gnome)
+    if (gnome_or_mate)
       used += (size_t)snprintf(result + used, capacity - used,
           "\n" FILE_URI_PREFIX "%s", encoded);
     else

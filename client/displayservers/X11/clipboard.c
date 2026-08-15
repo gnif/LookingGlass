@@ -92,6 +92,7 @@ struct X11ClipboardState
   Atom                          aCurSelection;
   Atom                          aTypes[LG_CLIPBOARD_DATA_NONE];
   Atom                          aFileGnome;
+  Atom                          aFileMate;
   Atom                          aFileKde;
   Window                        targetsWindow;
   LG_ClipboardData              type;
@@ -114,8 +115,9 @@ static const char * atomTypes[] =
 };
 
 static const char fileGnomeMime[] = "x-special/gnome-copied-files";
-static const char fileKdeMime[]   = "application/x-kde-cutselection";
-static const char fileUriMime[]   = "text/uri-list";
+static const char fileMateMime [] = "x-special/mate-copied-files";
+static const char fileKdeMime  [] = "application/x-kde-cutselection";
+static const char fileUriMime  [] = "text/uri-list";
 
 static struct X11ClipboardState x11cb;
 
@@ -143,6 +145,8 @@ static const char * fileMimeForAtom(Atom atom)
     return fileUriMime;
   if (atom == x11cb.aFileGnome)
     return fileGnomeMime;
+  if (atom == x11cb.aFileMate)
+    return fileMateMime;
   if (atom == x11cb.aFileKde)
     return fileKdeMime;
   return NULL;
@@ -285,9 +289,12 @@ bool x11CBInit(void)
   }
 
   x11cb.aFileGnome = XInternAtom(x11.display, fileGnomeMime, False);
-  x11cb.aFileKde   = XInternAtom(x11.display, fileKdeMime, False);
-  if (x11cb.aFileGnome == BadAlloc || x11cb.aFileGnome == BadValue ||
-      x11cb.aFileKde == BadAlloc || x11cb.aFileKde == BadValue)
+  x11cb.aFileMate  = XInternAtom(x11.display, fileMateMime , False);
+  x11cb.aFileKde   = XInternAtom(x11.display, fileKdeMime  , False);
+  if (
+    x11cb.aFileGnome == BadAlloc || x11cb.aFileGnome == BadValue ||
+    x11cb.aFileMate  == BadAlloc || x11cb.aFileMate  == BadValue ||
+    x11cb.aFileKde   == BadAlloc || x11cb.aFileKde   == BadValue)
   {
     DEBUG_ERROR("failed to get clipboard file atoms");
     return false;
@@ -480,13 +487,14 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
   // target list requested
   if (e.target == x11atoms.TARGETS)
   {
-    Atom targets[4];
+    Atom targets[5];
     targets[0] = x11atoms.TARGETS;
     targets[1] = x11cb.aTypes[requestType];
     int count = 2;
     if (requestType == LG_CLIPBOARD_DATA_FILES)
     {
       targets[count++] = x11cb.aFileGnome;
+      targets[count++] = x11cb.aFileMate;
       targets[count++] = x11cb.aFileKde;
     }
 
@@ -1406,11 +1414,19 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     const Atom * targets = (const Atom *)data;
     Atom fileTarget = None;
     for (unsigned long i = 0; i < itemCount; ++i)
+    {
       if (targets[i] == x11cb.aFileGnome)
       {
         fileTarget = x11cb.aFileGnome;
         break;
       }
+
+      if (targets[i] == x11cb.aFileMate)
+      {
+        fileTarget = x11cb.aFileMate;
+        break;
+      }
+    }
     if (fileTarget == None)
       for (unsigned long i = 0; i < itemCount; ++i)
         if (targets[i] == x11cb.aTypes[LG_CLIPBOARD_DATA_FILES])
