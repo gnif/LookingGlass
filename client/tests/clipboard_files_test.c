@@ -271,6 +271,13 @@ static void testLocalLifecycle(void)
   CHECK(notices == 2);
   CHECK(datasets[1] != datasets[0]);
 
+  clipboardFiles_clearLocal();
+  CHECK(clipboardFiles_setLocal("x-special/mate-copied-files",
+        gnome, (size_t)gnomeLength));
+  CHECK(notices == 3);
+  CHECK(datasets[2] != datasets[0]);
+  CHECK(datasets[2] != datasets[1]);
+
   static const char invalid[] = "file:///does/not/exist\n";
   CHECK(!clipboardFiles_setLocal(
         "text/uri-list", invalid, sizeof(invalid) - 1U));
@@ -281,9 +288,10 @@ static void testLocalLifecycle(void)
   CHECK(clipboardFiles_testInit(UINT64_C(0x5678000056780000)));
   CHECK(clipboardFiles_setLocal(
         "text/uri-list", uri, (size_t)uriLength));
-  CHECK(notices == 3);
-  CHECK(datasets[2] != datasets[0]);
-  CHECK(datasets[2] != datasets[1]);
+  CHECK(notices == 4);
+  CHECK(datasets[3] != datasets[0]);
+  CHECK(datasets[3] != datasets[1]);
+  CHECK(datasets[3] != datasets[2]);
   clipboardFiles_free();
 
   CHECK(unlink(path) == 0);
@@ -381,6 +389,8 @@ static void testLocalUriValidation(void)
   CHECK(length > 0 && (size_t)length < sizeof(uri));
   CHECK(!clipboardFiles_setLocal(
         "x-special/gnome-copied-files", uri, (size_t)length));
+  CHECK(!clipboardFiles_setLocal(
+        "x-special/mate-copied-files", uri, (size_t)length));
   CHECK(notices == before + 2U);
 
   clipboardFiles_free();
@@ -721,6 +731,27 @@ static void checkRemoteUri(uint64_t presentation, const char * name)
   free(uri);
 }
 
+static void checkRemoteMate(uint64_t presentation, const char * name)
+{
+  char * gnome = NULL;
+  char * mate = NULL;
+  size_t gnomeSize = 0;
+  size_t mateSize = 0;
+  CHECK(clipboardFiles_getRemotePresentation(presentation,
+        "x-special/gnome-copied-files", &gnome, &gnomeSize));
+  CHECK(clipboardFiles_getRemotePresentation(presentation,
+        "x-special/mate-copied-files", &mate, &mateSize));
+  CHECK(gnome);
+  CHECK(mate);
+  CHECK(gnomeSize == mateSize);
+  CHECK(memcmp(gnome, mate, mateSize) == 0);
+  CHECK(mateSize >= sizeof("copy\n") - 1U);
+  CHECK(memcmp(mate, "copy\n", sizeof("copy\n") - 1U) == 0);
+  CHECK(strstr(mate, name));
+  free(mate);
+  free(gnome);
+}
+
 typedef struct ReleasePresentationTask
 {
   pthread_barrier_t * barrier;
@@ -791,6 +822,7 @@ static void testRemoteLifecycle(void)
     clipboardFiles_remotePresentationAcquire();
   CHECK(firstPresentation == first);
   checkRemoteUri(firstPresentation, "first.txt");
+  checkRemoteMate(firstPresentation, "first.txt");
 
   const uint64_t secondDataset = KVMFR_CLIPBOARD_TRANSFER_HELPER |
     UINT64_C(0x73110002);

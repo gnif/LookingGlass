@@ -164,8 +164,10 @@ struct Log
   unsigned int         presentationAcquireN;
   unsigned int         presentationDeliveredN;
   unsigned int         presentationReleaseN;
+  unsigned int         presentationMimeN;
   uint64_t             presentationDelivered[MAX_SOURCE];
   uint64_t             presentationReleased[MAX_SOURCE];
+  char                 presentationMime[MAX_MIME][80];
   char                 fileMime[80];
   uint8_t              fileData[MAX_TRANSFER];
   size_t               fileSize;
@@ -598,10 +600,14 @@ bool clipboardFiles_getRemotePresentation(uint64_t presentation,
     const char * mime, char ** data, size_t * size)
 {
   CHECK(presentation >= 1001U);
+  CHECK(rec.presentationMimeN < MAX_MIME);
+  snprintf(rec.presentationMime[rec.presentationMimeN++],
+      sizeof(rec.presentationMime[0]), "%s", mime);
   const char * value;
   if (!strcmp(mime, "text/uri-list"))
     value = "file:///run/user/1000/looking-glass/guest.txt\r\n";
-  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+  else if (!strcmp(mime, "x-special/gnome-copied-files") ||
+      !strcmp(mime, "x-special/mate-copied-files"))
     value = "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
   else if (!strcmp(mime, "application/x-kde-cutselection"))
     value = "0";
@@ -803,20 +809,59 @@ static void testFileImport(void)
   finish();
 }
 
+static void testFileImportMate(void)
+{
+  start();
+  const char payload[] =
+    "copy\nfile:///home/user/first.txt\r\n"
+    "file:///home/user/second.txt\r\n";
+  proto.receiveData = payload;
+  proto.receiveSize = sizeof(payload) - 1U;
+
+  struct Proxy * offer = newOffer();
+  offerMime(offer, "text/plain;charset=utf-8");
+  offerMime(offer, "text/uri-list");
+  offerMime(offer, "x-special/mate-copied-files");
+  selectOffer(offer);
+
+  CHECK(rec.noticeN == 0);
+  CHECK(proto.receiveN == 1);
+  CHECK(strcmp(proto.receiveMime,
+      "x-special/mate-copied-files") == 0);
+  CHECK(rec.pollN == 1);
+  pollFire(0, EPOLLIN);
+  CHECK(rec.fileSetN == 1);
+  CHECK(strcmp(rec.fileMime,
+      "x-special/mate-copied-files") == 0);
+  CHECK(rec.fileSize == sizeof(payload) - 1U);
+  CHECK(memcmp(rec.fileData, payload, sizeof(payload) - 1U) == 0);
+
+  finish();
+}
+
 static void testFileSource(void)
 {
   start();
   waylandCBNotice(LG_CLIPBOARD_DATA_FILES);
   CHECK(rec.presentationAcquireN == 1);
   CHECK(rec.presentationReleaseN == 0);
+  CHECK(rec.presentationMimeN == 3);
+  CHECK(strcmp(rec.presentationMime[0], "text/uri-list") == 0);
+  CHECK(strcmp(rec.presentationMime[1],
+      "x-special/gnome-copied-files") == 0);
+  CHECK(strcmp(rec.presentationMime[2],
+      "application/x-kde-cutselection") == 0);
   CHECK(proto.sourceN == 1);
   struct Proxy * source = &proto.source[0];
-  CHECK(source->mimeN == 4);
+  CHECK(source->mimeN == 5);
   CHECK(strcmp(source->mime[0],
       "x-special/gnome-copied-files") == 0);
-  CHECK(strcmp(source->mime[1], "text/uri-list") == 0);
-  CHECK(strcmp(source->mime[2],
+  CHECK(strcmp(source->mime[1],
+      "x-special/mate-copied-files") == 0);
+  CHECK(strcmp(source->mime[2], "text/uri-list") == 0);
+  CHECK(strcmp(source->mime[3],
       "application/x-kde-cutselection") == 0);
+  CHECK(strcmp(source->mime[4], wlCb.lgMimetype) == 0);
 
   int fds[2];
   CHECK(pipe(fds) == 0);
@@ -836,14 +881,33 @@ static void testFileSource(void)
   CHECK(read(fds[0], actual, 1) == 0);
   CHECK(close(fds[0]) == 0);
 
+  int mate[2];
+  CHECK(pipe(mate) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source,
+      "x-special/mate-copied-files", mate[1]);
+  CHECK(rec.pollN == 2);
+  pollFire(1, EPOLLOUT);
+  CHECK(rec.presentationDeliveredN == 2);
+  CHECK(rec.presentationDelivered[1] == 1001U);
+  const char mateExpected[] =
+    "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
+  char mateActual[sizeof(mateExpected)] = { 0 };
+  CHECK(read(mate[0], mateActual, sizeof(mateActual)) ==
+      (ssize_t)(sizeof(mateExpected) - 1U));
+  CHECK(memcmp(mateActual,
+      mateExpected, sizeof(mateExpected) - 1U) == 0);
+  CHECK(read(mate[0], mateActual, 1) == 0);
+  CHECK(close(mate[0]) == 0);
+
   int kde[2];
   CHECK(pipe(kde) == 0);
   sourceListener(source)->send(source->data,
       (struct wl_data_source *)source,
       "application/x-kde-cutselection", kde[1]);
-  CHECK(rec.pollN == 2);
-  pollFire(1, EPOLLOUT);
-  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.pollN == 3);
+  pollFire(2, EPOLLOUT);
+  CHECK(rec.presentationDeliveredN == 2);
   CHECK(read(kde[0], actual, sizeof(actual)) == 1);
   CHECK(actual[0] == '0');
   CHECK(read(kde[0], actual, 1) == 0);
@@ -1573,6 +1637,7 @@ static const struct Test tests[] =
 {
   { "mime"      , testMime      },
   { "file-import", testFileImport },
+  { "file-mate-import", testFileImportMate },
   { "file-source", testFileSource },
   { "file-replace", testFileSourceReplacement },
   { "replace"   , testReplace   },

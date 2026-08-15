@@ -60,7 +60,8 @@
 #define A_JPEG      104UL
 #define A_URI       105UL
 #define A_GNOME     106UL
-#define A_KDE       107UL
+#define A_MATE      107UL
+#define A_KDE       108UL
 
 struct WindowLog
 {
@@ -223,6 +224,8 @@ Atom XInternAtom(Display * display, const char * name, Bool onlyIfExists)
     return A_URI;
   if (!strcmp(name, "x-special/gnome-copied-files"))
     return A_GNOME;
+  if (!strcmp(name, "x-special/mate-copied-files"))
+    return A_MATE;
   if (!strcmp(name, "application/x-kde-cutselection"))
     return A_KDE;
   CHECK(false);
@@ -609,7 +612,8 @@ bool clipboardFiles_getRemotePresentation(uint64_t presentation,
   const char * value;
   if (!strcmp(mime, "text/uri-list"))
     value = "file:///run/user/1000/looking-glass/guest.txt\r\n";
-  else if (!strcmp(mime, "x-special/gnome-copied-files"))
+  else if (!strcmp(mime, "x-special/gnome-copied-files") ||
+      !strcmp(mime, "x-special/mate-copied-files"))
     value = "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
   else if (!strcmp(mime, "application/x-kde-cutselection"))
     value = "0";
@@ -887,6 +891,29 @@ static void testFileImportIncr(void)
   finish();
 }
 
+static void testFileImportMate(void)
+{
+  start();
+  const unsigned long targets[] = { A_TEXT, A_URI, A_MATE };
+  discover(603, targets, ARRAY_LENGTH(targets));
+  CHECK(rec.convertN == 2);
+  const struct ConvertLog * convert = &rec.convert[1];
+  CHECK(convert->target == A_MATE);
+  CHECK(convert->property == x11atoms.SEL_DATA);
+
+  const char payload[] =
+    "copy\nfile:///home/user/first.txt\r\n"
+    "file:///home/user/second.txt\r\n";
+  prop8(A_MATE, payload, sizeof(payload) - 1U);
+  selection(convert->requestor, A_MATE, x11atoms.SEL_DATA);
+  CHECK(rec.fileSetN == 1);
+  CHECK(strcmp(rec.fileMime, "x-special/mate-copied-files") == 0);
+  CHECK(rec.fileSize == sizeof(payload) - 1U);
+  CHECK(memcmp(rec.fileData, payload, sizeof(payload) - 1U) == 0);
+  CHECK(rec.noticeN == 0);
+  finish();
+}
+
 static void testFileSource(void)
 {
   start();
@@ -898,12 +925,13 @@ static void testFileSource(void)
   selectionRequest(x11atoms.TARGETS, 710);
   CHECK(rec.changeN == 1);
   CHECK(rec.change[0].format == 32);
-  CHECK(rec.change[0].count == 4);
+  CHECK(rec.change[0].count == 5);
   const Atom * targets = (const Atom *)rec.change[0].data;
   CHECK(targets[0] == x11atoms.TARGETS);
   CHECK(targets[1] == A_URI);
   CHECK(targets[2] == A_GNOME);
-  CHECK(targets[3] == A_KDE);
+  CHECK(targets[3] == A_MATE);
+  CHECK(targets[4] == A_KDE);
 
   selectionRequest(A_URI, 711);
   CHECK(rec.presentationAcquireN == 2);
@@ -956,6 +984,46 @@ static void testFileSource(void)
   CHECK(rec.presentationReleased[2] == 2001U);
   finish();
   CHECK(rec.presentationReleaseN == 3);
+}
+
+static void testFileSourceMate(void)
+{
+  start();
+  x11CBNotice(LG_CLIPBOARD_DATA_FILES);
+  CHECK(rec.presentationAcquireN == 1);
+  CHECK(rec.presentationReleaseN == 0);
+
+  selectionRequest(A_MATE, 713);
+  CHECK(rec.presentationAcquireN == 2);
+  CHECK(rec.structureSelectN == 1);
+  CHECK(rec.changeN == 1);
+  CHECK(rec.change[0].type == x11atoms.INCR);
+  CHECK(rec.change[0].format == 32);
+  CHECK(rec.change[0].count == 1);
+  CHECK(rec.sendN == 1);
+
+  propertyState(900, 713, PropertyDelete);
+  CHECK(rec.changeN == 2);
+  CHECK(rec.change[1].type == A_MATE);
+  CHECK(rec.change[1].format == 8);
+  const char expected[] =
+    "copy\nfile:///run/user/1000/looking-glass/guest.txt\r\n";
+  CHECK(rec.change[1].size == sizeof(expected) - 1U);
+  CHECK(memcmp(rec.change[1].data,
+      expected, sizeof(expected) - 1U) == 0);
+
+  propertyState(900, 713, PropertyDelete);
+  CHECK(rec.changeN == 3);
+  CHECK(rec.change[2].type == A_MATE);
+  CHECK(rec.change[2].count == 0);
+  CHECK(rec.presentationDeliveredN == 1);
+  CHECK(rec.presentationDelivered[0] == 2001U);
+  CHECK(rec.presentationReleaseN == 1);
+  CHECK(rec.presentationReleased[0] == 2001U);
+
+  finish();
+  CHECK(rec.presentationReleaseN == 2);
+  CHECK(rec.presentationReleased[1] == 2001U);
 }
 
 static void testFileSourceActiveReplacement(void)
@@ -1434,7 +1502,9 @@ static const struct Test tests[] =
   { "targets"                   , testTargets                     },
   { "file-import"               , testFileImport                  },
   { "file-incr"                 , testFileImportIncr              },
+  { "file-mate-import"          , testFileImportMate              },
   { "file-source"               , testFileSource                  },
+  { "file-mate-source"          , testFileSourceMate              },
   { "file-source-active-replace", testFileSourceActiveReplacement },
   { "normal"                    , testNormal                      },
   { "incr"                      , testIncr                        },
