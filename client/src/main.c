@@ -146,6 +146,14 @@ static bool videoStatusRetry(LG_TransportStatus status,
   return true;
 }
 
+static void primaryWorkerFailed(void)
+{
+  /* A worker can still be handling an abandoned primary payload after the
+   * session thread has initiated a restart. Preserve that restart so the
+   * fallback video source can take over instead of terminating the client. */
+  app_transitionState(APP_STATE_RUNNING, APP_STATE_SHUTDOWN);
+}
+
 #ifdef ENABLE_TESTS
 static struct
 {
@@ -1212,7 +1220,7 @@ int main_cursorThread(void * unused)
       else
       {
         DEBUG_ERROR("Pointer transport failed with status %d", status);
-        app_setState(APP_STATE_SHUTDOWN);
+        primaryWorkerFailed();
       }
       break;
     }
@@ -1414,11 +1422,11 @@ int main_frameThread(void * unused)
         primaryLost();
       }
       else if (status == LG_TRANSPORT_END)
-        app_setState(APP_STATE_SHUTDOWN);
+        primaryWorkerFailed();
       else
       {
         DEBUG_ERROR("Frame transport failed with status %d", status);
-        app_setState(APP_STATE_SHUTDOWN);
+        primaryWorkerFailed();
       }
       break;
     }
@@ -1443,7 +1451,7 @@ int main_frameThread(void * unused)
       videoPayloadRelease();
       DEBUG_ERROR("Transport returned a frame without format metadata");
       g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
-      app_setState(APP_STATE_SHUTDOWN);
+      primaryWorkerFailed();
       break;
     }
     const bool formatChanged = sourceChanged ||
@@ -1528,7 +1536,7 @@ int main_frameThread(void * unused)
         DEBUG_ERROR("Unsupported frame type");
         g_state.videoOps->frame->releaseFrame(
             g_state.transport.handle, &frame);
-        app_setState(APP_STATE_SHUTDOWN);
+        primaryWorkerFailed();
         break;
       }
 
@@ -1549,7 +1557,7 @@ int main_frameThread(void * unused)
         DEBUG_ERROR("Renderer failed to configure format");
         g_state.videoOps->frame->releaseFrame(
             g_state.transport.handle, &frame);
-        app_setState(APP_STATE_SHUTDOWN);
+        primaryWorkerFailed();
         break;
       }
       rendererSupportsNativeHDR = !rendererFormat.hdr ||
@@ -1601,7 +1609,7 @@ int main_frameThread(void * unused)
       frameTimingCancel(frameToken);
       g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       DEBUG_ERROR("Renderer onFrame returned failure");
-      app_setState(APP_STATE_SHUTDOWN);
+      primaryWorkerFailed();
       break;
     }
     /* A DMA snapshot can complete on the render thread immediately after it
@@ -2628,6 +2636,10 @@ static const LG_TransportFallbackEventOps fallbackEvents =
 
 static void primaryLost(void)
 {
+  /* Establish restart before updating the transport bookkeeping. Primary
+   * workers may still be unwinding abandoned payloads in parallel and must
+   * observe that their failures no longer warrant a terminal shutdown. */
+  app_setState(APP_STATE_RESTART);
   atomic_store_explicit(
       &g_state.lgHostConnected, false, memory_order_release);
   unsigned int lost = atomic_load_explicit(
@@ -2652,7 +2664,6 @@ static void primaryLost(void)
   }
 
   DEBUG_INFO("Waiting for the host to restart...");
-  app_setState(APP_STATE_RESTART);
 }
 
 static bool fallbackStart(const uint8_t primaryUUID[16])
