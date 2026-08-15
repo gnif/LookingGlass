@@ -24,6 +24,8 @@
 #include <strsafe.h>
 
 #include <algorithm>
+#include <array>
+#include <condition_variable>
 #include <cstring>
 #include <cwchar>
 #include <exception>
@@ -32,6 +34,8 @@
 #include <new>
 #include <set>
 #include <stdexcept>
+#include <system_error>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 
@@ -521,13 +525,41 @@ namespace
   class CClipboardFileStream final : public IStream
   {
   private:
+    static constexpr size_t PREFETCH_BLOCKS = 2U;
+
+    enum class PrefetchState
+    {
+      EMPTY,
+      QUEUED,
+      FILLING,
+      READY
+    };
+
+    struct PrefetchBlock
+    {
+      std::vector<uint8_t> data;
+      uint64_t offset     = 0;
+      ULONG length        = 0;
+      HRESULT result      = S_OK;
+      uint64_t generation = 0;
+      PrefetchState state = PrefetchState::EMPTY;
+    };
+
     std::atomic<ULONG> m_refs { 1 };
     ClipboardRemoteFileEntry m_entry;
     std::shared_ptr<CClipboardFileDatasetLease> m_lease;
+    std::mutex m_operationLock;
     std::mutex m_lock;
-    uint64_t m_offset = 0;
-    std::vector<uint8_t> m_cache;
-    uint64_t m_cacheOffset = 0;
+    std::condition_variable m_prefetchWork;
+    std::condition_variable m_prefetchReady;
+    // The consumer can drain one protocol-sized block while the worker fills
+    // the other, bounding each active stream to two MiB of read-ahead.
+    std::array<PrefetchBlock, PREFETCH_BLOCKS> m_prefetch;
+    std::thread m_prefetchThread;
+    uint64_t m_offset             = 0;
+    uint64_t m_prefetchGeneration = 1;
+    bool m_prefetchStarted        = false;
+    bool m_prefetchStop           = false;
 
     HRESULT ReadProvider(uint64_t offset, void * data, ULONG length)
     {
@@ -540,8 +572,175 @@ namespace
       return actual == length ? S_OK : STG_E_READFAULT;
     }
 
-    HRESULT ReadLocked(void * data, ULONG length, ULONG * read,
-      bool readAhead)
+    bool Contains(const PrefetchBlock& block, uint64_t offset) const
+    {
+      return block.generation == m_prefetchGeneration &&
+        block.state != PrefetchState::EMPTY &&
+        offset >= block.offset && offset - block.offset < block.length;
+    }
+
+    void InvalidatePrefetchLocked()
+    {
+      if (!++m_prefetchGeneration)
+        ++m_prefetchGeneration;
+      for (PrefetchBlock& block : m_prefetch)
+        if (block.state != PrefetchState::FILLING)
+          block.state = PrefetchState::EMPTY;
+    }
+
+    void SchedulePrefetchLocked()
+    {
+      if (!m_prefetchStarted || m_prefetchStop ||
+          m_offset >= m_entry.size)
+        return;
+
+      for (PrefetchBlock& block : m_prefetch)
+      {
+        if (block.state != PrefetchState::FILLING &&
+            block.generation != m_prefetchGeneration)
+          block.state = PrefetchState::EMPTY;
+        else if (block.state == PrefetchState::READY &&
+            block.offset + block.length <= m_offset)
+          block.state = PrefetchState::EMPTY;
+      }
+
+      uint64_t next = m_offset;
+      for (;;)
+      {
+        const PrefetchBlock * existing = nullptr;
+        for (const PrefetchBlock& block : m_prefetch)
+          if (Contains(block, next))
+          {
+            existing = &block;
+            break;
+          }
+        if (existing)
+        {
+          next = existing->offset + existing->length;
+          if (next >= m_entry.size)
+            break;
+          continue;
+        }
+
+        PrefetchBlock * empty = nullptr;
+        for (PrefetchBlock& block : m_prefetch)
+          if (block.state == PrefetchState::EMPTY)
+          {
+            empty = &block;
+            break;
+          }
+        if (!empty)
+          break;
+
+        empty->offset = next;
+        empty->length = static_cast<ULONG>((std::min<uint64_t>)(
+          FILE_READ_BYTES, m_entry.size - next));
+        empty->result = S_OK;
+        empty->generation = m_prefetchGeneration;
+        empty->state = PrefetchState::QUEUED;
+        next += empty->length;
+        m_prefetchWork.notify_one();
+        if (next >= m_entry.size)
+          break;
+      }
+    }
+
+    HRESULT StartPrefetchLocked()
+    {
+      if (m_prefetchStarted)
+        return S_OK;
+      try
+      {
+        const size_t blockBytes = static_cast<size_t>(
+          (std::min<uint64_t>)(FILE_READ_BYTES, m_entry.size));
+        for (PrefetchBlock& block : m_prefetch)
+          block.data.resize(blockBytes);
+        m_prefetchThread = std::thread(
+          &CClipboardFileStream::PrefetchThread, this);
+      }
+      catch (const std::bad_alloc&)
+      {
+        return E_OUTOFMEMORY;
+      }
+      catch (const std::length_error&)
+      {
+        return E_OUTOFMEMORY;
+      }
+      catch (const std::system_error&)
+      {
+        return E_FAIL;
+      }
+      m_prefetchStarted = true;
+      return S_OK;
+    }
+
+    void PrefetchThread()
+    {
+      std::unique_lock<std::mutex> lock(m_lock);
+      for (;;)
+      {
+        m_prefetchWork.wait(lock, [this]()
+        {
+          if (m_prefetchStop)
+            return true;
+          for (const PrefetchBlock& block : m_prefetch)
+            if (block.state == PrefetchState::QUEUED)
+              return true;
+          return false;
+        });
+        if (m_prefetchStop)
+          return;
+
+        PrefetchBlock * pending = nullptr;
+        for (PrefetchBlock& block : m_prefetch)
+          if (block.state == PrefetchState::QUEUED &&
+              (!pending || block.offset < pending->offset))
+            pending = &block;
+        if (!pending)
+          continue;
+
+        pending->state = PrefetchState::FILLING;
+        const uint64_t generation = pending->generation;
+        const uint64_t offset     = pending->offset;
+        const ULONG length        = pending->length;
+        uint8_t * const data      = pending->data.data();
+        lock.unlock();
+        const HRESULT result = ReadProvider(offset, data, length);
+        lock.lock();
+
+        if (pending->state == PrefetchState::FILLING &&
+            pending->generation == generation)
+        {
+          if (m_prefetchStop || generation != m_prefetchGeneration)
+            pending->state = PrefetchState::EMPTY;
+          else
+          {
+            pending->result = result;
+            pending->state = PrefetchState::READY;
+          }
+        }
+        SchedulePrefetchLocked();
+        m_prefetchReady.notify_all();
+      }
+    }
+
+    void StopPrefetch()
+    {
+      {
+        std::lock_guard<std::mutex> lock(m_lock);
+        if (!m_prefetchStarted)
+          return;
+        m_prefetchStop = true;
+        InvalidatePrefetchLocked();
+      }
+      m_prefetchWork.notify_all();
+      m_prefetchReady.notify_all();
+      if (m_prefetchThread.joinable())
+        m_prefetchThread.join();
+    }
+
+    HRESULT ReadLocked(std::unique_lock<std::mutex>& lock, void * data,
+      ULONG length, ULONG * read)
     {
       if (read)
         *read = 0;
@@ -552,81 +751,57 @@ namespace
 
       const ULONG requested = static_cast<ULONG>((std::min<uint64_t>)(
         length, m_entry.size - m_offset));
-      const bool direct = !readAhead || length >= FILE_READ_BYTES;
       uint8_t * output = static_cast<uint8_t *>(data);
       ULONG completed = 0;
 
+      const HRESULT started = StartPrefetchLocked();
+      if (FAILED(started))
+        return started;
+
       while (completed < requested)
       {
-        if (!direct && m_offset >= m_cacheOffset)
-        {
-          const uint64_t relative = m_offset - m_cacheOffset;
-          if (relative < m_cache.size())
+        SchedulePrefetchLocked();
+        PrefetchBlock * ready = nullptr;
+        for (PrefetchBlock& block : m_prefetch)
+          if (block.state == PrefetchState::READY &&
+              Contains(block, m_offset))
           {
-            const size_t available = m_cache.size() -
-              static_cast<size_t>(relative);
-            const ULONG amount = static_cast<ULONG>((std::min<size_t>)(
-              requested - completed, available));
-            memcpy(output + completed,
-              m_cache.data() + static_cast<size_t>(relative), amount);
-            m_offset += amount;
-            completed += amount;
-            continue;
+            ready = &block;
+            break;
           }
-        }
-
-        if (direct)
+        if (!ready)
         {
-          const ULONG amount = (std::min)(
-            FILE_READ_BYTES, requested - completed);
-          const HRESULT result = ReadProvider(
-            m_offset, output + completed, amount);
-          if (FAILED(result))
+          m_prefetchReady.wait(lock);
+          if (m_prefetchStop)
           {
             if (read)
               *read = completed;
-            return result;
+            return STG_E_READFAULT;
           }
-          m_offset += amount;
-          completed += amount;
           continue;
         }
 
-        m_cache.clear();
-        m_cacheOffset = 0;
-        const ULONG amount = static_cast<ULONG>((std::min<uint64_t>)(
-          FILE_READ_BYTES, m_entry.size - m_offset));
-        try
+        if (FAILED(ready->result))
         {
-          m_cache.resize(amount);
-        }
-        catch (const std::bad_alloc&)
-        {
-          m_cache.clear();
-          if (read)
-            *read = completed;
-          return E_OUTOFMEMORY;
-        }
-        catch (const std::length_error&)
-        {
-          m_cache.clear();
-          if (read)
-            *read = completed;
-          return E_OUTOFMEMORY;
-        }
-
-        const HRESULT result = ReadProvider(
-          m_offset, m_cache.data(), amount);
-        if (FAILED(result))
-        {
-          m_cache.clear();
+          const HRESULT result = ready->result;
+          InvalidatePrefetchLocked();
           if (read)
             *read = completed;
           return result;
         }
-        m_cacheOffset = m_offset;
+
+        const size_t relative = static_cast<size_t>(
+          m_offset - ready->offset);
+        const ULONG amount = static_cast<ULONG>((std::min<size_t>)(
+          requested - completed, ready->length - relative));
+        memcpy(output + completed, ready->data.data() + relative, amount);
+        m_offset += amount;
+        completed += amount;
+        if (relative + amount == ready->length)
+          ready->state = PrefetchState::EMPTY;
       }
 
+      SchedulePrefetchLocked();
       if (read)
         *read = completed;
       return completed == length ? S_OK : S_FALSE;
@@ -639,6 +814,11 @@ namespace
       uint64_t offset = 0) :
       m_entry(entry), m_lease(std::move(lease)), m_offset(offset)
     {
+    }
+
+    ~CClipboardFileStream()
+    {
+      StopPrefetch();
     }
 
     HRESULT STDMETHODCALLTYPE QueryInterface(REFIID iid, void ** object)
@@ -679,8 +859,9 @@ namespace
           *read = 0;
         return STG_E_INVALIDPOINTER;
       }
-      std::lock_guard<std::mutex> lock(m_lock);
-      return ReadLocked(data, length, read, true);
+      std::lock_guard<std::mutex> operationLock(m_operationLock);
+      std::unique_lock<std::mutex> lock(m_lock);
+      return ReadLocked(lock, data, length, read);
     }
 
     HRESULT STDMETHODCALLTYPE Write(const void *, ULONG, ULONG *) override
@@ -691,6 +872,7 @@ namespace
     HRESULT STDMETHODCALLTYPE Seek(LARGE_INTEGER move, DWORD origin,
       ULARGE_INTEGER * position) override
     {
+      std::lock_guard<std::mutex> operationLock(m_operationLock);
       std::lock_guard<std::mutex> lock(m_lock);
       uint64_t base = 0;
       switch (origin)
@@ -725,6 +907,7 @@ namespace
         next = base + amount;
       }
       m_offset = next;
+      InvalidatePrefetchLocked();
       if (position)
         position->QuadPart = next;
       return S_OK;
@@ -766,8 +949,9 @@ namespace
         ULONG got = 0;
         HRESULT result;
         {
-          std::lock_guard<std::mutex> lock(m_lock);
-          result = ReadLocked(buffer.data(), wanted, &got, false);
+          std::lock_guard<std::mutex> operationLock(m_operationLock);
+          std::unique_lock<std::mutex> lock(m_lock);
+          result = ReadLocked(lock, buffer.data(), wanted, &got);
         }
         if (FAILED(result))
           return result;
@@ -819,6 +1003,7 @@ namespace
       if (!stream)
         return E_POINTER;
       *stream = nullptr;
+      std::lock_guard<std::mutex> operationLock(m_operationLock);
       std::lock_guard<std::mutex> lock(m_lock);
       try
       {
