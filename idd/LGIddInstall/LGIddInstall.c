@@ -545,7 +545,6 @@ typedef struct DeviceRuntimeState
   bool present;
   bool started;
   bool usable;
-  bool disabled;
   bool created;
   bool rollbackDeviceSafe;
   WCHAR instanceId[MAX_DEVICE_ID_LEN];
@@ -601,114 +600,6 @@ bool deviceIsUsable(const DeviceDesc *device)
   DeviceRuntimeState state;
   return captureDeviceState(device, &state) &&
     state.present && state.usable;
-}
-
-bool waitForDeviceState(
-  const DeviceRuntimeState *state,
-  bool started)
-{
-  const ULONGLONG deadline = GetTickCount64() + STATE_WAIT_TIMEOUT_MS;
-  for (;;)
-  {
-    DEVINST devInst;
-    CONFIGRET cr = CM_Locate_DevNodeW(
-      &devInst, (DEVINSTID_W) state->instanceId, CM_LOCATE_DEVNODE_NORMAL);
-    if (cr != CR_SUCCESS)
-    {
-      debugConfigError(L"CM_Locate_DevNodeW", cr);
-      return false;
-    }
-
-    ULONG status;
-    ULONG problem;
-    cr = CM_Get_DevNode_Status(&status, &problem, devInst, 0);
-    if (cr != CR_SUCCESS)
-    {
-      debugConfigError(L"CM_Get_DevNode_Status", cr);
-      return false;
-    }
-    if (((status & DN_STARTED) != 0) == started)
-      return true;
-
-    if (GetTickCount64() >= deadline)
-    {
-      fwprintf(stderr, L"%s: timed out waiting for device to %s\n",
-        state->device->name, started ? L"start" : L"stop");
-      return false;
-    }
-    Sleep(100);
-  }
-}
-
-bool disableDevice(DeviceRuntimeState *state)
-{
-  if (!state->present || !state->started)
-    return true;
-
-  DEVINST devInst;
-  CONFIGRET cr = CM_Locate_DevNodeW(
-    &devInst, state->instanceId, CM_LOCATE_DEVNODE_NORMAL);
-  if (cr != CR_SUCCESS)
-  {
-    debugConfigError(L"CM_Locate_DevNodeW", cr);
-    return false;
-  }
-
-  wprintf(L"Temporarily disabling %s...\n", state->device->name);
-  cr = CM_Disable_DevNode(devInst, CM_DISABLE_UI_NOT_OK);
-  if (cr != CR_SUCCESS)
-  {
-    debugConfigError(L"CM_Disable_DevNode", cr);
-    return false;
-  }
-
-  state->disabled = true;
-  return waitForDeviceState(state, false);
-}
-
-bool enableDevice(DeviceRuntimeState *state)
-{
-  if (!state->disabled)
-    return true;
-
-  DEVINST devInst;
-  CONFIGRET cr = CM_Locate_DevNodeW(
-    &devInst, state->instanceId, CM_LOCATE_DEVNODE_NORMAL);
-  if (cr != CR_SUCCESS)
-  {
-    debugConfigError(L"CM_Locate_DevNodeW", cr);
-    return false;
-  }
-
-  wprintf(L"Re-enabling %s...\n", state->device->name);
-  cr = CM_Enable_DevNode(devInst, 0);
-  if (cr != CR_SUCCESS)
-  {
-    debugConfigError(L"CM_Enable_DevNode", cr);
-    return false;
-  }
-
-  if (!waitForDeviceState(state, true))
-    return false;
-  state->disabled = false;
-  return true;
-}
-
-bool enableDevices(
-  DeviceRuntimeState *idd,
-  DeviceRuntimeState *input)
-{
-  if (!enableDevice(idd))
-    return false;
-
-  if (input->disabled && !deviceIsUsable(&LGIDD_DEVICE))
-  {
-    fwprintf(stderr,
-      L"LGInput remains disabled because LGIdd is not usable\n");
-    return false;
-  }
-
-  return enableDevice(input);
 }
 
 DeviceRuntimeState *runtimeStateForDevice(
@@ -1116,7 +1007,7 @@ void install(const DeviceDesc *const devices[DEVICE_COUNT])
   bool helperWasRunning = false;
   bool installSucceeded = false;
   bool rollbackSucceeded = true;
-  bool restoreSucceeded;
+  bool restoreSucceeded = true;
   BOOL needRestart = FALSE;
 
   if (!captureDeviceState(&LGIDD_DEVICE, &idd) ||
@@ -1126,11 +1017,6 @@ void install(const DeviceDesc *const devices[DEVICE_COUNT])
   _putws(L"Stopping LGIddHelper...");
   if (!stopHelperService(&helperExisted, &helperWasRunning))
     exit(1);
-
-  // LGInput consumes LGIdd's input pipe, so quiesce the dependent device
-  // first and restore the provider first.
-  if (!disableDevice(&input) || !disableDevice(&idd))
-    goto cleanup;
 
   _putws(L"Preparing registry key...");
   if (!ensureKeyWithAce())
@@ -1177,8 +1063,6 @@ cleanup:
         rollbackSucceeded = false;
     }
   }
-
-  restoreSucceeded = enableDevices(&idd, &input);
 
   if (installSucceeded && restoreSucceeded && !needRestart)
   {
