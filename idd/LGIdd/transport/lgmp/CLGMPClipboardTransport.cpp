@@ -31,6 +31,10 @@
 #include <limits>
 #include <string.h>
 
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+  #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
+
 namespace
 {
   static_assert(sizeof(LGMPStreamDescriptor) ==
@@ -49,6 +53,13 @@ namespace
     LGMP_Q_CLIPBOARD_LEN,
     1000,
   };
+
+  bool ArmPollTimer(HANDLE timer, uint32_t waitUs)
+  {
+    LARGE_INTEGER due = {};
+    due.QuadPart = -static_cast<LONGLONG>(waitUs) * 10;
+    return SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) != FALSE;
+  }
 
   bool EmptyControl(const KVMFRClipboardMessage& message,
     bool keepToken = false)
@@ -334,9 +345,11 @@ bool CLGMPClipboardTransport::Start(IClipboardTarget& target)
       return true;
 
     CloseHandle(m_thread);
+    CloseHandle(m_pollTimer);
     CloseHandle(m_wakeEvent);
     CloseHandle(m_stopEvent);
     m_thread    = nullptr;
+    m_pollTimer = nullptr;
     m_wakeEvent = nullptr;
     m_stopEvent = nullptr;
   }
@@ -344,15 +357,38 @@ bool CLGMPClipboardTransport::Start(IClipboardTarget& target)
     return false;
 
   m_stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  m_wakeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
-  if (!m_stopEvent || !m_wakeEvent)
+  if (!m_stopEvent)
   {
-    DEBUG_ERROR_HR(GetLastError(),
-      "Failed to create LGMP clipboard worker events");
-    if (m_wakeEvent)
-      CloseHandle(m_wakeEvent);
-    if (m_stopEvent)
-      CloseHandle(m_stopEvent);
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create LGMP clipboard stop event");
+    m_stopEvent = nullptr;
+    return false;
+  }
+
+  m_wakeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (!m_wakeEvent)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create LGMP clipboard wake event");
+    CloseHandle(m_stopEvent);
+    m_stopEvent = nullptr;
+    return false;
+  }
+
+  m_pollTimer = CreateWaitableTimerExW(nullptr, nullptr,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  if (!m_pollTimer)
+    m_pollTimer = CreateWaitableTimerExW(
+      nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+  if (!m_pollTimer)
+  {
+    const DWORD error = GetLastError();
+    DEBUG_ERROR_HR(error,
+      "Failed to create LGMP clipboard poll timer");
+    CloseHandle(m_wakeEvent);
+    CloseHandle(m_stopEvent);
     m_wakeEvent = nullptr;
     m_stopEvent = nullptr;
     return false;
@@ -373,8 +409,10 @@ bool CLGMPClipboardTransport::Start(IClipboardTarget& target)
       CSRWExclusiveLock lock(m_lock);
       m_target = nullptr;
     }
+    CloseHandle(m_pollTimer);
     CloseHandle(m_wakeEvent);
     CloseHandle(m_stopEvent);
+    m_pollTimer = nullptr;
     m_wakeEvent = nullptr;
     m_stopEvent = nullptr;
     return false;
@@ -392,11 +430,14 @@ void CLGMPClipboardTransport::Stop()
 
   if (m_thread)
     CloseHandle(m_thread);
+  if (m_pollTimer)
+    CloseHandle(m_pollTimer);
   if (m_wakeEvent)
     CloseHandle(m_wakeEvent);
   if (m_stopEvent)
     CloseHandle(m_stopEvent);
   m_thread    = nullptr;
+  m_pollTimer = nullptr;
   m_wakeEvent = nullptr;
   m_stopEvent = nullptr;
 
@@ -1839,7 +1880,7 @@ void CLGMPClipboardTransport::Thread()
   bool notifyFailed = false;
   for (;;)
   {
-    DWORD timeout = IDLE_POLL_MS;
+    uint32_t waitUs = IDLE_POLL_MS * 1000U;
     bool streamReceived = false;
     bool notifyReady = false;
     IClipboardTarget * readyTarget = nullptr;
@@ -1881,13 +1922,12 @@ void CLGMPClipboardTransport::Thread()
       }
       if (m_pendingTarget.valid || m_internalTargetCount ||
           m_streamTargetCount || m_ownerClientID)
-        timeout = ACTIVE_POLL_MS;
+        waitUs = ACTIVE_POLL_MS * 1000U;
       if (m_ownerClientID)
       {
         if (streamReceived)
           lgmpStreamPollActivity(&streamPoll);
-        const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
-        timeout = waitUs ? (waitUs + 999U) / 1000U : 0U;
+        waitUs = lgmpStreamPollIdle(&streamPoll);
       }
       else
         lgmpStreamPollActivity(&streamPoll);
@@ -1898,9 +1938,27 @@ void CLGMPClipboardTransport::Thread()
     if (notifyReady)
       readyTarget->ClipboardReceiveReady();
 
-    const HANDLE handles[] = { m_stopEvent, m_wakeEvent };
+    if (!waitUs)
+      continue;
+    if (!ArmPollTimer(m_pollTimer, waitUs))
+    {
+      const DWORD error = GetLastError();
+      if (WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
+        break;
+      DEBUG_ERROR_HR(error,
+        "Failed to arm LGMP clipboard poll timer");
+      notifyFailed = true;
+      break;
+    }
+
+    const HANDLE handles[] =
+    {
+      m_stopEvent,
+      m_wakeEvent,
+      m_pollTimer,
+    };
     const DWORD wait = WaitForMultipleObjects(
-      _countof(handles), handles, FALSE, timeout);
+      _countof(handles), handles, FALSE, INFINITE);
     if (wait == WAIT_OBJECT_0)
       break;
     if (wait == WAIT_OBJECT_0 + 1)
@@ -1908,13 +1966,19 @@ void CLGMPClipboardTransport::Thread()
       lgmpStreamPollActivity(&streamPoll);
       continue;
     }
-    if (wait != WAIT_OBJECT_0 + 1 && wait != WAIT_TIMEOUT)
+    if (wait == WAIT_OBJECT_0 + 2)
+      continue;
+    if (wait == WAIT_FAILED)
     {
       DEBUG_ERROR_HR(GetLastError(),
         "LGMP clipboard worker wait failed");
       notifyFailed = true;
       break;
     }
+    DEBUG_ERROR("LGMP clipboard worker returned an unexpected wait "
+      "result: %lu", wait);
+    notifyFailed = true;
+    break;
   }
 
   IClipboardTarget * target = nullptr;

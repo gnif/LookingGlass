@@ -114,6 +114,7 @@ private:
   IClipboardTarget * m_target = nullptr;
   HANDLE m_stopEvent = nullptr;
   HANDLE m_wakeEvent = nullptr;
+  HANDLE m_pollTimer = nullptr;
   HANDLE m_thread    = nullptr;
 
   bool m_available          = false;
