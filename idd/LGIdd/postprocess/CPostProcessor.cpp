@@ -313,8 +313,44 @@ void CPostProcessor::RecordTiming(
 bool CPostProcessor::ShouldCopyFully(
   const RECT dirtyRects[], unsigned nbDirtyRects) const
 {
-  return m_copyEffect &&
-    m_copyEffect->ShouldCopyFully(dirtyRects, nbDirtyRects);
+  if (m_copyEffect)
+    return m_copyEffect->ShouldCopyFully(dirtyRects, nbDirtyRects);
+
+  static const unsigned commandLimit = 256;
+
+  const UINT64 bytesPerPixel =
+    m_dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+  uint64_t copiedBytes = 0;
+  unsigned commands    = 0;
+  for (const RECT * rect = dirtyRects;
+       rect < dirtyRects + nbDirtyRects; ++rect)
+  {
+    if (rect->left < 0 || rect->top < 0 ||
+        rect->right  > (LONG)m_dstFormat.width ||
+        rect->bottom > (LONG)m_dstFormat.height ||
+        rect->left >= rect->right || rect->top >= rect->bottom)
+      return true;
+
+    const UINT64   left  = (UINT64)rect->left  * bytesPerPixel;
+    const UINT64   right = (UINT64)rect->right * bytesPerPixel;
+    const unsigned rows  = (unsigned)(rect->bottom - rect->top);
+
+    if (rect->left == 0 && rect->right == (LONG)m_dstFormat.width)
+    {
+      ++commands;
+      copiedBytes += (uint64_t)rows * m_pitch;
+    }
+    else
+    {
+      commands    += rows;
+      copiedBytes += (right - left) * rows;
+    }
+
+    if (commands > commandLimit || copiedBytes >= m_frameSize)
+      return true;
+  }
+
+  return false;
 }
 
 void CPostProcessor::CopyToFrameBuffer(
@@ -390,16 +426,6 @@ void CPostProcessor::CopyFromCandidate(
     return;
   }
 
-  D3D12_TEXTURE_COPY_LOCATION srcLoc = {};
-  srcLoc.pResource       = src;
-  srcLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  srcLoc.PlacedFootprint = m_copyLayout;
-
-  D3D12_TEXTURE_COPY_LOCATION dstLoc = {};
-  dstLoc.pResource       = dst;
-  dstLoc.Type            = D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;
-  dstLoc.PlacedFootprint = m_copyLayout;
-
   if (fullCopy)
   {
     commandList->CopyBufferRegion(
@@ -407,19 +433,33 @@ void CPostProcessor::CopyFromCandidate(
     return;
   }
 
+  const UINT64 bytesPerPixel =
+    m_dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
   for (const RECT * rect = dirtyRects;
        rect < dirtyRects + nbDirtyRects; ++rect)
   {
-    D3D12_BOX box = {};
-    box.left   = rect->left;
-    box.top    = rect->top;
-    box.front  = 0;
-    box.right  = rect->right;
-    box.bottom = rect->bottom;
-    box.back   = 1;
+    const UINT64 left      = (UINT64)rect->left * bytesPerPixel;
+    const UINT64 right     = (UINT64)rect->right * bytesPerPixel;
+    const UINT64 rowBytes  = right - left;
+    const UINT   rowCount  = (UINT)(rect->bottom - rect->top);
 
-    commandList->CopyTextureRegion(
-      &dstLoc, box.left, box.top, 0, &srcLoc, &box);
+    // Candidate and destination use the same linear layout. Copy complete
+    // row spans as one range, otherwise address each damaged row in bytes.
+    if (rect->left == 0 && rect->right == (LONG)m_dstFormat.width)
+    {
+      const UINT64 offset = (UINT64)rect->top * m_pitch;
+      commandList->CopyBufferRegion(
+        dst, offset, src, offset, (UINT64)rowCount * m_pitch);
+      continue;
+    }
+
+    for (UINT row = 0; row < rowCount; ++row)
+    {
+      const UINT64 offset =
+        ((UINT64)rect->top + row) * m_pitch + left;
+      commandList->CopyBufferRegion(
+        dst, offset, src, offset, rowBytes);
+    }
   }
 }
 
