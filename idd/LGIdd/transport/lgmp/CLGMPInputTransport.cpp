@@ -18,7 +18,11 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <ntstatus.h>
+
 #include "transport/lgmp/CLGMPInputTransport.h"
+
+#include <wudfwdm.h>
 
 #include "config/CSettings.h"
 #include "transport/lgmp/CLGMPHost.h"
@@ -53,8 +57,6 @@ static constexpr int32_t MAX_MOUSE_WHEEL =
   INT8_MAX * MAX_SPLIT_REPORTS;
 static constexpr int32_t MIN_MOUSE_WHEEL =
   -INT8_MAX * MAX_SPLIT_REPORTS;
-static constexpr DWORD WAIT_FIRST_OBJECT_VALUE = 0;
-
 static bool IsZero(const void * data, size_t size)
 {
   const uint8_t * byte = static_cast<const uint8_t *>(data);
@@ -446,7 +448,7 @@ bool CLGMPInputTransport::Start(IInputTarget& target)
     const DWORD state = WaitForSingleObject(m_thread, 0);
     if (state == WAIT_TIMEOUT)
       return true;
-    if (state != WAIT_FIRST_OBJECT_VALUE)
+    if (state != WAIT_OBJECT_0)
     {
       DEBUG_ERROR_HR(GetLastError(),
         "Failed to inspect LGMP input worker");
@@ -1006,12 +1008,12 @@ void CLGMPInputTransport::Thread()
 
     const DWORD wait = WaitForMultipleObjects(
       _countof(waitHandles), waitHandles, FALSE, INFINITE);
-    if (wait == WAIT_FIRST_OBJECT_VALUE)
+    if (wait == WAIT_OBJECT_0)
     {
       failed = Atomic::Load(m_statusFailed, std::memory_order_acquire);
       break;
     }
-    if (wait != WAIT_FIRST_OBJECT_VALUE + 1)
+    if (wait != WAIT_OBJECT_0 + 1)
     {
       DEBUG_ERROR_HR(GetLastError(), "LGMP input worker wait failed");
       failed = true;

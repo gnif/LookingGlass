@@ -18,7 +18,11 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <ntstatus.h>
+
 #include "ipc/CInputPipeServer.h"
+
+#include <wudfwdm.h>
 
 #include "config/CSettings.h"
 #include "CDebug.h"
@@ -28,8 +32,6 @@
 #include <string.h>
 
 CInputPipeServer g_inputPipeServer;
-
-static constexpr DWORD WAIT_FIRST_OBJECT_VALUE = 0;
 
 bool CInputPipeServer::Init()
 {
@@ -564,9 +566,9 @@ void CInputPipeServer::Thread()
   {
     const DWORD wait = WaitForMultipleObjects(
       _countof(handles), handles, FALSE, INFINITE);
-    if (wait == WAIT_FIRST_OBJECT_VALUE)
+    if (wait == WAIT_OBJECT_0)
       break;
-    if (wait != WAIT_FIRST_OBJECT_VALUE + 1)
+    if (wait != WAIT_OBJECT_0 + 1)
     {
       DEBUG_ERROR_HR(GetLastError(), "LGInput sender wait failed");
       break;

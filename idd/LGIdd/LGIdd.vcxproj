@@ -280,6 +280,11 @@
     <LGPackageToolOutDir Condition="'$(Platform)'=='Win32'">$([MSBuild]::NormalizeDirectory('$(LGDriverSolutionDir)$(LGBaseConfiguration)'))</LGPackageToolOutDir>
     <InfVerif_AdditionalOptions>/sw2084</InfVerif_AdditionalOptions>
   </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PreprocessorDefinitions>UMDF_USING_NTSTATUS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <WppEnabled>true</WppEnabled>

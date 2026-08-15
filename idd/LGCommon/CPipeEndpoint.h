@@ -126,7 +126,6 @@ private:
   static const DWORD AUTHENTICATION_TIMEOUT_MS;
   static const DWORD AUTHORIZATION_POLL_MS;
   static const DWORD WRITE_TIMEOUT_MS;
-  static const DWORD WAIT_FIRST_OBJECT_VALUE;
 
   static bool IsDisconnectedError(_In_ DWORD error);
   PipeIoResult WaitForOverlapped(

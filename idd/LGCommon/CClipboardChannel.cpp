@@ -18,13 +18,16 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <ntstatus.h>
+
 #include "CClipboardChannel.h"
+
+#include <wudfwdm.h>
 
 #include "CClipboardRing.h"
 #include "CDebug.h"
 
 #include <new>
-#include <ntstatus.h>
 #include <string.h>
 #include <utility>
 #include <vector>
@@ -562,9 +565,9 @@ void CClipboardChannel::Thread()
   {
     const DWORD result = WaitForMultipleObjects(
       ARRAYSIZE(events), events, FALSE, POLL_MS);
-    if (result == WAIT_FIRST_OBJECT_VALUE)
+    if (result == WAIT_OBJECT_0)
       break;
-    if (result != WAIT_FIRST_OBJECT_VALUE + 1 && result != WAIT_TIMEOUT)
+    if (result != WAIT_OBJECT_0 + 1 && result != WAIT_TIMEOUT)
     {
       const DWORD error = GetLastError();
       DEBUG_ERROR_HR(error,

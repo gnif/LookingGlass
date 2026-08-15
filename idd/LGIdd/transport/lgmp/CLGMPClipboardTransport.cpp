@@ -18,7 +18,11 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <ntstatus.h>
+
 #include "transport/lgmp/CLGMPClipboardTransport.h"
+
+#include <wudfwdm.h>
 
 #include "CDebug.h"
 #include "Seq.h"
@@ -29,8 +33,6 @@
 
 namespace
 {
-  static constexpr DWORD WAIT_FIRST_OBJECT_VALUE = 0;
-
   static_assert(sizeof(LGMPStreamDescriptor) ==
       sizeof(KVMFRStreamDescriptor),
     "LGMP and KVMFR stream descriptor sizes differ");
@@ -1899,14 +1901,14 @@ void CLGMPClipboardTransport::Thread()
     const HANDLE handles[] = { m_stopEvent, m_wakeEvent };
     const DWORD wait = WaitForMultipleObjects(
       _countof(handles), handles, FALSE, timeout);
-    if (wait == WAIT_FIRST_OBJECT_VALUE)
+    if (wait == WAIT_OBJECT_0)
       break;
-    if (wait == WAIT_FIRST_OBJECT_VALUE + 1)
+    if (wait == WAIT_OBJECT_0 + 1)
     {
       lgmpStreamPollActivity(&streamPoll);
       continue;
     }
-    if (wait != WAIT_FIRST_OBJECT_VALUE + 1 && wait != WAIT_TIMEOUT)
+    if (wait != WAIT_OBJECT_0 + 1 && wait != WAIT_TIMEOUT)
     {
       DEBUG_ERROR_HR(GetLastError(),
         "LGMP clipboard worker wait failed");

@@ -18,7 +18,11 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
+#include <ntstatus.h>
+
 #include "CPipeEndpoint.h"
+
+#include <wudfwdm.h>
 
 #include "CDebug.h"
 
@@ -32,7 +36,6 @@ const DWORD CPipeEndpoint::SERVER_RETRY_MS           = 1000;
 const DWORD CPipeEndpoint::AUTHENTICATION_TIMEOUT_MS = 2000;
 const DWORD CPipeEndpoint::AUTHORIZATION_POLL_MS     = 1000;
 const DWORD CPipeEndpoint::WRITE_TIMEOUT_MS          = 250;
-const DWORD CPipeEndpoint::WAIT_FIRST_OBJECT_VALUE   = 0;
 
 bool CPipeEndpoint::IsDisconnectedError(DWORD error)
 {
@@ -66,14 +69,14 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WaitForOverlapped(
     return PipeIoResult::Error;
   }
 
-  if (waitResult == WAIT_FIRST_OBJECT_VALUE + 1)
+  if (waitResult == WAIT_OBJECT_0 + 1)
   {
     CancelIoEx(pipe, overlapped);
     GetOverlappedResult(pipe, overlapped, transferred, TRUE);
     return PipeIoResult::Stopped;
   }
 
-  if (waitResult != WAIT_FIRST_OBJECT_VALUE)
+  if (waitResult != WAIT_OBJECT_0)
   {
     DEBUG_ERROR_HR(GetLastError(), "Failed to wait for named pipe I/O");
     CancelIoEx(pipe, overlapped);
@@ -86,7 +89,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WaitForOverlapped(
 
   const DWORD error = GetLastError();
   if (error == ERROR_OPERATION_ABORTED &&
-      WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+      WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
     return PipeIoResult::Stopped;
 
   if (IsDisconnectedError(error))
@@ -117,7 +120,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::ReadMessage(
       pipe, ioEvent, &overlapped, bytesRead, timeoutMs);
 
   if (error == ERROR_OPERATION_ABORTED &&
-      WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+      WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
     return PipeIoResult::Stopped;
 
   if (IsDisconnectedError(error))
@@ -158,7 +161,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
       result = PipeIoResult::Disconnected;
     else if (error == ERROR_OPERATION_ABORTED &&
              WaitForSingleObject(m_stopEvent, 0) ==
-               WAIT_FIRST_OBJECT_VALUE)
+               WAIT_OBJECT_0)
       result = PipeIoResult::Stopped;
     else
     {
@@ -457,7 +460,7 @@ void CPipeEndpoint::RunServer()
     }
 
     if (!IsRunning() ||
-        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
       break;
 
     bool authenticated = false;
@@ -508,7 +511,7 @@ void CPipeEndpoint::RunServer()
     }
 
     if (!IsRunning() ||
-        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE ||
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0 ||
         (m_handler && !m_handler->PipeClientStillAuthorized(pipe)))
     {
       if (authenticated && m_handler)
@@ -617,7 +620,7 @@ void CPipeEndpoint::RunClient()
     }
 
     if (!IsRunning() ||
-        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
     {
       CloseHandle(pipe);
       break;
@@ -650,7 +653,7 @@ void CPipeEndpoint::RunClient()
     }
 
     if (!IsRunning() ||
-        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
     {
       CloseHandle(pipe);
       break;
@@ -726,7 +729,7 @@ bool CPipeEndpoint::ReadMessages(HANDLE pipe)
     }
 
     if (!IsRunning() ||
-        WaitForSingleObject(m_stopEvent, 0) == WAIT_FIRST_OBJECT_VALUE)
+        WaitForSingleObject(m_stopEvent, 0) == WAIT_OBJECT_0)
       break;
 
     if (m_handler && !m_handler->PipeClientStillAuthorized(pipe))
