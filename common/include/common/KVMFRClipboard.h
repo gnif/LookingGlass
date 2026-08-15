@@ -23,16 +23,33 @@
 
 #pragma once
 
+#include "KVMFRStream.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
-#define KVMFR_CLIPBOARD_VERSION                3U
-#define KVMFR_CLIPBOARD_SLOT_COUNT             1U
-#define KVMFR_CLIPBOARD_DATA_BYTES             (1024U * 1024U)
+#define KVMFR_CLIPBOARD_VERSION                4U
+#define KVMFR_CLIPBOARD_STREAM_VERSION         1U
+
+/* Physical transport geometry. Keep these independent from the maximum
+ * logical request and representation sizes below: one response may span
+ * several stream slots. The legacy grant transport uses the same geometry so
+ * it remains a bounded fallback while stream adoption is staged. */
+#define KVMFR_CLIPBOARD_STREAM_SLOT_COUNT      4U
+#define KVMFR_CLIPBOARD_STREAM_SLOT_BYTES      (256U * 1024U)
+#define KVMFR_CLIPBOARD_STREAM_WINDOW_BYTES    \
+  (KVMFR_CLIPBOARD_STREAM_SLOT_COUNT *         \
+   KVMFR_CLIPBOARD_STREAM_SLOT_BYTES)
+#define KVMFR_CLIPBOARD_SLOT_COUNT             \
+  KVMFR_CLIPBOARD_STREAM_SLOT_COUNT
+#define KVMFR_CLIPBOARD_DATA_BYTES             \
+  KVMFR_CLIPBOARD_STREAM_SLOT_BYTES
 /* Keep text and image chunks within the core X11 request limit. File data can
  * use the full slot without passing through XChangeProperty. */
 #define KVMFR_CLIPBOARD_REPRESENTATION_BYTES   (64U * 1024U)
 #define KVMFR_CLIPBOARD_SIZE_UNKNOWN           UINT64_MAX
+/* Logical request size. A READ response may require multiple physical
+ * stream records and must not be constrained to a single slot. */
 #define KVMFR_CLIPBOARD_FILE_READ_BYTES        (1024U * 1024U)
 #define KVMFR_CLIPBOARD_FILE_ROOT_NODE         UINT64_C(0)
 #define KVMFR_CLIPBOARD_FILE_MAX_ACQUISITIONS  8U
@@ -136,10 +153,30 @@ enum
 
 typedef uint32_t KVMFRClipboardFlags;
 
+enum
+{
+  KVMFR_CLIPBOARD_TRANSPORT_LEGACY = 1U << 0,
+  KVMFR_CLIPBOARD_TRANSPORT_STREAM = 1U << 1,
+  KVMFR_CLIPBOARD_TRANSPORT_ALL    =
+    KVMFR_CLIPBOARD_TRANSPORT_LEGACY |
+    KVMFR_CLIPBOARD_TRANSPORT_STREAM,
+};
+
+typedef uint32_t KVMFRClipboardTransportFlags;
+
+static inline int kvmfrClipboardTransportValid(
+  KVMFRClipboardTransportFlags transport)
+{
+  return transport && !(transport & (transport - 1U)) &&
+    !(transport & ~KVMFR_CLIPBOARD_TRANSPORT_ALL);
+}
+
 /*
  * Bidirectional control record. Client-to-host records must fit LGMP's
  * 64-byte client message area. Host-to-client records use a small payload
- * pool and the same layout.
+ * pool and the same layout. CLAIM flags select exactly one transport offered
+ * by KVMFRClipboardStatus. The selected transport is fixed until RELEASE and
+ * a subsequent CLAIM with a new generation.
  */
 typedef struct KVMFRClipboardMessage
 {
@@ -332,12 +369,14 @@ static inline int kvmfrClipboardFileMessageValid(
 }
 
 /* Type-specific fields:
+ * CLAIM: flags selects exactly one KVMFRClipboardTransportFlags value and
+ *        token is the endpoint generation from the latest status.
  * OFFER:  token is KVMFRClipboardFormatFlags.
  * REQUEST: format and transfer identify the requested representation.
  * DATA: size is an optional total hint on BEGIN and authoritative on END;
  *       offset/length describe this record's borrowed payload.
  * CANCEL: token is a KVMFRClipboardCancelReason-compatible reason.
- * ACK/GRANT: token identifies the acknowledged or writable slot. */
+ * ACK/GRANT: token identifies the acknowledged or writable legacy slot. */
 
 enum
 {
@@ -347,6 +386,11 @@ enum
 
 typedef uint32_t KVMFRClipboardStatusFlags;
 
+/* transports advertises available data planes. When HAS_OWNER is set,
+ * ownerTransport identifies the single data plane selected by that owner's
+ * CLAIM. Stream descriptors are valid only when STREAM is advertised; their
+ * slot size includes KVMFRClipboardSlotHeader as well as slotBytes of payload.
+ */
 typedef struct KVMFRClipboardStatus
 {
   uint32_t                     version;
@@ -357,11 +401,21 @@ typedef struct KVMFRClipboardStatus
   uint32_t                     lease;
   KVMFRClipboardFormatFlags    formats;
   uint32_t                     slotBytes;
+  KVMFRClipboardTransportFlags transports;
+  KVMFRClipboardTransportFlags ownerTransport;
+  uint32_t                     streamVersion;
+  uint32_t                     streamSlotCount;
+  uint32_t                     reserved[4];
+  KVMFRStreamDescriptor        hostToClient;
+  KVMFRStreamDescriptor        clientToHost;
 }
 KVMFRClipboardStatus;
 
 /* The data immediately following this header is length bytes long. */
 typedef KVMFRClipboardMessage KVMFRClipboardSlotHeader;
+
+#define KVMFR_CLIPBOARD_STREAM_RECORD_BYTES \
+  (sizeof(KVMFRClipboardSlotHeader) + KVMFR_CLIPBOARD_STREAM_SLOT_BYTES)
 
 enum
 {
@@ -384,7 +438,11 @@ static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
 static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
   "KVMFR clipboard file entry layout changed");
-static_assert(sizeof(KVMFRClipboardStatus) == 32,
+static_assert(offsetof(KVMFRClipboardStatus, transports) == 32,
+  "KVMFR clipboard transport status layout changed");
+static_assert(offsetof(KVMFRClipboardStatus, hostToClient) == 64,
+  "KVMFR clipboard stream discovery layout changed");
+static_assert(sizeof(KVMFRClipboardStatus) == 128,
   "KVMFR clipboard status layout changed");
 static_assert(sizeof(KVMFRClipboardSlotHeader) == 64,
   "KVMFR clipboard slot header layout changed");
@@ -395,7 +453,11 @@ _Static_assert(sizeof(KVMFRClipboardMessage) == 64,
   "KVMFR clipboard control message layout changed");
 _Static_assert(sizeof(KVMFRClipboardFileEntry) == 40,
   "KVMFR clipboard file entry layout changed");
-_Static_assert(sizeof(KVMFRClipboardStatus) == 32,
+_Static_assert(offsetof(KVMFRClipboardStatus, transports) == 32,
+  "KVMFR clipboard transport status layout changed");
+_Static_assert(offsetof(KVMFRClipboardStatus, hostToClient) == 64,
+  "KVMFR clipboard stream discovery layout changed");
+_Static_assert(sizeof(KVMFRClipboardStatus) == 128,
   "KVMFR clipboard status layout changed");
 _Static_assert(sizeof(KVMFRClipboardSlotHeader) == 64,
   "KVMFR clipboard slot header layout changed");
