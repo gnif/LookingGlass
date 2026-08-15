@@ -51,6 +51,7 @@ enum SplashState
 static _Atomic(bool)    l_requestedShow;
 static _Atomic(bool)    l_fading;
 static bool             l_appliedShow;
+static bool             l_startupFadePending;
 static enum SplashState l_state;
 static uint64_t         l_fadeStart;
 static OverlayImage     l_logo;
@@ -102,9 +103,10 @@ static bool splash_init(void ** udata, const void * params)
   const bool show = strcmp(g_params.transport, "test") != 0;
   atomic_store_explicit(&l_requestedShow, show, memory_order_relaxed);
   atomic_store_explicit(&l_fading, false, memory_order_relaxed);
-  l_appliedShow = show;
-  l_state       = show ? SPLASH_VISIBLE : SPLASH_HIDDEN;
-  l_fadeStart   = 0;
+  l_appliedShow        = show;
+  l_startupFadePending = show;
+  l_state              = show ? SPLASH_VISIBLE : SPLASH_HIDDEN;
+  l_fadeStart          = 0;
 
   overlayLoadSVG(b_lg_logo_svg, b_lg_logo_svg_size, &l_logo, 200, 200);
   calcRadialVectors(l_vectors, ARRAY_LENGTH(l_vectors));
@@ -273,15 +275,17 @@ static bool splash_needsFullRender(void * udata)
       l_fadeStart = 0;
       atomic_store_explicit(&l_fading, false, memory_order_release);
     }
-    else if (g_params.quickSplash)
+    else if (g_params.quickSplash || !l_startupFadePending)
     {
-      l_state = SPLASH_HIDDEN;
+      l_startupFadePending = false;
+      l_state              = SPLASH_HIDDEN;
       atomic_store_explicit(&l_fading, false, memory_order_release);
     }
     else
     {
-      l_state     = SPLASH_FADING;
-      l_fadeStart = nanotime();
+      l_startupFadePending = false;
+      l_state              = SPLASH_FADING;
+      l_fadeStart          = nanotime();
       atomic_store_explicit(&l_fading, true, memory_order_release);
     }
   }
