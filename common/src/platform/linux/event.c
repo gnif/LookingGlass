@@ -131,14 +131,14 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   }
 
   atomic_fetch_sub_explicit(&handle->waiting, 1, memory_order_release);
+  if (ret && handle->autoReset)
+    atomic_store_explicit(&handle->signaled, false, memory_order_release);
+
   if (pthread_mutex_unlock(&handle->mutex) != 0)
   {
     DEBUG_ERROR("Failed to unlock the mutex");
     return false;
   }
-
-  if (ret && handle->autoReset)
-    atomic_store_explicit(&handle->signaled, false, memory_order_release);
 
   return ret;
 }
