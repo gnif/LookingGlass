@@ -83,7 +83,6 @@ private:
     bool valid       = false;
     bool acknowledge = false;
     KVMFRClipboardMessage record = {};
-    uint8_t data[KVMFR_CLIPBOARD_DATA_BYTES] = {};
 
     void Clear()
     {
@@ -150,6 +149,7 @@ private:
   StreamTarget m_streamTarget[STREAM_TARGET_COUNT];
   unsigned m_streamTargetHead  = 0;
   unsigned m_streamTargetCount = 0;
+  bool m_streamTargetBusy      = false;
   KVMFRClipboardMessage m_internalTarget[INTERNAL_TARGET_COUNT] = {};
   unsigned m_internalTargetCount = 0;
   CLGMPClipboardFiles m_files;
@@ -187,12 +187,15 @@ private:
   bool QueueInternalTarget(const KVMFRClipboardMessage& record);
   bool PumpInternalTarget();
   void ClearStreamTargets();
+  void ClearQueuedStreamTargets();
   bool QueueStreamTarget(const KVMFRClipboardMessage& record,
     const uint8_t * data);
+  void PopStreamTarget();
+  bool PublishStreamTarget();
+  bool RetryStreamTarget();
   bool PumpStreamTarget();
   bool DrainStream(bool& received);
-  bool ProcessStreamTarget(const KVMFRClipboardMessage& record,
-    const uint8_t * data);
+  bool ProcessStreamTarget();
 
   PLGMPMemory FindAvailable(PLGMPMemory (&memory)[MEMORY_COUNT]) const;
   PostResult PostForOwner(uint64_t udata, PLGMPMemory memory);
@@ -217,7 +220,7 @@ private:
   void ApplyInbound(const KVMFRClipboardMessage& message);
   void ApplyOutbound(const KVMFRClipboardMessage& message);
   bool BeginTarget(const KVMFRClipboardMessage& message,
-    const uint8_t * data, bool acknowledge);
+    bool acknowledge);
 
   ClipboardChannelResult SendControl(
     const KVMFRClipboardMessage& record);
