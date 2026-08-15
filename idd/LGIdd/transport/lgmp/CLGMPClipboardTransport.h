@@ -64,6 +64,14 @@ private:
     FAILED,
   };
 
+  enum class StreamDisposition
+  {
+    READY,
+    DISCARD,
+    STALE,
+    INVALID,
+  };
+
   struct Transfer
   {
     uint64_t transfer            = 0;
@@ -147,9 +155,9 @@ private:
   Transfer m_helperToClient;
   PendingTarget m_pendingTarget;
   StreamTarget m_streamTarget[STREAM_TARGET_COUNT];
-  unsigned m_streamTargetHead  = 0;
-  unsigned m_streamTargetCount = 0;
-  bool m_streamTargetBusy      = false;
+  unsigned m_streamTargetHead     = 0;
+  unsigned m_streamTargetCount    = 0;
+  unsigned m_streamTargetPrepared = 0;
   KVMFRClipboardMessage m_internalTarget[INTERNAL_TARGET_COUNT] = {};
   unsigned m_internalTargetCount = 0;
   CLGMPClipboardFiles m_files;
@@ -190,12 +198,14 @@ private:
   void ClearQueuedStreamTargets();
   bool QueueStreamTarget(const KVMFRClipboardMessage& record,
     const uint8_t * data);
-  void PopStreamTarget();
-  bool PublishStreamTarget();
-  bool RetryStreamTarget();
+  void PopStreamTargets(unsigned count);
+  StreamDisposition PreviewStreamTarget(
+    const KVMFRClipboardMessage& record, Transfer& transfer,
+    CLGMPClipboardFiles& files);
+  bool PublishStreamTargets();
+  bool RetryStreamTargets();
   bool PumpStreamTarget();
   bool DrainStream(bool& received);
-  bool ProcessStreamTarget();
 
   PLGMPMemory FindAvailable(PLGMPMemory (&memory)[MEMORY_COUNT]) const;
   PostResult PostForOwner(uint64_t udata, PLGMPMemory memory);

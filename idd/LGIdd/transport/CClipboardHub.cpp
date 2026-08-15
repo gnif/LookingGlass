@@ -384,14 +384,31 @@ void CClipboardHub::ClipboardReset(uint64_t epoch, uint32_t reason)
 ClipboardChannelResult CClipboardHub::SendClipboard(
   const KVMFRClipboardMessage& record, const uint8_t * data)
 {
-  // Keep the shared lock through Send so Unbind cannot advance the binding
-  // generation after validation but before the record enters the channel.
-  CSRWSharedLock lock(m_lock);
-  if (!ValidClientDirection(record) ||
-      m_stopped || !m_available || !m_active || !m_running || m_failed ||
-      !m_source || record.generation != m_generation)
+  const ClipboardChannelWrite write = { record, data };
+  size_t accepted = 0;
+  return SendClipboardBatch(&write, 1, accepted);
+}
+
+ClipboardChannelResult CClipboardHub::SendClipboardBatch(
+  const ClipboardChannelWrite * records, size_t count, size_t& accepted)
+{
+  accepted = 0;
+  if (!records || !count || count > KVMFR_CLIPBOARD_SLOT_COUNT)
     return ClipboardChannelResult::FAILED;
-  return m_channel.Send(record, data);
+
+  // Keep the shared lock through Send so Unbind cannot advance the binding
+  // generation after validation but before the records enter the channel.
+  CSRWSharedLock lock(m_lock);
+  if (m_stopped || !m_available || !m_active || !m_running || m_failed ||
+      !m_source)
+    return ClipboardChannelResult::FAILED;
+
+  for (size_t i = 0; i < count; ++i)
+    if (!ValidClientDirection(records[i].record) ||
+        records[i].record.generation != m_generation)
+      return ClipboardChannelResult::FAILED;
+
+  return m_channel.SendBatch(records, count, accepted);
 }
 
 void CClipboardHub::ClipboardReceiveReady()

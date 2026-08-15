@@ -73,6 +73,9 @@ public:
   ClipboardChannelResult SendClipboard(
     const KVMFRClipboardMessage& record,
     const uint8_t * data) override;
+  ClipboardChannelResult SendClipboardBatch(
+    const ClipboardChannelWrite * records,
+    size_t count, size_t& accepted) override;
   void ClipboardReceiveReady() override;
   void ClipboardFailed() override;
 };

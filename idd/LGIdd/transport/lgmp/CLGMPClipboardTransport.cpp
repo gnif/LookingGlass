@@ -596,7 +596,7 @@ void CLGMPClipboardTransport::QueueFileDisconnect()
 bool CLGMPClipboardTransport::QueueInternalTarget(
   const KVMFRClipboardMessage& record)
 {
-  if (!m_pendingTarget.valid && !m_streamTargetBusy &&
+  if (!m_pendingTarget.valid && !m_streamTargetPrepared &&
       !m_internalTargetCount)
     return BeginTarget(record, false);
   if (m_internalTargetCount == INTERNAL_TARGET_COUNT)
@@ -610,7 +610,7 @@ bool CLGMPClipboardTransport::QueueInternalTarget(
 
 bool CLGMPClipboardTransport::PumpInternalTarget()
 {
-  if (m_pendingTarget.valid || m_streamTargetBusy ||
+  if (m_pendingTarget.valid || m_streamTargetPrepared ||
       !m_internalTargetCount)
     return true;
 
@@ -625,26 +625,27 @@ void CLGMPClipboardTransport::ClearStreamTargets()
 {
   for (StreamTarget& target : m_streamTarget)
     target.Clear();
-  m_streamTargetHead  = 0;
-  m_streamTargetCount = 0;
-  m_streamTargetBusy  = false;
+  m_streamTargetHead     = 0;
+  m_streamTargetCount    = 0;
+  m_streamTargetPrepared = 0;
 }
 
 void CLGMPClipboardTransport::ClearQueuedStreamTargets()
 {
-  if (!m_streamTargetBusy)
+  if (!m_streamTargetPrepared)
   {
     ClearStreamTargets();
     return;
   }
 
-  // The BUSY head has already crossed the target boundary and must receive
-  // the same drain treatment as a BUSY PendingTarget. Only discard records
-  // which have not yet been presented to the target.
-  for (unsigned i = 1; i < m_streamTargetCount; ++i)
+  // The prepared prefix has already crossed the target boundary and must
+  // receive the same drain treatment as a BUSY PendingTarget. Only discard
+  // records which have not yet been presented to the target.
+  for (unsigned i = m_streamTargetPrepared;
+      i < m_streamTargetCount; ++i)
     m_streamTarget[
       (m_streamTargetHead + i) % STREAM_TARGET_COUNT].Clear();
-  m_streamTargetCount = 1;
+  m_streamTargetCount = m_streamTargetPrepared;
 }
 
 bool CLGMPClipboardTransport::QueueStreamTarget(
@@ -663,38 +664,91 @@ bool CLGMPClipboardTransport::QueueStreamTarget(
   return true;
 }
 
-void CLGMPClipboardTransport::PopStreamTarget()
+void CLGMPClipboardTransport::PopStreamTargets(unsigned count)
 {
-  StreamTarget& target = m_streamTarget[m_streamTargetHead];
-  target.Clear();
+  for (unsigned i = 0; i < count; ++i)
+    m_streamTarget[
+      (m_streamTargetHead + i) % STREAM_TARGET_COUNT].Clear();
   m_streamTargetHead =
-    (m_streamTargetHead + 1) % STREAM_TARGET_COUNT;
-  --m_streamTargetCount;
-  m_streamTargetBusy = false;
+    (m_streamTargetHead + count) % STREAM_TARGET_COUNT;
+  m_streamTargetCount -= count;
+  m_streamTargetPrepared = count < m_streamTargetPrepared ?
+    m_streamTargetPrepared - count : 0;
 }
 
-bool CLGMPClipboardTransport::PublishStreamTarget()
+CLGMPClipboardTransport::StreamDisposition
+CLGMPClipboardTransport::PreviewStreamTarget(
+  const KVMFRClipboardMessage& record, Transfer& transfer,
+  CLGMPClipboardFiles& files)
 {
-  StreamTarget& target = m_streamTarget[m_streamTargetHead];
+  if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA)
+  {
+    if (record.transfer == m_discardClientToHelper)
+      return StreamDisposition::DISCARD;
+    if (record.token ||
+        !kvmfrClipboardTransferFromHelper(record.transfer) ||
+        !ValidateChunk(transfer, record))
+      return StreamDisposition::INVALID;
+    AdvanceChunk(transfer, record);
+    return StreamDisposition::READY;
+  }
+
+  const CLGMPClipboardFiles::Direction direction =
+    CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER;
+  if (files.IsStaleTerminal(record, direction))
+    return StreamDisposition::STALE;
+  if (!files.Validate(record, direction, 0, false))
+    return StreamDisposition::INVALID;
+  files.Apply(record, direction);
+  return StreamDisposition::READY;
+}
+
+bool CLGMPClipboardTransport::PublishStreamTargets()
+{
+  ClipboardChannelWrite writes[STREAM_TARGET_COUNT] = {};
+  for (unsigned i = 0; i < m_streamTargetPrepared; ++i)
+  {
+    StreamTarget& target = m_streamTarget[
+      (m_streamTargetHead + i) % STREAM_TARGET_COUNT];
+    writes[i].record = target.record;
+    writes[i].data   = target.record.length ? target.data : nullptr;
+  }
+
+  size_t accepted = 0;
   const ClipboardChannelResult result = m_target ?
-    m_target->SendClipboard(target.record,
-      target.record.length ? target.data : nullptr) :
+    m_target->SendClipboardBatch(writes, m_streamTargetPrepared,
+      accepted) :
     ClipboardChannelResult::FAILED;
+  if (accepted > m_streamTargetPrepared ||
+      (result == ClipboardChannelResult::ACCEPTED &&
+        accepted != m_streamTargetPrepared))
+  {
+    DEBUG_ERROR("Helper accepted an invalid clipboard stream prefix: "
+      "accepted=%zu offered=%u", accepted, m_streamTargetPrepared);
+    ReleaseOwner("invalid Helper clipboard batch result", false);
+    m_failed = true;
+    return true;
+  }
+
+  for (size_t i = 0; i < accepted; ++i)
+  {
+    const StreamTarget& target = m_streamTarget[
+      (m_streamTargetHead + i) % STREAM_TARGET_COUNT];
+    ApplyInbound(target.record);
+  }
+  if (accepted)
+  {
+    PopStreamTargets(static_cast<unsigned>(accepted));
+    if (m_ownerClientID && !m_ownerReleasing)
+      RenewLease();
+  }
+
   if (result == ClipboardChannelResult::BUSY)
   {
-    m_streamTargetBusy = true;
     if (m_ownerClientID)
       RenewLease();
     return true;
   }
-
-  if (result == ClipboardChannelResult::ACCEPTED)
-  {
-    ApplyInbound(target.record);
-    if (m_ownerClientID && !m_ownerReleasing)
-      RenewLease();
-  }
-  PopStreamTarget();
 
   if (result == ClipboardChannelResult::FAILED)
   {
@@ -704,86 +758,87 @@ bool CLGMPClipboardTransport::PublishStreamTarget()
   return true;
 }
 
-bool CLGMPClipboardTransport::RetryStreamTarget()
+bool CLGMPClipboardTransport::RetryStreamTargets()
 {
-  if (!m_streamTargetBusy || m_pendingTarget.valid)
+  if (!m_streamTargetPrepared || m_pendingTarget.valid)
     return true;
 
-  // The retained head is already validated and stamped. Retry it exactly;
+  // The retained prefix is already validated and stamped. Retry it exactly;
   // owner-release state may have changed while the target was BUSY.
-  m_streamTargetBusy = false;
-  return PublishStreamTarget();
-}
-
-bool CLGMPClipboardTransport::ProcessStreamTarget()
-{
-  StreamTarget& target = m_streamTarget[m_streamTargetHead];
-  const KVMFRClipboardMessage record = target.record;
-  if (!m_ownerClientID)
-  {
-    PopStreamTarget();
-    return true;
-  }
-  if (m_ownerReleasing && !m_releaseClearHelper)
-  {
-    PopStreamTarget();
-    return true;
-  }
-
-  if (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA &&
-      record.transfer == m_discardClientToHelper)
-  {
-    PopStreamTarget();
-    return true;
-  }
-
-  const bool fileData =
-    record.type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA;
-  const bool staleFileData = fileData && m_files.IsStaleTerminal(
-    record, CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER);
-  const bool validData = fileData ?
-    (staleFileData || m_files.Validate(record,
-      CLGMPClipboardFiles::Direction::CLIENT_TO_HELPER, 0, false)) :
-    (!record.token && kvmfrClipboardTransferFromHelper(record.transfer) &&
-      ValidateChunk(m_clientToHelper, record));
-  if (!validData)
-  {
-    PopStreamTarget();
-    ReleaseOwner("invalid clipboard stream data", true);
-    return true;
-  }
-
-  if (!m_ownerReleasing)
-    RenewLease();
-  if (staleFileData)
-  {
-    PopStreamTarget();
-    return true;
-  }
-
-  target.record.generation = m_endpointGeneration;
-  return PublishStreamTarget();
+  return PublishStreamTargets();
 }
 
 bool CLGMPClipboardTransport::PumpStreamTarget()
 {
-  while (!m_pendingTarget.valid && !m_streamTargetBusy &&
+  while (!m_pendingTarget.valid && !m_streamTargetPrepared &&
       m_streamTargetCount)
-    if (!ProcessStreamTarget())
-      return false;
+  {
+    if (!m_ownerClientID ||
+        (m_ownerReleasing && !m_releaseClearHelper))
+    {
+      PopStreamTargets(1);
+      continue;
+    }
+
+    // Dependent chunks are validated against the state the preceding chunk
+    // would establish, without committing that state before Helper accepts
+    // the corresponding prefix.
+    Transfer transfer = m_clientToHelper;
+    CLGMPClipboardFiles files = m_files;
+    StreamDisposition disposition = StreamDisposition::READY;
+    for (unsigned i = 0; i < m_streamTargetCount; ++i)
+    {
+      StreamTarget& target = m_streamTarget[
+        (m_streamTargetHead + i) % STREAM_TARGET_COUNT];
+      disposition = PreviewStreamTarget(target.record, transfer, files);
+      if (disposition != StreamDisposition::READY)
+        break;
+      target.record.generation = m_endpointGeneration;
+      ++m_streamTargetPrepared;
+    }
+
+    if (m_streamTargetPrepared)
+    {
+      if (!m_ownerReleasing)
+        RenewLease();
+      if (!PublishStreamTargets())
+        return false;
+      if (m_streamTargetPrepared || m_failed)
+        return true;
+      continue;
+    }
+
+    PopStreamTargets(1);
+    if (disposition == StreamDisposition::STALE)
+    {
+      if (!m_ownerReleasing)
+        RenewLease();
+      continue;
+    }
+    if (disposition == StreamDisposition::INVALID)
+      ReleaseOwner("invalid clipboard stream data", true);
+  }
   return true;
 }
 
 bool CLGMPClipboardTransport::DrainStream(bool& received)
 {
   received = false;
-  if (!m_ownerClientID || !m_clientToHostStream)
+  if (m_failed || !m_ownerClientID || !m_clientToHostStream)
     return true;
 
-  for (unsigned drained = 0;
-      drained < STREAM_DRAIN_MAX &&
-      m_streamTargetCount < STREAM_TARGET_COUNT; ++drained)
+  for (unsigned drained = 0; drained < STREAM_DRAIN_MAX;)
   {
+    if (m_streamTargetCount == STREAM_TARGET_COUNT)
+    {
+      // Submit only after the bounded staging window is full. A retained
+      // prefix or pending control keeps the window backpressured here.
+      if (!PumpStreamTarget())
+        return false;
+      if (m_streamTargetCount == STREAM_TARGET_COUNT)
+        return true;
+    }
+
     LGMPStreamBuffer buffer = {};
     LGMP_STATUS status =
       lgmpHostStreamReadPeek(m_clientToHostStream, &buffer);
@@ -794,11 +849,15 @@ bool CLGMPClipboardTransport::DrainStream(bool& received)
     {
       if (m_ownerReleasing && status == LGMP_ERR_STREAM_UNBOUND)
         break;
+      if (!PumpStreamTarget())
+        return false;
       ReleaseOwner("clipboard stream binding lost", true);
       return true;
     }
     if (status != LGMP_OK)
     {
+      if (!PumpStreamTarget())
+        return false;
       Fail("lgmpHostStreamReadPeek", status);
       return false;
     }
@@ -828,11 +887,12 @@ bool CLGMPClipboardTransport::DrainStream(bool& received)
     }
     if (!queued)
     {
+      if (!PumpStreamTarget())
+        return false;
       ReleaseOwner("invalid clipboard stream record", true);
       return true;
     }
-    if (!PumpStreamTarget())
-      return false;
+    ++drained;
   }
 
   return PumpStreamTarget();
@@ -1970,10 +2030,9 @@ void CLGMPClipboardTransport::Thread()
 
       // A restarted client can reuse dataset and transfer IDs. Deliver every
       // old-owner cleanup record before admitting messages from a new owner.
-      if (!RetryTarget() || !RetryStreamTarget() ||
+      if (!RetryTarget() || !RetryStreamTargets() ||
           !PumpInternalTarget() ||
-          !PumpStreamTarget() ||
-          (!m_streamTargetBusy && m_internalTargetCount == 0 &&
+          (!m_streamTargetCount && m_internalTargetCount == 0 &&
             !DrainMessage()) ||
           !DrainStream(streamReceived) ||
           !RetryOwnerRelease() ||

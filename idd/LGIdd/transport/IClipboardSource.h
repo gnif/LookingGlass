@@ -42,6 +42,12 @@ public:
   virtual ClipboardChannelResult SendClipboard(
     const KVMFRClipboardMessage& record, const uint8_t * data) = 0;
 
+  // Sends an ordered prefix of client-to-Helper records. accepted reports
+  // how many records were consumed for every result; the source retains and
+  // retries an unaccepted suffix when the target returns BUSY.
+  virtual ClipboardChannelResult SendClipboardBatch(
+    const ClipboardChannelWrite * records, size_t count, size_t& accepted) = 0;
+
   // The source calls ClipboardReceiveReady after a Helper-to-client record
   // returned BUSY and it can accept an exact retry of that record.
   virtual void ClipboardReceiveReady() = 0;
