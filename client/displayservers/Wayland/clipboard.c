@@ -435,11 +435,14 @@ static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
 
   if (data->mimetypes[type])
   {
-    if (type != LG_CLIPBOARD_DATA_FILES ||
-        strcmp(mimetype, "x-special/gnome-copied-files") ||
-        strcmp(mimetype, "x-special/mate-copied-files") ||
-        !strcmp(data->mimetypes[type], "x-special/gnome-copied-files") ||
-        !strcmp(data->mimetypes[type], "x-special/mate-copied-files"))
+    const bool preferredFileMime =
+      !strcmp(mimetype, "x-special/gnome-copied-files") ||
+      !strcmp(mimetype, "x-special/mate-copied-files" );
+    const bool currentPreferredFileMime =
+      !strcmp(data->mimetypes[type], "x-special/gnome-copied-files") ||
+      !strcmp(data->mimetypes[type], "x-special/mate-copied-files" );
+    if (type != LG_CLIPBOARD_DATA_FILES || !preferredFileMime ||
+        currentPreferredFileMime)
       return;
     free(data->mimetypes[type]);
   }
@@ -1545,9 +1548,6 @@ static bool waylandCBPublish(LG_ClipboardData type)
           &transfer->fileUri, &transfer->fileUriSize) ||
        !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "x-special/gnome-copied-files",
-          &transfer->fileGnome, &transfer->fileGnomeSize) ||
-       !clipboardFiles_getRemotePresentation(transfer->filePresentation,
-          "x-special/mate-copied-files",
           &transfer->fileGnome, &transfer->fileGnomeSize) ||
        !clipboardFiles_getRemotePresentation(transfer->filePresentation,
           "application/x-kde-cutselection",
