@@ -80,6 +80,7 @@ struct HIDDeviceContext
   HIDStatistics         statistics;
   HIDQueuedReport       reports[REPORT_QUEUE_LENGTH];
   CInputPipeClient *    inputPipe;
+  WDFREQUEST            deactivateRequest;
 };
 
 WDF_DECLARE_CONTEXT_TYPE_WITH_NAME(HIDDeviceContext, HIDGetDeviceContext);
@@ -88,6 +89,7 @@ static CSRWLock           s_deviceLock;
 static HIDDeviceContext * s_device = nullptr;
 
 EVT_WDF_IO_QUEUE_IO_DEVICE_CONTROL HIDEvtIoDeviceControl;
+EVT_WDF_IO_QUEUE_STATE HIDEvtReportQueuePurged;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP HIDEvtReportQueueCleanup;
 EVT_WDF_OBJECT_CONTEXT_CLEANUP HIDEvtDeviceCleanup;
 EVT_WDF_DEVICE_SELF_MANAGED_IO_INIT HIDEvtSelfManagedIoInit;
@@ -338,7 +340,7 @@ static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
 {
   CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
   CSRWExclusiveLock lock(context->reportLock);
-  if (context->stopping)
+  if (context->stopping || context->deactivateRequest)
     return STATUS_DEVICE_NOT_READY;
 
   WdfIoQueueStart(context->reportQueue);
@@ -346,21 +348,36 @@ static NTSTATUS ActivateDevice(_Inout_ HIDDeviceContext * context)
   return STATUS_SUCCESS;
 }
 
-static NTSTATUS DeactivateDevice(_Inout_ HIDDeviceContext * context)
+static NTSTATUS DeactivateDevice(
+  _Inout_ HIDDeviceContext * context,
+  _In_ WDFREQUEST request,
+  _Out_ bool * complete)
 {
-  CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
   {
-    CSRWExclusiveLock lock(context->reportLock);
-    if (context->stopping)
-      return STATUS_DEVICE_NOT_READY;
+    CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
+    {
+      CSRWExclusiveLock lock(context->reportLock);
+      if (context->stopping)
+        return STATUS_DEVICE_NOT_READY;
+      if (context->deactivateRequest)
+        return STATUS_DEVICE_BUSY;
 
-    context->active        = false;
-    context->reportHead    = 0;
-    context->reportCount   = 0;
-    context->consumerUsage = UINT16_MAX;
+      context->active        = false;
+      context->reportHead    = 0;
+      context->reportCount   = 0;
+      context->consumerUsage = UINT16_MAX;
+    }
+
+    context->deactivateRequest = request;
   }
-  WdfIoQueuePurgeSynchronously(context->reportQueue);
-  return STATUS_SUCCESS;
+
+  // WDF forbids synchronously purging any queue from EvtIoDeviceControl.
+  // Keep the HID deactivation request pending until the asynchronous purge
+  // has canceled every outstanding read report.
+  *complete = false;
+  WdfIoQueuePurge(
+    context->reportQueue, HIDEvtReportQueuePurged, context);
+  return STATUS_PENDING;
 }
 
 static NTSTATUS CreateQueues(_In_ WDFDEVICE device)
@@ -737,7 +754,7 @@ VOID HIDEvtIoDeviceControl(
       break;
 
     case IOCTL_HID_DEACTIVATE_DEVICE:
-      status = DeactivateDevice(context);
+      status = DeactivateDevice(context, request, &complete);
       break;
 
     default:
@@ -749,21 +766,51 @@ VOID HIDEvtIoDeviceControl(
     WdfRequestComplete(request, status);
 }
 
+VOID HIDEvtReportQueuePurged(
+  _In_ WDFQUEUE queue,
+  _In_ WDFCONTEXT callbackContext)
+{
+  UNREFERENCED_PARAMETER(queue);
+
+  HIDDeviceContext * context =
+    static_cast<HIDDeviceContext *>(callbackContext);
+  WDFREQUEST request = nullptr;
+  {
+    CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
+    request = context->deactivateRequest;
+    context->deactivateRequest = nullptr;
+  }
+
+  if (request)
+    WdfRequestComplete(request, STATUS_SUCCESS);
+}
+
 VOID HIDEvtReportQueueCleanup(_In_ WDFOBJECT object)
 {
   HIDDeviceContext * context =
     HIDGetDeviceContext(WdfIoQueueGetDevice((WDFQUEUE)object));
 
-  CSRWExclusiveLock deviceLock(s_deviceLock);
-  if (s_device == context)
-    s_device = nullptr;
-
   {
-    CSRWExclusiveLock reportLock(context->reportLock);
-    context->stopping    = true;
-    context->reportHead  = 0;
-    context->reportCount = 0;
+    CSRWExclusiveLock deviceLock(s_deviceLock);
+    if (s_device == context)
+      s_device = nullptr;
   }
+
+  WDFREQUEST deactivateRequest = nullptr;
+  {
+    CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
+    {
+      CSRWExclusiveLock reportLock(context->reportLock);
+      context->stopping    = true;
+      context->reportHead  = 0;
+      context->reportCount = 0;
+    }
+    deactivateRequest = context->deactivateRequest;
+    context->deactivateRequest = nullptr;
+  }
+
+  if (deactivateRequest)
+    WdfRequestComplete(deactivateRequest, STATUS_DEVICE_REMOVED);
 }
 
 VOID HIDEvtDeviceCleanup(_In_ WDFOBJECT object)
