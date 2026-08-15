@@ -33,6 +33,7 @@
 
 extern "C" {
   #include "lgmp/host.h"
+  #include "lgmp/stream.h"
 }
 
 class CLGMPHost;
@@ -45,10 +46,15 @@ private:
     CLGMPClipboardFiles::MAX_ACQUISITIONS +
     CLGMPClipboardFiles::MAX_REQUESTS + 3;
   static constexpr ULONGLONG OWNER_LEASE_MS = 1000;
+  static constexpr ULONGLONG STREAM_DRAIN_TIMEOUT_MS = 1000;
   static constexpr DWORD ACTIVE_POLL_MS = 5;
+  static constexpr DWORD STREAM_POLL_MS = 1;
   static constexpr DWORD IDLE_POLL_MS = 50;
+  static constexpr unsigned STREAM_TARGET_COUNT =
+    KVMFR_CLIPBOARD_STREAM_SLOT_COUNT;
+  static constexpr unsigned STREAM_DRAIN_MAX = 64;
   static constexpr uint32_t SLOT_BYTES =
-    sizeof(KVMFRClipboardSlotHeader) + KVMFR_CLIPBOARD_DATA_BYTES;
+    KVMFR_CLIPBOARD_STREAM_RECORD_BYTES;
 
   enum class PostResult
   {
@@ -96,9 +102,19 @@ private:
     }
   };
 
+  struct StreamTarget
+  {
+    KVMFRClipboardMessage record = {};
+    uint8_t data[KVMFR_CLIPBOARD_DATA_BYTES] = {};
+
+    void Clear() { record = {}; }
+  };
+
   CLGMPHost& m_host;
 
   PLGMPHostQueue m_queue = nullptr;
+  PLGMPHostStream m_hostToClientStream = nullptr;
+  PLGMPHostStream m_clientToHostStream = nullptr;
   PLGMPMemory m_statusMemory [MEMORY_COUNT] = {};
   PLGMPMemory m_messageMemory[MEMORY_COUNT] = {};
   PLGMPMemory m_grantMemory  [MEMORY_COUNT] = {};
@@ -111,15 +127,18 @@ private:
   HANDLE m_wakeEvent = nullptr;
   HANDLE m_thread    = nullptr;
 
-  bool m_available        = false;
-  bool m_statusDirty      = true;
-  bool m_cachedValid      = false;
-  bool m_replayPending    = false;
-  bool m_outboundBlocked  = false;
-  bool m_failed           = false;
+  bool m_available          = false;
+  bool m_statusDirty        = true;
+  bool m_cachedValid        = false;
+  bool m_replayPending      = false;
+  bool m_outboundBlocked    = false;
+  bool m_ownerReleasing     = false;
+  bool m_releaseClearHelper = false;
+  bool m_failed             = false;
   uint32_t m_endpointGeneration = 0;
   uint32_t m_ownerClientID       = 0;
   uint32_t m_ownerGeneration     = 0;
+  KVMFRClipboardTransportFlags m_ownerTransport = 0;
   uint32_t m_statusSerial        = 0;
   uint32_t m_messageSerial       = 0;
   uint32_t m_dataSerial          = 0;
@@ -128,20 +147,33 @@ private:
   uint32_t m_blockedOwnerClientID   = 0;
   uint32_t m_blockedOwnerGeneration = 0;
   uint64_t m_ownerDeadline       = 0;
+  uint64_t m_ownerDrainDeadline  = 0;
   uint64_t m_clientClipboardGeneration = 0;
+  uint64_t m_discardClientToHelper = 0;
   uint64_t m_discardHelperToClient = 0;
+  const char * m_ownerReleaseReason = nullptr;
   KVMFRClipboardMessage m_cachedClipboard = {};
   KVMFRClipboardMessage m_blockedOutbound = {};
+  KVMFRStreamDescriptor m_hostToClientDescriptor = {};
+  KVMFRStreamDescriptor m_clientToHostDescriptor = {};
   Transfer m_clientToHelper;
   Transfer m_helperToClient;
   Grant m_grants[MEMORY_COUNT];
   PendingTarget m_pendingTarget;
+  StreamTarget m_streamTarget[STREAM_TARGET_COUNT];
+  unsigned m_streamTargetHead  = 0;
+  unsigned m_streamTargetCount = 0;
   KVMFRClipboardMessage m_internalTarget[INTERNAL_TARGET_COUNT] = {};
   unsigned m_internalTargetCount = 0;
   CLGMPClipboardFiles m_files;
 
   bool Initialize();
   void DeInit();
+  bool InitializeStreams();
+  void DeInitStreams();
+  bool BindStreams(uint32_t clientID);
+  bool TryUnbindStreams();
+  void ForceUnbindStreams();
 
   static DWORD CALLBACK ThreadProc(void * context);
   void Thread();
@@ -154,7 +186,10 @@ private:
     uint32_t ownerClientID, uint32_t ownerGeneration);
   void ClearOutboundBlock();
   bool BlockedOwnerLost(const KVMFRClipboardMessage& record) const;
-  void ReleaseOwner(const char * reason, bool clearHelper);
+  void ReleaseOwner(const char * reason, bool clearHelper,
+    bool force = false);
+  void FinishOwnerRelease();
+  bool RetryOwnerRelease();
   void ResetProtocol(bool keepClipboard);
   void QueueHelperClear();
   void QueueTransferCancel(const Transfer& transfer);
@@ -164,6 +199,13 @@ private:
   void QueueFileDisconnect();
   bool QueueInternalTarget(const KVMFRClipboardMessage& record);
   bool PumpInternalTarget();
+  void ClearStreamTargets();
+  bool QueueStreamTarget(const KVMFRClipboardMessage& record,
+    const uint8_t * data);
+  bool PumpStreamTarget();
+  bool DrainStream(bool& received);
+  bool ProcessStreamTarget(const KVMFRClipboardMessage& record,
+    const uint8_t * data);
 
   PLGMPMemory FindAvailable(PLGMPMemory (&memory)[MEMORY_COUNT]) const;
   PostResult PostForOwner(uint64_t udata, PLGMPMemory memory);
