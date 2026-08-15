@@ -2399,7 +2399,8 @@ bool lgmpClipboard_connect(LGMPClipboard * clipboard, uint32_t clientID)
 
 static void releaseOnDisconnect(LGMPClipboard * clipboard)
 {
-  if (!clipboard->queue || !clipboard->publishedClaimGeneration)
+  if (!clipboard->queue || !clipboard->publishedClaimGeneration ||
+      !lgmpClientSessionValid(clipboard->client))
     return;
 
   const KVMFRClipboardMessage release =

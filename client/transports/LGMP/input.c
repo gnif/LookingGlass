@@ -907,7 +907,8 @@ static void logStats(const struct LGMPInputCounters * stats)
 static void releaseOnDisconnect(LGMPInput * input)
 {
   if (!input->queue || !input->stream || !input->publishedClaimed ||
-      !input->publishedGeneration)
+      !input->publishedGeneration ||
+      !lgmpClientSessionValid(input->client))
     return;
 
   KVMFRInputMessage message =
