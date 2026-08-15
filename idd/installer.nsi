@@ -50,6 +50,9 @@ InstallDir "$PROGRAMFILES64\Looking Glass (IDD)"
 !define MUI_TEXTCOLOR "ffffff"
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${NSISDIR}\Contrib\Graphics\Wizard\nsis3-grey.bmp"
 !define /file VERSION "VERSION"
+!define LGIDD_EXIT_RESTART_REQUIRED 12
+; The operation failed, but a partial change or rollback still needs reboot.
+!define LGIDD_EXIT_FAILURE_RESTART_REQUIRED 13
 
 !define MUI_WELCOMEPAGE_TEXT "\
   You are about to install $(^Name) version ${VERSION}.$\n$\n\
@@ -117,18 +120,6 @@ Function .onInit
   Pop $R0
 
 FunctionEnd
-
-!macro StopLGIddHelper
-  ;Attempt to stop existing LG service only if it exists
-
-  nsExec::Exec 'sc.exe query LGIddHelper'
-  Pop $0 ; SC.exe error level
-
-  ${If} $0 == 0 ; If error level is 0, service exists
-    DetailPrint "Stop service: LGIddHelper"
-    nsExec::ExecToLog 'net.exe STOP LGIddHelper'
-  ${EndIf}
-!macroend
 
 ;Install 
 !ifdef IVSHMEM
@@ -207,23 +198,44 @@ Section "!Indirect Display Driver (IDD)" Section1
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\Looking Glass (IDD)" \
   "DisplayVersion" ${VERSION}
 
-  !insertmacro StopLGIddHelper
-
   DetailPrint "Installing IDD"
   nsExec::ExecToLog '"$INSTDIR\LGIddInstall.exe" install'
 
   Pop $0
-  ${If} $0 == 12
+  ${If} $0 == ${LGIDD_EXIT_RESTART_REQUIRED}
     DetailPrint "Restart is required to complete driver install."
+    SetRebootFlag true
+  ${ElseIf} $0 == ${LGIDD_EXIT_FAILURE_RESTART_REQUIRED}
+    DetailPrint "Driver installation failed and a restart is required."
+    SetRebootFlag true
+    SetErrorLevel $0
+    Abort
+  ${ElseIf} $0 != 0
+    DetailPrint "Driver installation failed with exit code $0."
+    SetErrorLevel $0
+    Abort
   ${EndIf}
 
 SectionEnd
 
 Section "Uninstall" Section6
-  !insertmacro StopLGIddHelper
-
   DetailPrint "Uninstalling IDD"
   nsExec::ExecToLog '"$INSTDIR\LGIddInstall.exe" uninstall'
+  Pop $0
+
+  ${If} $0 == ${LGIDD_EXIT_RESTART_REQUIRED}
+    DetailPrint "Restart is required to complete driver uninstall."
+    SetRebootFlag true
+  ${ElseIf} $0 == ${LGIDD_EXIT_FAILURE_RESTART_REQUIRED}
+    DetailPrint "Driver uninstallation failed and a restart is required."
+    SetRebootFlag true
+    SetErrorLevel $0
+    Abort
+  ${ElseIf} $0 != 0
+    DetailPrint "Driver uninstallation failed with exit code $0."
+    SetErrorLevel $0
+    Abort
+  ${EndIf}
 
   DetailPrint "Clean up helper service"
   nsExec::Exec 'sc.exe delete LGIddHelper'

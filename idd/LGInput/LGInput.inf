@@ -60,7 +60,7 @@ ServiceBinary=%12%\UMDF\LGInput.dll
 UMDriverCopy=12,UMDF
 
 [UMDriverCopy]
-LGInput.dll
+LGInput.dll,,,0x00004000
 
 [SourceDisksNames]
 1=%DiskName%
