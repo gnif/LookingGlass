@@ -32,7 +32,7 @@
 #include "KVMFRInput.h"
 
 #define KVMFR_MAGIC   "KVMFR---"
-#define KVMFR_VERSION 33
+#define KVMFR_VERSION 34
 
 // Fallback used by producers that cannot report the source display's SDR
 // white level. IDD frames override this with IDDCX_METADATA2::SdrWhiteLevel.
