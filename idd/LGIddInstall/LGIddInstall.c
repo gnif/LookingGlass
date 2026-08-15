@@ -1149,7 +1149,10 @@ failure:
 
 int wmain(int argc, wchar_t **argv)
 {
+  _setmode(_fileno(stdout), _O_U16TEXT);
   _setmode(_fileno(stderr), _O_U16TEXT);
+  setvbuf(stdout, NULL, _IONBF, 0);
+  setvbuf(stderr, NULL, _IONBF, 0);
 
   if (argc < 2)
     usage(argv[0]);
