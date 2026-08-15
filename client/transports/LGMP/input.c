@@ -59,17 +59,9 @@ enum LGMPInputMouseMode
   LGMP_INPUT_MOUSE_ABSOLUTE,
 };
 
-enum LGMPInputMessageTransport
-{
-  LGMP_INPUT_TRANSPORT_NONE,
-  LGMP_INPUT_TRANSPORT_QUEUE,
-  LGMP_INPUT_TRANSPORT_STREAM,
-};
-
 struct LGMPInputPending
 {
   KVMFRInputMessage message;
-  enum LGMPInputMessageTransport transport;
   bool pureMotion;
 };
 
@@ -78,9 +70,7 @@ struct LGMPInputCounters
   uint64_t immediateSends;
   uint64_t deferredSends;
   uint64_t localEnqueues;
-  uint64_t initialBusy;
   uint64_t initialFull;
-  uint64_t retryBusy;
   uint64_t retryFull;
   uint64_t relativeCoalesces;
   uint64_t absoluteCoalesces;
@@ -92,9 +82,6 @@ struct LGMPInputCounters
   uint64_t releases;
   uint64_t keepalives;
   uint64_t terminalFailures;
-  uint64_t ackTotal;
-  uint64_t ackMax;
-  uint64_t ackSamples;
   unsigned pendingHighWater;
 };
 
@@ -102,11 +89,6 @@ struct LGMPInputStats
 {
   struct LGMPInputCounters counters;
   uint64_t                 lastReport;
-  uint64_t                 nextProbe;
-  uint64_t                 probeStart;
-  uint32_t                 probeSerial;
-  bool                     probeOutstanding;
-  bool                     probeDue;
 };
 
 struct LGMPInput
@@ -127,9 +109,6 @@ struct LGMPInput
   uint32_t sequence;
   uint32_t publishedGeneration;
   uint32_t publishedSequence;
-  enum LGMPInputMessageTransport publishedTransport;
-  enum LGMPInputMessageTransport activeTransport;
-  bool                            queueOnly;
   bool     publishedClaimed;
   uint64_t lastSend;
 
@@ -146,9 +125,7 @@ struct LGMPInput
 
   uint32_t clientID;
   uint32_t capabilities;
-  KVMFRInputTransportFlags transports;
   KVMFRInputStreamEndpoint streamEndpoint;
-  uint32_t streamGeneration;
   uint32_t endpointGeneration;
   uint32_t statusSerial;
   uint32_t statusOwnerClientID;
@@ -211,12 +188,10 @@ static void notifyInputStatus(LGMPInput * input)
 }
 
 static void published(LGMPInput * input,
-    const KVMFRInputMessage * message,
-    enum LGMPInputMessageTransport transport)
+    const KVMFRInputMessage * message)
 {
   input->publishedGeneration = message->generation;
   input->publishedSequence   = message->sequence;
-  input->publishedTransport  = transport;
   input->lastSend            = microtime();
 
   switch (message->type)
@@ -228,9 +203,6 @@ static void published(LGMPInput * input,
 
     case KVMFR_INPUT_MESSAGE_RELEASE:
       input->publishedClaimed = false;
-      input->publishedTransport = LGMP_INPUT_TRANSPORT_NONE;
-      if (message->generation == input->generation && !input->claimed)
-        input->activeTransport = LGMP_INPUT_TRANSPORT_NONE;
       ++input->stats.counters.releases;
       break;
 
@@ -266,64 +238,43 @@ static void connectionFailed(LGMPInput * input, LGMP_STATUS status)
   input->mouseMode              = LGMP_INPUT_MOUSE_NONE;
   input->mouseButtons           = 0;
   input->publishedClaimed       = false;
-  input->publishedTransport     = LGMP_INPUT_TRANSPORT_NONE;
-  input->activeTransport        = LGMP_INPUT_TRANSPORT_NONE;
-  input->queueOnly              = false;
   input->lastInput              = 0;
   input->capabilities           = 0;
-  input->transports             = 0;
-  input->streamGeneration       = 0;
   input->streamEndpointBound    = false;
   detachInputStream(input);
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
   input->statusValid            = false;
   input->ownerConfirmed         = false;
-  input->stats.probeOutstanding = false;
   memset(input->keyState, 0, sizeof(input->keyState));
   atomic_store_explicit(&input->stop, true, memory_order_release);
 }
 
 static LGMP_STATUS trySend(LGMPInput * input,
-    const KVMFRInputMessage * message,
-    enum LGMPInputMessageTransport transport, bool deferred)
+    const KVMFRInputMessage * message, bool deferred)
 {
-  bool probe = false;
-  uint32_t serial = 0;
-  LGMP_STATUS status;
-  if (transport == LGMP_INPUT_TRANSPORT_STREAM)
-  {
-    if (!input->stream)
-      return LGMP_ERR_STREAM_UNBOUND;
+  if (!input->stream)
+    return LGMP_ERR_STREAM_UNBOUND;
 
-    LGMPStreamBuffer buffer = { 0 };
-    status = lgmpClientStreamWriteAcquire(input->stream, &buffer);
-    if (status == LGMP_OK)
+  LGMPStreamBuffer buffer = { 0 };
+  LGMP_STATUS status = lgmpClientStreamWriteAcquire(
+    input->stream, &buffer);
+  if (status == LGMP_OK)
+  {
+    if (buffer.capacity < sizeof(*message))
     {
-      if (buffer.capacity < sizeof(*message))
-      {
+      lgmpClientStreamWriteCancel(input->stream, &buffer);
+      status = LGMP_ERR_INVALID_SIZE;
+    }
+    else
+    {
+      memcpy(buffer.data, message, sizeof(*message));
+      status = lgmpClientStreamWriteCommit(input->stream,
+        &buffer, sizeof(*message));
+      if (status != LGMP_OK)
         lgmpClientStreamWriteCancel(input->stream, &buffer);
-        status = LGMP_ERR_INVALID_SIZE;
-      }
-      else
-      {
-        memcpy(buffer.data, message, sizeof(*message));
-        status = lgmpClientStreamWriteCommit(input->stream,
-          &buffer, sizeof(*message));
-        if (status != LGMP_OK)
-          lgmpClientStreamWriteCancel(input->stream, &buffer);
-      }
     }
   }
-  else if (transport == LGMP_INPUT_TRANSPORT_QUEUE)
-  {
-    probe = input->stats.probeDue &&
-      !input->stats.probeOutstanding;
-    status = lgmpClientTrySendData(input->queue,
-      message, sizeof(*message), probe ? &serial : NULL);
-  }
-  else
-    return LGMP_ERR_INVALID_ARGUMENT;
 
   if (status == LGMP_OK)
   {
@@ -331,34 +282,10 @@ static LGMP_STATUS trySend(LGMPInput * input,
       ++input->stats.counters.deferredSends;
     else
       ++input->stats.counters.immediateSends;
-
-    if (probe)
-    {
-      const uint64_t now = microtime();
-      input->stats.probeOutstanding = true;
-      input->stats.probeDue         = false;
-      input->stats.probeSerial      = serial;
-      input->stats.probeStart       = now;
-      input->stats.nextProbe        = now + INPUT_STATS_INTERVAL_US;
-    }
     return status;
   }
 
-  if (status == LGMP_ERR_QUEUE_BUSY)
-  {
-    if (deferred)
-      ++input->stats.counters.retryBusy;
-    else
-      ++input->stats.counters.initialBusy;
-  }
-  else if (status == LGMP_ERR_QUEUE_FULL)
-  {
-    if (deferred)
-      ++input->stats.counters.retryFull;
-    else
-      ++input->stats.counters.initialFull;
-  }
-  else if (status == LGMP_ERR_STREAM_FULL)
+  if (status == LGMP_ERR_STREAM_FULL)
   {
     if (deferred)
       ++input->stats.counters.retryFull;
@@ -370,23 +297,22 @@ static LGMP_STATUS trySend(LGMPInput * input,
 
 static bool retryableSendStatus(LGMP_STATUS status)
 {
-  return status == LGMP_ERR_QUEUE_BUSY ||
-    status == LGMP_ERR_QUEUE_FULL ||
-    status == LGMP_ERR_STREAM_FULL;
+  return status == LGMP_ERR_STREAM_FULL;
 }
 
-static void sendFailed(LGMPInput * input,
-    enum LGMPInputMessageTransport transport, LGMP_STATUS status)
+static void sendFailed(LGMPInput * input, LGMP_STATUS status)
 {
-  if (transport == LGMP_INPUT_TRANSPORT_STREAM &&
-      (status == LGMP_ERR_STREAM_UNBOUND ||
-        status == LGMP_ERR_STREAM_STALE))
+  if (status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE)
   {
     DEBUG_WARN("LGMP input stream binding was lost: %s",
       lgmpStatusString(status));
+    const bool notify = input->available || input->endpointGeneration;
     detachInputStream(input);
-    input->queueOnly = true;
     discardProtocolState(input);
+    input->available = false;
+    if (notify)
+      input->notifyStatus = true;
     return;
   }
 
@@ -402,8 +328,7 @@ static bool coalesceMotion(LGMPInput * input,
   struct LGMPInputPending * tail = pendingAt(
     input, input->pendingCount - 1);
   if (!tail->pureMotion || tail->message.type != type ||
-      tail->message.generation != input->generation ||
-      tail->transport != input->activeTransport)
+      tail->message.generation != input->generation)
     return false;
 
   if (type == KVMFR_INPUT_MESSAGE_MOUSE_ABSOLUTE)
@@ -465,19 +390,16 @@ static bool discardPendingMotion(LGMPInput * input)
   return false;
 }
 
-static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
+static bool submitPayload(LGMPInput * input, KVMFRInputMessageType type,
     const KVMFRInputPayload * payload, bool pureMotion, bool * wake)
 {
-  if (!input->connected || !input->queue ||
-      input->activeTransport == LGMP_INPUT_TRANSPORT_NONE)
+  if (!input->connected || !input->stream)
     return false;
 
   const bool inputMessage =
     type == KVMFR_INPUT_MESSAGE_MOUSE_RELATIVE ||
     type == KVMFR_INPUT_MESSAGE_MOUSE_ABSOLUTE ||
     type == KVMFR_INPUT_MESSAGE_KEYBOARD;
-  const enum LGMPInputMessageTransport transport =
-    input->activeTransport;
 
   if (pureMotion && coalesceMotion(input, type, payload))
   {
@@ -511,23 +433,19 @@ static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
 
   if (!input->pendingCount)
   {
-    const bool probeOutstanding = input->stats.probeOutstanding;
-    const LGMP_STATUS status = trySend(
-      input, &message, transport, false);
+    const LGMP_STATUS status = trySend(input, &message, false);
     if (status == LGMP_OK)
     {
-      published(input, &message, transport);
+      published(input, &message);
       if (inputMessage)
         input->lastInput = microtime();
-      if (!probeOutstanding && input->stats.probeOutstanding)
-        *wake = true;
       return true;
     }
 
     if (!retryableSendStatus(status))
     {
       input->sequence = previousSequence;
-      sendFailed(input, transport, status);
+      sendFailed(input, status);
       return false;
     }
   }
@@ -540,7 +458,6 @@ static bool queuePayload(LGMPInput * input, KVMFRInputMessageType type,
 
   struct LGMPInputPending * item = pendingAt(input, input->pendingCount++);
   item->message    = message;
-  item->transport  = transport;
   item->pureMotion = pureMotion;
   ++input->stats.counters.localEnqueues;
   if (input->pendingCount > input->stats.counters.pendingHighWater)
@@ -555,7 +472,8 @@ static bool claim(LGMPInput * input, bool * wake)
 {
   if (input->claimed)
     return true;
-  if (!input->available || input->ownerBlocked)
+  if (!input->available || input->ownerBlocked ||
+      !input->stream || !input->streamEndpointBound)
     return false;
 
   if (++input->generation == 0)
@@ -563,21 +481,13 @@ static bool claim(LGMPInput * input, bool * wake)
   input->sequence       = 0;
   input->claimed        = true;
   input->ownerConfirmed = false;
-  if (!input->queueOnly && input->stream && input->streamEndpointBound)
-    input->activeTransport = LGMP_INPUT_TRANSPORT_STREAM;
-  else
-  {
-    input->activeTransport = LGMP_INPUT_TRANSPORT_QUEUE;
-    input->queueOnly = true;
-  }
 
   const KVMFRInputPayload payload = { 0 };
-  if (queuePayload(input, KVMFR_INPUT_MESSAGE_CLAIM,
+  if (submitPayload(input, KVMFR_INPUT_MESSAGE_CLAIM,
       &payload, false, wake))
     return true;
 
   input->claimed = false;
-  input->activeTransport = LGMP_INPUT_TRANSPORT_NONE;
   return false;
 }
 
@@ -611,8 +521,6 @@ static void discardProtocolState(LGMPInput * input)
   input->publishedGeneration = 0;
   input->publishedSequence   = 0;
   input->publishedClaimed    = false;
-  input->publishedTransport  = LGMP_INPUT_TRANSPORT_NONE;
-  input->activeTransport     = LGMP_INPUT_TRANSPORT_NONE;
   input->ownerConfirmed      = false;
 }
 
@@ -625,7 +533,7 @@ static bool restoreInputState(LGMPInput * input, bool * wake)
 
   KVMFRInputPayload keyboard = { 0 };
   const bool keyboardHeld = buildKeyboardPayload(input, &keyboard);
-  if (keyboardHeld && !queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+  if (keyboardHeld && !submitPayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
       &keyboard, false, wake))
     return false;
 
@@ -634,15 +542,6 @@ static bool restoreInputState(LGMPInput * input, bool * wake)
       !queueMouse(input, input->mouseMode, 0, 0, 0,
         input->mouseButtons, false, wake))
     return false;
-  return true;
-}
-
-static bool inputBytesZero(const void * data, size_t size)
-{
-  const uint8_t * bytes = data;
-  for (size_t i = 0; i < size; ++i)
-    if (bytes[i])
-      return false;
   return true;
 }
 
@@ -655,18 +554,17 @@ static bool validInputStatus(const KVMFRInputStatus * status)
   static const uint32_t flags =
     KVMFR_INPUT_STATUS_AVAILABLE |
     KVMFR_INPUT_STATUS_HAS_OWNER;
-  static const uint32_t transports =
-    KVMFR_INPUT_TRANSPORT_QUEUE |
-    KVMFR_INPUT_TRANSPORT_STREAM;
 
   if (status->version != KVMFR_INPUT_VERSION ||
       status->capabilities & ~capabilities ||
       status->flags & ~flags ||
-      status->transports & ~transports ||
-      !(status->transports & KVMFR_INPUT_TRANSPORT_QUEUE) ||
       !status->generation ||
       !status->lease || !status->maxButtons ||
-      status->maxButtons > KVMFR_INPUT_MOUSE_BUTTON_COUNT)
+      status->maxButtons > KVMFR_INPUT_MOUSE_BUTTON_COUNT ||
+      status->streamVersion != KVMFR_INPUT_STREAM_VERSION ||
+      status->streamEndpointCount !=
+        KVMFR_INPUT_STREAM_ENDPOINT_COUNT ||
+      !status->streamGeneration)
     return false;
 
   for (size_t i = 0; i < sizeof(status->streamReserved) /
@@ -674,82 +572,45 @@ static bool validInputStatus(const KVMFRInputStatus * status)
     if (status->streamReserved[i])
       return false;
 
-  const bool stream =
-    (status->transports & KVMFR_INPUT_TRANSPORT_STREAM) != 0;
-  if (!stream)
+  for (unsigned i = 0;
+      i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
   {
-    if (status->streamVersion || status->streamEndpointCount ||
-        status->streamGeneration)
-      return false;
-    for (unsigned i = 0;
-        i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
-      if (!inputBytesZero(&status->streamEndpoint[i],
-            sizeof(status->streamEndpoint[i])))
-        return false;
-  }
-  else
-  {
-    if (status->streamVersion != KVMFR_INPUT_STREAM_VERSION ||
-        status->streamEndpointCount !=
-          KVMFR_INPUT_STREAM_ENDPOINT_COUNT ||
-        !status->streamGeneration)
+    const KVMFRInputStreamEndpoint * endpoint =
+      &status->streamEndpoint[i];
+    const uint32_t endpointFlags =
+      KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE |
+      KVMFR_INPUT_STREAM_ENDPOINT_BOUND;
+    if (endpoint->flags & ~endpointFlags || endpoint->reserved ||
+        !(endpoint->flags &
+          KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE))
       return false;
 
-    bool endpointAvailable = false;
-    for (unsigned i = 0;
-        i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
+    const bool endpointBound =
+      (endpoint->flags & KVMFR_INPUT_STREAM_ENDPOINT_BOUND) != 0;
+    if (endpoint->stream.magic != LGMP_STREAM_DESCRIPTOR_MAGIC ||
+        endpoint->stream.size != sizeof(endpoint->stream) ||
+        endpoint->stream.version != LGMP_STREAM_DESCRIPTOR_VERSION ||
+        !endpoint->stream.offset ||
+        !endpoint->stream.regionSize ||
+        endpoint->stream.direction != LGMP_STREAM_CLIENT_TO_HOST ||
+        endpoint->stream.policy != LGMP_STREAM_RELIABLE_FIFO ||
+        endpoint->stream.slotCount !=
+          KVMFR_INPUT_STREAM_SLOT_COUNT ||
+        endpoint->stream.slotSize != KVMFR_INPUT_STREAM_SLOT_SIZE ||
+        (endpointBound ?
+          !endpoint->boundClientID || !endpoint->bindingGeneration :
+          endpoint->boundClientID || endpoint->bindingGeneration))
+      return false;
+
+    for (unsigned j = 0; j < i; ++j)
     {
-      const KVMFRInputStreamEndpoint * endpoint =
-        &status->streamEndpoint[i];
-      const uint32_t endpointFlags =
-        KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE |
-        KVMFR_INPUT_STREAM_ENDPOINT_BOUND;
-      if (endpoint->flags & ~endpointFlags || endpoint->reserved)
+      const KVMFRInputStreamEndpoint * previous =
+        &status->streamEndpoint[j];
+      if (previous->stream.offset == endpoint->stream.offset ||
+          (endpointBound &&
+            previous->boundClientID == endpoint->boundClientID))
         return false;
-
-      const bool endpointValid =
-        (endpoint->flags &
-          KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE) != 0;
-      const bool endpointBound =
-        (endpoint->flags & KVMFR_INPUT_STREAM_ENDPOINT_BOUND) != 0;
-      if (!endpointValid)
-      {
-        if (!inputBytesZero(endpoint, sizeof(*endpoint)))
-          return false;
-        continue;
-      }
-
-      endpointAvailable = true;
-      if (endpoint->stream.magic != LGMP_STREAM_DESCRIPTOR_MAGIC ||
-          endpoint->stream.size != sizeof(endpoint->stream) ||
-          endpoint->stream.version != LGMP_STREAM_DESCRIPTOR_VERSION ||
-          !endpoint->stream.offset ||
-          !endpoint->stream.regionSize ||
-          endpoint->stream.direction != LGMP_STREAM_CLIENT_TO_HOST ||
-          endpoint->stream.policy != LGMP_STREAM_RELIABLE_FIFO ||
-          endpoint->stream.slotCount !=
-            KVMFR_INPUT_STREAM_SLOT_COUNT ||
-          endpoint->stream.slotSize != KVMFR_INPUT_STREAM_SLOT_SIZE ||
-          (endpointBound ?
-            !endpoint->boundClientID || !endpoint->bindingGeneration :
-            endpoint->boundClientID || endpoint->bindingGeneration))
-        return false;
-
-      for (unsigned j = 0; j < i; ++j)
-      {
-        const KVMFRInputStreamEndpoint * previous =
-          &status->streamEndpoint[j];
-        if (!(previous->flags &
-              KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE))
-          continue;
-        if (previous->stream.offset == endpoint->stream.offset ||
-            (endpointBound &&
-              previous->boundClientID == endpoint->boundClientID))
-          return false;
-      }
     }
-    if (!endpointAvailable)
-      return false;
   }
 
   const bool available =
@@ -789,15 +650,14 @@ static bool reconcileInputStream(LGMPInput * input,
     const KVMFRInputStatus * status)
 {
   const KVMFRInputStreamEndpoint * desired = NULL;
-  if (status->transports & KVMFR_INPUT_TRANSPORT_STREAM)
-    for (unsigned i = 0; i < status->streamEndpointCount; ++i)
-      if ((status->streamEndpoint[i].flags &
-            KVMFR_INPUT_STREAM_ENDPOINT_BOUND) &&
-          status->streamEndpoint[i].boundClientID == input->clientID)
-      {
-        desired = &status->streamEndpoint[i];
-        break;
-      }
+  for (unsigned i = 0; i < status->streamEndpointCount; ++i)
+    if ((status->streamEndpoint[i].flags &
+          KVMFR_INPUT_STREAM_ENDPOINT_BOUND) &&
+        status->streamEndpoint[i].boundClientID == input->clientID)
+    {
+      desired = &status->streamEndpoint[i];
+      break;
+    }
 
   const bool oldBound = input->streamEndpointBound;
   const KVMFRInputStreamEndpoint oldEndpoint = input->streamEndpoint;
@@ -858,7 +718,7 @@ static void applyInputStatus(LGMPInput * input,
   const bool     wasAvailable   = input->available;
   const uint32_t oldCapabilities = input->capabilities;
   const uint32_t oldGeneration   = input->endpointGeneration;
-  const bool     available =
+  const bool     targetAvailable =
     (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
   const bool     endpointChanged = wasValid &&
     oldGeneration != status->generation;
@@ -866,18 +726,16 @@ static void applyInputStatus(LGMPInput * input,
 
   input->statusValid           = true;
   input->statusSerial          = serial;
-  input->available             = available;
   input->capabilities          = status->capabilities;
   input->endpointGeneration    = status->generation;
   input->statusOwnerClientID   = status->ownerClientID;
   input->statusOwnerGeneration = status->ownerGeneration;
-  input->transports             = status->transports;
-  input->streamGeneration       = status->streamGeneration;
   const bool streamChanged = reconcileInputStream(input, status);
+  const bool available = targetAvailable &&
+    input->streamEndpointBound;
+  input->available = available;
 
-  if (endpointChanged || !available ||
-      (streamChanged &&
-        input->activeTransport == LGMP_INPUT_TRANSPORT_STREAM))
+  if (endpointChanged || !available || streamChanged)
   {
     discardProtocolState(input);
     restore = available && (endpointChanged || streamChanged);
@@ -974,64 +832,37 @@ static bool release(LGMPInput * input, bool * wake)
   clearInputState(input);
 
   if (!input->publishedClaimed)
-  {
-    input->activeTransport = LGMP_INPUT_TRANSPORT_NONE;
     return true;
-  }
 
   input->generation = input->publishedGeneration;
   input->sequence   = input->publishedSequence;
-  input->activeTransport = input->publishedTransport;
   const KVMFRInputPayload payload = { 0 };
-  return queuePayload(input, KVMFR_INPUT_MESSAGE_RELEASE,
+  return submitPayload(input, KVMFR_INPUT_MESSAGE_RELEASE,
     &payload, false, wake);
 }
 
-static void flushPending(LGMPInput * input)
+static bool flushPending(LGMPInput * input)
 {
+  bool progress = false;
   while (input->connected && input->pendingCount)
   {
     struct LGMPInputPending * item = pendingAt(input, 0);
-    const LGMP_STATUS status = trySend(input, &item->message,
-      item->transport, true);
+    const LGMP_STATUS status = trySend(input, &item->message, true);
     if (retryableSendStatus(status))
-      return;
+      return progress;
     if (status != LGMP_OK)
     {
-      sendFailed(input, item->transport, status);
-      return;
+      sendFailed(input, status);
+      return progress;
     }
 
-    published(input, &item->message, item->transport);
+    progress = true;
+    published(input, &item->message);
     input->pendingHead =
       (input->pendingHead + 1) % INPUT_PENDING_LENGTH;
     --input->pendingCount;
   }
-}
-
-static void pollAckProbe(LGMPInput * input)
-{
-  if (!input->stats.probeOutstanding)
-    return;
-
-  uint32_t processed;
-  const LGMP_STATUS status =
-    lgmpClientGetSerial(input->queue, &processed);
-  if (status != LGMP_OK)
-  {
-    input->stats.probeOutstanding = false;
-    connectionFailed(input, status);
-    return;
-  }
-  if ((int32_t)(processed - input->stats.probeSerial) < 0)
-    return;
-
-  const uint64_t elapsed = microtime() - input->stats.probeStart;
-  input->stats.probeOutstanding = false;
-  input->stats.counters.ackTotal += elapsed;
-  ++input->stats.counters.ackSamples;
-  if (elapsed > input->stats.counters.ackMax)
-    input->stats.counters.ackMax = elapsed;
+  return progress;
 }
 
 static bool collectStats(LGMPInput * input, uint64_t now, bool force,
@@ -1046,44 +877,36 @@ static bool collectStats(LGMPInput * input, uint64_t now, bool force,
   input->stats.counters.pendingHighWater = input->pendingCount;
 
   return result->immediateSends || result->deferredSends ||
-    result->localEnqueues || result->initialBusy ||
-    result->initialFull || result->retryBusy || result->retryFull ||
+    result->localEnqueues || result->initialFull || result->retryFull ||
     result->relativeCoalesces || result->absoluteCoalesces ||
     result->reservedRejects || result->motionEvictions ||
     result->discreteOverflowFailures ||
     result->discreteOverflowResets || result->claims ||
     result->releases || result->keepalives ||
-    result->terminalFailures || result->ackSamples;
+    result->terminalFailures;
 }
 
 static void logStats(const struct LGMPInputCounters * stats)
 {
-  const uint64_t ackAverage = stats->ackSamples ?
-    stats->ackTotal / stats->ackSamples : 0;
-
   DEBUG_TRACE("LGMP input: sent immediate/deferred %lu/%lu"
-    ", queued %lu (high %u), initial busy/full %lu"
-    "/%lu, retry busy/full %lu/%lu"
+    ", queued %lu (high %u), initial/retry full %lu/%lu"
     ", coalesced relative/absolute %lu/%lu"
     ", motion rejected/evicted %lu/%lu"
     ", overflow failures/resets %lu/%lu"
     ", published claim/release/keepalive %lu/%lu"
-    "/%lu, terminal failures %lu"
-    ", LGMP ACK average/max %lu/%lu us (%lu"
-    " samples)", stats->immediateSends, stats->deferredSends,
+    "/%lu, terminal failures %lu",
+    stats->immediateSends, stats->deferredSends,
     stats->localEnqueues, stats->pendingHighWater,
-    stats->initialBusy, stats->initialFull, stats->retryBusy,
-    stats->retryFull, stats->relativeCoalesces,
+    stats->initialFull, stats->retryFull, stats->relativeCoalesces,
     stats->absoluteCoalesces, stats->reservedRejects,
     stats->motionEvictions, stats->discreteOverflowFailures,
     stats->discreteOverflowResets, stats->claims, stats->releases,
-    stats->keepalives, stats->terminalFailures, ackAverage,
-    stats->ackMax, stats->ackSamples);
+    stats->keepalives, stats->terminalFailures);
 }
 
 static void releaseOnDisconnect(LGMPInput * input)
 {
-  if (!input->queue || !input->publishedClaimed ||
+  if (!input->queue || !input->stream || !input->publishedClaimed ||
       !input->publishedGeneration)
     return;
 
@@ -1097,58 +920,14 @@ static void releaseOnDisconnect(LGMPInput * input)
     message.sequence = 1;
 
   const uint64_t deadline = microtime() + INPUT_RELEASE_TIMEOUT_US;
-  if (input->publishedTransport == LGMP_INPUT_TRANSPORT_STREAM)
-  {
-    const uint32_t statusSerial = input->statusSerial;
-    LGMP_STATUS status;
-    do
-    {
-      status = trySend(input, &message,
-        input->publishedTransport, true);
-      if (status == LGMP_OK)
-        break;
-      if (!retryableSendStatus(status))
-        return;
-      if (input->event)
-        lgWaitEvent(input->event, INPUT_WORKER_RETRY_MS);
-    }
-    while (microtime() < deadline);
-
-    if (status != LGMP_OK)
-    {
-      DEBUG_WARN("Timed out releasing LGMP input stream ownership");
-      return;
-    }
-
-    do
-    {
-      bool wake = false;
-      processInputStatus(input, &wake);
-      if (input->statusValid &&
-          (int32_t)(input->statusSerial - statusSerial) > 0 &&
-          (input->statusOwnerClientID != input->clientID ||
-            input->statusOwnerGeneration != message.generation))
-        return;
-      if (input->event)
-        lgWaitEvent(input->event, INPUT_WORKER_RETRY_MS);
-    }
-    while (microtime() < deadline);
-
-    DEBUG_WARN("Timed out waiting for LGMP input stream release");
-    return;
-  }
-  if (input->publishedTransport != LGMP_INPUT_TRANSPORT_QUEUE)
-    return;
-
-  uint32_t serial = 0;
+  const uint32_t statusSerial = input->statusSerial;
   LGMP_STATUS status;
   do
   {
-    status = lgmpClientTrySendData(input->queue,
-      &message, sizeof(message), &serial);
+    status = trySend(input, &message, true);
     if (status == LGMP_OK)
       break;
-    if (status != LGMP_ERR_QUEUE_BUSY && status != LGMP_ERR_QUEUE_FULL)
+    if (!retryableSendStatus(status))
       return;
     if (input->event)
       lgWaitEvent(input->event, INPUT_WORKER_RETRY_MS);
@@ -1157,29 +936,45 @@ static void releaseOnDisconnect(LGMPInput * input)
 
   if (status != LGMP_OK)
   {
-    DEBUG_WARN("Timed out releasing LGMP input ownership");
+    DEBUG_WARN("Timed out releasing LGMP input stream ownership");
     return;
   }
 
   do
   {
-    uint32_t processed;
-    status = lgmpClientGetSerial(input->queue, &processed);
-    if (status != LGMP_OK)
-      return;
-    if ((int32_t)(processed - serial) >= 0)
+    bool wake = false;
+    processInputStatus(input, &wake);
+    if (input->statusValid &&
+        (int32_t)(input->statusSerial - statusSerial) > 0 &&
+        (input->statusOwnerClientID != input->clientID ||
+          input->statusOwnerGeneration != message.generation))
       return;
     if (input->event)
       lgWaitEvent(input->event, INPUT_WORKER_RETRY_MS);
   }
   while (microtime() < deadline);
 
-  DEBUG_WARN("Timed out waiting for LGMP input release");
+  DEBUG_WARN("Timed out waiting for LGMP input stream release");
 }
 
 static int inputThread(void * opaque)
 {
   LGMPInput * input = opaque;
+  LGMPStreamPollState streamPoll;
+  const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+      (struct LGMPStreamPollConfig)
+      {
+        .spinCount = 32U,
+        .minWaitUs = 50U,
+        .maxWaitUs = 1000U,
+      });
+  if (pollStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to initialize LGMP input polling: %s",
+      lgmpStatusString(pollStatus));
+    return -1;
+  }
+
   while (!atomic_load_explicit(&input->stop, memory_order_acquire))
   {
     struct LGMPInputCounters stats = { 0 };
@@ -1187,13 +982,9 @@ static int inputThread(void * opaque)
     bool wake = false;
     LG_LOCK(input->lock);
     processInputStatus(input, &wake);
-    flushPending(input);
-    pollAckProbe(input);
+    const bool streamProgress = flushPending(input);
 
     const uint64_t now = microtime();
-    if (!input->stats.probeOutstanding &&
-        now >= input->stats.nextProbe)
-      input->stats.probeDue = true;
     if (input->connected && input->claimed && !inputStateHeld(input) &&
         !input->pendingCount &&
         input->publishedGeneration == input->generation &&
@@ -1207,14 +998,13 @@ static int inputThread(void * opaque)
         now - input->lastSend >= INPUT_KEEPALIVE_US)
     {
       const KVMFRInputPayload payload = { 0 };
-      queuePayload(input, KVMFR_INPUT_MESSAGE_KEEPALIVE,
+      submitPayload(input, KVMFR_INPUT_MESSAGE_KEEPALIVE,
         &payload, false, &wake);
     }
 
     if (input->pendingCount)
       timeout = INPUT_WORKER_RETRY_MS;
-    if (input->stats.probeOutstanding)
-      timeout = INPUT_WORKER_RETRY_MS;
+    const bool streamPending = input->pendingCount != 0;
     const bool report = collectStats(input, now, false, &stats);
     LG_UNLOCK(input->lock);
 
@@ -1226,7 +1016,25 @@ static int inputThread(void * opaque)
 
     if (atomic_load_explicit(&input->stop, memory_order_acquire))
       break;
-    lgWaitEvent(input->event, timeout);
+
+    bool signaled;
+    if (streamPending)
+    {
+      if (streamProgress)
+        lgmpStreamPollActivity(&streamPoll);
+      const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+      if (!waitUs)
+        continue;
+      signaled = lgWaitEventNS(input->event, waitUs * 1000U);
+    }
+    else
+    {
+      if (streamProgress)
+        lgmpStreamPollActivity(&streamPoll);
+      signaled = lgWaitEvent(input->event, timeout);
+    }
+    if (signaled)
+      lgmpStreamPollActivity(&streamPoll);
   }
 
   struct LGMPInputCounters stats = { 0 };
@@ -1286,7 +1094,7 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
   if (status != LGMP_OK)
   {
     LG_UNLOCK(input->lock);
-    DEBUG_WARN("Failed to subscribe to LGMP input queue: %s",
+    DEBUG_WARN("Failed to subscribe to LGMP input status queue: %s",
       lgmpStatusString(status));
     return false;
   }
@@ -1307,8 +1115,6 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
   input->pendingCount          = 0;
   input->clientID              = clientID;
   input->capabilities          = 0;
-  input->transports            = 0;
-  input->streamGeneration      = 0;
   input->streamEndpointBound   = false;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
@@ -1321,15 +1127,11 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
   input->publishedGeneration   = 0;
   input->publishedSequence     = 0;
   input->publishedClaimed      = false;
-  input->publishedTransport    = LGMP_INPUT_TRANSPORT_NONE;
-  input->activeTransport       = LGMP_INPUT_TRANSPORT_NONE;
-  input->queueOnly             = false;
   input->lastSend              = 0;
   input->lastInput             = 0;
   input->generation            = 0;
   memset(&input->stats, 0, sizeof(input->stats));
   input->stats.lastReport      = microtime();
-  input->stats.probeDue        = true;
   clearInputState(input);
   atomic_store_explicit(&input->stop, false, memory_order_release);
   LGThread * thread;
@@ -1372,8 +1174,6 @@ void lgmpInput_disconnect(LGMPInput * input)
   input->available      = false;
   input->ownerBlocked   = false;
   input->capabilities   = 0;
-  input->transports     = 0;
-  input->streamGeneration    = 0;
   input->streamEndpointBound = false;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
@@ -1407,9 +1207,6 @@ void lgmpInput_disconnect(LGMPInput * input)
   input->thread           = NULL;
   input->event            = NULL;
   input->publishedClaimed = false;
-  input->publishedTransport = LGMP_INPUT_TRANSPORT_NONE;
-  input->activeTransport  = LGMP_INPUT_TRANSPORT_NONE;
-  input->queueOnly        = false;
   LG_UNLOCK(input->lock);
 
   if (queue)
@@ -1418,7 +1215,7 @@ void lgmpInput_disconnect(LGMPInput * input)
     if (status != LGMP_OK && status != LGMP_ERR_INVALID_SESSION &&
         status != LGMP_ERR_QUEUE_TIMEOUT &&
         status != LGMP_ERR_QUEUE_UNSUBSCRIBED)
-      DEBUG_WARN("Failed to unsubscribe from LGMP input queue: %s",
+      DEBUG_WARN("Failed to unsubscribe from LGMP input status queue: %s",
         lgmpStatusString(status));
   }
   if (event)
@@ -1537,7 +1334,7 @@ static bool updateKey(void * opaque, int key, bool pressed)
   buildKeyboardPayload(input, &payload);
   const uint64_t overflowFailures =
     input->stats.counters.discreteOverflowFailures;
-  bool result = queuePayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+  bool result = submitPayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
     &payload, false, &wake);
   if (!result && !pressed && input->connected)
   {
@@ -1588,7 +1385,7 @@ static bool queueMouse(LGMPInput * input, enum LGMPInputMouseMode mode,
     payload.mouseRelative.wheel   = wheel;
   }
 
-  return queuePayload(input, type, &payload, pureMotion, wake);
+  return submitPayload(input, type, &payload, pureMotion, wake);
 }
 
 static bool inputMouseMotion(void * opaque, int32_t x, int32_t y)

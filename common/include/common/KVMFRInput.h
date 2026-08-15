@@ -94,10 +94,9 @@ enum
 typedef uint32_t KVMFRInputMessageType;
 
 /*
- * One activation must remain on one ordered transport. CLAIM is sequence one,
- * reports, KEEPALIVE and RESET increment the sequence, and RELEASE is the
- * final record. A sender must start a new generation instead of moving an
- * active sequence between the queue fallback and a stream endpoint.
+ * Input messages are carried by the client's ordered stream endpoint. CLAIM
+ * is sequence one, reports, KEEPALIVE and RESET increment the sequence, and
+ * RELEASE is the final record.
  */
 typedef struct KVMFRInputMessage
 {
@@ -131,14 +130,6 @@ typedef uint32_t KVMFRInputStatusFlags;
 
 enum
 {
-  KVMFR_INPUT_TRANSPORT_QUEUE  = 0x1,
-  KVMFR_INPUT_TRANSPORT_STREAM = 0x2,
-};
-
-typedef uint32_t KVMFRInputTransportFlags;
-
-enum
-{
   KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE = 0x1,
   KVMFR_INPUT_STREAM_ENDPOINT_BOUND     = 0x2,
 };
@@ -160,6 +151,10 @@ typedef struct KVMFRInputStreamEndpoint
 }
 KVMFRInputStreamEndpoint;
 
+/*
+ * Published through the LGMP input queue for status and stream discovery.
+ * KVMFRInputMessage records are carried only by the bound stream endpoint.
+ */
 typedef struct KVMFRInputStatus
 {
   uint32_t                  version;
@@ -171,11 +166,10 @@ typedef struct KVMFRInputStatus
   // Input ownership lease duration in milliseconds.
   uint32_t                  lease;
   uint32_t                  maxButtons;
-  KVMFRInputTransportFlags  transports;
   uint32_t                  streamVersion;
   uint32_t                  streamEndpointCount;
   uint32_t                  streamGeneration;
-  uint32_t                  streamReserved[4];
+  uint32_t                  streamReserved[5];
   KVMFRInputStreamEndpoint  streamEndpoint[
     KVMFR_INPUT_STREAM_ENDPOINT_COUNT];
 }
@@ -196,14 +190,14 @@ static_assert(sizeof(KVMFRInputMessage) == 32,
     "KVMFR input message layout changed");
 static_assert(sizeof(KVMFRInputStreamEndpoint) == 48,
     "KVMFR input stream endpoint layout changed");
-static_assert(offsetof(KVMFRInputStatus, transports) == 32,
-    "KVMFR input status transport layout changed");
+static_assert(offsetof(KVMFRInputStatus, streamVersion) == 32,
+    "KVMFR input status stream layout changed");
 static_assert(offsetof(KVMFRInputStatus, streamEndpoint) == 64,
     "KVMFR input stream discovery layout changed");
 static_assert(sizeof(KVMFRInputStatus) == 448,
     "KVMFR input status layout changed");
-static_assert(sizeof(KVMFRInputMessage) <= 64,
-    "KVMFR input message must fit in one LGMP control message");
+static_assert(sizeof(KVMFRInputMessage) <= KVMFR_INPUT_STREAM_SLOT_SIZE,
+    "KVMFR input message must fit in one stream record");
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
 _Static_assert(sizeof(KVMFRInputMouseRelative) == 16,
     "KVMFR relative mouse input layout changed");
@@ -219,14 +213,14 @@ _Static_assert(sizeof(KVMFRInputMessage) == 32,
     "KVMFR input message layout changed");
 _Static_assert(sizeof(KVMFRInputStreamEndpoint) == 48,
     "KVMFR input stream endpoint layout changed");
-_Static_assert(offsetof(KVMFRInputStatus, transports) == 32,
-    "KVMFR input status transport layout changed");
+_Static_assert(offsetof(KVMFRInputStatus, streamVersion) == 32,
+    "KVMFR input status stream layout changed");
 _Static_assert(offsetof(KVMFRInputStatus, streamEndpoint) == 64,
     "KVMFR input stream discovery layout changed");
 _Static_assert(sizeof(KVMFRInputStatus) == 448,
     "KVMFR input status layout changed");
-_Static_assert(sizeof(KVMFRInputMessage) <= 64,
-    "KVMFR input message must fit in one LGMP control message");
+_Static_assert(sizeof(KVMFRInputMessage) <= KVMFR_INPUT_STREAM_SLOT_SIZE,
+    "KVMFR input message must fit in one stream record");
 #endif
 
 #endif

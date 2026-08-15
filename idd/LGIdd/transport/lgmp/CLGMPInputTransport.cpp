@@ -64,10 +64,10 @@ static bool IsZero(const void * data, size_t size)
   return true;
 }
 
-static bool ArmPollTimer(HANDLE timer, bool active)
+static bool ArmPollTimer(HANDLE timer, uint32_t waitUs)
 {
   LARGE_INTEGER due = {};
-  due.QuadPart = active ? -2500 : -10000;
+  due.QuadPart = -static_cast<LONGLONG>(waitUs) * 10;
   return SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) != FALSE;
 }
 
@@ -199,7 +199,11 @@ bool CLGMPInputTransport::ReconcileStreams(bool& changed)
 
       const LGMP_STATUS status = lgmpHostStreamUnbind(endpoint.stream);
       if (status == LGMP_ERR_STREAM_BUSY)
+      {
+        // A vanished peer may have left an active reservation. Keep this
+        // endpoint draining; force-unbind is reserved for transport teardown.
         continue;
+      }
       if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
       {
         DEBUG_ERROR("lgmpHostStreamUnbind Failed (Input): %s",
@@ -294,7 +298,11 @@ void CLGMPInputTransport::ResetStreams()
         endpoint.draining = false;
       }
       else if (status == LGMP_ERR_STREAM_BUSY)
+      {
+        // Stop is restartable, so preserve outstanding records and finish
+        // the graceful unbind after the transport starts again.
         endpoint.draining = true;
+      }
       changed           = true;
     }
     if (changed)
@@ -366,23 +374,22 @@ bool CLGMPInputTransport::PublishStatus()
 
   const bool available = m_targetState.available;
   KVMFRInputStatus status = {};
-  status.version      = KVMFR_INPUT_VERSION;
-  status.capabilities = available ?
+  status.version             = KVMFR_INPUT_VERSION;
+  status.capabilities        = available ?
     KVMFR_INPUT_CAP_MOUSE_RELATIVE |
     KVMFR_INPUT_CAP_MOUSE_ABSOLUTE |
     KVMFR_INPUT_CAP_KEYBOARD : 0;
-  status.flags = available ? KVMFR_INPUT_STATUS_AVAILABLE : 0;
+  status.flags               = available ?
+    KVMFR_INPUT_STATUS_AVAILABLE : 0;
   if (m_targetState.owned)
   {
-    status.flags          |= KVMFR_INPUT_STATUS_HAS_OWNER;
-    status.ownerClientID   = m_targetState.owner.client;
-    status.ownerGeneration = m_targetState.owner.generation;
+    status.flags           |= KVMFR_INPUT_STATUS_HAS_OWNER;
+    status.ownerClientID    = m_targetState.owner.client;
+    status.ownerGeneration  = m_targetState.owner.generation;
   }
   status.generation          = m_endpointGeneration;
   status.lease               = static_cast<uint32_t>(OWNER_LEASE_MS);
   status.maxButtons          = KVMFR_INPUT_MOUSE_BUTTON_COUNT;
-  status.transports          = KVMFR_INPUT_TRANSPORT_QUEUE |
-    KVMFR_INPUT_TRANSPORT_STREAM;
   status.streamVersion       = KVMFR_INPUT_STREAM_VERSION;
   status.streamEndpointCount = KVMFR_INPUT_STREAM_ENDPOINT_COUNT;
   status.streamGeneration    = m_streamGeneration;
@@ -535,7 +542,6 @@ void CLGMPInputTransport::Stop()
   m_ownerClientID    = 0;
   m_ownerGeneration  = 0;
   m_ownerSequence    = 0;
-  m_ownerTransport   = MessageTransport::NONE;
   m_ownerDeadline    = 0;
   ResetStreams();
   {
@@ -553,8 +559,7 @@ bool CLGMPInputTransport::IsOwner(
 }
 
 bool CLGMPInputTransport::Claim(
-  uint32_t sourceClientID, const KVMFRInputMessage& message,
-  MessageTransport transport)
+  uint32_t sourceClientID, const KVMFRInputMessage& message)
 {
   if (message.sequence != 1)
   {
@@ -581,7 +586,6 @@ bool CLGMPInputTransport::Claim(
   m_ownerClientID    = sourceClientID;
   m_ownerGeneration  = message.generation;
   m_ownerSequence    = message.sequence;
-  m_ownerTransport   = transport;
   RenewLease();
   UpdateTargetState(m_target->GetState(source));
   ++m_statistics.claims;
@@ -607,7 +611,6 @@ void CLGMPInputTransport::ReleaseOwner(bool reset)
   m_ownerClientID    = 0;
   m_ownerGeneration  = 0;
   m_ownerSequence    = 0;
-  m_ownerTransport   = MessageTransport::NONE;
   m_ownerDeadline    = 0;
   ++m_statistics.releases;
 }
@@ -617,7 +620,7 @@ void CLGMPInputTransport::CheckOwner()
   if (!m_target)
     return;
 
-  if (m_ownerClientID && m_ownerTransport == MessageTransport::STREAM)
+  if (m_ownerClientID)
   {
     bool found = false;
     bool retiring = false;
@@ -698,8 +701,7 @@ bool CLGMPInputTransport::ValidatePayload(
 }
 
 bool CLGMPInputTransport::ProcessMessage(
-  uint32_t sourceClientID, const KVMFRInputMessage& message,
-  MessageTransport transport)
+  uint32_t sourceClientID, const KVMFRInputMessage& message)
 {
   const bool owner = IsOwner(sourceClientID, message.generation);
   InputSourceId source;
@@ -728,28 +730,20 @@ bool CLGMPInputTransport::ProcessMessage(
         ++m_statistics.nonOwner;
         return true;
       }
-      if (message.sequence == 1 && m_ownerSequence == 1 &&
-          m_ownerTransport == transport)
+      if (message.sequence == 1 && m_ownerSequence == 1)
         return true;
 
       ++m_statistics.sequenceErrors;
       ReleaseOwner(true);
       return false;
     }
-    return Claim(sourceClientID, message, transport);
+    return Claim(sourceClientID, message);
   }
 
   if (!owner)
   {
     ++m_statistics.nonOwner;
     return true;
-  }
-
-  if (m_ownerTransport != transport)
-  {
-    ++m_statistics.sequenceErrors;
-    ReleaseOwner(true);
-    return false;
   }
 
   const uint32_t expectedSequence = Seq::Next(m_ownerSequence);
@@ -823,57 +817,6 @@ bool CLGMPInputTransport::ProcessMessage(
   return true;
 }
 
-bool CLGMPInputTransport::DrainQueueMessages(bool& received)
-{
-  received = false;
-  unsigned count = 0;
-  for (; count < DRAIN_LIMIT; ++count)
-  {
-    uint8_t data[LGMP_MSGS_SIZE] = {};
-    size_t size = 0;
-    uint32_t sourceClientID = 0;
-    const LGMP_STATUS status = lgmpHostReadDataWithSource(
-      m_queue, data, &size, &sourceClientID);
-    if (status == LGMP_ERR_QUEUE_EMPTY)
-      break;
-    if (status != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostReadData Failed (Input): %s",
-        lgmpStatusString(status));
-      return false;
-    }
-
-    received = true;
-    ++m_statistics.messages;
-    if (size != sizeof(KVMFRInputMessage))
-    {
-      DEBUG_WARN("Ignoring invalid KVMFR input message size");
-      ++m_statistics.malformedSize;
-      if (sourceClientID == m_ownerClientID)
-        ReleaseOwner(true);
-    }
-    else
-    {
-      KVMFRInputMessage message = {};
-      memcpy(&message, data, sizeof(message));
-      ProcessMessage(sourceClientID, message, MessageTransport::QUEUE);
-    }
-
-    const LGMP_STATUS ackStatus = lgmpHostAckData(m_queue);
-    if (ackStatus != LGMP_OK)
-    {
-      DEBUG_ERROR("lgmpHostAckData Failed (Input): %s",
-        lgmpStatusString(ackStatus));
-      return false;
-    }
-  }
-  if (count > m_statistics.maxDrain)
-    m_statistics.maxDrain = count;
-  if (count == DRAIN_LIMIT)
-    ++m_statistics.drainLimit;
-  return true;
-}
-
 bool CLGMPInputTransport::DrainStreamMessages(bool& received)
 {
   received = false;
@@ -930,8 +873,7 @@ bool CLGMPInputTransport::DrainStreamMessages(bool& received)
       {
         KVMFRInputMessage message = {};
         memcpy(&message, buffer.data, sizeof(message));
-        ProcessMessage(selected->clientID, message,
-          MessageTransport::STREAM);
+        ProcessMessage(selected->clientID, message);
       }
     }
 
@@ -1008,7 +950,24 @@ void CLGMPInputTransport::Thread()
     DEBUG_WARN("Failed to raise input MMCSS priority: %lu",
       GetLastError());
 
-  ULONGLONG activeUntil = 0;
+  LGMPStreamPollState streamPoll = {};
+  LGMPStreamPollConfig pollConfig = {};
+  pollConfig.spinCount = 64U;
+  pollConfig.minWaitUs = 25U;
+  pollConfig.maxWaitUs = 1000U;
+  const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+    pollConfig);
+  if (pollStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to initialize LGMP input polling: %s",
+      lgmpStatusString(pollStatus));
+    if (m_target)
+      m_target->Failed();
+    if (avTaskHandle)
+      AvRevertMmThreadCharacteristics(avTaskHandle);
+    return;
+  }
+
   m_statistics = {};
   m_statistics.lastLog = GetTickCount64();
   const HANDLE waitHandles[] = { m_stopEvent, m_pollTimer };
@@ -1017,26 +976,7 @@ void CLGMPInputTransport::Thread()
   {
     CheckOwner();
     bool streamReceived = false;
-    bool queueReceived  = false;
-    bool drained = true;
-    // Do not consume the other lane while the current owner still holds its
-    // lane. Its RELEASE is the ordering barrier for a subsequent generation.
-    if (m_ownerTransport == MessageTransport::QUEUE)
-    {
-      drained = DrainQueueMessages(queueReceived);
-      if (drained && m_ownerTransport != MessageTransport::QUEUE)
-        drained = DrainStreamMessages(streamReceived);
-    }
-    else if (m_ownerTransport == MessageTransport::STREAM)
-    {
-      drained = DrainStreamMessages(streamReceived);
-      if (drained && m_ownerTransport != MessageTransport::STREAM)
-        drained = DrainQueueMessages(queueReceived);
-    }
-    else
-      drained = DrainStreamMessages(streamReceived) &&
-        DrainQueueMessages(queueReceived);
-    if (!drained)
+    if (!DrainStreamMessages(streamReceived))
     {
       failed = true;
       break;
@@ -1047,13 +987,15 @@ void CLGMPInputTransport::Thread()
       failed = true;
       break;
     }
+    if (streamReceived)
+      lgmpStreamPollActivity(&streamPoll);
     const ULONGLONG now = GetTickCount64();
-    if (streamReceived || queueReceived)
-      activeUntil = now + ACTIVE_POLL_MS;
     LogStatistics(now);
 
-    const bool active = now < activeUntil;
-    if (!ArmPollTimer(m_pollTimer, active))
+    const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+    if (!waitUs)
+      continue;
+    if (!ArmPollTimer(m_pollTimer, waitUs))
     {
       DEBUG_ERROR_HR(GetLastError(), "Failed to arm LGMP input timer");
       if (WaitForSingleObject(m_stopEvent, 1) != WAIT_TIMEOUT)

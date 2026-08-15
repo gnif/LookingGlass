@@ -42,16 +42,8 @@ class CLGMPInputTransport final : public IInputSource
 {
 private:
   static constexpr ULONGLONG OWNER_LEASE_MS = 500;
-  static constexpr ULONGLONG ACTIVE_POLL_MS  = 50;
   static constexpr ULONGLONG LOG_INTERVAL_MS = 5000;
   static constexpr unsigned  DRAIN_LIMIT     = 256;
-
-  enum class MessageTransport : uint8_t
-  {
-    NONE,
-    QUEUE,
-    STREAM,
-  };
 
   struct StreamEndpoint
   {
@@ -96,7 +88,6 @@ private:
   uint32_t         m_ownerClientID       = 0;
   uint32_t         m_ownerGeneration     = 0;
   uint32_t         m_ownerSequence       = 0;
-  MessageTransport m_ownerTransport      = MessageTransport::NONE;
   ULONGLONG        m_ownerDeadline       = 0;
   InputTargetState m_targetState;
   uint32_t         m_endpointGeneration  = 0;
@@ -116,14 +107,13 @@ private:
   bool PublishStatus();
   void FlushStatus();
   void LogStatistics(ULONGLONG now);
-  bool DrainQueueMessages(bool& received);
   bool DrainStreamMessages(bool& received);
   bool ProcessMessage(uint32_t sourceClientID,
-    const KVMFRInputMessage& message, MessageTransport transport);
+    const KVMFRInputMessage& message);
   bool ValidatePayload(const KVMFRInputMessage& message) const;
   bool IsOwner(uint32_t sourceClientID, uint32_t generation) const;
   bool Claim(uint32_t sourceClientID,
-    const KVMFRInputMessage& message, MessageTransport transport);
+    const KVMFRInputMessage& message);
   void RenewLease();
   void ReleaseOwner(bool reset);
   void CheckOwner();
