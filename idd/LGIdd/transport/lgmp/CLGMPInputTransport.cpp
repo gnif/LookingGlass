@@ -71,6 +71,22 @@ static bool ArmPollTimer(HANDLE timer, bool active)
   return SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) != FALSE;
 }
 
+static KVMFRStreamDescriptor ExportStreamDescriptor(
+  const LGMPStreamDescriptor& source)
+{
+  KVMFRStreamDescriptor result = {};
+  result.magic      = source.magic;
+  result.version    = source.version;
+  result.size       = source.size;
+  result.offset     = source.offset;
+  result.regionSize = source.regionSize;
+  result.direction  = source.direction;
+  result.policy     = source.policy;
+  result.slotCount  = source.slotCount;
+  result.slotSize   = source.slotSize;
+  return result;
+}
+
 CLGMPInputTransport::~CLGMPInputTransport()
 {
   DeInit();
@@ -89,6 +105,27 @@ bool CLGMPInputTransport::Initialize()
       lgmpStatusString(status));
     return false;
   }
+
+  const LGMPStreamConfig streamConfig =
+  {
+    LGMP_STREAM_CLIENT_TO_HOST,
+    LGMP_STREAM_RELIABLE_FIFO,
+    KVMFR_INPUT_STREAM_SLOT_COUNT,
+    KVMFR_INPUT_STREAM_SLOT_SIZE,
+  };
+  for (StreamEndpoint& endpoint : m_streamEndpoint)
+  {
+    status = m_host.CreateStream(streamConfig, &endpoint.stream);
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostStreamNew Failed (Input): %s",
+        lgmpStatusString(status));
+      DeInit();
+      return false;
+    }
+    lgmpHostStreamGetDescriptor(endpoint.stream, &endpoint.descriptor);
+  }
+  Seq::Inc(m_streamGeneration);
 
   for (PLGMPMemory& memory : m_statusMemory)
   {
@@ -115,7 +152,160 @@ void CLGMPInputTransport::DeInit()
   Stop();
   for (PLGMPMemory& memory : m_statusMemory)
     lgmpHostMemFree(&memory);
+  for (StreamEndpoint& endpoint : m_streamEndpoint)
+  {
+    lgmpHostStreamFree(&endpoint.stream);
+    endpoint = {};
+  }
+  m_streamGeneration  = 0;
+  m_streamDrainCursor = 0;
   m_queue = nullptr;
+}
+
+bool CLGMPInputTransport::ReconcileStreams(bool& changed)
+{
+  changed = false;
+  uint32_t activeClientIDs[32] = {};
+  unsigned activeClientCount = 0;
+  const LGMP_STATUS clientsStatus = lgmpHostGetClientIDs(
+    m_queue, activeClientIDs, &activeClientCount);
+  if (clientsStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("lgmpHostGetClientIDs Failed (Input): %s",
+      lgmpStatusString(clientsStatus));
+    return false;
+  }
+
+  CSRWExclusiveLock lock(m_streamLock);
+  for (StreamEndpoint& endpoint : m_streamEndpoint)
+  {
+    if (!endpoint.clientID)
+      continue;
+
+    bool active = false;
+    for (unsigned i = 0; i < activeClientCount; ++i)
+      if (activeClientIDs[i] == endpoint.clientID)
+      {
+        active = true;
+        break;
+      }
+    if (!active)
+    {
+      if (!endpoint.draining)
+      {
+        endpoint.draining = true;
+        changed = true;
+      }
+
+      const LGMP_STATUS status = lgmpHostStreamUnbind(endpoint.stream);
+      if (status == LGMP_ERR_STREAM_BUSY)
+        continue;
+      if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
+      {
+        DEBUG_ERROR("lgmpHostStreamUnbind Failed (Input): %s",
+          lgmpStatusString(status));
+        return false;
+      }
+      endpoint.clientID = 0;
+      endpoint.epoch    = 0;
+      endpoint.draining = false;
+      changed           = true;
+      continue;
+    }
+
+    if (!endpoint.draining)
+      continue;
+
+    const LGMP_STATUS status = lgmpHostStreamUnbind(endpoint.stream);
+    if (status == LGMP_ERR_STREAM_BUSY)
+      continue;
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostStreamUnbind Failed (Input): %s",
+        lgmpStatusString(status));
+      return false;
+    }
+    endpoint.clientID = 0;
+    endpoint.epoch    = 0;
+    endpoint.draining = false;
+    changed           = true;
+  }
+
+  for (unsigned i = 0; i < activeClientCount; ++i)
+  {
+    const uint32_t clientID = activeClientIDs[i];
+    bool bound = false;
+    for (const StreamEndpoint& endpoint : m_streamEndpoint)
+      if (endpoint.clientID == clientID)
+      {
+        bound = true;
+        break;
+      }
+    if (bound)
+      continue;
+
+    StreamEndpoint * available = nullptr;
+    for (StreamEndpoint& endpoint : m_streamEndpoint)
+      if (!endpoint.clientID)
+      {
+        available = &endpoint;
+        break;
+      }
+    if (!available)
+      continue;
+
+    uint32_t epoch = 0;
+    const LGMP_STATUS status = lgmpHostStreamBind(
+      available->stream, clientID, &epoch);
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostStreamBind Failed (Input client %u): %s",
+        clientID, lgmpStatusString(status));
+      return false;
+    }
+    available->clientID = clientID;
+    available->epoch    = epoch;
+    available->draining = false;
+    changed             = true;
+  }
+
+  if (changed)
+    Seq::Inc(m_streamGeneration);
+  return true;
+}
+
+void CLGMPInputTransport::ResetStreams()
+{
+  bool changed = false;
+  {
+    CSRWExclusiveLock lock(m_streamLock);
+    for (StreamEndpoint& endpoint : m_streamEndpoint)
+    {
+      if (!endpoint.clientID)
+        continue;
+      const LGMP_STATUS status = lgmpHostStreamUnbind(endpoint.stream);
+      if (status != LGMP_OK && status != LGMP_ERR_STREAM_BUSY)
+        DEBUG_WARN("lgmpHostStreamUnbind Failed (Input): %s",
+          lgmpStatusString(status));
+      if (status == LGMP_OK)
+      {
+        endpoint.clientID = 0;
+        endpoint.epoch    = 0;
+        endpoint.draining = false;
+      }
+      else if (status == LGMP_ERR_STREAM_BUSY)
+        endpoint.draining = true;
+      changed           = true;
+    }
+    if (changed)
+      Seq::Inc(m_streamGeneration);
+  }
+
+  if (changed)
+  {
+    CSRWExclusiveLock lock(m_statusLock);
+    m_statusDirty = true;
+  }
 }
 
 InputSourceId CLGMPInputTransport::Owner() const
@@ -147,11 +337,19 @@ void CLGMPInputTransport::UpdateTargetState(
 
 bool CLGMPInputTransport::PublishStatus()
 {
-  CSRWExclusiveLock lock(m_statusLock);
   if (!m_queue)
     return true;
 
+  bool streamChanged = false;
+  if (!ReconcileStreams(streamChanged))
+    return false;
+
+  CSRWSharedLock streamLock(m_streamLock);
+  CSRWExclusiveLock lock(m_statusLock);
+
   if (lgmpHostQueueNewSubs(m_queue))
+    m_statusDirty = true;
+  if (streamChanged)
     m_statusDirty = true;
   if (!m_statusDirty || !lgmpHostQueueHasSubs(m_queue))
     return true;
@@ -180,9 +378,29 @@ bool CLGMPInputTransport::PublishStatus()
     status.ownerClientID   = m_targetState.owner.client;
     status.ownerGeneration = m_targetState.owner.generation;
   }
-  status.generation = m_endpointGeneration;
-  status.lease      = static_cast<uint32_t>(OWNER_LEASE_MS);
-  status.maxButtons = KVMFR_INPUT_MOUSE_BUTTON_COUNT;
+  status.generation          = m_endpointGeneration;
+  status.lease               = static_cast<uint32_t>(OWNER_LEASE_MS);
+  status.maxButtons          = KVMFR_INPUT_MOUSE_BUTTON_COUNT;
+  status.transports          = KVMFR_INPUT_TRANSPORT_QUEUE |
+    KVMFR_INPUT_TRANSPORT_STREAM;
+  status.streamVersion       = KVMFR_INPUT_STREAM_VERSION;
+  status.streamEndpointCount = KVMFR_INPUT_STREAM_ENDPOINT_COUNT;
+  status.streamGeneration    = m_streamGeneration;
+  for (unsigned i = 0; i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
+  {
+    const StreamEndpoint& endpoint = m_streamEndpoint[i];
+    KVMFRInputStreamEndpoint& exported = status.streamEndpoint[i];
+    exported.stream                    =
+      ExportStreamDescriptor(endpoint.descriptor);
+    exported.flags                     =
+      KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE;
+    if (endpoint.clientID && !endpoint.draining)
+    {
+      exported.boundClientID             = endpoint.clientID;
+      exported.bindingGeneration         = endpoint.epoch;
+      exported.flags |= KVMFR_INPUT_STREAM_ENDPOINT_BOUND;
+    }
+  }
   memcpy(lgmpHostMemPtr(memory), &status, sizeof(status));
 
   const uint32_t serial = Seq::Next(m_statusSerial);
@@ -235,6 +453,7 @@ bool CLGMPInputTransport::Start(IInputTarget& target)
     m_pollTimer = nullptr;
     m_stopEvent = nullptr;
     m_target    = nullptr;
+    ResetStreams();
   }
 
   if (!m_queue)
@@ -313,10 +532,12 @@ void CLGMPInputTransport::Stop()
     m_stopEvent = nullptr;
   }
   m_target = nullptr;
-  m_ownerClientID   = 0;
-  m_ownerGeneration = 0;
-  m_ownerSequence   = 0;
-  m_ownerDeadline   = 0;
+  m_ownerClientID    = 0;
+  m_ownerGeneration  = 0;
+  m_ownerSequence    = 0;
+  m_ownerTransport   = MessageTransport::NONE;
+  m_ownerDeadline    = 0;
+  ResetStreams();
   {
     CSRWExclusiveLock statusLock(m_statusLock);
     m_targetState = {};
@@ -332,7 +553,8 @@ bool CLGMPInputTransport::IsOwner(
 }
 
 bool CLGMPInputTransport::Claim(
-  uint32_t sourceClientID, const KVMFRInputMessage& message)
+  uint32_t sourceClientID, const KVMFRInputMessage& message,
+  MessageTransport transport)
 {
   if (message.sequence != 1)
   {
@@ -356,9 +578,10 @@ bool CLGMPInputTransport::Claim(
     return false;
   }
 
-  m_ownerClientID   = sourceClientID;
-  m_ownerGeneration = message.generation;
-  m_ownerSequence   = message.sequence;
+  m_ownerClientID    = sourceClientID;
+  m_ownerGeneration  = message.generation;
+  m_ownerSequence    = message.sequence;
+  m_ownerTransport   = transport;
   RenewLease();
   UpdateTargetState(m_target->GetState(source));
   ++m_statistics.claims;
@@ -381,10 +604,11 @@ void CLGMPInputTransport::ReleaseOwner(bool reset)
     UpdateTargetState(m_target->GetState({}));
   }
 
-  m_ownerClientID   = 0;
-  m_ownerGeneration = 0;
-  m_ownerSequence   = 0;
-  m_ownerDeadline   = 0;
+  m_ownerClientID    = 0;
+  m_ownerGeneration  = 0;
+  m_ownerSequence    = 0;
+  m_ownerTransport   = MessageTransport::NONE;
+  m_ownerDeadline    = 0;
   ++m_statistics.releases;
 }
 
@@ -392,6 +616,27 @@ void CLGMPInputTransport::CheckOwner()
 {
   if (!m_target)
     return;
+
+  if (m_ownerClientID && m_ownerTransport == MessageTransport::STREAM)
+  {
+    bool found = false;
+    bool retiring = false;
+    {
+      CSRWSharedLock lock(m_streamLock);
+      for (const StreamEndpoint& endpoint : m_streamEndpoint)
+        if (endpoint.clientID == m_ownerClientID)
+        {
+          found = true;
+          retiring = endpoint.draining;
+          break;
+        }
+    }
+    if (!found || retiring)
+    {
+      ReleaseOwner(true);
+      return;
+    }
+  }
 
   const InputTargetState state = m_target->GetState(Owner());
   UpdateTargetState(state);
@@ -453,7 +698,8 @@ bool CLGMPInputTransport::ValidatePayload(
 }
 
 bool CLGMPInputTransport::ProcessMessage(
-  uint32_t sourceClientID, const KVMFRInputMessage& message)
+  uint32_t sourceClientID, const KVMFRInputMessage& message,
+  MessageTransport transport)
 {
   const bool owner = IsOwner(sourceClientID, message.generation);
   InputSourceId source;
@@ -482,20 +728,28 @@ bool CLGMPInputTransport::ProcessMessage(
         ++m_statistics.nonOwner;
         return true;
       }
-      if (message.sequence == 1 && m_ownerSequence == 1)
+      if (message.sequence == 1 && m_ownerSequence == 1 &&
+          m_ownerTransport == transport)
         return true;
 
       ++m_statistics.sequenceErrors;
       ReleaseOwner(true);
       return false;
     }
-    return Claim(sourceClientID, message);
+    return Claim(sourceClientID, message, transport);
   }
 
   if (!owner)
   {
     ++m_statistics.nonOwner;
     return true;
+  }
+
+  if (m_ownerTransport != transport)
+  {
+    ++m_statistics.sequenceErrors;
+    ReleaseOwner(true);
+    return false;
   }
 
   const uint32_t expectedSequence = Seq::Next(m_ownerSequence);
@@ -569,11 +823,11 @@ bool CLGMPInputTransport::ProcessMessage(
   return true;
 }
 
-bool CLGMPInputTransport::DrainMessages(bool& received)
+bool CLGMPInputTransport::DrainQueueMessages(bool& received)
 {
   received = false;
   unsigned count = 0;
-  for (; count < 256; ++count)
+  for (; count < DRAIN_LIMIT; ++count)
   {
     uint8_t data[LGMP_MSGS_SIZE] = {};
     size_t size = 0;
@@ -602,7 +856,7 @@ bool CLGMPInputTransport::DrainMessages(bool& received)
     {
       KVMFRInputMessage message = {};
       memcpy(&message, data, sizeof(message));
-      ProcessMessage(sourceClientID, message);
+      ProcessMessage(sourceClientID, message, MessageTransport::QUEUE);
     }
 
     const LGMP_STATUS ackStatus = lgmpHostAckData(m_queue);
@@ -615,7 +869,85 @@ bool CLGMPInputTransport::DrainMessages(bool& received)
   }
   if (count > m_statistics.maxDrain)
     m_statistics.maxDrain = count;
-  if (count == 256)
+  if (count == DRAIN_LIMIT)
+    ++m_statistics.drainLimit;
+  return true;
+}
+
+bool CLGMPInputTransport::DrainStreamMessages(bool& received)
+{
+  received = false;
+  unsigned count = 0;
+  CSRWSharedLock lock(m_streamLock);
+  for (; count < DRAIN_LIMIT; ++count)
+  {
+    StreamEndpoint * selected = nullptr;
+    LGMPStreamBuffer buffer = {};
+    for (unsigned scanned = 0;
+        scanned < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++scanned)
+    {
+      const unsigned index = (m_streamDrainCursor + scanned) %
+        KVMFR_INPUT_STREAM_ENDPOINT_COUNT;
+      StreamEndpoint& endpoint = m_streamEndpoint[index];
+      if (!endpoint.clientID)
+        continue;
+
+      const LGMP_STATUS status = lgmpHostStreamReadPeek(
+        endpoint.stream, &buffer);
+      if (status == LGMP_ERR_STREAM_EMPTY ||
+          status == LGMP_ERR_STREAM_UNBOUND)
+        continue;
+      if (status != LGMP_OK)
+      {
+        DEBUG_ERROR("lgmpHostStreamReadPeek Failed (Input): %s",
+          lgmpStatusString(status));
+        return false;
+      }
+
+      selected = &endpoint;
+      m_streamDrainCursor = (index + 1) %
+        KVMFR_INPUT_STREAM_ENDPOINT_COUNT;
+      break;
+    }
+
+    if (!selected)
+      break;
+
+    received = true;
+    ++m_statistics.messages;
+    // Retired endpoint generations are consumed only to finish their
+    // graceful unbind; they must not reach a newly started input target.
+    if (!selected->draining)
+    {
+      if (buffer.size != sizeof(KVMFRInputMessage))
+      {
+        DEBUG_WARN("Ignoring invalid KVMFR input stream message size");
+        ++m_statistics.malformedSize;
+        if (selected->clientID == m_ownerClientID)
+          ReleaseOwner(true);
+      }
+      else
+      {
+        KVMFRInputMessage message = {};
+        memcpy(&message, buffer.data, sizeof(message));
+        ProcessMessage(selected->clientID, message,
+          MessageTransport::STREAM);
+      }
+    }
+
+    const LGMP_STATUS releaseStatus = lgmpHostStreamReadRelease(
+      selected->stream, &buffer);
+    if (releaseStatus != LGMP_OK)
+    {
+      DEBUG_ERROR("lgmpHostStreamReadRelease Failed (Input): %s",
+        lgmpStatusString(releaseStatus));
+      return false;
+    }
+  }
+
+  if (count > m_statistics.maxDrain)
+    m_statistics.maxDrain = count;
+  if (count == DRAIN_LIMIT)
     ++m_statistics.drainLimit;
   return true;
 }
@@ -684,8 +1016,27 @@ void CLGMPInputTransport::Thread()
   for (;;)
   {
     CheckOwner();
-    bool received = false;
-    if (!DrainMessages(received))
+    bool streamReceived = false;
+    bool queueReceived  = false;
+    bool drained = true;
+    // Do not consume the other lane while the current owner still holds its
+    // lane. Its RELEASE is the ordering barrier for a subsequent generation.
+    if (m_ownerTransport == MessageTransport::QUEUE)
+    {
+      drained = DrainQueueMessages(queueReceived);
+      if (drained && m_ownerTransport != MessageTransport::QUEUE)
+        drained = DrainStreamMessages(streamReceived);
+    }
+    else if (m_ownerTransport == MessageTransport::STREAM)
+    {
+      drained = DrainStreamMessages(streamReceived);
+      if (drained && m_ownerTransport != MessageTransport::STREAM)
+        drained = DrainQueueMessages(queueReceived);
+    }
+    else
+      drained = DrainStreamMessages(streamReceived) &&
+        DrainQueueMessages(queueReceived);
+    if (!drained)
     {
       failed = true;
       break;
@@ -697,7 +1048,7 @@ void CLGMPInputTransport::Thread()
       break;
     }
     const ULONGLONG now = GetTickCount64();
-    if (received)
+    if (streamReceived || queueReceived)
       activeUntil = now + ACTIVE_POLL_MS;
     LogStatistics(now);
 

@@ -23,6 +23,7 @@
 #include "Atomic.h"
 #include "CSRWLock.h"
 #include "transport/IInputSource.h"
+#include "common/KVMFRInput.h"
 #include "common/LGMPConfig.h"
 
 #include <Windows.h>
@@ -31,11 +32,11 @@
 
 extern "C" {
   #include "lgmp/host.h"
+  #include "lgmp/stream.h"
 }
 
 class CLGMPHost;
 class IInputTarget;
-struct KVMFRInputMessage;
 
 class CLGMPInputTransport final : public IInputSource
 {
@@ -43,6 +44,23 @@ private:
   static constexpr ULONGLONG OWNER_LEASE_MS = 500;
   static constexpr ULONGLONG ACTIVE_POLL_MS  = 50;
   static constexpr ULONGLONG LOG_INTERVAL_MS = 5000;
+  static constexpr unsigned  DRAIN_LIMIT     = 256;
+
+  enum class MessageTransport : uint8_t
+  {
+    NONE,
+    QUEUE,
+    STREAM,
+  };
+
+  struct StreamEndpoint
+  {
+    PLGMPHostStream       stream;
+    LGMPStreamDescriptor descriptor;
+    uint32_t              clientID;
+    uint32_t              epoch;
+    bool                  draining;
+  };
 
   struct Statistics
   {
@@ -64,39 +82,48 @@ private:
 
   PLGMPHostQueue m_queue                          = nullptr;
   PLGMPMemory    m_statusMemory[LGMP_Q_INPUT_LEN] = {};
+  StreamEndpoint m_streamEndpoint[
+    KVMFR_INPUT_STREAM_ENDPOINT_COUNT]            = {};
   IInputTarget * m_target                         = nullptr;
 
   CSRWLock m_lifecycleLock;
   CSRWLock m_statusLock;
+  CSRWLock m_streamLock;
   HANDLE   m_stopEvent = nullptr;
   HANDLE   m_pollTimer = nullptr;
   HANDLE   m_thread    = nullptr;
 
-  uint32_t   m_ownerClientID       = 0;
-  uint32_t   m_ownerGeneration     = 0;
-  uint32_t   m_ownerSequence       = 0;
-  ULONGLONG  m_ownerDeadline       = 0;
+  uint32_t         m_ownerClientID       = 0;
+  uint32_t         m_ownerGeneration     = 0;
+  uint32_t         m_ownerSequence       = 0;
+  MessageTransport m_ownerTransport      = MessageTransport::NONE;
+  ULONGLONG        m_ownerDeadline       = 0;
   InputTargetState m_targetState;
-  uint32_t   m_endpointGeneration = 0;
-  uint32_t   m_statusSerial        = 0;
-  bool       m_statusDirty         = false;
-  std::atomic<bool> m_statusFailed = false;
-  Statistics m_statistics         = {};
+  uint32_t         m_endpointGeneration  = 0;
+  uint32_t         m_streamGeneration    = 0;
+  unsigned         m_streamDrainCursor   = 0;
+  uint32_t         m_statusSerial        = 0;
+  bool             m_statusDirty         = false;
+  std::atomic<bool> m_statusFailed       = false;
+  Statistics       m_statistics         = {};
 
   bool Initialize();
   void DeInit();
+  bool ReconcileStreams(bool& changed);
+  void ResetStreams();
   InputSourceId Owner() const;
   void UpdateTargetState(const InputTargetState& state);
   bool PublishStatus();
   void FlushStatus();
   void LogStatistics(ULONGLONG now);
-  bool DrainMessages(bool& received);
+  bool DrainQueueMessages(bool& received);
+  bool DrainStreamMessages(bool& received);
   bool ProcessMessage(uint32_t sourceClientID,
-    const KVMFRInputMessage& message);
+    const KVMFRInputMessage& message, MessageTransport transport);
   bool ValidatePayload(const KVMFRInputMessage& message) const;
   bool IsOwner(uint32_t sourceClientID, uint32_t generation) const;
   bool Claim(uint32_t sourceClientID,
-    const KVMFRInputMessage& message);
+    const KVMFRInputMessage& message, MessageTransport transport);
   void RenewLease();
   void ReleaseOwner(bool reset);
   void CheckOwner();
