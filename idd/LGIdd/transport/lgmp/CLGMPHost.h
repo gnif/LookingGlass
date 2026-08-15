@@ -29,6 +29,7 @@
 
 extern "C" {
   #include "lgmp/host.h"
+  #include "lgmp/stream.h"
 }
 
 class CIVSHMEM;
@@ -54,6 +55,8 @@ public:
 
   LGMP_STATUS CreateQueue(const struct LGMPQueueConfig& config,
     PLGMPHostQueue * queue);
+  LGMP_STATUS CreateStream(const struct LGMPStreamConfig& config,
+    PLGMPHostStream * stream);
   LGMP_STATUS Allocate(uint32_t size, PLGMPMemory * memory);
   LGMP_STATUS AllocateAligned(uint32_t size, uint32_t alignment,
     PLGMPMemory * memory);
