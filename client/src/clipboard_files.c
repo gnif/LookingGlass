@@ -2160,15 +2160,17 @@ static bool getRemoteDatasetNL(struct RemoteDataset * dataset,
   }
   if (strcmp(mime, FILE_URI_MIME) && strcmp(mime, FILE_GNOME_MIME))
     return false;
+
+  const bool gnome = !strcmp(mime, FILE_GNOME_MIME);
   char * result = NULL;
   size_t used = 0;
   size_t capacity = 0;
-  if (!strcmp(mime, FILE_GNOME_MIME))
+  if (gnome)
   {
-    if (!grow((void **)&result, &capacity, 6U))
+    if (!grow((void **)&result, &capacity, 5U))
       return false;
-    memcpy(result, "copy\n", 5U);
-    used = 5U;
+    memcpy(result, "copy", 4U);
+    used = 4U;
   }
   for (struct RemoteNode * node = files.remoteNodes; node; node = node->next)
   {
@@ -2185,14 +2187,20 @@ static bool getRemoteDatasetNL(struct RemoteDataset * dataset,
     free(raw);
     if (!encoded)
       goto error;
+
     const size_t line = strlen(FILE_URI_PREFIX) + strlen(encoded) + 2U;
     if (!grow((void **)&result, &capacity, used + line + 1U))
     {
       free(encoded);
       goto error;
     }
-    used += (size_t)snprintf(result + used, capacity - used,
-        FILE_URI_PREFIX "%s\r\n", encoded);
+
+    if (gnome)
+      used += (size_t)snprintf(result + used, capacity - used,
+          "\n" FILE_URI_PREFIX "%s", encoded);
+    else
+      used += (size_t)snprintf(result + used, capacity - used,
+          FILE_URI_PREFIX "%s\r\n", encoded);
     free(encoded);
   }
   if (!result)
