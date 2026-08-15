@@ -26,6 +26,7 @@
 
 #include <lgmp/client.h>
 #include <lgmp/host.h>
+#include <lgmp/stream.h>
 
 #include <pthread.h>
 #include <stdatomic.h>
@@ -38,14 +39,11 @@
 #define TEST_WAIT_MS          2500U
 #define TEST_QUIET_MS         50U
 #define TEST_MEMORY_MAX       128U
-#define SLOT_BYTES            \
-  (sizeof(KVMFRClipboardSlotHeader) + KVMFR_CLIPBOARD_DATA_BYTES)
-#define TEST_TRANSIENT_SLOTS  4U
+#define SLOT_BYTES            KVMFR_CLIPBOARD_STREAM_RECORD_BYTES
 #define TEST_SHM_OVERHEAD     (1024U * 1024U)
-/* Match the production inbound and outbound slot pools, retain several
- * synthetic host DATA records at once, and leave room for LGMP metadata. */
+/* Match the production duplex streams and leave room for LGMP metadata. */
 #define TEST_SHM_SIZE         \
-  ((2U * KVMFR_CLIPBOARD_SLOT_COUNT + TEST_TRANSIENT_SLOTS) * SLOT_BYTES + \
+  (2U * KVMFR_CLIPBOARD_STREAM_SLOT_COUNT * SLOT_BYTES + \
     TEST_SHM_OVERHEAD)
 
 #define CHECK(x) \
@@ -106,6 +104,11 @@ typedef struct TestState
   PLGMPHost               host;
   PLGMPHostQueue          queue;
   PLGMPClient             client;
+  PLGMPHostStream         hostToClientStream;
+  PLGMPHostStream         clientToHostStream;
+  KVMFRStreamDescriptor   hostToClientDescriptor;
+  KVMFRStreamDescriptor   clientToHostDescriptor;
+  bool                    streamsBound;
   LGMPClipboard         * clipboard;
   const LG_ClipboardOps * ops;
   uint32_t                clientID;
@@ -113,7 +116,6 @@ typedef struct TestState
   uint64_t                localClipboardGeneration;
   PLGMPMemory             memories[TEST_MEMORY_MAX];
   unsigned                memoryCount;
-  PLGMPMemory             grantMemory[KVMFR_CLIPBOARD_SLOT_COUNT];
   atomic_uint             statusCount;
   atomic_bool             statusAvailable;
   atomic_uint             statusGeneration;
@@ -315,6 +317,23 @@ static bool hostProcess(TestState * state)
   return true;
 }
 
+static KVMFRStreamDescriptor exportStreamDescriptor(
+    const struct LGMPStreamDescriptor * descriptor)
+{
+  return (KVMFRStreamDescriptor)
+  {
+    .magic      = descriptor->magic,
+    .version    = descriptor->version,
+    .size       = descriptor->size,
+    .offset     = descriptor->offset,
+    .regionSize = descriptor->regionSize,
+    .direction  = descriptor->direction,
+    .policy     = descriptor->policy,
+    .slotCount  = descriptor->slotCount,
+    .slotSize   = descriptor->slotSize,
+  };
+}
+
 static bool waitAtomic(TestState * state, atomic_uint * value,
     unsigned expected)
 {
@@ -375,10 +394,31 @@ static uint32_t nextSerial(TestState * state)
   return state->hostSerial;
 }
 
+static bool unbindStream(TestState * state, PLGMPHostStream stream)
+{
+  for (unsigned i = 0; i < TEST_WAIT_MS; ++i)
+  {
+    const LGMP_STATUS status = lgmpHostStreamUnbind(stream);
+    if (status == LGMP_OK)
+      return true;
+    CHECK(status == LGMP_ERR_STREAM_BUSY);
+    CHECK(hostProcess(state));
+    usleep(1000);
+  }
+  return false;
+}
+
 static bool postStatus(TestState * state, uint32_t endpointGeneration,
     uint32_t ownerClientID, uint32_t ownerGeneration,
     bool available, KVMFRClipboardFormatFlags formats)
 {
+  if (!ownerClientID && state->streamsBound)
+  {
+    CHECK(unbindStream(state, state->clientToHostStream));
+    CHECK(unbindStream(state, state->hostToClientStream));
+    state->streamsBound = false;
+  }
+
   PLGMPMemory memory;
   CHECK(allocMemory(state, sizeof(KVMFRClipboardStatus), &memory));
   KVMFRClipboardStatus * status = lgmpHostMemPtr(memory);
@@ -392,7 +432,11 @@ static bool postStatus(TestState * state, uint32_t endpointGeneration,
     .ownerGeneration = ownerGeneration,
     .lease            = 1000,
     .formats          = available ? formats : 0,
-    .slotBytes        = KVMFR_CLIPBOARD_DATA_BYTES,
+    .slotBytes        = KVMFR_CLIPBOARD_STREAM_SLOT_BYTES,
+    .streamVersion    = KVMFR_CLIPBOARD_STREAM_VERSION,
+    .streamSlotCount  = KVMFR_CLIPBOARD_STREAM_SLOT_COUNT,
+    .hostToClient     = state->hostToClientDescriptor,
+    .clientToHost     = state->clientToHostDescriptor,
   };
   CHECK(postMemory(state, memory, KVMFR_CLIPBOARD_QUEUE_STATUS,
         nextSerial(state)));
@@ -404,37 +448,109 @@ static bool postRecord(TestState * state,
     const KVMFRClipboardMessage * record,
     KVMFRClipboardQueueType type, const void * data)
 {
-  const size_t bytes = type == KVMFR_CLIPBOARD_QUEUE_DATA ?
-    SLOT_BYTES : sizeof(*record);
+  CHECK(type == KVMFR_CLIPBOARD_QUEUE_MESSAGE);
+  CHECK(record->length == 0);
+  CHECK(data == NULL);
   PLGMPMemory memory;
-  CHECK(allocMemory(state, bytes, &memory));
+  CHECK(allocMemory(state, sizeof(*record), &memory));
   memcpy(lgmpHostMemPtr(memory), record, sizeof(*record));
-  if (record->length && data)
-    memcpy((uint8_t *)lgmpHostMemPtr(memory) + sizeof(*record),
-      data, record->length);
   CHECK(postMemory(state, memory, type, nextSerial(state)));
   return true;
 }
 
-static bool postGrant(TestState * state, uint32_t generation,
-    uint32_t token)
+static bool postStreamRecord(TestState * state,
+    const KVMFRClipboardMessage * record, const void * data)
 {
-  CHECK(token >= 1 && token <= KVMFR_CLIPBOARD_SLOT_COUNT);
-  PLGMPMemory * memory = &state->grantMemory[token - 1];
-  if (!*memory)
-    CHECK(allocMemory(state, SLOT_BYTES, memory));
-  else
-    CHECK(waitMemory(state, *memory));
+  CHECK(state->streamsBound);
+  CHECK(record->length <= KVMFR_CLIPBOARD_STREAM_SLOT_BYTES);
+  CHECK(!record->length || data);
+  for (unsigned i = 0; i < TEST_WAIT_MS; ++i)
+  {
+    CHECK(hostProcess(state));
+    LGMPStreamBuffer buffer = { 0 };
+    const LGMP_STATUS status = lgmpHostStreamWriteAcquire(
+      state->hostToClientStream, &buffer);
+    if (status == LGMP_ERR_STREAM_FULL)
+    {
+      usleep(1000);
+      continue;
+    }
+    CHECK(status == LGMP_OK);
+    const uint32_t bytes = sizeof(*record) + record->length;
+    CHECK(buffer.capacity >= bytes);
+    memcpy(buffer.data, record, sizeof(*record));
+    if (record->length)
+      memcpy((uint8_t *)buffer.data + sizeof(*record), data,
+        record->length);
+    CHECK(lgmpHostStreamWriteCommit(state->hostToClientStream,
+          &buffer, bytes) == LGMP_OK);
+    return true;
+  }
+  return false;
+}
 
-  KVMFRClipboardSlotHeader * header = lgmpHostMemPtr(*memory);
-  memset(header, 0, sizeof(*header));
-  header->version    = KVMFR_CLIPBOARD_VERSION;
-  header->type       = KVMFR_CLIPBOARD_MESSAGE_GRANT;
-  header->generation = generation;
-  header->size       = KVMFR_CLIPBOARD_DATA_BYTES;
-  header->token      = token;
-  return postMemory(state, *memory,
-    KVMFR_CLIPBOARD_QUEUE_GRANT, token);
+static bool settleHostStream(TestState * state)
+{
+  for (unsigned i = 0; i < TEST_QUIET_MS; ++i)
+  {
+    CHECK(hostProcess(state));
+    usleep(1000);
+  }
+  return true;
+}
+
+static bool expectPayloadQueueClean(TestState * state)
+{
+  for (;;)
+  {
+    KVMFRClipboardMessage record;
+    size_t size = sizeof(record);
+    uint32_t clientID = 0;
+    const LGMP_STATUS status = lgmpHostReadDataWithSource(
+      state->queue, &record, &size, &clientID);
+    if (status == LGMP_ERR_QUEUE_EMPTY)
+      return true;
+    CHECK(status == LGMP_OK);
+    CHECK(size == sizeof(record));
+    CHECK(clientID == state->clientID);
+    CHECK(lgmpHostAckData(state->queue) == LGMP_OK);
+    CHECK(record.type == KVMFR_CLIPBOARD_MESSAGE_KEEPALIVE);
+  }
+}
+
+static bool readClientStream(TestState * state,
+    KVMFRClipboardMessage * record, LGMPStreamBuffer * buffer,
+    const void ** data)
+{
+  for (unsigned i = 0; i < TEST_WAIT_MS; ++i)
+  {
+    CHECK(hostProcess(state));
+    CHECK(expectPayloadQueueClean(state));
+    memset(buffer, 0, sizeof(*buffer));
+    const LGMP_STATUS status = lgmpHostStreamReadPeek(
+      state->clientToHostStream, buffer);
+    if (status == LGMP_ERR_STREAM_EMPTY)
+    {
+      usleep(1000);
+      continue;
+    }
+    CHECK(status == LGMP_OK);
+    CHECK(buffer->size >= sizeof(*record));
+    memcpy(record, buffer->data, sizeof(*record));
+    CHECK(buffer->size == sizeof(*record) + record->length);
+    *data = (const uint8_t *)buffer->data + sizeof(*record);
+    return true;
+  }
+  return false;
+}
+
+static bool releaseClientStream(TestState * state,
+    LGMPStreamBuffer * buffer)
+{
+  CHECK(lgmpHostStreamReadRelease(
+        state->clientToHostStream, buffer) == LGMP_OK);
+  memset(buffer, 0, sizeof(*buffer));
+  return true;
 }
 
 static bool readClient(TestState * state, KVMFRClipboardMessage * record)
@@ -454,6 +570,8 @@ static bool readClient(TestState * state, KVMFRClipboardMessage * record)
     CHECK(status == LGMP_OK);
     CHECK(size == sizeof(*record));
     CHECK(clientID == state->clientID);
+    CHECK(record->type != KVMFR_CLIPBOARD_MESSAGE_DATA);
+    CHECK(record->type != KVMFR_CLIPBOARD_MESSAGE_FILE_DATA);
     CHECK(lgmpHostAckData(state->queue) == LGMP_OK);
     return true;
   }
@@ -484,7 +602,7 @@ static bool readNonKeepalive(TestState * state,
   return false;
 }
 
-static bool noClientData(TestState * state)
+static bool noClientControl(TestState * state)
 {
   for (unsigned i = 0; i < TEST_QUIET_MS; ++i)
   {
@@ -531,12 +649,25 @@ static bool claim(TestState * state, uint32_t endpointGeneration,
   CHECK(result->version == KVMFR_CLIPBOARD_VERSION);
   CHECK(result->generation != 0);
   CHECK(result->token == endpointGeneration);
+  CHECK(result->flags == 0);
   return true;
 }
 
 static bool own(TestState * state, uint32_t endpointGeneration,
     uint32_t claimGeneration)
 {
+  if (!state->streamsBound)
+  {
+    CHECK(lgmpHostStreamBind(state->hostToClientStream,
+          state->clientID, NULL) == LGMP_OK);
+    if (lgmpHostStreamBind(state->clientToHostStream,
+          state->clientID, NULL) != LGMP_OK)
+    {
+      lgmpHostStreamUnbind(state->hostToClientStream);
+      return false;
+    }
+    state->streamsBound = true;
+  }
   CHECK(postStatus(state, endpointGeneration, state->clientID,
         claimGeneration, true, 0));
   return true;
@@ -625,7 +756,7 @@ static bool testInboundStream(TestState * state)
   data.size     = 5;
   data.format   = KVMFR_CLIPBOARD_FORMAT_TEXT;
   data.flags    = KVMFR_CLIPBOARD_FLAG_BEGIN;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
+  CHECK(postStreamRecord(state, &data, NULL));
   CHECK(waitAtomic(state, &state->events.dataBegin, 1));
   CHECK(atomic_load(&state->events.dataBegin) == 1);
   CHECK(atomic_load(&state->events.dataChunk) == 0);
@@ -636,7 +767,7 @@ static bool testInboundStream(TestState * state)
   data.size     = KVMFR_CLIPBOARD_SIZE_UNKNOWN;
   data.flags    = 0;
   data.length   = sizeof(bytes);
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, bytes));
+  CHECK(postStreamRecord(state, &data, bytes));
   CHECK(waitAtomic(state, &state->events.dataChunk, 1));
   CHECK(state->events.chunkOffset == 0);
   CHECK(state->events.chunkSize == sizeof(bytes));
@@ -647,7 +778,7 @@ static bool testInboundStream(TestState * state)
   data.size     = sizeof(bytes);
   data.flags    = KVMFR_CLIPBOARD_FLAG_END;
   data.length   = 0;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
+  CHECK(postStreamRecord(state, &data, NULL));
   CHECK(waitAtomic(state, &state->events.dataEnd, 1));
   CHECK(atomic_load(&state->events.dataChunk) == 1);
   CHECK(state->events.finalSize == 5);
@@ -662,7 +793,7 @@ static bool testInboundStream(TestState * state)
   data.format   = KVMFR_CLIPBOARD_FORMAT_TEXT;
   data.flags    = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
+  CHECK(postStreamRecord(state, &data, NULL));
   CHECK(waitAtomic(state, &state->events.dataEnd, 2));
   CHECK(atomic_load(&state->events.dataBegin) == 2);
   CHECK(state->events.finalSize == 0);
@@ -695,114 +826,84 @@ static bool prepareOutbound(TestState * state, uint32_t endpoint,
   return true;
 }
 
-static bool checkCommit(TestState * state, uint32_t token,
-    KVMFRClipboardMessage * commit, KVMFRClipboardMessage * slot,
+static bool checkDataRecord(TestState * state,
+    KVMFRClipboardMessage * record, LGMPStreamBuffer * buffer,
     const void ** data)
 {
-  CHECK(readType(state, KVMFR_CLIPBOARD_MESSAGE_COMMIT, commit));
-  CHECK(commit->token == token);
-  *slot = *(KVMFRClipboardMessage *)
-    lgmpHostMemPtr(state->grantMemory[token - 1]);
-  CHECK(slot->type == KVMFR_CLIPBOARD_MESSAGE_DATA);
-  CHECK(slot->generation == commit->generation);
-  CHECK(slot->clipboardGeneration == commit->clipboardGeneration);
-  CHECK(slot->transfer == commit->transfer);
-  CHECK(slot->offset == commit->offset);
-  CHECK(slot->size == commit->size);
-  CHECK(slot->format == commit->format);
-  CHECK(slot->flags == commit->flags);
-  CHECK(slot->length == commit->length);
-  CHECK(slot->sequence == commit->sequence);
-  *data = (const uint8_t *)lgmpHostMemPtr(
-    state->grantMemory[token - 1]) + sizeof(*slot);
+  CHECK(readClientStream(state, record, buffer, data));
+  CHECK(record->type == KVMFR_CLIPBOARD_MESSAGE_DATA);
+  CHECK(record->version == KVMFR_CLIPBOARD_VERSION);
   return true;
 }
 
-static bool checkFileCommit(TestState * state, uint32_t grantToken,
+static bool checkFileDataRecord(TestState * state,
     KVMFRClipboardFileOperation operation,
-    KVMFRClipboardMessage * commit, KVMFRClipboardMessage * slot,
+    KVMFRClipboardMessage * record, LGMPStreamBuffer * buffer,
     const void ** data)
 {
-  CHECK(readType(state, KVMFR_CLIPBOARD_MESSAGE_COMMIT, commit));
-  CHECK(commit->token == grantToken);
-  *slot = *(KVMFRClipboardMessage *)
-    lgmpHostMemPtr(state->grantMemory[grantToken - 1]);
-  CHECK(slot->type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA);
-  CHECK(slot->generation == commit->generation);
-  CHECK(slot->clipboardGeneration == commit->clipboardGeneration);
-  CHECK(slot->transfer == commit->transfer);
-  CHECK(slot->offset == commit->offset);
-  CHECK(slot->size == commit->size);
-  CHECK(slot->format == commit->format);
-  CHECK(slot->flags == commit->flags);
-  CHECK(slot->length == commit->length);
-  CHECK(slot->sequence == commit->sequence);
-  CHECK(slot->token == operation);
-  *data = (const uint8_t *)lgmpHostMemPtr(
-    state->grantMemory[grantToken - 1]) + sizeof(*slot);
+  CHECK(readClientStream(state, record, buffer, data));
+  CHECK(record->type == KVMFR_CLIPBOARD_MESSAGE_FILE_DATA);
+  CHECK(record->version == KVMFR_CLIPBOARD_VERSION);
+  CHECK(record->token == operation);
   return true;
 }
 
-static bool testOutboundGrant(TestState * state)
+static bool testOutboundStream(TestState * state)
 {
   KVMFRClipboardMessage claimRecord;
   CHECK(prepareOutbound(state, 40, &claimRecord, 1));
   const LG_ClipboardRequest transfer = state->events.requestID;
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
 
   CHECK(state->ops->dataBegin(state->clipboard, transfer,
         LG_CLIPBOARD_DATA_TEXT, 5) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(noClientData(state));
+  CHECK(noClientControl(state));
   const uint8_t first[] = { 1, 2, 3 };
   CHECK(state->ops->dataChunk(state->clipboard, transfer,
         0, first, sizeof(first)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  KVMFRClipboardMessage commit;
-  KVMFRClipboardMessage slot;
-  const void * data;
-  CHECK(checkCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
-  CHECK(slot.sequence == 0 && slot.offset == 0 && slot.size == 5);
+  KVMFRClipboardMessage record;
+  LGMPStreamBuffer buffer;
+  const void * data = NULL;
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
+  CHECK(record.sequence == 0 && record.offset == 0 && record.size == 5);
   CHECK(memcmp(data, first, sizeof(first)) == 0);
+  CHECK(releaseClientStream(state, &buffer));
 
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
   const uint8_t second[] = { 4, 5 };
   CHECK(state->ops->dataChunk(state->clipboard, transfer,
         3, second, sizeof(second)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(checkCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == 0 && slot.sequence == 1 && slot.offset == 3);
-  CHECK(slot.size == KVMFR_CLIPBOARD_SIZE_UNKNOWN);
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.flags == 0 && record.sequence == 1 && record.offset == 3);
+  CHECK(record.size == KVMFR_CLIPBOARD_SIZE_UNKNOWN);
   CHECK(memcmp(data, second, sizeof(second)) == 0);
+  CHECK(releaseClientStream(state, &buffer));
 
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->dataEnd(state->clipboard, transfer, 5) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(checkCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == KVMFR_CLIPBOARD_FLAG_END);
-  CHECK(slot.sequence == 2 && slot.offset == 5 && slot.size == 5);
-  CHECK(slot.length == 0);
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_END);
+  CHECK(record.sequence == 2 && record.offset == 5 && record.size == 5);
+  CHECK(record.length == 0);
+  CHECK(releaseClientStream(state, &buffer));
 
   KVMFRClipboardMessage requestRecord =
     hostRecord(KVMFR_CLIPBOARD_MESSAGE_REQUEST,
       claimRecord.generation);
-  requestRecord.clipboardGeneration = slot.clipboardGeneration;
+  requestRecord.clipboardGeneration = record.clipboardGeneration;
   requestRecord.transfer = KVMFR_CLIPBOARD_TRANSFER_HELPER | 2;
   requestRecord.format = KVMFR_CLIPBOARD_FORMAT_TEXT;
   CHECK(postRecord(state, &requestRecord,
         KVMFR_CLIPBOARD_QUEUE_MESSAGE, NULL));
   CHECK(waitAtomic(state, &state->events.request, 2));
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->dataBegin(state->clipboard, requestRecord.transfer,
         LG_CLIPBOARD_DATA_TEXT, 0) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(state->ops->dataEnd(state->clipboard,
         requestRecord.transfer, 0) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(checkCommit(state, 1, &commit, &slot, &data));
-  CHECK(slot.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
         KVMFR_CLIPBOARD_FLAG_END));
-  CHECK(slot.sequence == 0 && slot.offset == 0 && slot.size == 0);
+  CHECK(record.sequence == 0 && record.offset == 0 && record.size == 0);
+  CHECK(releaseClientStream(state, &buffer));
   return true;
 }
 
@@ -812,19 +913,40 @@ static bool testBlocked(TestState * state)
   CHECK(prepareOutbound(state, 50, &claimRecord, 3));
   const LG_ClipboardRequest transfer = state->events.requestID;
   CHECK(state->ops->dataBegin(state->clipboard, transfer,
-        LG_CLIPBOARD_DATA_TEXT, 2) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  const uint8_t bytes[] = { 8, 9 };
+        LG_CLIPBOARD_DATA_TEXT, 5) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  const uint8_t bytes[] = { 8, 9, 10, 11, 12 };
+  for (unsigned i = 0; i < KVMFR_CLIPBOARD_STREAM_SLOT_COUNT; ++i)
+    CHECK(state->ops->dataChunk(state->clipboard, transfer,
+          i, &bytes[i], 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(state->ops->dataChunk(state->clipboard, transfer,
-        0, bytes, sizeof(bytes)) == LG_CLIPBOARD_RESULT_BLOCKED);
-  CHECK(postGrant(state, claimRecord.generation, 1));
+        4, &bytes[4], 1) == LG_CLIPBOARD_RESULT_BLOCKED);
+
+  KVMFRClipboardMessage record;
+  LGMPStreamBuffer buffer;
+  const void * data = NULL;
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.sequence == 0 && record.offset == 0 && record.length == 1);
+  CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
+  CHECK(*(const uint8_t *)data == bytes[0]);
+  CHECK(releaseClientStream(state, &buffer));
   CHECK(waitAtomic(state, &state->events.dataReady, 1));
   CHECK(state->events.streamID == transfer);
   CHECK(state->ops->dataChunk(state->clipboard, transfer,
-        0, bytes, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  KVMFRClipboardMessage commit;
-  KVMFRClipboardMessage slot;
-  const void * data;
-  CHECK(checkCommit(state, 1, &commit, &slot, &data));
+        4, &bytes[4], 1) == LG_CLIPBOARD_RESULT_ACCEPTED);
+  for (unsigned i = 1; i < 5; ++i)
+  {
+    CHECK(checkDataRecord(state, &record, &buffer, &data));
+    CHECK(record.sequence == i && record.offset == i &&
+        record.length == 1);
+    CHECK(*(const uint8_t *)data == bytes[i]);
+    CHECK(releaseClientStream(state, &buffer));
+  }
+  CHECK(state->ops->dataEnd(state->clipboard, transfer, 5) ==
+      LG_CLIPBOARD_RESULT_ACCEPTED);
+  CHECK(checkDataRecord(state, &record, &buffer, &data));
+  CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_END);
+  CHECK(record.sequence == 5 && record.offset == 5 && record.size == 5);
+  CHECK(releaseClientStream(state, &buffer));
 
   KVMFRClipboardMessage requestRecord;
   CHECK(offerAndRequest(state, claimRecord.generation,
@@ -839,7 +961,7 @@ static bool testBlocked(TestState * state)
   wire.flags    = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
   wire.length   = 1;
-  CHECK(postRecord(state, &wire, KVMFR_CLIPBOARD_QUEUE_DATA, bytes));
+  CHECK(postStreamRecord(state, &wire, bytes));
   CHECK(waitAtomic(state, &state->events.dataChunk, 1));
   CHECK(atomic_load(&state->events.dataEnd) == 0);
   CHECK(state->ops->dataReady(state->clipboard, 5001));
@@ -1203,8 +1325,7 @@ static bool testMalformedFileData(TestState * state)
   const uint8_t byte = 0;
   const unsigned cancellations =
     atomic_load(&state->events.fileCancel);
-  CHECK(postRecord(state, &malformed,
-        KVMFR_CLIPBOARD_QUEUE_DATA, &byte));
+  CHECK(postStreamRecord(state, &malformed, &byte));
   CHECK(waitAtomic(state, &state->events.fileCancel, cancellations + 1));
   CHECK(state->events.fileDataset == dataset);
   CHECK(state->events.fileAcquisition == request.request);
@@ -1217,9 +1338,8 @@ static bool testMalformedFileData(TestState * state)
         dataset, request.request, LG_CLIPBOARD_FILE_ERROR_CANCELLED));
 
   malformed.transfer = request.request + 1U;
-  CHECK(postRecord(state, &malformed,
-        KVMFR_CLIPBOARD_QUEUE_DATA, &byte));
-  CHECK(waitMemory(state, state->memories[state->memoryCount - 1]));
+  CHECK(postStreamRecord(state, &malformed, &byte));
+  CHECK(settleHostStream(state));
   CHECK(atomic_load(&state->events.fileCancel) == cancellations + 1);
   return true;
 }
@@ -1278,26 +1398,50 @@ static bool testFileStream(TestState * state)
   CHECK(state->ops->fileDataBegin(state->clipboard,
         &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
 
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
-  CHECK(state->ops->fileDataChunk(state->clipboard,
-        &descriptor, 0, bytes, sizeof(bytes), true) ==
-      LG_CLIPBOARD_RESULT_ACCEPTED);
-  KVMFRClipboardMessage commit;
-  KVMFRClipboardMessage slot;
-  const void * data;
-  CHECK(checkFileCommit(state, 1, KVMFR_CLIPBOARD_FILE_OP_READ,
-        &commit, &slot, &data));
-  CHECK(slot.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
-        KVMFR_CLIPBOARD_FLAG_END));
-  CHECK(slot.offset == 0 && slot.sequence == 0 &&
-      slot.size == sizeof(bytes));
-  CHECK(slot.length == sizeof(bytes));
-  CHECK(memcmp(data, bytes, sizeof(bytes)) == 0);
+  for (unsigned i = 0; i < KVMFR_CLIPBOARD_STREAM_SLOT_COUNT; ++i)
+  {
+    const uint64_t offset =
+      (uint64_t)i * KVMFR_CLIPBOARD_STREAM_SLOT_BYTES;
+    CHECK(state->ops->fileDataChunk(state->clipboard,
+          &descriptor, offset, bytes + offset,
+          KVMFR_CLIPBOARD_STREAM_SLOT_BYTES,
+          i + 1 == KVMFR_CLIPBOARD_STREAM_SLOT_COUNT) ==
+        LG_CLIPBOARD_RESULT_ACCEPTED);
+  }
+  KVMFRClipboardMessage record;
+  LGMPStreamBuffer buffer;
+  const void * data = NULL;
+  for (unsigned i = 0; i < KVMFR_CLIPBOARD_STREAM_SLOT_COUNT; ++i)
+  {
+    const uint64_t offset =
+      (uint64_t)i * KVMFR_CLIPBOARD_STREAM_SLOT_BYTES;
+    CHECK(checkFileDataRecord(state, KVMFR_CLIPBOARD_FILE_OP_READ,
+          &record, &buffer, &data));
+    CHECK(record.offset == offset && record.sequence == i);
+    CHECK(record.length == KVMFR_CLIPBOARD_STREAM_SLOT_BYTES);
+    if (i == 0)
+    {
+      CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_BEGIN);
+      CHECK(record.size == sizeof(bytes));
+    }
+    else if (i + 1 == KVMFR_CLIPBOARD_STREAM_SLOT_COUNT)
+    {
+      CHECK(record.flags == KVMFR_CLIPBOARD_FLAG_END);
+      CHECK(record.size == sizeof(bytes));
+    }
+    else
+    {
+      CHECK(record.flags == 0);
+      CHECK(record.size == KVMFR_CLIPBOARD_SIZE_UNKNOWN);
+    }
+    CHECK(memcmp(data, bytes + offset,
+          KVMFR_CLIPBOARD_STREAM_SLOT_BYTES) == 0);
+    CHECK(releaseClientStream(state, &buffer));
+  }
 
   CHECK(state->ops->fileDataEnd(state->clipboard,
         &descriptor, sizeof(bytes)) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(noClientData(state));
+  CHECK(noClientControl(state));
 
   const unsigned requests = atomic_load(&state->events.fileRequest);
   request.transfer = KVMFR_CLIPBOARD_TRANSFER_HELPER | UINT64_C(0x7803);
@@ -1313,16 +1457,15 @@ static bool testFileStream(TestState * state)
   CHECK(state->ops->fileDataBegin(state->clipboard,
         &empty, KVMFR_CLIPBOARD_SIZE_UNKNOWN) ==
       LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
   CHECK(state->ops->fileDataEnd(state->clipboard,
         &empty, 0) == LG_CLIPBOARD_RESULT_ACCEPTED);
-  CHECK(checkFileCommit(state, 1, KVMFR_CLIPBOARD_FILE_OP_LIST,
-        &commit, &slot, &data));
-  CHECK(slot.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
+  CHECK(checkFileDataRecord(state, KVMFR_CLIPBOARD_FILE_OP_LIST,
+        &record, &buffer, &data));
+  CHECK(record.flags == (KVMFR_CLIPBOARD_FLAG_BEGIN |
         KVMFR_CLIPBOARD_FLAG_END));
-  CHECK(slot.offset == 0 && slot.sequence == 0 && slot.size == 0);
-  CHECK(slot.length == 0);
+  CHECK(record.offset == 0 && record.sequence == 0 && record.size == 0);
+  CHECK(record.length == 0);
+  CHECK(releaseClientStream(state, &buffer));
   return true;
 }
 
@@ -1382,6 +1525,13 @@ static bool recreateClipboard(TestState * state)
   {
     state->ops->detach(state->clipboard);
     atomic_store(&state->events.attached, false);
+    KVMFRClipboardMessage release;
+    CHECK(readType(state, KVMFR_CLIPBOARD_MESSAGE_RELEASE, &release));
+    CHECK(release.generation != 0);
+    const uint32_t endpointGeneration =
+      atomic_load(&state->statusGeneration);
+    CHECK(endpointGeneration != 0);
+    CHECK(postStatus(state, endpointGeneration, 0, 0, true, 0));
   }
   CHECK(disconnectAndDrain(state, NULL));
   lgmpClipboard_destroy(&state->clipboard);
@@ -1463,8 +1613,8 @@ static bool testProcessRestart(TestState * state)
   staleData.format              = KVMFR_CLIPBOARD_FORMAT_TEXT;
   staleData.flags               = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
-  CHECK(postRecord(state, &staleData, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
-  CHECK(waitMemory(state, state->memories[state->memoryCount - 1]));
+  CHECK(postStreamRecord(state, &staleData, NULL));
+  CHECK(settleHostStream(state));
   CHECK(atomic_load(&state->events.dataBegin) == beginCount);
 
   KVMFRClipboardMessage data =
@@ -1475,7 +1625,7 @@ static bool testProcessRestart(TestState * state)
   data.flags               = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
   const unsigned endCount = atomic_load(&state->events.dataEnd);
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
+  CHECK(postStreamRecord(state, &data, NULL));
   CHECK(waitAtomic(state, &state->events.dataEnd, endCount + 1));
   CHECK(atomic_load(&state->events.dataBegin) == beginCount + 1);
 
@@ -1578,14 +1728,9 @@ static bool testMalformed(TestState * state)
   CHECK(atomic_load(&state->events.notice) == 0);
 
   malformed.generation = claimRecord.generation;
-  CHECK(postRecord(state, &malformed, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
-  CHECK(waitMemory(state, state->memories[state->memoryCount - 1]));
+  CHECK(postStreamRecord(state, &malformed, NULL));
+  CHECK(settleHostStream(state));
   CHECK(atomic_load(&state->events.notice) == 0);
-
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
-  CHECK(postGrant(state, claimRecord.generation, 1));
-  CHECK(waitMemory(state, state->grantMemory[0]));
 
   KVMFRClipboardMessage requestRecord;
   CHECK(offerAndRequest(state, claimRecord.generation,
@@ -1599,14 +1744,14 @@ static bool testMalformed(TestState * state)
   data.format   = KVMFR_CLIPBOARD_FORMAT_TEXT;
   data.flags    = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
-  CHECK(waitMemory(state, state->memories[state->memoryCount - 1]));
+  CHECK(postStreamRecord(state, &data, NULL));
+  CHECK(settleHostStream(state));
   CHECK(atomic_load(&state->events.dataBegin) == 0);
 
   const uint8_t byte = 42;
   data.offset = 0;
   data.length = 1;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, &byte));
+  CHECK(postStreamRecord(state, &data, &byte));
   CHECK(waitAtomic(state, &state->events.dataEnd, 1));
   CHECK(atomic_load(&state->events.dataBegin) == 1);
   CHECK(atomic_load(&state->events.dataChunk) == 1);
@@ -1623,7 +1768,7 @@ static bool testFileFormatIsolation(TestState * state)
 
   const LG_ClipboardData files[] = { LG_CLIPBOARD_DATA_FILES };
   CHECK(!state->ops->notifyTypes(state->clipboard, files, 1));
-  CHECK(noClientData(state));
+  CHECK(noClientControl(state));
 
   const uint64_t localDataset = UINT64_C(0x123456789abcdef);
   CHECK(state->ops->offerFiles(state->clipboard, localDataset));
@@ -1653,7 +1798,7 @@ static bool testFileFormatIsolation(TestState * state)
   CHECK(state->events.noticeTypes[0] == LG_CLIPBOARD_DATA_FILES);
   CHECK(!state->ops->request(state->clipboard,
         100, LG_CLIPBOARD_DATA_FILES));
-  CHECK(noClientData(state));
+  CHECK(noClientControl(state));
 
   KVMFRClipboardMessage data =
     hostRecord(KVMFR_CLIPBOARD_MESSAGE_DATA, claimRecord.generation);
@@ -1662,8 +1807,8 @@ static bool testFileFormatIsolation(TestState * state)
   data.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
   data.flags               = KVMFR_CLIPBOARD_FLAG_BEGIN |
     KVMFR_CLIPBOARD_FLAG_END;
-  CHECK(postRecord(state, &data, KVMFR_CLIPBOARD_QUEUE_DATA, NULL));
-  CHECK(waitMemory(state, state->memories[state->memoryCount - 1]));
+  CHECK(postStreamRecord(state, &data, NULL));
+  CHECK(settleHostStream(state));
   CHECK(atomic_load(&state->events.dataBegin) == 0);
   return true;
 }
@@ -1721,6 +1866,31 @@ static bool stateInit(TestState * state)
   CHECK(dataSize == sizeof(sessionData));
   CHECK(memcmp(data, &sessionData, sizeof(sessionData)) == 0);
 
+  const struct LGMPStreamConfig hostToClientConfig =
+  {
+    .direction = LGMP_STREAM_HOST_TO_CLIENT,
+    .policy    = LGMP_STREAM_RELIABLE_FIFO,
+    .slotCount = KVMFR_CLIPBOARD_STREAM_SLOT_COUNT,
+    .slotSize  = SLOT_BYTES,
+  };
+  CHECK(lgmpHostStreamNew(state->host, hostToClientConfig,
+        &state->hostToClientStream) == LGMP_OK);
+  struct LGMPStreamDescriptor descriptor;
+  lgmpHostStreamGetDescriptor(state->hostToClientStream, &descriptor);
+  state->hostToClientDescriptor = exportStreamDescriptor(&descriptor);
+
+  const struct LGMPStreamConfig clientToHostConfig =
+  {
+    .direction = LGMP_STREAM_CLIENT_TO_HOST,
+    .policy    = LGMP_STREAM_RELIABLE_FIFO,
+    .slotCount = KVMFR_CLIPBOARD_STREAM_SLOT_COUNT,
+    .slotSize  = SLOT_BYTES,
+  };
+  CHECK(lgmpHostStreamNew(state->host, clientToHostConfig,
+        &state->clientToHostStream) == LGMP_OK);
+  lgmpHostStreamGetDescriptor(state->clientToHostStream, &descriptor);
+  state->clientToHostDescriptor = exportStreamDescriptor(&descriptor);
+
   CHECK(lgmpClipboard_create(state->client, &state->clipboard));
   CHECK(lgmpClipboard_connect(state->clipboard, state->clientID));
   state->ops = lgmpClipboard_getOps();
@@ -1753,6 +1923,8 @@ static void stateFree(TestState * state)
   lgmpClientFree(&state->client);
   for (unsigned i = 0; i < state->memoryCount; ++i)
     lgmpHostMemFree(&state->memories[i]);
+  lgmpHostStreamFree(&state->clientToHostStream);
+  lgmpHostStreamFree(&state->hostToClientStream);
   lgmpHostFree(&state->host);
   if (state->memory != MAP_FAILED)
     munmap(state->memory, TEST_SHM_SIZE);
@@ -1770,7 +1942,7 @@ TESTS[] =
   { "claim"           , testClaim               },
   { "offer-request"   , testOfferRequest        },
   { "inbound-stream"  , testInboundStream       },
-  { "outbound-grant"  , testOutboundGrant       },
+  { "outbound-stream" , testOutboundStream      },
   { "blocked"         , testBlocked             },
   { "cancel"          , testCancel              },
   { "restart"         , testRestart             },

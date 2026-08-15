@@ -119,7 +119,7 @@ set(LGMP_CLIPBOARD_CASES
   claim
   offer-request
   inbound-stream
-  outbound-grant
+  outbound-stream
   blocked
   cancel
   restart

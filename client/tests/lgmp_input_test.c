@@ -26,6 +26,7 @@
 
 #include <lgmp/client.h>
 #include <lgmp/host.h>
+#include <lgmp/stream.h>
 
 #include <linux/input.h>
 #include <pthread.h>
@@ -54,17 +55,22 @@ StatusTrace;
 
 typedef struct TestState
 {
-  void              * memory;
-  PLGMPHost           host;
-  PLGMPHostQueue      queue;
-  PLGMPClient         client;
-  LGMPInput         * input;
-  const LG_InputOps * ops;
-  uint32_t            clientID;
-  uint32_t            statusSerial;
-  PLGMPMemory         statuses[TEST_MAX_STATUSES];
-  unsigned            statusCount;
-  StatusTrace         status;
+  void                    * memory;
+  PLGMPHost                 host;
+  PLGMPHostQueue            queue;
+  PLGMPClient               client;
+  PLGMPHostStream           streams[KVMFR_INPUT_STREAM_ENDPOINT_COUNT];
+  KVMFRStreamDescriptor     streamDescriptors[
+    KVMFR_INPUT_STREAM_ENDPOINT_COUNT];
+  uint32_t                  streamEpoch;
+  uint32_t                  streamGeneration;
+  LGMPInput               * input;
+  const LG_InputOps       * ops;
+  uint32_t                  clientID;
+  uint32_t                  statusSerial;
+  PLGMPMemory               statuses[TEST_MAX_STATUSES];
+  unsigned                  statusCount;
+  StatusTrace               status;
 }
 TestState;
 
@@ -102,6 +108,23 @@ static bool hostProcess(TestState * state)
 {
   CHECK(lgmpHostProcess(state->host) == LGMP_OK);
   return true;
+}
+
+static KVMFRStreamDescriptor exportStreamDescriptor(
+    const struct LGMPStreamDescriptor * descriptor)
+{
+  return (KVMFRStreamDescriptor)
+  {
+    .magic      = descriptor->magic,
+    .version    = descriptor->version,
+    .size       = descriptor->size,
+    .offset     = descriptor->offset,
+    .regionSize = descriptor->regionSize,
+    .direction  = descriptor->direction,
+    .policy     = descriptor->policy,
+    .slotCount  = descriptor->slotCount,
+    .slotSize   = descriptor->slotSize,
+  };
 }
 
 static bool waitStatus(TestState * state, unsigned count,
@@ -150,17 +173,31 @@ static bool postStatus(TestState * state, uint32_t endpointGeneration,
   KVMFRInputStatus * status = lgmpHostMemPtr(memory);
   *status = (KVMFRInputStatus)
   {
-    .version         = KVMFR_INPUT_VERSION,
-    .capabilities    = KVMFR_INPUT_CAP_MOUSE_RELATIVE |
+    .version             = KVMFR_INPUT_VERSION,
+    .capabilities        = KVMFR_INPUT_CAP_MOUSE_RELATIVE |
       KVMFR_INPUT_CAP_MOUSE_ABSOLUTE | KVMFR_INPUT_CAP_KEYBOARD,
-    .flags           = KVMFR_INPUT_STATUS_AVAILABLE |
+    .flags               = KVMFR_INPUT_STATUS_AVAILABLE |
       (ownerClientID ? KVMFR_INPUT_STATUS_HAS_OWNER : 0),
-    .generation      = endpointGeneration,
-    .ownerClientID   = ownerClientID,
-    .ownerGeneration = ownerGeneration,
-    .lease            = 1000,
-    .maxButtons       = KVMFR_INPUT_MOUSE_BUTTON_COUNT,
+    .generation          = endpointGeneration,
+    .ownerClientID       = ownerClientID,
+    .ownerGeneration     = ownerGeneration,
+    .lease               = 1000,
+    .maxButtons          = KVMFR_INPUT_MOUSE_BUTTON_COUNT,
+    .streamVersion       = KVMFR_INPUT_STREAM_VERSION,
+    .streamEndpointCount = KVMFR_INPUT_STREAM_ENDPOINT_COUNT,
+    .streamGeneration    = state->streamGeneration,
   };
+
+  for (unsigned i = 0; i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
+  {
+    status->streamEndpoint[i].stream = state->streamDescriptors[i];
+    status->streamEndpoint[i].flags =
+      KVMFR_INPUT_STREAM_ENDPOINT_AVAILABLE;
+  }
+  status->streamEndpoint[0].boundClientID = state->clientID;
+  status->streamEndpoint[0].bindingGeneration = state->streamEpoch;
+  status->streamEndpoint[0].flags |=
+    KVMFR_INPUT_STREAM_ENDPOINT_BOUND;
 
   if (++state->statusSerial == 0)
     ++state->statusSerial;
@@ -186,28 +223,42 @@ static bool postOwner(TestState * state, uint32_t endpointGeneration,
   return true;
 }
 
+static bool expectInputQueueEmpty(TestState * state)
+{
+  KVMFRInputMessage message;
+  size_t            size = sizeof(message);
+  uint32_t          sourceClientID = 0;
+  const LGMP_STATUS status = lgmpHostReadDataWithSource(state->queue,
+    &message, &size, &sourceClientID);
+  if (status == LGMP_OK)
+    lgmpHostAckData(state->queue);
+  CHECK(status == LGMP_ERR_QUEUE_EMPTY);
+  return true;
+}
+
 static bool readInput(TestState * state, KVMFRInputMessage * result)
 {
   for (unsigned i = 0; i < TEST_WAIT_MS; ++i)
   {
     CHECK(hostProcess(state));
-    size_t            size = sizeof(*result);
-    uint32_t          sourceClientID = 0;
-    const LGMP_STATUS status = lgmpHostReadDataWithSource(state->queue,
-        result, &size, &sourceClientID);
-    if (status == LGMP_ERR_QUEUE_EMPTY)
+    CHECK(expectInputQueueEmpty(state));
+    LGMPStreamBuffer buffer = { 0 };
+    const LGMP_STATUS status = lgmpHostStreamReadPeek(
+      state->streams[0], &buffer);
+    if (status == LGMP_ERR_STREAM_EMPTY)
     {
       usleep(1000);
       continue;
     }
 
     CHECK(status == LGMP_OK);
-    CHECK(size == sizeof(*result));
-    CHECK(sourceClientID == state->clientID);
+    CHECK(buffer.size == sizeof(*result));
+    memcpy(result, buffer.data, sizeof(*result));
     CHECK(result->reserved == 0);
     CHECK(result->generation != 0);
     CHECK(result->sequence != 0);
-    CHECK(lgmpHostAckData(state->queue) == LGMP_OK);
+    CHECK(lgmpHostStreamReadRelease(state->streams[0], &buffer) ==
+      LGMP_OK);
     return true;
   }
 
@@ -247,20 +298,19 @@ static bool expectNoInput(TestState * state)
   for (unsigned i = 0; i < TEST_QUIET_MS; ++i)
   {
     CHECK(hostProcess(state));
-    KVMFRInputMessage message;
-    size_t            size = sizeof(message);
-    uint32_t          sourceClientID = 0;
-    const LGMP_STATUS status = lgmpHostReadDataWithSource(state->queue,
-        &message, &size, &sourceClientID);
-    if (status == LGMP_ERR_QUEUE_EMPTY)
+    CHECK(expectInputQueueEmpty(state));
+    LGMPStreamBuffer buffer = { 0 };
+    const LGMP_STATUS status = lgmpHostStreamReadPeek(
+      state->streams[0], &buffer);
+    if (status == LGMP_ERR_STREAM_EMPTY)
     {
       usleep(1000);
       continue;
     }
 
     if (status == LGMP_OK)
-      lgmpHostAckData(state->queue);
-    CHECK(status == LGMP_ERR_QUEUE_EMPTY);
+      lgmpHostStreamReadRelease(state->streams[0], &buffer);
+    CHECK(status == LGMP_ERR_STREAM_EMPTY);
   }
 
   return true;
@@ -297,6 +347,10 @@ static bool resetAndRelease(TestState * state, uint32_t generation)
   CHECK(readUntilType(state, KVMFR_INPUT_MESSAGE_RELEASE, 8,
         &message, &skipped));
   CHECK(message.generation == generation);
+  const uint32_t endpointGeneration =
+    atomic_load(&state->status.generation);
+  CHECK(endpointGeneration != 0);
+  CHECK(postOwner(state, endpointGeneration, 0, 0));
   return true;
 }
 
@@ -512,6 +566,25 @@ static bool stateInit(TestState * state)
   CHECK(dataSize == sizeof(sessionData));
   CHECK(memcmp(data, &sessionData, sizeof(sessionData)) == 0);
 
+  const struct LGMPStreamConfig streamConfig =
+  {
+    .direction = LGMP_STREAM_CLIENT_TO_HOST,
+    .policy    = LGMP_STREAM_RELIABLE_FIFO,
+    .slotCount = KVMFR_INPUT_STREAM_SLOT_COUNT,
+    .slotSize  = KVMFR_INPUT_STREAM_SLOT_SIZE,
+  };
+  for (unsigned i = 0; i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
+  {
+    CHECK(lgmpHostStreamNew(state->host, streamConfig,
+          &state->streams[i]) == LGMP_OK);
+    struct LGMPStreamDescriptor descriptor;
+    lgmpHostStreamGetDescriptor(state->streams[i], &descriptor);
+    state->streamDescriptors[i] = exportStreamDescriptor(&descriptor);
+  }
+  CHECK(lgmpHostStreamBind(state->streams[0], state->clientID,
+        &state->streamEpoch) == LGMP_OK);
+  state->streamGeneration = 1;
+
   CHECK(lgmpInput_create(state->client, &state->input));
   CHECK(lgmpInput_connect(state->input, state->clientID));
   state->ops = lgmpInput_getOps();
@@ -559,20 +632,21 @@ static bool disconnectAndDrain(TestState * state)
   }
 
   bool valid = true;
+  bool releaseAcknowledged = false;
   for (unsigned i = 0;
       i < TEST_WAIT_MS && !atomic_load(&task.done); ++i)
   {
     if (lgmpHostProcess(state->host) != LGMP_OK)
       valid = false;
+    if (!expectInputQueueEmpty(state))
+      valid = false;
 
     for (;;)
     {
-      KVMFRInputMessage message;
-      size_t            size = sizeof(message);
-      uint32_t          sourceClientID = 0;
-      const LGMP_STATUS status = lgmpHostReadDataWithSource(state->queue,
-          &message, &size, &sourceClientID);
-      if (status == LGMP_ERR_QUEUE_EMPTY)
+      LGMPStreamBuffer buffer = { 0 };
+      const LGMP_STATUS status = lgmpHostStreamReadPeek(
+        state->streams[0], &buffer);
+      if (status == LGMP_ERR_STREAM_EMPTY)
         break;
       if (status != LGMP_OK)
       {
@@ -580,12 +654,27 @@ static bool disconnectAndDrain(TestState * state)
         break;
       }
 
-      valid &= size == sizeof(message);
-      valid &= sourceClientID == state->clientID;
+      KVMFRInputMessage message;
+      valid &= buffer.size == sizeof(message);
+      if (buffer.size == sizeof(message))
+        memcpy(&message, buffer.data, sizeof(message));
+      else
+        memset(&message, 0, sizeof(message));
       valid &= message.type == KVMFR_INPUT_MESSAGE_RELEASE;
       valid &= message.reserved == 0;
-      if (lgmpHostAckData(state->queue) != LGMP_OK)
+      if (lgmpHostStreamReadRelease(state->streams[0], &buffer) !=
+          LGMP_OK)
         valid = false;
+      if (!releaseAcknowledged &&
+          message.type == KVMFR_INPUT_MESSAGE_RELEASE)
+      {
+        const uint32_t endpointGeneration =
+          atomic_load(&state->status.generation);
+        if (endpointGeneration && !postStatus(
+              state, endpointGeneration, 0, 0))
+          valid = false;
+        releaseAcknowledged = true;
+      }
     }
     usleep(1000);
   }
@@ -604,6 +693,8 @@ static bool stateFree(TestState * state)
   lgmpClientFree(&state->client);
   for (unsigned i = 0; i < state->statusCount; ++i)
     lgmpHostMemFree(&state->statuses[i]);
+  for (unsigned i = 0; i < KVMFR_INPUT_STREAM_ENDPOINT_COUNT; ++i)
+    lgmpHostStreamFree(&state->streams[i]);
   lgmpHostFree(&state->host);
   if (state->memory != MAP_FAILED)
     munmap(state->memory, TEST_SHM_SIZE);
