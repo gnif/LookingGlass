@@ -70,6 +70,10 @@
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
     <ClCompile Include="RefreshRate.cpp" />
+    <ClCompile Include="WCCopy.cpp" />
+    <ClCompile Include="WCCopyAVX2.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CClipboardChannel.h" />
@@ -85,6 +89,7 @@
     <ClInclude Include="PipeMsg.h" />
     <ClInclude Include="RefreshRate.h" />
     <ClInclude Include="Seq.h" />
+    <ClInclude Include="WCCopy.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

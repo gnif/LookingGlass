@@ -27,6 +27,12 @@
     <ClCompile Include="RefreshRate.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="WCCopy.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WCCopyAVX2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Atomic.h">
@@ -66,6 +72,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Seq.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WCCopy.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

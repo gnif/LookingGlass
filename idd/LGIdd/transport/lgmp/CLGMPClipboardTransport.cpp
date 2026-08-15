@@ -26,6 +26,7 @@
 
 #include "CDebug.h"
 #include "Seq.h"
+#include "WCCopy.h"
 #include "transport/lgmp/CLGMPHost.h"
 
 #include <limits>
@@ -637,7 +638,7 @@ bool CLGMPClipboardTransport::QueueStreamTarget(
     (m_streamTargetHead + m_streamTargetCount) % STREAM_TARGET_COUNT];
   target.record = record;
   if (record.length)
-    memcpy(target.data, data, record.length);
+    WCCopy::Copy(target.data, data, record.length);
   ++m_streamTargetCount;
   return true;
 }
