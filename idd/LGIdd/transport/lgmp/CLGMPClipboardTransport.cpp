@@ -27,6 +27,7 @@
 #include "CDebug.h"
 #include "Seq.h"
 #include "WCCopy.h"
+#include "WCWrite.h"
 #include "transport/lgmp/CLGMPHost.h"
 
 #include <limits>
@@ -1745,8 +1746,10 @@ ClipboardChannelResult CLGMPClipboardTransport::SendData(
 
   memcpy(buffer.data, &message, sizeof(message));
   if (message.length)
-    memcpy(static_cast<uint8_t *>(buffer.data) + sizeof(message), data,
+    WCWrite::Copy(static_cast<uint8_t *>(buffer.data) + sizeof(message), data,
       message.length);
+
+  // Stream commit drains WC writes before publishing the producer cursor.
   status = lgmpHostStreamWriteCommit(
     m_hostToClientStream, &buffer, bytes);
   if (status == LGMP_OK)

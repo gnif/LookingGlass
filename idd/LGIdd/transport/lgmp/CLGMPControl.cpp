@@ -21,6 +21,7 @@
 #include "transport/lgmp/CLGMPControl.h"
 
 #include "CDebug.h"
+#include "WCWrite.h"
 
 #include <string.h>
 
@@ -30,6 +31,7 @@ static const uint32_t MAX_POINTER_SIZE =
   (uint32_t)(sizeof(KVMFRCursor) + (512 * 512 * 4));
 static const uint32_t POINTER_POSITION_SIZE =
   (uint32_t)sizeof(KVMFRCursor);
+static const size_t WC_WRITE_MIN_SIZE = 4 * 1024;
 
 static const struct LGMPQueueConfig POINTER_QUEUE_CONFIG =
 {
@@ -225,7 +227,12 @@ ControlResult CLGMPControl::SendCursor(
   if (hasShape)
   {
     if (size)
-      memcpy(cursor + 1, data, size);
+    {
+      if (size < WC_WRITE_MIN_SIZE)
+        memcpy(cursor + 1, data, size);
+      else
+        WCWrite::Copy(cursor + 1, data, size);
+    }
 
     cursor->hx     = (int8_t  )info.CursorShapeInfo.XHot;
     cursor->hy     = (int8_t  )info.CursorShapeInfo.YHot;
@@ -247,6 +254,7 @@ ControlResult CLGMPControl::SendCursor(
     flags |= CURSOR_FLAG_SHAPE;
   }
 
+  WCWrite::Flush();
   const LGMP_STATUS status =
     lgmpHostQueuePost(m_pointerQueue, flags, mem);
   if (status == LGMP_OK)
@@ -292,9 +300,10 @@ ControlResult CLGMPControl::SendColorTransform(
       output->flags |= KVMFR_COLOR_TRANSFORM_LUT;
     memcpy(output->matrix, transform->matrix, sizeof(output->matrix));
     output->scalar = transform->scalar;
-    memcpy(output->lut, transform->lut, sizeof(output->lut));
+    WCWrite::Copy(output->lut, transform->lut, sizeof(output->lut));
   }
 
+  WCWrite::Flush();
   const LGMP_STATUS status = lgmpHostQueuePost(m_pointerQueue,
     CURSOR_FLAG_COLOR_TRANSFORM, mem);
   if (status == LGMP_OK)
