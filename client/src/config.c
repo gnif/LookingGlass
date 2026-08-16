@@ -726,6 +726,13 @@ bool config_load(int argc, char * argv[])
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
   g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
 
+  if (g_params.autoResize && g_params.setGuestRes)
+  {
+    DEBUG_WARN("win:autoResize (-a) and win:setGuestRes can't be used "
+      "simultaneously");
+    return false;
+  }
+
   g_params.clipboardToVM    = option_get_bool("clipboard", "toVM"   );
   g_params.clipboardToLocal = option_get_bool("clipboard", "toLocal");
 
