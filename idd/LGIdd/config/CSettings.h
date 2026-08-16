@@ -96,6 +96,11 @@ class CSettings
       return ReadBoolValue(L"LogStatistics");
     }
 
+    static bool ShouldForceFullDirectCopy()
+    {
+      return ReadBoolValue(L"ForceFullDirectCopy");
+    }
+
   private:
     static const wchar_t * RegistryKey()
     {

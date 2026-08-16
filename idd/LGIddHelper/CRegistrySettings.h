@@ -56,4 +56,7 @@ public:
 
   std::optional<bool> getExclusiveMonitor();
   LSTATUS setExclusiveMonitor(bool exclusive);
+
+  std::optional<bool> getForceFullDirectCopy();
+  LSTATUS setForceFullDirectCopy(bool forceFullCopy);
 };

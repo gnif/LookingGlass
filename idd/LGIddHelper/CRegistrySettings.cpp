@@ -265,3 +265,28 @@ LSTATUS CRegistrySettings::setExclusiveMonitor(bool exclusive)
   DWORD dwValue = exclusive;
   return RegSetValueEx(hKey, L"ExclusiveMonitor", 0, REG_DWORD, (LPBYTE)&dwValue, sizeof(DWORD));
 }
+
+std::optional<bool> CRegistrySettings::getForceFullDirectCopy()
+{
+  DWORD result, cbData = sizeof result;
+
+  LSTATUS status = RegGetValue(hKey, nullptr, L"ForceFullDirectCopy",
+    RRF_RT_REG_DWORD, nullptr, &result, &cbData);
+  switch (status)
+  {
+  case ERROR_SUCCESS:
+    return !!result;
+  case ERROR_FILE_NOT_FOUND:
+    return false;
+  default:
+    DEBUG_ERROR_HR(status, "RegGetValue(ForceFullDirectCopy)");
+    return {};
+  }
+}
+
+LSTATUS CRegistrySettings::setForceFullDirectCopy(bool forceFullCopy)
+{
+  DWORD dwValue = forceFullCopy;
+  return RegSetValueEx(hKey, L"ForceFullDirectCopy", 0, REG_DWORD,
+    (LPBYTE)&dwValue, sizeof(DWORD));
+}

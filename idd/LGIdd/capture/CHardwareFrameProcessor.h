@@ -73,6 +73,7 @@ private:
   CSRWLock            m_copySubmitLock;
   bool                m_publishPending     = false;
   bool                m_useCadence         = true;
+  bool                m_forceFullDirectCopy = false;
   Wrappers::Event     m_candidateAvailableEvent;
   Wrappers::Event     m_copySubmitEvent;
 

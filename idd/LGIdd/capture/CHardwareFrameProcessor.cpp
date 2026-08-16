@@ -19,6 +19,8 @@
  */
 
 #include "capture/CHardwareFrameProcessor.h"
+
+#include "config/CSettings.h"
 #include "capture/CFrameProcessorUtil.h"
 #include "transport/IFrameTransport.h"
 #include "CSRWLock.h"
@@ -76,11 +78,15 @@ CHardwareFrameProcessor::CHardwareFrameProcessor(
     CSRWLock * pipelineLock, HANDLE terminateEvent, bool useCadence) :
   CFrameProcessor(transport, std::move(dx12), postProcessors,
     pipelineLock, terminateEvent),
-  m_useCadence(useCadence)
+  m_useCadence(useCadence),
+  m_forceFullDirectCopy(CSettings::ShouldForceFullDirectCopy())
 {
   m_candidateAvailableEvent.Attach(
     CreateEvent(nullptr, FALSE, FALSE, nullptr));
   m_copySubmitEvent.Attach(CreateEvent(nullptr, TRUE, TRUE, nullptr));
+
+  if (m_forceFullDirectCopy)
+    DEBUG_INFO("Forcing full copies to direct transport memory");
 }
 
 bool CHardwareFrameProcessor::IsValid() const
@@ -668,12 +674,17 @@ bool CHardwareFrameProcessor::Publish(
 
     RECT copyDirtyRects[LG_MAX_DIRTY_RECTS * 2] = {};
     unsigned nbCopyDirtyRects = 0;
-    const bool fullCopy = CFrameProcessorUtil::BuildCopyDamage(
-      postProcessor, prepared.targets[i].fullCopy,
-      previousDirtyRects, nbPreviousDirtyRects,
-      candidate.dirtyRects, candidate.nbDirtyRects,
-      candidate.dstFormat.width, candidate.dstFormat.height,
-      copyDirtyRects, &nbCopyDirtyRects);
+    // Some GPUs corrupt fragmented writes to the external transport heap.
+    // An unmapped target is a direct D3D12 transport resource; readback
+    // targets remain mapped and continue using normal damage copies.
+    const bool fullCopy =
+      (m_forceFullDirectCopy && !fbRes->GetMap()) ||
+      CFrameProcessorUtil::BuildCopyDamage(
+        postProcessor, prepared.targets[i].fullCopy,
+        previousDirtyRects, nbPreviousDirtyRects,
+        candidate.dirtyRects, candidate.nbDirtyRects,
+        candidate.dstFormat.width, candidate.dstFormat.height,
+        copyDirtyRects, &nbCopyDirtyRects);
     fbRes->SetTiming(
       candidate.captureTime, candidate.postProcessStart, publishStart);
     fbRes->SetCandidateIndex(candidateIndex);

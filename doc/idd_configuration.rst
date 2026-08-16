@@ -63,6 +63,14 @@ Disable no GPU warning
    processing. It does not enable GPU acceleration or change the active
    adapter.
 
+Force full direct frame copies
+   Works around GPU drivers that corrupt partial D3D12 copies into the shared
+   transport heap. When enabled, the GPU copies every direct frame in full;
+   readback/indirect transfers continue using partial damage copies. This can
+   substantially increase GPU and shared-memory bandwidth, so leave it
+   disabled unless you encounter corruption. Changing it requests a driver
+   reload.
+
 Unlike mode-list edits, preference checkboxes are saved when clicked.
 
 Software processing
