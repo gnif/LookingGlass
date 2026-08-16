@@ -55,6 +55,8 @@ struct LG_USBRedir
   bool        disconnectPending;
   int64_t     disconnectDeadline;
   int64_t     reconnectDeadline;
+  uint64_t    mainPingCount;
+  bool        waitingForMainPing;
 };
 
 static void setAvailable(LG_USBRedir * usbredir, bool available)
@@ -191,6 +193,25 @@ static bool selectChannel(LG_USBRedir * usbredir)
 {
   if (usbredir->channel)
     return true;
+
+  if (!purespice_channelConnected(PS_CHANNEL_MAIN))
+  {
+    usbredir->reconnectDeadline =
+      (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
+    return false;
+  }
+
+  if (usbredir->waitingForMainPing)
+  {
+    if (purespice_mainPingCount() == usbredir->mainPingCount)
+    {
+      usbredir->reconnectDeadline =
+        (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
+      return false;
+    }
+
+    usbredir->waitingForMainPing = false;
+  }
 
   for (unsigned int i = 0; i < USB_REDIR_CHANNEL_COUNT; ++i)
   {
@@ -424,8 +445,16 @@ void lgUsbRedir_state(PSUSBRedirChannel * channel,
         destroyParser(usbredir);
         usbredir->channel = NULL;
         if (purespice_usbRedirAvailable(channel))
+        {
+          /* Wait for a fresh MAIN PING/PONG before reconnecting this
+           * optional channel. The server shuts it down before MAIN during a
+           * session teardown, so this prevents reconnect attempts to a
+           * disappearing SPICE server. */
+          usbredir->mainPingCount = purespice_mainPingCount();
+          usbredir->waitingForMainPing = true;
           usbredir->reconnectDeadline =
             (int64_t)nanotime() + USB_REDIR_RECONNECT_DELAY_NS;
+        }
       }
       break;
 
