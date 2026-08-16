@@ -386,6 +386,20 @@ bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
     uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {
+  /*
+   * Both the DMA and staged upload paths need a complete frame. Do this
+   * before selecting either path so a producer that is still filling an
+   * indirect frame cannot be mistaken for a broken DMA import. Retain the
+   * last image and release a direct frame lease when there is one.
+   */
+  if (unlikely(!framebuffer_wait_timed(
+          frame, desktop->texture->format.dataSize, waitTimeNs)))
+  {
+    if (releaseFn)
+      releaseFn(releaseOpaque, releaseHandle);
+    return true;
+  }
+
   if (likely(desktop->useDMA && dmaFd >= 0))
   {
     if (likely(egl_textureUpdateFromDMA(
