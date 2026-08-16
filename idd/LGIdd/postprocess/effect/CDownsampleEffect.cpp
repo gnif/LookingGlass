@@ -214,9 +214,12 @@ PostProcessStatus CDownsampleEffect::Set(
   m_width    = (unsigned)desc.Width;
   m_height   = desc.Height;
 
-  dst.desc   = desc;
-  dst.width  = (unsigned)desc.Width;
-  dst.height = desc.Height;
+  dst.desc       = desc;
+  dst.dataWidth  = (unsigned)desc.Width;
+  dst.dataHeight = desc.Height;
+  dst.pitch      = 0;
+  dst.width      = (unsigned)desc.Width;
+  dst.height     = desc.Height;
   return PostProcessStatus::SUCCESS;
 }
 
