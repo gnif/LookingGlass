@@ -262,6 +262,12 @@ static bool cleanupConnection(LG_TransportFallback * fallback,
   fallback->connectedReported = false;
   LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
+  /* Report a dead session before provider teardown, which may be waiting on
+   * work abandoned by the remote endpoint. */
+  const bool reportLost = knownDead && reportDisconnected &&
+    !atomic_load_explicit(&fallback->stop, memory_order_acquire);
+  notifyLost(fallback, reportLost);
+
   const bool live = !knownDead && sessionLive(fallback);
   unpublishProviders(fallback, live);
 
@@ -476,9 +482,6 @@ static bool connectFallback(LG_TransportFallback * fallback)
   if (reportMismatch && fallback->eventOps.endpointMismatch)
     fallback->eventOps.endpointMismatch(
         fallback->eventOpaque, primaryUUID, fallbackUUID);
-  const bool reportLost = lost && reportDisconnect && !atomic_load_explicit(
-      &fallback->stop, memory_order_acquire);
-  notifyLost(fallback, reportLost);
   notifyDisconnected(fallback, reportDisconnect);
   return true;
 }

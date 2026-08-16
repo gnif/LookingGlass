@@ -1212,10 +1212,10 @@ int main_cursorThread(void * unused)
 
       if (status == LG_TRANSPORT_DISCONNECTED)
       {
+        primaryLost();
         lgInput_dropTransport();
         lgAudio_dropTransport();
         clipboard_dropTransport();
-        primaryLost();
       }
       else
       {
@@ -1416,10 +1416,10 @@ int main_frameThread(void * unused)
       }
       if (status == LG_TRANSPORT_DISCONNECTED)
       {
+        primaryLost();
         lgInput_dropTransport();
         lgAudio_dropTransport();
         clipboard_dropTransport();
-        primaryLost();
       }
       else if (status == LG_TRANSPORT_END)
         primaryWorkerFailed();
@@ -3921,10 +3921,10 @@ restart:
     if (unlikely(!g_state.transport.ops->sessionValid(
           g_state.transport.handle)))
     {
+      primaryLost();
       lgInput_dropTransport();
       lgAudio_dropTransport();
       clipboard_dropTransport();
-      primaryLost();
       break;
     }
     lgMessage_process();
