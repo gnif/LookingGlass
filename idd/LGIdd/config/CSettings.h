@@ -32,7 +32,7 @@ class CSettings
     {
       unsigned width;
       unsigned height;
-      unsigned refreshMilliHz;
+      unsigned refresh100uHz;
       bool     preferred;
       bool     extraMode;
     };
@@ -44,7 +44,7 @@ class CSettings
     TransportInstances LoadTransportInstances() const;
     bool SetExtraMode(const DisplayMode & mode);
     bool GetExtraMode(DisplayMode & mode);
-    unsigned GetDefaultRefreshMilliHz() const;
+    unsigned GetDefaultRefresh100uHz() const;
 
     std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue = nullptr);
     static bool ReadBoolValue(

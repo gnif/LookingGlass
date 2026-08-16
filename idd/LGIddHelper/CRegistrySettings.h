@@ -28,7 +28,7 @@
 struct DisplayMode {
   unsigned width;
   unsigned height;
-  unsigned refreshMilliHz;
+  unsigned refresh100uHz;
   bool     preferred;
 
   std::wstring toString();
@@ -49,7 +49,7 @@ public:
   LSTATUS setModes(const std::vector<DisplayMode> &modes);
 
   std::optional<DWORD> getDefaultRefresh();
-  LSTATUS setDefaultRefresh(DWORD refreshMilliHz);
+  LSTATUS setDefaultRefresh(DWORD refresh100uHz);
 
   std::optional<bool> getNoGPU();
   LSTATUS setNoGPU(bool noGPU);

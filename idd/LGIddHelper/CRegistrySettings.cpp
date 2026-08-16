@@ -29,7 +29,7 @@
 
 #define LGIDD_REGKEY L"SOFTWARE\\LookingGlass\\IDD"
 
-const DWORD DEFAULT_REFRESH = 120000;
+const DWORD DEFAULT_REFRESH = 120 * LG_REFRESH_RATE_SCALE;
 
 CRegistrySettings::CRegistrySettings() : hKey(nullptr) {}
 
@@ -65,7 +65,7 @@ static std::basic_string<T> trim(const std::basic_string<T> &s)
 }
 
 static std::wregex displayMode(
-  L"(\\d+)x(\\d+)@(\\d+(?:\\.\\d{1,3})?)(\\*)?");
+  L"(\\d+)x(\\d+)@(\\d+(?:\\.\\d{1,4})?)(\\*)?");
 
 static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
 {
@@ -78,7 +78,7 @@ static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
   DisplayMode mode;
   mode.width  = std::stoul(match[1]);
   mode.height = std::stoul(match[2]);
-  if (!LGParseRefreshRate(match[3], mode.refreshMilliHz))
+  if (!LGParseRefreshRate(match[3], mode.refresh100uHz))
     return {};
   mode.preferred = match[4] == L"*";
   return mode;
@@ -87,7 +87,7 @@ static std::optional<DisplayMode> parseDisplayMode(const std::wstring &str)
 std::vector<DisplayMode> CRegistrySettings::getDefaultModes()
 {
   auto defaultRefresh = getDefaultRefresh();
-  const unsigned refreshMilliHz =
+  const unsigned refresh100uHz =
     defaultRefresh ? *defaultRefresh : DEFAULT_REFRESH;
 
   std::vector<DisplayMode> result;
@@ -96,7 +96,7 @@ std::vector<DisplayMode> CRegistrySettings::getDefaultModes()
     DisplayMode mode;
     mode.width          = DefaultDisplayModes[i][0];
     mode.height         = DefaultDisplayModes[i][1];
-    mode.refreshMilliHz = refreshMilliHz;
+    mode.refresh100uHz = refresh100uHz;
     mode.preferred      = i == DefaultPreferredDisplayMode;
     result.emplace_back(mode);
   }
@@ -166,7 +166,7 @@ std::wstring DisplayMode::toString()
   serialized.push_back('x');
   serialized.append(std::to_wstring(height));
   serialized.push_back('@');
-  serialized.append(LGFormatRefreshRate(refreshMilliHz));
+  serialized.append(LGFormatRefreshRate(refresh100uHz));
   if (preferred)
     serialized.push_back('*');
   return serialized;
@@ -192,7 +192,7 @@ std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
     status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
       (LPBYTE)&refresh, &size);
     if (status == ERROR_SUCCESS && refresh >= 24 && refresh <= 1000)
-      return refresh * 1000;
+      return refresh * LG_REFRESH_RATE_SCALE;
   }
   else if ((type == REG_SZ || type == REG_EXPAND_SZ) && size &&
       size % sizeof(wchar_t) == 0)
@@ -202,9 +202,9 @@ std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
       (LPBYTE)value.data(), &size);
     if (status == ERROR_SUCCESS)
     {
-      unsigned refreshMilliHz;
-      if (LGParseRefreshRate(value.data(), refreshMilliHz))
-        return refreshMilliHz;
+      unsigned refresh100uHz;
+      if (LGParseRefreshRate(value.data(), refresh100uHz))
+        return refresh100uHz;
     }
   }
 
@@ -212,9 +212,9 @@ std::optional<DWORD> CRegistrySettings::getDefaultRefresh()
   return {};
 }
 
-LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refreshMilliHz)
+LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refresh100uHz)
 {
-  const std::wstring value = LGFormatRefreshRate(refreshMilliHz);
+  const std::wstring value = LGFormatRefreshRate(refresh100uHz);
   return RegSetValueExW(hKey, L"DefaultRefresh", 0, REG_SZ,
     (const BYTE *)value.c_str(),
     (DWORD)((value.size() + 1) * sizeof(wchar_t)));

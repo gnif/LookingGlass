@@ -254,7 +254,7 @@ void CConfigWindow::onModeListSelectChange()
     auto &mode = (*m_modes)[index];
     m_modeWidth->setNumericValue(mode.width);
     m_modeHeight->setNumericValue(mode.height);
-    m_modeRefresh->setValue(LGFormatRefreshRate(mode.refreshMilliHz));
+    m_modeRefresh->setValue(LGFormatRefreshRate(mode.refresh100uHz));
     m_modePreferred->setChecked(mode.preferred);
   }
   EnableWindow(*m_modeUpdate, TRUE);
@@ -294,11 +294,11 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
       return 0;
     }
 
-    unsigned refreshMilliHz;
+    unsigned refresh100uHz;
     if (!LGParseRefreshRate(
-        m_modeRefresh->getValue(), refreshMilliHz))
+        m_modeRefresh->getValue(), refresh100uHz))
       return 0;
-    mode.refreshMilliHz = refreshMilliHz;
+    mode.refresh100uHz = refresh100uHz;
 
     m_modeBox->clear();
     m_modeBox->setSel(updateModeList(index));
@@ -325,10 +325,10 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
   }
   else if (m_defRefresh && hwnd == *m_defRefresh && code == EN_CHANGE && m_defaultRefresh)
   {
-    unsigned refreshMilliHz;
-    if (!LGParseRefreshRate(m_defRefresh->getValue(), refreshMilliHz))
+    unsigned refresh100uHz;
+    if (!LGParseRefreshRate(m_defRefresh->getValue(), refresh100uHz))
       return 0;
-    m_defaultRefresh = refreshMilliHz;
+    m_defaultRefresh = refresh100uHz;
   }
   else if (m_prefNoGPU && hwnd == *m_prefNoGPU && code == BN_CLICKED && m_noGPU)
   {

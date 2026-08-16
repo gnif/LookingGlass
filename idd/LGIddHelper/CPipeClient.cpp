@@ -24,6 +24,7 @@
 #include "CSRWLock.h"
 #include "CNotifyWindow.h"
 #include "CRegistrySettings.h"
+#include "RefreshRate.h"
 
 #include <setupapi.h>
 #include <tchar.h>
@@ -1011,7 +1012,8 @@ void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
     dm.dmPelsWidth        = msg.displayMode.width;
     dm.dmPelsHeight       = msg.displayMode.height;
     dm.dmDisplayFrequency =
-      (msg.displayMode.refreshMilliHz + 500) / 1000;
+      (msg.displayMode.refresh100uHz + LG_REFRESH_RATE_SCALE / 2) /
+        LG_REFRESH_RATE_SCALE;
     dm.dmFields           =
       DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
 

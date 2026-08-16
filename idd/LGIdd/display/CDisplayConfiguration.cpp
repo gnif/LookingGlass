@@ -22,6 +22,7 @@
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "RefreshRate.h"
 
 #include <iterator>
 #include <utility>
@@ -66,24 +67,26 @@ bool CDisplayConfiguration::LoadModes(const FrameCaps& caps)
     {
       configuredMode.width,
       configuredMode.height,
-      configuredMode.refreshMilliHz,
+      configuredMode.refresh100uHz,
     };
     if (!frameMode.width || !frameMode.height ||
-        !frameMode.refreshMilliHz)
+        !frameMode.refresh100uHz)
     {
-      DEBUG_WARN("Filtering invalid %s mode %ux%u@%.3f",
+      DEBUG_WARN("Filtering invalid %s mode %ux%u@%.4f",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
-        configuredMode.refreshMilliHz / 1000.0);
+        configuredMode.refresh100uHz /
+          static_cast<double>(LG_REFRESH_RATE_SCALE));
       continue;
     }
     if (!caps.CanUseMode(frameMode))
     {
       DEBUG_WARN(
-        "Filtering unsupported %s mode %ux%u@%.3f",
+        "Filtering unsupported %s mode %ux%u@%.4f",
         configuredMode.extraMode ? "extra" : "configured",
         configuredMode.width, configuredMode.height,
-        configuredMode.refreshMilliHz / 1000.0);
+        configuredMode.refresh100uHz /
+          static_cast<double>(LG_REFRESH_RATE_SCALE));
       continue;
     }
 
@@ -128,11 +131,11 @@ bool CDisplayConfiguration::ReloadSettings(
     CSettings::DisplayMode extraMode = {};
     if (m_settings.GetExtraMode(extraMode))
     {
-      const unsigned refreshMilliHz =
-        m_settings.GetDefaultRefreshMilliHz();
-      if (extraMode.refreshMilliHz != refreshMilliHz)
+      const unsigned refresh100uHz =
+        m_settings.GetDefaultRefresh100uHz();
+      if (extraMode.refresh100uHz != refresh100uHz)
       {
-        extraMode.refreshMilliHz = refreshMilliHz;
+        extraMode.refresh100uHz = refresh100uHz;
         settingsUpdated = m_settings.SetExtraMode(extraMode);
       }
     }
@@ -155,10 +158,10 @@ CDisplayConfiguration::SetResolution(
   CSettings::DisplayMode mode = {};
   mode.width          = width;
   mode.height         = height;
-  mode.refreshMilliHz = m_settings.GetDefaultRefreshMilliHz();
+  mode.refresh100uHz = m_settings.GetDefaultRefresh100uHz();
   mode.preferred      = true;
 
-  if (!mode.width || !mode.height || !mode.refreshMilliHz)
+  if (!mode.width || !mode.height || !mode.refresh100uHz)
   {
     DEBUG_WARN("Ignoring invalid resolution request: %ux%u", width, height);
     return result;
@@ -168,7 +171,7 @@ CDisplayConfiguration::SetResolution(
   {
     mode.width,
     mode.height,
-    mode.refreshMilliHz,
+    mode.refresh100uHz,
   };
   if (!caps.CanUseMode(frameMode, &result.requiredMiB))
   {
@@ -289,9 +292,11 @@ static inline void FillSignalInfo(DISPLAYCONFIG_VIDEO_SIGNAL_INFO& signal,
   signal.AdditionalSignalInfo.vSyncFreqDivider = monitorMode ? 0 : 1;
   signal.AdditionalSignalInfo.videoStandard    = 255;
 
-  SetSignalRate(signal.vSyncFreq, mode.refreshMilliHz, 1000);
+  SetSignalRate(signal.vSyncFreq, mode.refresh100uHz,
+    LG_REFRESH_RATE_SCALE);
   SetSignalRate(signal.hSyncFreq,
-    (UINT64)mode.refreshMilliHz * signal.totalSize.cy, 1000);
+    (UINT64)mode.refresh100uHz * signal.totalSize.cy,
+    LG_REFRESH_RATE_SCALE);
 
   signal.scanLineOrdering = DISPLAYCONFIG_SCANLINE_ORDERING_PROGRESSIVE;
   signal.pixelRate        = timing.pixelClock;

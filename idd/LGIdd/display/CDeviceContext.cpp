@@ -440,7 +440,7 @@ void CDeviceContext::OnSwapChainReady()
     m_monitorManager.QueueReplug();
   else if (action.setMode)
     g_pipe.SetDisplayMode(
-      action.mode.width, action.mode.height, action.mode.refreshMilliHz);
+      action.mode.width, action.mode.height, action.mode.refresh100uHz);
 }
 
 // Display configuration

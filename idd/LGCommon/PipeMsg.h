@@ -51,7 +51,7 @@ struct LGPipeMsg
   enum : uint32_t
   {
     RECOVERY_ACTIVE  = 0x1U,
-    PROTOCOL_VERSION = 2U
+    PROTOCOL_VERSION = 3U
   };
 
   union
@@ -67,7 +67,7 @@ struct LGPipeMsg
     {
       uint32_t width;
       uint32_t height;
-      uint32_t refreshMilliHz;
+      uint32_t refresh100uHz;
     }
     displayMode;
 

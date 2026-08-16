@@ -50,14 +50,14 @@ static bool ToUnsigned(const std::wstring& text, unsigned& value)
   return true;
 }
 
-bool LGParseRefreshRate(const std::wstring& text, unsigned& refreshMilliHz)
+bool LGParseRefreshRate(const std::wstring& text, unsigned& refresh100uHz)
 {
   const std::wstring value = Trim(text);
   const size_t decimal = value.find(L'.');
   if (value.empty() ||
       (decimal != std::wstring::npos &&
         (value.find(L'.', decimal + 1) != std::wstring::npos ||
-         decimal == 0 || decimal + 4 < value.size())))
+         decimal == 0 || decimal + 5 < value.size())))
     return false;
 
   const std::wstring wholeText = value.substr(0, decimal);
@@ -71,30 +71,34 @@ bool LGParseRefreshRate(const std::wstring& text, unsigned& refreshMilliHz)
     return false;
 
   if (fractionText.size() == 1)
-    fraction *= 100;
+    fraction *= 1000;
   else if (fractionText.size() == 2)
+    fraction *= 100;
+  else if (fractionText.size() == 3)
     fraction *= 10;
 
-  const unsigned long long valueMilliHz =
-    (unsigned long long)whole * 1000 + fraction;
-  if (valueMilliHz < 23900 || valueMilliHz > 1000000)
+  const unsigned long long value100uHz =
+    (unsigned long long)whole * LG_REFRESH_RATE_SCALE + fraction;
+  if (value100uHz < 239000 || value100uHz > 10000000)
     return false;
 
-  refreshMilliHz = (unsigned)valueMilliHz;
+  refresh100uHz = (unsigned)value100uHz;
   return true;
 }
 
-std::wstring LGFormatRefreshRate(unsigned refreshMilliHz)
+std::wstring LGFormatRefreshRate(unsigned refresh100uHz)
 {
-  std::wstring result = std::to_wstring(refreshMilliHz / 1000);
-  const unsigned fraction = refreshMilliHz % 1000;
+  std::wstring result = std::to_wstring(
+    refresh100uHz / LG_REFRESH_RATE_SCALE);
+  const unsigned fraction = refresh100uHz % LG_REFRESH_RATE_SCALE;
   if (!fraction)
     return result;
 
   const wchar_t text[] =
   {
     L'.',
-    (wchar_t)(L'0' + fraction / 100),
+    (wchar_t)(L'0' + fraction / 1000),
+    (wchar_t)(L'0' + fraction / 100 % 10),
     (wchar_t)(L'0' + fraction / 10 % 10),
     (wchar_t)(L'0' + fraction % 10),
     L'\0'

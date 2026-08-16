@@ -43,7 +43,7 @@ namespace
     const FrameMode& mode, uint64_t& frameSize)
   {
     frameSize = 0;
-    if (!mode.width || !mode.height || !mode.refreshMilliHz)
+    if (!mode.width || !mode.height || !mode.refresh100uHz)
       return false;
 
     uint64_t pitch;

@@ -20,6 +20,8 @@
 
 #include "display/CEdid.h"
 
+#include "RefreshRate.h"
+
 #include <algorithm>
 #include <string.h>
 
@@ -367,7 +369,7 @@ bool CEdid::GetTiming(Timing& timing, const CSettings::DisplayMode& mode)
   timing.vActive = mode.height;
 
   if (timing.hActive == 0 || timing.vActive == 0 ||
-      mode.refreshMilliHz == 0)
+      mode.refresh100uHz == 0)
     return false;
 
   timing.hBlank = std::max<DWORD>(160,
@@ -391,11 +393,12 @@ bool CEdid::GetTiming(Timing& timing, const CSettings::DisplayMode& mode)
   if (timing.vFront + timing.vSync >= timing.vBlank)
     return false;
 
-  const UINT64 pixelClockMilliHz =
+  const UINT64 pixelClock100uHz =
     (UINT64)(timing.hActive + timing.hBlank) *
     (UINT64)(timing.vActive + timing.vBlank) *
-    (UINT64)mode.refreshMilliHz;
-  timing.pixelClock = (pixelClockMilliHz + 500) / 1000;
+    (UINT64)mode.refresh100uHz;
+  timing.pixelClock = (pixelClock100uHz + LG_REFRESH_RATE_SCALE / 2) /
+    LG_REFRESH_RATE_SCALE;
   return timing.pixelClock != 0;
 }
 

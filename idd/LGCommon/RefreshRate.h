@@ -22,5 +22,8 @@
 
 #include <string>
 
-bool LGParseRefreshRate(const std::wstring& text, unsigned& refreshMilliHz);
-std::wstring LGFormatRefreshRate(unsigned refreshMilliHz);
+// Refresh rates are represented in 100 microhertz units.
+static constexpr unsigned LG_REFRESH_RATE_SCALE = 10000;
+
+bool LGParseRefreshRate(const std::wstring& text, unsigned& refresh100uHz);
+std::wstring LGFormatRefreshRate(unsigned refresh100uHz);

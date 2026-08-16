@@ -33,14 +33,14 @@ CSettings::CSettings()
 
 CSettings::DisplayModes CSettings::LoadModes()
 {
-  const unsigned defaultRefreshMilliHz = GetDefaultRefreshMilliHz();
+  const unsigned defaultRefresh100uHz = GetDefaultRefresh100uHz();
   DisplayModes displayModes;
 
   bool hasPreferred = false;
   DisplayMode m;
   if (GetExtraMode(m))
   {
-    const std::wstring refresh = LGFormatRefreshRate(m.refreshMilliHz);
+    const std::wstring refresh = LGFormatRefreshRate(m.refresh100uHz);
     DEBUG_INFO("ExtraMode: %ux%u@%ls%s", m.width, m.height,
       refresh.c_str(), m.preferred ? "*" : "");
     displayModes.push_back(m);
@@ -57,7 +57,7 @@ CSettings::DisplayModes CSettings::LoadModes()
     {
       m.width          = DefaultDisplayModes[i][0];
       m.height         = DefaultDisplayModes[i][1];
-      m.refreshMilliHz = defaultRefreshMilliHz;
+      m.refresh100uHz = defaultRefresh100uHz;
       m.preferred      = !hasPreferred &&
         (i == DefaultPreferredDisplayMode);
       m.extraMode      = false;
@@ -96,7 +96,7 @@ TransportInstances CSettings::LoadTransportInstances() const
 bool CSettings::SetExtraMode(const DisplayMode& mode)
 {
   WCHAR buf[64];
-  const std::wstring refresh = LGFormatRefreshRate(mode.refreshMilliHz);
+  const std::wstring refresh = LGFormatRefreshRate(mode.refresh100uHz);
   _snwprintf_s(buf, _countof(buf), _TRUNCATE, L"%ux%u@%ls%s",
     mode.width, mode.height, refresh.c_str(),
     mode.preferred ? L"*" : L"");
@@ -199,13 +199,13 @@ bool CSettings::GetExtraMode(DisplayMode& mode)
   return true;
 }
 
-unsigned CSettings::GetDefaultRefreshMilliHz() const
+unsigned CSettings::GetDefaultRefresh100uHz() const
 {
   HKEY hKey = nullptr;
   LONG status = RegOpenKeyExW(
     HKEY_LOCAL_MACHINE, RegistryKey(), 0, KEY_QUERY_VALUE, &hKey);
   if (status != ERROR_SUCCESS)
-    return 60000;
+    return 60 * LG_REFRESH_RATE_SCALE;
 
   DWORD type = 0;
   DWORD size = 0;
@@ -214,17 +214,17 @@ unsigned CSettings::GetDefaultRefreshMilliHz() const
   if (status != ERROR_SUCCESS)
   {
     RegCloseKey(hKey);
-    return 60000;
+    return 60 * LG_REFRESH_RATE_SCALE;
   }
 
-  unsigned refreshMilliHz = 0;
+  unsigned refresh100uHz = 0;
   if (type == REG_DWORD && size == sizeof(DWORD))
   {
     DWORD refresh = 0;
     status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
       (LPBYTE)&refresh, &size);
     if (status == ERROR_SUCCESS && refresh >= 24 && refresh <= 1000)
-      refreshMilliHz = refresh * 1000;
+      refresh100uHz = refresh * LG_REFRESH_RATE_SCALE;
   }
   else if ((type == REG_SZ || type == REG_EXPAND_SZ) && size &&
       size % sizeof(wchar_t) == 0)
@@ -233,11 +233,11 @@ unsigned CSettings::GetDefaultRefreshMilliHz() const
     status = RegQueryValueExW(hKey, L"DefaultRefresh", nullptr, &type,
       (LPBYTE)value.data(), &size);
     if (status == ERROR_SUCCESS)
-      LGParseRefreshRate(value.data(), refreshMilliHz);
+      LGParseRefreshRate(value.data(), refresh100uHz);
   }
 
   RegCloseKey(hKey);
-  return refreshMilliHz ? refreshMilliHz : 60000;
+  return refresh100uHz ? refresh100uHz : 60 * LG_REFRESH_RATE_SCALE;
 }
 
 bool CSettings::ReadMultiStringValue(const wchar_t * name,
@@ -331,7 +331,7 @@ bool CSettings::ParseModeString(const std::wstring& in, DisplayMode& out)
 
   if (!toUnsigned(s.substr(0, xPos), out.width) ||
       !toUnsigned(s.substr(xPos + 1, atPos - (xPos + 1)), out.height) ||
-      !LGParseRefreshRate(s.substr(atPos + 1), out.refreshMilliHz))
+      !LGParseRefreshRate(s.substr(atPos + 1), out.refresh100uHz))
       return false;
 
   // sanity check
