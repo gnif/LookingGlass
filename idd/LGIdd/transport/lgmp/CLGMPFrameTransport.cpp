@@ -25,6 +25,7 @@
 #include "transport/lgmp/CLGMPHost.h"
 #include "Atomic.h"
 #include "CDebug.h"
+#include "WCWrite.h"
 
 #include <cstring>
 #include <memory>
@@ -1335,15 +1336,14 @@ void CLGMPFrameTransport::WriteFrameBuffer(unsigned frameIndex, void * src,
 {
   LGMPBuffer * fb = m_frameBuffer[frameIndex];
 
-  memcpy(
-    reinterpret_cast<void *>(
-      reinterpret_cast<uintptr_t>(fb->data) + offset),
-    reinterpret_cast<void *>(
-      reinterpret_cast<uintptr_t>(src) + offset),
-    len);
+  WCWrite::Copy(fb->data + offset,
+    static_cast<uint8_t *>(src) + offset, len);
 
   if (setWritePos)
+  {
+    WCWrite::Flush();
     fb->wp = (uint32_t)(offset + len);
+  }
 }
 
 void CLGMPFrameTransport::WriteFrameBufferRows(unsigned frameIndex,
@@ -1355,7 +1355,7 @@ void CLGMPFrameTransport::WriteFrameBufferRows(unsigned frameIndex,
   uint8_t * source = static_cast<uint8_t *>(src) + offset;
   for (unsigned row = 0; row < rows; ++row)
   {
-    memcpy(dst, source, rowBytes);
+    WCWrite::Copy(dst, source, rowBytes);
     dst    += pitch;
     source += pitch;
   }
@@ -1365,5 +1365,6 @@ void CLGMPFrameTransport::FinalizeFrameBuffer(unsigned frameIndex) const
 {
   const KVMFRFrame * frame = m_frame[frameIndex];
   LGMPBuffer       * fb    = m_frameBuffer[frameIndex];
+  WCWrite::Flush();
   fb->wp = frame->dataHeight * frame->pitch;
 }

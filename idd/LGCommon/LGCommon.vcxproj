@@ -74,6 +74,10 @@
     <ClCompile Include="WCCopyAVX2.cpp">
       <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
     </ClCompile>
+    <ClCompile Include="WCWrite.cpp" />
+    <ClCompile Include="WCWriteAVX2.cpp">
+      <EnableEnhancedInstructionSet>AdvancedVectorExtensions2</EnableEnhancedInstructionSet>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CClipboardChannel.h" />
@@ -90,6 +94,7 @@
     <ClInclude Include="RefreshRate.h" />
     <ClInclude Include="Seq.h" />
     <ClInclude Include="WCCopy.h" />
+    <ClInclude Include="WCWrite.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

@@ -33,6 +33,12 @@
     <ClCompile Include="WCCopyAVX2.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="WCWrite.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="WCWriteAVX2.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Atomic.h">
@@ -75,6 +81,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="WCCopy.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="WCWrite.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
