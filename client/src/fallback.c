@@ -381,14 +381,16 @@ static bool publishConnection(LG_TransportFallback * fallback,
   return published;
 }
 
-static bool connectFallback(LG_TransportFallback * fallback)
+static LG_TransportStatus connectFallback(LG_TransportFallback * fallback,
+    bool retrying)
 {
   LG_TransportInstance transport = { 0 };
   if (!lgTransport_create(fallback->transportName, &transport))
   {
-    DEBUG_ERROR("Failed to create fallback transport %s",
-        fallback->transportName);
-    return false;
+    if (!retrying)
+      DEBUG_ERROR("Failed to create fallback transport %s",
+          fallback->transportName);
+    return LG_TRANSPORT_ERROR;
   }
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
@@ -401,11 +403,12 @@ static bool connectFallback(LG_TransportFallback * fallback)
 
   if (status != LG_TRANSPORT_OK)
   {
-    if (!atomic_load_explicit(&fallback->stop, memory_order_acquire))
+    if (!retrying && !atomic_load_explicit(
+          &fallback->stop, memory_order_acquire))
       DEBUG_ERROR("Fallback transport %s failed to connect: %d",
           fallback->transportName, status);
     cleanupConnection(fallback, false);
-    return false;
+    return status;
   }
 
   LG_LOCK_EXCLUSIVE(fallback->lock);
@@ -445,7 +448,7 @@ static bool connectFallback(LG_TransportFallback * fallback)
     if (reportMismatch && fallback->eventOps.endpointMismatch)
       fallback->eventOps.endpointMismatch(
           fallback->eventOpaque, primaryUUID, fallbackUUID);
-    return false;
+    return LG_TRANSPORT_UNAVAILABLE;
   }
 
   notifyConnected(fallback);
@@ -483,18 +486,34 @@ static bool connectFallback(LG_TransportFallback * fallback)
     fallback->eventOps.endpointMismatch(
         fallback->eventOpaque, primaryUUID, fallbackUUID);
   notifyDisconnected(fallback, reportDisconnect);
-  return true;
+  return lost ? LG_TRANSPORT_DISCONNECTED : LG_TRANSPORT_OK;
 }
 
 static int fallbackThread(void * opaque)
 {
   LG_TransportFallback * fallback = opaque;
   unsigned int retry = RETRY_INITIAL_MS;
+  bool retrying = false;
 
   while (!atomic_load_explicit(&fallback->stop, memory_order_acquire))
   {
-    if (connectFallback(fallback))
+    const LG_TransportStatus status = connectFallback(fallback, retrying);
+    if (status == LG_TRANSPORT_OK)
+    {
       retry = RETRY_INITIAL_MS;
+      retrying = false;
+    }
+    else if (status == LG_TRANSPORT_ERROR)
+    {
+      if (!atomic_load_explicit(&fallback->stop, memory_order_acquire) &&
+          fallback->eventOps.connectFailed)
+        fallback->eventOps.connectFailed(fallback->eventOpaque);
+      break;
+    }
+    else if (status == LG_TRANSPORT_DISCONNECTED)
+      break;
+    else
+      retrying = true;
 
     if (atomic_load_explicit(&fallback->stop, memory_order_acquire))
       break;

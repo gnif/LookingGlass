@@ -51,6 +51,7 @@ struct LG_Transport
   bool playbackEnabled;
   bool recordEnabled;
   bool audioDebug;
+  bool waitForServer;
 
   SpiceInput     * input;
   SpiceClipboard * clipboard;

@@ -189,7 +189,7 @@ set(SOURCES
   src/render_queue.c
   src/evdev.c
   src/transport.c
-  src/transport_fallback.c
+  src/fallback.c
   src/sw_surface.c
   src/input.c
 

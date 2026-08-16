@@ -325,10 +325,7 @@ int spiceSession_thread(void * opaque)
 
   PSStatus status = PS_STATUS_SHUTDOWN;
   if (!purespice_connect(&config))
-  {
-    DEBUG_ERROR("Failed to connect to SPICE server");
     goto done;
-  }
 
   transport->connected = true;
   status = PS_STATUS_RUN;

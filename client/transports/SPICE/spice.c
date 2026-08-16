@@ -63,6 +63,13 @@ static void spiceSetup(void)
       .value.x_int    = 5900
     },
     {
+      .module         = "spice",
+      .name           = "waitForServer",
+      .description    = "Wait for the SPICE server to become available",
+      .type           = OPTION_TYPE_BOOL,
+      .value.x_bool   = true
+    },
+    {
       .module       = "spice",
       .name         = "input",
       .description  = "Enable SPICE keyboard and mouse input",
@@ -127,6 +134,7 @@ static bool spiceCreate(LG_Transport ** result)
   transport->usbAudioEnabled  =
     option_get_bool("spice", "usbAudio");
   transport->audioDebug       = option_get_bool("audio", "debug");
+  transport->waitForServer    = option_get_bool("spice", "waitForServer");
 
 #if !ENABLE_USB_AUDIO
   if (transport->audioEnabled && transport->usbAudioEnabled)
@@ -265,9 +273,12 @@ static LG_TransportStatus spiceConnectCancellable(LG_Transport * transport,
 
   if (transport->connectStatus != LG_TRANSPORT_OK)
   {
+    const LG_TransportStatus status = transport->connectStatus;
     lgJoinThread(transport->thread, NULL);
     transport->thread = NULL;
-    return transport->connectStatus;
+    if (status == LG_TRANSPORT_ERROR && transport->waitForServer)
+      return LG_TRANSPORT_UNAVAILABLE;
+    return status;
   }
 
   *session = transport->session;

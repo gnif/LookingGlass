@@ -2610,6 +2610,13 @@ static void fallbackLost(void * opaque)
   app_setState(APP_STATE_SHUTDOWN);
 }
 
+static void fallbackConnectFailed(void * opaque)
+{
+  (void)opaque;
+  DEBUG_INFO("SPICE fallback server is unavailable");
+  app_setState(APP_STATE_SHUTDOWN);
+}
+
 static void fallbackEndpointMismatch(void * opaque, const uint8_t primary[16],
     const uint8_t fallback[16])
 {
@@ -2624,6 +2631,7 @@ static void fallbackEndpointMismatch(void * opaque, const uint8_t primary[16],
 static const LG_TransportFallbackEventOps fallbackEvents =
 {
   .connected    = fallbackConnected,
+  .connectFailed = fallbackConnectFailed,
   .lost         = fallbackLost,
   .disconnected = fallbackDisconnected,
   .videoStateChanged = fallbackVideoStateChanged,

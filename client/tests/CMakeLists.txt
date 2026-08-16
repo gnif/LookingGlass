@@ -577,7 +577,7 @@ endforeach()
 
 add_executable(transport-fallback-tests
   transport_fallback_test.c
-  ../src/transport_fallback.c
+  ../src/fallback.c
   ../src/sw_surface.c
 )
 target_include_directories(transport-fallback-tests PRIVATE
