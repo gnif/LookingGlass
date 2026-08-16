@@ -44,7 +44,7 @@ namespace WCWrite
     }
 
 #if defined(_M_IX86) || defined(_M_X64)
-    __declspec(noinline) void CopySSE41(
+    __declspec(noinline) void CopySSE2(
       void * destination, const void * source, size_t size)
     {
       uint8_t * dst       = static_cast<uint8_t *>(destination);
@@ -104,7 +104,7 @@ namespace WCWrite
         return &CopyFallback;
 
       __cpuidex(registers, 1, 0);
-      const bool sse41   = (registers[2] & (1 << 19)) != 0;
+      const bool sse2    = (registers[3] & (1 << 26)) != 0;
       const bool avx     = (registers[2] & (1 << 28)) != 0;
       const bool osxsave = (registers[2] & (1 << 27)) != 0;
 
@@ -116,7 +116,7 @@ namespace WCWrite
           return &Detail::CopyAVX2;
       }
 
-      return sse41 ? &CopySSE41 : &CopyFallback;
+      return sse2 ? &CopySSE2 : &CopyFallback;
     }
 #else
     CopyFn SelectCopy()
