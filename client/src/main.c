@@ -2604,14 +2604,10 @@ static void fallbackVideoStateChanged(void * opaque, bool ready)
 static void fallbackLost(void * opaque)
 {
   (void)opaque;
-  const unsigned int lost = atomic_fetch_or_explicit(&g_state.transportLost,
-      TRANSPORT_LOST_FALLBACK, memory_order_acq_rel) |
-    TRANSPORT_LOST_FALLBACK;
-  if ((lost & TRANSPORT_LOST_ALL) == TRANSPORT_LOST_ALL)
-  {
-    DEBUG_INFO("Primary and fallback transport sessions disconnected");
-    app_setState(APP_STATE_SHUTDOWN);
-  }
+  atomic_fetch_or_explicit(&g_state.transportLost,
+      TRANSPORT_LOST_FALLBACK, memory_order_acq_rel);
+  DEBUG_INFO("SPICE fallback transport session disconnected");
+  app_setState(APP_STATE_SHUTDOWN);
 }
 
 static void fallbackEndpointMismatch(void * opaque, const uint8_t primary[16],
@@ -2636,12 +2632,21 @@ static const LG_TransportFallbackEventOps fallbackEvents =
 
 static void primaryLost(void)
 {
+  atomic_store_explicit(
+      &g_state.lgHostConnected, false, memory_order_release);
+
+  if (g_state.transport.ops && g_state.transport.ops->name &&
+      strcmp(g_state.transport.ops->name, "spice") == 0)
+  {
+    DEBUG_INFO("SPICE transport session disconnected");
+    app_setState(APP_STATE_SHUTDOWN);
+    return;
+  }
+
   /* Establish restart before updating the transport bookkeeping. Primary
    * workers may still be unwinding abandoned payloads in parallel and must
    * observe that their failures no longer warrant a terminal shutdown. */
   app_setState(APP_STATE_RESTART);
-  atomic_store_explicit(
-      &g_state.lgHostConnected, false, memory_order_release);
   unsigned int lost = atomic_load_explicit(
       &g_state.transportLost, memory_order_acquire);
   for (;;)
