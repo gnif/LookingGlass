@@ -161,7 +161,8 @@ LRESULT CConfigWindow::onCreate()
 
   m_modeWidth.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
   m_modeHeight.reset(new CEditWidget(WS_TABSTOP | ES_LEFT | ES_NUMBER, m_hwnd));
-  m_modeRefresh.reset(new CEditWidget(WS_TABSTOP | ES_LEFT, m_hwnd));
+  m_modeRefresh.reset(new CEditWidget(
+    WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL, m_hwnd));
   m_modePreferred.reset(new CCheckbox(L"prefer", 0, m_hwnd));
 
   m_modeUpdate.reset(new CButton(L"Update", WS_TABSTOP, m_hwnd));
@@ -174,7 +175,8 @@ LRESULT CConfigWindow::onCreate()
   m_modeRevert.reset(new CButton(L"Revert", WS_TABSTOP, m_hwnd));
 
   m_defRefreshLabel.reset(new CStaticWidget(L"Default refresh:", SS_CENTERIMAGE, m_hwnd));
-  m_defRefresh.reset(new CEditWidget(ES_LEFT | WS_TABSTOP, m_hwnd));
+  m_defRefresh.reset(new CEditWidget(
+    ES_LEFT | WS_TABSTOP | ES_AUTOHSCROLL, m_hwnd));
   m_defRefreshHz.reset(new CStaticWidget(L"Hz", SS_CENTERIMAGE, m_hwnd));
 
   if (m_defaultRefresh)
