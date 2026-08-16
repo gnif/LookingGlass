@@ -124,7 +124,7 @@ void lgSetProcessTitle(const char * title)
     return;
 
   size_t effective = strlen(title);
-  if (effective > totalSize)
+  if (effective >= totalSize)
     effective = totalSize - 1;
 
   memcpy(buffer, title, effective);
