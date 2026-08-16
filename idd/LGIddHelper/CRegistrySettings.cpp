@@ -220,98 +220,65 @@ LSTATUS CRegistrySettings::setDefaultRefresh(DWORD refresh100uHz)
     (DWORD)((value.size() + 1) * sizeof(wchar_t)));
 }
 
-std::optional<bool> CRegistrySettings::getNoGPU()
+std::optional<bool> CRegistrySettings::readBooleanSetting(LPCWSTR szName, bool fallback)
 {
   DWORD result, cbData = sizeof result;
 
-  LSTATUS status = RegGetValue(hKey, nullptr, L"NoGPU", RRF_RT_REG_DWORD, nullptr, &result, &cbData);
+  LSTATUS status = RegGetValue(hKey, nullptr, szName, RRF_RT_REG_DWORD, nullptr, &result, &cbData);
   switch (status)
   {
   case ERROR_SUCCESS:
     return !!result;
   case ERROR_FILE_NOT_FOUND:
-    return false;
+    return fallback;
   default:
-    DEBUG_ERROR_HR(status, "RegGetValue(NoGPU)");
+    DEBUG_ERROR_HR(status, "RegGetValue(%S)", szName);
     return {};
   }
+}
+
+LSTATUS CRegistrySettings::writeBooleanSetting(LPCWSTR szName, bool value)
+{
+  DWORD dwValue = value;
+  return RegSetValueEx(hKey, szName, 0, REG_DWORD, (LPBYTE)&dwValue, sizeof(DWORD));
+}
+
+std::optional<bool> CRegistrySettings::getNoGPU()
+{
+  return readBooleanSetting(L"NoGPU");
 }
 
 LSTATUS CRegistrySettings::setNoGPU(bool noGPU)
 {
-  DWORD dwValue = noGPU;
-  return RegSetValueEx(hKey, L"NoGPU", 0, REG_DWORD, (LPBYTE)&dwValue, sizeof(DWORD));
+  return writeBooleanSetting(L"NoGPU", noGPU);
 }
 
 std::optional<bool> CRegistrySettings::getExclusiveMonitor()
 {
-  DWORD result, cbData = sizeof result;
-
-  LSTATUS status = RegGetValue(hKey, nullptr, L"ExclusiveMonitor", RRF_RT_REG_DWORD, nullptr, &result, &cbData);
-  switch (status)
-  {
-  case ERROR_SUCCESS:
-    return !!result;
-  case ERROR_FILE_NOT_FOUND:
-    return true;
-  default:
-    DEBUG_ERROR_HR(status, "RegGetValue(ExclusiveMonitor)");
-    return {};
-  }
+  return readBooleanSetting(L"ExclusiveMonitor", true);
 }
 
 LSTATUS CRegistrySettings::setExclusiveMonitor(bool exclusive)
 {
-  DWORD dwValue = exclusive;
-  return RegSetValueEx(hKey, L"ExclusiveMonitor", 0, REG_DWORD, (LPBYTE)&dwValue, sizeof(DWORD));
+  return writeBooleanSetting(L"ExclusiveMonitor", exclusive);
 }
 
 std::optional<bool> CRegistrySettings::getForceFullDirectCopy()
 {
-  DWORD result, cbData = sizeof result;
-
-  LSTATUS status = RegGetValue(hKey, nullptr, L"ForceFullDirectCopy",
-    RRF_RT_REG_DWORD, nullptr, &result, &cbData);
-  switch (status)
-  {
-  case ERROR_SUCCESS:
-    return !!result;
-  case ERROR_FILE_NOT_FOUND:
-    return false;
-  default:
-    DEBUG_ERROR_HR(status, "RegGetValue(ForceFullDirectCopy)");
-    return {};
-  }
+  return readBooleanSetting(L"ForceFullDirectCopy");
 }
 
 LSTATUS CRegistrySettings::setForceFullDirectCopy(bool forceFullCopy)
 {
-  DWORD dwValue = forceFullCopy;
-  return RegSetValueEx(hKey, L"ForceFullDirectCopy", 0, REG_DWORD,
-    (LPBYTE)&dwValue, sizeof(DWORD));
+  return writeBooleanSetting(L"ForceFullDirectCopy", forceFullCopy);
 }
 
 std::optional<bool> CRegistrySettings::getForceIndirectCopy()
 {
-  DWORD result, cbData = sizeof result;
-
-  LSTATUS status = RegGetValue(hKey, nullptr, L"ForceIndirectCopy",
-    RRF_RT_REG_DWORD, nullptr, &result, &cbData);
-  switch (status)
-  {
-  case ERROR_SUCCESS:
-    return !!result;
-  case ERROR_FILE_NOT_FOUND:
-    return false;
-  default:
-    DEBUG_ERROR_HR(status, "RegGetValue(ForceIndirectCopy)");
-    return {};
-  }
+  return readBooleanSetting(L"ForceIndirectCopy");
 }
 
 LSTATUS CRegistrySettings::setForceIndirectCopy(bool forceIndirectCopy)
 {
-  DWORD dwValue = forceIndirectCopy;
-  return RegSetValueEx(hKey, L"ForceIndirectCopy", 0, REG_DWORD,
-    (LPBYTE)&dwValue, sizeof(DWORD));
+  return writeBooleanSetting(L"ForceIndirectCopy", forceIndirectCopy);
 }

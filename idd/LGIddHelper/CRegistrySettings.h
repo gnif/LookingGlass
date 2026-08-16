@@ -37,6 +37,9 @@ struct DisplayMode {
 class CRegistrySettings {
   HKEY hKey;
 
+  std::optional<bool> readBooleanSetting(LPCWSTR szName, bool fallback = false);
+  LSTATUS writeBooleanSetting(LPCWSTR szName, bool value);
+
 public:
   CRegistrySettings();
   ~CRegistrySettings();
