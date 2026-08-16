@@ -732,14 +732,57 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
 {
   SinkTarget result = {};
 
-  const unsigned dataWidth = dstFormat.dataWidth ?
-    dstFormat.dataWidth : (unsigned)dstFormat.desc.Width;
-  const unsigned dataHeight = dstFormat.dataHeight ?
-    dstFormat.dataHeight : dstFormat.desc.Height;
+  const D3D12_RESOURCE_DESC& desc = dstFormat.desc;
+  const unsigned dataWidth  = dstFormat.dataWidth;
+  const unsigned dataHeight = dstFormat.dataHeight;
 
-  if (dstFormat.format == FRAME_TYPE_INVALID)
+  unsigned bpp         = 0;
+  bool     validLayout = false;
+  switch (dstFormat.format)
   {
-    DEBUG_ERROR("Unsupported frame format, skipping frame");
+    case FRAME_TYPE_BGRA:
+    case FRAME_TYPE_RGBA:
+    case FRAME_TYPE_RGBA10:
+    case FRAME_TYPE_RGBA16F:
+      bpp = dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
+      validLayout =
+        desc.Dimension        == D3D12_RESOURCE_DIMENSION_TEXTURE2D &&
+        D12::Type(desc.Format) == dstFormat.format              &&
+        dataWidth             == desc.Width                      &&
+        dataHeight            == desc.Height                     &&
+        dstFormat.width       == desc.Width                      &&
+        dstFormat.height      == desc.Height                     &&
+        dstFormat.pitch       == 0;
+      break;
+
+    case FRAME_TYPE_BGR_32:
+      bpp = 4;
+      validLayout =
+        desc.Dimension          == D3D12_RESOURCE_DIMENSION_BUFFER &&
+        dstFormat.pitch         == pitch                           &&
+        pitch % bpp             == 0                               &&
+        dataWidth               == pitch / bpp                     &&
+        dataHeight              == dstFormat.height                &&
+        (UINT64)dstFormat.width * 3 <= pitch      &&
+        (UINT64)pitch * dataHeight   <= desc.Width;
+      break;
+
+    default:
+      DEBUG_ERROR("Unsupported frame format, skipping frame");
+      return result;
+  }
+
+  const UINT64 rowBytes = (UINT64)dataWidth * bpp;
+  if (!pitch || !dataWidth || !dataHeight || !dstFormat.width ||
+      !dstFormat.height || pitch % bpp || rowBytes > pitch ||
+      !validLayout)
+  {
+    DEBUG_ERROR(
+      "Invalid frame layout: resource=%u data=%ux%u frame=%ux%u "
+      "pitch=%u format=%u",
+      (unsigned)desc.Dimension,
+      dataWidth, dataHeight, dstFormat.width, dstFormat.height,
+      pitch, (unsigned)dstFormat.format);
     return result;
   }
 
@@ -842,7 +885,6 @@ SinkTarget CLGMPFrameTransport::PrepareFrameBuffer(
   KVMFRFrame * fi = m_frame[frameIndex];
 
   const unsigned maxRows = (unsigned)(m_maxFrameSize / pitch);
-  const int bpp = dstFormat.format == FRAME_TYPE_RGBA16F ? 8 : 4;
   KVMFRFrameFlags flags =
     (dstFormat.hdr         ? FRAME_FLAG_HDR          : 0) |
     (dstFormat.hdrPQ       ? FRAME_FLAG_HDR_PQ       : 0) |
