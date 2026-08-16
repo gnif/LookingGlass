@@ -36,6 +36,8 @@ namespace
   static const unsigned RECOVERY_PATH_ATTEMPTS   = 20;
   static const size_t   RECOVERY_MAX_PATHS       = 4;
   static const DWORD    RECOVERY_VERIFY_DELAY_MS = 100;
+  static const unsigned DISPLAY_MODE_ATTEMPTS    = 20;
+  static const DWORD    DISPLAY_MODE_DELAY_MS    = 100;
 
   struct DisplayState
   {
@@ -192,6 +194,58 @@ namespace
     }
 
     return lgIndex != SIZE_MAX;
+  }
+
+  bool GetLGDisplayState(DisplayState& state)
+  {
+    DISPLAY_DEVICE device = {};
+    device.cb = sizeof(device);
+    for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+    {
+      if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) &&
+        !(device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) &&
+        IsLGDisplay(device))
+      {
+        state        = {};
+        state.device = device;
+        state.mode.dmSize = sizeof(state.mode);
+        state.isLG        = true;
+        return EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS,
+          &state.mode, 0) != FALSE;
+      }
+
+      device = {};
+      device.cb = sizeof(device);
+    }
+
+    return false;
+  }
+
+  uint32_t DisplayModeRefresh(const LGPipeMsg& msg)
+  {
+    return (msg.displayMode.refresh100uHz + LG_REFRESH_RATE_SCALE / 2) /
+      LG_REFRESH_RATE_SCALE;
+  }
+
+  bool FindDisplayMode(const DisplayState& display, const LGPipeMsg& msg,
+    DEVMODE& mode)
+  {
+    const uint32_t refresh = DisplayModeRefresh(msg);
+    for (DWORD i = 0; ; ++i)
+    {
+      DEVMODE candidate = {};
+      candidate.dmSize = sizeof(candidate);
+      if (!EnumDisplaySettingsEx(display.device.DeviceName, i, &candidate, 0))
+        return false;
+
+      if (candidate.dmPelsWidth == msg.displayMode.width &&
+        candidate.dmPelsHeight == msg.displayMode.height &&
+        candidate.dmDisplayFrequency == refresh)
+      {
+        mode = candidate;
+        return true;
+      }
+    }
   }
 
   bool HasActiveDisplay(bool lg)
@@ -398,17 +452,33 @@ bool CPipeClient::Init()
       return false;
   }
 
+  if (!StartDisplayModeThread())
+  {
+    CSRWExclusiveLock lock(m_clipboardSetupLock);
+    ResetClipboardSetupLocked();
+    return false;
+  }
+
   m_endpoint.SetHandler(this);
-  return m_endpoint.Start(
+  if (m_endpoint.Start(
     LG_PIPE_NAME,
     CPipeEndpoint::Mode::Client,
-    sizeof(LGPipeMsg));
+    sizeof(LGPipeMsg)))
+    return true;
+
+  StopDisplayModeThread();
+  {
+    CSRWExclusiveLock lock(m_clipboardSetupLock);
+    ResetClipboardSetupLocked();
+  }
+  return false;
 }
 
 void CPipeClient::DeInit()
 {
   // Stop first so no endpoint callback can race mapping teardown.
   m_endpoint.Stop();
+  StopDisplayModeThread();
 
   CSRWExclusiveLock lock(m_clipboardSetupLock);
   ResetClipboardSetupLocked();
@@ -482,6 +552,165 @@ void CPipeClient::SetActiveDesktop()
 void CPipeClient::WriteMsg(const LGPipeMsg& msg)
 {
   m_endpoint.Send(&msg, sizeof(msg));
+}
+
+DWORD WINAPI CPipeClient::DisplayModeThreadProc(void * context)
+{
+  static_cast<CPipeClient *>(context)->DisplayModeThread();
+  return 0;
+}
+
+bool CPipeClient::StartDisplayModeThread()
+{
+  m_displayModeStop = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  m_displayModeWake = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (!m_displayModeStop || !m_displayModeWake)
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create display mode events");
+    StopDisplayModeThread();
+    return false;
+  }
+
+  m_displayModeThread = CreateThread(
+    nullptr, 0, DisplayModeThreadProc, this, 0, nullptr);
+  if (!m_displayModeThread)
+  {
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create display mode worker");
+    StopDisplayModeThread();
+    return false;
+  }
+
+  return true;
+}
+
+void CPipeClient::StopDisplayModeThread()
+{
+  if (m_displayModeStop)
+    SetEvent(m_displayModeStop);
+  if (m_displayModeWake)
+    SetEvent(m_displayModeWake);
+  if (m_displayModeThread)
+  {
+    WaitForSingleObject(m_displayModeThread, INFINITE);
+    CloseHandle(m_displayModeThread);
+  }
+  if (m_displayModeWake)
+    CloseHandle(m_displayModeWake);
+  if (m_displayModeStop)
+    CloseHandle(m_displayModeStop);
+
+  m_displayModeThread = nullptr;
+  m_displayModeWake   = nullptr;
+  m_displayModeStop   = nullptr;
+
+  CSRWExclusiveLock lock(m_displayModeLock);
+  m_displayMode       = {};
+  m_displayModeSerial = 0;
+  m_hasDisplayMode    = false;
+}
+
+bool CPipeClient::ApplyDisplayMode(const LGPipeMsg& msg, LONG& result)
+{
+  CSRWExclusiveLock lock(m_displayLock);
+
+  DisplayState display = {};
+  if (!GetLGDisplayState(display))
+  {
+    result = DISP_CHANGE_FAILED;
+    return false;
+  }
+
+  DEVMODE mode = {};
+  if (!FindDisplayMode(display, msg, mode))
+  {
+    result = DISP_CHANGE_BADMODE;
+    return false;
+  }
+
+  mode.dmFields =
+    DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
+  result = ChangeDisplaySettingsEx(display.device.DeviceName,
+    &mode, NULL, CDS_UPDATEREGISTRY, NULL);
+  return result == DISP_CHANGE_SUCCESSFUL;
+}
+
+bool CPipeClient::VerifyDisplayMode(const LGPipeMsg& msg)
+{
+  CSRWExclusiveLock lock(m_displayLock);
+
+  DisplayState display = {};
+  return GetLGDisplayState(display) &&
+    display.mode.dmPelsWidth == msg.displayMode.width &&
+    display.mode.dmPelsHeight == msg.displayMode.height &&
+    display.mode.dmDisplayFrequency == DisplayModeRefresh(msg);
+}
+
+void CPipeClient::DisplayModeThread()
+{
+  const HANDLE handles[] = { m_displayModeStop, m_displayModeWake };
+  uint64_t serial = 0;
+  unsigned int attempts = 0;
+
+  while (true)
+  {
+    const DWORD wait = WaitForMultipleObjects(_countof(handles), handles,
+      FALSE, attempts ? DISPLAY_MODE_DELAY_MS : INFINITE);
+    if (wait == WAIT_OBJECT_0)
+      break;
+    if (wait == WAIT_FAILED)
+    {
+      DEBUG_ERROR_HR(GetLastError(), "Display mode worker wait failed");
+      break;
+    }
+
+    LGPipeMsg msg = {};
+    {
+      CSRWSharedLock lock(m_displayModeLock);
+      if (!m_hasDisplayMode)
+      {
+        attempts = 0;
+        continue;
+      }
+
+      if (serial != m_displayModeSerial)
+      {
+        serial   = m_displayModeSerial;
+        attempts = 0;
+      }
+      msg = m_displayMode;
+    }
+
+    LONG result = DISP_CHANGE_FAILED;
+    if (ApplyDisplayMode(msg, result))
+    {
+      if (EnsureOnlyDisplay() && VerifyDisplayMode(msg))
+      {
+        CSRWExclusiveLock lock(m_displayModeLock);
+        if (serial == m_displayModeSerial)
+          m_hasDisplayMode = false;
+        attempts = 0;
+        continue;
+      }
+
+      result = DISP_CHANGE_FAILED;
+    }
+
+    ++attempts;
+    if (attempts < DISPLAY_MODE_ATTEMPTS)
+      continue;
+
+    CSRWExclusiveLock lock(m_displayModeLock);
+    if (serial == m_displayModeSerial)
+    {
+      DEBUG_ERROR("Failed to apply Looking Glass display mode %ux%u@%u (%ld)",
+        msg.displayMode.width,
+        msg.displayMode.height,
+        DisplayModeRefresh(msg),
+        result);
+      m_hasDisplayMode = false;
+    }
+    attempts = 0;
+  }
 }
 
 bool CPipeClient::PipeServerIsAuthorized(HANDLE pipe)
@@ -996,35 +1225,17 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
-  LONG result;
+  // The IDD reaches swap-chain readiness before Win32 has necessarily
+  // enumerated the replugged monitor's complete mode list. Latch the latest
+  // request and let the worker apply it once that list is ready.
   {
-    CSRWExclusiveLock lock(m_displayLock);
-
-    std::vector<DisplayState> displays;
-    size_t lgIndex;
-    if (!GetDisplayStates(displays, lgIndex))
-    {
-      DEBUG_ERROR("Looking Glass display not found while setting its mode");
-      return;
-    }
-
-    DEVMODE dm = displays[lgIndex].mode;
-    dm.dmPelsWidth        = msg.displayMode.width;
-    dm.dmPelsHeight       = msg.displayMode.height;
-    dm.dmDisplayFrequency =
-      (msg.displayMode.refresh100uHz + LG_REFRESH_RATE_SCALE / 2) /
-        LG_REFRESH_RATE_SCALE;
-    dm.dmFields           =
-      DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-
-    result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
-      &dm, NULL, CDS_UPDATEREGISTRY, NULL);
-    if (result != DISP_CHANGE_SUCCESSFUL)
-      DEBUG_ERROR("ChangeDisplaySettingsEx Failed (0x%08x)", result);
+    CSRWExclusiveLock lock(m_displayModeLock);
+    m_displayMode       = msg;
+    ++m_displayModeSerial;
+    m_hasDisplayMode    = true;
   }
 
-  if (result == DISP_CHANGE_SUCCESSFUL)
-    EnsureOnlyDisplay();
+  SetEvent(m_displayModeWake);
 }
 
 void CPipeClient::HandleGPUStatus(const LGPipeMsg& msg)

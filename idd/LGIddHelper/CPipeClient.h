@@ -43,6 +43,14 @@ private:
   bool               m_clipboardEnabled        = false;
   CSRWLock           m_displayLock;
 
+  CSRWLock  m_displayModeLock;
+  HANDLE    m_displayModeStop   = nullptr;
+  HANDLE    m_displayModeWake   = nullptr;
+  HANDLE    m_displayModeThread = nullptr;
+  LGPipeMsg m_displayMode       = {};
+  uint64_t  m_displayModeSerial = 0;
+  bool      m_hasDisplayMode    = false;
+
   bool      m_recoveryActive    = false;
   bool      m_hasRecoveryStatus = false;
   LGPipeMsg m_recoveryStatus    = {};
@@ -50,6 +58,13 @@ private:
   void WriteMsg(const LGPipeMsg& msg);
 
   void SetActiveDesktop();
+
+  static DWORD WINAPI DisplayModeThreadProc(void * context);
+  void DisplayModeThread();
+  bool StartDisplayModeThread();
+  void StopDisplayModeThread();
+  bool ApplyDisplayMode(const LGPipeMsg& msg, LONG& result);
+  bool VerifyDisplayMode(const LGPipeMsg& msg);
 
   bool EnsureOnlyDisplayLocked();
   uint32_t RestoreSavedTopologyLocked() const;
