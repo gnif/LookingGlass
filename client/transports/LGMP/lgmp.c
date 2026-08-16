@@ -753,7 +753,8 @@ static void lgmp_unsubscribeFrameLease(struct LGMPFrameLease * lease)
   const LGMP_STATUS status = lgmpClientUnsubscribe(lease->subscription);
   if (status != LGMP_OK)
   {
-    if (status != LGMP_ERR_QUEUE_TIMEOUT &&
+    if (status != LGMP_ERR_INVALID_SESSION &&
+        status != LGMP_ERR_QUEUE_TIMEOUT &&
         status != LGMP_ERR_QUEUE_UNSUBSCRIBED)
       DEBUG_WARN("Failed to unsubscribe from LGMP frame queue: %s",
           lgmpStatusString(status));
@@ -833,7 +834,8 @@ static void lgmp_stopPointer(struct LG_Transport * this)
   const LGMP_STATUS status = lgmpClientUnsubscribe(&this->pointerQueue);
   if (status != LGMP_OK)
   {
-    if (status != LGMP_ERR_QUEUE_TIMEOUT &&
+    if (status != LGMP_ERR_INVALID_SESSION &&
+        status != LGMP_ERR_QUEUE_TIMEOUT &&
         status != LGMP_ERR_QUEUE_UNSUBSCRIBED)
       DEBUG_WARN("Failed to unsubscribe from the LGMP pointer queue: %s",
           lgmpStatusString(status));

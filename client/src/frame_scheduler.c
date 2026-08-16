@@ -102,6 +102,7 @@ static bool controlReady(uint64_t now)
   if (status != LG_TRANSPORT_OK)
   {
     if (status != LG_TRANSPORT_UNAVAILABLE &&
+        status != LG_TRANSPORT_DISCONNECTED &&
         !l_frameScheduler.controlFaulted)
     {
       DEBUG_WARN(
@@ -169,6 +170,7 @@ static bool sendSchedule(LG_TransportFrameScheduleFlags flags,
   if (status != LG_TRANSPORT_OK)
   {
     if (status != LG_TRANSPORT_UNAVAILABLE &&
+        status != LG_TRANSPORT_DISCONNECTED &&
         !l_frameScheduler.enqueueFaulted)
     {
       DEBUG_WARN("Frame-schedule control failed with status %d", status);
