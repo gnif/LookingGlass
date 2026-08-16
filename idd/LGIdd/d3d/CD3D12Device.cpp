@@ -19,6 +19,7 @@
  */
 
 #include "d3d/CD3D12Device.h"
+#include "config/CSettings.h"
 #include "CDebug.h"
 
 bool CD3D12Device::s_directHeapFailed = false;
@@ -66,8 +67,12 @@ CD3D12Device::InitResult CD3D12Device::Init(
 {
   HRESULT hr;
 
+  const bool forceIndirectCopy = CSettings::ShouldForceIndirectCopy();
   m_computeEnabled = enableCompute;
-  m_indirectCopy   = !directMemory || s_directHeapFailed;
+  m_indirectCopy   = !directMemory || s_directHeapFailed || forceIndirectCopy;
+
+  if (forceIndirectCopy)
+    DEBUG_INFO("Forcing indirect transport copies");
 
   hr = CreateDXGIFactory2(m_debug ? DXGI_CREATE_FACTORY_DEBUG : 0, IID_PPV_ARGS(&m_factory));  
   if (FAILED(hr))

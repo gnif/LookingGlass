@@ -59,4 +59,7 @@ public:
 
   std::optional<bool> getForceFullDirectCopy();
   LSTATUS setForceFullDirectCopy(bool forceFullCopy);
+
+  std::optional<bool> getForceIndirectCopy();
+  LSTATUS setForceIndirectCopy(bool forceIndirectCopy);
 };

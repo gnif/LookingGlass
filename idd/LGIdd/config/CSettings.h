@@ -101,6 +101,11 @@ class CSettings
       return ReadBoolValue(L"ForceFullDirectCopy");
     }
 
+    static bool ShouldForceIndirectCopy()
+    {
+      return ReadBoolValue(L"ForceIndirectCopy");
+    }
+
   private:
     static const wchar_t * RegistryKey()
     {

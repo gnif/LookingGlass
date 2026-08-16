@@ -65,6 +65,7 @@ class CConfigWindow : public CWindow
   std::unique_ptr<CCheckbox> m_prefNoGPU;
   std::unique_ptr<CCheckbox> m_prefExclusive;
   std::unique_ptr<CCheckbox> m_prefForceFullDirectCopy;
+  std::unique_ptr<CCheckbox> m_prefForceIndirectCopy;
 
   std::function<void()> m_onDestroy;
   std::function<void()> m_onSettingChange;
@@ -77,6 +78,7 @@ class CConfigWindow : public CWindow
   std::optional<bool> m_noGPU;
   std::optional<bool> m_exclusive;
   std::optional<bool> m_forceFullDirectCopy;
+  std::optional<bool> m_forceIndirectCopy;
 
   void getMinimumSize(LONG &width, LONG &height);
   void updateFont();

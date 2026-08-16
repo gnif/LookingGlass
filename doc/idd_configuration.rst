@@ -71,6 +71,13 @@ Force full direct frame copies
    disabled unless you encounter corruption. Changing it requests a driver
    reload.
 
+Force indirect copy
+   Disables direct D3D12 access to the shared transport heap and instead
+   copies each frame through a CPU-mapped readback resource. Enable this only
+   to work around a GPU driver that corrupts direct transport writes: it adds
+   a CPU copy and significantly reduces throughput. It takes precedence over
+   the direct-copy preference and requests a driver reload when changed.
+
 Unlike mode-list edits, preference checkboxes are saved when clicked.
 
 Software processing

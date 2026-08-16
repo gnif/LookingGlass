@@ -290,3 +290,28 @@ LSTATUS CRegistrySettings::setForceFullDirectCopy(bool forceFullCopy)
   return RegSetValueEx(hKey, L"ForceFullDirectCopy", 0, REG_DWORD,
     (LPBYTE)&dwValue, sizeof(DWORD));
 }
+
+std::optional<bool> CRegistrySettings::getForceIndirectCopy()
+{
+  DWORD result, cbData = sizeof result;
+
+  LSTATUS status = RegGetValue(hKey, nullptr, L"ForceIndirectCopy",
+    RRF_RT_REG_DWORD, nullptr, &result, &cbData);
+  switch (status)
+  {
+  case ERROR_SUCCESS:
+    return !!result;
+  case ERROR_FILE_NOT_FOUND:
+    return false;
+  default:
+    DEBUG_ERROR_HR(status, "RegGetValue(ForceIndirectCopy)");
+    return {};
+  }
+}
+
+LSTATUS CRegistrySettings::setForceIndirectCopy(bool forceIndirectCopy)
+{
+  DWORD dwValue = forceIndirectCopy;
+  return RegSetValueEx(hKey, L"ForceIndirectCopy", 0, REG_DWORD,
+    (LPBYTE)&dwValue, sizeof(DWORD));
+}

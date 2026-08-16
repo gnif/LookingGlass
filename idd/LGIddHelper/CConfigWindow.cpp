@@ -55,6 +55,7 @@ CConfigWindow::CConfigWindow() : m_scale(1)
     m_noGPU = m_settings.getNoGPU();
     m_exclusive = m_settings.getExclusiveMonitor();
     m_forceFullDirectCopy = m_settings.getForceFullDirectCopy();
+    m_forceIndirectCopy = m_settings.getForceIndirectCopy();
   }
 
   if (!CreateWindowEx(0, MAKEINTATOM(s_atom), L"Looking Glass IDD Configuration",
@@ -96,6 +97,7 @@ void CConfigWindow::updateFont()
     *m_defRefreshLabel, *m_defRefresh, *m_defRefreshHz, *m_modeSave, *m_modeRevert,
     *m_prefGroup, *m_prefNoGPU, *m_prefExclusive,
     *m_prefForceFullDirectCopy,
+    *m_prefForceIndirectCopy,
   }))
     SendMessage(child, WM_SETFONT, (WPARAM)m_font.Get(), 1);
 }
@@ -191,6 +193,8 @@ LRESULT CConfigWindow::onCreate()
   m_prefExclusive.reset(new CCheckbox(L"Make LG the only monitor", 0, m_hwnd));
   m_prefForceFullDirectCopy.reset(new CCheckbox(
     L"Force full direct frame copies", 0, m_hwnd));
+  m_prefForceIndirectCopy.reset(new CCheckbox(
+    L"Force indirect copy", 0, m_hwnd));
 
   if (m_noGPU)
     m_prefNoGPU->setChecked(*m_noGPU);
@@ -200,6 +204,9 @@ LRESULT CConfigWindow::onCreate()
 
   if (m_forceFullDirectCopy)
     m_prefForceFullDirectCopy->setChecked(*m_forceFullDirectCopy);
+
+  if (m_forceIndirectCopy)
+    m_prefForceIndirectCopy->setChecked(*m_forceIndirectCopy);
 
   LONG width, height;
   getMinimumSize(width, height);
@@ -240,10 +247,11 @@ LRESULT CConfigWindow::onResize(DWORD width, DWORD height)
   pos.pinBottomLeft(*m_modeSave, 20, 20, 132, 24);
   pos.pinBottomLeft(*m_modeRevert, 154, 20, 50, 24);
 
-  pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 92);
+  pos.pinTopLeft(*m_prefGroup, 224, 40, 200, 112);
   pos.pinTopLeft(*m_prefNoGPU, 236, 64, 176, 20);
   pos.pinTopLeft(*m_prefExclusive, 236, 84, 176, 20);
   pos.pinTopLeft(*m_prefForceFullDirectCopy, 236, 104, 188, 20);
+  pos.pinTopLeft(*m_prefForceIndirectCopy, 236, 124, 188, 20);
   return 0;
 }
 
@@ -366,6 +374,22 @@ LRESULT CConfigWindow::onCommand(WORD id, WORD code, HWND hwnd)
 
     *m_forceFullDirectCopy = value;
     m_prefForceFullDirectCopy->setChecked(value);
+    sendSettingChange();
+  }
+  else if (m_prefForceIndirectCopy &&
+           hwnd == *m_prefForceIndirectCopy && code == BN_CLICKED &&
+           m_forceIndirectCopy)
+  {
+    const bool value = !*m_forceIndirectCopy;
+    const LSTATUS result = m_settings.setForceIndirectCopy(value);
+    if (result != ERROR_SUCCESS)
+    {
+      DEBUG_ERROR_HR(result, "Failed to save ForceIndirectCopy");
+      return 0;
+    }
+
+    *m_forceIndirectCopy = value;
+    m_prefForceIndirectCopy->setChecked(value);
     sendSettingChange();
   }
   else if (m_modeSave && hwnd == *m_modeSave && code == BN_CLICKED)
