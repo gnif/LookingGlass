@@ -106,8 +106,15 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
     return 0;
 
   case WM_NO_GPU:
-    handleGPUNotification((bool)wParam);
+  {
+    m_gpuNotificationQueued.store(false, std::memory_order_release);
+    const int status = m_pendingGPUStatus.exchange(
+      -1, std::memory_order_acq_rel);
+    if (status >= 0)
+      handleGPUNotification(status != 0);
+    queueGPUNotification();
     return 0;
+  }
 
   case WM_RESOLUTION_REJECTED:
   {
@@ -174,6 +181,7 @@ LRESULT CNotifyWindow::onClose()
 
 LRESULT CNotifyWindow::onDestroy()
 {
+  m_iconRegistered.store(false, std::memory_order_release);
   if (m_clipboard)
     m_clipboard->Shutdown();
   KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
@@ -235,27 +243,40 @@ void CNotifyWindow::registerIcon()
     return;
   }
 
-  m_iconRegistered = true;
+  m_iconRegistered.store(true, std::memory_order_release);
   if (!Shell_NotifyIcon(NIM_SETVERSION, &m_iconData))
     DEBUG_ERROR_HR(GetLastError(), "Shell_NotifyIcon(NIM_SETVERSION)");
 
-  if (m_gpuQueue)
-  {
-    handleGPUNotification(*m_gpuQueue);
-    m_gpuQueue.reset();
-  }
+  queueGPUNotification();
 }
 
 void CNotifyWindow::setGPU(bool hasGPU)
 {
-  if (m_iconRegistered)
-    PostMessage(m_hwnd, WM_NO_GPU, hasGPU, 0);
-  else
-    m_gpuQueue.emplace(hasGPU);
+  m_pendingGPUStatus.store(hasGPU ? 1 : 0, std::memory_order_release);
+  queueGPUNotification();
+}
+
+void CNotifyWindow::queueGPUNotification()
+{
+  if (!m_iconRegistered.load(std::memory_order_acquire) ||
+      m_pendingGPUStatus.load(std::memory_order_acquire) < 0 ||
+      m_gpuNotificationQueued.exchange(true, std::memory_order_acq_rel))
+    return;
+
+  if (!PostMessage(m_hwnd, WM_NO_GPU, 0, 0))
+  {
+    m_gpuNotificationQueued.store(false, std::memory_order_release);
+    DEBUG_ERROR_HR(GetLastError(), "Failed to queue GPU status notification");
+  }
 }
 
 void CNotifyWindow::handleGPUNotification(bool hasGPU)
 {
+  const bool notifyNoGPU = !hasGPU &&
+    (!m_gpuStatusKnown || m_hasGPU);
+  m_gpuStatusKnown = true;
+  m_hasGPU         = hasGPU;
+
   StringCbCopy(m_iconData.szTip, sizeof m_iconData.szTip, hasGPU ?
     L"Looking Glass (IDD) with GPU acceleration" :
     L"Looking Glass (IDD) with software rendering");
@@ -271,7 +292,7 @@ void CNotifyWindow::handleGPUNotification(bool hasGPU)
     return;
   }
 
-  if (hasGPU)
+  if (hasGPU || !notifyNoGPU)
     return;
 
   CRegistrySettings settings;

@@ -24,7 +24,6 @@
 #include <stdint.h>
 #include <functional>
 #include <memory>
-#include <optional>
 
 class CConfigWindow;
 class CClipboardChannel;
@@ -36,8 +35,11 @@ class CNotifyWindow : public CWindow
   static ATOM s_atom;
 
   NOTIFYICONDATA m_iconData;
-  bool m_iconRegistered;
-  std::optional<bool> m_gpuQueue;
+  std::atomic_bool m_iconRegistered;
+  std::atomic_int  m_pendingGPUStatus { -1 };
+  std::atomic_bool m_gpuNotificationQueued { false };
+  bool             m_gpuStatusKnown = false;
+  bool             m_hasGPU         = false;
   HMENU m_menu;
   std::atomic_bool closeRequested;
   bool m_recoveryActive;
@@ -49,6 +51,7 @@ class CNotifyWindow : public CWindow
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
+  void queueGPUNotification();
   void handleGPUNotification(bool hasGPU);
   void handleResolutionRejected(uint32_t width, uint32_t height,
     uint32_t requiredSizeMiB);
