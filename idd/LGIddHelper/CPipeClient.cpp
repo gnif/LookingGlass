@@ -196,56 +196,10 @@ namespace
     return lgIndex != SIZE_MAX;
   }
 
-  bool GetLGDisplayState(DisplayState& state)
-  {
-    DISPLAY_DEVICE device = {};
-    device.cb = sizeof(device);
-    for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
-    {
-      if ((device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) &&
-        !(device.StateFlags & DISPLAY_DEVICE_MIRRORING_DRIVER) &&
-        IsLGDisplay(device))
-      {
-        state        = {};
-        state.device = device;
-        state.mode.dmSize = sizeof(state.mode);
-        state.isLG        = true;
-        return EnumDisplaySettingsEx(device.DeviceName, ENUM_CURRENT_SETTINGS,
-          &state.mode, 0) != FALSE;
-      }
-
-      device = {};
-      device.cb = sizeof(device);
-    }
-
-    return false;
-  }
-
   uint32_t DisplayModeRefresh(const LGPipeMsg& msg)
   {
     return (msg.displayMode.refresh100uHz + LG_REFRESH_RATE_SCALE / 2) /
       LG_REFRESH_RATE_SCALE;
-  }
-
-  bool FindDisplayMode(const DisplayState& display, const LGPipeMsg& msg,
-    DEVMODE& mode)
-  {
-    const uint32_t refresh = DisplayModeRefresh(msg);
-    for (DWORD i = 0; ; ++i)
-    {
-      DEVMODE candidate = {};
-      candidate.dmSize = sizeof(candidate);
-      if (!EnumDisplaySettingsEx(display.device.DeviceName, i, &candidate, 0))
-        return false;
-
-      if (candidate.dmPelsWidth == msg.displayMode.width &&
-        candidate.dmPelsHeight == msg.displayMode.height &&
-        candidate.dmDisplayFrequency == refresh)
-      {
-        mode = candidate;
-        return true;
-      }
-    }
   }
 
   bool HasActiveDisplay(bool lg)
@@ -613,36 +567,26 @@ bool CPipeClient::ApplyDisplayMode(const LGPipeMsg& msg, LONG& result)
 {
   CSRWExclusiveLock lock(m_displayLock);
 
-  DisplayState display = {};
-  if (!GetLGDisplayState(display))
+  std::vector<DisplayState> displays;
+  size_t lgIndex;
+  if (!GetDisplayStates(displays, lgIndex))
   {
     result = DISP_CHANGE_FAILED;
     return false;
   }
 
-  DEVMODE mode = {};
-  if (!FindDisplayMode(display, msg, mode))
-  {
-    result = DISP_CHANGE_BADMODE;
-    return false;
-  }
-
+  // Preserve the original mode-application transaction: Windows accepts the
+  // requested values before EnumDisplaySettingsEx necessarily lists the new
+  // mode after a monitor replug.
+  DEVMODE mode = displays[lgIndex].mode;
+  mode.dmPelsWidth        = msg.displayMode.width;
+  mode.dmPelsHeight       = msg.displayMode.height;
+  mode.dmDisplayFrequency = DisplayModeRefresh(msg);
   mode.dmFields =
     DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-  result = ChangeDisplaySettingsEx(display.device.DeviceName,
+  result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
     &mode, NULL, CDS_UPDATEREGISTRY, NULL);
   return result == DISP_CHANGE_SUCCESSFUL;
-}
-
-bool CPipeClient::VerifyDisplayMode(const LGPipeMsg& msg)
-{
-  CSRWExclusiveLock lock(m_displayLock);
-
-  DisplayState display = {};
-  return GetLGDisplayState(display) &&
-    display.mode.dmPelsWidth == msg.displayMode.width &&
-    display.mode.dmPelsHeight == msg.displayMode.height &&
-    display.mode.dmDisplayFrequency == DisplayModeRefresh(msg);
 }
 
 void CPipeClient::DisplayModeThread()
@@ -683,7 +627,10 @@ void CPipeClient::DisplayModeThread()
     LONG result = DISP_CHANGE_FAILED;
     if (ApplyDisplayMode(msg, result))
     {
-      if (EnsureOnlyDisplay() && VerifyDisplayMode(msg))
+      // A requested resolution replug is also a topology transition. Keep
+      // the original apply-then-enforce ordering so LG remains the only
+      // active (and therefore primary) display on this path.
+      if (EnsureOnlyDisplay())
       {
         CSRWExclusiveLock lock(m_displayModeLock);
         if (serial == m_displayModeSerial)
@@ -1225,9 +1172,9 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
-  // The IDD reaches swap-chain readiness before Win32 has necessarily
-  // enumerated the replugged monitor's complete mode list. Latch the latest
-  // request and let the worker apply it once that list is ready.
+  // The IDD reaches swap-chain readiness while the replugged monitor can
+  // still be settling. Latch the latest request and retry the original
+  // apply-then-enforce transaction outside the pipe callback.
   {
     CSRWExclusiveLock lock(m_displayModeLock);
     m_displayMode       = msg;

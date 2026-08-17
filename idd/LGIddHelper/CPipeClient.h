@@ -64,7 +64,6 @@ private:
   bool StartDisplayModeThread();
   void StopDisplayModeThread();
   bool ApplyDisplayMode(const LGPipeMsg& msg, LONG& result);
-  bool VerifyDisplayMode(const LGPipeMsg& msg);
 
   bool EnsureOnlyDisplayLocked();
   uint32_t RestoreSavedTopologyLocked() const;
