@@ -4,7 +4,6 @@ labels:
 
 matrix:
   BUILD_TYPE:
-    - Debug
     - Release
 
 when:
