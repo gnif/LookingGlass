@@ -82,6 +82,14 @@ static int help_render(void * udata, bool interactive, struct Rect * windowRects
       igText("%s+%s", escapeName, keyName);
       igTableNextColumn();
       igTextUnformatted(handle->description, NULL);
+
+      if (handle->shiftCallback && handle->shiftDescription)
+      {
+        igTableNextColumn();
+        igText("%s+Shift+%s", escapeName, keyName);
+        igTableNextColumn();
+        igTextUnformatted(handle->shiftDescription, NULL);
+      }
     }
 
     igEndTable();

@@ -50,6 +50,11 @@ static void bind_rotate(int sc, void * opaque)
   core_updatePositionInfo();
 }
 
+static void bind_forceRecovery(int sc, void * opaque)
+{
+  atomic_store_explicit(&g_state.forceRecovery, true, memory_order_release);
+}
+
 static void bind_input(int sc, void * opaque)
 {
   g_state.ignoreInput = !g_state.ignoreInput;
@@ -150,8 +155,13 @@ void keybind_commonRegister(void)
       "Full screen toggle");
   app_registerKeybind(KEY_V, bind_video        , NULL,
       "Video stream toggle");
-  app_registerKeybind(KEY_R, bind_rotate       , NULL,
+  KeybindHandle rotate = app_registerKeybind(KEY_R, bind_rotate, NULL,
       "Rotate the output clockwise by 90° increments");
+  if (rotate)
+  {
+    rotate->shiftCallback    = bind_forceRecovery;
+    rotate->shiftDescription = "Force guest display recovery";
+  }
   app_registerKeybind(KEY_Q, bind_quit         , NULL,
       "Quit");
   app_registerKeybind(KEY_O, bind_toggleOverlay, NULL,

@@ -116,6 +116,7 @@ struct AppState
 
   atomic_bool fallbackEndpointMismatch;
   atomic_uint transportLost;
+  atomic_bool forceRecovery;
 
   uint8_t guestUUID[16];
   bool    guestUUIDValid;
@@ -130,6 +131,8 @@ struct AppState
   uint64_t             escapeTime;
   int                  escapeAction;
   bool                 escapeKeys[KEY_MAX];
+  bool                 escapeShiftKeys[KEY_MAX];
+  atomic_uint          keyModifiers;
   bool                 escapeHelp;
   struct ll          * bindings;
   bool                 haveSrcSize;
@@ -265,8 +268,11 @@ struct KeybindHandle
 {
   int          sc;
   KeybindFn    callback;
+  KeybindFn    shiftCallback;
   const char * description;
+  const char * shiftDescription;
   void *       opaque;
+  void *       shiftOpaque;
 };
 
 enum WarpState

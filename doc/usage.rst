@@ -46,6 +46,8 @@ not have :kbd:`ScrLk`.
      - Toggle the video stream
    * - :kbd:`ScrLk` + :kbd:`R`
      - Rotate clockwise by 90 degrees
+   * - :kbd:`ScrLk` + :kbd:`Shift` + :kbd:`R`
+     - Force guest display recovery mode
    * - :kbd:`ScrLk` + :kbd:`=`
      - Ask the IDD to match the client window resolution
    * - :kbd:`ScrLk` + :kbd:`I`

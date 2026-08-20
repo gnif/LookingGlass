@@ -1420,7 +1420,7 @@ static LG_TransportStatus lgmp_getRecoveryInfo(LG_Transport * this,
 }
 
 static LG_TransportStatus lgmp_requestRecovery(LG_Transport * this,
-    LG_RecoveryRequest request, uint32_t * serial)
+    LG_RecoveryRequest request, uint64_t * instance, uint32_t * serial)
 {
   uint32_t wireRequest;
   switch (request)
@@ -1505,6 +1505,8 @@ static LG_TransportStatus lgmp_requestRecovery(LG_Transport * this,
   }
   if (serial)
     *serial = ticket;
+  if (instance)
+    *instance = header.session;
 
   LG_UNLOCK(this->recoveryLock);
   return LG_TRANSPORT_OK;

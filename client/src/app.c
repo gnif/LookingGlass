@@ -47,6 +47,12 @@
 
 #define SHADER_MOUSE_VALID (UINT32_C(1) << 31)
 
+enum
+{
+  KEY_MODIFIER_LEFT_SHIFT  = 0x1,
+  KEY_MODIFIER_RIGHT_SHIFT = 0x2,
+};
+
 #define MTRACE(fmt, ...) \
   do \
   { \
@@ -273,6 +279,9 @@ void app_handleFocusEvent(bool focused)
 
   if (!focused)
   {
+    atomic_store_explicit(
+        &g_state.keyModifiers, 0, memory_order_release);
+    g_state.escapeActive = false;
     core_setGrabQuiet(false);
     core_setCursorInView(false);
   }
@@ -288,8 +297,6 @@ void app_handleFocusEvent(bool focused)
   {
     if (g_params.releaseKeysOnFocusLoss)
       lgInput_releaseKeys();
-
-    g_state.escapeActive = false;
 
     if (!g_params.showCursorDot)
       g_state.ds->setPointer(LG_POINTER_NONE);
@@ -418,10 +425,20 @@ void app_handleWheelMotion(double motion)
 
 void app_handleKeyPressInternal(int sc)
 {
+  if (sc == KEY_LEFTSHIFT)
+    atomic_fetch_or_explicit(&g_state.keyModifiers,
+        KEY_MODIFIER_LEFT_SHIFT, memory_order_acq_rel);
+  else if (sc == KEY_RIGHTSHIFT)
+    atomic_fetch_or_explicit(&g_state.keyModifiers,
+        KEY_MODIFIER_RIGHT_SHIFT, memory_order_acq_rel);
+
   if (!app_isOverlayMode() || !g_state.io->WantCaptureKeyboard)
   {
     if (sc == g_params.escapeKey && !g_state.escapeActive)
     {
+      memset(g_state.escapeKeys, 0, sizeof(g_state.escapeKeys));
+      memset(g_state.escapeShiftKeys, 0,
+          sizeof(g_state.escapeShiftKeys));
       g_state.escapeActive   = true;
       g_state.escapeTime     = microtime();
       g_state.escapeAction   = -1;
@@ -431,6 +448,7 @@ void app_handleKeyPressInternal(int sc)
 
     if (g_state.escapeActive)
     {
+      const bool repeat = g_state.escapeKeys[sc];
       g_state.escapeAction   = sc;
       g_state.escapeKeys[sc] = true;
       KeybindHandle handle;
@@ -438,7 +456,24 @@ void app_handleKeyPressInternal(int sc)
       {
         if (handle->sc == sc)
         {
-          handle->callback(sc, handle->opaque);
+          unsigned modifiers = atomic_load_explicit(
+              &g_state.keyModifiers, memory_order_acquire);
+          if (g_params.escapeKey == KEY_LEFTSHIFT)
+            modifiers &= ~(unsigned)KEY_MODIFIER_LEFT_SHIFT;
+          else if (g_params.escapeKey == KEY_RIGHTSHIFT)
+            modifiers &= ~(unsigned)KEY_MODIFIER_RIGHT_SHIFT;
+          const bool shift = modifiers != 0;
+          if (!repeat)
+            g_state.escapeShiftKeys[sc] =
+              shift && handle->shiftCallback;
+
+          if (g_state.escapeShiftKeys[sc])
+          {
+            if (!repeat)
+              handle->shiftCallback(sc, handle->shiftOpaque);
+          }
+          else
+            handle->callback(sc, handle->opaque);
           break;
         }
       }
@@ -472,6 +507,13 @@ void app_handleKeyPressInternal(int sc)
 
 void app_handleKeyReleaseInternal(int sc)
 {
+  if (sc == KEY_LEFTSHIFT)
+    atomic_fetch_and_explicit(&g_state.keyModifiers,
+        ~(unsigned)KEY_MODIFIER_LEFT_SHIFT, memory_order_acq_rel);
+  else if (sc == KEY_RIGHTSHIFT)
+    atomic_fetch_and_explicit(&g_state.keyModifiers,
+        ~(unsigned)KEY_MODIFIER_RIGHT_SHIFT, memory_order_acq_rel);
+
   if (g_state.escapeActive && sc == g_params.escapeKey)
   {
     if (g_state.escapeAction == -1)
@@ -486,7 +528,8 @@ void app_handleKeyReleaseInternal(int sc)
 
   if (g_state.escapeKeys[sc])
   {
-    g_state.escapeKeys[sc] = false;
+    g_state.escapeKeys[sc]      = false;
+    g_state.escapeShiftKeys[sc] = false;
     return;
   }
 
@@ -814,10 +857,13 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
     return NULL;
   }
 
-  handle->sc          = sc;
-  handle->callback    = callback;
-  handle->description = description;
-  handle->opaque      = opaque;
+  handle->sc               = sc;
+  handle->callback         = callback;
+  handle->shiftCallback    = NULL;
+  handle->description      = description;
+  handle->shiftDescription = NULL;
+  handle->opaque           = opaque;
+  handle->shiftOpaque      = NULL;
 
   ll_push(g_state.bindings, handle);
   return handle;

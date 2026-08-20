@@ -485,7 +485,7 @@ typedef struct LG_TransportOps
   LG_TransportStatus (*getRecoveryInfo)(LG_Transport * transport,
       LG_RecoveryInfo * info);
   LG_TransportStatus (*requestRecovery)(LG_Transport * transport,
-      LG_RecoveryRequest request, uint32_t * serial);
+      LG_RecoveryRequest request, uint64_t * instance, uint32_t * serial);
 
   LG_TransportStatus (*sendControl)(LG_Transport * transport,
       const LG_TransportControl * control, LG_TransportControlToken * token);

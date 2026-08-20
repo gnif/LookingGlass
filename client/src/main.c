@@ -2803,6 +2803,13 @@ struct RecoveryPrompt
   bool             retryDeclined;
 };
 
+struct ForcedRecovery
+{
+  uint64_t instance;
+  uint32_t serial;
+  bool     pending;
+};
+
 static bool recoveryGetInfo(LG_RecoveryInfo * info)
 {
   if (!g_state.transport.ops->getRecoveryInfo)
@@ -3043,6 +3050,152 @@ static bool recoverySerialNewer(uint32_t serial, uint32_t reference)
   return difference && difference < 0x80000000U;
 }
 
+static bool recoveryRequestNewer(const LG_RecoveryInfo * info)
+{
+  return info->requestSerial != 0 &&
+    (info->ackSerial == 0 ||
+     recoverySerialNewer(info->requestSerial, info->ackSerial));
+}
+
+static void recoveryHandleForced(struct ForcedRecovery * recovery)
+{
+  const bool triggered = atomic_exchange_explicit(
+      &g_state.forceRecovery, false, memory_order_acq_rel);
+  if (!triggered && !recovery->pending)
+    return;
+
+  LG_RecoveryInfo info = { 0 };
+  if (!recoveryGetInfo(&info) ||
+      !(info.capabilities & LG_RECOVERY_CAP_DISPLAY))
+  {
+    if (triggered)
+      app_alert(LG_ALERT_WARNING,
+          "Guest display recovery is unavailable");
+    return;
+  }
+
+  if (info.uuidValid)
+    lgTransportFallback_setPrimaryUUID(g_state.fallback, info.uuid);
+  else
+    lgTransportFallback_clearPrimaryUUID(g_state.fallback);
+
+  const bool requestNewer = recoveryRequestNewer(&info);
+  const LG_RecoveryRequest currentRequest = requestNewer ?
+    info.request : info.ackRequest;
+  const uint32_t currentSerial = requestNewer ?
+    info.requestSerial : info.ackSerial;
+
+  if (recovery->pending)
+  {
+    const bool instanceChanged = recovery->instance != info.instance;
+    const bool currentRelevant = currentSerial &&
+      (instanceChanged || currentSerial == recovery->serial ||
+       recoverySerialNewer(currentSerial, recovery->serial));
+    if (!currentRelevant && instanceChanged)
+    {
+      recovery->pending = false;
+      app_alert(LG_ALERT_WARNING,
+          "Guest display recovery was interrupted");
+      if (!triggered)
+        return;
+    }
+    else if (currentRelevant &&
+        currentRequest == LG_RECOVERY_REQ_RECOVERY)
+    {
+      recovery->instance = info.instance;
+      recovery->serial   = currentSerial;
+      if (!requestNewer && info.state == LG_RECOVERY_STATE_ACTIVE)
+      {
+        recovery->pending = false;
+        fallbackRequestVideo();
+        app_alert(LG_ALERT_SUCCESS,
+            "Guest display recovery is active");
+        return;
+      }
+
+      if (!requestNewer && info.state == LG_RECOVERY_STATE_FAILED)
+      {
+        recovery->pending = false;
+        app_alert(LG_ALERT_WARNING, "Recovery failed: %s",
+            recoveryErrorText(info.error));
+        if (!triggered)
+          return;
+      }
+      else
+      {
+        fallbackRequestVideo();
+        return;
+      }
+    }
+    else if (currentRelevant)
+    {
+      recovery->pending = false;
+      app_alert(LG_ALERT_WARNING,
+          "Guest display recovery was superseded");
+      if (!triggered)
+        return;
+    }
+    else
+    {
+      fallbackRequestVideo();
+      return;
+    }
+  }
+
+  if (!triggered)
+    return;
+
+  const bool pendingRecovery = requestNewer &&
+    info.request == LG_RECOVERY_REQ_RECOVERY;
+  const bool switchingRecovery = !requestNewer && info.ackSerial &&
+    info.ackRequest == LG_RECOVERY_REQ_RECOVERY &&
+    info.state == LG_RECOVERY_STATE_SWITCHING;
+  const bool activeRecovery = !requestNewer && info.ackSerial &&
+    info.ackRequest == LG_RECOVERY_REQ_RECOVERY &&
+    info.state == LG_RECOVERY_STATE_ACTIVE;
+  if (activeRecovery)
+  {
+    fallbackRequestVideo();
+    app_alert(LG_ALERT_SUCCESS,
+        "Guest display recovery is already active");
+    return;
+  }
+
+  if (pendingRecovery || switchingRecovery)
+  {
+    recovery->instance = info.instance;
+    recovery->serial   = currentSerial;
+    recovery->pending  = true;
+    fallbackRequestVideo();
+    app_alert(LG_ALERT_INFO,
+        "Guest display recovery is already pending");
+    return;
+  }
+
+  if (!g_state.transport.ops->requestRecovery)
+  {
+    app_alert(LG_ALERT_WARNING,
+        "Guest display recovery is unavailable");
+    return;
+  }
+
+  uint32_t serial = 0;
+  const LG_TransportStatus status =
+    g_state.transport.ops->requestRecovery(g_state.transport.handle,
+        LG_RECOVERY_REQ_RECOVERY, &recovery->instance, &serial);
+  if (status != LG_TRANSPORT_OK)
+  {
+    app_alert(LG_ALERT_WARNING,
+        "Guest display recovery request failed (%d)", status);
+    return;
+  }
+
+  recovery->serial   = serial;
+  recovery->pending  = true;
+  fallbackRequestVideo();
+  app_alert(LG_ALERT_INFO, "Guest display recovery requested");
+}
+
 static void recoveryHandleMismatch(struct RecoveryPrompt * prompt,
     const LG_VersionMismatch * mismatch)
 {
@@ -3114,9 +3267,7 @@ static void recoveryHandleMismatch(struct RecoveryPrompt * prompt,
   else
     lgTransportFallback_clearPrimaryUUID(g_state.fallback);
 
-  const bool requestNewer = info.requestSerial != 0 &&
-    (info.ackSerial == 0 ||
-     recoverySerialNewer(info.requestSerial, info.ackSerial));
+  const bool requestNewer = recoveryRequestNewer(&info);
   const LG_RecoveryRequest globalRequest = requestNewer ?
     info.request : info.ackRequest;
   const uint32_t globalSerial = requestNewer ?
@@ -3218,7 +3369,8 @@ static void recoveryHandleMismatch(struct RecoveryPrompt * prompt,
     const LG_TransportStatus status =
       g_state.transport.ops->requestRecovery ?
         g_state.transport.ops->requestRecovery(g_state.transport.handle,
-            LG_RECOVERY_REQ_RECOVERY, &prompt->serial) :
+            LG_RECOVERY_REQ_RECOVERY, &prompt->instance,
+            &prompt->serial) :
         LG_TRANSPORT_UNAVAILABLE;
     prompt->requested     = status == LG_TRANSPORT_OK;
     prompt->owned         = prompt->requested;
@@ -3346,6 +3498,8 @@ static int lg_run(void)
   frameTimingInit();
   lgInput_init();
   lgAudio_init();
+  atomic_init(&g_state.forceRecovery, false);
+  atomic_init(&g_state.keyModifiers, 0);
   if (!clipboard_init())
     return -1;
 
@@ -3688,6 +3842,7 @@ static int lg_run(void)
   MsgBoxHandle msgs[10];
   int msgsCount;
   struct RecoveryPrompt recoveryPrompt = { 0 };
+  struct ForcedRecovery forcedRecovery = { 0 };
   atomic_init(&recoveryPrompt.choice, RECOVERY_PENDING);
   atomic_init(&recoveryPrompt.handle, 0);
   atomic_init(&recoveryPrompt.message, 0);
@@ -3704,6 +3859,7 @@ restart:
   while(app_getState() == APP_STATE_RUNNING)
   {
     fallbackHandleEvents();
+    recoveryHandleForced(&forcedRecovery);
 
     if (initialFallbackEnable && microtime() > initialFallbackEnable)
     {
@@ -3795,7 +3951,7 @@ restart:
 
   recoveryClose(&recoveryPrompt);
   LG_RecoveryInfo recoveryInfo = { 0 };
-  if (recoveryGetInfo(&recoveryInfo) &&
+  if (!forcedRecovery.pending && recoveryGetInfo(&recoveryInfo) &&
       (recoveryInfo.state == LG_RECOVERY_STATE_ACTIVE ||
        recoveryInfo.state == LG_RECOVERY_STATE_SWITCHING ||
        recoveryInfo.request == LG_RECOVERY_REQ_RECOVERY ||
@@ -3804,7 +3960,7 @@ restart:
   {
     const LG_TransportStatus status =
       g_state.transport.ops->requestRecovery(g_state.transport.handle,
-          LG_RECOVERY_REQ_NORMAL, NULL);
+          LG_RECOVERY_REQ_NORMAL, NULL, NULL);
     if (status != LG_TRANSPORT_OK)
       DEBUG_WARN("Failed to leave recovery mode: %d", status);
   }
@@ -3931,6 +4087,7 @@ restart:
   while(likely(app_getState() == APP_STATE_RUNNING))
   {
     fallbackHandleEvents();
+    recoveryHandleForced(&forcedRecovery);
     if (unlikely(!g_state.transport.ops->sessionValid(
           g_state.transport.handle)))
     {
