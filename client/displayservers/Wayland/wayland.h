@@ -276,13 +276,14 @@ struct WaylandDSState
   _Atomic(unsigned) frameEventFlags;
   LGEvent *         frameEvent;
 
-  struct wl_list poll; // WaylandPoll::link
-  struct wl_list pollFree; // WaylandPoll::link
-  LG_Lock        pollLock;
-  LG_Lock        pollFreeLock;
-  unsigned int   pollWaiters;
-  int            epollFd;
-  int            displayFd;
+  struct wl_list   poll; // WaylandPoll::link
+  struct wl_list   pollFree; // WaylandPoll::link
+  LG_Lock          pollLock;
+  LG_Lock          pollFreeLock;
+  unsigned int     pollWaiters;
+  int              epollFd;
+  int              displayFd;
+  LG_DSEventSource eventSource;
 };
 
 struct WCBTransfer

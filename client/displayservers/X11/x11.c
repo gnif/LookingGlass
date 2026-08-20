@@ -443,6 +443,7 @@ static bool x11Init(const LG_DSInitParams params)
   x11InputInit(&x11.input, &inputSink, NULL);
   LG_LOCK_INIT(x11.pointerLock);
   atomic_init(&x11.captureActive, false);
+  x11.eventSource         = params.eventSource;
   x11.xValuator           = -1;
   x11.yValuator           = -1;
   x11.numLockIndicator    = -1;
@@ -1063,6 +1064,12 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
 
 static int x11EventThread(void * unused)
 {
+  enum
+  {
+    EPOLL_SOURCE_X11,
+    EPOLL_SOURCE_EXTERNAL,
+  };
+
   int epollfd = epoll_create1(0);
   if (epollfd == -1)
   {
@@ -1070,13 +1077,29 @@ static int x11EventThread(void * unused)
     return 0;
   }
 
-  struct epoll_event ev = { .events = EPOLLIN };
+  struct epoll_event ev =
+  {
+    .events   = EPOLLIN,
+    .data.u32 = EPOLL_SOURCE_X11,
+  };
   const int fd = ConnectionNumber(x11.display);
   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, fd, &ev) == -1)
   {
     close(epollfd);
     DEBUG_ERROR("epoll_ctl failed");
     return 0;
+  }
+
+  bool pollEventSource = false;
+  if (x11.eventSource.fd >= 0 && x11.eventSource.callback)
+  {
+    ev.data.u32 = EPOLL_SOURCE_EXTERNAL;
+    if (epoll_ctl(epollfd, EPOLL_CTL_ADD,
+          x11.eventSource.fd, &ev) == -1)
+    {
+      DEBUG_WARN("Failed to register the external event source; polling");
+      pollEventSource = true;
+    }
   }
 
   while(app_isRunning())
@@ -1088,23 +1111,29 @@ static int x11EventThread(void * unused)
       app_invalidateWindow(true);
     }
 
-    if (!XPending(x11.display))
+    const bool xPending = XPending(x11.display) != 0;
+    struct epoll_event events[2];
+    const int nfds = epoll_wait(epollfd, events, ARRAY_LENGTH(events),
+        xPending ? 0 : pollEventSource ? 10 : 100);
+    if (nfds == -1)
     {
-      struct epoll_event events[1];
-      int nfds = epoll_wait(epollfd, events, 1, 100);
-      if (nfds == -1)
-      {
-        if (errno == EINTR)
-          continue;
-
-        close(epollfd);
-        DEBUG_ERROR("epoll_wait failure");
-        return 0;
-      }
-
-      if (nfds == 0 || !XPending(x11.display))
+      if (errno == EINTR)
         continue;
+
+      close(epollfd);
+      DEBUG_ERROR("epoll_wait failure");
+      return 0;
     }
+
+    for (int i = 0; i < nfds; ++i)
+      if (events[i].data.u32 == EPOLL_SOURCE_EXTERNAL)
+        x11.eventSource.callback(x11.eventSource.opaque);
+
+    if (pollEventSource)
+      x11.eventSource.callback(x11.eventSource.opaque);
+
+    if (!XPending(x11.display))
+      continue;
 
     XEvent xe;
     XNextEvent(x11.display, &xe);

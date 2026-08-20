@@ -103,6 +103,18 @@ LG_DSWaitFrameResult;
 
 #define LG_POINTER_COUNT (LG_POINTER_NOT_ALLOWED + 1)
 
+typedef void (*LG_DSEventCallback)(void * opaque);
+
+typedef struct LG_DSEventSource
+{
+  /* The callback must be nonblocking and tolerate spurious calls. The caller
+   * retains ownership of fd and opaque until display-server shutdown. */
+  int                fd;
+  LG_DSEventCallback callback;
+  void             * opaque;
+}
+LG_DSEventSource;
+
 typedef struct LG_DSInitParams
 {
   const char * title;
@@ -122,6 +134,8 @@ typedef struct LG_DSInitParams
   // x11 needs to know if this is in use so we can decide to setup for
   // presentation times
   bool jitRender;
+
+  LG_DSEventSource eventSource;
 }
 LG_DSInitParams;
 

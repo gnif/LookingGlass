@@ -101,10 +101,11 @@ struct X11DSState
   int xValuator;
   int yValuator;
 
-  X11Input      input;
-  LG_Lock       pointerLock;
-  _Atomic(bool) captureActive;
-  bool fullscreen;
+  X11Input          input;
+  LG_DSEventSource  eventSource;
+  LG_Lock           pointerLock;
+  _Atomic(bool)     captureActive;
+  bool              fullscreen;
 
   struct Rect   rect;
   struct Border border;

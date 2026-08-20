@@ -23,6 +23,7 @@
 
 #include <signal.h>
 #include <string.h>
+#include <sys/epoll.h>
 #include <wayland-client.h>
 #include <sys/socket.h>
 
@@ -105,6 +106,14 @@ static bool getCompositor(char * dst, size_t size)
   return true;
 }
 
+static void eventSourceCallback(uint32_t events, void * opaque)
+{
+  (void)events;
+
+  const LG_DSEventSource * source = (const LG_DSEventSource *)opaque;
+  source->callback(source->opaque);
+}
+
 static bool waylandInit(const LG_DSInitParams params)
 {
   memset(&wlWm, 0, sizeof(wlWm));
@@ -121,6 +130,7 @@ static bool waylandInit(const LG_DSInitParams params)
   atomic_init(&wlWm.hdrScRGBWhiteLevel, 80);
   atomic_init(&wlWm.pendingResize, 0);
   wlWm.resizeEventFd = -1;
+  wlWm.eventSource   = params.eventSource;
 
   wlWm.display = wl_display_connect(NULL);
   if (!wlWm.display)
@@ -151,6 +161,14 @@ static bool waylandInit(const LG_DSInitParams params)
 
   if (!waylandPollInit())
     return false;
+
+  if (wlWm.eventSource.fd >= 0 && wlWm.eventSource.callback &&
+      !waylandPollRegister(wlWm.eventSource.fd, eventSourceCallback,
+        &wlWm.eventSource, EPOLLIN))
+  {
+    DEBUG_ERROR("Failed to register the external event source");
+    return false;
+  }
 
   if (!waylandOutputInit())
     return false;
