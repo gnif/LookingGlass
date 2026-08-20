@@ -63,6 +63,7 @@ static void bind_input(int sc, void * opaque)
     core_setCursorInView(false);
   else
     g_state.ds->realignPointer();
+  core_updateKeyboardGrab();
 
   app_alert(
     LG_ALERT_INFO,

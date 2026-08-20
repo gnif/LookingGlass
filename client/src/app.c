@@ -269,9 +269,9 @@ void app_handleFocusEvent(bool focused)
   if (g_state.focused == focused)
     return;
 
-  g_state.focused       = focused;
-  g_cursor.motionValid  = false;
-  const bool inputEnabled = core_inputEnabled();
+  g_state.focused            = focused;
+  g_cursor.motionValid       = false;
+  const bool inputWasEnabled = core_inputEnabled();
 
   // release any imgui buttons/keys if we lost focus
   if (!focused && app_isOverlayMode())
@@ -285,6 +285,15 @@ void app_handleFocusEvent(bool focused)
     core_setGrabQuiet(false);
     core_setCursorInView(false);
   }
+  else
+  {
+    if (g_params.captureOnFocus && !g_state.ignoreInput)
+      core_setGrab(true);
+    core_updateKeyboardGrab();
+  }
+
+  const bool inputEnabled = focused ?
+    core_inputEnabled() : inputWasEnabled;
 
   if (!inputEnabled)
   {
@@ -304,10 +313,6 @@ void app_handleFocusEvent(bool focused)
     if (g_params.minimizeOnFocusLoss)
       g_state.ds->minimize();
   }
-  else
-    if (g_params.captureOnFocus)
-      core_setGrab(true);
-
   g_cursor.realign = true;
   g_state.ds->realignPointer();
 }
@@ -518,7 +523,8 @@ void app_handleKeyReleaseInternal(int sc)
   {
     if (g_state.escapeAction == -1)
     {
-      if (!g_state.escapeHelp && lgInput_available() &&
+      if (!g_state.escapeHelp &&
+          (g_cursor.grab || lgInput_available()) &&
           !app_isOverlayMode())
         core_setGrab(!g_cursor.grab);
     }

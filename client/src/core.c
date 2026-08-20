@@ -137,14 +137,18 @@ bool core_inputEnabled(void)
     ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
 }
 
-static void updateKeyboardGrab(void)
+void core_updateKeyboardGrab(void)
 {
-  const bool capture   = g_cursor.grab && g_params.grabKeyboard;
-  const bool view      = g_cursor.inView && g_params.grabKeyboardOnFocus;
-  const bool automatic = !g_cursor.grab &&
+  const bool inputEnabled = core_inputEnabled();
+  /* Explicit capture is local window state and must survive an input provider
+   * becoming unavailable or changing during startup. */
+  const bool capture      = g_cursor.grab && g_params.grabKeyboard &&
+    !g_state.ignoreInput;
+  const bool view         = g_cursor.inView && g_params.grabKeyboardOnFocus;
+  const bool automatic    = !g_cursor.grab &&
     g_cursor.autoCaptureActive && !g_params.captureInputOnly;
-  const bool active    = g_state.focused && core_inputEnabled() &&
-    !app_isOverlayMode() && (capture || view || automatic);
+  const bool active       = g_state.focused && !app_isOverlayMode() &&
+    (capture || (inputEnabled && (view || automatic)));
 
   if (active)
     g_state.ds->grabKeyboard();
@@ -162,7 +166,7 @@ static void setAutoCapture(bool active)
   MTRACE("auto capture active=%d old=%d", active,
       g_cursor.autoCaptureActive);
   g_cursor.autoCaptureActive = active;
-  updateKeyboardGrab();
+  core_updateKeyboardGrab();
 }
 
 static void applyView(bool active, bool force)
@@ -175,7 +179,7 @@ static void applyView(bool active, bool force)
 
   if (!force && g_cursor.inView == active)
   {
-    updateKeyboardGrab();
+    core_updateKeyboardGrab();
     return;
   }
 
@@ -204,7 +208,7 @@ static void applyView(bool active, bool force)
       g_state.ds->setPointer(LG_POINTER_SQUARE);
   }
 
-  updateKeyboardGrab();
+  core_updateKeyboardGrab();
   g_cursor.warpState = WARP_STATE_ON;
 }
 
@@ -323,7 +327,7 @@ void core_setGrabQuiet(bool enable)
     g_state.ignoreInput          = false;
     g_cursor.grab                = true;
     g_cursor.autoCaptureActive   = false;
-    updateKeyboardGrab();
+    core_updateKeyboardGrab();
     core_setCursorInView(true);
 
     /* ensure the local mouse is inside the window before we capture, this fixes
@@ -331,7 +335,11 @@ void core_setGrabQuiet(bool enable)
      * was focused without the cursor being in window already */
     if (warpSupport != LG_DS_WARP_NONE)
     {
-      struct DoublePoint local;
+      struct DoublePoint local =
+      {
+        .x = g_state.windowCX,
+        .y = g_state.windowCY,
+      };
       const bool valid = util_guestCurToLocal(&local);
       MTRACE("grab align valid=%d", valid);
       core_warpPointer(local.x, local.y, true);
@@ -345,7 +353,7 @@ void core_setGrabQuiet(bool enable)
     g_cursor.grab              = false;
     g_cursor.autoCaptureActive = g_params.autoCapture &&
       g_cursor.inView && !g_params.captureInputOnly;
-    updateKeyboardGrab();
+    core_updateKeyboardGrab();
 
     if (warpSupport == LG_DS_WARP_NONE)
       core_handleMouseAbsolute();
