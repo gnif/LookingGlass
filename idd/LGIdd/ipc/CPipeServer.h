@@ -44,17 +44,42 @@ class CPipeServer : private IPipeEndpointHandler,
   public IClipboardChannelDoorbell
 {
   public:
+    enum class RecoveryResult
+    {
+      NORMAL,
+      ACTIVE,
+      FAILED,
+      NO_DISPLAY,
+      HELPER_UNAVAILABLE,
+    };
+
+    enum class RecoveryDispatch
+    {
+      REJECTED,
+      UNAVAILABLE,
+      QUEUED,
+      SENT,
+    };
+
     using RecoveryHandler = void (*)(void * opaque,
       uint64_t route, uint64_t session, uint32_t serial, bool active,
-      LGPipeMsg::Type result);
+      RecoveryResult result);
 
   private:
     CPipeEndpoint          m_endpoint;
     CClipboardChannel      m_clipboard;
     CSRWLock               m_queueLock;
     std::vector<LGPipeMsg> m_queue;
-    bool                   m_recoveryValid   = false;
-    LGPipeMsg              m_recoveryRequest = {};
+    bool      m_recoveryValid         = false;
+    bool      m_recoveryPending       = false;
+    bool      m_recoveryHelperActive  = false;
+    bool      m_recoveryReplaySafe    = true;
+    bool      m_recoveryActiveValid   = false;
+    LGPipeMsg m_recoveryRequest       = {};
+    LGPipeMsg m_recoveryActiveRequest = {};
+    LGPipeMsg m_recoveryNewestRequest = {};
+    uint64_t  m_recoveryActiveRoute   = 0;
+    uint64_t  m_recoveryNewestRoute   = 0;
 
     CSRWLock         m_deviceContextLock;
     CDeviceContext * m_deviceContext = nullptr;
@@ -115,8 +140,9 @@ class CPipeServer : private IPipeEndpointHandler,
     void SetGPUStatus(bool software);
     void ResolutionRejected(uint32_t width, uint32_t height,
       uint32_t requiredSizeMiB);
-    bool SetRecovery(void * owner, uint64_t route,
-      uint64_t session, uint32_t serial, bool active);
+    RecoveryDispatch SetRecovery(void * owner, uint64_t route,
+      uint64_t session, uint32_t serial, bool active,
+      bool replayIfUnavailable = true);
 
     CClipboardChannel& Clipboard() { return m_clipboard; }
     bool ClipboardKick(uint64_t epoch) override;

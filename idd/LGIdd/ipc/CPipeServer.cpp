@@ -369,7 +369,8 @@ void CPipeServer::OnPipeConnected()
   // latest request whenever the helper reconnects so a helper restart cannot
   // silently restore the IDD-only topology while recovery is active.
   if (m_recoveryValid)
-    m_endpoint.Send(&m_recoveryRequest, sizeof(m_recoveryRequest));
+    m_recoveryPending = m_endpoint.Send(
+      &m_recoveryRequest, sizeof(m_recoveryRequest));
 }
 
 void CPipeServer::OnPipeDisconnected()
@@ -383,6 +384,37 @@ void CPipeServer::OnPipeDisconnected()
     m_pendingClipboardEpoch   = 0;
     m_clientAuthorityId[0]    = 0;
     m_clientAuthorityId[1]    = 0;
+  }
+
+  CSRWExclusiveLock queueLock(m_queueLock);
+  CSRWSharedLock recoveryLock(m_recoveryLock);
+  if (m_recoveryValid &&
+      (m_recoveryPending || m_recoveryHelperActive) &&
+      m_recoveryHandler)
+  {
+    const uint64_t route   = m_recoveryRoute;
+    const uint64_t session = m_recoveryRequest.recovery.session;
+    const uint32_t serial  = m_recoveryRequest.recovery.request &
+      ~LGPipeMsg::RECOVERY_ACTIVE;
+    const bool active = (m_recoveryRequest.recovery.request &
+      LGPipeMsg::RECOVERY_ACTIVE) != 0;
+
+    // If NORMAL was sent while Helper still owned the recovery topology,
+    // do not replay it after a disconnect until the IDD monitor is present.
+    // Preserve the preceding ACTIVE command for reconnect in the meantime.
+    if (!active && !m_recoveryReplaySafe && m_recoveryActiveValid)
+    {
+      m_recoveryValid     = true;
+      m_recoveryRoute     = m_recoveryActiveRoute;
+      m_recoveryRequest   = m_recoveryActiveRequest;
+      m_recoveryReplaySafe = true;
+    }
+
+    m_recoveryPending      = false;
+    m_recoveryHelperActive = false;
+    queueLock.Unlock();
+    m_recoveryHandler(m_recoveryOpaque, route, session, serial, active,
+      RecoveryResult::HELPER_UNAVAILABLE);
   }
 }
 
@@ -494,7 +526,7 @@ void CPipeServer::HandleReloadSettings()
 
 void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
 {
-  CSRWSharedLock queueLock(m_queueLock);
+  CSRWExclusiveLock queueLock(m_queueLock);
   if (!m_recoveryValid ||
       msg.recovery.session != m_recoveryRequest.recovery.session ||
       msg.recovery.request != m_recoveryRequest.recovery.request)
@@ -505,14 +537,44 @@ void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
 
   const uint32_t serial =
     msg.recovery.request & ~LGPipeMsg::RECOVERY_ACTIVE;
-  const bool     active =
+  const bool active =
     (msg.recovery.request & LGPipeMsg::RECOVERY_ACTIVE) != 0;
+  const uint64_t route = m_recoveryRoute;
+  RecoveryResult result;
+  switch (msg.type)
+  {
+    case LGPipeMsg::RECOVERY_OFF:
+      result = RecoveryResult::NORMAL;
+      m_recoveryHelperActive  = false;
+      m_recoveryReplaySafe    = true;
+      m_recoveryActiveValid   = false;
+      m_recoveryActiveRoute   = 0;
+      m_recoveryActiveRequest = {};
+      break;
+
+    case LGPipeMsg::RECOVERY_ON:
+      result = RecoveryResult::ACTIVE;
+      m_recoveryHelperActive = true;
+      break;
+
+    case LGPipeMsg::RECOVERY_FAILED:
+      result = RecoveryResult::FAILED;
+      break;
+
+    case LGPipeMsg::RECOVERY_NO_DISPLAY:
+      result = RecoveryResult::NO_DISPLAY;
+      break;
+
+    default:
+      return;
+  }
+  m_recoveryPending = false;
 
   CSRWSharedLock recoveryLock(m_recoveryLock);
   queueLock.Unlock();
   if (m_recoveryHandler)
     m_recoveryHandler(m_recoveryOpaque,
-      m_recoveryRoute, msg.recovery.session, serial, active, msg.type);
+      route, msg.recovery.session, serial, active, result);
 }
 
 void CPipeServer::SetDeviceContext(CDeviceContext * context)
@@ -526,11 +588,19 @@ void CPipeServer::SetRecoveryHandler(
 {
   CSRWExclusiveLock queueLock(m_queueLock);
   CSRWExclusiveLock recoveryLock(m_recoveryLock);
-  m_recoveryRoute   = 0;
-  m_recoveryValid   = false;
-  m_recoveryRequest = {};
-  m_recoveryHandler = handler;
-  m_recoveryOpaque  = opaque;
+  m_recoveryRoute         = 0;
+  m_recoveryValid         = false;
+  m_recoveryPending       = false;
+  m_recoveryHelperActive  = false;
+  m_recoveryReplaySafe    = true;
+  m_recoveryActiveValid   = false;
+  m_recoveryRequest       = {};
+  m_recoveryActiveRequest = {};
+  m_recoveryNewestRequest = {};
+  m_recoveryActiveRoute   = 0;
+  m_recoveryNewestRoute   = 0;
+  m_recoveryHandler       = handler;
+  m_recoveryOpaque        = opaque;
 }
 
 void CPipeServer::ClearRecoveryHandler(void * opaque)
@@ -540,11 +610,19 @@ void CPipeServer::ClearRecoveryHandler(void * opaque)
   if (m_recoveryOpaque != opaque)
     return;
 
-  m_recoveryRoute   = 0;
-  m_recoveryValid   = false;
-  m_recoveryRequest = {};
-  m_recoveryHandler = nullptr;
-  m_recoveryOpaque  = nullptr;
+  m_recoveryRoute         = 0;
+  m_recoveryValid         = false;
+  m_recoveryPending       = false;
+  m_recoveryHelperActive  = false;
+  m_recoveryReplaySafe    = true;
+  m_recoveryActiveValid   = false;
+  m_recoveryRequest       = {};
+  m_recoveryActiveRequest = {};
+  m_recoveryNewestRequest = {};
+  m_recoveryActiveRoute   = 0;
+  m_recoveryNewestRoute   = 0;
+  m_recoveryHandler       = nullptr;
+  m_recoveryOpaque        = nullptr;
 }
 
 bool CPipeServer::SetCursorPos(int32_t x, int32_t y)
@@ -596,14 +674,16 @@ void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   WriteMsg(msg);
 }
 
-bool CPipeServer::SetRecovery(void * owner, uint64_t route,
-  uint64_t session, uint32_t serial, bool active)
+CPipeServer::RecoveryDispatch CPipeServer::SetRecovery(
+  void * owner, uint64_t route,
+  uint64_t session, uint32_t serial, bool active,
+  bool replayIfUnavailable)
 {
   if (!route || !session || !serial ||
       (serial & LGPipeMsg::RECOVERY_ACTIVE))
   {
     DEBUG_ERROR("Invalid recovery request correlation");
-    return false;
+    return RecoveryDispatch::REJECTED;
   }
 
   LGPipeMsg msg = {};
@@ -616,11 +696,57 @@ bool CPipeServer::SetRecovery(void * owner, uint64_t route,
   CSRWExclusiveLock queueLock(m_queueLock);
   CSRWExclusiveLock recoveryLock(m_recoveryLock);
   if (!m_recoveryHandler || m_recoveryOpaque != owner)
-    return false;
+    return RecoveryDispatch::REJECTED;
 
-  m_recoveryValid   = true;
-  m_recoveryRoute   = route;
-  m_recoveryRequest = msg;
-  m_endpoint.Send(&msg, sizeof(msg));
-  return true;
+  // RecoveryHub routes increase for the lifetime of this handler. Keep a
+  // watermark separate from the replay request so restoring retained ACTIVE
+  // state cannot let a late, older NORMAL overwrite newer work.
+  if (m_recoveryNewestRoute)
+  {
+    if (route < m_recoveryNewestRoute)
+      return RecoveryDispatch::REJECTED;
+    if (route == m_recoveryNewestRoute &&
+        (msg.recovery.session !=
+           m_recoveryNewestRequest.recovery.session ||
+         msg.recovery.request !=
+           m_recoveryNewestRequest.recovery.request))
+      return RecoveryDispatch::REJECTED;
+  }
+  if (route > m_recoveryNewestRoute)
+  {
+    m_recoveryNewestRoute   = route;
+    m_recoveryNewestRequest = msg;
+  }
+
+  const bool      previousValid      = m_recoveryValid;
+  const bool      previousPending    = m_recoveryPending;
+  const bool      previousReplaySafe = m_recoveryReplaySafe;
+  const uint64_t  previousRoute      = m_recoveryRoute;
+  const LGPipeMsg previousRequest    = m_recoveryRequest;
+
+  m_recoveryValid      = true;
+  m_recoveryRoute      = route;
+  m_recoveryRequest    = msg;
+  m_recoveryReplaySafe = active || replayIfUnavailable;
+  if (active)
+  {
+    m_recoveryActiveValid   = true;
+    m_recoveryActiveRoute   = route;
+    m_recoveryActiveRequest = msg;
+  }
+  m_recoveryPending = m_endpoint.Send(&msg, sizeof(msg));
+  if (m_recoveryPending)
+    return RecoveryDispatch::SENT;
+
+  if (replayIfUnavailable)
+    return RecoveryDispatch::QUEUED;
+
+  // A NORMAL request cannot be replayed while the IDD monitor is locally
+  // absent. Retain the prior ACTIVE request until the monitor has re-arrived.
+  m_recoveryValid      = previousValid;
+  m_recoveryPending    = previousPending;
+  m_recoveryReplaySafe = previousReplaySafe;
+  m_recoveryRoute      = previousRoute;
+  m_recoveryRequest    = previousRequest;
+  return RecoveryDispatch::UNAVAILABLE;
 }

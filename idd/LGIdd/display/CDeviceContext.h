@@ -26,7 +26,9 @@
 #include <wdf.h>
 #include <IddCx.h>
 
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -55,6 +57,19 @@ private:
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
 
+  std::mutex                 m_recoveryTransitionMutex;
+  CSRWLock                   m_localRecoveryLock;
+  std::deque<RecoveryAction> m_localRecoveryQueue;
+  RecoveryAction             m_localRecoveryArrivalAction = {};
+  RecoveryAction             m_latestRecoveryAction       = {};
+  RecoveryAction             m_helperRecoveryAction       = {};
+  bool                       m_localRecoveryArrival        = false;
+  bool                       m_latestRecoveryValid         = false;
+  bool                       m_helperRecoveryComplete      = false;
+  bool                       m_recoveryActive              = false;
+  bool                       m_recoveryMonitorDisabled     = false;
+  bool                       m_adapterReady                = false;
+
   UINT m_iddCxVersion    = 0;
   bool m_hasIddCx110DDIs = false;
   bool m_canProcessFP16  = false;
@@ -67,6 +82,12 @@ private:
 
   bool InitializeTransport();
   void TransportTimer();
+  static bool SameRecoveryAction(
+    const RecoveryAction& left, const RecoveryAction& right);
+  bool QueueLocalRecovery(const RecoveryAction& action);
+  void RemoveLocalRecovery(const RecoveryAction& action);
+  void ProcessLocalRecovery();
+  void CompleteRecoveryArrival(bool arrived);
   InteractionResult OnSetCursorPos(
     const SourceKey& source, int32_t x, int32_t y) override;
   InteractionResult OnSetResolution(const SourceKey& source,

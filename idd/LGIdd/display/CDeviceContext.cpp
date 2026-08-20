@@ -385,16 +385,42 @@ void CDeviceContext::FinishAdapterInit(UINT connectorIndex)
     DEBUG_INFO("Preferred render adapter set");
   }
 
-  FinishInit(connectorIndex);
+  bool monitorDisabled;
+  bool arrivalPending;
+  {
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    m_adapterReady   = true;
+    monitorDisabled = m_recoveryMonitorDisabled;
+    arrivalPending  = m_localRecoveryArrival;
+  }
+
+  if (!monitorDisabled)
+  {
+    FinishInit(connectorIndex);
+    return;
+  }
+
+  if (arrivalPending)
+    m_monitorManager.Enable();
+  else
+  {
+    // Recovery can intentionally disable the monitor before the adapter's
+    // first arrival. This is still a valid synchronization boundary: allow a
+    // later NORMAL request to re-enable the monitor instead of waiting for an
+    // arrival that ACTIVE deliberately suppressed.
+    m_transport->SyncRecovery();
+  }
 }
 
 void CDeviceContext::FinishInit(UINT connectorIndex)
 {
   CDisplayConfiguration::Description description =
     m_displayConfiguration.GetDescription();
-  if (m_monitorManager.Create(
-      connectorIndex, m_adapter, std::move(description.edid), this))
+  const bool arrived = m_monitorManager.Create(
+    connectorIndex, m_adapter, std::move(description.edid), this);
+  if (arrived)
     m_transport->SyncRecovery();
+  CompleteRecoveryArrival(arrived);
 }
 
 void CDeviceContext::ReplugMonitor()
@@ -489,28 +515,80 @@ bool CDeviceContext::InitializeTransport()
 
   g_pipe.SetRecoveryHandler(
     [](void * opaque, uint64_t route, uint64_t session,
-       uint32_t serial, bool active, LGPipeMsg::Type result)
+       uint32_t serial, bool active, CPipeServer::RecoveryResult result)
     {
       CDeviceContext * context =
         static_cast<CDeviceContext *>(opaque);
+
+      RecoveryAction action;
+      action.route   = route;
+      action.session = session;
+      action.serial  = serial;
+      action.active  = active;
+
+      if (result == CPipeServer::RecoveryResult::HELPER_UNAVAILABLE)
+      {
+        // Pipe recovery messages do not carry the local operation deadline.
+        // Recover it from the canonical action so a late monitor transition
+        // cannot complete an operation after the recovery hub timed it out.
+        {
+          CSRWSharedLock lock(context->m_localRecoveryLock);
+          if (context->m_latestRecoveryValid &&
+              context->SameRecoveryAction(action,
+                context->m_latestRecoveryAction))
+            action = context->m_latestRecoveryAction;
+        }
+
+        if (!context->QueueLocalRecovery(action))
+          context->m_transport->RecoveryStatus(
+            route, session, serial, active,
+            ITransport::Recovery::FAILED, RPC_S_SERVER_UNAVAILABLE);
+        return;
+      }
+
+      std::lock_guard<std::mutex> transitionLock(
+        context->m_recoveryTransitionMutex);
+      context->m_helperRecoveryAction   = action;
+      context->m_helperRecoveryComplete = true;
+      context->RemoveLocalRecovery(action);
 
       ITransport::Recovery state = ITransport::Recovery::FAILED;
       uint32_t error = ERROR_SUCCESS;
       switch (result)
       {
-        case LGPipeMsg::RECOVERY_OFF:
+        case CPipeServer::RecoveryResult::NORMAL:
           state = ITransport::Recovery::NORMAL;
+          {
+            CSRWExclusiveLock lock(context->m_localRecoveryLock);
+            if (context->m_latestRecoveryValid &&
+                context->SameRecoveryAction(action,
+                  context->m_latestRecoveryAction))
+            {
+              context->m_recoveryActive = false;
+              context->m_latestRecoveryAction.deadline = 0;
+            }
+          }
           break;
 
-        case LGPipeMsg::RECOVERY_ON:
+        case CPipeServer::RecoveryResult::ACTIVE:
           state = ITransport::Recovery::ACTIVE;
+          {
+            CSRWExclusiveLock lock(context->m_localRecoveryLock);
+            if (context->m_latestRecoveryValid &&
+                context->SameRecoveryAction(action,
+                  context->m_latestRecoveryAction))
+            {
+              context->m_recoveryActive = true;
+              context->m_latestRecoveryAction.deadline = 0;
+            }
+          }
           break;
 
-        case LGPipeMsg::RECOVERY_FAILED:
+        case CPipeServer::RecoveryResult::FAILED:
           error = ERROR_GEN_FAILURE;
           break;
 
-        case LGPipeMsg::RECOVERY_NO_DISPLAY:
+        case CPipeServer::RecoveryResult::NO_DISPLAY:
           error = ERROR_NOT_FOUND;
           break;
 
@@ -588,6 +666,8 @@ bool CDeviceContext::SetupTransport(size_t alignSize)
 
 void CDeviceContext::TransportTimer()
 {
+  ProcessLocalRecovery();
+
   // Monitor work is deferred off IddCx callback threads.
   switch (m_monitorManager.TakeDeferredAction())
   {
@@ -623,6 +703,360 @@ InteractionResult CDeviceContext::OnSetResolution(const SourceKey& source,
 
 bool CDeviceContext::OnRecoveryAction(const RecoveryAction& action)
 {
-  return g_pipe.SetRecovery(this, action.route, action.session,
-    action.serial, action.active);
+  bool recoveryActive;
+  bool monitorDisabled;
+  {
+    std::lock_guard<std::mutex> transitionLock(m_recoveryTransitionMutex);
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    m_latestRecoveryAction = action;
+    m_latestRecoveryValid  = true;
+    recoveryActive         = m_recoveryActive;
+    monitorDisabled        = m_recoveryMonitorDisabled;
+  }
+
+  // The monitor must exist before Helper can restore the LG display path.
+  // Re-arrive it first when recovery previously used the IDD-only fallback.
+  if (!action.active && monitorDisabled)
+    return QueueLocalRecovery(action);
+
+  const CPipeServer::RecoveryDispatch dispatch = g_pipe.SetRecovery(
+    this, action.route, action.session, action.serial, action.active,
+    action.active || !recoveryActive);
+
+  std::lock_guard<std::mutex> transitionLock(m_recoveryTransitionMutex);
+  if (m_helperRecoveryComplete &&
+      SameRecoveryAction(m_helperRecoveryAction, action))
+    return true;
+
+  switch (dispatch)
+  {
+    case CPipeServer::RecoveryDispatch::SENT:
+      return true;
+
+    case CPipeServer::RecoveryDispatch::UNAVAILABLE:
+    case CPipeServer::RecoveryDispatch::QUEUED:
+      return QueueLocalRecovery(action);
+
+    case CPipeServer::RecoveryDispatch::REJECTED:
+      return false;
+  }
+  return false;
+}
+
+bool CDeviceContext::SameRecoveryAction(
+  const RecoveryAction& left, const RecoveryAction& right)
+{
+  return left.route == right.route &&
+    left.session == right.session &&
+    left.serial == right.serial &&
+    left.active == right.active;
+}
+
+bool CDeviceContext::QueueLocalRecovery(const RecoveryAction& action)
+{
+  if (!action.route || !action.session || !action.serial)
+    return false;
+
+  CSRWExclusiveLock lock(m_localRecoveryLock);
+  if (m_latestRecoveryValid &&
+      !SameRecoveryAction(action, m_latestRecoveryAction))
+    return true;
+
+  if (m_localRecoveryArrival)
+  {
+    const RecoveryAction& pending = m_localRecoveryArrivalAction;
+    if (SameRecoveryAction(pending, action))
+      return true;
+  }
+
+  for (const RecoveryAction& pending : m_localRecoveryQueue)
+    if (SameRecoveryAction(pending, action))
+      return true;
+
+  m_localRecoveryQueue.push_back(action);
+  return true;
+}
+
+void CDeviceContext::RemoveLocalRecovery(const RecoveryAction& action)
+{
+  CSRWExclusiveLock lock(m_localRecoveryLock);
+  for (auto it = m_localRecoveryQueue.begin();
+       it != m_localRecoveryQueue.end();)
+  {
+    if (SameRecoveryAction(*it, action))
+      it = m_localRecoveryQueue.erase(it);
+    else
+      ++it;
+  }
+}
+
+void CDeviceContext::ProcessLocalRecovery()
+{
+  std::lock_guard<std::mutex> transitionLock(m_recoveryTransitionMutex);
+
+  RecoveryAction action;
+  bool haveAction            = false;
+  bool reconcileActive       = false;
+  bool reconcileAdapterReady = false;
+  {
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    for (;;)
+    {
+      if (m_localRecoveryQueue.empty())
+        break;
+      action = m_localRecoveryQueue.front();
+      m_localRecoveryQueue.pop_front();
+      const bool current = !m_latestRecoveryValid ||
+        SameRecoveryAction(action, m_latestRecoveryAction);
+      const bool expired = action.deadline &&
+        GetTickCount64() >= action.deadline;
+      if (current && !expired)
+      {
+        haveAction = true;
+        break;
+      }
+
+      // The request can expire after Helper disappears but before this timer
+      // consumes the handoff. Its result is stale, but an already-established
+      // ACTIVE state still needs the IDD monitor physically disabled.
+      if (current && expired && m_recoveryActive &&
+          !m_recoveryMonitorDisabled)
+      {
+        m_recoveryMonitorDisabled = true;
+        reconcileActive           = true;
+        reconcileAdapterReady     = m_adapterReady;
+        break;
+      }
+    }
+  }
+
+  if (reconcileActive)
+  {
+    DEBUG_WARN(
+      "IDD Helper is unavailable; reconciling the active recovery topology");
+    if (!m_monitorManager.Disable())
+    {
+      CSRWExclusiveLock lock(m_localRecoveryLock);
+      m_recoveryMonitorDisabled = false;
+    }
+    else if (reconcileAdapterReady)
+      m_transport->SyncRecovery();
+    return;
+  }
+
+  if (!haveAction)
+    return;
+
+  if (action.active)
+  {
+    DEBUG_WARN(
+      "IDD Helper is unavailable; disabling the virtual monitor for recovery");
+    bool oldRecoveryActive;
+    bool oldMonitorDisabled;
+    bool adapterReady;
+    {
+      CSRWExclusiveLock lock(m_localRecoveryLock);
+      oldRecoveryActive           = m_recoveryActive;
+      oldMonitorDisabled          = m_recoveryMonitorDisabled;
+      m_recoveryActive            = true;
+      m_recoveryMonitorDisabled   = true;
+      adapterReady                = m_adapterReady;
+    }
+
+    const bool disabled = m_monitorManager.Disable();
+    if (!disabled)
+    {
+      CSRWExclusiveLock lock(m_localRecoveryLock);
+      m_recoveryActive          = oldRecoveryActive;
+      m_recoveryMonitorDisabled = oldMonitorDisabled;
+    }
+    if (disabled && adapterReady)
+      m_transport->SyncRecovery();
+    m_transport->RecoveryStatus(action.route, action.session, action.serial,
+      true, disabled ? ITransport::Recovery::ACTIVE :
+      ITransport::Recovery::FAILED,
+      disabled ? ERROR_SUCCESS : ERROR_GEN_FAILURE);
+    return;
+  }
+
+  bool disable = false;
+  {
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    disable = m_recoveryActive && !m_recoveryMonitorDisabled;
+    if (disable)
+      m_recoveryMonitorDisabled = true;
+  }
+
+  if (disable)
+  {
+    DEBUG_WARN(
+      "IDD Helper disconnected during recovery; cycling the virtual monitor");
+    if (!m_monitorManager.Disable())
+    {
+      {
+        CSRWExclusiveLock lock(m_localRecoveryLock);
+        m_recoveryMonitorDisabled = false;
+      }
+      m_transport->RecoveryStatus(action.route, action.session, action.serial,
+        false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
+      return;
+    }
+  }
+
+  bool enable      = false;
+  bool waitArrival = false;
+  {
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    if (m_recoveryMonitorDisabled)
+    {
+      m_localRecoveryArrivalAction = action;
+      m_localRecoveryArrival       = true;
+      enable                       = m_adapterReady;
+      waitArrival                  = true;
+    }
+    else
+      m_recoveryActive = false;
+  }
+
+  if (enable)
+    m_monitorManager.Enable();
+
+  if (waitArrival)
+    return;
+
+  // The normal monitor is already present. With no Helper there is no
+  // user-session topology work to perform, so monitor presence is the local
+  // completion boundary.
+  m_transport->RecoveryStatus(action.route, action.session, action.serial,
+    false, ITransport::Recovery::NORMAL, ERROR_SUCCESS);
+}
+
+void CDeviceContext::CompleteRecoveryArrival(bool arrived)
+{
+  RecoveryAction action;
+  RecoveryAction latest;
+  bool stale         = false;
+  bool latestValid   = false;
+  bool latestHandled = false;
+  bool latestCurrent = false;
+  std::unique_lock<std::mutex> transitionLock(m_recoveryTransitionMutex);
+  {
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    if (!m_localRecoveryArrival)
+      return;
+
+    action = m_localRecoveryArrivalAction;
+    const uint64_t now        = GetTickCount64();
+    const bool     expired    = action.deadline && now >= action.deadline;
+    const bool     superseded = m_latestRecoveryValid &&
+      !SameRecoveryAction(action, m_latestRecoveryAction);
+    stale = expired || superseded;
+    if (stale)
+    {
+      latestValid   = m_latestRecoveryValid;
+      latest        = m_latestRecoveryAction;
+      latestHandled = m_helperRecoveryComplete &&
+        SameRecoveryAction(m_helperRecoveryAction, latest);
+      latestCurrent = latestValid &&
+        (!latest.deadline || now < latest.deadline);
+      if (superseded && arrived && latestCurrent && !latest.active)
+      {
+        action = latest;
+        m_localRecoveryArrivalAction = latest;
+        stale = false;
+        for (auto it = m_localRecoveryQueue.begin();
+             it != m_localRecoveryQueue.end();)
+        {
+          if (SameRecoveryAction(*it, latest))
+            it = m_localRecoveryQueue.erase(it);
+          else
+            ++it;
+        }
+      }
+      else
+      {
+        m_localRecoveryArrivalAction = {};
+        m_localRecoveryArrival       = false;
+      }
+    }
+
+    if (arrived && !stale)
+    {
+      // Arrival is the IDD-only NORMAL completion boundary. Keep the monitor
+      // present if Helper disappears while applying its user-session topology.
+      m_localRecoveryArrivalAction = {};
+      m_localRecoveryArrival       = false;
+      m_recoveryActive             = false;
+      m_recoveryMonitorDisabled    = false;
+    }
+    else if (!stale)
+    {
+      m_localRecoveryArrivalAction = {};
+      m_localRecoveryArrival       = false;
+    }
+  }
+
+  if (stale)
+  {
+    // The expired/superseded NORMAL operation must not leave the IDD monitor
+    // arrived while CPipe still retains the preceding ACTIVE topology. Return
+    // to that stable local state before allowing newer work to proceed.
+    const bool disabled = m_monitorManager.Disable();
+    {
+      CSRWExclusiveLock lock(m_localRecoveryLock);
+      m_recoveryActive          = true;
+      m_recoveryMonitorDisabled = disabled;
+    }
+
+    const bool queueLatest = latestValid && latest.active &&
+      latestCurrent && !latestHandled;
+    transitionLock.unlock();
+    if (queueLatest)
+      QueueLocalRecovery(latest);
+    return;
+  }
+
+  if (!arrived)
+  {
+    const bool disabled = m_monitorManager.Disable();
+    {
+      CSRWExclusiveLock lock(m_localRecoveryLock);
+      if (disabled)
+      {
+        m_recoveryActive          = true;
+        m_recoveryMonitorDisabled = true;
+      }
+    }
+    transitionLock.unlock();
+    m_transport->RecoveryStatus(action.route, action.session, action.serial,
+      false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
+    return;
+  }
+
+  transitionLock.unlock();
+
+  // If Helper appeared while the monitor was disabled, let it restore the
+  // user-session topology now that the LG display path exists again.
+  const CPipeServer::RecoveryDispatch dispatch = g_pipe.SetRecovery(
+    this, action.route, action.session, action.serial, false, true);
+
+  {
+    std::lock_guard<std::mutex> completionLock(m_recoveryTransitionMutex);
+    CSRWExclusiveLock lock(m_localRecoveryLock);
+    if (m_helperRecoveryComplete &&
+        SameRecoveryAction(m_helperRecoveryAction, action))
+      return;
+  }
+
+  if (dispatch == CPipeServer::RecoveryDispatch::SENT)
+    return;
+
+  m_transport->RecoveryStatus(action.route, action.session, action.serial,
+    false,
+    (dispatch == CPipeServer::RecoveryDispatch::QUEUED ||
+     dispatch == CPipeServer::RecoveryDispatch::UNAVAILABLE) ?
+      ITransport::Recovery::NORMAL : ITransport::Recovery::FAILED,
+    (dispatch == CPipeServer::RecoveryDispatch::QUEUED ||
+     dispatch == CPipeServer::RecoveryDispatch::UNAVAILABLE) ?
+      ERROR_SUCCESS : RPC_S_SERVER_UNAVAILABLE);
 }

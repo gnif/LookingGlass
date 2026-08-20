@@ -27,6 +27,7 @@
 bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   std::vector<BYTE> edid, CDeviceContext * owner)
 {
+  std::lock_guard<std::mutex> lifecycleLock(m_lifecycleMutex);
   DEBUG_INFO("Creating monitor on connector %u", connectorIndex);
 
   // We support a single monitor; never create a second one if one already
@@ -34,6 +35,8 @@ bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   bool haveMonitor;
   {
     CSRWExclusiveLock lock(m_lock);
+    if (!m_enabled)
+      return false;
     haveMonitor = m_monitor != WDF_NO_HANDLE;
   }
   if (haveMonitor)
@@ -79,18 +82,27 @@ bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
 
   DEBUG_INFO("Monitor object created (%p)", createOut.MonitorObject);
 
+  const IDDCX_MONITOR monitor = createOut.MonitorObject;
+
+  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
+  wrapper->context = new CMonitorContext(monitor, owner);
+
   {
     CSRWExclusiveLock lock(m_lock);
-    m_monitor = createOut.MonitorObject;
+    m_monitor         = monitor;
+    m_monitorDeparted = false;
   }
 
-  auto * wrapper = WdfObjectGet_CMonitorContextWrapper(m_monitor);
-  wrapper->context = new CMonitorContext(m_monitor, owner);
-
   IDARG_OUT_MONITORARRIVAL out = {};
-  status = IddCxMonitorArrival(m_monitor, &out);
+  status = IddCxMonitorArrival(monitor, &out);
   if (FAILED(status))
   {
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_monitor == monitor)
+        m_monitor = nullptr;
+    }
+    WdfObjectDelete((WDFOBJECT)monitor);
     DEBUG_ERROR_HR(status, "IddCxMonitorArrival Failed");
     return false;
   }
@@ -99,11 +111,99 @@ bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   return true;
 }
 
+bool CMonitorManager::Disable()
+{
+  std::lock_guard<std::mutex> lifecycleLock(m_lifecycleMutex);
+  IDDCX_MONITOR monitor                    = nullptr;
+  bool          oldReplugMonitor           = false;
+  bool          oldReplugPending           = false;
+  bool          oldMonitorDeparted         = false;
+  bool          oldWaitForSwapChainRelease = false;
+  LONG          oldCreateQueued            = 0;
+  LONG          oldReplugQueued            = 0;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    if (!m_enabled)
+      return true;
+
+    oldReplugMonitor           = m_replugMonitor;
+    oldReplugPending           = m_replugPending;
+    oldMonitorDeparted         = m_monitorDeparted;
+    oldWaitForSwapChainRelease = m_waitForSwapChainRelease;
+    oldCreateQueued = Atomic::Load(m_createQueued);
+    oldReplugQueued = Atomic::Load(m_replugQueued);
+
+    m_enabled       = false;
+    m_replugMonitor = false;
+    m_replugPending = false;
+    Atomic::Store(m_createQueued, 0);
+    Atomic::Store(m_replugQueued, 0);
+
+    monitor = m_monitor;
+    if (monitor == WDF_NO_HANDLE)
+      return true;
+
+    m_monitor                 = nullptr;
+    m_monitorDeparted         = false;
+    m_waitForSwapChainRelease = m_swapChainAssigned;
+  }
+
+  DEBUG_INFO("Disabling the virtual monitor for recovery");
+  const NTSTATUS status = IddCxMonitorDeparture(monitor);
+  if (!NT_SUCCESS(status))
+  {
+    CSRWExclusiveLock lock(m_lock);
+    m_enabled                 = true;
+    m_monitor                 = monitor;
+    m_replugMonitor           = oldReplugMonitor;
+    m_replugPending           = oldReplugPending;
+    m_monitorDeparted         = oldMonitorDeparted;
+    m_waitForSwapChainRelease = oldWaitForSwapChainRelease;
+    Atomic::Store(m_createQueued, oldCreateQueued);
+    Atomic::Store(m_replugQueued, oldReplugQueued);
+    DEBUG_ERROR_HR(status,
+      "Failed to disable the virtual monitor for recovery");
+    return false;
+  }
+
+  {
+    CSRWExclusiveLock lock(m_lock);
+    m_monitorDeparted = true;
+  }
+  DEBUG_INFO("Virtual monitor disabled for recovery");
+  return true;
+}
+
+void CMonitorManager::Enable()
+{
+  std::lock_guard<std::mutex> lifecycleLock(m_lifecycleMutex);
+  bool create = false;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    if (m_enabled)
+      return;
+
+    m_enabled = true;
+    create = m_monitor == WDF_NO_HANDLE &&
+      !m_waitForSwapChainRelease;
+  }
+
+  if (create)
+    Atomic::Store(m_createQueued, 1);
+}
+
 CMonitorManager::ReplugAction CMonitorManager::Replug()
 {
+  std::lock_guard<std::mutex> lifecycleLock(m_lifecycleMutex);
   IDDCX_MONITOR monitor;
   {
     CSRWExclusiveLock lock(m_lock);
+
+    if (!m_enabled)
+      return ReplugAction::NONE;
+
+    if (m_waitForSwapChainRelease)
+      return ReplugAction::NONE;
 
     if (m_replugMonitor || (m_swapChainAssigned && !m_swapChainReady))
     {
@@ -198,10 +298,11 @@ void CMonitorManager::OnSwapChainReleased()
     CSRWExclusiveLock lock(m_lock);
     m_swapChainAssigned = false;
     m_swapChainReady    = false;
-    if (m_replugMonitor && m_waitForSwapChainRelease)
+    if (m_waitForSwapChainRelease)
     {
       m_waitForSwapChainRelease = false;
-      rebuild = m_monitorDeparted;
+      rebuild = m_enabled && m_monitorDeparted &&
+        m_monitor == WDF_NO_HANDLE;
     }
   }
 
@@ -217,6 +318,9 @@ CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
   {
     CSRWExclusiveLock lock(m_lock);
     m_swapChainReady = true;
+    if (!m_enabled || m_waitForSwapChainRelease)
+      return action;
+
     if (m_replugMonitor)
     {
       m_replugMonitor   = false;
@@ -250,16 +354,27 @@ CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
 
 void CMonitorManager::QueueReplug()
 {
+  CSRWSharedLock lock(m_lock);
+  if (!m_enabled)
+    return;
   Atomic::Store(m_replugQueued, 1);
 }
 
 CMonitorManager::DeferredAction CMonitorManager::TakeDeferredAction()
 {
   if (Atomic::Swap(m_createQueued, 0))
-    return DeferredAction::CREATE;
+  {
+    CSRWSharedLock lock(m_lock);
+    if (m_enabled)
+      return DeferredAction::CREATE;
+  }
 
   if (Atomic::Swap(m_replugQueued, 0))
-    return DeferredAction::REPLUG;
+  {
+    CSRWSharedLock lock(m_lock);
+    if (m_enabled)
+      return DeferredAction::REPLUG;
+  }
 
   return DeferredAction::NONE;
 }

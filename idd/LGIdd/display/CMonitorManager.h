@@ -25,6 +25,7 @@
 #include <Windows.h>
 #include <wdf.h>
 #include <IddCx.h>
+#include <mutex>
 #include <vector>
 
 #include "config/CSettings.h"
@@ -61,9 +62,14 @@ private:
   // IddCx callback threads, the swap-chain thread, and the transport timer.
   CSRWLock m_lock;
 
+  // Serializes monitor arrival/departure calls. IddCx can finish adapter
+  // initialization on a different thread from transport recovery work.
+  std::mutex m_lifecycleMutex;
+
   bool m_replugMonitor           = false;
   bool m_replugPending           = false;
   bool m_monitorDeparted         = false;
+  bool m_enabled                 = true;
   bool m_swapChainAssigned       = false;
   bool m_swapChainReady          = false;
   bool m_waitForSwapChainRelease = false;
@@ -77,6 +83,8 @@ private:
 public:
   bool Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
     std::vector<BYTE> edid, CDeviceContext * owner);
+  bool Disable();
+  void Enable();
   ReplugAction Replug();
   void RequestMode(const CSettings::DisplayMode& mode);
 
