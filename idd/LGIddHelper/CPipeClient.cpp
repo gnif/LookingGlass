@@ -34,8 +34,10 @@ namespace
 {
   static const unsigned RECOVERY_VERIFY_ATTEMPTS = 20;
   static const unsigned RECOVERY_PATH_ATTEMPTS   = 20;
+  static const unsigned RECOVERY_ACCESS_ATTEMPTS = 20;
   static const size_t   RECOVERY_MAX_PATHS       = 4;
   static const DWORD    RECOVERY_VERIFY_DELAY_MS = 100;
+  static const DWORD    RECOVERY_ACCESS_DELAY_MS = 250;
   static const unsigned DISPLAY_MODE_ATTEMPTS    = 20;
   static const DWORD    DISPLAY_MODE_DELAY_MS    = 100;
 
@@ -83,6 +85,33 @@ namespace
         return true;
 
     return false;
+  }
+
+  bool GetDesktopName(HDESK desktop, std::vector<wchar_t>& name)
+  {
+    DWORD bytes = 0;
+    if (GetUserObjectInformationW(
+          desktop, UOI_NAME, nullptr, 0, &bytes) ||
+        GetLastError() != ERROR_INSUFFICIENT_BUFFER ||
+        bytes < sizeof(wchar_t))
+      return false;
+
+    name.resize((bytes + sizeof(wchar_t) - 1) / sizeof(wchar_t));
+    return GetUserObjectInformationW(desktop, UOI_NAME,
+      name.data(), static_cast<DWORD>(name.size() * sizeof(wchar_t)),
+      &bytes) != FALSE;
+  }
+
+  bool SameDesktop(HDESK first, HDESK second)
+  {
+    if (!first || !second)
+      return false;
+
+    std::vector<wchar_t> firstName;
+    std::vector<wchar_t> secondName;
+    return GetDesktopName(first, firstName) &&
+      GetDesktopName(second, secondName) &&
+      _wcsicmp(firstName.data(), secondName.data()) == 0;
   }
 
   bool IsLGPath(const DISPLAYCONFIG_PATH_INFO& path)
@@ -353,7 +382,7 @@ namespace
     return ActivateDisplay(false);
   }
 
-  uint32_t RestoreNonExclusiveTopology()
+  uint32_t RestoreNonExclusiveTopology(bool logResult = true)
   {
     if (HasActiveDisplay(true))
       return ERROR_SUCCESS;
@@ -362,14 +391,20 @@ namespace
       SDC_APPLY | SDC_USE_DATABASE_CURRENT | SDC_ALLOW_CHANGES);
     if (result == ERROR_SUCCESS && WaitForDisplay(true))
     {
-      DEBUG_INFO("Saved non-exclusive display topology restored");
+      if (logResult)
+        DEBUG_INFO("Saved non-exclusive display topology restored");
       return ERROR_SUCCESS;
     }
 
-    if (result == ERROR_SUCCESS)
-      DEBUG_WARN("The saved display topology does not activate Looking Glass");
-    else
-      DEBUG_WARN("Failed to restore the saved display topology (%ld)", result);
+    if (logResult)
+    {
+      if (result == ERROR_SUCCESS)
+        DEBUG_WARN(
+          "The saved display topology does not activate Looking Glass");
+      else
+        DEBUG_WARN(
+          "Failed to restore the saved display topology (%ld)", result);
+    }
 
     // If the current database topology omits LG, use Windows' most recently
     // saved clone or extended topology. No persistence flag is supplied, so
@@ -379,7 +414,8 @@ namespace
       SDC_ALLOW_CHANGES);
     if (result == ERROR_SUCCESS && WaitForDisplay(true))
     {
-      DEBUG_INFO("Non-exclusive Looking Glass topology activated");
+      if (logResult)
+        DEBUG_INFO("Non-exclusive Looking Glass topology activated");
       return ERROR_SUCCESS;
     }
 
@@ -489,18 +525,42 @@ bool CPipeClient::IsLGIddDeviceAttached()
  * attached to. If the user switches to the secure desktop (UAC, etc)
  * then these functions will not work, so call this first to ensure
  * the call is effective */
-void CPipeClient::SetActiveDesktop()
+bool CPipeClient::SetActiveDesktop(bool quiet)
 {
-  HDESK desktop = NULL;
-  desktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
-  if (!desktop)
-    DEBUG_ERROR_HR(GetLastError(), "OpenInputDesktop Failed");
-  else
+  // CloseDesktop rejects the handle assigned to this thread. Retain a handle
+  // acquired for a switch until a later switch makes it safe to close.
+  static thread_local HDESK ownedDesktop = NULL;
+
+  HDESK inputDesktop = OpenInputDesktop(0, FALSE, GENERIC_READ);
+  if (!inputDesktop)
   {
-    if (!SetThreadDesktop(desktop))
-      DEBUG_ERROR_HR(GetLastError(), "SetThreadDesktop Failed");
-    CloseDesktop(desktop);
+    if (!quiet)
+      DEBUG_ERROR_HR(GetLastError(), "OpenInputDesktop Failed");
+    return false;
   }
+
+  const HDESK currentDesktop = GetThreadDesktop(GetCurrentThreadId());
+  if (SameDesktop(currentDesktop, inputDesktop))
+  {
+    if (!CloseDesktop(inputDesktop))
+      DEBUG_ERROR_HR(GetLastError(), "CloseDesktop Failed");
+    return true;
+  }
+
+  if (!SetThreadDesktop(inputDesktop))
+  {
+    if (!quiet)
+      DEBUG_ERROR_HR(GetLastError(), "SetThreadDesktop Failed");
+    if (!CloseDesktop(inputDesktop))
+      DEBUG_ERROR_HR(GetLastError(), "CloseDesktop Failed");
+    return false;
+  }
+
+  const HDESK previousOwned = ownedDesktop;
+  ownedDesktop = inputDesktop;
+  if (previousOwned && !CloseDesktop(previousOwned))
+    DEBUG_ERROR_HR(GetLastError(), "CloseDesktop Failed");
+  return true;
 }
 
 void CPipeClient::WriteMsg(const LGPipeMsg& msg)
@@ -594,11 +654,13 @@ void CPipeClient::DisplayModeThread()
   const HANDLE handles[] = { m_displayModeStop, m_displayModeWake };
   uint64_t serial = 0;
   unsigned int attempts = 0;
+  bool applied = false;
+  bool retryPending = false;
 
   while (true)
   {
     const DWORD wait = WaitForMultipleObjects(_countof(handles), handles,
-      FALSE, attempts ? DISPLAY_MODE_DELAY_MS : INFINITE);
+      FALSE, retryPending ? DISPLAY_MODE_DELAY_MS : INFINITE);
     if (wait == WAIT_OBJECT_0)
       break;
     if (wait == WAIT_FAILED)
@@ -612,7 +674,9 @@ void CPipeClient::DisplayModeThread()
       CSRWSharedLock lock(m_displayModeLock);
       if (!m_hasDisplayMode)
       {
-        attempts = 0;
+        attempts     = 0;
+        applied      = false;
+        retryPending = false;
         continue;
       }
 
@@ -620,43 +684,79 @@ void CPipeClient::DisplayModeThread()
       {
         serial   = m_displayModeSerial;
         attempts = 0;
+        applied  = false;
       }
       msg = m_displayMode;
     }
 
-    LONG result = DISP_CHANGE_FAILED;
-    if (ApplyDisplayMode(msg, result))
+    if (!applied)
     {
-      // A requested resolution replug is also a topology transition. Keep
-      // the original apply-then-enforce ordering so LG remains the only
-      // active (and therefore primary) display on this path.
-      if (EnsureOnlyDisplay())
+      LONG result = DISP_CHANGE_FAILED;
+      if (!ApplyDisplayMode(msg, result))
       {
+        ++attempts;
+        if (attempts < DISPLAY_MODE_ATTEMPTS)
+        {
+          retryPending = true;
+          continue;
+        }
+
         CSRWExclusiveLock lock(m_displayModeLock);
         if (serial == m_displayModeSerial)
+        {
+          DEBUG_ERROR("Failed to apply Looking Glass display mode %ux%u@%u (%ld)",
+            msg.displayMode.width,
+            msg.displayMode.height,
+            DisplayModeRefresh(msg),
+            result);
           m_hasDisplayMode = false;
-        attempts = 0;
+        }
+        attempts     = 0;
+        applied      = false;
+        retryPending = false;
         continue;
       }
 
-      result = DISP_CHANGE_FAILED;
+      // ChangeDisplaySettingsEx returning success starts an asynchronous
+      // transition. Do not restart it on the next retry.
+      applied      = true;
+      attempts     = 0;
+      retryPending = true;
+      continue;
+    }
+
+    if (EnsureOnlyDisplay())
+    {
+      CSRWExclusiveLock lock(m_displayModeLock);
+      if (serial == m_displayModeSerial)
+        m_hasDisplayMode = false;
+      attempts     = 0;
+      applied      = false;
+      retryPending = false;
+      continue;
     }
 
     ++attempts;
     if (attempts < DISPLAY_MODE_ATTEMPTS)
+    {
+      retryPending = true;
       continue;
+    }
 
     CSRWExclusiveLock lock(m_displayModeLock);
     if (serial == m_displayModeSerial)
     {
-      DEBUG_ERROR("Failed to apply Looking Glass display mode %ux%u@%u (%ld)",
+      DEBUG_ERROR(
+        "Failed to enforce the Looking Glass-only topology after applying "
+        "display mode %ux%u@%u",
         msg.displayMode.width,
         msg.displayMode.height,
-        DisplayModeRefresh(msg),
-        result);
+        DisplayModeRefresh(msg));
       m_hasDisplayMode = false;
     }
-    attempts = 0;
+    attempts     = 0;
+    applied      = false;
+    retryPending = false;
   }
 }
 
@@ -743,15 +843,22 @@ bool CPipeClient::ShouldReconnect()
   return attached;
 }
 
-bool CPipeClient::EnsureOnlyDisplayLocked()
+bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
 {
+  if (error)
+    *error = ERROR_SUCCESS;
+
   if (m_recoveryActive)
     return true;
 
   std::vector<DisplayState> displays;
   size_t lgIndex;
   if (!GetDisplayStates(displays, lgIndex))
+  {
+    if (error)
+      *error = ERROR_NOT_FOUND;
     return false;
+  }
 
   // The only active display is necessarily the primary display.
   if (displays.size() == 1)
@@ -765,7 +872,10 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
       QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount);
     if (result != ERROR_SUCCESS)
     {
-      DEBUG_ERROR("GetDisplayConfigBufferSizes failed (%ld)", result);
+      if (error)
+        *error = static_cast<uint32_t>(result);
+      if (logResult)
+        DEBUG_ERROR("GetDisplayConfigBufferSizes failed (%ld)", result);
       return false;
     }
 
@@ -778,7 +888,10 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
 
     if (result != ERROR_SUCCESS)
     {
-      DEBUG_ERROR("QueryDisplayConfig failed (%ld)", result);
+      if (error)
+        *error = static_cast<uint32_t>(result);
+      if (logResult)
+        DEBUG_ERROR("QueryDisplayConfig failed (%ld)", result);
       return false;
     }
 
@@ -810,7 +923,10 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
         modes[sourceModeIndex].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_SOURCE ||
         modes[targetModeIndex].infoType != DISPLAYCONFIG_MODE_INFO_TYPE_TARGET)
       {
-        DEBUG_ERROR("Looking Glass display path has invalid mode indices");
+        if (error)
+          *error = ERROR_INVALID_DATA;
+        if (logResult)
+          DEBUG_ERROR("Looking Glass display path has invalid mode indices");
         return false;
       }
 
@@ -835,20 +951,30 @@ bool CPipeClient::EnsureOnlyDisplayLocked()
         SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES);
       if (result != ERROR_SUCCESS)
       {
-        DEBUG_ERROR("Failed to apply the LG-only display topology (%ld)",
-          result);
+        if (error)
+          *error = static_cast<uint32_t>(result);
+        if (logResult)
+          DEBUG_ERROR("Failed to apply the LG-only display topology (%ld)",
+            result);
         return false;
       }
 
-      DEBUG_INFO("Looking Glass display set as the only active display");
+      if (logResult)
+        DEBUG_INFO("Looking Glass display set as the only active display");
       return true;
     }
 
-    DEBUG_ERROR("Looking Glass display configuration path not found");
+    if (error)
+      *error = ERROR_NOT_FOUND;
+    if (logResult)
+      DEBUG_ERROR("Looking Glass display configuration path not found");
     return false;
   }
 
-  DEBUG_WARN("Display topology kept changing while selecting Looking Glass");
+  if (error)
+    *error = ERROR_RETRY;
+  if (logResult)
+    DEBUG_WARN("Display topology kept changing while selecting Looking Glass");
   return false;
 }
 
@@ -874,7 +1000,7 @@ uint32_t CPipeClient::RestoreSavedTopologyLocked() const
   return ActivateFallbackDisplay();
 }
 
-uint32_t CPipeClient::RestoreLGTopologyLocked()
+uint32_t CPipeClient::RestoreLGTopologyLocked(bool logResult)
 {
   uint32_t error = ERROR_SUCCESS;
   bool exclusive = false;
@@ -899,11 +1025,12 @@ uint32_t CPipeClient::RestoreLGTopologyLocked()
   {
     if (!exclusive)
     {
-      error = RestoreNonExclusiveTopology();
+      error = RestoreNonExclusiveTopology(logResult);
       if (error == ERROR_SUCCESS)
       {
         m_recoveryActive = false;
-        DEBUG_INFO("Looking Glass display topology restored");
+        if (logResult)
+          DEBUG_INFO("Looking Glass display topology restored");
         return ERROR_SUCCESS;
       }
     }
@@ -918,13 +1045,17 @@ uint32_t CPipeClient::RestoreLGTopologyLocked()
         // LG path is active. This explicit call owns the transition back to
         // the temporary LG-only topology.
         m_recoveryActive = false;
-        if (EnsureOnlyDisplayLocked() && WaitForOnlyLGDisplay())
+        uint32_t ensureError = ERROR_GEN_FAILURE;
+        if (EnsureOnlyDisplayLocked(&ensureError, logResult) &&
+            WaitForOnlyLGDisplay())
         {
-          DEBUG_INFO("Looking Glass display topology restored");
+          if (logResult)
+            DEBUG_INFO("Looking Glass display topology restored");
           return ERROR_SUCCESS;
         }
 
-        error = ERROR_GEN_FAILURE;
+        error = ensureError == ERROR_SUCCESS ?
+          ERROR_GEN_FAILURE : ensureError;
       }
     }
   }
@@ -1173,8 +1304,8 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
   // The IDD reaches swap-chain readiness while the replugged monitor can
-  // still be settling. Latch the latest request and retry the original
-  // apply-then-enforce transaction outside the pipe callback.
+  // still be settling. Latch the latest request and retry until Windows
+  // accepts it; after acceptance, retry only topology enforcement.
   {
     CSRWExclusiveLock lock(m_displayModeLock);
     m_displayMode       = msg;
@@ -1202,7 +1333,9 @@ void CPipeClient::HandleSetRecovery(const LGPipeMsg& msg)
 {
   const bool active =
     (msg.recovery.request & LGPipeMsg::RECOVERY_ACTIVE) != 0;
-  bool      cached = false;
+  bool         cached = false;
+  bool         recoveryExitAccessUnavailable = false;
+  unsigned int recoveryExitAttempts = 0;
   LGPipeMsg status = {};
   status.size       = sizeof(status);
   status.type       = LGPipeMsg::RECOVERY_FAILED;
@@ -1233,14 +1366,35 @@ void CPipeClient::HandleSetRecovery(const LGPipeMsg& msg)
       m_recoveryActive = true;
       CNotifyWindow::instance().setRecoveryMode(true);
 
-      if (RestoreLGTopologyLocked() == ERROR_SUCCESS)
+      // This callback runs on CPipeEndpoint's worker, which owns no windows
+      // or hooks and can safely follow the input desktop. During logon the
+      // user token can become available just before that desktop is ready;
+      // keep this request pending rather than caching a transient failure.
+      SetActiveDesktop(true);
+      recoveryExitAttempts = 1;
+      uint32_t error = RestoreLGTopologyLocked();
+      while (error == ERROR_ACCESS_DENIED &&
+        recoveryExitAttempts < RECOVERY_ACCESS_ATTEMPTS)
+      {
+        Sleep(RECOVERY_ACCESS_DELAY_MS);
+        ++recoveryExitAttempts;
+        if (!SetActiveDesktop(true))
+          continue;
+
+        error = RestoreLGTopologyLocked(false);
+      }
+      recoveryExitAccessUnavailable = error == ERROR_ACCESS_DENIED;
+
+      if (error == ERROR_SUCCESS)
       {
         CNotifyWindow::instance().setRecoveryMode(false);
         status.type = LGPipeMsg::RECOVERY_OFF;
       }
     }
 
-    if (!cached)
+    // Do not make a transient desktop-access failure sticky. Report this
+    // attempt, but let an identical OFF replay try again after reconnect.
+    if (!cached && !recoveryExitAccessUnavailable)
     {
       m_hasRecoveryStatus = true;
       m_recoveryStatus    = status;
@@ -1258,7 +1412,18 @@ void CPipeClient::HandleSetRecovery(const LGPipeMsg& msg)
     DEBUG_INFO("Recovery mode %s", status.type == LGPipeMsg::RECOVERY_ON ?
       "active" : "failed");
   else if (status.type == LGPipeMsg::RECOVERY_OFF)
-    DEBUG_INFO("Recovery mode disabled");
+  {
+    if (recoveryExitAttempts > 1)
+      DEBUG_INFO("Recovery mode disabled after %u desktop access attempts",
+        recoveryExitAttempts);
+    else
+      DEBUG_INFO("Recovery mode disabled");
+  }
+  else if (recoveryExitAccessUnavailable)
+    DEBUG_WARN(
+      "Recovery mode exit failed: display configuration access remained "
+      "unavailable after %u attempts",
+      recoveryExitAttempts);
   else
     DEBUG_INFO("Recovery mode exit failed");
 

@@ -39,6 +39,7 @@
 #define ID_DISPLAY_CHECK_TIMER 1
 #define DISPLAY_SETTLE_DELAY   250
 #define DISPLAY_RETRY_DELAY    1000
+#define DISPLAY_CHECK_INTERVAL 5000
 
 ATOM CNotifyWindow::s_atom = 0;
 UINT CNotifyWindow::s_taskbarCreated = 0;
@@ -135,7 +136,9 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
 
   case WM_DISPLAYCHANGE:
     if (!m_recoveryActive)
+    {
       scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+    }
     return 0;
 
   case WM_TIMER:
@@ -145,10 +148,18 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
       KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
       if (m_recoveryActive)
         break;
-      if (m_onEnsureOnlyDisplay && m_onEnsureOnlyDisplay())
-        DEBUG_INFO("Enforced Looking Glass as the only display");
+      const bool success =
+        m_onEnsureOnlyDisplay && m_onEnsureOnlyDisplay();
+      if (success)
+      {
+        DEBUG_TRACE("Enforced Looking Glass as the only display");
+      }
       else
+      {
         DEBUG_WARN("Failed to ensure Looking Glass is the only display");
+      }
+      scheduleDisplayCheck(success ?
+        DISPLAY_CHECK_INTERVAL : DISPLAY_RETRY_DELAY);
       break;
     }
     return 0;
@@ -218,7 +229,11 @@ LRESULT CNotifyWindow::onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y)
         PostMessage(m_hwnd, WM_CLEAN_UP_CONFIG, 0, 0);
       });
       if (m_onSettingChange)
-        m_config->onSettingChange(m_onSettingChange);
+        m_config->onSettingChange([this]() {
+          m_onSettingChange();
+          KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+          scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+        });
       ShowWindow(*m_config, SW_NORMAL);
       break;
     }

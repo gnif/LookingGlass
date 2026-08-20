@@ -57,7 +57,7 @@ private:
 
   void WriteMsg(const LGPipeMsg& msg);
 
-  void SetActiveDesktop();
+  bool SetActiveDesktop(bool quiet = false);
 
   static DWORD WINAPI DisplayModeThreadProc(void * context);
   void DisplayModeThread();
@@ -65,9 +65,10 @@ private:
   void StopDisplayModeThread();
   bool ApplyDisplayMode(const LGPipeMsg& msg, LONG& result);
 
-  bool EnsureOnlyDisplayLocked();
+  bool EnsureOnlyDisplayLocked(uint32_t * error = nullptr,
+    bool logResult = true);
   uint32_t RestoreSavedTopologyLocked() const;
-  uint32_t RestoreLGTopologyLocked();
+  uint32_t RestoreLGTopologyLocked(bool logResult = true);
 
   void HandleSetCursorPos(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
