@@ -34,6 +34,8 @@ struct SpiceInput
   LG_Lock statusDispatch;
 
   bool             available;
+  bool             keyboardLEDsValid;
+  uint8_t          keyboardLEDs;
   uint32_t         statusGeneration;
   LG_InputStatusFn statusCallback;
   void           * statusOpaque;
@@ -64,8 +66,10 @@ static void spiceSetStatusListener(void * opaque,
   input->statusOpaque   = callbackOpaque;
   const LG_InputStatus status =
   {
-    .available  = input->available,
-    .generation = input->statusGeneration,
+    .available         = input->available,
+    .generation        = input->statusGeneration,
+    .keyboardLEDsValid = input->available && input->keyboardLEDsValid,
+    .keyboardLEDs      = input->keyboardLEDs,
   };
   LG_UNLOCK(input->stateLock);
 
@@ -193,19 +197,58 @@ void spiceInput_setAvailable(SpiceInput * input, bool available)
   LG_LOCK(input->statusDispatch);
   LG_LOCK(input->stateLock);
 
+  const bool oldLEDsValid =
+    input->available && input->keyboardLEDsValid;
   const bool changed = input->available != available;
   if (changed)
   {
     input->available        = available;
     input->statusGeneration = nextGeneration(input->statusGeneration);
   }
+  if (!available)
+    input->keyboardLEDsValid = false;
+
+  const bool statusChanged = changed || oldLEDsValid !=
+    (input->available && input->keyboardLEDsValid);
 
   const LG_InputStatusFn callback       = input->statusCallback;
   void                 * callbackOpaque = input->statusOpaque;
   const LG_InputStatus status =
   {
-    .available  = input->available,
-    .generation = input->statusGeneration,
+    .available         = input->available,
+    .generation        = input->statusGeneration,
+    .keyboardLEDsValid = input->available && input->keyboardLEDsValid,
+    .keyboardLEDs      = input->keyboardLEDs,
+  };
+  LG_UNLOCK(input->stateLock);
+
+  if (statusChanged && callback)
+    callback(callbackOpaque, &status);
+  LG_UNLOCK(input->statusDispatch);
+}
+
+void spiceInput_setKeyboardLEDs(SpiceInput * input, uint32_t modifiers)
+{
+  const uint8_t keyboardLEDs =
+    (modifiers & 2 ? LG_KEYBOARD_LED_NUM_LOCK    : 0) |
+    (modifiers & 4 ? LG_KEYBOARD_LED_CAPS_LOCK   : 0) |
+    (modifiers & 1 ? LG_KEYBOARD_LED_SCROLL_LOCK : 0);
+
+  LG_LOCK(input->statusDispatch);
+  LG_LOCK(input->stateLock);
+  const bool changed = !input->keyboardLEDsValid ||
+    input->keyboardLEDs != keyboardLEDs;
+  input->keyboardLEDsValid = true;
+  input->keyboardLEDs      = keyboardLEDs;
+
+  const LG_InputStatusFn callback       = input->statusCallback;
+  void                 * callbackOpaque = input->statusOpaque;
+  const LG_InputStatus status =
+  {
+    .available         = input->available,
+    .generation        = input->statusGeneration,
+    .keyboardLEDsValid = input->available,
+    .keyboardLEDs      = input->keyboardLEDs,
   };
   LG_UNLOCK(input->stateLock);
 

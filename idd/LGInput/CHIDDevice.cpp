@@ -165,7 +165,10 @@ static NTSTATUS SetOutputReport(
     return STATUS_INVALID_PARAMETER;
 
   WDFDEVICE device = WdfIoQueueGetDevice(queue);
-  HIDGetDeviceContext(device)->keyboardLeds = report->leds;
+  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  context->keyboardLeds = report->leds;
+  if (context->inputPipe)
+    context->inputPipe->UpdateKeyboardLEDs(report->leds);
   WdfRequestSetInformation(request, sizeof(*report));
   return STATUS_SUCCESS;
 }

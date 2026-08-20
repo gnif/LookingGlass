@@ -29,7 +29,7 @@ static constexpr wchar_t LG_INPUT_PIPE_NAME[] =
   L"\\\\.\\pipe\\LookingGlassIDDInput";
 
 static constexpr uint32_t LG_INPUT_PIPE_MAGIC                  = 0x5049474c;
-static constexpr uint16_t LG_INPUT_PIPE_VERSION                = 3;
+static constexpr uint16_t LG_INPUT_PIPE_VERSION                = 4;
 static constexpr size_t   LG_INPUT_PIPE_MAX_PAYLOAD_SIZE       = 64;
 static constexpr uint16_t LG_INPUT_MOUSE_ABSOLUTE_MAX          =
   KVMFR_INPUT_MOUSE_ABSOLUTE_MAX;
@@ -67,9 +67,12 @@ enum LGInputKeyboardModifier : uint8_t
 
 enum LGInputPipeMessageType : uint16_t
 {
+  // LGIdd to LGInput.
   LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE = 1,
   LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE = 2,
   LG_INPUT_PIPE_MESSAGE_KEYBOARD       = 3,
+  // LGInput to LGIdd.
+  LG_INPUT_PIPE_MESSAGE_KEYBOARD_LEDS  = 4,
 };
 
 #pragma pack(push, 1)
@@ -88,11 +91,18 @@ using LGInputPipeMouseRelative = KVMFRInputMouseRelative;
 using LGInputPipeMouseAbsolute = KVMFRInputMouseAbsolute;
 using LGInputPipeKeyboard      = KVMFRInputKeyboard;
 
+struct LGInputPipeKeyboardLEDs
+{
+  KVMFRInputKeyboardLEDFlags leds;
+};
+
 static_assert(sizeof(LGInputPipeMouseRelative) == 16,
   "LGInputPipeMouseRelative wire layout changed");
 static_assert(sizeof(LGInputPipeMouseAbsolute) == 16,
   "LGInputPipeMouseAbsolute wire layout changed");
 static_assert(sizeof(LGInputPipeKeyboard) == 16,
   "LGInputPipeKeyboard wire layout changed");
+static_assert(sizeof(LGInputPipeKeyboardLEDs) == 1,
+  "LGInputPipeKeyboardLEDs wire layout changed");
 static_assert(sizeof(LGInputPipeMessage) == 84,
   "LGInputPipeMessage wire layout changed");

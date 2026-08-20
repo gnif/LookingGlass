@@ -29,6 +29,8 @@ public:
 
   // Odd states are available; a state change invalidates in-flight input.
   virtual uint64_t GetState() const = 0;
+  // Returns false until the guest endpoint has reported its HID LED state.
+  virtual bool GetKeyboardLEDs(uint8_t& leds) const = 0;
   virtual bool SendMouseRelative(int32_t deltaX, int32_t deltaY,
     int32_t wheel, uint32_t buttons) = 0;
   virtual bool SendMouseAbsolute(uint16_t x, uint16_t y,

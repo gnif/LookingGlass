@@ -32,6 +32,8 @@ struct InputBinding
   void              * opaque;
   bool                available;
   bool                mouseAbsolute;
+  bool                keyboardLEDsValid;
+  uint8_t             keyboardLEDs;
   uint32_t            epoch;
 };
 
@@ -39,7 +41,11 @@ static struct
 {
   LG_Lock   bindingLock;
   LG_RWLock activeLock;
+  LG_Lock   keyboardLEDsDispatch;
   uint32_t  nextBindingEpoch;
+
+  LGInputKeyboardLEDsFn keyboardLEDsCallback;
+  void                  * keyboardLEDsOpaque;
 
   struct InputBinding fallback;
   struct InputBinding transport;
@@ -95,6 +101,31 @@ static bool bindingEqual(const struct InputBinding * a,
     a->epoch           == b->epoch;
 }
 
+static bool keyboardLEDsEqual(const struct InputBinding * a,
+    const struct InputBinding * b)
+{
+  const bool aValid = a->ops && a->available && a->keyboardLEDsValid;
+  const bool bValid = b->ops && b->available && b->keyboardLEDsValid;
+  return aValid == bValid && (!aValid || a->keyboardLEDs == b->keyboardLEDs);
+}
+
+static void dispatchKeyboardLEDs(void)
+{
+  LG_LOCK(l_input.keyboardLEDsDispatch);
+  LG_LOCK_SHARED(l_input.activeLock);
+  LGInputKeyboardLEDsFn callback = l_input.keyboardLEDsCallback;
+  void                  * opaque = l_input.keyboardLEDsOpaque;
+  const bool valid = l_input.active.ops &&
+    l_input.active.available &&
+    l_input.active.keyboardLEDsValid;
+  const uint8_t leds = l_input.active.keyboardLEDs;
+  LG_UNLOCK_SHARED(l_input.activeLock);
+
+  if (callback)
+    callback(opaque, valid, leds);
+  LG_UNLOCK(l_input.keyboardLEDsDispatch);
+}
+
 static void releaseKeysNL(void)
 {
   for (int key = 0; key < KEY_MAX; ++key)
@@ -132,7 +163,7 @@ static void clearStateNL(void)
   atomic_store_explicit(&l_input.buttons, 0, memory_order_relaxed);
 }
 
-static void updateActiveNL(bool dropActive)
+static bool updateActiveNL(bool dropActive)
 {
   const struct InputBinding next =
     l_input.useTransport && l_input.transport.available ?
@@ -142,9 +173,14 @@ static void updateActiveNL(bool dropActive)
 
   if (bindingEqual(&next, &l_input.active))
   {
+    const bool keyboardLEDsChanged =
+      !keyboardLEDsEqual(&next, &l_input.active);
     l_input.active = next;
-    return;
+    return keyboardLEDsChanged;
   }
+
+  const bool keyboardLEDsChanged =
+    !keyboardLEDsEqual(&next, &l_input.active);
 
   if (dropActive)
     clearStateNL();
@@ -160,11 +196,13 @@ static void updateActiveNL(bool dropActive)
   }
   else
     DEBUG_INFO("Input is unavailable");
+  return keyboardLEDsChanged;
 }
 
-static void updateStatusNL(struct InputBinding * binding,
+static bool updateStatusNL(struct InputBinding * binding,
     const LG_InputStatus * status)
 {
+  const struct InputBinding oldActive = l_input.active;
   const bool wasActive = bindingEqual(&l_input.active, binding);
 
   if (wasActive && !status->available)
@@ -178,7 +216,11 @@ static void updateStatusNL(struct InputBinding * binding,
     binding->ops->mousePosition &&
     binding->ops->supports(binding->opaque,
       LG_INPUT_SUPPORT_MOUSE_ABSOLUTE);
+  binding->keyboardLEDsValid = status->available &&
+    status->keyboardLEDsValid;
+  binding->keyboardLEDs      = status->keyboardLEDs;
   updateActiveNL(false);
+  return !keyboardLEDsEqual(&oldActive, &l_input.active);
 }
 
 static void fallbackStatusChanged(void * opaque,
@@ -188,10 +230,13 @@ static void fallbackStatusChanged(void * opaque,
     return;
 
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  bool keyboardLEDsChanged = false;
   if (l_input.fallback.ops &&
       l_input.fallback.epoch == (uint32_t)(uintptr_t)opaque)
-    updateStatusNL(&l_input.fallback, status);
+    keyboardLEDsChanged = updateStatusNL(&l_input.fallback, status);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  if (keyboardLEDsChanged)
+    dispatchKeyboardLEDs();
 }
 
 static void transportStatusChanged(void * opaque,
@@ -201,10 +246,13 @@ static void transportStatusChanged(void * opaque,
     return;
 
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
+  bool keyboardLEDsChanged = false;
   if (l_input.transport.ops &&
       l_input.transport.epoch == (uint32_t)(uintptr_t)opaque)
-    updateStatusNL(&l_input.transport, status);
+    keyboardLEDsChanged = updateStatusNL(&l_input.transport, status);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  if (keyboardLEDsChanged)
+    dispatchKeyboardLEDs();
 }
 
 void lgInput_init(void)
@@ -220,6 +268,7 @@ void lgInput_init(void)
 
   LG_LOCK_INIT(l_input.bindingLock);
   LG_RWLOCK_INIT(l_input.activeLock);
+  LG_LOCK_INIT(l_input.keyboardLEDsDispatch);
 }
 
 void lgInput_free(void)
@@ -228,6 +277,7 @@ void lgInput_free(void)
   struct InputBinding transport;
 
   LG_LOCK(l_input.bindingLock);
+  LG_LOCK(l_input.keyboardLEDsDispatch);
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   resetActiveNL();
   fallback             = l_input.fallback;
@@ -235,7 +285,10 @@ void lgInput_free(void)
   l_input.active       = (struct InputBinding) { 0 };
   l_input.fallback     = (struct InputBinding) { 0 };
   l_input.transport    = (struct InputBinding) { 0 };
+  l_input.keyboardLEDsCallback = NULL;
+  l_input.keyboardLEDsOpaque   = NULL;
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  LG_UNLOCK(l_input.keyboardLEDsDispatch);
 
   if (fallback.ops && fallback.ops->setStatusListener)
     fallback.ops->setStatusListener(fallback.opaque, NULL, NULL);
@@ -244,6 +297,7 @@ void lgInput_free(void)
 
   LG_UNLOCK(l_input.bindingLock);
   LG_RWLOCK_FREE(l_input.activeLock);
+  LG_LOCK_FREE(l_input.keyboardLEDsDispatch);
   LG_LOCK_FREE(l_input.bindingLock);
 }
 
@@ -270,8 +324,11 @@ static void setBinding(struct InputBinding * target,
   const struct InputBinding next = makeBinding(ops, opaque);
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   *target = next;
-  updateActiveNL(false);
+  const bool keyboardLEDsChanged = updateActiveNL(false);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+
+  if (keyboardLEDsChanged)
+    dispatchKeyboardLEDs();
 
   if (next.ops && next.ops->setStatusListener)
     next.ops->setStatusListener(next.opaque, statusFn,
@@ -285,8 +342,10 @@ static void dropBinding(struct InputBinding * target)
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   const bool wasActive = bindingEqual(&l_input.active, target);
   *target = (struct InputBinding) { 0 };
-  updateActiveNL(wasActive);
+  const bool keyboardLEDsChanged = updateActiveNL(wasActive);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  if (keyboardLEDsChanged)
+    dispatchKeyboardLEDs();
   LG_UNLOCK(l_input.bindingLock);
 }
 
@@ -314,8 +373,10 @@ void lgInput_useTransport(bool enable)
 {
   LG_LOCK_EXCLUSIVE(l_input.activeLock);
   l_input.useTransport = enable;
-  updateActiveNL(false);
+  const bool keyboardLEDsChanged = updateActiveNL(false);
   LG_UNLOCK_EXCLUSIVE(l_input.activeLock);
+  if (keyboardLEDsChanged)
+    dispatchKeyboardLEDs();
 }
 
 bool lgInput_available(void)
@@ -342,6 +403,24 @@ bool lgInput_supports(LG_InputSupport support)
   }
   LG_UNLOCK_SHARED(l_input.activeLock);
   return result;
+}
+
+void lgInput_setKeyboardLEDsListener(
+    LGInputKeyboardLEDsFn callback, void * opaque)
+{
+  LG_LOCK(l_input.keyboardLEDsDispatch);
+  LG_LOCK_SHARED(l_input.activeLock);
+  l_input.keyboardLEDsCallback = callback;
+  l_input.keyboardLEDsOpaque   = opaque;
+  const bool valid = l_input.active.ops &&
+    l_input.active.available &&
+    l_input.active.keyboardLEDsValid;
+  const uint8_t leds = l_input.active.keyboardLEDs;
+  LG_UNLOCK_SHARED(l_input.activeLock);
+
+  if (callback)
+    callback(opaque, valid, leds);
+  LG_UNLOCK(l_input.keyboardLEDsDispatch);
 }
 
 bool lgInput_keyDown(int key)

@@ -38,6 +38,8 @@ bool CInputPipeServer::Init()
   DeInit();
 
   Atomic::Store(m_state, 0, std::memory_order_release);
+  Atomic::Store(m_keyboardLEDs, 0, std::memory_order_release);
+  Atomic::Store(m_keyboardLEDsValid, false, std::memory_order_release);
   m_performanceFrequency.QuadPart = 0;
   if (!QueryPerformanceFrequency(&m_performanceFrequency))
     m_performanceFrequency.QuadPart = 0;
@@ -551,6 +553,7 @@ void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
   CSRWExclusiveLock queueLock(m_queueLock);
   m_queueHead  = 0;
   m_queueCount = 0;
+  Atomic::Store(m_keyboardLEDsValid, false, std::memory_order_release);
 }
 
 DWORD WINAPI CInputPipeServer::ThreadProc(void * context)
@@ -597,6 +600,8 @@ void CInputPipeServer::OnPipeConnected()
     ++state;
   ++state;
   m_sequence = 0;
+  m_feedbackSequence = 0;
+  Atomic::Store(m_keyboardLEDsValid, false, std::memory_order_release);
 
   m_queueHead  = 0;
   m_queueCount = 0;
@@ -623,8 +628,40 @@ bool CInputPipeServer::OnPipeMessage(
   const void * message,
   size_t size)
 {
-  UNREFERENCED_PARAMETER(message);
-  UNREFERENCED_PARAMETER(size);
-  DEBUG_WARN("LGInput sent an unexpected message");
-  return false;
+  if (size != sizeof(LGInputPipeMessage))
+  {
+    DEBUG_WARN("Received a malformed LGInput feedback message");
+    return false;
+  }
+
+  const LGInputPipeMessage& frame =
+    *static_cast<const LGInputPipeMessage *>(message);
+  if (frame.magic != LG_INPUT_PIPE_MAGIC ||
+      frame.version != LG_INPUT_PIPE_VERSION ||
+      frame.type != LG_INPUT_PIPE_MESSAGE_KEYBOARD_LEDS ||
+      frame.payloadSize != sizeof(LGInputPipeKeyboardLEDs) ||
+      !frame.sequence || frame.sequence != m_feedbackSequence + 1)
+  {
+    DEBUG_WARN("Received a malformed LGInput feedback message");
+    return false;
+  }
+
+  LGInputPipeKeyboardLEDs feedback = {};
+  memcpy(&feedback, frame.payload, sizeof(feedback));
+  const uint8_t mask =
+    KVMFR_INPUT_KEYBOARD_LED_NUM_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_CAPS_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_SCROLL_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_COMPOSE |
+    KVMFR_INPUT_KEYBOARD_LED_KANA;
+  if (feedback.leds & ~mask)
+  {
+    DEBUG_WARN("Received invalid LGInput keyboard LEDs");
+    return false;
+  }
+
+  m_feedbackSequence = frame.sequence;
+  Atomic::Store(m_keyboardLEDs, feedback.leds, std::memory_order_release);
+  Atomic::Store(m_keyboardLEDsValid, true, std::memory_order_release);
+  return true;
 }

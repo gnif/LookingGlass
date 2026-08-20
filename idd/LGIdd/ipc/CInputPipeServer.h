@@ -66,6 +66,10 @@ private:
   size_t    m_queueHead            = 0;
   size_t    m_queueCount           = 0;
   uint64_t  m_sequence             = 0;
+  uint64_t  m_feedbackSequence     = 0;
+
+  std::atomic<uint8_t> m_keyboardLEDs      { 0 };
+  std::atomic<bool>    m_keyboardLEDsValid { false };
 
   MouseMode m_mouseMode       = MouseMode::NONE;
   uint16_t  m_absoluteX       = 0;
@@ -116,6 +120,14 @@ public:
   uint64_t GetState() const override
   {
     return Atomic::Load(m_state, std::memory_order_acquire);
+  }
+
+  bool GetKeyboardLEDs(uint8_t& leds) const override
+  {
+    if (!Atomic::Load(m_keyboardLEDsValid, std::memory_order_acquire))
+      return false;
+    leds = Atomic::Load(m_keyboardLEDs, std::memory_order_acquire);
+    return true;
   }
 
   bool SendMouseRelative(

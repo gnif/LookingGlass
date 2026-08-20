@@ -34,6 +34,8 @@ struct InputTargetState
   InputSourceId owner;
   bool          available = false;
   bool          owned     = false;
+  bool          keyboardLEDsValid = false;
+  uint8_t       keyboardLEDs      = 0;
 };
 
 enum class InputResult

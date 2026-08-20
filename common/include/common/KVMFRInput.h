@@ -28,7 +28,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define KVMFR_INPUT_VERSION                 2
+#define KVMFR_INPUT_VERSION                 3
+#define KVMFR_INPUT_KEYBOARD_LEDS_VERSION   3
 #define KVMFR_INPUT_STREAM_VERSION          1
 #define KVMFR_INPUT_STREAM_ENDPOINT_COUNT   8
 #define KVMFR_INPUT_STREAM_SLOT_COUNT       128
@@ -122,8 +123,20 @@ typedef uint32_t KVMFRInputCapabilityFlags;
 
 enum
 {
-  KVMFR_INPUT_STATUS_AVAILABLE = 0x1,
-  KVMFR_INPUT_STATUS_HAS_OWNER = 0x2,
+  KVMFR_INPUT_KEYBOARD_LED_NUM_LOCK    = 0x1,
+  KVMFR_INPUT_KEYBOARD_LED_CAPS_LOCK   = 0x2,
+  KVMFR_INPUT_KEYBOARD_LED_SCROLL_LOCK = 0x4,
+  KVMFR_INPUT_KEYBOARD_LED_COMPOSE     = 0x8,
+  KVMFR_INPUT_KEYBOARD_LED_KANA        = 0x10,
+};
+
+typedef uint8_t KVMFRInputKeyboardLEDFlags;
+
+enum
+{
+  KVMFR_INPUT_STATUS_AVAILABLE           = 0x1,
+  KVMFR_INPUT_STATUS_HAS_OWNER           = 0x2,
+  KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID = 0x4,
 };
 
 typedef uint32_t KVMFRInputStatusFlags;
@@ -169,7 +182,10 @@ typedef struct KVMFRInputStatus
   uint32_t                  streamVersion;
   uint32_t                  streamEndpointCount;
   uint32_t                  streamGeneration;
-  uint32_t                  streamReserved[5];
+  // USB HID keyboard LED bits; valid only when the status flag is set.
+  uint8_t                   keyboardLEDs;
+  uint8_t                   statusReserved[3];
+  uint32_t                  streamReserved[4];
   KVMFRInputStreamEndpoint  streamEndpoint[
     KVMFR_INPUT_STREAM_ENDPOINT_COUNT];
 }
@@ -192,6 +208,8 @@ static_assert(sizeof(KVMFRInputStreamEndpoint) == 48,
     "KVMFR input stream endpoint layout changed");
 static_assert(offsetof(KVMFRInputStatus, streamVersion) == 32,
     "KVMFR input status stream layout changed");
+static_assert(offsetof(KVMFRInputStatus, keyboardLEDs) == 44,
+    "KVMFR input status keyboard LED layout changed");
 static_assert(offsetof(KVMFRInputStatus, streamEndpoint) == 64,
     "KVMFR input stream discovery layout changed");
 static_assert(sizeof(KVMFRInputStatus) == 448,
@@ -215,6 +233,8 @@ _Static_assert(sizeof(KVMFRInputStreamEndpoint) == 48,
     "KVMFR input stream endpoint layout changed");
 _Static_assert(offsetof(KVMFRInputStatus, streamVersion) == 32,
     "KVMFR input status stream layout changed");
+_Static_assert(offsetof(KVMFRInputStatus, keyboardLEDs) == 44,
+    "KVMFR input status keyboard LED layout changed");
 _Static_assert(offsetof(KVMFRInputStatus, streamEndpoint) == 64,
     "KVMFR input stream discovery layout changed");
 _Static_assert(sizeof(KVMFRInputStatus) == 448,

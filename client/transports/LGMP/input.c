@@ -52,6 +52,18 @@
 #define INPUT_MOUSE_DELTA_MIN              (INT16_MIN * INPUT_MAX_SPLIT_REPORTS)
 #define INPUT_MOUSE_DELTA_MAX              (INT16_MAX * INPUT_MAX_SPLIT_REPORTS)
 
+_Static_assert(
+    (int)LG_KEYBOARD_LED_NUM_LOCK ==
+      (int)KVMFR_INPUT_KEYBOARD_LED_NUM_LOCK &&
+    (int)LG_KEYBOARD_LED_CAPS_LOCK ==
+      (int)KVMFR_INPUT_KEYBOARD_LED_CAPS_LOCK &&
+    (int)LG_KEYBOARD_LED_SCROLL_LOCK ==
+      (int)KVMFR_INPUT_KEYBOARD_LED_SCROLL_LOCK &&
+    (int)LG_KEYBOARD_LED_COMPOSE ==
+      (int)KVMFR_INPUT_KEYBOARD_LED_COMPOSE &&
+    (int)LG_KEYBOARD_LED_KANA == (int)KVMFR_INPUT_KEYBOARD_LED_KANA,
+    "Client and KVMFR keyboard LED bits differ");
+
 enum LGMPInputMouseMode
 {
   LGMP_INPUT_MOUSE_NONE,
@@ -104,6 +116,8 @@ struct LGMPInput
   bool              claimed;
   bool              available;
   bool              ownerBlocked;
+  bool              keyboardLEDsValid;
+  uint8_t           keyboardLEDs;
 
   uint32_t generation;
   uint32_t sequence;
@@ -159,8 +173,10 @@ static LG_InputStatus inputStatus(const LGMPInput * input)
 {
   return (LG_InputStatus)
   {
-    .available  = input->available,
-    .generation = input->endpointGeneration,
+    .available         = input->available,
+    .generation        = input->endpointGeneration,
+    .keyboardLEDsValid = input->available && input->keyboardLEDsValid,
+    .keyboardLEDs      = input->keyboardLEDs,
   };
 }
 
@@ -227,12 +243,15 @@ static void connectionFailed(LGMPInput * input, LGMP_STATUS status)
     ++input->stats.counters.terminalFailures;
   }
 
-  if (input->available || input->endpointGeneration)
+  if (input->available || input->endpointGeneration ||
+      input->keyboardLEDsValid)
     input->notifyStatus = true;
   input->connected              = false;
   input->claimed                = false;
   input->available              = false;
   input->ownerBlocked           = false;
+  input->keyboardLEDsValid      = false;
+  input->keyboardLEDs           = 0;
   input->pendingHead            = 0;
   input->pendingCount           = 0;
   input->mouseMode              = LGMP_INPUT_MOUSE_NONE;
@@ -551,11 +570,25 @@ static bool validInputStatus(const KVMFRInputStatus * status)
     KVMFR_INPUT_CAP_MOUSE_RELATIVE |
     KVMFR_INPUT_CAP_MOUSE_ABSOLUTE |
     KVMFR_INPUT_CAP_KEYBOARD;
-  static const uint32_t flags =
+  static const uint32_t commonFlags =
     KVMFR_INPUT_STATUS_AVAILABLE |
     KVMFR_INPUT_STATUS_HAS_OWNER;
+  static const uint8_t keyboardLEDs =
+    KVMFR_INPUT_KEYBOARD_LED_NUM_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_CAPS_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_SCROLL_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_COMPOSE |
+    KVMFR_INPUT_KEYBOARD_LED_KANA;
 
-  if (status->version != KVMFR_INPUT_VERSION ||
+  const bool     supportedVersion    = status->version > 0 &&
+    status->version <= KVMFR_INPUT_VERSION;
+  const bool     keyboardLEDsVersion =
+    status->version >= KVMFR_INPUT_KEYBOARD_LEDS_VERSION;
+  const uint32_t flags                = commonFlags |
+    (keyboardLEDsVersion ?
+      KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID : 0);
+
+  if (!supportedVersion ||
       status->capabilities & ~capabilities ||
       status->flags & ~flags ||
       !status->generation ||
@@ -566,6 +599,12 @@ static bool validInputStatus(const KVMFRInputStatus * status)
         KVMFR_INPUT_STREAM_ENDPOINT_COUNT ||
       !status->streamGeneration)
     return false;
+
+  if (status->keyboardLEDs & ~keyboardLEDs)
+    return false;
+  for (size_t i = 0; i < sizeof(status->statusReserved); ++i)
+    if (status->statusReserved[i])
+      return false;
 
   for (size_t i = 0; i < sizeof(status->streamReserved) /
       sizeof(status->streamReserved[0]); ++i)
@@ -617,7 +656,13 @@ static bool validInputStatus(const KVMFRInputStatus * status)
     (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
   const bool hasOwner =
     (status->flags & KVMFR_INPUT_STATUS_HAS_OWNER) != 0;
+  const bool keyboardLEDsValid = keyboardLEDsVersion &&
+    (status->flags & KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID) != 0;
   if (!available && (status->capabilities || hasOwner))
+    return false;
+  if (!keyboardLEDsValid && status->keyboardLEDs)
+    return false;
+  if (!available && keyboardLEDsValid)
     return false;
   if (available &&
       (status->capabilities &
@@ -714,10 +759,12 @@ static bool reconcileInputStream(LGMPInput * input,
 static void applyInputStatus(LGMPInput * input,
     const KVMFRInputStatus * status, uint32_t serial, bool * wake)
 {
-  const bool     wasValid       = input->statusValid;
-  const bool     wasAvailable   = input->available;
-  const uint32_t oldCapabilities = input->capabilities;
-  const uint32_t oldGeneration   = input->endpointGeneration;
+  const bool     wasValid             = input->statusValid;
+  const bool     wasAvailable         = input->available;
+  const uint32_t oldCapabilities      = input->capabilities;
+  const uint32_t oldGeneration        = input->endpointGeneration;
+  const bool     oldKeyboardLEDsValid = input->keyboardLEDsValid;
+  const uint8_t  oldKeyboardLEDs      = input->keyboardLEDs;
   const bool     targetAvailable =
     (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
   const bool     endpointChanged = wasValid &&
@@ -730,6 +777,9 @@ static void applyInputStatus(LGMPInput * input,
   input->endpointGeneration    = status->generation;
   input->statusOwnerClientID   = status->ownerClientID;
   input->statusOwnerGeneration = status->ownerGeneration;
+  input->keyboardLEDsValid     =
+    (status->flags & KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID) != 0;
+  input->keyboardLEDs          = status->keyboardLEDs;
   const bool streamChanged = reconcileInputStream(input, status);
   const bool available = targetAvailable &&
     input->streamEndpointBound;
@@ -773,7 +823,9 @@ static void applyInputStatus(LGMPInput * input,
 
   if (!wasValid || wasAvailable != available ||
       oldCapabilities != status->capabilities ||
-      oldGeneration != status->generation)
+      oldGeneration != status->generation ||
+      oldKeyboardLEDsValid != input->keyboardLEDsValid ||
+      oldKeyboardLEDs != input->keyboardLEDs)
     input->notifyStatus = true;
 }
 
@@ -1112,6 +1164,8 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
   input->claimed               = false;
   input->available             = false;
   input->ownerBlocked          = false;
+  input->keyboardLEDsValid     = false;
+  input->keyboardLEDs          = 0;
   input->pendingHead           = 0;
   input->pendingCount          = 0;
   input->clientID              = clientID;
@@ -1170,11 +1224,14 @@ void lgmpInput_disconnect(LGMPInput * input)
   input->pendingCount = 0;
   input->connected    = false;
   input->claimed      = false;
-  if (input->available || input->endpointGeneration)
+  if (input->available || input->endpointGeneration ||
+      input->keyboardLEDsValid)
     input->notifyStatus = true;
-  input->available      = false;
-  input->ownerBlocked   = false;
-  input->capabilities   = 0;
+  input->available         = false;
+  input->ownerBlocked      = false;
+  input->keyboardLEDsValid = false;
+  input->keyboardLEDs      = 0;
+  input->capabilities      = 0;
   input->streamEndpointBound = false;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
@@ -1196,6 +1253,8 @@ void lgmpInput_disconnect(LGMPInput * input)
   detachInputStream(input);
   input->available             = false;
   input->ownerBlocked          = false;
+  input->keyboardLEDsValid     = false;
+  input->keyboardLEDs          = 0;
   input->statusValid           = false;
   input->ownerConfirmed        = false;
   input->notifyStatus          = false;

@@ -83,6 +83,13 @@ static void ready(void)
   lgSignalEvent(transport->connectEvent);
 }
 
+static void keyModifiers(uint32_t modifiers)
+{
+  LG_Transport * transport = callbackTarget();
+  if (transport && transport->input)
+    spiceInput_setKeyboardLEDs(transport->input, modifiers);
+}
+
 static void surfaceCreate(unsigned int surfaceId, PSSurfaceFormat format,
     unsigned int width, unsigned int height)
 {
@@ -258,8 +265,9 @@ int spiceSession_thread(void * opaque)
     .ready    = ready,
     .inputs =
     {
-      .enable      = transport->inputEnabled,
-      .autoConnect = true,
+      .enable       = transport->inputEnabled,
+      .autoConnect  = true,
+      .keyModifiers = keyModifiers,
     },
     .clipboard =
     {

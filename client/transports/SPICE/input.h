@@ -30,5 +30,6 @@ void spiceInput_free(SpiceInput ** input);
 
 const LG_InputOps * spiceInput_getOps(void);
 void spiceInput_setAvailable(SpiceInput * input, bool available);
+void spiceInput_setKeyboardLEDs(SpiceInput * input, uint32_t modifiers);
 
 #endif

@@ -30,10 +30,22 @@ typedef enum LG_InputSupport
 }
 LG_InputSupport;
 
+enum
+{
+  LG_KEYBOARD_LED_NUM_LOCK    = 0x1,
+  LG_KEYBOARD_LED_CAPS_LOCK   = 0x2,
+  LG_KEYBOARD_LED_SCROLL_LOCK = 0x4,
+  LG_KEYBOARD_LED_COMPOSE     = 0x8,
+  LG_KEYBOARD_LED_KANA        = 0x10,
+};
+
 typedef struct LG_InputStatus
 {
   bool     available;
   uint32_t generation;
+  /* USB HID keyboard LED bits reported by the guest. */
+  bool     keyboardLEDsValid;
+  uint8_t  keyboardLEDs;
 }
 LG_InputStatus;
 

@@ -330,11 +330,13 @@ void CLGMPInputTransport::UpdateTargetState(
   const InputTargetState& state)
 {
   CSRWExclusiveLock lock(m_statusLock);
-  if (state.state            == m_targetState.state            &&
-      state.available        == m_targetState.available        &&
-      state.owned            == m_targetState.owned            &&
-      state.owner.client     == m_targetState.owner.client     &&
-      state.owner.generation == m_targetState.owner.generation)
+  if (state.state             == m_targetState.state             &&
+      state.available         == m_targetState.available         &&
+      state.owned             == m_targetState.owned             &&
+      state.keyboardLEDsValid == m_targetState.keyboardLEDsValid &&
+      state.keyboardLEDs      == m_targetState.keyboardLEDs      &&
+      state.owner.client      == m_targetState.owner.client      &&
+      state.owner.generation  == m_targetState.owner.generation)
     return;
 
   if (state.state != m_targetState.state)
@@ -388,6 +390,11 @@ bool CLGMPInputTransport::PublishStatus()
     status.flags           |= KVMFR_INPUT_STATUS_HAS_OWNER;
     status.ownerClientID    = m_targetState.owner.client;
     status.ownerGeneration  = m_targetState.owner.generation;
+  }
+  if (available && m_targetState.keyboardLEDsValid)
+  {
+    status.flags        |= KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID;
+    status.keyboardLEDs = m_targetState.keyboardLEDs;
   }
   status.generation          = m_endpointGeneration;
   status.lease               = static_cast<uint32_t>(OWNER_LEASE_MS);

@@ -41,6 +41,7 @@ extern const LG_TransportOps LGT_SPICE;
 struct SpiceInput
 {
   bool          available;
+  uint32_t      keyModifiers;
   unsigned int onN;
   unsigned int offN;
   unsigned int onOrder;
@@ -302,6 +303,11 @@ void spiceInput_setAvailable(SpiceInput * input, bool available)
     if (input->offN == 1)
       input->offFirst = input->offOrder;
   }
+}
+
+void spiceInput_setKeyboardLEDs(SpiceInput * input, uint32_t modifiers)
+{
+  input->keyModifiers = modifiers;
 }
 
 bool spiceClipboard_init(SpiceClipboard ** clipboard)

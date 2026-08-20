@@ -551,6 +551,8 @@ InputTargetState CInputHub::GetState(const SourceKey& source)
     return result;
   if (!BindingValid(source))
     return result;
+  result.keyboardLEDsValid = m_sink->GetKeyboardLEDs(
+    result.keyboardLEDs);
   if (!m_owner.backend)
     result.available = true;
   else if (source.client && source.generation && m_owner == source)

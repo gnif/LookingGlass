@@ -23,6 +23,9 @@
 
 #include "interface/input.h"
 
+typedef void (*LGInputKeyboardLEDsFn)(void * opaque,
+    bool valid, uint8_t leds);
+
 void lgInput_init(void);
 void lgInput_free(void);
 
@@ -35,6 +38,11 @@ void lgInput_useTransport(bool enable);
 
 bool lgInput_available(void);
 bool lgInput_supports(LG_InputSupport support);
+/* The listener is called synchronously with the current guest LED state and
+ * later from transport threads whenever it changes. The callback must not
+ * call back into the input layer. */
+void lgInput_setKeyboardLEDsListener(
+    LGInputKeyboardLEDsFn callback, void * opaque);
 
 bool lgInput_keyDown(int key);
 bool lgInput_keyUp(int key);

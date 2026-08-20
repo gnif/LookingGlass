@@ -38,7 +38,15 @@ static constexpr uint16_t HID_CONSUMER_USAGE_VOLUME_DOWN = 0xea;
 
 bool CInputPipeClient::Start()
 {
+  {
+    CSRWExclusiveLock lock(m_feedbackLock);
+    m_feedbackReady = false;
+  }
   m_endpoint.Stop();
+  {
+    CSRWExclusiveLock lock(m_feedbackLock);
+    m_feedbackSequence = 0;
+  }
   m_lastSequence       = 0;
   m_statReceived       = 0;
   m_statMalformed      = 0;
@@ -55,6 +63,10 @@ bool CInputPipeClient::Start()
 void CInputPipeClient::Stop()
 {
   const bool wasRunning = m_endpoint.IsRunning();
+  {
+    CSRWExclusiveLock lock(m_feedbackLock);
+    m_feedbackReady = false;
+  }
   m_endpoint.Stop();
   m_lastSequence = 0;
   if (wasRunning)
@@ -67,11 +79,22 @@ void CInputPipeClient::Stop()
 void CInputPipeClient::OnPipeConnected()
 {
   m_lastSequence = 0;
+  {
+    CSRWExclusiveLock lock(m_feedbackLock);
+    m_feedbackSequence = 0;
+    m_feedbackReady    = SendKeyboardLEDsLocked();
+    if (!m_feedbackReady)
+      DEBUG_WARN("Failed to report LGInput keyboard LEDs");
+  }
   DEBUG_INFO("Connected to the LGIdd input transport");
 }
 
 void CInputPipeClient::OnPipeDisconnected()
 {
+  {
+    CSRWExclusiveLock lock(m_feedbackLock);
+    m_feedbackReady = false;
+  }
   m_lastSequence = 0;
   LogStatistics(true);
   CHIDDevice::ResetReports();
@@ -317,6 +340,46 @@ bool CInputPipeClient::SubmitReport(
     return false;
   }
   return true;
+}
+
+void CInputPipeClient::UpdateKeyboardLEDs(uint8_t leds)
+{
+  const uint8_t mask =
+    KVMFR_INPUT_KEYBOARD_LED_NUM_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_CAPS_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_SCROLL_LOCK |
+    KVMFR_INPUT_KEYBOARD_LED_COMPOSE |
+    KVMFR_INPUT_KEYBOARD_LED_KANA;
+  leds &= mask;
+
+  CSRWExclusiveLock lock(m_feedbackLock);
+  if (m_keyboardLEDs == leds)
+    return;
+
+  m_keyboardLEDs = leds;
+  if (m_feedbackReady && !SendKeyboardLEDsLocked())
+  {
+    m_feedbackReady = false;
+    DEBUG_WARN("Failed to report LGInput keyboard LEDs");
+  }
+}
+
+bool CInputPipeClient::SendKeyboardLEDsLocked()
+{
+  LGInputPipeMessage message = {};
+  message.magic       = LG_INPUT_PIPE_MAGIC;
+  message.version     = LG_INPUT_PIPE_VERSION;
+  message.type        = LG_INPUT_PIPE_MESSAGE_KEYBOARD_LEDS;
+  message.payloadSize = sizeof(LGInputPipeKeyboardLEDs);
+  message.sequence    = ++m_feedbackSequence;
+
+  const LGInputPipeKeyboardLEDs feedback = { m_keyboardLEDs };
+  memcpy(message.payload, &feedback, sizeof(feedback));
+  if (m_endpoint.Send(&message, sizeof(message)))
+    return true;
+
+  --m_feedbackSequence;
+  return false;
 }
 
 void CInputPipeClient::LogStatistics(bool force)

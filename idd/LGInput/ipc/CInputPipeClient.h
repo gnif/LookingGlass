@@ -21,6 +21,7 @@
 #pragma once
 
 #include "CPipeEndpoint.h"
+#include "CSRWLock.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -32,6 +33,7 @@ public:
 
   bool Start();
   void Stop();
+  void UpdateKeyboardLEDs(uint8_t leds);
 
 private:
   static constexpr ULONGLONG STATISTICS_INTERVAL_MS = 5000;
@@ -43,9 +45,14 @@ private:
   bool HandleMouseAbsolute(const void * payload, size_t size);
   bool HandleKeyboard(const void * payload, size_t size);
   bool SubmitReport(const void * report, size_t size);
+  bool SendKeyboardLEDsLocked();
   void LogStatistics(bool force);
 
   CPipeEndpoint m_endpoint;
+  CSRWLock      m_feedbackLock;
+  bool          m_feedbackReady      = false;
+  uint64_t      m_feedbackSequence   = 0;
+  uint8_t       m_keyboardLEDs       = 0;
   uint64_t      m_lastSequence       = 0;
   uint64_t      m_statReceived       = 0;
   uint64_t      m_statMalformed      = 0;
