@@ -636,6 +636,11 @@ bool CInputPipeServer::OnPipeMessage(
 
   const LGInputPipeMessage& frame =
     *static_cast<const LGInputPipeMessage *>(message);
+
+  CSRWExclusiveLock connectionLock(m_connectionLock);
+  if (!(Atomic::Load(m_state, std::memory_order_relaxed) & 1))
+    return true;
+
   if (frame.magic != LG_INPUT_PIPE_MAGIC ||
       frame.version != LG_INPUT_PIPE_VERSION ||
       frame.type != LG_INPUT_PIPE_MESSAGE_KEYBOARD_LEDS ||

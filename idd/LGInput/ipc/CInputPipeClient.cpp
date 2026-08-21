@@ -82,9 +82,12 @@ void CInputPipeClient::OnPipeConnected()
   {
     CSRWExclusiveLock lock(m_feedbackLock);
     m_feedbackSequence = 0;
-    m_feedbackReady    = SendKeyboardLEDsLocked();
-    if (!m_feedbackReady)
+    m_feedbackReady    = true;
+    if (m_keyboardLEDsValid && !SendKeyboardLEDsLocked())
+    {
+      m_feedbackReady = false;
       DEBUG_WARN("Failed to report LGInput keyboard LEDs");
+    }
   }
   DEBUG_INFO("Connected to the LGIdd input transport");
 }
@@ -353,10 +356,11 @@ void CInputPipeClient::UpdateKeyboardLEDs(uint8_t leds)
   leds &= mask;
 
   CSRWExclusiveLock lock(m_feedbackLock);
-  if (m_keyboardLEDs == leds)
+  if (m_keyboardLEDsValid && m_keyboardLEDs == leds)
     return;
 
-  m_keyboardLEDs = leds;
+  m_keyboardLEDs      = leds;
+  m_keyboardLEDsValid = true;
   if (m_feedbackReady && !SendKeyboardLEDsLocked())
   {
     m_feedbackReady = false;

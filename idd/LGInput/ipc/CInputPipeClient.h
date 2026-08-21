@@ -50,13 +50,14 @@ private:
 
   CPipeEndpoint m_endpoint;
   CSRWLock      m_feedbackLock;
-  bool          m_feedbackReady      = false;
-  uint64_t      m_feedbackSequence   = 0;
-  uint8_t       m_keyboardLEDs       = 0;
-  uint64_t      m_lastSequence       = 0;
-  uint64_t      m_statReceived       = 0;
-  uint64_t      m_statMalformed      = 0;
-  uint64_t      m_statSequenceResets = 0;
-  uint64_t      m_statSubmitFailed   = 0;
-  ULONGLONG     m_lastStatistics     = 0;
+  bool          m_feedbackReady       = false;
+  bool          m_keyboardLEDsValid   = false;
+  uint64_t      m_feedbackSequence    = 0;
+  uint8_t       m_keyboardLEDs        = 0;
+  uint64_t      m_lastSequence        = 0;
+  uint64_t      m_statReceived        = 0;
+  uint64_t      m_statMalformed       = 0;
+  uint64_t      m_statSequenceResets  = 0;
+  uint64_t      m_statSubmitFailed    = 0;
+  ULONGLONG     m_lastStatistics      = 0;
 };
