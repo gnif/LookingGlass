@@ -460,6 +460,14 @@ static LG_TransportStatus connectFallback(LG_TransportFallback * fallback,
     lgWaitEvent(fallback->wakeEvent, SESSION_POLL_MS);
     if (atomic_load_explicit(&fallback->stop, memory_order_acquire))
       break;
+
+    if (!sessionLive(fallback))
+    {
+      lost = !atomic_load_explicit(
+          &fallback->stop, memory_order_acquire);
+      break;
+    }
+
     applyVideoRequest(fallback);
 
     LG_LOCK_EXCLUSIVE(fallback->lock);
@@ -695,12 +703,14 @@ static bool applyVideoRequest(LG_TransportFallback * fallback)
     };
     const bool result = lgSwSurface_setActive(surfaceOps, transport,
         requested, videoCallCancelled, (void *)&cancellation);
+    const bool live   = sessionLive(fallback);
 
     LG_LOCK_EXCLUSIVE(fallback->lock);
-    const bool current = fallback->connectionSerial == connectionSerial;
+    const bool current        = fallback->connectionSerial ==
+      connectionSerial;
     const bool desiredCurrent = current &&
       fallback->videoRequested == requested;
-    const bool usable = desiredCurrent && result &&
+    const bool usable         = desiredCurrent && result && live &&
       atomic_load_explicit(&fallback->usable, memory_order_acquire) &&
       !atomic_load_explicit(&fallback->stop, memory_order_acquire) &&
       !fallback->closing && endpointMatchesLocked(fallback);
@@ -717,7 +727,7 @@ static bool applyVideoRequest(LG_TransportFallback * fallback)
           ready, memory_order_release);
     }
     const bool accepted = usable;
-    const bool retry = current && !fallback->closing &&
+    const bool retry    = current && !fallback->closing &&
       fallback->videoRequested != requested;
     LG_UNLOCK_EXCLUSIVE(fallback->lock);
 
