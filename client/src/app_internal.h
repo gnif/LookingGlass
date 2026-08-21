@@ -25,5 +25,10 @@
 
 void app_handleKeyPressInternal(int scancode);
 void app_handleKeyReleaseInternal(int scancode);
+void app_handleButtonPressInternal(int button);
+void app_handleButtonReleaseInternal(int button);
+void app_handleKeyboardModifiersInternal(
+    bool ctrl, bool shift, bool alt, bool super);
+void app_handleInputResetInternal(bool keyboard, bool pointer);
 
 #endif

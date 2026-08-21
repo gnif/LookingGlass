@@ -3603,7 +3603,7 @@ static int lg_run(void)
   }
 
   if (evdev_start())
-    DEBUG_INFO("Using evdev for keyboard capture");
+    DEBUG_INFO("Using evdev for input capture");
 
   // override the SIGINIT handler so that we can tell the difference between
   // SIGINT and the user sending a close event, such as ALT+F4
@@ -3739,7 +3739,13 @@ static int lg_run(void)
     .largeCursorDot      = g_params.largeCursorDot,
     .allowNoInput        = strcmp(g_params.transport, "test") == 0,
     .opengl              = needsOpenGL,
-    .jitRender           = g_params.jitRender
+    .jitRender           = g_params.jitRender,
+    .eventSource         =
+    {
+      .fd       = evdev_getEventFD(),
+      .callback = evdev_dispatch,
+      .opaque   = NULL,
+    },
   };
 
   g_state.dsInitialized = g_state.ds->init(params);

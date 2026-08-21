@@ -25,6 +25,7 @@
 
 typedef void (*LGInputKeyboardLEDsFn)(void * opaque,
     bool valid, uint8_t leds);
+typedef void (*LGInputAvailabilityFn)(void * opaque, bool available);
 
 void lgInput_init(void);
 void lgInput_free(void);
@@ -43,11 +44,20 @@ bool lgInput_supports(LG_InputSupport support);
  * call back into the input layer. */
 void lgInput_setKeyboardLEDsListener(
     LGInputKeyboardLEDsFn callback, void * opaque);
+/* The listener is called synchronously with the current input availability
+ * and later from transport threads whenever it changes. The callback must
+ * not call back into the input layer. */
+void lgInput_setAvailabilityListener(
+    LGInputAvailabilityFn callback, void * opaque);
 
 bool lgInput_keyDown(int key);
 bool lgInput_keyUp(int key);
 bool lgInput_keyboardLEDs(bool numLock, bool capsLock, bool scrollLock);
 void lgInput_releaseKeys(void);
+void lgInput_releaseButtons(void);
+/* Release all tracked keyboard and mouse button state under one active-input
+ * transaction. */
+void lgInput_releaseAll(void);
 
 bool lgInput_mouseMotion(int32_t x, int32_t y);
 bool lgInput_mousePosition(uint32_t x, uint32_t y, uint32_t width,

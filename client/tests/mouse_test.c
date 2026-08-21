@@ -282,6 +282,12 @@ void app_mouseTrace(const char * file, unsigned int line,
   (void)format;
 }
 
+void evdev_setGrab(bool keyboard, bool pointer)
+{
+  (void)keyboard;
+  (void)pointer;
+}
+
 static bool inputSupports(void * opaque, LG_InputSupport support)
 {
   return support == LG_INPUT_SUPPORT_MOUSE_ABSOLUTE &&

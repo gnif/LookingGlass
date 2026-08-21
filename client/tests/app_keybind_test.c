@@ -163,6 +163,10 @@ bool core_inputEnabled(void)
   return t.input;
 }
 
+void core_updateKeyboardGrab(void)
+{
+}
+
 void core_setGrab(bool enable)
 {
   ++t.grabN;

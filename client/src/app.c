@@ -174,6 +174,9 @@ bool app_isOverlayMode(void)
 
 void app_updateCursorPos(double x, double y)
 {
+  if (evdev_isPointerExclusive())
+    return;
+
   const bool overlay = app_isOverlayMode();
   if (overlay)
   {
@@ -375,7 +378,7 @@ static int mapInputToImGuiButton(uint32_t button)
   return -1;
 }
 
-void app_handleButtonPress(int button)
+void app_handleButtonPressInternal(int button)
 {
   g_cursor.buttons |= (1U << button);
   app_updateMouseButtons();
@@ -399,7 +402,13 @@ void app_handleButtonPress(int button)
     DEBUG_ERROR("app_handleButtonPress: failed to send message");
 }
 
-void app_handleButtonRelease(int button)
+void app_handleButtonPress(int button)
+{
+  if (!evdev_isPointerExclusive())
+    app_handleButtonPressInternal(button);
+}
+
+void app_handleButtonReleaseInternal(int button)
 {
   g_cursor.buttons &= ~(1U << button);
   app_updateMouseButtons();
@@ -422,8 +431,17 @@ void app_handleButtonRelease(int button)
     DEBUG_ERROR("app_handleButtonRelease: failed to send message");
 }
 
+void app_handleButtonRelease(int button)
+{
+  if (!evdev_isPointerExclusive())
+    app_handleButtonReleaseInternal(button);
+}
+
 void app_handleWheelMotion(double motion)
 {
+  if (evdev_isPointerExclusive())
+    return;
+
   if (app_isOverlayMode())
     g_state.io->MouseWheel -= motion;
 }
@@ -570,11 +588,15 @@ void app_handleKeyRelease(int sc)
 
 void app_handleKeyboardTyped(const char * typed)
 {
+  if (evdev_isExclusive())
+    return;
+
   app_registerImGuiText(typed);
   ImGuiIO_AddInputCharactersUTF8(g_state.io, typed);
 }
 
-void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
+void app_handleKeyboardModifiersInternal(
+    bool ctrl, bool shift, bool alt, bool super)
 {
   g_state.modCtrl  = ctrl;
   g_state.modShift = shift;
@@ -582,8 +604,57 @@ void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
   g_state.modSuper = super;
 }
 
+void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
+{
+  if (!evdev_isExclusive())
+    app_handleKeyboardModifiersInternal(ctrl, shift, alt, super);
+}
+
+void app_handleInputResetInternal(bool keyboard, bool pointer)
+{
+  if (pointer)
+  {
+    g_cursor.buttons = 0;
+    app_updateMouseButtons();
+    g_state.io->MouseDown[ImGuiMouseButton_Left  ] = false;
+    g_state.io->MouseDown[ImGuiMouseButton_Right ] = false;
+    g_state.io->MouseDown[ImGuiMouseButton_Middle] = false;
+  }
+
+  if (keyboard)
+  {
+    for(int key = 0; key < KEY_MAX; ++key)
+      if (linux_to_imgui[key])
+        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[key], false);
+
+    g_state.modCtrl      = false;
+    g_state.modShift     = false;
+    g_state.modAlt       = false;
+    g_state.modSuper     = false;
+    g_state.escapeActive = false;
+    g_state.escapeTime   = 0;
+    g_state.escapeAction = -1;
+    memset(g_state.escapeKeys, 0, sizeof(g_state.escapeKeys));
+    memset(g_state.escapeShiftKeys, 0,
+        sizeof(g_state.escapeShiftKeys));
+    atomic_store_explicit(
+        &g_state.keyModifiers, 0, memory_order_release);
+  }
+
+  if (keyboard && pointer)
+    lgInput_releaseAll();
+  else if (keyboard)
+    lgInput_releaseKeys();
+  else if (pointer)
+    lgInput_releaseButtons();
+  app_invalidateWindow(false);
+}
+
 void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 {
+  if (evdev_isExclusive())
+    return;
+
   if (!core_inputEnabled())
     return;
 
@@ -594,6 +665,9 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
+  if (evdev_isPointerExclusive())
+    return;
+
   MTRACE("rel delta=%.3f,%.3f raw=%.3f,%.3f inWin=%d inView=%d "
       "grab=%d", normx, normy, rawx, rawy, g_cursor.inWindow,
       g_cursor.inView, g_cursor.grab);

@@ -95,7 +95,10 @@ Evdev capture
 -------------
 
 Advanced users may list Linux evdev devices in ``input:evdev``. They become
-active whenever Looking Glass grabs the keyboard, including capture mode and
-automatic keyboard capture. The client user must be allowed to read those
-devices. Keep ``input:evdevExclusive=yes`` unless duplicate input from the
-window system is specifically required.
+active when Looking Glass captures their keyboard or relative-pointer role.
+Automatic capture takes keyboard-only devices without taking mouse input from
+the window system, while full capture takes both roles. Guest keyboard lock
+LEDs are mirrored while a writable keyboard is captured. The client user must
+be allowed to read the configured devices and write them for LED mirroring.
+Keep ``input:evdevExclusive=yes`` unless input from other window-system
+devices is also required.

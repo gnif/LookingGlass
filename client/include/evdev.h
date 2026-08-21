@@ -36,22 +36,31 @@ bool evdev_start(void);
 void evdev_stop(void);
 
 /**
- * restore the display server hooks and free the device state; only
- * call once display server callbacks have stopped
+ * free the device state; only call once display server callbacks have stopped
  */
 void evdev_free(void);
 
 /**
- * grab the keyboard for exclusive access
+ * update the keyboard and pointer capture requirements
  */
-void evdev_grabKeyboard(void);
+void evdev_setGrab(bool keyboard, bool pointer);
 
 /**
- * ungrab the keyboard
+ * return the event fd used to dispatch captured input
  */
-void evdev_ungrabKeyboard(void);
+int evdev_getEventFD(void);
 
 /**
- * returns true if input should only be processed by evdev
+ * dispatch captured input on the display server's event thread
+ */
+void evdev_dispatch(void * opaque);
+
+/**
+ * return true if keyboard input should only be processed by evdev
  */
 bool evdev_isExclusive(void);
+
+/**
+ * return true if pointer input should only be processed by evdev
+ */
+bool evdev_isPointerExclusive(void);

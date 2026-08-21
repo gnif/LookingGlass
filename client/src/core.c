@@ -25,6 +25,7 @@
 #include "kb.h"
 #include "message.h"
 #include "input.h"
+#include "evdev.h"
 
 #include "common/time.h"
 #include "common/debug.h"
@@ -140,6 +141,8 @@ bool core_inputEnabled(void)
 void core_updateKeyboardGrab(void)
 {
   const bool inputEnabled = core_inputEnabled();
+  const bool localActive  = g_state.focused && !app_isOverlayMode() &&
+    !g_state.ignoreInput;
   /* Explicit capture is local window state and must survive an input provider
    * becoming unavailable or changing during startup. */
   const bool capture      = g_cursor.grab && g_params.grabKeyboard &&
@@ -150,6 +153,7 @@ void core_updateKeyboardGrab(void)
   const bool active       = g_state.focused && !app_isOverlayMode() &&
     (capture || (inputEnabled && (view || automatic)));
 
+  evdev_setGrab(active, localActive && g_cursor.grab);
   if (active)
     g_state.ds->grabKeyboard();
   else

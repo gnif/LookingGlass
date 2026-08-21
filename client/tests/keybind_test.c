@@ -224,6 +224,10 @@ void core_updatePositionInfo(void)
   ++t.posN;
 }
 
+void core_updateKeyboardGrab(void)
+{
+}
+
 void core_setCursorInView(bool enable)
 {
   ++t.cursorN;
