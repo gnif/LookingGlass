@@ -820,6 +820,7 @@ if(ENABLE_AUDIO)
     provider
     playback-retry
     jitter
+    recovery
     consent
     quiesce
   )

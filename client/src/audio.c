@@ -170,13 +170,15 @@ typedef struct
   uint64_t mediaPosition;
   int64_t  lastArrivalTime;
   double   arrivalJitterSec;
-  double   sourcePhaseBaselineSec;
-  double   sourcePhaseReserveSec;
-  double   sourcePacketDurationSec;
-  bool     sourcePhaseBaselineValid;
-  bool     mediaClockValid;
-  bool     mediaPositionValid;
-  bool     mediaClockFromSource;
+  double       sourcePhaseBaselineSec;
+  double       sourcePhaseReserveSec;
+  double       sourcePacketDurationSec;
+  unsigned int sourcePacketPacedCount;
+  bool         sourcePhaseBaselineValid;
+  bool         sourcePacketRecovering;
+  bool         mediaClockValid;
+  bool         mediaPositionValid;
+  bool         mediaClockFromSource;
 
   PlaybackRateSample rateSamples[PLAYBACK_RATE_MAX_SAMPLES];
   unsigned int rateSampleStart;
@@ -1422,25 +1424,27 @@ static bool playbackStart(const LG_AudioFormat * format,
   audio.playback.sourceData.deviceTimingSequence = 0;
   audio.playback.sourceData.deviceDiscontinuity  = 0;
   playbackDeviceClockAcquireReset(&audio.playback.sourceData);
-  audio.playback.sourceData.offsetError          = 0.0;
-  audio.playback.sourceData.offsetErrorIntegral  = 0.0;
-  audio.playback.sourceData.ratioIntegral        = 0.0;
-  audio.playback.sourceData.lastRatio            = 1.0;
-  audio.playback.sourceData.lastClockRatio       = 1.0;
-  audio.playback.sourceData.nextFeedbackTime     = 0;
-  audio.playback.sourceData.nextGraphTime        = 0;
-  audio.playback.sourceData.bufferOverrunPending = false;
-  audio.playback.sourceData.backlogTrimArmed     = true;
-  audio.playback.sourceData.bufferOverruns       = 0;
-  audio.playback.sourceData.nextLogTime          =
+  audio.playback.sourceData.offsetError              = 0.0;
+  audio.playback.sourceData.offsetErrorIntegral      = 0.0;
+  audio.playback.sourceData.ratioIntegral            = 0.0;
+  audio.playback.sourceData.lastRatio                = 1.0;
+  audio.playback.sourceData.lastClockRatio           = 1.0;
+  audio.playback.sourceData.nextFeedbackTime         = 0;
+  audio.playback.sourceData.nextGraphTime            = 0;
+  audio.playback.sourceData.bufferOverrunPending     = false;
+  audio.playback.sourceData.backlogTrimArmed         = true;
+  audio.playback.sourceData.bufferOverruns           = 0;
+  audio.playback.sourceData.nextLogTime              =
     nanotime() + INT64_C(5000000000);
-  audio.playback.sourceData.arrivalJitterSec    = 0.0;
-  audio.playback.sourceData.sourcePhaseBaselineSec = 0.0;
-  audio.playback.sourceData.sourcePhaseReserveSec = 0.0;
-  audio.playback.sourceData.sourcePacketDurationSec = 0.0;
+  audio.playback.sourceData.arrivalJitterSec         = 0.0;
+  audio.playback.sourceData.sourcePhaseBaselineSec   = 0.0;
+  audio.playback.sourceData.sourcePhaseReserveSec    = 0.0;
+  audio.playback.sourceData.sourcePacketDurationSec  = 0.0;
+  audio.playback.sourceData.sourcePacketPacedCount   = 0;
   audio.playback.sourceData.sourcePhaseBaselineValid = false;
-  audio.playback.sourceData.deviceClock.valid   = false;
-  audio.playback.sourceData.outputClock.valid   = false;
+  audio.playback.sourceData.sourcePacketRecovering   = false;
+  audio.playback.sourceData.deviceClock.valid        = false;
+  audio.playback.sourceData.outputClock.valid        = false;
   playbackPrepareMediaClock(&audio.playback.sourceData, sourceClock);
 
   atomic_store_explicit(
@@ -2130,6 +2134,26 @@ static int playbackSlewBuffer(
   return advanced;
 }
 
+static bool playbackUseLowWaterRecovery(bool providerRateControl,
+    bool bufferUnderrun, const PlaybackSourceData * sourceData)
+{
+  return providerRateControl ||
+    (bufferUnderrun && (!sourceData->deviceClock.valid ||
+      !sourceData->deviceClockStable));
+}
+
+static void playbackResetRateControl(PlaybackSourceData * sourceData,
+    bool providerRateControl)
+{
+  sourceData->offsetError         = 0.0;
+  sourceData->offsetErrorIntegral = 0.0;
+  sourceData->ratioIntegral       = 0.0;
+  sourceData->lastRatio           = providerRateControl ?
+    1.0 : sourceData->lastClockRatio;
+  if (providerRateControl)
+    sourceData->nextFeedbackTime = 0;
+}
+
 static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     const LG_AudioClock * sourceClock, int64_t arrivalTime)
 {
@@ -2191,17 +2215,18 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     inputFrames = sourceData->framesIn;
   }
 
-  const bool providerRateControl =
+  const bool providerRateControl    =
     audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
   /* An unbounded ring represents an underrun by advancing the reader beyond
    * the writer. Do not carry that logical debt into resumed playback: bounded
    * rate correction would otherwise discard fresh audio for many seconds. */
-  const bool bufferUnderrun =
+  const bool bufferUnderrun         =
     STREAM_ACTIVE(playbackGetState()) &&
     ringbuffer_getCount(audio.playback.buffer) < 0;
-  bool discontinuity =
+  bool discontinuity                =
     bufferUnderrun || (sourceClock && sourceClock->discontinuity);
-  const int64_t packetTime =
+  const int64_t previousArrivalTime = sourceData->lastArrivalTime;
+  const int64_t packetTime          =
     playbackMapMediaTime(sourceData, sourceClock, frames,
         audio.playback.sampleRate, arrivalTime, &discontinuity);
   if (sourceData->bufferOverrunPending)
@@ -2212,7 +2237,7 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
 
   sourceData->lastArrivalTime = arrivalTime;
 
-  const bool sourceRateWasValid =
+  const bool sourceRateWasValid  =
     sourceData->sourceRateValid;
   const int64_t sourceRateTimeMs = providerRateControl ?
     (arrivalTime - sourceData->mediaLocalOrigin) / INT64_C(1000000) :
@@ -2247,13 +2272,50 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
    * source media clock and must not become buffer reserve. Positive
    * deviation means the latency model temporarily overstates how much audio
    * remains in the ring. */
-  const double sourcePhaseSec =
+  const double sourcePhaseSec           =
     sourceData->sourceClock.phaseResidualSec;
-  const double packetSec =
+  const double packetSec                =
     frames * nominalFrameSec;
+  const double decayedPacketDurationSec =
+    sourceData->sourcePacketDurationSec *
+      exp(-packetSec / PLAYBACK_PHASE_RESERVE_DECAY_SEC);
+  const bool cadenceReset               = discontinuity ||
+    state == STREAM_STATE_KEEP_ALIVE ||
+    state == STREAM_STATE_RESUMING;
+  if (cadenceReset && sourceData->sourcePacketDurationSec > 0.0)
+  {
+    sourceData->sourcePacketRecovering = true;
+    sourceData->sourcePacketPacedCount = 0;
+  }
+  else if (sourceData->sourcePacketRecovering)
+  {
+    if (packetSec <= decayedPacketDurationSec + nominalFrameSec)
+    {
+      sourceData->sourcePacketRecovering = false;
+      sourceData->sourcePacketPacedCount = 0;
+    }
+    else
+    {
+      const bool paced = previousArrivalTime != INT64_MIN &&
+        arrivalTime > previousArrivalTime &&
+        (arrivalTime - previousArrivalTime) * 2.0e-9 >= packetSec;
+      sourceData->sourcePacketPacedCount = paced ?
+        sourceData->sourcePacketPacedCount + 1 : 0;
+      if (sourceData->sourcePacketPacedCount >= 2)
+      {
+        sourceData->sourcePacketRecovering = false;
+        sourceData->sourcePacketPacedCount = 0;
+      }
+    }
+  }
+
+  /* Catch-up packets describe audio accumulated during a gap, not the future
+   * delivery cadence. Resume when the prior cadence returns or a larger
+   * cadence is confirmed by consecutive plausibly paced packets. */
   sourceData->sourcePacketDurationSec =
-    max(packetSec, sourceData->sourcePacketDurationSec *
-        exp(-packetSec / PLAYBACK_PHASE_RESERVE_DECAY_SEC));
+    !sourceData->sourcePacketRecovering ?
+      max(packetSec, decayedPacketDurationSec) :
+      decayedPacketDurationSec;
 
   if (!sourceData->sourcePhaseBaselineValid ||
       sourceData->sourceClock.updates == 1)
@@ -2361,7 +2423,7 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     }
   }
 
-  const int maxPeriodFrames =
+  const int maxPeriodFrames       =
     max(audio.playback.deviceMaxPeriodFrames, sourceData->devPeriodFrames);
   const double backlogGuardFrames =
     max((double)maxPeriodFrames,
@@ -2369,34 +2431,35 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   /* The device period, delivery jitter, packet phase, and resampler delay
    * define the minimum viable latency. Provider feedback directly controls
    * the source rate, so latencyOffset only applies to local rate control. */
-  const double latencyOffsetFrames = providerRateControl ? 0.0 :
+  const double latencyOffsetFrames          = providerRateControl ? 0.0 :
     max(g_params.audioLatencyOffset, 0) *
       audio.playback.sampleRate / 1000.0;
-  const double arrivalJitterFrames =
+  const double arrivalJitterFrames          =
     sourceData->arrivalJitterSec * audio.playback.sampleRate;
-  const double arrivalReserveFrames =
+  const double arrivalReserveFrames         =
     arrivalJitterFrames + 0.001 * audio.playback.sampleRate;
   const double minimumLowWaterReserveFrames =
     maxPeriodFrames * 0.1 + arrivalReserveFrames;
-  const double minimumLowWaterFrames =
+  const double minimumLowWaterFrames        =
     maxPeriodFrames + minimumLowWaterReserveFrames;
-  const double targetLowWaterFrames =
+  const double targetLowWaterFrames         =
     minimumLowWaterFrames + latencyOffsetFrames;
-  const double minimumBufferFrames =
+  const double minimumBufferFrames          =
     minimumLowWaterFrames + sourceReserveFrames;
-  const double targetBufferFrames =
+  const double targetBufferFrames           =
     minimumBufferFrames + latencyOffsetFrames;
-  const double resamplerDelayFrames =
+  const double resamplerDelayFrames         =
     audio.playback.rateControl == PLAYBACK_RATE_SOFTWARE ?
       PLAYBACK_RESAMPLER_DELAY_FRAMES : 0.0;
-  const double minimumLatencyFrames =
+  const double minimumLatencyFrames         =
     minimumBufferFrames + resamplerDelayFrames;
-  const double targetLatencyFrames =
+  const double targetLatencyFrames          =
     minimumLatencyFrames + latencyOffsetFrames;
 
   double devPosition = DBL_MIN;
   state = playbackGetState();
-  if ((providerRateControl || bufferUnderrun) &&
+  if (playbackUseLowWaterRecovery(providerRateControl,
+        bufferUnderrun, sourceData) &&
       (discontinuity ||
        state == STREAM_STATE_KEEP_ALIVE ||
        state == STREAM_STATE_RESUMING))
@@ -2409,14 +2472,7 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     sourceData->outputPosition += actualSlew;
     curPosition += actualSlew;
 
-    sourceData->offsetError         = 0.0;
-    sourceData->offsetErrorIntegral = 0.0;
-    sourceData->ratioIntegral       = 0.0;
-    if (providerRateControl && bufferUnderrun)
-    {
-      sourceData->lastRatio        = 1.0;
-      sourceData->nextFeedbackTime = 0;
-    }
+    playbackResetRateControl(sourceData, providerRateControl);
     if (state == STREAM_STATE_KEEP_ALIVE ||
         state == STREAM_STATE_RESUMING)
       atomic_compare_exchange_strong_explicit(
@@ -2437,9 +2493,7 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     sourceData->outputPosition += actualSlew;
     curPosition += actualSlew;
 
-    sourceData->offsetError         = 0.0;
-    sourceData->offsetErrorIntegral = 0.0;
-    sourceData->ratioIntegral       = 0.0;
+    playbackResetRateControl(sourceData, providerRateControl);
     if (state == STREAM_STATE_KEEP_ALIVE ||
         state == STREAM_STATE_RESUMING)
       atomic_compare_exchange_strong_explicit(

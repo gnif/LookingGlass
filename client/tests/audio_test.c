@@ -654,6 +654,54 @@ static void testPlaybackJitter(void)
   CHECK(source.arrivalJitterSec < 0.011);
 }
 
+static void testPlaybackRecovery(void)
+{
+  reset();
+  startAudio();
+
+  const LG_AudioFormat format = makeFormat(LG_AUDIO_FMT_S16_LE);
+  CHECK(playbackStart(&format, NULL, false, false));
+  CHECK(audio.playback.rateControl == PLAYBACK_RATE_BACKEND);
+  playbackSetState(STREAM_STATE_RUN);
+
+  PlaybackSourceData * source = &audio.playback.sourceData;
+  const int64_t arrival       = nanotime();
+  playbackClockReset(&source->deviceClock,
+      arrival, 0.0, 1.0 / format.sampleRate);
+  source->deviceClockStable       = true;
+  source->outputPosition          = 0;
+  source->lastRatio               = 0.999;
+  source->lastClockRatio          = 1.0002;
+  source->sourcePacketDurationSec = 0.010;
+  playbackPublishDeviceTiming(16, arrival, 0, 0.0, 0);
+
+  CHECK(ringbuffer_consume(audio.playback.buffer, NULL, 16) == 16);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) == -16);
+  uint8_t frames[1200 * 2 * 2] = { 0 };
+  CHECK(playbackData(frames, 1200, NULL, arrival) ==
+      PLAYBACK_DATA_PROCESSED);
+
+  CHECK(source->sourcePacketDurationSec < 0.010);
+  CHECK(source->sourcePacketDurationSec > 0.009);
+  CHECK(source->sourcePacketRecovering);
+  CHECK(source->outputPosition == 1770);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) == 1754);
+  CHECK(fabs(atomic_load(&audio.playback.backendResampleRatio) -
+        source->lastClockRatio) < 0.000001);
+
+  CHECK(playbackData(frames, 1200, NULL, arrival + 1000) ==
+      PLAYBACK_DATA_PROCESSED);
+  CHECK(source->sourcePacketDurationSec < 0.010);
+  CHECK(source->sourcePacketRecovering);
+
+  CHECK(playbackData(frames, 480, NULL,
+        arrival + INT64_C(10000000)) == PLAYBACK_DATA_PROCESSED);
+  CHECK(!source->sourcePacketRecovering);
+  CHECK(fabs(source->sourcePacketDurationSec - 0.010) < 0.000001);
+
+  stopAudio();
+}
+
 static void testConsent(void)
 {
   reset();
@@ -781,6 +829,7 @@ static const struct Test tests[] =
   { "provider"      , testProvider      },
   { "playback-retry", testPlaybackRetry },
   { "jitter"        , testPlaybackJitter },
+  { "recovery"      , testPlaybackRecovery },
   { "consent"       , testConsent       },
   { "quiesce"       , testQuiesce       },
 };
