@@ -2096,6 +2096,8 @@ void evdev_dispatch(void * opaque)
             evdev_barrierMatches(&output.barrier, desiredState))
         {
           evdev_dispatchReset(output.barrier.lanes);
+          if (output.barrier.activate & EVDEV_GRAB_KEYBOARD)
+            lgInput_setKeyboardLEDsSync(false);
           evdev_publishActive(output.barrier.deactivate, false);
           evdev_publishActive(output.barrier.activate, true);
           const uint64_t currentState = atomic_load_explicit(
@@ -2103,6 +2105,7 @@ void evdev_dispatch(void * opaque)
           if (output.barrier.activate &&
               !evdev_barrierMatches(&output.barrier, currentState))
             evdev_publishActive(output.barrier.activate, false);
+          core_updateKeyboardLEDsSync();
         }
         atomic_store_explicit(&state.barrierAck,
             output.barrier.serial, memory_order_release);

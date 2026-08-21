@@ -655,9 +655,6 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
   if (evdev_isExclusive())
     return;
 
-  if (!core_inputEnabled())
-    return;
-
   if (!lgInput_keyboardLEDs(numLock, capsLock, scrollLock))
     DEBUG_ERROR("app_handleKeyboardLEDs: failed to send message");
 }

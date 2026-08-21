@@ -39,18 +39,22 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define INPUT_PENDING_LENGTH              128
-#define INPUT_MOTION_COALESCE_THRESHOLD   (INPUT_PENDING_LENGTH / 2)
-#define INPUT_PENDING_RESERVED            (INPUT_PENDING_LENGTH / 2)
-#define INPUT_KEEPALIVE_US                 200000
-#define INPUT_IDLE_RELEASE_US              400000
-#define INPUT_RELEASE_TIMEOUT_US           50000
-#define INPUT_WORKER_IDLE_MS               10
-#define INPUT_WORKER_RETRY_MS              1
-#define INPUT_STATS_INTERVAL_US            5000000
-#define INPUT_MAX_SPLIT_REPORTS            4
-#define INPUT_MOUSE_DELTA_MIN              (INT16_MIN * INPUT_MAX_SPLIT_REPORTS)
-#define INPUT_MOUSE_DELTA_MAX              (INT16_MAX * INPUT_MAX_SPLIT_REPORTS)
+#define INPUT_PENDING_LENGTH                128
+#define INPUT_MOTION_COALESCE_THRESHOLD     (INPUT_PENDING_LENGTH / 2)
+#define INPUT_PENDING_RESERVED              (INPUT_PENDING_LENGTH / 2)
+#define INPUT_KEEPALIVE_US                   200000
+#define INPUT_IDLE_RELEASE_US                400000
+#define INPUT_RELEASE_TIMEOUT_US             50000
+#define INPUT_KEYBOARD_LED_SYNC_DELAY_US     20000
+#define INPUT_KEYBOARD_LED_ACK_TIMEOUT_US    500000
+#define INPUT_WORKER_IDLE_MS                 10
+#define INPUT_WORKER_RETRY_MS                1
+#define INPUT_STATS_INTERVAL_US              5000000
+#define INPUT_MAX_SPLIT_REPORTS              4
+#define INPUT_MOUSE_DELTA_MIN                \
+  (INT16_MIN * INPUT_MAX_SPLIT_REPORTS)
+#define INPUT_MOUSE_DELTA_MAX                \
+  (INT16_MAX * INPUT_MAX_SPLIT_REPORTS)
 
 _Static_assert(
     (int)LG_KEYBOARD_LED_NUM_LOCK ==
@@ -71,10 +75,30 @@ enum LGMPInputMouseMode
   LGMP_INPUT_MOUSE_ABSOLUTE,
 };
 
+struct LGMPInputLockKey
+{
+  int     key;
+  uint8_t led;
+};
+
+static const struct LGMPInputLockKey LOCK_KEYS[] =
+{
+  { KEY_NUMLOCK,    LG_KEYBOARD_LED_NUM_LOCK    },
+  { KEY_CAPSLOCK,   LG_KEYBOARD_LED_CAPS_LOCK   },
+  { KEY_SCROLLLOCK, LG_KEYBOARD_LED_SCROLL_LOCK },
+};
+
+static const uint8_t LOCK_LED_MASK =
+  LG_KEYBOARD_LED_NUM_LOCK |
+  LG_KEYBOARD_LED_CAPS_LOCK |
+  LG_KEYBOARD_LED_SCROLL_LOCK;
+
 struct LGMPInputPending
 {
   KVMFRInputMessage message;
-  bool pureMotion;
+  uint8_t           keyboardLEDToggle;
+  bool              pureMotion;
+  bool              keyboardLEDSync;
 };
 
 struct LGMPInputCounters
@@ -118,6 +142,14 @@ struct LGMPInput
   bool              ownerBlocked;
   bool              keyboardLEDsValid;
   uint8_t           keyboardLEDs;
+  bool              desiredKeyboardLEDsValid;
+  uint8_t           desiredKeyboardLEDs;
+  uint8_t           staleKeyboardLEDs;
+  uint8_t           pendingKeyboardLEDs;
+  uint32_t          keyboardLEDTransitions;
+  uint64_t          keyboardLEDsSyncAfter;
+  uint64_t          keyboardLEDsPendingUntil;
+  uint64_t          keyboardLEDsStaleUntil;
 
   uint32_t generation;
   uint32_t sequence;
@@ -160,13 +192,134 @@ static bool buildKeyboardPayload(const LGMPInput * input,
 static bool queueMouse(LGMPInput * input, enum LGMPInputMouseMode mode,
     int32_t x, int32_t y, int32_t wheel, uint32_t buttons,
     bool pureMotion, bool * wake);
+static bool release(LGMPInput * input, bool * wake);
 static void discardProtocolState(LGMPInput * input);
+
+static uint8_t keyboardLEDForKey(int key)
+{
+  for (size_t i = 0; i < sizeof(LOCK_KEYS) / sizeof(*LOCK_KEYS); ++i)
+    if (LOCK_KEYS[i].key == key)
+      return LOCK_KEYS[i].led;
+  return 0;
+}
+
+static uint8_t projectedKeyboardLEDs(const LGMPInput * input)
+{
+  return input->keyboardLEDs ^ input->pendingKeyboardLEDs;
+}
+
+static void invalidateKeyboardLEDProjection(
+    LGMPInput * input, uint64_t now, uint64_t delay)
+{
+  input->pendingKeyboardLEDs       = 0;
+  input->keyboardLEDTransitions    = 0;
+  input->keyboardLEDsPendingUntil  = 0;
+  input->keyboardLEDsSyncAfter     =
+    now + delay;
+}
 
 static struct LGMPInputPending * pendingAt(
     LGMPInput * input, unsigned position)
 {
   return &input->pending[
     (input->pendingHead + position) % INPUT_PENDING_LENGTH];
+}
+
+static bool markPendingKeyboardLEDSync(
+    LGMPInput * input, uint32_t sequence)
+{
+  if (!input->pendingCount)
+    return false;
+
+  struct LGMPInputPending * item = pendingAt(
+    input, input->pendingCount - 1);
+  if (item->message.generation != input->generation ||
+      item->message.sequence != sequence ||
+      item->message.type != KVMFR_INPUT_MESSAGE_KEYBOARD)
+    return false;
+
+  item->keyboardLEDSync = true;
+  return true;
+}
+
+static bool markPendingKeyboardLEDToggle(
+    LGMPInput * input, uint32_t sequence, uint8_t led)
+{
+  if (!input->pendingCount)
+    return false;
+
+  struct LGMPInputPending * item = pendingAt(
+    input, input->pendingCount - 1);
+  if (item->message.generation != input->generation ||
+      item->message.sequence != sequence ||
+      item->message.type != KVMFR_INPUT_MESSAGE_KEYBOARD)
+    return false;
+
+  item->keyboardLEDToggle ^= led;
+  return true;
+}
+
+static bool pendingKeyboardLEDSync(LGMPInput * input)
+{
+  for (unsigned i = 0; i < input->pendingCount; ++i)
+    if (pendingAt(input, i)->keyboardLEDSync)
+      return true;
+  return false;
+}
+
+static uint8_t pendingKeyboardLEDToggles(LGMPInput * input)
+{
+  uint8_t toggles = 0;
+  for (unsigned i = 0; i < input->pendingCount; ++i)
+    toggles ^= pendingAt(input, i)->keyboardLEDToggle;
+  return toggles;
+}
+
+static unsigned keyboardLEDToggleCount(uint8_t toggles)
+{
+  unsigned count = 0;
+  while (toggles)
+  {
+    count += toggles & 1U;
+    toggles >>= 1;
+  }
+  return count;
+}
+
+static uint32_t queuedKeyboardLEDTransitions(LGMPInput * input)
+{
+  uint32_t count = 0;
+  for (unsigned i = 0; i < input->pendingCount; ++i)
+    count += keyboardLEDToggleCount(
+        pendingAt(input, i)->keyboardLEDToggle);
+  return count;
+}
+
+static uint32_t publishedKeyboardLEDTransitions(LGMPInput * input)
+{
+  const uint32_t queued = queuedKeyboardLEDTransitions(input);
+  return input->keyboardLEDTransitions > queued ?
+    input->keyboardLEDTransitions - queued : 0;
+}
+
+static void retainQueuedKeyboardLEDProjection(LGMPInput * input)
+{
+  input->pendingKeyboardLEDs       = pendingKeyboardLEDToggles(input);
+  input->keyboardLEDTransitions    = queuedKeyboardLEDTransitions(input);
+  input->keyboardLEDsPendingUntil  = 0;
+}
+
+static uint8_t publishedKeyboardLEDToggles(LGMPInput * input)
+{
+  return input->pendingKeyboardLEDs ^ pendingKeyboardLEDToggles(input);
+}
+
+static void updateKeyboardLEDPendingDeadline(
+    LGMPInput * input, uint64_t now)
+{
+  input->keyboardLEDsPendingUntil =
+    publishedKeyboardLEDTransitions(input) ?
+    now + INPUT_KEYBOARD_LED_ACK_TIMEOUT_US : 0;
 }
 
 static LG_InputStatus inputStatus(const LGMPInput * input)
@@ -246,25 +399,31 @@ static void connectionFailed(LGMPInput * input, LGMP_STATUS status)
   if (input->available || input->endpointGeneration ||
       input->keyboardLEDsValid)
     input->notifyStatus = true;
-  input->connected              = false;
-  input->claimed                = false;
-  input->available              = false;
-  input->ownerBlocked           = false;
-  input->keyboardLEDsValid      = false;
-  input->keyboardLEDs           = 0;
-  input->pendingHead            = 0;
-  input->pendingCount           = 0;
-  input->mouseMode              = LGMP_INPUT_MOUSE_NONE;
-  input->mouseButtons           = 0;
-  input->publishedClaimed       = false;
-  input->lastInput              = 0;
-  input->capabilities           = 0;
-  input->streamEndpointBound    = false;
+  input->connected                   = false;
+  input->claimed                     = false;
+  input->available                   = false;
+  input->ownerBlocked                = false;
+  input->keyboardLEDsValid           = false;
+  input->keyboardLEDs                = 0;
+  input->pendingKeyboardLEDs         = 0;
+  input->keyboardLEDTransitions      = 0;
+  input->staleKeyboardLEDs           = 0;
+  input->keyboardLEDsSyncAfter       = 0;
+  input->keyboardLEDsPendingUntil    = 0;
+  input->keyboardLEDsStaleUntil      = 0;
+  input->pendingHead                 = 0;
+  input->pendingCount                = 0;
+  input->mouseMode                   = LGMP_INPUT_MOUSE_NONE;
+  input->mouseButtons                = 0;
+  input->publishedClaimed            = false;
+  input->lastInput                   = 0;
+  input->capabilities                = 0;
+  input->streamEndpointBound         = false;
   detachInputStream(input);
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
-  input->statusValid            = false;
-  input->ownerConfirmed         = false;
+  input->statusValid                 = false;
+  input->ownerConfirmed              = false;
   memset(input->keyState, 0, sizeof(input->keyState));
   atomic_store_explicit(&input->stop, true, memory_order_release);
 }
@@ -476,8 +635,10 @@ static bool submitPayload(LGMPInput * input, KVMFRInputMessageType type,
   }
 
   struct LGMPInputPending * item = pendingAt(input, input->pendingCount++);
-  item->message    = message;
-  item->pureMotion = pureMotion;
+  item->message           = message;
+  item->keyboardLEDToggle = 0;
+  item->pureMotion        = pureMotion;
+  item->keyboardLEDSync   = false;
   ++input->stats.counters.localEnqueues;
   if (input->pendingCount > input->stats.counters.pendingHighWater)
     input->stats.counters.pendingHighWater = input->pendingCount;
@@ -510,6 +671,143 @@ static bool claim(LGMPInput * input, bool * wake)
   return false;
 }
 
+static bool keyboardStateHeld(const LGMPInput * input)
+{
+  for (unsigned usage = 1;
+      usage <= KVMFR_INPUT_KEYBOARD_USAGE_MAX; ++usage)
+    if (input->keyState[usage])
+      return true;
+  return false;
+}
+
+static void recordKeyboardToggle(LGMPInput * input, int key)
+{
+  const uint8_t led = keyboardLEDForKey(key);
+  if (!led)
+    return;
+
+  const uint64_t now = microtime();
+  if (input->keyboardLEDsValid)
+  {
+    input->pendingKeyboardLEDs ^= led;
+    if (input->keyboardLEDTransitions != UINT32_MAX)
+      ++input->keyboardLEDTransitions;
+    markPendingKeyboardLEDToggle(input, input->sequence, led);
+    updateKeyboardLEDPendingDeadline(input, now);
+  }
+
+  if (!input->desiredKeyboardLEDsValid ||
+      ((projectedKeyboardLEDs(input) ^ input->desiredKeyboardLEDs) & led))
+  {
+    input->staleKeyboardLEDs      |= led;
+    input->keyboardLEDsStaleUntil  =
+      now + INPUT_KEYBOARD_LED_ACK_TIMEOUT_US;
+  }
+  else
+  {
+    input->staleKeyboardLEDs &= ~led;
+    if (!input->staleKeyboardLEDs)
+      input->keyboardLEDsStaleUntil = 0;
+  }
+  input->keyboardLEDsSyncAfter = now + INPUT_KEYBOARD_LED_SYNC_DELAY_US;
+}
+
+static bool queueKeyboardTap(LGMPInput * input,
+    const struct LGMPInputLockKey * lockKey, bool * wake)
+{
+  const uint8_t usage = linux_to_hid[lockKey->key];
+  if (!usage || input->keyState[usage] || !claim(input, wake))
+    return false;
+
+  input->keyState[usage] = 1;
+  KVMFRInputPayload payload = { 0 };
+  buildKeyboardPayload(input, &payload);
+  if (!submitPayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+      &payload, false, wake))
+  {
+    input->keyState[usage] = 0;
+    return false;
+  }
+  markPendingKeyboardLEDSync(input, input->sequence);
+  markPendingKeyboardLEDToggle(input, input->sequence, lockKey->led);
+
+  input->keyState[usage] = 0;
+  payload = (KVMFRInputPayload) { 0 };
+  buildKeyboardPayload(input, &payload);
+  if (!submitPayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
+      &payload, false, wake))
+  {
+    invalidateKeyboardLEDProjection(input, microtime(),
+      INPUT_KEYBOARD_LED_ACK_TIMEOUT_US);
+    if (input->connected)
+      release(input, wake);
+    return false;
+  }
+  markPendingKeyboardLEDSync(input, input->sequence);
+
+  input->pendingKeyboardLEDs ^= lockKey->led;
+  if (input->keyboardLEDTransitions != UINT32_MAX)
+    ++input->keyboardLEDTransitions;
+  updateKeyboardLEDPendingDeadline(input, microtime());
+  return true;
+}
+
+static void syncKeyboardLEDs(LGMPInput * input,
+    uint64_t now, bool * wake)
+{
+  if (publishedKeyboardLEDTransitions(input) &&
+      now >= input->keyboardLEDsPendingUntil)
+  {
+    input->pendingKeyboardLEDs       = pendingKeyboardLEDToggles(input);
+    input->keyboardLEDTransitions    =
+      queuedKeyboardLEDTransitions(input);
+    input->keyboardLEDsPendingUntil  = 0;
+    input->keyboardLEDsSyncAfter     =
+      now + INPUT_KEYBOARD_LED_SYNC_DELAY_US;
+  }
+
+  if (input->staleKeyboardLEDs &&
+      now >= input->keyboardLEDsStaleUntil)
+  {
+    input->desiredKeyboardLEDsValid = false;
+    input->staleKeyboardLEDs        = 0;
+    input->keyboardLEDsStaleUntil   = 0;
+  }
+
+  if (!input->connected || !input->available || input->ownerBlocked ||
+      !input->keyboardLEDsValid || !input->desiredKeyboardLEDsValid ||
+      input->keyboardLEDTransitions ||
+      now < input->keyboardLEDsSyncAfter)
+    return;
+
+  const uint8_t mismatch =
+    (projectedKeyboardLEDs(input) ^ input->desiredKeyboardLEDs) &
+    LOCK_LED_MASK & ~input->staleKeyboardLEDs;
+  if (!mismatch)
+  {
+    if (!input->keyboardLEDTransitions && !input->staleKeyboardLEDs)
+      input->desiredKeyboardLEDsValid = false;
+    return;
+  }
+  if (keyboardStateHeld(input))
+    return;
+
+  unsigned messageCount = input->claimed ? 0 : 1;
+  for (size_t i = 0; i < sizeof(LOCK_KEYS) / sizeof(*LOCK_KEYS); ++i)
+    if (mismatch & LOCK_KEYS[i].led)
+      messageCount += 2;
+  if (messageCount > INPUT_PENDING_LENGTH - input->pendingCount)
+    return;
+
+  for (size_t i = 0; i < sizeof(LOCK_KEYS) / sizeof(*LOCK_KEYS); ++i)
+    if ((mismatch & LOCK_KEYS[i].led) &&
+        !queueKeyboardTap(input, &LOCK_KEYS[i], wake))
+      break;
+
+  input->keyboardLEDsSyncAfter =
+    now + INPUT_KEYBOARD_LED_SYNC_DELAY_US;
+}
+
 static void clearInputState(LGMPInput * input)
 {
   input->mouseMode    = LGMP_INPUT_MOUSE_NONE;
@@ -533,6 +831,8 @@ static bool inputStateHeld(const LGMPInput * input)
 
 static void discardProtocolState(LGMPInput * input)
 {
+  invalidateKeyboardLEDProjection(input, microtime(),
+    INPUT_KEYBOARD_LED_ACK_TIMEOUT_US);
   input->pendingHead         = 0;
   input->pendingCount        = 0;
   input->claimed             = false;
@@ -555,6 +855,13 @@ static bool restoreInputState(LGMPInput * input, bool * wake)
   if (keyboardHeld && !submitPayload(input, KVMFR_INPUT_MESSAGE_KEYBOARD,
       &keyboard, false, wake))
     return false;
+  if (keyboardHeld)
+    for (size_t i = 0; i < sizeof(LOCK_KEYS) / sizeof(*LOCK_KEYS); ++i)
+    {
+      const uint8_t usage = linux_to_hid[LOCK_KEYS[i].key];
+      if (usage && input->keyState[usage])
+        recordKeyboardToggle(input, LOCK_KEYS[i].key);
+    }
 
   if (input->mouseButtons &&
       input->mouseMode != LGMP_INPUT_MOUSE_NONE &&
@@ -765,11 +1072,15 @@ static void applyInputStatus(LGMPInput * input,
   const uint32_t oldGeneration        = input->endpointGeneration;
   const bool     oldKeyboardLEDsValid = input->keyboardLEDsValid;
   const uint8_t  oldKeyboardLEDs      = input->keyboardLEDs;
-  const bool     targetAvailable =
+  const bool     keyboardLEDsValid    =
+    (status->flags & KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID) != 0;
+  const uint8_t  keyboardLEDs         = status->keyboardLEDs;
+  const bool     targetAvailable      =
     (status->flags & KVMFR_INPUT_STATUS_AVAILABLE) != 0;
-  const bool     endpointChanged = wasValid &&
+  const bool     endpointChanged      = wasValid &&
     oldGeneration != status->generation;
-  bool restore = false;
+  const uint64_t now                  = microtime();
+  bool           restore              = false;
 
   input->statusValid           = true;
   input->statusSerial          = serial;
@@ -777,11 +1088,47 @@ static void applyInputStatus(LGMPInput * input,
   input->endpointGeneration    = status->generation;
   input->statusOwnerClientID   = status->ownerClientID;
   input->statusOwnerGeneration = status->ownerGeneration;
-  input->keyboardLEDsValid     =
-    (status->flags & KVMFR_INPUT_STATUS_KEYBOARD_LEDS_VALID) != 0;
-  input->keyboardLEDs          = status->keyboardLEDs;
+  if (!keyboardLEDsValid)
+    retainQueuedKeyboardLEDProjection(input);
+  else if (!oldKeyboardLEDsValid)
+  {
+    retainQueuedKeyboardLEDProjection(input);
+    input->staleKeyboardLEDs       = 0;
+    input->keyboardLEDsStaleUntil  = 0;
+  }
+  else if (endpointChanged)
+  {
+    input->pendingKeyboardLEDs       = 0;
+    input->keyboardLEDTransitions    = 0;
+    input->staleKeyboardLEDs         = 0;
+    input->keyboardLEDsPendingUntil  = 0;
+    input->keyboardLEDsStaleUntil    = 0;
+  }
+  else
+  {
+    const uint8_t acknowledged =
+      (oldKeyboardLEDs ^ keyboardLEDs) &
+      publishedKeyboardLEDToggles(input);
+    if (acknowledged)
+    {
+      input->pendingKeyboardLEDs ^= acknowledged;
+      const unsigned count = keyboardLEDToggleCount(acknowledged);
+      input->keyboardLEDTransitions =
+        input->keyboardLEDTransitions > count ?
+          input->keyboardLEDTransitions - count : 0;
+      updateKeyboardLEDPendingDeadline(input, now);
+    }
+  }
+
+  input->keyboardLEDsValid = keyboardLEDsValid;
+  input->keyboardLEDs      = keyboardLEDs;
+  if (keyboardLEDsValid && input->desiredKeyboardLEDsValid &&
+      ((projectedKeyboardLEDs(input) ^ input->desiredKeyboardLEDs) &
+        LOCK_LED_MASK & ~input->staleKeyboardLEDs))
+    input->keyboardLEDsSyncAfter =
+      now + INPUT_KEYBOARD_LED_SYNC_DELAY_US;
   const bool streamChanged = reconcileInputStream(input, status);
-  const bool available = targetAvailable &&
+  const bool available     = targetAvailable &&
     input->streamEndpointBound;
   input->available = available;
 
@@ -878,6 +1225,9 @@ static void processInputStatus(LGMPInput * input, bool * wake)
 
 static bool release(LGMPInput * input, bool * wake)
 {
+  if (input->pendingCount)
+    invalidateKeyboardLEDProjection(input, microtime(),
+      INPUT_KEYBOARD_LED_ACK_TIMEOUT_US);
   input->pendingHead  = 0;
   input->pendingCount = 0;
   input->claimed      = false;
@@ -910,9 +1260,12 @@ static bool flushPending(LGMPInput * input)
 
     progress = true;
     published(input, &item->message);
+    const uint8_t keyboardLEDToggle = item->keyboardLEDToggle;
     input->pendingHead =
       (input->pendingHead + 1) % INPUT_PENDING_LENGTH;
     --input->pendingCount;
+    if (keyboardLEDToggle)
+      updateKeyboardLEDPendingDeadline(input, microtime());
   }
   return progress;
 }
@@ -1037,7 +1390,9 @@ static int inputThread(void * opaque)
     processInputStatus(input, &wake);
     const bool streamProgress = flushPending(input);
 
-    const uint64_t now = microtime();
+    uint64_t now = microtime();
+    syncKeyboardLEDs(input, now, &wake);
+    now = microtime();
     if (input->connected && input->claimed && !inputStateHeld(input) &&
         !input->pendingCount &&
         input->publishedGeneration == input->generation &&
@@ -1160,33 +1515,39 @@ bool lgmpInput_connect(LGMPInput * input, uint32_t clientID)
     return false;
   }
 
-  input->connected             = true;
-  input->claimed               = false;
-  input->available             = false;
-  input->ownerBlocked          = false;
-  input->keyboardLEDsValid     = false;
-  input->keyboardLEDs          = 0;
-  input->pendingHead           = 0;
-  input->pendingCount          = 0;
-  input->clientID              = clientID;
-  input->capabilities          = 0;
-  input->streamEndpointBound   = false;
+  input->connected                   = true;
+  input->claimed                     = false;
+  input->available                   = false;
+  input->ownerBlocked                = false;
+  input->keyboardLEDsValid           = false;
+  input->keyboardLEDs                = 0;
+  input->pendingKeyboardLEDs         = 0;
+  input->keyboardLEDTransitions      = 0;
+  input->staleKeyboardLEDs           = 0;
+  input->keyboardLEDsSyncAfter       = 0;
+  input->keyboardLEDsPendingUntil    = 0;
+  input->keyboardLEDsStaleUntil      = 0;
+  input->pendingHead                 = 0;
+  input->pendingCount                = 0;
+  input->clientID                    = clientID;
+  input->capabilities                = 0;
+  input->streamEndpointBound         = false;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
-  input->endpointGeneration    = 0;
-  input->statusSerial          = 0;
-  input->statusOwnerClientID   = 0;
-  input->statusOwnerGeneration = 0;
-  input->ownerConfirmed        = false;
-  input->statusValid           = false;
-  input->publishedGeneration   = 0;
-  input->publishedSequence     = 0;
-  input->publishedClaimed      = false;
-  input->lastSend              = 0;
-  input->lastInput             = 0;
-  input->generation            = 0;
+  input->endpointGeneration          = 0;
+  input->statusSerial                = 0;
+  input->statusOwnerClientID         = 0;
+  input->statusOwnerGeneration       = 0;
+  input->ownerConfirmed              = false;
+  input->statusValid                 = false;
+  input->publishedGeneration         = 0;
+  input->publishedSequence           = 0;
+  input->publishedClaimed            = false;
+  input->lastSend                    = 0;
+  input->lastInput                   = 0;
+  input->generation                  = 0;
   memset(&input->stats, 0, sizeof(input->stats));
-  input->stats.lastReport      = microtime();
+  input->stats.lastReport            = microtime();
   clearInputState(input);
   atomic_store_explicit(&input->stop, false, memory_order_release);
   LGThread * thread;
@@ -1220,23 +1581,29 @@ void lgmpInput_disconnect(LGMPInput * input)
     return;
   }
 
-  input->pendingHead  = 0;
-  input->pendingCount = 0;
-  input->connected    = false;
-  input->claimed      = false;
+  input->pendingHead                 = 0;
+  input->pendingCount                = 0;
+  input->connected                   = false;
+  input->claimed                     = false;
   if (input->available || input->endpointGeneration ||
       input->keyboardLEDsValid)
     input->notifyStatus = true;
-  input->available         = false;
-  input->ownerBlocked      = false;
-  input->keyboardLEDsValid = false;
-  input->keyboardLEDs      = 0;
-  input->capabilities      = 0;
-  input->streamEndpointBound = false;
+  input->available                   = false;
+  input->ownerBlocked                = false;
+  input->keyboardLEDsValid           = false;
+  input->keyboardLEDs                = 0;
+  input->pendingKeyboardLEDs         = 0;
+  input->keyboardLEDTransitions      = 0;
+  input->staleKeyboardLEDs           = 0;
+  input->keyboardLEDsSyncAfter       = 0;
+  input->keyboardLEDsPendingUntil    = 0;
+  input->keyboardLEDsStaleUntil      = 0;
+  input->capabilities                = 0;
+  input->streamEndpointBound         = false;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
-  input->statusValid    = false;
-  input->ownerConfirmed = false;
+  input->statusValid                 = false;
+  input->ownerConfirmed              = false;
   clearInputState(input);
   atomic_store_explicit(&input->stop, true, memory_order_release);
   LGThread * thread = input->thread;
@@ -1251,15 +1618,21 @@ void lgmpInput_disconnect(LGMPInput * input)
   LG_LOCK(input->lock);
   releaseOnDisconnect(input);
   detachInputStream(input);
-  input->available             = false;
-  input->ownerBlocked          = false;
-  input->keyboardLEDsValid     = false;
-  input->keyboardLEDs          = 0;
-  input->statusValid           = false;
-  input->ownerConfirmed        = false;
-  input->notifyStatus          = false;
-  input->statusOwnerClientID   = 0;
-  input->statusOwnerGeneration = 0;
+  input->available                   = false;
+  input->ownerBlocked                = false;
+  input->keyboardLEDsValid           = false;
+  input->keyboardLEDs                = 0;
+  input->pendingKeyboardLEDs         = 0;
+  input->keyboardLEDTransitions      = 0;
+  input->staleKeyboardLEDs           = 0;
+  input->keyboardLEDsSyncAfter       = 0;
+  input->keyboardLEDsPendingUntil    = 0;
+  input->keyboardLEDsStaleUntil      = 0;
+  input->statusValid                 = false;
+  input->ownerConfirmed              = false;
+  input->notifyStatus                = false;
+  input->statusOwnerClientID         = 0;
+  input->statusOwnerGeneration       = 0;
   memset(&input->streamEndpoint, 0,
     sizeof(input->streamEndpoint));
   PLGMPClientQueue queue  = input->queue;
@@ -1405,6 +1778,8 @@ static bool updateKey(void * opaque, int key, bool pressed)
   }
   else if (!result && input->connected)
     *state = previous;
+  if (result && pressed && !previous)
+    recordKeyboardToggle(input, key);
   LG_UNLOCK(input->lock);
 
   if (wake)
@@ -1420,6 +1795,48 @@ static bool inputKeyDown(void * opaque, int key)
 static bool inputKeyUp(void * opaque, int key)
 {
   return updateKey(opaque, key, false);
+}
+
+static bool inputKeyboardLEDs(void * opaque, bool numLock, bool capsLock,
+    bool scrollLock)
+{
+  LGMPInput * input = opaque;
+
+  const uint8_t  desired   =
+    (numLock    ? LG_KEYBOARD_LED_NUM_LOCK    : 0) |
+    (capsLock   ? LG_KEYBOARD_LED_CAPS_LOCK   : 0) |
+    (scrollLock ? LG_KEYBOARD_LED_SCROLL_LOCK : 0);
+  const uint64_t syncAfter =
+    microtime() + INPUT_KEYBOARD_LED_SYNC_DELAY_US;
+
+  LG_LOCK(input->lock);
+  input->desiredKeyboardLEDs      = desired;
+  input->desiredKeyboardLEDsValid = true;
+  input->staleKeyboardLEDs        &= ~LOCK_LED_MASK;
+  input->keyboardLEDsStaleUntil   = 0;
+  if (input->keyboardLEDsSyncAfter < syncAfter)
+    input->keyboardLEDsSyncAfter = syncAfter;
+  const bool result = input->connected && input->available;
+  if (input->event)
+    lgSignalEvent(input->event);
+  LG_UNLOCK(input->lock);
+  return result;
+}
+
+static void inputKeyboardLEDsReset(void * opaque)
+{
+  LGMPInput * input = opaque;
+  bool        wake  = false;
+
+  LG_LOCK(input->lock);
+  input->desiredKeyboardLEDsValid = false;
+  input->staleKeyboardLEDs        = 0;
+  input->keyboardLEDsStaleUntil   = 0;
+  if (input->connected && pendingKeyboardLEDSync(input))
+    release(input, &wake);
+  if (input->event)
+    lgSignalEvent(input->event);
+  LG_UNLOCK(input->lock);
 }
 
 static bool queueMouse(LGMPInput * input, enum LGMPInputMouseMode mode,
@@ -1656,7 +2073,8 @@ static const LG_InputOps INPUT_OPS =
   .setStatusListener = inputSetStatusListener,
   .keyDown           = inputKeyDown,
   .keyUp             = inputKeyUp,
-  .keyboardLEDs      = NULL,
+  .keyboardLEDs      = inputKeyboardLEDs,
+  .keyboardLEDsReset = inputKeyboardLEDsReset,
   .mouseMotion       = inputMouseMotion,
   .mousePosition     = inputMousePosition,
   .mousePress        = inputMousePress,

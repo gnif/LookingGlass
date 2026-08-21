@@ -53,6 +53,7 @@ void lgInput_setAvailabilityListener(
 bool lgInput_keyDown(int key);
 bool lgInput_keyUp(int key);
 bool lgInput_keyboardLEDs(bool numLock, bool capsLock, bool scrollLock);
+void lgInput_setKeyboardLEDsSync(bool enable);
 void lgInput_releaseKeys(void);
 void lgInput_releaseButtons(void);
 /* Release all tracked keyboard and mouse button state under one active-input

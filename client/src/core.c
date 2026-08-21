@@ -132,10 +132,22 @@ static bool moveExit(double ex, double ey)
   return inside;
 }
 
+static bool inputPolicyEnabled(void)
+{
+  return !g_state.ignoreInput &&
+    ((g_cursor.grab && g_params.captureInputOnly) ||
+      !g_params.captureInputOnly);
+}
+
 bool core_inputEnabled(void)
 {
-  return lgInput_available() && !g_state.ignoreInput &&
-    ((g_cursor.grab && g_params.captureInputOnly) || !g_params.captureInputOnly);
+  return lgInput_available() && inputPolicyEnabled();
+}
+
+void core_updateKeyboardLEDsSync(void)
+{
+  lgInput_setKeyboardLEDsSync(
+      inputPolicyEnabled() && !evdev_isExclusive());
 }
 
 void core_updateKeyboardGrab(void)
@@ -154,6 +166,7 @@ void core_updateKeyboardGrab(void)
     (capture || (inputEnabled && (view || automatic)));
 
   evdev_setGrab(active, localActive && g_cursor.grab);
+  core_updateKeyboardLEDsSync();
   if (active)
     g_state.ds->grabKeyboard();
   else

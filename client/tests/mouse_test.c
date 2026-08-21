@@ -288,6 +288,11 @@ void evdev_setGrab(bool keyboard, bool pointer)
   (void)pointer;
 }
 
+bool evdev_isExclusive(void)
+{
+  return false;
+}
+
 static bool inputSupports(void * opaque, LG_InputSupport support)
 {
   return support == LG_INPUT_SUPPORT_MOUSE_ABSOLUTE &&

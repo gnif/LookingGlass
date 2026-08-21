@@ -24,6 +24,7 @@
 #include <stdbool.h>
 
 bool core_inputEnabled(void);
+void core_updateKeyboardLEDsSync(void);
 void core_updateKeyboardGrab(void);
 void core_invalidatePointer(bool detectInView);
 void core_setCursorInView(bool enable);

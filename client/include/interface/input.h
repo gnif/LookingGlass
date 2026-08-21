@@ -69,6 +69,8 @@ typedef struct LG_InputOps
   bool (*keyUp)(void * opaque, int key);
   bool (*keyboardLEDs)(void * opaque, bool numLock, bool capsLock,
       bool scrollLock);
+  /* Cancel any queued host-to-guest lock-state reconciliation. */
+  void (*keyboardLEDsReset)(void * opaque);
 
   bool (*mouseMotion)(void * opaque, int32_t x, int32_t y);
   /* Position is in guest pixels and must be within the supplied dimensions. */
