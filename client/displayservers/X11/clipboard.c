@@ -76,14 +76,16 @@ struct X11ClipboardWrite
 
 struct X11ClipboardFileImport
 {
-  Window        window;
-  Atom          target;
-  const char  * mime;
-  long          propertyOffset;
-  uint8_t     * data;
-  size_t        size;
-  size_t        capacity;
-  bool          incremental;
+  Window           window;
+  Atom             target;
+  const char     * mime;
+  long             propertyOffset;
+  uint8_t        * data;
+  size_t           size;
+  size_t           capacity;
+  bool             incremental;
+  LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
+  size_t           typeCount;
 };
 
 struct X11ClipboardState
@@ -858,7 +860,8 @@ static bool fileImportGrowNL(size_t wanted)
   return true;
 }
 
-static bool startFileImport(Atom target)
+static bool startFileImport(Atom target,
+    const LG_ClipboardData types[], size_t typeCount)
 {
   const char * mime = fileMimeForAtom(target);
   if (!mime)
@@ -886,6 +889,8 @@ static bool startFileImport(Atom target)
     .target = target,
     .mime   = mime,
   };
+  memcpy(x11cb.fileImport.types, types, typeCount * sizeof(*types));
+  x11cb.fileImport.typeCount = typeCount;
   XSelectInput(x11.display, window, PropertyChangeMask);
   XConvertSelection(x11.display, x11cb.aCurSelection, target,
       x11atoms.SEL_DATA, window, CurrentTime);
@@ -900,9 +905,16 @@ static void finishFileImport(struct X11ClipboardFileImport import,
   if (!clipboardFiles_setLocal(import.mime, data, size))
   {
     clipboardFiles_clearLocal();
-    clipboard_release();
+    clipboard_notifyTypes(import.types, import.typeCount);
   }
   free(import.data);
+}
+
+static void failFileImport(struct X11ClipboardFileImport import)
+{
+  free(import.data);
+  clipboardFiles_clearLocal();
+  clipboard_notifyTypes(import.types, import.typeCount);
 }
 
 static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
@@ -930,8 +942,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
     LG_UNLOCK(x11cb.lock);
     if (data)
       XFree(data);
-    free(failed.data);
-    clipboard_release();
+    failFileImport(failed);
     return true;
   }
 
@@ -943,8 +954,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
       LG_UNLOCK(x11cb.lock);
       if (data)
         XFree(data);
-      free(failed.data);
-      clipboard_release();
+      failFileImport(failed);
       return true;
     }
     x11cb.fileImport.incremental = true;
@@ -960,10 +970,7 @@ static bool x11CBFileImportSelectionNotify(const XSelectionEvent e)
   if (valid)
     finishFileImport(import, data, itemCount);
   else
-  {
-    free(import.data);
-    clipboard_release();
-  }
+    failFileImport(import);
   if (data)
     XFree(data);
   return true;
@@ -1000,8 +1007,7 @@ readProperty:
     LG_UNLOCK(x11cb.lock);
     if (data)
       XFree(data);
-    free(failed.data);
-    clipboard_release();
+    failFileImport(failed);
     return;
   }
 
@@ -1026,8 +1032,7 @@ readProperty:
     {
       const struct X11ClipboardFileImport failed = takeFileImportNL();
       LG_UNLOCK(x11cb.lock);
-      free(failed.data);
-      clipboard_release();
+      failFileImport(failed);
       return;
     }
     x11cb.fileImport.propertyOffset += (long)units;
@@ -1407,11 +1412,23 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
       goto out;
     }
 
-    size_t typeCount = 0;
+    size_t           typeCount = 0;
     LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
 
     // see if we support any of the targets listed
     const Atom * targets = (const Atom *)data;
+    for(int n = 0; n < LG_CLIPBOARD_DATA_NONE; ++n)
+    {
+      if (n == LG_CLIPBOARD_DATA_FILES)
+        continue;
+      for(unsigned long i = 0; i < itemCount; ++i)
+        if (x11cb.aTypes[n] == targets[i])
+        {
+          types[typeCount++] = n;
+          break;
+        }
+    }
+
     Atom fileTarget = None;
     for (unsigned long i = 0; i < itemCount; ++i)
     {
@@ -1438,18 +1455,10 @@ static void x11CBSelectionNotify(const XSelectionEvent e)
     if (fileTarget != None)
     {
       clipboardFiles_clearLocal();
-      if (!startFileImport(fileTarget))
-        clipboard_release();
+      if (!startFileImport(fileTarget, types, typeCount))
+        clipboard_notifyTypes(types, typeCount);
       goto out;
     }
-
-    for(int n = 0; n < LG_CLIPBOARD_DATA_NONE; ++n)
-      for(unsigned long i = 0; i < itemCount; ++i)
-        if (x11cb.aTypes[n] == targets[i])
-        {
-          types[typeCount++] = n;
-          break;
-        }
 
     clipboard_notifyTypes(types, typeCount);
     goto out;

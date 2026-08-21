@@ -210,6 +210,17 @@ static bool hasImageMimetype(char ** mimetypes)
   return false;
 }
 
+static size_t getRepresentationTypes(char * const mimetypes[],
+    LG_ClipboardData types[])
+{
+  size_t count = 0;
+  for (enum LG_ClipboardData type = 0;
+      type < LG_CLIPBOARD_DATA_NONE; ++type)
+    if (type != LG_CLIPBOARD_DATA_FILES && mimetypes[type])
+      types[count++] = type;
+  return count;
+}
+
 enum ClipboardInvalidateMode
 {
   CLIPBOARD_INVALIDATE_CONDITIONAL,
@@ -307,8 +318,10 @@ static void fileImportCleanup(void * opaque)
 static void fileImportCallback(uint32_t events, void * opaque)
 {
   struct ClipboardFileImport * import = opaque;
-  bool complete = false;
-  bool failed = (events & EPOLLERR) != 0;
+  LG_ClipboardData             types[LG_CLIPBOARD_DATA_NONE];
+  size_t                       typeCount = 0;
+  bool                         complete = false;
+  bool                         failed = (events & EPOLLERR) != 0;
   while (!failed)
   {
     if (import->size > SIZE_MAX - 4096U)
@@ -337,6 +350,8 @@ static void fileImportCallback(uint32_t events, void * opaque)
   LG_LOCK(wlCb.lock);
   const bool current = wlCb.fileImport == import &&
     wlCb.offer == import->offer;
+  if (current)
+    typeCount = getRepresentationTypes(wlCb.mimetypes, types);
   if (wlCb.fileImport == import)
     wlCb.fileImport = NULL;
   LG_UNLOCK(wlCb.lock);
@@ -345,7 +360,7 @@ static void fileImportCallback(uint32_t events, void * opaque)
         import->data, import->size)))
   {
     clipboardFiles_clearLocal();
-    clipboard_release();
+    clipboard_notifyTypes(types, typeCount);
   }
   if (current)
     waylandPollUnregister(import->fd);
@@ -516,11 +531,9 @@ static void dataDeviceHandleSelection(void * opaque,
     return;
   }
 
-  size_t idx = 0;
   enum LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
-  for (enum LG_ClipboardData i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
-    if (extra->mimetypes[i])
-      types[idx++] = i;
+  const size_t          typeCount =
+    getRepresentationTypes(extra->mimetypes, types);
 
   char * oldMimetypes[LG_CLIPBOARD_DATA_NONE];
   LG_LOCK(wlCb.lock);
@@ -555,11 +568,11 @@ static void dataDeviceHandleSelection(void * opaque,
     if (!fileImportStart(offer, wlCb.mimetypes[LG_CLIPBOARD_DATA_FILES]))
     {
       clipboardFiles_clearLocal();
-      clipboard_release();
+      clipboard_notifyTypes(types, typeCount);
     }
   }
   else
-    clipboard_notifyTypes(types, idx);
+    clipboard_notifyTypes(types, typeCount);
 }
 
 static void dataDeviceHandleEnter(void * data, struct wl_data_device * device,
