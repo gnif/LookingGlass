@@ -323,7 +323,7 @@ private:
   std::shared_ptr<CClipboardSpool> CaptureFormat(
     KVMFRClipboardFormat format, DWORD sequence);
   bool MaterializeFormat(KVMFRClipboardFormat format,
-    CClipboardSpool& spool);
+    UINT windowsFormat, CClipboardSpool& spool);
 
   void ClipboardState(bool available, uint64_t epoch) override;
   ClipboardChannelResult ClipboardRecord(

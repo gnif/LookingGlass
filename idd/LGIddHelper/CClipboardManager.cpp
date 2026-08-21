@@ -24,6 +24,7 @@
 #include <bcrypt.h>
 #include <Ole2.h>
 #include <ShlObj.h>
+#include <wincodec.h>
 
 #include <algorithm>
 #include <condition_variable>
@@ -806,6 +807,124 @@ namespace
     }
     GlobalUnlock(memory);
     return memory;
+  }
+
+  HGLOBAL PNGToDIBV5(CClipboardSpool& spool)
+  {
+    if (!spool.Size())
+    {
+      SetLastError(ERROR_INVALID_DATA);
+      return nullptr;
+    }
+
+    HGLOBAL source = CopySpoolToGlobal(spool, 0);
+    if (!source)
+      return nullptr;
+
+    ClipboardComScope<IStream> stream;
+    HRESULT result = CreateStreamOnHGlobal(source, TRUE, &stream.object);
+    if (FAILED(result))
+    {
+      GlobalFree(source);
+      SetLastError(result == E_OUTOFMEMORY ? ERROR_OUTOFMEMORY :
+        ERROR_INVALID_DATA);
+      return nullptr;
+    }
+
+    ClipboardComScope<IWICImagingFactory> factory;
+    ClipboardComScope<IWICBitmapDecoder> decoder;
+    ClipboardComScope<IWICBitmapFrameDecode> frame;
+    ClipboardComScope<IWICFormatConverter> converter;
+    result = CoCreateInstance(CLSID_WICImagingFactory, nullptr,
+      CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&factory.object));
+    if (SUCCEEDED(result))
+      result = CoCreateInstance(CLSID_WICPngDecoder, nullptr,
+        CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&decoder.object));
+    if (SUCCEEDED(result))
+      result = decoder.object->Initialize(stream.object,
+        WICDecodeMetadataCacheOnLoad);
+    if (SUCCEEDED(result))
+      result = decoder.object->GetFrame(0, &frame.object);
+    if (SUCCEEDED(result))
+      result = factory.object->CreateFormatConverter(&converter.object);
+    if (SUCCEEDED(result))
+      result = converter.object->Initialize(frame.object,
+        GUID_WICPixelFormat32bppBGRA, WICBitmapDitherTypeNone, nullptr,
+        0.0, WICBitmapPaletteTypeCustom);
+    if (FAILED(result))
+    {
+      SetLastError(result == E_OUTOFMEMORY ? ERROR_OUTOFMEMORY :
+        ERROR_INVALID_DATA);
+      return nullptr;
+    }
+
+    UINT width  = 0;
+    UINT height = 0;
+    result = converter.object->GetSize(&width, &height);
+    const UINT maxDimension = static_cast<UINT>(
+      (std::numeric_limits<LONG>::max)());
+    if (FAILED(result) || !width || !height || width > maxDimension ||
+        height > maxDimension || width > UINT_MAX / 4U)
+    {
+      SetLastError(result == E_OUTOFMEMORY ? ERROR_OUTOFMEMORY :
+        ERROR_INVALID_DATA);
+      return nullptr;
+    }
+
+    const UINT stride = width * 4U;
+    if (height > UINT64_MAX / stride)
+    {
+      SetLastError(ERROR_FILE_TOO_LARGE);
+      return nullptr;
+    }
+    const uint64_t pixelBytes = static_cast<uint64_t>(stride) * height;
+    if (pixelBytes > UINT_MAX ||
+        pixelBytes > MAX_SPOOL_BYTES - sizeof(BITMAPV5HEADER) ||
+        pixelBytes > (std::numeric_limits<SIZE_T>::max)() -
+          sizeof(BITMAPV5HEADER))
+    {
+      SetLastError(ERROR_FILE_TOO_LARGE);
+      return nullptr;
+    }
+
+    const SIZE_T outputBytes = sizeof(BITMAPV5HEADER) +
+      static_cast<SIZE_T>(pixelBytes);
+    HGLOBAL output = GlobalAlloc(GMEM_MOVEABLE, outputBytes);
+    if (!output)
+      return nullptr;
+    uint8_t * data = static_cast<uint8_t *>(GlobalLock(output));
+    if (!data)
+    {
+      GlobalFree(output);
+      return nullptr;
+    }
+
+    BITMAPV5HEADER header = {};
+    header.bV5Size        = static_cast<DWORD>(sizeof(header));
+    header.bV5Width       = static_cast<LONG>(width);
+    header.bV5Height      = -static_cast<LONG>(height);
+    header.bV5Planes      = 1;
+    header.bV5BitCount    = 32;
+    header.bV5Compression = BI_BITFIELDS;
+    header.bV5SizeImage   = static_cast<DWORD>(pixelBytes);
+    header.bV5RedMask     = 0x00ff0000U;
+    header.bV5GreenMask   = 0x0000ff00U;
+    header.bV5BlueMask    = 0x000000ffU;
+    header.bV5AlphaMask   = 0xff000000U;
+    header.bV5CSType      = LCS_sRGB;
+    header.bV5Intent      = LCS_GM_IMAGES;
+    memcpy(data, &header, sizeof(header));
+    result = converter.object->CopyPixels(nullptr, stride,
+      static_cast<UINT>(pixelBytes), data + sizeof(header));
+    GlobalUnlock(output);
+    if (FAILED(result))
+    {
+      GlobalFree(output);
+      SetLastError(result == E_OUTOFMEMORY ? ERROR_OUTOFMEMORY :
+        ERROR_INVALID_DATA);
+      return nullptr;
+    }
+    return output;
   }
 }
 
@@ -4244,10 +4363,16 @@ bool CClipboardManager::ApplyRemoteOffer(uint32_t formats,
     bool complete = true;
     if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_TEXT)
       complete = setDelayed(CF_UNICODETEXT) && complete;
-    if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_PNG)
+    const bool havePNG =
+      (formats & KVMFR_CLIPBOARD_FORMAT_MASK_PNG) != 0;
+    const bool haveBMP =
+      (formats & KVMFR_CLIPBOARD_FORMAT_MASK_BMP) != 0;
+    if (havePNG)
       complete = setDelayed(m_formatPNG) && complete;
-    if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_BMP)
+    if (haveBMP)
       complete = setDelayed(CF_DIB) && complete;
+    else if (havePNG)
+      complete = setDelayed(CF_DIBV5) && complete;
     if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_TIFF)
       complete = setDelayed(CF_TIFF) && complete;
     if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_JPEG)
@@ -4526,9 +4651,8 @@ std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
 }
 
 bool CClipboardManager::MaterializeFormat(KVMFRClipboardFormat format,
-  CClipboardSpool& spool)
+  UINT windowsFormat, CClipboardSpool& spool)
 {
-  UINT windowsFormat = ToWindowsFormat(format);
   if (format == KVMFR_CLIPBOARD_FORMAT_BMP)
     windowsFormat = CF_DIB;
   if (!windowsFormat)
@@ -4540,6 +4664,9 @@ bool CClipboardManager::MaterializeFormat(KVMFRClipboardFormat format,
   HGLOBAL memory = nullptr;
   if (format == KVMFR_CLIPBOARD_FORMAT_TEXT)
     memory = UnicodeFromUTF8(spool);
+  else if (format == KVMFR_CLIPBOARD_FORMAT_PNG &&
+      (windowsFormat == CF_DIB || windowsFormat == CF_DIBV5))
+    memory = PNGToDIBV5(spool);
   else if (format == KVMFR_CLIPBOARD_FORMAT_BMP)
   {
     BITMAPFILEHEADER header = {};
@@ -4575,7 +4702,11 @@ bool CClipboardManager::MaterializeFormat(KVMFRClipboardFormat format,
 
 void CClipboardManager::RenderFormat(UINT windowsFormat, uint64_t deadline)
 {
-  const KVMFRClipboardFormat format = ToWireFormat(windowsFormat);
+  KVMFRClipboardFormat format = ToWireFormat(windowsFormat);
+  if ((windowsFormat == CF_DIB || windowsFormat == CF_DIBV5) &&
+      !(m_remoteFormats & KVMFR_CLIPBOARD_FORMAT_MASK_BMP) &&
+      (m_remoteFormats & KVMFR_CLIPBOARD_FORMAT_MASK_PNG))
+    format = KVMFR_CLIPBOARD_FORMAT_PNG;
   if (!m_available || !m_remoteGeneration ||
       !kvmfrClipboardRepresentationFormatValid(format) ||
       !(m_remoteFormats & kvmfrClipboardFormatFlag(format)))
@@ -4658,9 +4789,11 @@ void CClipboardManager::RenderFormat(UINT windowsFormat, uint64_t deadline)
       m_incoming.reset();
   }
 
-  if (render && !MaterializeFormat(format, *transfer->spool))
-    DEBUG_WARN_HR(GetLastError(), "Failed to render clipboard format %u",
-      format);
+  if (render &&
+      !MaterializeFormat(format, windowsFormat, *transfer->spool))
+    DEBUG_WARN_HR(GetLastError(),
+      "Failed to render clipboard format %u as %u", format,
+      windowsFormat);
 }
 
 void CClipboardManager::RenderAllFormats()
@@ -4675,14 +4808,16 @@ void CClipboardManager::RenderAllFormats()
 
   const uint32_t formats = m_remoteFormats;
   const uint64_t deadline = GetTickCount64() + RENDER_TIMEOUT_MS;
+  const bool havePNG =
+    (formats & KVMFR_CLIPBOARD_FORMAT_MASK_PNG) != 0;
+  const bool haveBMP =
+    (formats & KVMFR_CLIPBOARD_FORMAT_MASK_BMP) != 0;
   if (formats & KVMFR_CLIPBOARD_FORMAT_MASK_TEXT)
     RenderFormat(CF_UNICODETEXT, deadline);
-  if (GetTickCount64() < deadline &&
-      (formats & KVMFR_CLIPBOARD_FORMAT_MASK_PNG))
+  if (GetTickCount64() < deadline && (havePNG || haveBMP))
+    RenderFormat(haveBMP ? CF_DIB : CF_DIBV5, deadline);
+  if (GetTickCount64() < deadline && havePNG)
     RenderFormat(m_formatPNG, deadline);
-  if (GetTickCount64() < deadline &&
-      (formats & KVMFR_CLIPBOARD_FORMAT_MASK_BMP))
-    RenderFormat(CF_DIB, deadline);
   if (GetTickCount64() < deadline &&
       (formats & KVMFR_CLIPBOARD_FORMAT_MASK_TIFF))
     RenderFormat(CF_TIFF, deadline);
