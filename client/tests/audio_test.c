@@ -702,6 +702,124 @@ static void testPlaybackRecovery(void)
   stopAudio();
 }
 
+static void testPlaybackResume(void)
+{
+  reset();
+  g_params.audioDebug = true;
+  startAudio();
+
+  struct Provider p;
+  initProvider(&p, "provider", true);
+  lgAudio_setFallback(&ops, &p);
+  CHECK(p.events);
+
+  const LG_AudioFormat format = makeFormat(LG_AUDIO_FMT_S16_LE);
+  p.events->playbackStart(p.eventOpaque, 11, &format, NULL);
+  for (unsigned int i = 0; i < WAIT_MS; ++i)
+  {
+    if (atomic_load_explicit(&audio.playback.streamGeneration,
+          memory_order_acquire) == 11)
+      break;
+    usleep(1000);
+  }
+  CHECK(atomic_load(&audio.playback.streamGeneration) == 11);
+  playbackSetState(STREAM_STATE_RUN);
+  audio.playback.backendStartTime = nanotime();
+
+  uint8_t output[16 * 2 * 2];
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(atomic_load(&audio.playback.underruns) == 1);
+
+  const int refill = -ringbuffer_getCount(audio.playback.buffer) + 16;
+  CHECK(ringbuffer_append(audio.playback.buffer, NULL, refill) == refill);
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(!audio.playback.deviceData.underrunning);
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(atomic_load(&audio.playback.underruns) == 2);
+
+  const unsigned int oldSyncEpoch = atomic_load_explicit(
+      &audio.playback.syncDiagnosticsEpoch, memory_order_acquire);
+  LG_LOCK(audio.playback.sourceLock);
+  PlaybackDiagnostics * diagnostics = playbackDiagnosticsLocked();
+  diagnostics->sync = (PlaybackSyncDiagnostics)
+  {
+    .epoch     = oldSyncEpoch,
+    .underruns = 99,
+  };
+  diagnostics->pending |= PLAYBACK_DIAGNOSTIC_SYNC_LOG;
+  LG_UNLOCK(audio.playback.sourceLock);
+  atomic_store(&audio.playback.backlogTrimTarget, 0);
+  atomic_store(&audio.playback.backlogTrimmedFrames, 123);
+  audio.playback.sourceData.bufferOverruns   = 7;
+  audio.playback.sourceData.backlogTrimArmed = false;
+
+  p.events->playbackStop(p.eventOpaque, 11);
+  CHECK(playbackGetState() == STREAM_STATE_KEEP_ALIVE);
+  CHECK(atomic_load(&audio.playback.underruns) == 0);
+  CHECK(!audio.playback.deviceData.underrunning);
+  CHECK(atomic_load(&audio.playback.backlogTrimTarget) == -1);
+  CHECK(atomic_load(&audio.playback.backlogTrimmedFrames) == 0);
+  CHECK(audio.playback.sourceData.bufferOverruns == 0);
+  CHECK(audio.playback.sourceData.backlogTrimArmed);
+  CHECK(atomic_load(&audio.playback.syncDiagnosticsEpoch) != oldSyncEpoch);
+  CHECK(!(audio.playback.diagnostics.pending &
+        PLAYBACK_DIAGNOSTIC_SYNC_LOG));
+
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(b.pull(output, 16) == 16);
+  CHECK(atomic_load(&audio.playback.underruns) == 0);
+
+  const unsigned int setupN = atomic_load(&b.setupN);
+  p.events->playbackStart(p.eventOpaque, 12, &format, NULL);
+  CHECK(atomic_load(&audio.playback.streamGeneration) == 12);
+  CHECK(playbackGetState() == STREAM_STATE_RESUMING);
+  CHECK(atomic_load(&b.setupN) == setupN);
+
+  uint8_t input[480 * 2 * 2] = { 0 };
+  p.events->playbackData(p.eventOpaque, 12, input, 480, NULL);
+  CHECK(atomic_load(&audio.playback.streamGeneration) == 12);
+  CHECK(playbackGetState() == STREAM_STATE_RUN);
+  CHECK(atomic_load(&audio.playback.underruns) == 0);
+
+  p.events->playbackStop(p.eventOpaque, 12);
+  CHECK(playbackGetState() == STREAM_STATE_KEEP_ALIVE);
+
+  PlaybackSourceData * source      = &audio.playback.sourceData;
+  const int64_t arrival            = nanotime();
+  const int64_t idleFrames         = INT64_C(30) * format.sampleRate;
+  const double disciplinedFrameSec =
+    1.0002 / format.sampleRate;
+  playbackClockReset(&source->deviceClock,
+      arrival - INT64_C(30000000000), 0.0, disciplinedFrameSec);
+  playbackClockReset(&source->outputClock,
+      arrival - INT64_C(30000000000), 0.0, disciplinedFrameSec);
+  source->deviceClockStable          = true;
+  source->devicePositionOffsetFrames = 37.5;
+  source->deviceTimingSequence       = atomic_load_explicit(
+      &audio.playback.deviceTiming.sequence, memory_order_acquire);
+  const int idleDebt = clamp(
+      (int64_t)ringbuffer_getCount(audio.playback.buffer) + idleFrames,
+      INT64_C(0), (int64_t)INT_MAX);
+  CHECK(ringbuffer_consume(
+        audio.playback.buffer, NULL, idleDebt) == idleDebt);
+  playbackPublishDeviceTiming(16, arrival, idleFrames,
+      (double)idleFrames, source->deviceDiscontinuity);
+
+  p.events->playbackStart(p.eventOpaque, 13, &format, NULL);
+  CHECK(atomic_load(&audio.playback.streamGeneration) == 13);
+  p.events->playbackData(p.eventOpaque, 13, input, 480, NULL);
+  CHECK(playbackGetState() == STREAM_STATE_RUN);
+  CHECK(source->deviceClock.time == arrival);
+  CHECK(source->deviceClock.position == idleFrames);
+  CHECK(fabs(source->deviceClock.frameSec - disciplinedFrameSec) < 1.0e-15);
+  CHECK(source->devicePositionOffsetFrames == 37.5);
+
+  p.events->playbackStop(p.eventOpaque, 13);
+  stopAudio();
+}
+
 static void testConsent(void)
 {
   reset();
@@ -830,6 +948,7 @@ static const struct Test tests[] =
   { "playback-retry", testPlaybackRetry },
   { "jitter"        , testPlaybackJitter },
   { "recovery"      , testPlaybackRecovery },
+  { "resume"        , testPlaybackResume },
   { "consent"       , testConsent       },
   { "quiesce"       , testQuiesce       },
 };

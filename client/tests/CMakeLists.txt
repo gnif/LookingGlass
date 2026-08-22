@@ -821,6 +821,7 @@ if(ENABLE_AUDIO)
     playback-retry
     jitter
     recovery
+    resume
     consent
     quiesce
   )

@@ -131,6 +131,7 @@ typedef struct
   double       appliedRatio;
   int          startupSilenceFrames;
   unsigned int discontinuity;
+  bool         underrunning;
 }
 PlaybackDeviceData;
 
@@ -238,6 +239,7 @@ PlaybackStartDiagnostics;
 
 typedef struct
 {
+  unsigned int        epoch;
   double              softwareLatencyMs;
   double              targetLatencyMs;
   double              controlPpm;
@@ -342,12 +344,14 @@ typedef struct
     RingBuffer            buffer;
     PlaybackDeviceTiming  deviceTiming;
     atomic_int            backlogTrimTarget;
+    atomic_flag           deviceStateGate;
     atomic_uint           underruns;
     atomic_uint_fast64_t  backlogTrimmedFrames;
 
     RingBuffer          timings;
     GraphHandle         graph;
     atomic_uint         diagnosticsEpoch;
+    atomic_uint         syncDiagnosticsEpoch;
     atomic_bool         graphReady;
     bool                graphRegistrationAttempted;
     PlaybackDiagnostics diagnostics;
@@ -620,6 +624,16 @@ static bool playbackClockUpdate(PlaybackClock * clock, int64_t time,
       nominalFrameSec * (1.0 + PLAYBACK_MAX_RATE_CORRECTION));
   ++clock->updates;
   return true;
+}
+
+static void playbackClockRebase(
+    PlaybackClock * clock, int64_t time, double position)
+{
+  DEBUG_ASSERT(clock->valid);
+  clock->time             = time;
+  clock->position         = position;
+  clock->phaseResidualSec = 0.0;
+  ++clock->updates;
 }
 
 static bool playbackSourceClockUpdate(PlaybackClock * clock, int64_t time,
@@ -1140,6 +1154,31 @@ static PlaybackDiagnostics * playbackDiagnosticsLocked(void)
   return diagnostics;
 }
 
+/* sourceLock must be held. End the old source's diagnostic interval without
+ * invalidating graph work, which belongs to the lifetime of the backend. */
+static void playbackResetSyncDiagnosticsLocked(void)
+{
+  atomic_fetch_add_explicit(
+      &audio.playback.syncDiagnosticsEpoch, 1, memory_order_release);
+  while (atomic_flag_test_and_set_explicit(
+      &audio.playback.deviceStateGate, memory_order_acquire))
+    ;
+  atomic_store_explicit(
+      &audio.playback.backlogTrimTarget, -1, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.underruns, 0, memory_order_relaxed);
+  atomic_store_explicit(
+      &audio.playback.backlogTrimmedFrames, 0, memory_order_relaxed);
+  audio.playback.deviceData.underrunning = false;
+  atomic_flag_clear_explicit(
+      &audio.playback.deviceStateGate, memory_order_release);
+  audio.playback.sourceData.bufferOverruns = 0;
+
+  PlaybackDiagnostics * diagnostics = playbackDiagnosticsLocked();
+  diagnostics->pending &= ~PLAYBACK_DIAGNOSTIC_SYNC_LOG;
+  diagnostics->sync     = (PlaybackSyncDiagnostics) { 0 };
+}
+
 static void playbackStop(void)
 {
   const bool alreadyStopped = playbackGetState() == STREAM_STATE_STOP;
@@ -1263,25 +1302,34 @@ static int playbackPullFrames(uint8_t * dst, int frames)
           memory_order_acq_rel, memory_order_acquire);
     }
 
-    if (playbackGetState() == STREAM_STATE_RUN)
+    if (playbackGetState() == STREAM_STATE_RUN &&
+        atomic_load_explicit(
+          &audio.playback.backlogTrimTarget, memory_order_acquire) >= 0 &&
+        !atomic_flag_test_and_set_explicit(
+          &audio.playback.deviceStateGate, memory_order_acquire))
     {
-      const int trimTarget = atomic_exchange_explicit(
-          &audio.playback.backlogTrimTarget, -1, memory_order_acq_rel);
-      if (trimTarget >= 0)
+      if (playbackGetState() == STREAM_STATE_RUN)
       {
-        const int queued = ringbuffer_getCount(audio.playback.buffer);
-        const int requested = max(queued - trimTarget, 0);
-        const int dropped = ringbuffer_consume(
-            audio.playback.buffer, NULL, requested);
-        if (dropped > 0)
+        const int trimTarget = atomic_exchange_explicit(
+            &audio.playback.backlogTrimTarget, -1, memory_order_acq_rel);
+        if (trimTarget >= 0)
         {
-          data->nextPosition += dropped;
-          ++data->discontinuity;
-          atomic_fetch_add_explicit(
-              &audio.playback.backlogTrimmedFrames, dropped,
-              memory_order_relaxed);
+          const int queued    = ringbuffer_getCount(audio.playback.buffer);
+          const int requested = max(queued - trimTarget, 0);
+          const int dropped   = ringbuffer_consume(
+              audio.playback.buffer, NULL, requested);
+          if (dropped > 0)
+          {
+            data->nextPosition += dropped;
+            ++data->discontinuity;
+            atomic_fetch_add_explicit(
+                &audio.playback.backlogTrimmedFrames, dropped,
+                memory_order_relaxed);
+          }
         }
       }
+      atomic_flag_clear_explicit(
+          &audio.playback.deviceStateGate, memory_order_release);
     }
 
     /* Timestamp the dequeue boundary before the current pull. The logical
@@ -1307,10 +1355,20 @@ static int playbackPullFrames(uint8_t * dst, int frames)
 
     const int audioFrames = frames - silenceFrames;
     if (g_params.audioDebug &&
+        !atomic_flag_test_and_set_explicit(
+          &audio.playback.deviceStateGate, memory_order_acquire))
+    {
+      const bool underrunning    = audioFrames > 0 &&
         playbackGetState() == STREAM_STATE_RUN &&
-        ringbuffer_getCount(audio.playback.buffer) < audioFrames)
-      atomic_fetch_add_explicit(
-          &audio.playback.underruns, 1, memory_order_relaxed);
+        ringbuffer_getCount(audio.playback.buffer) < audioFrames;
+      const bool wasUnderrunning = data->underrunning;
+      data->underrunning         = underrunning;
+      if (underrunning && !wasUnderrunning)
+        atomic_fetch_add_explicit(
+            &audio.playback.underruns, 1, memory_order_relaxed);
+      atomic_flag_clear_explicit(
+          &audio.playback.deviceStateGate, memory_order_release);
+    }
     ringbuffer_consume(audio.playback.buffer,
         dst + (size_t)silenceFrames * audio.playback.stride, audioFrames);
   }
@@ -1360,6 +1418,28 @@ static bool playbackSetupDevice(const LG_AudioFormat * format,
     audio.playback.deviceStartFrames >= 0;
 }
 
+static bool playbackResume(const LG_AudioFormat * format,
+    const LG_AudioClock * sourceClock, bool providerRateControl,
+    bool forceSoftwareResampler)
+{
+  if (forceSoftwareResampler ||
+      !audio.playback.lastFormatValid ||
+      audio.playback.lastProviderRateControl != providerRateControl ||
+      !audioFormatEqual(format, &audio.playback.lastFormat))
+    return false;
+
+  StreamState expected = STREAM_STATE_KEEP_ALIVE;
+  if (!atomic_compare_exchange_strong_explicit(
+        &audio.playback.state, &expected, STREAM_STATE_RESUMING,
+        memory_order_acq_rel, memory_order_acquire))
+    return false;
+
+  playbackPrepareMediaClock(&audio.playback.sourceData, sourceClock);
+  audio.playback.sourceData.nextLogTime =
+    nanotime() + INT64_C(5000000000);
+  return true;
+}
+
 static bool playbackStart(const LG_AudioFormat * format,
     const LG_AudioClock * sourceClock, bool providerRateControl,
     bool forceSoftwareResampler)
@@ -1378,24 +1458,11 @@ static bool playbackStart(const LG_AudioFormat * format,
   const int channels   = format->channelCount;
   const int sampleRate = format->sampleRate;
 
-  StreamState state = playbackGetState();
-  if (!forceSoftwareResampler && state == STREAM_STATE_KEEP_ALIVE &&
-      audio.playback.lastFormatValid &&
-      audio.playback.lastProviderRateControl == providerRateControl &&
-      audioFormatEqual(format, &audio.playback.lastFormat))
-  {
-    StreamState expected = STREAM_STATE_KEEP_ALIVE;
-    if (atomic_compare_exchange_strong_explicit(
-          &audio.playback.state, &expected, STREAM_STATE_RESUMING,
-          memory_order_acq_rel, memory_order_acquire))
-    {
-      playbackPrepareMediaClock(
-          &audio.playback.sourceData, sourceClock);
-      return true;
-    }
+  if (playbackResume(format, sourceClock, providerRateControl,
+        forceSoftwareResampler))
+    return true;
 
-    state = expected;
-  }
+  const StreamState state = playbackGetState();
 
   if (state != STREAM_STATE_STOP)
     playbackStop();
@@ -1415,7 +1482,8 @@ static bool playbackStart(const LG_AudioFormat * format,
   audio.playback.deviceData.outputPosition       = 0.0;
   audio.playback.deviceData.appliedRatio         = 1.0;
   audio.playback.deviceData.startupSilenceFrames = 0;
-  audio.playback.deviceData.discontinuity         = 0;
+  audio.playback.deviceData.discontinuity        = 0;
+  audio.playback.deviceData.underrunning         = false;
 
   audio.playback.sourceData.inputPosition        = 0;
   audio.playback.sourceData.outputPosition       = 0;
@@ -1894,6 +1962,7 @@ static void playbackProcessDiagnostics(void)
   LG_UNLOCK(audio.playback.sourceLock);
 
   bool   current          = false;
+  bool   syncCurrent      = false;
   double backendLatencyMs = 0.0;
   LG_LOCK(audio.playback.deviceLock);
   const StreamState state = playbackGetState();
@@ -1902,6 +1971,8 @@ static void playbackProcessDiagnostics(void)
     state != STREAM_STATE_STOP && state != STREAM_STATE_STOP_PENDING;
   if (current)
   {
+    syncCurrent = diagnostics.sync.epoch == atomic_load_explicit(
+        &audio.playback.syncDiagnosticsEpoch, memory_order_acquire);
     const bool timingsCurrent = timings &&
       timings == audio.playback.timings;
     if ((diagnostics.pending & PLAYBACK_DIAGNOSTIC_REGISTER_GRAPH) &&
@@ -1920,6 +1991,7 @@ static void playbackProcessDiagnostics(void)
       app_invalidateGraph(audio.playback.graph);
 
     if ((diagnostics.pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG) &&
+        syncCurrent &&
         audio.audioDev && audio.audioDev->playback.latency)
       backendLatencyMs =
         audio.audioDev->playback.latency() / 1000.0;
@@ -1935,7 +2007,10 @@ static void playbackProcessDiagnostics(void)
         diagnostics.start.targetLatencyMs,
         diagnostics.start.queuedLatencyMs);
 
-  if (diagnostics.pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG)
+  if ((diagnostics.pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG) &&
+      syncCurrent &&
+      diagnostics.sync.epoch == atomic_load_explicit(
+        &audio.playback.syncDiagnosticsEpoch, memory_order_acquire))
   {
     const char * controlName =
       diagnostics.sync.rateControl == PLAYBACK_RATE_PROVIDER ? "feedback" :
@@ -1971,6 +2046,9 @@ static void playbackSourceStop(void)
             &audio.playback.state, &state, STREAM_STATE_KEEP_ALIVE,
             memory_order_acq_rel, memory_order_acquire))
         break;
+
+      audio.playback.sourceData.backlogTrimArmed = true;
+      playbackResetSyncDiagnosticsLocked();
 
       // Reset the software resampler so it is safe for the next playback
       if (audio.playback.sourceData.src)
@@ -2135,11 +2213,13 @@ static int playbackSlewBuffer(
 }
 
 static bool playbackUseLowWaterRecovery(bool providerRateControl,
-    bool bufferUnderrun, const PlaybackSourceData * sourceData)
+    bool bufferUnderrun, StreamState state,
+    const PlaybackSourceData * sourceData)
 {
   return providerRateControl ||
-    (bufferUnderrun && (!sourceData->deviceClock.valid ||
-      !sourceData->deviceClockStable));
+    ((!sourceData->deviceClock.valid || !sourceData->deviceClockStable) &&
+      (bufferUnderrun || state == STREAM_STATE_KEEP_ALIVE ||
+        state == STREAM_STATE_RESUMING));
 }
 
 static void playbackResetRateControl(PlaybackSourceData * sourceData,
@@ -2376,6 +2456,49 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
       sourceData->lastRatio           = 1.0;
       sourceData->nextFeedbackTime    = 0;
     }
+    else if (state == STREAM_STATE_RESUMING &&
+        sourceData->deviceClock.valid)
+    {
+      /* The callback clock continued throughout KEEP_ALIVE. Rebase its phase
+       * to the newest published tick while preserving the disciplined rate;
+       * feeding the entire idle gap through the short-step filter produces
+       * unstable gains. An incomplete acquisition starts over from this tick. */
+      const bool monotonic =
+        deviceTick.nextTime >= sourceData->deviceClock.time &&
+        deviceTick.nextPosition >= sourceData->deviceClock.position &&
+        (audio.playback.rateControl != PLAYBACK_RATE_BACKEND ||
+          !sourceData->outputClock.valid ||
+          (deviceTick.nextTime >= sourceData->outputClock.time &&
+            deviceTick.outputPosition >= sourceData->outputClock.position));
+      if (!monotonic)
+      {
+        playbackClockReset(&sourceData->deviceClock,
+            deviceTick.nextTime, deviceTick.nextPosition, nominalFrameSec);
+        if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND)
+          playbackClockReset(&sourceData->outputClock,
+              deviceTick.nextTime, deviceTick.outputPosition,
+              nominalFrameSec);
+        playbackDeviceClockAcquireReset(sourceData);
+        discontinuity = true;
+      }
+      else
+      {
+        playbackClockRebase(&sourceData->deviceClock,
+            deviceTick.nextTime, deviceTick.nextPosition);
+        if (audio.playback.rateControl == PLAYBACK_RATE_BACKEND)
+        {
+          if (sourceData->outputClock.valid)
+            playbackClockRebase(&sourceData->outputClock,
+                deviceTick.nextTime, deviceTick.outputPosition);
+          else
+            playbackClockReset(&sourceData->outputClock,
+                deviceTick.nextTime, deviceTick.outputPosition,
+                nominalFrameSec);
+        }
+        if (!sourceData->deviceClockStable)
+          playbackDeviceClockAcquireReset(sourceData);
+      }
+    }
     else
     {
       const bool deviceClockUpdated =
@@ -2459,7 +2582,7 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   double devPosition = DBL_MIN;
   state = playbackGetState();
   if (playbackUseLowWaterRecovery(providerRateControl,
-        bufferUnderrun, sourceData) &&
+        bufferUnderrun, state, sourceData) &&
       (discontinuity ||
        state == STREAM_STATE_KEEP_ALIVE ||
        state == STREAM_STATE_RESUMING))
@@ -2835,39 +2958,42 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
 
   if (now >= sourceData->nextLogTime)
   {
-    const bool providerControl =
+    const bool providerControl           =
       audio.playback.rateControl == PLAYBACK_RATE_PROVIDER;
-    const double controlPpm = providerControl ?
+    const double controlPpm              = providerControl ?
       (playbackProviderRate(sourceData) /
         audio.playback.sampleRate - 1.0) * 1.0e6 :
       (ratio - 1.0) * 1.0e6;
-    const unsigned int underruns = atomic_exchange_explicit(
+    const unsigned int underruns         = atomic_exchange_explicit(
         &audio.playback.underruns, 0, memory_order_relaxed);
-    PlaybackDiagnostics * diagnostics = playbackDiagnosticsLocked();
-    const unsigned int pendingUnderruns =
-      diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG ?
+    PlaybackDiagnostics * diagnostics    = playbackDiagnosticsLocked();
+    const unsigned int syncEpoch         = atomic_load_explicit(
+        &audio.playback.syncDiagnosticsEpoch, memory_order_acquire);
+    const bool pendingSync               =
+      (diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG) &&
+      diagnostics->sync.epoch == syncEpoch;
+    const unsigned int pendingUnderruns  = pendingSync ?
         diagnostics->sync.underruns : 0;
-    const unsigned int pendingOverruns =
-      diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG ?
+    const unsigned int pendingOverruns   = pendingSync ?
         diagnostics->sync.overruns : 0;
-    const double pendingBacklogTrimmedMs =
-      diagnostics->pending & PLAYBACK_DIAGNOSTIC_SYNC_LOG ?
+    const double pendingBacklogTrimmedMs = pendingSync ?
         diagnostics->sync.backlogTrimmedMs : 0.0;
     diagnostics->sync = (PlaybackSyncDiagnostics)
     {
+      .epoch             = syncEpoch,
       .softwareLatencyMs = softwareLatencyMs,
       .targetLatencyMs   =
         targetLatencyFrames * 1000.0 / audio.playback.sampleRate,
-      .controlPpm       = controlPpm,
-      .jitterMs         = sourceData->arrivalJitterSec * 1000.0,
-      .underruns        = pendingUnderruns + underruns,
-      .overruns         = pendingOverruns + sourceData->bufferOverruns,
-      .backlogTrimmedMs = pendingBacklogTrimmedMs +
+      .controlPpm        = controlPpm,
+      .jitterMs          = sourceData->arrivalJitterSec * 1000.0,
+      .underruns         = pendingUnderruns + underruns,
+      .overruns          = pendingOverruns + sourceData->bufferOverruns,
+      .backlogTrimmedMs  = pendingBacklogTrimmedMs +
         atomic_exchange_explicit(
           &audio.playback.backlogTrimmedFrames, 0,
           memory_order_relaxed) * 1000.0 /
           audio.playback.sampleRate,
-      .rateControl      = audio.playback.rateControl,
+      .rateControl       = audio.playback.rateControl,
     };
     diagnostics->pending |= PLAYBACK_DIAGNOSTIC_SYNC_LOG;
 
@@ -3664,6 +3790,7 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
   const bool providerRateControl =
     active.ops->clockFeedback &&
     audio.feedback.wakeInitialized && audio.feedback.thread;
+  bool       wake                = false;
 
   LG_LOCK(audio.playback.sourceLock);
   ++audio.playback.requestSerial;
@@ -3681,7 +3808,32 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
   if (audio.playback.requestedFormatValid)
   {
     audio.playback.requestedFormat = *format;
-    if (audio.playback.startInProgress)
+    bool resumed = false;
+    if (!audio.playback.startInProgress &&
+        playbackGetState() == STREAM_STATE_KEEP_ALIVE &&
+        audio.playback.backendStartTime != 0)
+    {
+      LG_LOCK(audio.playback.deviceLock);
+      resumed = playbackResume(format, NULL, providerRateControl,
+          false);
+      if (resumed)
+      {
+        if (atomic_load_explicit(&audio.playback.activeAttemptSerial,
+              memory_order_acquire))
+          audio.playback.backendRequestSerial =
+            audio.playback.requestSerial;
+        atomic_store_explicit(&audio.playback.streamGeneration,
+            generation, memory_order_release);
+        audio.playback.controlsPending = true;
+        audio.playback.nextStartRetry  = 0;
+        wake                           = true;
+      }
+      LG_UNLOCK(audio.playback.deviceLock);
+    }
+
+    if (resumed)
+      audio.playback.startPending = false;
+    else if (audio.playback.startInProgress)
     {
       audio.playback.startPending = true;
       playbackWorkerWake();
@@ -3702,6 +3854,8 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
     audio.playback.requestedGeneration = 0;
   }
   LG_UNLOCK(audio.playback.sourceLock);
+  if (wake)
+    playbackWorkerWake();
   eventEnd();
 }
 
@@ -4285,7 +4439,9 @@ void lgAudio_init(void)
   atomic_init(&audio.playback.activeAttemptSerial, 0);
   atomic_init(&audio.playback.failedAttemptSerial, 0);
   atomic_init(&audio.playback.diagnosticsEpoch, 1);
+  atomic_init(&audio.playback.syncDiagnosticsEpoch, 1);
   atomic_init(&audio.playback.graphReady, false);
+  atomic_flag_clear(&audio.playback.deviceStateGate);
   atomic_init(&audio.playback.backlogTrimTarget, -1);
   atomic_init(&audio.playback.backlogTrimmedFrames, 0);
   atomic_init(&audio.playback.deviceTiming.discontinuity, 0);
