@@ -819,6 +819,7 @@ if(ENABLE_AUDIO)
     convert
     provider
     playback-retry
+    jitter
     consent
     quiesce
   )

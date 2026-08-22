@@ -624,6 +624,36 @@ static void testPlaybackRetry(void)
   stopAudio();
 }
 
+static void testPlaybackJitter(void)
+{
+  PlaybackSourceData source = { 0 };
+  playbackPrepareMediaClock(&source, NULL);
+
+  bool discontinuity = false;
+  playbackMapMediaTime(&source, NULL, 480, 48000, 0,
+      &discontinuity);
+  source.inputPosition   = 480;
+  source.lastArrivalTime = 0;
+
+  discontinuity = true;
+  playbackMapMediaTime(&source, NULL, 480, 48000,
+      INT64_C(110000000), &discontinuity);
+  CHECK(discontinuity);
+  CHECK(source.arrivalJitterSec == 0.0);
+
+  memset(&source, 0, sizeof(source));
+  playbackPrepareMediaClock(&source, NULL);
+  discontinuity = false;
+  playbackMapMediaTime(&source, NULL, 480, 48000, 0,
+      &discontinuity);
+  source.inputPosition   = 480;
+  source.lastArrivalTime = 0;
+  playbackMapMediaTime(&source, NULL, 480, 48000,
+      INT64_C(20000000), &discontinuity);
+  CHECK(source.arrivalJitterSec > 0.009);
+  CHECK(source.arrivalJitterSec < 0.011);
+}
+
 static void testConsent(void)
 {
   reset();
@@ -750,6 +780,7 @@ static const struct Test tests[] =
   { "convert"       , testConvert       },
   { "provider"      , testProvider      },
   { "playback-retry", testPlaybackRetry },
+  { "jitter"        , testPlaybackJitter },
   { "consent"       , testConsent       },
   { "quiesce"       , testQuiesce       },
 };

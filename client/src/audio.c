@@ -924,7 +924,7 @@ static int64_t playbackMapMediaTime(PlaybackSourceData * sourceData,
   }
 
   const int64_t delta = time - sourceData->mediaTime;
-  if ((!clock || !clock->discontinuity) &&
+  if (!*discontinuity && (!clock || !clock->discontinuity) &&
       sourceData->mediaClockFromSource == fromSource &&
       sourceData->mediaPositionValid &&
       sourceData->mediaPosition == position && delta >= 0 &&
@@ -937,8 +937,9 @@ static int64_t playbackMapMediaTime(PlaybackSourceData * sourceData,
       (now - sourceData->lastArrivalTime) * 1.0e-9;
     const double lateness = max(arrivalDelta - mediaDelta, 0.0);
 
-    /* Learn harmful late delivery before a buffer underrun rebases the media
-     * clock. Early catch-up packets do not require additional reserve. */
+    /* Learn harmful late delivery only while playback remains continuous.
+     * An underrun rebases the media clock and must not become future
+     * latency. Early catch-up packets do not require additional reserve. */
     sourceData->arrivalJitterSec =
       min(PLAYBACK_MAX_JITTER_SEC,
           max(lateness, sourceData->arrivalJitterSec *
