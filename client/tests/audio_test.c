@@ -702,6 +702,78 @@ static void testPlaybackRecovery(void)
   stopAudio();
 }
 
+static void testPlaybackStableUnderrun(void)
+{
+  reset();
+  startAudio();
+
+  const LG_AudioFormat format = makeFormat(LG_AUDIO_FMT_S16_LE);
+  CHECK(playbackStart(&format, NULL, false, false));
+  CHECK(audio.playback.rateControl == PLAYBACK_RATE_BACKEND);
+  playbackSetState(STREAM_STATE_RUN);
+
+  PlaybackSourceData * source = &audio.playback.sourceData;
+  const int64_t arrival       = nanotime();
+  playbackClockReset(&source->deviceClock,
+      arrival, 0.0, 1.0 / format.sampleRate);
+  source->deviceClockStable           = true;
+  source->devicePositionOffsetFrames  = 0.0;
+  source->outputPosition              = 1000;
+  source->lastRatio                   = 0.999;
+  source->lastClockRatio              = 1.0002;
+  source->sourcePacketDurationSec     = 0.010;
+  playbackPublishDeviceTiming(16, arrival, 0, 0.0, 0);
+
+  CHECK(source->outputPosition - computeDevicePosition(arrival) > 900.0);
+  CHECK(ringbuffer_append(audio.playback.buffer, NULL, 1000) == 1000);
+  CHECK(ringbuffer_consume(audio.playback.buffer, NULL, 1128) == 1128);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) == -128);
+  uint8_t frames[64 * 2 * 2];
+  uint8_t output[64 * 2 * 2];
+  memset(frames, 0x5a, sizeof(frames));
+  CHECK(playbackData(frames, 64, NULL, arrival) ==
+      PLAYBACK_DATA_PROCESSED);
+
+  const int    recoveredOccupancy =
+    ringbuffer_getCount(audio.playback.buffer) - 64;
+  const double recoveredPosition  = source->outputPosition - 64;
+  const double recoveredLatency   = recoveredPosition -
+    computeDevicePosition(source->sourceClock.time);
+  const double targetLowWater     =
+    audio.playback.deviceMaxPeriodFrames * 1.1 +
+      0.001 * format.sampleRate;
+  const double sourceReserve      =
+    max(source->sourcePacketDurationSec * 0.5,
+        source->sourcePhaseReserveSec) * format.sampleRate;
+  const double targetLatency      = targetLowWater + sourceReserve;
+  CHECK(recoveredOccupancy >= (int)ceil(targetLowWater));
+  CHECK(fabs(recoveredLatency - targetLatency) < 0.000001);
+  CHECK(!source->bufferOverrunPending);
+  CHECK(source->deviceClockStable);
+  CHECK(source->devicePositionOffsetFrames > 0.0);
+  CHECK(fabs(source->deviceClock.frameSec -
+        1.0 / format.sampleRate) < 0.000000001);
+  CHECK(fabs(atomic_load(&audio.playback.backendResampleRatio) -
+        source->lastClockRatio) < 0.000001);
+
+  CHECK(ringbuffer_consume(audio.playback.buffer, output, 64) == 64);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) == recoveredOccupancy);
+
+  const double recoveredOffset       =
+    source->devicePositionOffsetFrames;
+  const int64_t secondPacketArrival  = arrival +
+    llrint(64.0e9 / format.sampleRate);
+  CHECK(playbackData(frames, 64, NULL,
+        secondPacketArrival) == PLAYBACK_DATA_PROCESSED);
+  CHECK(source->devicePositionOffsetFrames == recoveredOffset);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) ==
+      recoveredOccupancy + 64);
+  CHECK(ringbuffer_consume(audio.playback.buffer, output, 64) == 64);
+  CHECK(ringbuffer_getCount(audio.playback.buffer) == recoveredOccupancy);
+
+  stopAudio();
+}
+
 static void testPlaybackResume(void)
 {
   reset();
@@ -942,15 +1014,16 @@ struct Test
 
 static const struct Test tests[] =
 {
-  { "format"        , testFormat        },
-  { "convert"       , testConvert       },
-  { "provider"      , testProvider      },
-  { "playback-retry", testPlaybackRetry },
-  { "jitter"        , testPlaybackJitter },
-  { "recovery"      , testPlaybackRecovery },
-  { "resume"        , testPlaybackResume },
-  { "consent"       , testConsent       },
-  { "quiesce"       , testQuiesce       },
+  { "format"         , testFormat                  },
+  { "convert"        , testConvert                 },
+  { "provider"       , testProvider                },
+  { "playback-retry" , testPlaybackRetry           },
+  { "jitter"         , testPlaybackJitter          },
+  { "recovery"       , testPlaybackRecovery        },
+  { "stable-underrun", testPlaybackStableUnderrun  },
+  { "resume"         , testPlaybackResume          },
+  { "consent"        , testConsent                 },
+  { "quiesce"        , testQuiesce                 },
 };
 
 int main(int argc, char ** argv)

@@ -2609,12 +2609,37 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
       sourceData->deviceClockStable)
   {
     devPosition = computeDevicePosition(curTime);
-    const double slew = devPosition + targetBufferFrames - curPosition;
+    const bool   activeUnderrun =
+      bufferUnderrun && state == STREAM_STATE_RUN;
+    const double clockSlew      =
+      devPosition + targetBufferFrames - curPosition;
+    double       slew           = clockSlew;
+    if (activeUnderrun)
+    {
+      const int    occupancy    = ringbuffer_getCount(audio.playback.buffer);
+      const double physicalSlew =
+        ceil(targetLowWaterFrames - occupancy);
+      if (physicalSlew > slew)
+        slew = physicalSlew;
+    }
+
     const int slewFrames = clamp(llrint(slew), (int64_t)INT_MIN,
         (int64_t)INT_MAX);
     const int actualSlew = playbackSlewBuffer(sourceData, slewFrames);
+
+    /* A negative unbounded ring must be restored in the physical domain even
+     * when the fitted clock asks for a smaller correction. Move the clock's
+     * phase translation by the excess so the forced refill neither appears as
+     * additional latency nor restarts the underrun/slew cycle. */
+    const double correction = actualSlew - clockSlew;
+    if (activeUnderrun && correction > 0.0)
+    {
+      sourceData->devicePositionOffsetFrames += correction;
+      devPosition                            += correction;
+    }
+
     sourceData->outputPosition += actualSlew;
-    curPosition += actualSlew;
+    curPosition                += actualSlew;
 
     playbackResetRateControl(sourceData, providerRateControl);
     if (state == STREAM_STATE_KEEP_ALIVE ||
