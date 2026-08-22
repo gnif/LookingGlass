@@ -494,7 +494,8 @@ static void pipewire_onPlaybackProcess(void * userdata)
     return;
   }
 
-  int frames = sbuf->datas[0].maxsize / pw.playback.stride;
+  int                        frames    =
+    sbuf->datas[0].maxsize / pw.playback.stride;
   struct spa_io_rate_match * rateMatch = atomic_load_explicit(
       &pw.playback.rateMatch, memory_order_acquire);
   if (rateMatch && rateMatch->size > 0)
@@ -503,6 +504,17 @@ static void pipewire_onPlaybackProcess(void * userdata)
   else if (pbuf->requested > 0)
     frames = min(frames, pbuf->requested);
 #endif
+  else
+  {
+#if PW_CHECK_VERSION(1, 1, 0)
+    struct pw_time time = {0};
+    if (pw_stream_get_time_n(
+          pw.playback.stream, &time, sizeof(time)) >= 0 && time.size > 0)
+      frames = (int)min((uint64_t)frames, time.size);
+    else
+#endif
+      frames = min(frames, pw.playback.maxPeriodFrames);
+  }
 
   const int requestedFrames = frames;
   frames = pw.playback.pullFn(dst, requestedFrames);
