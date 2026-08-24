@@ -802,6 +802,13 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     goto exit;
   }
 
+  if (!desc.dirtyRects || desc.nbDirtyRects > D12_MAX_DIRTY_RECTS)
+  {
+    DEBUG_ERROR("D12 backend returned invalid damage metadata");
+    desc.dirtyRects   = this->dirtyRects;
+    desc.nbDirtyRects = 0;
+  }
+
   const D3D12_RESOURCE_DESC srcDesc = ID3D12Resource_GetDesc(*src);
   D12FrameFormat srcFormat =
   {
@@ -943,9 +950,15 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
     if (effect->enabled)
       d12_effectAdjustDamage(effect, desc.dirtyRects, &desc.nbDirtyRects);
 
+  if (desc.nbDirtyRects > D12_MAX_DIRTY_RECTS)
+  {
+    DEBUG_ERROR("D12 effect returned too many damage rectangles");
+    desc.nbDirtyRects = 0;
+  }
+
   {
     // create a clean list of rects
-    FrameDamageRect allRects[desc.nbDirtyRects];
+    FrameDamageRect allRects[D12_MAX_DIRTY_RECTS];
     unsigned count = 0;
     for(const RECT * rect = desc.dirtyRects;
       rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
@@ -994,18 +1007,31 @@ static CaptureResult d12_getFrame(
   comRef_scopePush(3);
 
   D12FrameDesc desc;
+  FrameDamageRect allRects[D12_MAX_DIRTY_RECTS * 2];
 
   comRef_defineLocal(ID3D12Resource, src);
   DEBUG_TRACE("d12_backendFetch");
   *src = d12_backendFetch(this->backend, frameBufferIndex, &desc);
   unsigned rectCount = 0;
-  FrameDamageRect allRects[this->nbDirtyRects + desc.nbDirtyRects];
 
   if (!*src)
   {
     DEBUG_ERROR("D12 backend failed to produce an expected frame: %u",
       frameBufferIndex);
     goto exit;
+  }
+
+  if (!desc.dirtyRects || desc.nbDirtyRects > D12_MAX_DIRTY_RECTS)
+  {
+    DEBUG_ERROR("D12 backend returned invalid damage metadata");
+    desc.dirtyRects   = this->dirtyRects;
+    desc.nbDirtyRects = 0;
+  }
+
+  if (this->nbDirtyRects > D12_MAX_DIRTY_RECTS)
+  {
+    DEBUG_ERROR("Discarding invalid prior D12 damage metadata");
+    this->nbDirtyRects = 0;
   }
 
   void * map;
@@ -1045,6 +1071,12 @@ static CaptureResult d12_getFrame(
       next,
       desc.dirtyRects,
       &desc.nbDirtyRects);
+  }
+
+  if (desc.nbDirtyRects > D12_MAX_DIRTY_RECTS)
+  {
+    DEBUG_ERROR("D12 effect returned too many damage rectangles");
+    desc.nbDirtyRects = 0;
   }
 
   // copy into the framebuffer resource

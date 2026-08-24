@@ -538,7 +538,9 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
       &requiredSize);
     if (FAILED(hr))
     {
-      if (hr != DXGI_ERROR_MORE_DATA)
+      if (hr == DXGI_ERROR_MORE_DATA)
+        goto fullDamage;
+      else
       {
         DEBUG_WINERROR("GetFrameDirtyRects failed", hr);
         goto exit;
@@ -546,6 +548,10 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
     }
     else
     {
+      if (requiredSize % sizeof(*this->current->dirtyRects) ||
+          requiredSize > sizeof(this->current->dirtyRects))
+        goto fullDamage;
+
       unsigned nbDirtyRects = requiredSize / sizeof(*this->current->dirtyRects);
 
       // if there is only one damage rect and it covers the entire frame
@@ -559,20 +565,31 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
       this->current->nbDirtyRects = nbDirtyRects;
     }
 
-    DXGI_OUTDUPL_MOVE_RECT moveRects[
-      (ARRAY_LENGTH(this->current->dirtyRects) - this->current->nbDirtyRects) / 2
-    ];
+    const unsigned moveCapacity =
+      (ARRAY_LENGTH(this->current->dirtyRects) -
+        this->current->nbDirtyRects) / 2;
+    if (!moveCapacity)
+      goto fullDamage;
+
+    DXGI_OUTDUPL_MOVE_RECT moveRects[D12_MAX_DIRTY_RECTS / 2];
+    const UINT moveBufferSize =
+      moveCapacity * sizeof(*moveRects);
     hr = IDXGIOutputDuplication_GetFrameMoveRects(*this->dup,
-      sizeof(moveRects), moveRects, &requiredSize);
+      moveBufferSize, moveRects, &requiredSize);
     if (FAILED(hr))
     {
-      this->current->nbDirtyRects = 0;
-      if (hr != DXGI_ERROR_MORE_DATA)
+      if (hr == DXGI_ERROR_MORE_DATA)
+        goto fullDamage;
+      else
       {
         DEBUG_WINERROR("GetFrameMoveRects failed", hr);
         goto exit;
       }
     }
+
+    if (requiredSize % sizeof(*moveRects) ||
+        requiredSize > moveBufferSize)
+      goto fullDamage;
 
     /* Move rects are seemingly not generated on Windows 10, but incase it
      * becomes a thing in the future we still need to implement this */
@@ -586,6 +603,10 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
       if (moveRect->SourcePoint.x == moveRect->DestinationRect.left &&
           moveRect->SourcePoint.y == moveRect->DestinationRect.top)
         continue;
+
+      if (this->current->nbDirtyRects >
+          ARRAY_LENGTH(this->current->dirtyRects) - 2)
+        goto fullDamage;
 
       /* Add the source rect to the dirty array */
       this->current->dirtyRects[this->current->nbDirtyRects++] = (RECT)
@@ -605,6 +626,7 @@ static bool d12_dd_handleFrameUpdate(DDInstance * this, IDXGIResource * res)
   }
 
 fullDamage:
+  this->current->nbDirtyRects = 0;
   result = true;
 
 exit:
