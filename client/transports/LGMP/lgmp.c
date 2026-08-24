@@ -155,8 +155,9 @@ struct LG_Transport
   struct LGMPFrameLease   frameLease[LGMP_FRAME_LEASE_COUNT];
 
   struct DMAFrameInfo dma[LGMP_Q_FRAME_BUFFER_LEN];
-  uint8_t            * pointerData;
-  size_t               pointerDataSize;
+  uint8_t             * pointerData;
+  size_t                pointerDataSize;
+  KVMFRColorTransform   pointerColorTransform;
 
   size_t      lgmpSize;
   KVMFRR    * recovery;
@@ -2397,7 +2398,13 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
                transformSize > payloadSize - shapeSize))
             status = LG_TRANSPORT_ERROR;
           else if (status == LG_TRANSPORT_OK)
+          {
             pointerFlags = (uint32_t)message.udata;
+            if (transformSize)
+              memcpy(&this->pointerColorTransform,
+                  (const uint8_t *)(cursor + 1) + shapeSize,
+                  sizeof(this->pointerColorTransform));
+          }
         }
 
         const LG_TransportStatus done =
@@ -2481,8 +2488,7 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   result->sdrWhiteLevel = cursor->sdrWhiteLevel;
   result->shape         = (const uint8_t *)(cursor + 1);
   if (transformSize)
-    result->colorTransform = (const LGColorTransform *)(result->shape +
-        shapeSize);
+    result->colorTransform = &this->pointerColorTransform;
   lgmp_releaseVideoStatusLifetime(this);
   return LG_TRANSPORT_OK;
 }
