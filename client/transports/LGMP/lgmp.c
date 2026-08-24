@@ -48,6 +48,13 @@
   ((KVMFR_R_HEARTBEAT_MS * 3U) * 1000U)
 #define LGMP_RECOVERY_LIVE_TIMEOUT_US \
   ((KVMFR_R_HEARTBEAT_MS * 4U) * 1000U)
+#define LGMP_CURSOR_MAX_WIDTH      512U
+#define LGMP_CURSOR_MAX_HEIGHT     512U
+#define LGMP_CURSOR_MAX_SHAPE_SIZE \
+  ((size_t)LGMP_CURSOR_MAX_WIDTH * LGMP_CURSOR_MAX_HEIGHT * 4U)
+#define LGMP_CURSOR_MAX_MESSAGE_SIZE \
+  (sizeof(KVMFRCursor) + LGMP_CURSOR_MAX_SHAPE_SIZE + \
+    sizeof(KVMFRColorTransform))
 
 struct DMAFrameInfo
 {
@@ -2263,6 +2270,43 @@ static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
   memset(frame, 0, sizeof(*frame));
 }
 
+static bool lgmp_cursorShapeSize(const KVMFRCursor * cursor,
+    size_t * shapeSize)
+{
+  if (!cursor->width || !cursor->height || !cursor->pitch ||
+      cursor->width > LGMP_CURSOR_MAX_WIDTH)
+    return false;
+
+  size_t rowBytes;
+  uint32_t decodedHeight;
+  switch (cursor->type)
+  {
+    case CURSOR_TYPE_COLOR:
+    case CURSOR_TYPE_MASKED_COLOR:
+      rowBytes      = (size_t)cursor->width * 4U;
+      decodedHeight = cursor->height;
+      break;
+
+    case CURSOR_TYPE_MONOCHROME:
+      if (cursor->height & 1U)
+        return false;
+      rowBytes      = ((size_t)cursor->width + 7U) / 8U;
+      decodedHeight = cursor->height / 2U;
+      break;
+
+    default:
+      return false;
+  }
+
+  if (!decodedHeight || decodedHeight > LGMP_CURSOR_MAX_HEIGHT ||
+      cursor->pitch < rowBytes ||
+      cursor->pitch > LGMP_CURSOR_MAX_SHAPE_SIZE / cursor->height)
+    return false;
+
+  *shapeSize = (size_t)cursor->height * cursor->pitch;
+  return true;
+}
+
 static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
     LG_TransportPointer * result)
 {
@@ -2304,7 +2348,8 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
       lgmp_clearPointerQueue(this, pointerQueue);
     if (status == LG_TRANSPORT_OK)
     {
-      if (message.size < sizeof(KVMFRCursor))
+      if (!message.mem || message.size < sizeof(KVMFRCursor) ||
+          message.size > LGMP_CURSOR_MAX_MESSAGE_SIZE)
       {
         const LG_TransportStatus done =
           lgmp_donePointerMessage(this, pointerQueue);
@@ -2313,44 +2358,44 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
       }
       else
       {
-        const KVMFRCursor * cursor = (const KVMFRCursor *)message.mem;
-        shapeSize = message.udata & CURSOR_FLAG_SHAPE ?
-          (size_t)cursor->height * cursor->pitch : 0;
-        transformSize =
-          message.udata & CURSOR_FLAG_COLOR_TRANSFORM ?
-            sizeof(KVMFRColorTransform) : 0;
-        if (shapeSize > message.size - sizeof(*cursor) ||
-            transformSize > message.size - sizeof(*cursor) - shapeSize)
+        const size_t messageSize = message.size;
+        if (messageSize > this->pointerDataSize)
         {
-          const LG_TransportStatus done =
-            lgmp_donePointerMessage(this, pointerQueue);
-          status = done == LG_TRANSPORT_DISCONNECTED ?
-            done : LG_TRANSPORT_ERROR;
-        }
-        else
-        {
-          const size_t needed = sizeof(*cursor) + shapeSize + transformSize;
-          if (needed > this->pointerDataSize)
+          void * data = realloc(this->pointerData, messageSize);
+          if (!data)
+            status = LG_TRANSPORT_ERROR;
+          else
           {
-            void * data = realloc(this->pointerData, needed);
-            if (!data)
-              status = LG_TRANSPORT_ERROR;
-            else
-            {
-              this->pointerData     = data;
-              this->pointerDataSize = needed;
-            }
+            this->pointerData     = data;
+            this->pointerDataSize = messageSize;
           }
-          if (status == LG_TRANSPORT_OK)
-          {
-            memcpy(this->pointerData, message.mem, needed);
+        }
+
+        if (status == LG_TRANSPORT_OK)
+        {
+          memcpy(this->pointerData, message.mem, messageSize);
+          const KVMFRCursor * cursor =
+            (const KVMFRCursor *)this->pointerData;
+          const bool hasShape = message.udata & CURSOR_FLAG_SHAPE;
+          if (hasShape && !lgmp_cursorShapeSize(cursor, &shapeSize))
+            status = LG_TRANSPORT_ERROR;
+          transformSize =
+            message.udata & CURSOR_FLAG_COLOR_TRANSFORM ?
+              sizeof(KVMFRColorTransform) : 0;
+
+          const size_t payloadSize = messageSize - sizeof(*cursor);
+          if (status == LG_TRANSPORT_OK &&
+              (shapeSize > payloadSize ||
+               transformSize > payloadSize - shapeSize))
+            status = LG_TRANSPORT_ERROR;
+          else if (status == LG_TRANSPORT_OK)
             pointerFlags = (uint32_t)message.udata;
-          }
-          const LG_TransportStatus done =
-            lgmp_donePointerMessage(this, pointerQueue);
-          if (status == LG_TRANSPORT_OK)
-            status = done;
         }
+
+        const LG_TransportStatus done =
+          lgmp_donePointerMessage(this, pointerQueue);
+        if (status == LG_TRANSPORT_OK)
+          status = done;
       }
     }
   }
