@@ -78,6 +78,7 @@ typedef struct DDInstance
 
   void   * shapeBuffer;
   unsigned shapeBufferSize;
+  unsigned shapeSize;
 }
 DDInstance;
 
@@ -424,7 +425,7 @@ retry:
       &pointer, frameInfo.PointerShapeBufferSize, &postPointer);
 
   if (postPointer)
-    d12_updatePointer(&pointer, this->shapeBuffer, this->shapeBufferSize);
+    d12_updatePointer(&pointer, this->shapeBuffer, this->shapeSize);
 
   // if this was not a frame update, go back and try again
   if (frameInfo.LastPresentTime.QuadPart == 0)
@@ -714,6 +715,13 @@ retry:
     return;
   }
 
+  if (!s || s > this->shapeBufferSize || !info.Height || !info.Pitch ||
+      (size_t)info.Height > (size_t)s / info.Pitch)
+  {
+    DEBUG_ERROR("Desktop duplication returned an invalid pointer shape");
+    return;
+  }
+
   switch(info.Type)
   {
     case DXGI_OUTDUPL_POINTER_SHAPE_TYPE_COLOR:
@@ -739,6 +747,7 @@ retry:
   pointer->pitch       = info.Pitch;
   pointer->hx          = info.HotSpot.x;
   pointer->hy          = info.HotSpot.y;
+  this->shapeSize      = s;
 
   *changed = true;
 }

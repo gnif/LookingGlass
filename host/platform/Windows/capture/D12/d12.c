@@ -1613,9 +1613,13 @@ void d12_updatePointer(CapturePointer * pointer, void * shape, size_t shapeSize)
       DEBUG_ERROR("Failed to obtain a buffer for the pointer shape");
       pointer->shapeUpdate = false;
     }
-
-    size_t copySize = min(dstSize, shapeSize);
-    memcpy(dst, shape, copySize);
+    else if (!shape || !shapeSize || shapeSize > dstSize)
+    {
+      DEBUG_ERROR("Pointer shape does not fit in the destination buffer");
+      pointer->shapeUpdate = false;
+    }
+    else
+      memcpy(dst, shape, shapeSize);
   }
 
   this->postPointerBufferFn(pointer);
