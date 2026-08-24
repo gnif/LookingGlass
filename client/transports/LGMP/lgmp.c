@@ -955,8 +955,9 @@ static bool lgmp_parseSession(struct LG_Transport * this,
     return false;
   }
 
-  const KVMFR * header = (const KVMFR *)data;
-  if (memcmp(header->magic, KVMFR_MAGIC, sizeof(header->magic)) != 0)
+  KVMFR header;
+  memcpy(&header, data, sizeof(header));
+  if (memcmp(header.magic, KVMFR_MAGIC, sizeof(header.magic)) != 0)
   {
     uint32_t current;
     if (lgmp_recoveryVersions(this, NULL, &current) &&
@@ -965,73 +966,74 @@ static bool lgmp_parseSession(struct LG_Transport * this,
     return false;
   }
 
-  if (header->version != KVMFR_VERSION)
+  if (header.version != KVMFR_VERSION)
   {
     lgmp_setVersionMismatch(session, "KVMFR", KVMFR_VERSION,
-        header->version);
+        header.version);
     return false;
   }
 
-  str_copy(session->version, sizeof(session->version), header->hostver,
-      sizeof(header->hostver));
-  if (header->features & KVMFR_FEATURE_SETCURSORPOS)
+  str_copy(session->version, sizeof(session->version), header.hostver,
+      sizeof(header.hostver));
+  if (header.features & KVMFR_FEATURE_SETCURSORPOS)
     session->features |= LG_TRANSPORT_FEATURE_SET_CURSOR_POS;
-  if (header->features & KVMFR_FEATURE_WINDOWSIZE)
+  if (header.features & KVMFR_FEATURE_WINDOWSIZE)
     session->features |= LG_TRANSPORT_FEATURE_WINDOW_SIZE;
-  if (header->features & KVMFR_FEATURE_FRAME_SCHEDULE)
+  if (header.features & KVMFR_FEATURE_FRAME_SCHEDULE)
     session->features |= LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
-  if (header->features & KVMFR_FEATURE_INPUT)
+  if (header.features & KVMFR_FEATURE_INPUT)
     session->features |= LG_TRANSPORT_FEATURE_INPUT;
-  if (header->features & KVMFR_FEATURE_CLIPBOARD)
+  if (header.features & KVMFR_FEATURE_CLIPBOARD)
     session->features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
-
-  data += sizeof(*header);
-  size -= sizeof(*header);
+  data += sizeof(header);
+  size -= sizeof(header);
   while (size >= sizeof(KVMFRRecord))
   {
-    const KVMFRRecord * record = (const KVMFRRecord *)data;
-    data += sizeof(*record);
-    size -= sizeof(*record);
-    if (record->size > size)
+    KVMFRRecord record;
+    memcpy(&record, data, sizeof(record));
+    const uint32_t recordSize = record.size;
+    data += sizeof(record);
+    size -= sizeof(record);
+    if (recordSize > size)
       break;
 
-    switch (record->type)
+    switch (record.type)
     {
       case KVMFR_RECORD_VMINFO:
-        if (record->size >= sizeof(KVMFRRecord_VMInfo))
+        if (recordSize >= sizeof(KVMFRRecord_VMInfo))
         {
-          const KVMFRRecord_VMInfo * info =
-            (const KVMFRRecord_VMInfo *)data;
-          memcpy(session->uuid, info->uuid, sizeof(session->uuid));
+          KVMFRRecord_VMInfo info;
+          memcpy(&info, data, sizeof(info));
+          memcpy(session->uuid, info.uuid, sizeof(session->uuid));
           for (unsigned i = 0; i < sizeof(session->uuid); ++i)
             session->uuidValid |= session->uuid[i] != 0;
-          str_copy(session->capture, sizeof(session->capture), info->capture,
-              sizeof(info->capture));
-          session->cpus    = info->cpus;
-          session->cores   = info->cores;
-          session->sockets = info->sockets;
+          str_copy(session->capture, sizeof(session->capture), info.capture,
+              sizeof(info.capture));
+          session->cpus    = info.cpus;
+          session->cores   = info.cores;
+          session->sockets = info.sockets;
           const size_t fixed = offsetof(KVMFRRecord_VMInfo, model);
-          str_copy(session->cpuModel, sizeof(session->cpuModel), info->model,
-              record->size - fixed);
+          str_copy(session->cpuModel, sizeof(session->cpuModel),
+              (const char *)data + fixed, recordSize - fixed);
         }
         break;
 
       case KVMFR_RECORD_OSINFO:
-        if (record->size >= sizeof(KVMFRRecord_OSInfo))
+        if (recordSize >= sizeof(KVMFRRecord_OSInfo))
         {
-          const KVMFRRecord_OSInfo * info =
-            (const KVMFRRecord_OSInfo *)data;
-          session->os = info->os <= KVMFR_OS_OTHER ?
-            (LG_TransportGuestOS)info->os : LG_TRANSPORT_OS_OTHER;
+          KVMFRRecord_OSInfo info;
+          memcpy(&info, data, sizeof(info));
+          session->os = info.os <= KVMFR_OS_OTHER ?
+            (LG_TransportGuestOS)info.os : LG_TRANSPORT_OS_OTHER;
           const size_t fixed = offsetof(KVMFRRecord_OSInfo, name);
-          str_copy(session->osName, sizeof(session->osName), info->name,
-              record->size - fixed);
+          str_copy(session->osName, sizeof(session->osName),
+              (const char *)data + fixed, recordSize - fixed);
         }
         break;
     }
 
-    data += record->size;
-    size -= record->size;
+    data += recordSize;
+    size -= recordSize;
   }
 
   return true;
