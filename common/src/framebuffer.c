@@ -34,9 +34,21 @@
 #include <immintrin.h>
 #include <unistd.h>
 
+static bool framebuffer_size_mul(size_t a, size_t b, size_t * result)
+{
+  if (a && b > SIZE_MAX / a)
+    return false;
+
+  *result = a * b;
+  return true;
+}
+
 bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
     uint64_t * waitTimeNs)
 {
+  if (size > UINT_LEAST32_MAX)
+    return false;
+
   if (atomic_load_explicit(&frame->wp, memory_order_acquire) >= size)
     return true;
 
@@ -71,6 +83,9 @@ bool framebuffer_wait(const FrameBuffer * frame, size_t size)
 static bool framebuffer_read_linear_timed(const FrameBuffer * frame,
     void * restrict dst, size_t size, uint64_t * waitTimeNs)
 {
+  if (size > UINT_LEAST32_MAX)
+    return false;
+
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
   static int raCount = 0;
@@ -80,7 +95,7 @@ static bool framebuffer_read_linear_timed(const FrameBuffer * frame,
 #endif
 
   uint8_t * restrict d     = (uint8_t*)dst;
-  uint_least32_t rp        = 0;
+  size_t rp                = 0;
 
   // copy in large 1MB chunks if the pitches match
   while(size)
@@ -114,9 +129,22 @@ bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch,
     uint64_t * waitTimeNs)
 {
-  if (dstpitch == pitch)
+  size_t linewidth;
+  size_t sourceSize;
+
+  if (!framebuffer_size_mul(width, bpp, &linewidth) ||
+      linewidth > pitch || linewidth > dstpitch ||
+      !framebuffer_size_mul(height, pitch, &sourceSize) ||
+      (height && dstpitch > SIZE_MAX / height) ||
+      sourceSize > UINT_LEAST32_MAX)
+    return false;
+
+  if (!height || !linewidth)
+    return true;
+
+  if (linewidth == pitch && linewidth == dstpitch)
     return framebuffer_read_linear_timed(
-        frame, dst, height * pitch, waitTimeNs);
+        frame, dst, sourceSize, waitTimeNs);
 
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
@@ -127,16 +155,15 @@ bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
 #endif
 
   uint8_t * restrict d     = (uint8_t*)dst;
-  uint_least32_t rp        = 0;
+  size_t rp                = 0;
 
   // copy per line to match the pitch of the destination buffer
-  const size_t linewidth = width * bpp;
   for(size_t y = 0; y < height; ++y)
   {
     if (!framebuffer_wait_timed(frame, rp + linewidth, waitTimeNs))
       return false;
 
-    memcpy(d, frame->data + rp, dstpitch);
+    memcpy(d, frame->data + rp, linewidth);
     rp += pitch;
     d  += dstpitch;
   }
@@ -160,6 +187,18 @@ bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
 bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
     size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque)
 {
+  size_t linewidth;
+  size_t sourceSize;
+
+  if (!framebuffer_size_mul(width, bpp, &linewidth) ||
+      linewidth > pitch ||
+      !framebuffer_size_mul(height, pitch, &sourceSize) ||
+      sourceSize > UINT_LEAST32_MAX)
+    return false;
+
+  if (!height || !linewidth)
+    return true;
+
 #ifdef FB_PROFILE
   static RunningAvg ra = NULL;
   static int raCount = 0;
@@ -168,9 +207,8 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
     ra = runningavg_new(100);
 #endif
 
-  uint_least32_t rp        = 0;
+  size_t         rp        = 0;
   size_t         y         = 0;
-  const size_t   linewidth = width * bpp;
 
   while(y < height)
   {
