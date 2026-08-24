@@ -1382,6 +1382,7 @@ int main_frameThread(void * unused)
 {
   uint64_t          frameSerial   = 0;
   uint32_t          formatVersion = 0;
+  LG_TransportFrameFormat acceptedFormat = {};
   LG_RendererFormat rendererFormat;
   uint64_t          sourceGeneration = 0;
 
@@ -1450,6 +1451,30 @@ int main_frameThread(void * unused)
     {
       videoPayloadRelease();
       DEBUG_ERROR("Transport returned a frame without format metadata");
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
+      primaryWorkerFailed();
+      break;
+    }
+    if (!lgTransport_validateFrameFormat(format, frame.flags, NULL))
+    {
+      videoPayloadRelease();
+      DEBUG_ERROR(
+          "Transport returned an invalid frame layout: type=%d "
+          "data=%ux%u frame=%ux%u stride=%u pitch=%u flags=%#x",
+          format->type, format->dataWidth, format->dataHeight,
+          format->frameWidth, format->frameHeight,
+          format->stride, format->pitch, frame.flags);
+      g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
+      primaryWorkerFailed();
+      break;
+    }
+    if (!sourceChanged && g_state.formatValid &&
+        format->version == formatVersion &&
+        !lgTransport_frameLayoutMatches(format, &acceptedFormat))
+    {
+      videoPayloadRelease();
+      DEBUG_ERROR(
+          "Transport changed the frame layout without changing its version");
       g_state.videoOps->frame->releaseFrame(g_state.transport.handle, &frame);
       primaryWorkerFailed();
       break;
@@ -1581,10 +1606,11 @@ int main_frameThread(void * unused)
     for (uint32_t i = 0; !invalidDamage && i < damageCount; ++i)
     {
       const FrameDamageRect * rect = &frame.damageRects[i];
-      invalidDamage = rect->x > format->frameWidth ||
-        rect->y > format->frameHeight ||
+      invalidDamage = !rect->width || !rect->height ||
+        rect->x > format->frameWidth ||
+        rect->y > format->dataHeight ||
         rect->width > format->frameWidth - rect->x ||
-        rect->height > format->frameHeight - rect->y;
+        rect->height > format->dataHeight - rect->y;
     }
     if (invalidDamage)
     {
@@ -1630,6 +1656,7 @@ int main_frameThread(void * unused)
     {
       g_state.formatValid = true;
       formatVersion       = format->version;
+      memcpy(&acceptedFormat, format, sizeof(acceptedFormat));
 #ifdef ENABLE_TESTS
       atomic_store_explicit(&l_testFrameType, format->type,
           memory_order_release);

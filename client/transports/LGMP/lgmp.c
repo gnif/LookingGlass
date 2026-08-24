@@ -52,6 +52,7 @@
 struct DMAFrameInfo
 {
   const KVMFRFrame * frame;
+  size_t             offset;
   size_t             dataSize;
   int                fd;
 };
@@ -63,6 +64,7 @@ struct LGMPFrameLease
   PLGMPClientQueue        * subscription;
   PLGMPClientQueue          queue;
   const KVMFRFrame        * frame;
+  KVMFRFrame                snapshot;
   LG_TransportFrameFormat   format;
   uint64_t                  handle;
   uint32_t                  generation;
@@ -865,6 +867,7 @@ static void lgmp_closeDMA(struct LG_Transport * this)
       close(this->dma[i].fd);
     this->dma[i].fd       = -1;
     this->dma[i].frame    = NULL;
+    this->dma[i].offset   = 0;
     this->dma[i].dataSize = 0;
   }
 }
@@ -1598,7 +1601,10 @@ struct LGMPFrameMessage
 {
   PLGMPClientQueue         queue;
   LGMPMessage              message;
+  const KVMFRFrame       * sharedFrame;
   const KVMFRFrame       * frame;
+  LG_TransportFrameFormat  format;
+  size_t                   dataSize;
   struct LGMPFrameLease  * lease;
   bool                     owner;
 };
@@ -1649,6 +1655,7 @@ static LG_TransportStatus lgmp_doneFrameMessage(
 
   const LGMP_STATUS status = lgmpClientMessageDone(message->queue);
   message->queue = NULL;
+  message->sharedFrame = NULL;
   message->frame = NULL;
 
   if (status == LGMP_OK)
@@ -1711,26 +1718,99 @@ static void lgmp_mergeFrameStatus(LG_TransportStatus status,
     *result = status;
 }
 
-static bool lgmp_validateFrameMessage(struct LGMPFrameMessage * message)
+static LG_TransportFrameFlags lgmp_frameFlags(const KVMFRFrame * frame)
 {
-  if (message->message.size < sizeof(KVMFRFrame))
+  LG_TransportFrameFlags flags = 0;
+  if (frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER)
+    flags |= LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
+  if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
+    flags |= LG_TRANSPORT_FRAME_REQUEST_ACTIVATION;
+  if (frame->flags & FRAME_FLAG_TRUNCATED)
+    flags |= LG_TRANSPORT_FRAME_TRUNCATED;
+  return flags;
+}
+
+static void lgmp_snapshotFrameFormat(const KVMFRFrame * frame,
+    LG_TransportFrameFormat * format)
+{
+  *format = (LG_TransportFrameFormat)
+  {
+    .version       = frame->formatVer,
+    .type          = frame->type,
+    .screenWidth   = frame->screenWidth,
+    .screenHeight  = frame->screenHeight,
+    .dataWidth     = frame->dataWidth,
+    .dataHeight    = frame->dataHeight,
+    .frameWidth    = frame->frameWidth,
+    .frameHeight   = frame->frameHeight,
+    .rotation      = frame->rotation,
+    .stride        = frame->stride,
+    .pitch         = frame->pitch,
+    .hdr           = frame->flags & FRAME_FLAG_HDR,
+    .hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ,
+    .hdrMetadata   = frame->flags & FRAME_FLAG_HDR_METADATA,
+    .sdrWhiteLevel = frame->sdrWhiteLevel ? frame->sdrWhiteLevel :
+      KVMFR_SDR_WHITE_LEVEL_DEFAULT,
+  };
+
+  if (!format->hdrMetadata)
+    return;
+
+  memcpy(format->hdrDisplayPrimary, frame->hdrDisplayPrimary,
+      sizeof(format->hdrDisplayPrimary));
+  memcpy(format->hdrWhitePoint, frame->hdrWhitePoint,
+      sizeof(format->hdrWhitePoint));
+  format->hdrMaxDisplayLuminance       = frame->hdrMaxDisplayLuminance;
+  format->hdrMinDisplayLuminance       = frame->hdrMinDisplayLuminance;
+  format->hdrMaxContentLightLevel      = frame->hdrMaxContentLightLevel;
+  format->hdrMaxFrameAverageLightLevel =
+    frame->hdrMaxFrameAverageLightLevel;
+}
+
+static bool lgmp_validateFrameMessage(LG_Transport * this,
+    struct LGMPFrameMessage * message)
+{
+  if (!message->message.mem ||
+      message->message.size < sizeof(KVMFRFrame))
   {
     DEBUG_ERROR("LGMP frame payload is too small");
     return false;
   }
 
-  const KVMFRFrame * frame = (const KVMFRFrame *)message->message.mem;
-  const size_t frameDataSize = (size_t)frame->dataHeight * frame->pitch;
-  if (frame->type <= FRAME_TYPE_INVALID || frame->type >= FRAME_TYPE_MAX ||
-      frame->offset > message->message.size - sizeof(FrameBuffer) ||
-      frameDataSize >
-        message->message.size - frame->offset - sizeof(FrameBuffer))
+  memcpy(&message->lease->snapshot, message->message.mem,
+      sizeof(message->lease->snapshot));
+  const KVMFRFrame * frame = &message->lease->snapshot;
+  lgmp_snapshotFrameFormat(frame, &message->format);
+
+  size_t frameDataSize;
+  if (!lgTransport_validateFrameFormat(
+        &message->format, lgmp_frameFlags(frame), &frameDataSize))
+  {
+    DEBUG_ERROR("LGMP frame payload contains an invalid frame layout");
+    return false;
+  }
+
+  const size_t messageSize = message->message.size;
+  if (frame->offset < sizeof(KVMFRFrame) ||
+      frame->offset > messageSize - sizeof(FrameBuffer) ||
+      frameDataSize > messageSize - frame->offset - sizeof(FrameBuffer) ||
+      (uintptr_t)((const uint8_t *)message->message.mem + frame->offset) %
+        _Alignof(FrameBuffer))
   {
     DEBUG_ERROR("LGMP frame payload contains invalid dimensions or offsets");
     return false;
   }
 
-  message->frame = frame;
+  if (this->formatValid && this->format.version == frame->formatVer &&
+      !lgTransport_frameLayoutMatches(&this->format, &message->format))
+  {
+    DEBUG_ERROR("LGMP frame layout changed without a format version change");
+    return false;
+  }
+
+  message->sharedFrame = (const KVMFRFrame *)message->message.mem;
+  message->frame       = frame;
+  message->dataSize    = frameDataSize;
   return true;
 }
 
@@ -1769,15 +1849,30 @@ static void lgmp_selectNewestFrameMessage(
     *selected = candidate;
 }
 
-static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
-    size_t dataSize)
+static int lgmp_getDMA(struct LG_Transport * this,
+    const KVMFRFrame * sharedFrame, size_t frameOffset, size_t dataSize)
 {
+  const uintptr_t base    = (uintptr_t)this->shm.mem;
+  const uintptr_t address = (uintptr_t)sharedFrame;
+  if (address < base)
+    return -1;
+
+  const size_t position = address - base;
+  if (position > this->lgmpSize ||
+      frameOffset > this->lgmpSize - position ||
+      sizeof(FrameBuffer) > this->lgmpSize - position - frameOffset)
+    return -1;
+
+  const size_t offset = position + frameOffset + sizeof(FrameBuffer);
+  if (dataSize > this->lgmpSize - offset)
+    return -1;
+
   struct DMAFrameInfo * dma = NULL;
   for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
-    if (this->dma[i].frame == frame)
+    if (this->dma[i].frame == sharedFrame)
     {
       dma = &this->dma[i];
-      if (dma->dataSize < dataSize && dma->fd >= 0)
+      if ((dma->offset != offset || dma->dataSize < dataSize) && dma->fd >= 0)
       {
         close(dma->fd);
         dma->fd = -1;
@@ -1790,7 +1885,7 @@ static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
       if (!this->dma[i].frame)
       {
         dma = &this->dma[i];
-        dma->frame = frame;
+        dma->frame = sharedFrame;
         break;
       }
 
@@ -1799,21 +1894,7 @@ static int lgmp_getDMA(struct LG_Transport * this, const KVMFRFrame * frame,
   if (dma->fd >= 0)
     return dma->fd;
 
-  const uintptr_t base = (uintptr_t)this->shm.mem;
-  const uintptr_t address = (uintptr_t)frame;
-  if (address < base)
-    return -1;
-
-  const size_t position = address - base;
-  if (position > this->lgmpSize ||
-      frame->offset > this->lgmpSize - position ||
-      sizeof(FrameBuffer) > this->lgmpSize - position - frame->offset)
-    return -1;
-
-  const size_t offset = position + frame->offset + sizeof(FrameBuffer);
-  if (dataSize > this->lgmpSize - offset)
-    return -1;
-
+  dma->offset   = offset;
   dma->dataSize = dataSize;
   dma->fd       = ivshmemGetDMABuf(&this->shm, offset, dataSize);
   return dma->fd;
@@ -1889,14 +1970,14 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
   bool malformed = false;
   LG_TransportStatus releaseFailure = LG_TRANSPORT_OK;
   if (sharedStatus == LG_TRANSPORT_OK &&
-      !lgmp_validateFrameMessage(&shared))
+      !lgmp_validateFrameMessage(this, &shared))
   {
     malformed = true;
     releaseFailure = lgmp_doneFrameMessage(&shared);
   }
   for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     if (ownerStatus[i] == LG_TRANSPORT_OK &&
-        !lgmp_validateFrameMessage(&owner[i]))
+        !lgmp_validateFrameMessage(this, &owner[i]))
     {
       malformed = true;
       const LG_TransportStatus done =
@@ -1954,7 +2035,9 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
     return done == LG_TRANSPORT_OK ? LG_TRANSPORT_TIMEOUT : done;
   }
 
-  const bool providerValid = lgmp_frameTimingReady(frame);
+  const bool providerValid =
+    selected->sharedFrame->frameSerial == frame->frameSerial &&
+    lgmp_frameTimingReady(selected->sharedFrame);
   const uint64_t providerStart = providerValid ? nanotime() : 0;
 
   const bool fullDamage = !this->frameSerialValid || equalSerial ||
@@ -1971,58 +2054,25 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
     result->scheduleDeadlineSerial = (uint32_t)scheduleToken;
     result->scheduleOwner          = true;
   }
-  if (frame->flags & FRAME_FLAG_BLOCK_SCREENSAVER)
-    result->flags |= LG_TRANSPORT_FRAME_BLOCK_SCREENSAVER;
-  if (frame->flags & FRAME_FLAG_REQUEST_ACTIVATION)
-    result->flags |= LG_TRANSPORT_FRAME_REQUEST_ACTIVATION;
-  if (frame->flags & FRAME_FLAG_TRUNCATED)
-    result->flags |= LG_TRANSPORT_FRAME_TRUNCATED;
+  result->flags = lgmp_frameFlags(frame);
 
   LG_TransportFrameFormat * format = &this->format;
   if (!this->formatValid || format->version != frame->formatVer)
   {
-    memset(format, 0, sizeof(*format));
-    format->version       = frame->formatVer;
-    format->type          = frame->type;
-    format->screenWidth   = frame->screenWidth;
-    format->screenHeight  = frame->screenHeight;
-    format->dataWidth     = frame->dataWidth;
-    format->dataHeight    = frame->dataHeight;
-    format->frameWidth    = frame->frameWidth;
-    format->frameHeight   = frame->frameHeight;
-    format->rotation      = frame->rotation;
-    format->stride        = frame->stride;
-    format->pitch         = frame->pitch;
-    format->hdr           = frame->flags & FRAME_FLAG_HDR;
-    format->hdrPQ         = frame->flags & FRAME_FLAG_HDR_PQ;
-    format->hdrMetadata   = frame->flags & FRAME_FLAG_HDR_METADATA;
-    format->sdrWhiteLevel = frame->sdrWhiteLevel ? frame->sdrWhiteLevel :
-      KVMFR_SDR_WHITE_LEVEL_DEFAULT;
-    if (format->hdrMetadata)
-    {
-      memcpy(format->hdrDisplayPrimary, frame->hdrDisplayPrimary,
-          sizeof(format->hdrDisplayPrimary));
-      memcpy(format->hdrWhitePoint, frame->hdrWhitePoint,
-          sizeof(format->hdrWhitePoint));
-      format->hdrMaxDisplayLuminance       = frame->hdrMaxDisplayLuminance;
-      format->hdrMinDisplayLuminance       = frame->hdrMinDisplayLuminance;
-      format->hdrMaxContentLightLevel      = frame->hdrMaxContentLightLevel;
-      format->hdrMaxFrameAverageLightLevel =
-        frame->hdrMaxFrameAverageLightLevel;
-    }
+    memcpy(format, &selected->format, sizeof(*format));
     this->formatValid = true;
   }
   struct LGMPFrameLease * lease = selected->lease;
   memcpy(&lease->format, format, sizeof(lease->format));
   result->format = &lease->format;
 
-  result->framebuffer = (const FrameBuffer *)((const uint8_t *)frame +
-      frame->offset);
+  result->framebuffer = (const FrameBuffer *)
+    ((const uint8_t *)selected->sharedFrame + frame->offset);
   result->dmaFD       = -1;
   if (useDMA)
   {
-    const size_t dataSize = (size_t)format->dataHeight * format->pitch;
-    result->dmaFD = lgmp_getDMA(this, frame, dataSize);
+    result->dmaFD = lgmp_getDMA(this, selected->sharedFrame,
+        frame->offset, selected->dataSize);
     if (result->dmaFD < 0)
     {
       const LG_TransportStatus done = lgmp_doneFrameMessage(selected);
@@ -2034,14 +2084,14 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
 
   if (!fullDamage && frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
   {
-    result->damageRects      = frame->damageRects;
+    result->damageRects      = lease->snapshot.damageRects;
     result->damageRectsCount = frame->damageRectsCount;
   }
   else if (!fullDamage)
     DEBUG_WARN("Invalid damage rectangles, forcing a full update");
 
   lease->queue = selected->queue;
-  lease->frame = frame;
+  lease->frame = selected->sharedFrame;
   if (++this->frameLeaseHandle == 0)
     ++this->frameLeaseHandle;
   lease->handle           = this->frameLeaseHandle;

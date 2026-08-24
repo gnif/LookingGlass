@@ -927,9 +927,8 @@ static enum ConfigStatus configure(struct Inst * this)
        * as OpenGL supports BGR directly we need to correct dimensions in order
        * to make this happen.
        */
-      this->format.dataWidth  = this->format.frameWidth;
-      this->format.dataHeight = this->format.frameHeight;
-      this->format.bpp        = 24;
+      this->format.dataWidth = this->format.frameWidth;
+      this->format.bpp       = 24;
       break;
 
     default:
@@ -938,7 +937,8 @@ static enum ConfigStatus configure(struct Inst * this)
   }
 
   // calculate the texture size in bytes
-  this->texSize = this->format.dataHeight * this->format.pitch;
+  this->texSize =
+    (size_t)this->format.dataHeight * (size_t)this->format.pitch;
   this->texPos  = 0;
 
   g_gl_dynProcs.glGenBuffers(BUFFER_COUNT, this->vboID);
@@ -1377,7 +1377,7 @@ static bool drawFrame(struct Inst * this,
     0,
     0,
     this->format.frameWidth ,
-    this->format.frameHeight,
+    this->format.dataHeight,
     this->vboFormat,
     this->dataFormat,
     (void*)0

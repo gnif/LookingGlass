@@ -21,6 +21,7 @@
 #ifndef _H_LG_CLIENT_TRANSPORT_
 #define _H_LG_CLIENT_TRANSPORT_
 
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -225,6 +226,100 @@ typedef struct LG_TransportFrameFormat
   uint32_t sdrWhiteLevel;
 }
 LG_TransportFrameFormat;
+
+/*
+ * Validate the common packed-frame layout used by renderers. The optional
+ * dataSize result is the validated byte capacity required for the frame data.
+ */
+static inline bool lgTransport_validateFrameFormat(
+    const LG_TransportFrameFormat * format, LG_TransportFrameFlags flags,
+    size_t * dataSize)
+{
+  if (!format)
+    return false;
+
+  uint32_t storageBpp;
+  switch (format->type)
+  {
+    case FRAME_TYPE_BGRA:
+    case FRAME_TYPE_RGBA:
+    case FRAME_TYPE_RGBA10:
+    case FRAME_TYPE_BGR_32:
+      storageBpp = 4;
+      break;
+
+    case FRAME_TYPE_RGBA16F:
+      storageBpp = 8;
+      break;
+
+    case FRAME_TYPE_RGB_24:
+      storageBpp = 3;
+      break;
+
+    default:
+      return false;
+  }
+
+  switch (format->rotation)
+  {
+    case FRAME_ROT_0:
+    case FRAME_ROT_90:
+    case FRAME_ROT_180:
+    case FRAME_ROT_270:
+      break;
+
+    default:
+      return false;
+  }
+
+  if (!format->screenWidth || !format->screenHeight ||
+      !format->dataWidth   || !format->dataHeight   ||
+      !format->frameWidth  || !format->frameHeight  ||
+      !format->stride      || !format->pitch        ||
+      format->screenWidth > INT_MAX || format->screenHeight > INT_MAX ||
+      format->dataWidth   > INT_MAX || format->dataHeight   > INT_MAX ||
+      format->frameWidth  > INT_MAX || format->frameHeight  > INT_MAX ||
+      format->stride      > INT_MAX || format->pitch        > INT_MAX)
+    return false;
+
+  const uint64_t rowBytes = (uint64_t)format->stride * storageBpp;
+  const uint64_t size     = (uint64_t)format->dataHeight * format->pitch;
+  if (format->dataWidth > format->stride || rowBytes != format->pitch ||
+      size > INT_MAX || format->dataHeight > format->frameHeight ||
+      (format->dataHeight < format->frameHeight &&
+       !(flags & LG_TRANSPORT_FRAME_TRUNCATED)))
+    return false;
+
+  if (format->type == FRAME_TYPE_BGR_32)
+  {
+    if (format->dataWidth != format->stride ||
+        (uint64_t)format->frameWidth * 3U > format->pitch)
+      return false;
+  }
+  else if (format->dataWidth != format->frameWidth)
+    return false;
+
+  if (dataSize)
+    *dataSize = (size_t)size;
+  return true;
+}
+
+static inline bool lgTransport_frameLayoutMatches(
+    const LG_TransportFrameFormat * left,
+    const LG_TransportFrameFormat * right)
+{
+  return left && right &&
+    left->type         == right->type         &&
+    left->screenWidth  == right->screenWidth  &&
+    left->screenHeight == right->screenHeight &&
+    left->dataWidth    == right->dataWidth    &&
+    left->dataHeight   == right->dataHeight   &&
+    left->frameWidth   == right->frameWidth   &&
+    left->frameHeight  == right->frameHeight  &&
+    left->rotation     == right->rotation     &&
+    left->stride       == right->stride       &&
+    left->pitch        == right->pitch;
+}
 
 typedef struct LG_TransportFrame
 {
