@@ -161,6 +161,51 @@ typedef enum LG_RendererCursor
 }
 LG_RendererCursor;
 
+/* Current producers reserve at most a 512x512 32-bpp cursor payload.
+ * Monochrome wire heights contain vertically stacked AND and XOR masks. */
+#define LG_CURSOR_MAX_WIDTH     512
+#define LG_CURSOR_MAX_HEIGHT    512
+#define LG_CURSOR_MAX_DATA_SIZE \
+  ((size_t)LG_CURSOR_MAX_WIDTH * LG_CURSOR_MAX_HEIGHT * 4U)
+
+static inline bool lg_rendererCursorValidate(LG_RendererCursor type,
+    int width, int height, int pitch, size_t * dataSize)
+{
+  if (width <= 0 || height <= 0 || pitch <= 0 ||
+      width > LG_CURSOR_MAX_WIDTH)
+    return false;
+
+  size_t rowBytes;
+  int decodedHeight;
+  switch (type)
+  {
+    case LG_CURSOR_COLOR:
+    case LG_CURSOR_MASKED_COLOR:
+      rowBytes      = (size_t)width * 4U;
+      decodedHeight = height;
+      break;
+
+    case LG_CURSOR_MONOCHROME:
+      if (height & 1)
+        return false;
+      rowBytes      = ((size_t)width + 7U) / 8U;
+      decodedHeight = height / 2;
+      break;
+
+    default:
+      return false;
+  }
+
+  if (decodedHeight <= 0 || decodedHeight > LG_CURSOR_MAX_HEIGHT ||
+      (size_t)pitch < rowBytes ||
+      (size_t)pitch > LG_CURSOR_MAX_DATA_SIZE / (size_t)height)
+    return false;
+
+  if (dataSize)
+    *dataSize = (size_t)height * (size_t)pitch;
+  return true;
+}
+
 typedef struct LG_Renderer LG_Renderer;
 
 typedef enum LG_RendererInteropType

@@ -426,8 +426,16 @@ static void testPayload(void)
      1,  2,  3,  4,  5,  6,  7,  8,
      9, 10, 11, 12, 13, 14, 15, 16,
   };
-  uint8_t shape[] = { 11, 12, 13, 14, 15, 16, 17, 18 };
-  const uint8_t shapeExpected[] = { 11, 12, 13, 14, 15, 16, 17, 18 };
+  uint8_t shape[] =
+  {
+    11, 12, 13, 14, 15, 16, 17, 18,
+    19, 20, 21, 22, 23, 24, 25, 26,
+  };
+  const uint8_t shapeExpected[] =
+  {
+    11, 12, 13, 14, 15, 16, 17, 18,
+    19, 20, 21, 22, 23, 24, 25, 26,
+  };
   LGColorTransform color =
   {
     .flags        = LG_COLOR_TRANSFORM_MATRIX | LG_COLOR_TRANSFORM_LUT,
@@ -439,7 +447,7 @@ static void testPayload(void)
   renderQueue_sourceSwSurfaceDrawBitmap(RENDER_QUEUE_SOURCE_PRIMARY,
       generation, 0, 0, 2, 2, 8, bitmap, true);
   renderQueue_sourceCursorImage(RENDER_QUEUE_SOURCE_PRIMARY, generation,
-      LG_CURSOR_COLOR, 2, 2, 4, shape);
+      LG_CURSOR_COLOR, 2, 2, 8, shape);
   renderQueue_sourceCursorColorTransform(RENDER_QUEUE_SOURCE_PRIMARY,
       generation, &color);
   renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY, generation,
@@ -468,7 +476,7 @@ static void testPayload(void)
   CHECK(f.shapeType == LG_CURSOR_COLOR);
   CHECK(f.shapeWidth == 2);
   CHECK(f.shapeHeight == 2);
-  CHECK(f.shapePitch == 4);
+  CHECK(f.shapePitch == 8);
   CHECK(f.shapeSize == sizeof(shapeExpected));
   CHECK(memcmp(f.shape, shapeExpected, sizeof(shapeExpected)) == 0);
   CHECK(f.colorCount == 1);

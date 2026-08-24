@@ -494,16 +494,12 @@ static void setCommandSource(RenderCommand * cmd, RenderQueueSource source,
 
 static bool copyCursorImage(RenderCommand * cmd, const void * data)
 {
-  if (!data || cmd->cursorImage.width <= 0 ||
-      cmd->cursorImage.height <= 0 || cmd->cursorImage.pitch <= 0)
+  size_t size;
+  if (!data || !lg_rendererCursorValidate(cmd->cursorImage.type,
+        cmd->cursorImage.width, cmd->cursorImage.height,
+        cmd->cursorImage.pitch, &size))
     return false;
 
-  if ((size_t)cmd->cursorImage.height >
-      SIZE_MAX / (size_t)cmd->cursorImage.pitch)
-    return false;
-
-  const size_t size =
-    (size_t)cmd->cursorImage.height * (size_t)cmd->cursorImage.pitch;
   cmd->cursorImage.data = malloc(size);
   if (!cmd->cursorImage.data)
     return false;

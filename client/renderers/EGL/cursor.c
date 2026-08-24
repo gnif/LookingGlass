@@ -83,6 +83,9 @@ struct EGL_Cursor
   int               stride;
   uint8_t *         data;
   size_t            dataSize;
+  uint32_t *        normData;
+  uint32_t *        monoData;
+  size_t            decodedCapacity;
   bool              update;
 
   // cursor state
@@ -255,6 +258,8 @@ void egl_cursorFree(EGL_Cursor ** cursor)
   LG_LOCK_FREE((*cursor)->lock);
   if ((*cursor)->data)
     free((*cursor)->data);
+  free((*cursor)->normData);
+  free((*cursor)->monoData);
 
   cursorTexFree(&(*cursor)->norm);
   cursorTexFree(&(*cursor)->mono);
@@ -266,34 +271,72 @@ void egl_cursorFree(EGL_Cursor ** cursor)
   *cursor = NULL;
 }
 
+static bool cursorEnsureDecoded(EGL_Cursor * cursor, size_t pixels)
+{
+  if (pixels <= cursor->decodedCapacity)
+    return true;
+
+  const size_t size = pixels * sizeof(*cursor->normData);
+  uint32_t * normData = malloc(size);
+  uint32_t * monoData = malloc(size);
+  if (!normData || !monoData)
+  {
+    free(normData);
+    free(monoData);
+    DEBUG_ERROR("Failed to allocate cursor conversion buffers");
+    return false;
+  }
+
+  free(cursor->normData);
+  free(cursor->monoData);
+  cursor->normData        = normData;
+  cursor->monoData        = monoData;
+  cursor->decodedCapacity = pixels;
+  return true;
+}
+
 bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
     const int width, const int height, const int stride, const uint8_t * data)
 {
+  size_t size;
+  if (!data || !lg_rendererCursorValidate(
+        type, width, height, stride, &size))
+  {
+    DEBUG_ERROR("Invalid cursor shape geometry");
+    return false;
+  }
+
+  const int decodedHeight =
+    type == LG_CURSOR_MONOCHROME ? height / 2 : height;
+  const size_t pixels = (size_t)width * (size_t)decodedHeight;
+
   LG_LOCK(cursor->lock);
 
-  cursor->type   = type;
-  cursor->width  = width;
-  cursor->height = (type == LG_CURSOR_MONOCHROME ? height / 2 : height);
-  cursor->stride = stride;
+  if (!cursorEnsureDecoded(cursor, pixels))
+  {
+    LG_UNLOCK(cursor->lock);
+    return false;
+  }
 
-  const size_t size = height * stride;
   if (size > cursor->dataSize)
   {
-    if (cursor->data)
-      free(cursor->data);
-
-    cursor->data = malloc(size);
-    if (!cursor->data)
+    uint8_t * resized = realloc(cursor->data, size);
+    if (!resized)
     {
       DEBUG_ERROR("Failed to malloc buffer for cursor shape");
       LG_UNLOCK(cursor->lock);
       return false;
     }
 
+    cursor->data     = resized;
     cursor->dataSize = size;
   }
 
   memcpy(cursor->data, data, size);
+  cursor->type   = type;
+  cursor->width  = width;
+  cursor->height = decodedHeight;
+  cursor->stride = stride;
   cursor->update = true;
 
   LG_UNLOCK(cursor->lock);
@@ -367,67 +410,92 @@ struct CursorState egl_cursorRender(EGL_Cursor * cursor,
 
     if (updateShape)
     {
-      uint8_t * data = cursor->data;
+      const uint8_t * data = cursor->data;
       switch(cursor->type)
       {
       case LG_CURSOR_MASKED_COLOR:
       {
-        uint32_t xor[cursor->height][cursor->width];
         for(int y = 0; y < cursor->height; ++y)
+        {
+          const uint8_t * row = data + (size_t)cursor->stride * (size_t)y;
           for(int x = 0; x < cursor->width; ++x)
           {
-            uint32_t * src = (uint32_t *)(data + (cursor->stride * y) + x * 4);
-            const bool masked = (*src & 0xFF000000) != 0;
+            uint32_t src;
+            memcpy(&src, row + (size_t)x * sizeof(src), sizeof(src));
+            const size_t index =
+              (size_t)y * (size_t)cursor->width + (size_t)x;
+            const bool masked = (src & 0xFF000000) != 0;
             if (masked)
-              *src = xor[y][x] = *src & 0x00FFFFFF;
+              cursor->normData[index] = cursor->monoData[index] =
+                src & 0x00FFFFFF;
             else
             {
-              xor[y][x]  = 0xFF000000;
-              *src      |= 0xFF000000;
+              cursor->normData[index] = src | 0xFF000000;
+              cursor->monoData[index] = 0xFF000000;
             }
           }
+        }
 
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, cursor->width, sizeof(xor[0]));
-        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
-      }
-      // fall through
-
-      case LG_CURSOR_COLOR:
-      {
+            cursor->width, cursor->height, cursor->width,
+            (size_t)cursor->width * sizeof(*cursor->monoData));
+        egl_textureUpdate(cursor->mono.texture,
+            (const uint8_t *)cursor->monoData, true);
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, cursor->width, cursor->stride);
-        egl_textureUpdate(cursor->norm.texture, data, true);
+            cursor->width, cursor->height, cursor->width,
+            (size_t)cursor->width * sizeof(*cursor->normData));
+        egl_textureUpdate(cursor->norm.texture,
+            (const uint8_t *)cursor->normData, true);
         break;
       }
 
+      case LG_CURSOR_COLOR:
+        for(int y = 0; y < cursor->height; ++y)
+          memcpy(cursor->normData + (size_t)y * (size_t)cursor->width,
+              data + (size_t)y * (size_t)cursor->stride,
+              (size_t)cursor->width * sizeof(*cursor->normData));
+
+        egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
+            cursor->width, cursor->height, cursor->width,
+            (size_t)cursor->width * sizeof(*cursor->normData));
+        egl_textureUpdate(cursor->norm.texture,
+            (const uint8_t *)cursor->normData, true);
+        break;
+
       case LG_CURSOR_MONOCHROME:
       {
-        uint32_t and[cursor->height][cursor->width];
-        uint32_t xor[cursor->height][cursor->width];
-
         for(int y = 0; y < cursor->height; ++y)
         {
+          const uint8_t * srcAnd =
+            data + (size_t)cursor->stride * (size_t)y;
+          const uint8_t * srcXor = data +
+            (size_t)cursor->stride * (size_t)(y + cursor->height);
           for(int x = 0; x < cursor->width; ++x)
           {
-            const uint8_t  * srcAnd  = data + (cursor->stride * y) + (x / 8);
-            const uint8_t  * srcXor  = srcAnd + cursor->stride * cursor->height;
             const uint8_t    mask    = 0x80 >> (x % 8);
-            const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
-            const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+            const uint32_t   andMask =
+              (srcAnd[x / 8] & mask) ? 0xFFFFFFFF : 0xFF000000;
+            const uint32_t   xorMask =
+              (srcXor[x / 8] & mask) ? 0x00FFFFFF : 0x00000000;
+            const size_t index =
+              (size_t)y * (size_t)cursor->width + (size_t)x;
 
-            and[y][x] = andMask;
-            xor[y][x] = xorMask;
+            cursor->normData[index] = andMask;
+            cursor->monoData[index] = xorMask;
           }
         }
 
         // Monochrome cursors use AND/XOR mask textures - never convert to PQ
         egl_textureSetup(cursor->norm.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, cursor->width, sizeof(and[0]));
+            cursor->width, cursor->height, cursor->width,
+            (size_t)cursor->width * sizeof(*cursor->normData));
         egl_textureSetup(cursor->mono.texture, EGL_PF_BGRA,
-            cursor->width, cursor->height, cursor->width, sizeof(xor[0]));
-        egl_textureUpdate(cursor->norm.texture, (uint8_t *)and, true);
-        egl_textureUpdate(cursor->mono.texture, (uint8_t *)xor, true);
+            cursor->width, cursor->height, cursor->width,
+            (size_t)cursor->width * sizeof(*cursor->monoData));
+        egl_textureUpdate(cursor->norm.texture,
+            (const uint8_t *)cursor->normData, true);
+        egl_textureUpdate(cursor->mono.texture,
+            (const uint8_t *)cursor->monoData, true);
         break;
       }
       }

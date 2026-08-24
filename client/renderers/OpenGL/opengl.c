@@ -157,6 +157,8 @@ struct Inst
   int               mousePitch;
   uint8_t *         mouseData;
   size_t            mouseDataSize;
+  uint32_t *        mouseRGBA;
+  size_t            mouseRGBACapacity;
 
   bool              mouseUpdate;
   bool              newShape;
@@ -269,6 +271,7 @@ void opengl_deinitialize(LG_Renderer * renderer)
 
   if (this->mouseData)
     free(this->mouseData);
+  free(this->mouseRGBA);
 
   free(this->swSurfaceBuffer);
 
@@ -352,29 +355,52 @@ bool opengl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cursor,
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  size_t size;
+  if (!data || !lg_rendererCursorValidate(
+        cursor, width, height, pitch, &size))
+  {
+    DEBUG_ERROR("Invalid cursor shape geometry");
+    return false;
+  }
+
+  const size_t pixels = (size_t)width * (size_t)height;
+
   LG_LOCK(this->mouseLock);
+
+  if (size > this->mouseDataSize)
+  {
+    uint8_t * resized = realloc(this->mouseData, size);
+    if (!resized)
+    {
+      DEBUG_ERROR("Failed to allocate cursor shape buffer");
+      LG_UNLOCK(this->mouseLock);
+      return false;
+    }
+
+    this->mouseData     = resized;
+    this->mouseDataSize = size;
+  }
+
+  if (pixels > this->mouseRGBACapacity)
+  {
+    uint32_t * resized = realloc(
+        this->mouseRGBA, pixels * sizeof(*this->mouseRGBA));
+    if (!resized)
+    {
+      DEBUG_ERROR("Failed to allocate cursor conversion buffer");
+      LG_UNLOCK(this->mouseLock);
+      return false;
+    }
+
+    this->mouseRGBA         = resized;
+    this->mouseRGBACapacity = pixels;
+  }
+
+  memcpy(this->mouseData, data, size);
   this->mouseCursor = cursor;
   this->mouseWidth  = width;
   this->mouseHeight = height;
   this->mousePitch  = pitch;
-
-  const size_t size = height * pitch;
-  if (size > this->mouseDataSize)
-  {
-    if (this->mouseData)
-      free(this->mouseData);
-
-    this->mouseData = malloc(size);
-    if (!this->mouseData)
-    {
-      DEBUG_ERROR("out of memory");
-      return false;
-    }
-
-    this->mouseDataSize = size;
-  }
-
-  memcpy(this->mouseData, data, size);
   this->newShape = true;
   LG_UNLOCK(this->mouseLock);
 
@@ -1105,27 +1131,41 @@ static void updateMouseShape(struct Inst * this)
   const int               height = this->mouseHeight;
   const int               pitch  = this->mousePitch;
   const uint8_t *         data   = this->mouseData;
-
-  // tmp buffer for masked colour
-  uint32_t tmp[width * height];
+  uint32_t              * rgba   = this->mouseRGBA;
 
   this->mouseType = cursor;
   switch(cursor)
   {
     case LG_CURSOR_MASKED_COLOR:
-      for(int i = 0; i < width * height; ++i)
+      for(int y = 0; y < height; ++y)
       {
-        const uint32_t c = ((uint32_t *)data)[i];
-        tmp[i] = (c & ~0xFF000000) | (c & 0xFF000000 ? 0x0 : 0xFF000000);
+        const uint8_t * row = data + (size_t)pitch * (size_t)y;
+        for(int x = 0; x < width; ++x)
+        {
+          uint32_t c;
+          memcpy(&c, row + (size_t)x * sizeof(c), sizeof(c));
+          rgba[(size_t)y * (size_t)width + (size_t)x] =
+            (c & ~0xFF000000) |
+            (c & 0xFF000000 ? 0x0 : 0xFF000000);
+        }
       }
-      data = (uint8_t *)tmp;
-      // fall through to LG_CURSOR_COLOR
+      data = (const uint8_t *)rgba;
+      // fall through
       //
       // technically we should also create an XOR texture from the data but this
       // usage seems very rare in modern software.
 
     case LG_CURSOR_COLOR:
     {
+      if (cursor == LG_CURSOR_COLOR)
+      {
+        for(int y = 0; y < height; ++y)
+          memcpy(rgba + (size_t)y * (size_t)width,
+              data + (size_t)y * (size_t)pitch,
+              (size_t)width * sizeof(*rgba));
+        data = (const uint8_t *)rgba;
+      }
+
       glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
       glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
       glPixelStorei(GL_UNPACK_ROW_LENGTH, width);
@@ -1169,19 +1209,28 @@ static void updateMouseShape(struct Inst * this)
     case LG_CURSOR_MONOCHROME:
     {
       const int hheight = height / 2;
-      uint32_t d[width * height];
       for(int y = 0; y < hheight; ++y)
+      {
+        const uint8_t * srcAnd =
+          data + (size_t)pitch * (size_t)y;
+        const uint8_t * srcXor =
+          data + (size_t)pitch * (size_t)(y + hheight);
         for(int x = 0; x < width; ++x)
         {
-          const uint8_t  * srcAnd  = data + (pitch * y) + (x / 8);
-          const uint8_t  * srcXor  = srcAnd + pitch * hheight;
           const uint8_t    mask    = 0x80 >> (x % 8);
-          const uint32_t   andMask = (*srcAnd & mask) ? 0xFFFFFFFF : 0xFF000000;
-          const uint32_t   xorMask = (*srcXor & mask) ? 0x00FFFFFF : 0x00000000;
+          const uint32_t   andMask =
+            (srcAnd[x / 8] & mask) ? 0xFFFFFFFF : 0xFF000000;
+          const uint32_t   xorMask =
+            (srcXor[x / 8] & mask) ? 0x00FFFFFF : 0x00000000;
+          const size_t andIndex =
+            (size_t)y * (size_t)width + (size_t)x;
+          const size_t xorIndex =
+            (size_t)(y + hheight) * (size_t)width + (size_t)x;
 
-          d[y * width + x                  ] = andMask;
-          d[y * width + x + width * hheight] = xorMask;
+          rgba[andIndex] = andMask;
+          rgba[xorIndex] = xorMask;
         }
+      }
 
       glBindTexture(GL_TEXTURE_2D, this->textures[MOUSE_TEXTURE]);
       glPixelStorei(GL_UNPACK_ALIGNMENT , 4    );
@@ -1196,7 +1245,7 @@ static void updateMouseShape(struct Inst * this)
         0      ,
         GL_RGBA,
         GL_UNSIGNED_BYTE,
-        d
+        rgba
       );
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
