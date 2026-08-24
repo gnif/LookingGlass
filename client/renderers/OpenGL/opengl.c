@@ -100,6 +100,13 @@ struct OpenGL_Options
   bool amdPinnedMem;
 };
 
+struct OpenGL_FrameRelease
+{
+  LG_FrameReleaseFn fn;
+  void            * opaque;
+  uint64_t          handle;
+};
+
 struct Inst
 {
   LG_Renderer base;
@@ -127,6 +134,7 @@ struct Inst
   float                 scaleX, scaleY;
   const FrameBuffer   * frame;
   LG_RendererFrameToken pendingFrameToken;
+  struct OpenGL_FrameRelease frameRelease;
 
   uint64_t        drawStart;
   bool            hasBuffers;
@@ -179,6 +187,7 @@ enum ConfigStatus
 
 static void deconfigure(struct Inst * this);
 static enum ConfigStatus configure(struct Inst * this);
+static void releasePendingFrame(struct Inst * this);
 static void updateMouseShape(struct Inst * this);
 static bool drawFrame(struct Inst * this,
     LG_RendererFrameToken frameTokenLimit,
@@ -201,6 +210,33 @@ static bool swSurfaceEnsureBuffer(struct Inst * this, size_t size)
   this->swSurfaceBuffer     = buffer;
   this->swSurfaceBufferSize = size;
   return true;
+}
+
+static struct OpenGL_FrameRelease takePendingFrameLocked(struct Inst * this)
+{
+  const struct OpenGL_FrameRelease release = this->frameRelease;
+
+  this->frame             = NULL;
+  this->pendingFrameToken = LG_RENDERER_FRAME_TOKEN_NONE;
+  this->frameRelease      = (struct OpenGL_FrameRelease) {};
+  atomic_store_explicit(&this->frameUpdate, false, memory_order_release);
+  return release;
+}
+
+static void invokeFrameRelease(const struct OpenGL_FrameRelease release)
+{
+  if (release.fn)
+    release.fn(release.opaque, release.handle);
+}
+
+static void releasePendingFrame(struct Inst * this)
+{
+  LG_LOCK(this->frameLock);
+  const struct OpenGL_FrameRelease release =
+    takePendingFrameLocked(this);
+  LG_UNLOCK(this->frameLock);
+
+  invokeFrameRelease(release);
 }
 
 const char * opengl_getName(void)
@@ -252,6 +288,8 @@ void opengl_deinitialize(LG_Renderer * renderer)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
+  releasePendingFrame(this);
+
   if (this->renderStarted)
   {
     ImGui_ImplOpenGL2_Shutdown();
@@ -290,7 +328,8 @@ void opengl_deinitialize(LG_Renderer * renderer)
 
 void opengl_onRestart(LG_Renderer * renderer)
 {
-//  struct Inst * this = UPCAST(struct Inst, renderer);
+  struct Inst * this = UPCAST(struct Inst, renderer);
+  releasePendingFrame(this);
 }
 
 static void setupModelView(struct Inst * this)
@@ -449,20 +488,25 @@ bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
-  /* The legacy renderer retains the shared framebuffer until render. It does
-   * not support asynchronous DMA ownership. */
-  if (releaseFn)
+  /* The legacy renderer supports only deferred CPU reads. */
+  if (!frame || dmaFd >= 0)
     return false;
 
-  (void)releaseOpaque;
-  (void)releaseHandle;
-
   LG_LOCK(this->frameLock);
+  const struct OpenGL_FrameRelease oldRelease =
+    takePendingFrameLocked(this);
   this->frame             = frame;
   this->pendingFrameToken = frameToken;
+  this->frameRelease      = (struct OpenGL_FrameRelease)
+  {
+    .fn     = releaseFn,
+    .opaque = releaseOpaque,
+    .handle = releaseHandle,
+  };
   atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
   LG_UNLOCK(this->frameLock);
 
+  invokeFrameRelease(oldRelease);
   return true;
 }
 
@@ -1327,8 +1371,10 @@ static bool drawFrame(struct Inst * this,
     LG_UNLOCK(this->frameLock);
     return true;
   }
-  atomic_store_explicit(&this->frameUpdate, false, memory_order_release);
+  const FrameBuffer * frame = this->frame;
   const LG_RendererFrameToken pendingFrameToken = this->pendingFrameToken;
+  const struct OpenGL_FrameRelease release =
+    takePendingFrameLocked(this);
 
   LG_LOCK(this->formatLock);
   glBindTexture(GL_TEXTURE_2D, this->frames[this->texWIndex]);
@@ -1340,7 +1386,7 @@ static bool drawFrame(struct Inst * this,
 
   this->texPos = 0;
   framebuffer_read_fn(
-    this->frame,
+    frame,
     this->format.dataHeight,
     this->format.dataWidth,
     bpp,
@@ -1406,6 +1452,7 @@ static bool drawFrame(struct Inst * this,
   glFlush();
 
   LG_UNLOCK(this->formatLock);
+  invokeFrameRelease(release);
   this->texReady = true;
   return true;
 }

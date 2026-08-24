@@ -1622,7 +1622,7 @@ int main_frameThread(void * unused)
     g_state.frameImportTime     = 0;
     g_state.frameImportWaitTime = 0;
 
-    const bool rendererOwnsFrame = frame.dmaFD >= 0 && frame.releaseFn;
+    const bool rendererOwnsFrame = frame.releaseFn != NULL;
     if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
           frame.damageRects, damageCount, frameToken,
           rendererOwnsFrame ? frame.releaseFn     : NULL,
@@ -1638,7 +1638,7 @@ int main_frameThread(void * unused)
       primaryWorkerFailed();
       break;
     }
-    /* A DMA snapshot can complete on the render thread immediately after it
+    /* A leased frame can complete on the render thread immediately after it
      * is signalled below, so sample producer timing while this lease is still
      * unambiguously owned by the frame thread. */
     LG_TransportFrameTiming timing = {};
