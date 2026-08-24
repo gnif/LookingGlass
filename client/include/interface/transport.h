@@ -285,19 +285,24 @@ static inline bool lgTransport_validateFrameFormat(
   const uint64_t rowBytes = (uint64_t)format->stride * storageBpp;
   const uint64_t size     = (uint64_t)format->dataHeight * format->pitch;
   if (format->dataWidth > format->stride || rowBytes != format->pitch ||
-      size > INT_MAX || format->dataHeight > format->frameHeight ||
-      (format->dataHeight < format->frameHeight &&
-       !(flags & LG_TRANSPORT_FRAME_TRUNCATED)))
+      size > INT_MAX || format->dataHeight > format->frameHeight)
     return false;
 
   if (format->type == FRAME_TYPE_BGR_32)
   {
+    /* Packed BGR rows are stored in a reshaped 32-bpp surface, so its storage
+     * height may be shorter than the logical frame without truncation. */
     if (format->dataWidth != format->stride ||
         (uint64_t)format->frameWidth * 3U > format->pitch)
       return false;
   }
-  else if (format->dataWidth != format->frameWidth)
-    return false;
+  else
+  {
+    if (format->dataWidth != format->frameWidth ||
+        (format->dataHeight < format->frameHeight &&
+         !(flags & LG_TRANSPORT_FRAME_TRUNCATED)))
+      return false;
+  }
 
   if (dataSize)
     *dataSize = (size_t)size;
