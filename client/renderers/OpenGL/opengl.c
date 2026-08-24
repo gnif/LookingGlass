@@ -933,7 +933,7 @@ static enum ConfigStatus configure(struct Inst * this)
 
     default:
       DEBUG_ERROR("Unknown/unsupported compression type");
-      return CONFIG_STATUS_ERROR;
+      goto fail;
   }
 
   // calculate the texture size in bytes
@@ -943,10 +943,7 @@ static enum ConfigStatus configure(struct Inst * this)
 
   g_gl_dynProcs.glGenBuffers(BUFFER_COUNT, this->vboID);
   if (check_gl_error("glGenBuffers"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return false;
-  }
+    goto fail;
   this->hasBuffers = true;
 
   if (this->amdPinnedMemSupport)
@@ -959,7 +956,7 @@ static enum ConfigStatus configure(struct Inst * this)
       if (!this->texPixels[i])
       {
         DEBUG_ERROR("Failed to allocate memory for texture");
-        return CONFIG_STATUS_ERROR;
+        goto fail;
       }
 
       memset(this->texPixels[i], 0, this->texSize);
@@ -967,10 +964,7 @@ static enum ConfigStatus configure(struct Inst * this)
       g_gl_dynProcs.glBindBuffer(
           GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
-      {
-        LG_UNLOCK(this->formatLock);
-        return CONFIG_STATUS_ERROR;
-      }
+        goto fail;
 
       g_gl_dynProcs.glBufferData(
         GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD,
@@ -980,10 +974,7 @@ static enum ConfigStatus configure(struct Inst * this)
       );
 
       if (check_gl_error("glBufferData"))
-      {
-        LG_UNLOCK(this->formatLock);
-        return CONFIG_STATUS_ERROR;
-      }
+        goto fail;
     }
     g_gl_dynProcs.glBindBuffer(GL_EXTERNAL_VIRTUAL_MEMORY_BUFFER_AMD, 0);
   }
@@ -993,10 +984,7 @@ static enum ConfigStatus configure(struct Inst * this)
     {
       g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, this->vboID[i]);
       if (check_gl_error("glBindBuffer"))
-      {
-        LG_UNLOCK(this->formatLock);
-        return CONFIG_STATUS_ERROR;
-      }
+        goto fail;
 
       g_gl_dynProcs.glBufferData(
         GL_PIXEL_UNPACK_BUFFER,
@@ -1005,10 +993,7 @@ static enum ConfigStatus configure(struct Inst * this)
         GL_STREAM_DRAW
       );
       if (check_gl_error("glBufferData"))
-      {
-        LG_UNLOCK(this->formatLock);
-        return CONFIG_STATUS_ERROR;
-      }
+        goto fail;
     }
     g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   }
@@ -1016,10 +1001,7 @@ static enum ConfigStatus configure(struct Inst * this)
   // create the frame textures
   glGenTextures(BUFFER_COUNT, this->frames);
   if (check_gl_error("glGenTextures"))
-  {
-    LG_UNLOCK(this->formatLock);
-    return CONFIG_STATUS_ERROR;
-  }
+    goto fail;
   this->hasFrames = true;
 
   for(int i = 0; i < BUFFER_COUNT; ++i)
@@ -1027,10 +1009,7 @@ static enum ConfigStatus configure(struct Inst * this)
     // bind and create the new texture
     glBindTexture(GL_TEXTURE_2D, this->frames[i]);
     if (check_gl_error("glBindTexture"))
-    {
-      LG_UNLOCK(this->formatLock);
-      return CONFIG_STATUS_ERROR;
-    }
+      goto fail;
 
     glTexImage2D(
       GL_TEXTURE_2D,
@@ -1044,10 +1023,7 @@ static enum ConfigStatus configure(struct Inst * this)
       (void*)0
     );
     if (check_gl_error("glTexImage2D"))
-    {
-      LG_UNLOCK(this->formatLock);
-      return CONFIG_STATUS_ERROR;
-    }
+      goto fail;
 
     // configure the texture
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S    , GL_CLAMP_TO_EDGE);
@@ -1079,6 +1055,11 @@ static enum ConfigStatus configure(struct Inst * this)
 
   LG_UNLOCK(this->formatLock);
   return CONFIG_STATUS_OK;
+
+fail:
+  deconfigure(this);
+  LG_UNLOCK(this->formatLock);
+  return CONFIG_STATUS_ERROR;
 }
 
 static void deconfigure(struct Inst * this)
