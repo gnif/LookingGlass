@@ -97,11 +97,12 @@ static bool waitForEmpty(TestState * state)
   return false;
 }
 
-static bool allocMemory(TestState * state, uint32_t size,
+static bool allocMemory(TestState * state, uint32_t size, uint32_t alignment,
     PLGMPMemory * memory, void ** pointer)
 {
   CHECK(state->allocationCount < TEST_MAX_ALLOCS);
-  CHECK(lgmpHostMemAlloc(state->host, size, memory) == LGMP_OK);
+  CHECK(lgmpHostMemAllocAligned(
+        state->host, size, alignment, memory) == LGMP_OK);
   state->allocations[state->allocationCount++] = *memory;
   *pointer = lgmpHostMemPtr(*memory);
   return true;
@@ -112,7 +113,8 @@ static bool newFrame(TestState * state, uint32_t serial, TestFrame * result)
   const uint32_t size = sizeof(KVMFRFrame) + sizeof(FrameBuffer) +
     TEST_FRAME_DATA;
   void * pointer;
-  CHECK(allocMemory(state, size, &result->memory, &pointer));
+  CHECK(allocMemory(state, size, _Alignof(KVMFRFrame),
+        &result->memory, &pointer));
 
   result->wire = pointer;
   result->wire->formatVer     = 1;
@@ -199,7 +201,8 @@ static bool testMalformed(TestState * state)
 
   PLGMPMemory shortMemory;
   void * shortPointer;
-  CHECK(allocMemory(state, sizeof(KVMFRFrame) - 4, &shortMemory,
+  CHECK(allocMemory(state, sizeof(KVMFRFrame) - 4, _Alignof(uint32_t),
+        &shortMemory,
         &shortPointer));
   CHECK(lgmpHostQueuePost(state->queues[0], 0, shortMemory) == LGMP_OK);
   LG_TransportFrame result;

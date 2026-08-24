@@ -1786,6 +1786,12 @@ static bool lgmp_validateFrameMessage(LG_Transport * this,
     return false;
   }
 
+  if ((uintptr_t)message->message.mem % _Alignof(KVMFRFrame))
+  {
+    DEBUG_ERROR("LGMP frame payload is not correctly aligned");
+    return false;
+  }
+
   memcpy(&message->lease->snapshot, message->message.mem,
       sizeof(message->lease->snapshot));
   const KVMFRFrame * frame = &message->lease->snapshot;

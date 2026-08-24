@@ -381,7 +381,8 @@ int main(void)
   };
   const uint32_t frameSize =
     sizeof(KVMFRFrame) + sizeof(FrameBuffer) + sizeof(uint32_t);
-  CHECK(lgmpHostMemAlloc(host, frameSize, &frameMemory) == LGMP_OK);
+  CHECK(lgmpHostMemAllocAligned(host, frameSize, _Alignof(KVMFRFrame),
+        &frameMemory) == LGMP_OK);
   KVMFRFrame * wireFrame = lgmpHostMemPtr(frameMemory);
   wireFrame->formatVer   = 1;
   wireFrame->frameSerial = 1;
