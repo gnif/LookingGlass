@@ -131,6 +131,7 @@ struct Inst
   GLuint                dataFormat;
   size_t                texSize;
   size_t                texPos;
+  bool                  texUploadError;
   float                 scaleX, scaleY;
   const FrameBuffer   * frame;
   LG_RendererFrameToken pendingFrameToken;
@@ -1313,6 +1314,14 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
 {
   struct Inst * this = (struct Inst *)opaque;
 
+  if (this->texPos > this->texSize || size > this->texSize - this->texPos)
+  {
+    this->texUploadError = true;
+    DEBUG_ERROR("Texture upload exceeds its buffer (%zu + %zu > %zu)",
+        this->texPos, size, this->texSize);
+    return false;
+  }
+
   // update the buffer, this performs a DMA transfer if possible
   g_gl_dynProcs.glBufferSubData(
     GL_PIXEL_UNPACK_BUFFER,
@@ -1322,7 +1331,10 @@ static bool opengl_bufferFn(void * opaque, const void * data, size_t size)
   );
 
   if (check_gl_error("glBufferSubData"))
+  {
+    this->texUploadError = true;
     return false;
+  }
 
   this->texPos += size;
   return true;
@@ -1384,8 +1396,12 @@ static bool drawFrame(struct Inst * this,
   glPixelStorei(GL_UNPACK_ALIGNMENT , bpp < 4 ? 1 : bpp);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, this->format.frameWidth);
 
-  this->texPos = 0;
-  framebuffer_read_fn(
+  this->texPos         = 0;
+  this->texUploadError = false;
+  const size_t expectedSize =
+    (size_t)this->format.dataHeight *
+    (size_t)this->format.dataWidth * (size_t)bpp;
+  const bool readComplete = framebuffer_read_fn(
     frame,
     this->format.dataHeight,
     this->format.dataWidth,
@@ -1395,7 +1411,30 @@ static bool drawFrame(struct Inst * this,
     this
   );
 
+  const bool incomplete = !readComplete || this->texPos != expectedSize;
+  const bool fatal = this->texUploadError ||
+    (readComplete && this->texPos != expectedSize);
+  if (incomplete && !fatal)
+  {
+    this->frame             = frame;
+    this->pendingFrameToken = pendingFrameToken;
+    this->frameRelease      = release;
+    atomic_store_explicit(&this->frameUpdate, true, memory_order_release);
+  }
+
   LG_UNLOCK(this->frameLock);
+
+  if (incomplete)
+  {
+    g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    LG_UNLOCK(this->formatLock);
+    if (fatal)
+      invokeFrameRelease(release);
+    DEBUG_WARN("%s incomplete texture upload (%zu of %zu bytes)",
+        fatal ? "Rejecting" : "Retrying", this->texPos, expectedSize);
+    return !fatal;
+  }
 
   // update the texture
   glTexSubImage2D(
@@ -1423,6 +1462,11 @@ static bool drawFrame(struct Inst * this,
       this->vboFormat,
       this->texSize
     );
+    g_gl_dynProcs.glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    LG_UNLOCK(this->formatLock);
+    invokeFrameRelease(release);
+    return false;
   }
 
   // unbind the buffer
