@@ -33,16 +33,17 @@ extern void (*rectCopyUnaligned)(
 
 void rectScaleOutward(struct Rect * rect, double scale);
 
-void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsBufferToFramebuffer(const FrameDamageRect * rects, int count, int bpp,
   FrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch);
 
-bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBuffer(const FrameDamageRect * rects, int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch);
 
 /* As above, accumulating producer wait time in nanoseconds. */
-bool rectsFramebufferToBufferTimed(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBufferTimed(const FrameDamageRect * rects,
+  int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs);
 

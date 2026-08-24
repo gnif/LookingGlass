@@ -1016,6 +1016,13 @@ static CaptureResult d12_getFrame(
   if (!*dst)
     goto exit;
 
+  const size_t frameHeight = this->dstFormat.desc.Height;
+  if (!this->pitch || !frameHeight ||
+      frameHeight > maxFrameSize / this->pitch ||
+      frameHeight * this->pitch > UINT_LEAST32_MAX)
+    goto exit;
+  const size_t frameSize = frameHeight * this->pitch;
+
   // place a fence into the queue
   DEBUG_TRACE("d12_backendSync");
   result = d12_backendSync(this->backend,
@@ -1210,18 +1217,19 @@ static CaptureResult d12_getFrame(
   {
     if (rectCount == 0)
     {
-      framebuffer_write(frameBuffer, map,
-        this->pitch * this->dstFormat.desc.Height);
+      framebuffer_write(frameBuffer, map, frameSize);
     }
     else
     {
       /* copy all the rects */
-      rectsBufferToFramebuffer(allRects, rectCount, this->bpp, frameBuffer,
-        this->pitch, this->dstFormat.desc.Height, map, this->pitch);
+      if (!rectsBufferToFramebuffer(allRects, rectCount, this->bpp,
+            frameBuffer, this->pitch, this->dstFormat.desc.Height,
+            map, this->pitch))
+        framebuffer_write(frameBuffer, map,
+            frameSize);
 
       // signal the frame is complete
-      framebuffer_set_write_ptr(frameBuffer,
-        this->dstFormat.desc.Height * this->pitch);
+      framebuffer_set_write_ptr(frameBuffer, frameSize);
     }
   }
   else

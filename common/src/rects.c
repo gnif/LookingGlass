@@ -99,18 +99,41 @@ static int cornerCompare(const void * a_, const void * b_)
   return 0;
 }
 
-inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
+static bool rectsBufferCopy(const FrameDamageRect * rects,
+  int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const uint8_t * src, int srcStride, void * opaque,
   bool (*rowCopyStart)(int y, void * opaque),
   void (*rowCopyFinish)(int y, void * opaque))
 {
-  const int cornerCount = 4 * count;
-  struct Corner corners[cornerCount];
+  if (!rects || count <= 0 || bpp <= 0 || !dst || !src ||
+      count > LG_MAX_FRAME_DAMAGE_RECTS ||
+      dstStride <= 0 || srcStride <= 0 || height <= 0 ||
+      (size_t)height > SIZE_MAX / (size_t)dstStride ||
+      (size_t)height > SIZE_MAX / (size_t)srcStride ||
+      (size_t)height * (size_t)dstStride > UINT_LEAST32_MAX ||
+      (size_t)height * (size_t)srcStride > UINT_LEAST32_MAX)
+    return false;
 
   for (int i = 0; i < count; ++i)
   {
-    FrameDamageRect * rect = rects + i;
+    const FrameDamageRect * rect = rects + i;
+    const uint64_t right  = (uint64_t)rect->x + rect->width;
+    const uint64_t bottom = (uint64_t)rect->y + rect->height;
+    if (!rect->width || !rect->height || bottom > (uint32_t)height ||
+        right > (uint32_t)dstStride / (uint32_t)bpp ||
+        right > (uint32_t)srcStride / (uint32_t)bpp)
+      return false;
+  }
+
+  const size_t cornerCount = (size_t)count * 4U;
+  struct Corner corners[cornerCount];
+  struct Edge active_[2][cornerCount];
+  struct Edge change[cornerCount];
+
+  for (int i = 0; i < count; ++i)
+  {
+    const FrameDamageRect * rect = rects + i;
     corners[4 * i + 0] = (struct Corner) {
       .x = rect->x, .y = rect->y, .delta = 1
     };
@@ -126,24 +149,20 @@ inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
   }
   qsort(corners, cornerCount, sizeof(struct Corner), cornerCompare);
 
-  struct Edge active_[2][cornerCount];
-  struct Edge change[cornerCount];
   int prev_y = 0;
   int activeRow = 0;
-  int actives = 0;
+  size_t actives = 0;
+  bool result = true;
 
-  for (int rs = 0;;)
+  for (size_t rs = 0;;)
   {
     int y = corners[rs].y;
-    int re = rs;
+    size_t re = rs;
     while (re < cornerCount && corners[re].y == y)
       ++re;
 
-    if (y > height)
-      y = height;
-
-    int changes = 0;
-    for (int i = rs; i < re; )
+    size_t changes = 0;
+    for (size_t i = rs; i < re; )
     {
       int x = corners[i].x;
       int delta = 0;
@@ -153,12 +172,15 @@ inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
     }
 
     if (rowCopyStart && !rowCopyStart(y, opaque))
-      return false;
+    {
+      result = false;
+      break;
+    }
 
     struct Edge * active = active_[activeRow];
     int x1 = 0;
     int in_rect = 0;
-    for (int i = 0; i < actives; ++i)
+    for (size_t i = 0; i < actives; ++i)
     {
       if (!in_rect)
         x1 = active[i].x;
@@ -175,9 +197,9 @@ inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
       rowCopyFinish(y, opaque);
 
     struct Edge * new = active_[activeRow ^ 1];
-    int ai = 0;
-    int ci = 0;
-    int ni = 0;
+    size_t ai = 0;
+    size_t ci = 0;
+    size_t ni = 0;
 
     while (ai < actives && ci < changes)
     {
@@ -206,7 +228,7 @@ inline static bool rectsBufferCopy(FrameDamageRect * rects, int count, int bpp,
     activeRow ^= 1;
   }
 
-  return true;
+  return result;
 }
 
 struct ToFramebufferData
@@ -218,17 +240,33 @@ struct ToFramebufferData
 static void fbRowFinish(int y, void * opaque)
 {
   struct ToFramebufferData * data = opaque;
-  framebuffer_set_write_ptr(data->frame, y * data->pitch);
+  framebuffer_set_write_ptr(
+      data->frame, (size_t)y * (size_t)data->pitch);
 }
 
-void rectsBufferToFramebuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsBufferToFramebuffer(const FrameDamageRect * rects,
+  int count, int bpp,
   FrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch)
 {
+  if (!rects || !frame || count <= 0)
+    return false;
+
   struct ToFramebufferData data = { .frame = frame, .pitch = dstPitch };
-  rectsBufferCopy(rects, count, bpp, framebuffer_get_data(frame), dstPitch,
-    height, src, srcPitch, &data, NULL, fbRowFinish);
-  framebuffer_set_write_ptr(frame, height * dstPitch);
+  const bool publishRows = count <= LG_MAX_FRAME_DAMAGE_RECTS;
+  for (int offset = 0; offset < count; )
+  {
+    const int batch = min(count - offset, LG_MAX_FRAME_DAMAGE_RECTS);
+    if (!rectsBufferCopy(rects + offset, batch, bpp,
+          framebuffer_get_data(frame), dstPitch, height, src, srcPitch,
+          &data, NULL, publishRows ? fbRowFinish : NULL))
+      return false;
+    offset += batch;
+  }
+
+  framebuffer_set_write_ptr(
+      frame, (size_t)height * (size_t)dstPitch);
+  return true;
 }
 
 struct FromFramebufferData
@@ -242,24 +280,38 @@ static bool fbRowStart(int y, void * opaque)
 {
   struct FromFramebufferData * data = opaque;
   return framebuffer_wait_timed(
-      data->frame, y * data->pitch, data->waitTimeNs);
+      data->frame, (size_t)y * (size_t)data->pitch, data->waitTimeNs);
 }
 
-bool rectsFramebufferToBufferTimed(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBufferTimed(const FrameDamageRect * rects,
+  int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs)
 {
+  if (!rects || !frame || count <= 0)
+    return false;
+
   struct FromFramebufferData data =
   {
     .frame      = frame,
     .pitch      = srcPitch,
     .waitTimeNs = waitTimeNs
   };
-  return rectsBufferCopy(rects, count, bpp, dst, dstPitch, height,
-    framebuffer_get_buffer(frame), srcPitch, &data, fbRowStart, NULL);
+  for (int offset = 0; offset < count; )
+  {
+    const int batch = min(count - offset, LG_MAX_FRAME_DAMAGE_RECTS);
+    if (!rectsBufferCopy(rects + offset, batch, bpp, dst, dstPitch, height,
+          framebuffer_get_buffer(frame), srcPitch,
+          &data, fbRowStart, NULL))
+      return false;
+    offset += batch;
+  }
+
+  return true;
 }
 
-bool rectsFramebufferToBuffer(FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBuffer(const FrameDamageRect * rects,
+  int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
   const FrameBuffer * frame, int srcPitch)
 {
@@ -336,13 +388,16 @@ static void rectCopyUnaligned_memcpy(
     uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
-  src += ystart * srcPitch + dx;
-  dst += ystart * dstPitch + dx;
+  src += (size_t)ystart * (size_t)srcPitch + (size_t)dx;
+  dst += (size_t)ystart * (size_t)dstPitch + (size_t)dx;
   for (int i = ystart; i < yend; ++i)
   {
     memcpy(dst, src, width);
-    src += srcPitch;
-    dst += dstPitch;
+    if (i + 1 < yend)
+    {
+      src += srcPitch;
+      dst += dstPitch;
+    }
   }
 }
 
@@ -356,8 +411,8 @@ static void rectCopyUnaligned_avx(
     uint8_t *restrict dst, const uint8_t *restrict src,
     int ystart, int yend, int dx, int dstPitch, int srcPitch, int width)
 {
-  src += ystart * srcPitch + dx;
-  dst += ystart * dstPitch + dx;
+  src += (size_t)ystart * (size_t)srcPitch + (size_t)dx;
+  dst += (size_t)ystart * (size_t)dstPitch + (size_t)dx;
 
   bool streamed = false;
   for (int i = ystart; i < yend; ++i)
@@ -399,8 +454,11 @@ static void rectCopyUnaligned_avx(
     for(int col = width - rem; col < width; ++col)
       dst[col] = src[col];
 
-    src += srcPitch;
-    dst += dstPitch;
+    if (i + 1 < yend)
+    {
+      src += srcPitch;
+      dst += dstPitch;
+    }
   }
 
   if (streamed)

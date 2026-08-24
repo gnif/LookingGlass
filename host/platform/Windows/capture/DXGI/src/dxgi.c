@@ -1551,13 +1551,19 @@ static CaptureResult dxgi_getFrame(
           scaledDamageRects[i] = rect;
         }
 
-        rectsBufferToFramebuffer(scaledDamageRects, damage->count, this->bpp, frame,
-          this->pitch, this->dataHeight, tex->map, this->pitch);
+        if (!rectsBufferToFramebuffer(scaledDamageRects, damage->count,
+              this->bpp, frame, this->pitch, this->dataHeight,
+              tex->map, this->pitch))
+          framebuffer_write(frame, tex->map,
+              this->pitch * this->dataHeight);
       }
       else
       {
-        rectsBufferToFramebuffer(damage->rects, damage->count, this->bpp, frame,
-          this->pitch, this->dataHeight, tex->map, this->pitch);
+        if (!rectsBufferToFramebuffer(damage->rects, damage->count,
+              this->bpp, frame, this->pitch, this->dataHeight,
+              tex->map, this->pitch))
+          framebuffer_write(frame, tex->map,
+              this->pitch * this->dataHeight);
       }
     }
   }
