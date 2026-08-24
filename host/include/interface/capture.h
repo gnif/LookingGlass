@@ -153,10 +153,12 @@ typedef struct CaptureInterface
   CaptureResult (*waitFrame )(
     unsigned frameBufferIndex,
     CaptureFrame * frame,
+    /* Capacity of FrameBuffer::data, excluding the message and header. */
     const size_t maxFrameSize);
   CaptureResult (*getFrame  )(
     unsigned       frameBufferIndex,
     FrameBuffer  * frame,
+    /* Capacity of FrameBuffer::data, excluding the message and header. */
     const size_t   maxFrameSize,
     CaptureFrame * captureFrame);
 }

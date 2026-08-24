@@ -98,6 +98,7 @@ struct app
   unsigned int   pointerShapeIndex;
 
   unsigned       alignSize;
+  size_t         frameMemorySize;
   size_t         maxFrameSize;
   PLGMPHostQueue frameQueue;
   PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
@@ -876,14 +877,37 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
     memset(lgmpHostMemPtr(app.pointerShapeMemory[i]), 0, MAX_POINTER_SIZE);
   }
 
-  app.maxFrameSize = lgmpHostMemAvail(app.lgmp);
-  app.maxFrameSize = (app.maxFrameSize - (app.alignSize - 1)) & ~(app.alignSize - 1);
-  app.maxFrameSize /= LGMP_Q_FRAME_LEN;
-  DEBUG_INFO("Max Frame Size   : %u MiB", (unsigned int)(app.maxFrameSize / 1048576LL));
+  const size_t frameMemoryAvail = lgmpHostMemAvail(app.lgmp);
+  if (!app.alignSize ||
+      (size_t)app.alignSize < sizeof(KVMFRFrame) + sizeof(FrameBuffer) ||
+      (app.alignSize & (app.alignSize - 1)) ||
+      frameMemoryAvail <= app.alignSize - 1)
+  {
+    DEBUG_ERROR("Invalid framebuffer alignment or shared memory capacity");
+    goto fail_lgmp;
+  }
+
+  /* Reserve the worst-case alignment padding once, then round each message
+   * down so all frame allocations are guaranteed to fit. The FrameBuffer data
+   * begins one alignment unit into each message. */
+  app.frameMemorySize = (frameMemoryAvail - (app.alignSize - 1)) /
+    LGMP_Q_FRAME_LEN;
+  app.frameMemorySize &= ~((size_t)app.alignSize - 1);
+  if (app.frameMemorySize <= app.alignSize ||
+      app.frameMemorySize > UINT32_MAX)
+  {
+    DEBUG_ERROR("Insufficient shared memory for the frame buffers");
+    goto fail_lgmp;
+  }
+
+  app.maxFrameSize = app.frameMemorySize - app.alignSize;
+  DEBUG_INFO("Max Frame Size   : %u MiB",
+      (unsigned int)(app.maxFrameSize / 1048576LL));
 
   for(int i = 0; i < LGMP_Q_FRAME_LEN; ++i)
   {
-    if ((status = lgmpHostMemAllocAligned(app.lgmp, app.maxFrameSize,
+    if ((status = lgmpHostMemAllocAligned(app.lgmp,
+            (uint32_t)app.frameMemorySize,
             app.alignSize, &app.frameMemory[i])) != LGMP_OK)
     {
       DEBUG_ERROR("lgmpHostMemAlloc Failed (Frame): %s", lgmpStatusString(status));

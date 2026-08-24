@@ -1526,12 +1526,21 @@ static CaptureResult dxgi_getFrame(
   }
   else
   {
+    if (!this->pitch || !this->dataHeight ||
+        (size_t)this->dataHeight > maxFrameSize / this->pitch ||
+        (size_t)this->dataHeight * this->pitch > UINT_LEAST32_MAX)
+    {
+      result = CAPTURE_RESULT_ERROR;
+      goto cleanup;
+    }
+    const size_t frameSize = (size_t)this->pitch * this->dataHeight;
+
     if (tex->damageRectsCount                 == 0 ||
         damage->count                          < 0 ||
         damage->count + tex->damageRectsCount  > KVMFR_MAX_DAMAGE_RECTS)
     {
       // damage all
-      framebuffer_write(frame, tex->map, this->pitch * this->dataHeight);
+      framebuffer_write(frame, tex->map, frameSize);
     }
     else
     {
@@ -1556,7 +1565,7 @@ static CaptureResult dxgi_getFrame(
               this->bpp, frame, this->pitch, this->dataHeight,
               tex->map, this->pitch))
           framebuffer_write(frame, tex->map,
-              this->pitch * this->dataHeight);
+              frameSize);
       }
       else
       {
@@ -1564,7 +1573,7 @@ static CaptureResult dxgi_getFrame(
               this->bpp, frame, this->pitch, this->dataHeight,
               tex->map, this->pitch))
           framebuffer_write(frame, tex->map,
-              this->pitch * this->dataHeight);
+              frameSize);
       }
     }
   }
