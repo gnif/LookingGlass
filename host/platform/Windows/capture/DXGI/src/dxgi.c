@@ -1516,12 +1516,13 @@ static CaptureResult dxgi_getFrame(
 
   Texture     * tex    = &this->texture[this->texRIndex];
   FrameDamage * damage = &this->frameDamage[frameBufferIndex];
+  CaptureResult result = CAPTURE_RESULT_OK;
 
   if (this->backend->writeFrame)
   {
-    CaptureResult result = this->backend->writeFrame(frameBufferIndex, frame);
+    result = this->backend->writeFrame(frameBufferIndex, frame);
     if (result != CAPTURE_RESULT_OK)
-      return result;
+      goto cleanup;
   }
   else
   {
@@ -1584,6 +1585,7 @@ static CaptureResult dxgi_getFrame(
       damage->count = -1;
   }
 
+cleanup:
   this->backend->unmapTexture(this->texRIndex);
   tex->map   = NULL;
   tex->state = TEXTURE_STATE_UNUSED;
@@ -1591,7 +1593,7 @@ static CaptureResult dxgi_getFrame(
   if (++this->texRIndex == this->maxTextures)
     this->texRIndex = 0;
 
-  return CAPTURE_RESULT_OK;
+  return result;
 }
 
 static CaptureResult dxgi_releaseFrame(void)
