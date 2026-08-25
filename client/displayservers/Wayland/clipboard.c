@@ -31,6 +31,7 @@
 
 #include "core/clipboard.h"
 #include "core/clipboard_files.h"
+#include "common/countedbuffer.h"
 #include "common/debug.h"
 #include "common/KVMFRClipboard.h"
 
@@ -1053,28 +1054,97 @@ void waylandCBRequestCancel(LG_ClipboardRequest request,
   clipboardReadRetire(data);
 }
 
-struct ClipboardWrite
+struct WCBPending
+{
+  int                 fd;
+  struct WCBPending * next;
+};
+
+struct WCBTextCache
 {
   LG_Lock             lock;
-  int                 fd;
-  LG_ClipboardRequest request;
-  LG_ClipboardData    type;
-  uint64_t            offset;
-  size_t              pos;
-  size_t              pending;
-  bool                begun;
-  bool                ended;
-  bool                blocked;
-  bool                discard;
-  bool                pollOwned;
-  bool                pollRegistered;
-  bool                streamActive;
-  bool                requesting;
-  uint8_t             buffer[KVMFR_CLIPBOARD_REPRESENTATION_BYTES];
+  CountedBuffer     * data;
+  struct WCBPending * pending;
+  bool                request;
 };
+
+static void fileTransferRetain(struct WCBTransfer * transfer);
+static void fileTransferRelease(struct WCBTransfer * transfer);
+static void clipboardTextComplete(struct WCBTransfer * transfer,
+    CountedBuffer * buffer);
+static void clipboardTextCancel(struct WCBTransfer * transfer);
+
+struct ClipboardWrite
+{
+  LG_Lock              lock;
+  int                  fd;
+  LG_ClipboardRequest  request;
+  LG_ClipboardData     type;
+  uint64_t             offset;
+  size_t               pos;
+  size_t               pending;
+  bool                 begun;
+  bool                 ended;
+  bool                 blocked;
+  bool                 discard;
+  bool                 pollOwned;
+  bool                 pollRegistered;
+  bool                 streamActive;
+  bool                 requesting;
+  bool                 cacheTerminal;
+  struct WCBTransfer * cacheTransfer;
+  uint8_t            * cache;
+  size_t               cacheSize;
+  size_t               cacheCapacity;
+  uint8_t              buffer[KVMFR_CLIPBOARD_REPRESENTATION_BYTES];
+};
+
+static bool clipboardWriteCacheGrow(struct ClipboardWrite * data,
+    size_t wanted)
+{
+  if (wanted <= data->cacheCapacity)
+    return true;
+
+  size_t capacity = data->cacheCapacity ? data->cacheCapacity : 4096U;
+  while (capacity < wanted)
+  {
+    if (capacity > SIZE_MAX / 2U)
+    {
+      capacity = wanted;
+      break;
+    }
+    capacity *= 2U;
+  }
+
+  uint8_t * cache = realloc(data->cache, capacity);
+  if (!cache)
+    return false;
+
+  data->cache         = cache;
+  data->cacheCapacity = capacity;
+  return true;
+}
+
+static void clipboardWriteCancelCache(struct ClipboardWrite * data)
+{
+  struct WCBTransfer * transfer = NULL;
+  LG_LOCK(data->lock);
+  if (data->cacheTransfer && !data->cacheTerminal)
+  {
+    data->cacheTerminal = true;
+    transfer            = data->cacheTransfer;
+  }
+  LG_UNLOCK(data->lock);
+
+  if (transfer)
+    clipboardTextCancel(transfer);
+}
 
 static void clipboardWriteDestroy(struct ClipboardWrite * data)
 {
+  free(data->cache);
+  if (data->cacheTransfer)
+    fileTransferRelease(data->cacheTransfer);
   LG_LOCK_FREE(data->lock);
   free(data);
 }
@@ -1102,11 +1172,17 @@ static void clipboardWriteRetireStream(struct ClipboardWrite * data)
 static LG_ClipboardResult clipboardWriteBegin(void * opaque,
     LG_ClipboardData type, uint64_t sizeHint)
 {
-  (void)sizeHint;
   struct ClipboardWrite * data = opaque;
   LG_LOCK(data->lock);
   if (data->begun || data->ended || !data->streamActive ||
       type != data->type)
+  {
+    LG_UNLOCK(data->lock);
+    return LG_CLIPBOARD_RESULT_FAILED;
+  }
+  if (data->cacheTransfer && sizeHint != LG_CLIPBOARD_SIZE_UNKNOWN &&
+      (sizeHint > SIZE_MAX ||
+       !clipboardWriteCacheGrow(data, (size_t)sizeHint)))
   {
     LG_UNLOCK(data->lock);
     return LG_CLIPBOARD_RESULT_FAILED;
@@ -1139,6 +1215,17 @@ static LG_ClipboardResult clipboardWriteChunk(void * opaque,
     LG_UNLOCK(data->lock);
     return LG_CLIPBOARD_RESULT_FAILED;
   }
+  if (data->cacheTransfer)
+  {
+    if (offset != data->cacheSize || size > SIZE_MAX - data->cacheSize ||
+        !clipboardWriteCacheGrow(data, data->cacheSize + size))
+    {
+      LG_UNLOCK(data->lock);
+      return LG_CLIPBOARD_RESULT_FAILED;
+    }
+    memcpy(data->cache + data->cacheSize, buffer, size);
+    data->cacheSize += size;
+  }
   if (data->discard)
   {
     data->offset += size;
@@ -1167,7 +1254,9 @@ static LG_ClipboardResult clipboardWriteChunk(void * opaque,
 static LG_ClipboardResult clipboardWriteEnd(void * opaque,
     uint64_t finalSize)
 {
-  struct ClipboardWrite * data = opaque;
+  struct ClipboardWrite * data   = opaque;
+  CountedBuffer       * cache    = NULL;
+  struct WCBTransfer * transfer  = NULL;
   LG_LOCK(data->lock);
   if (!data->begun || data->ended || !data->streamActive)
   {
@@ -1185,9 +1274,28 @@ static LG_ClipboardResult clipboardWriteEnd(void * opaque,
     LG_UNLOCK(data->lock);
     return LG_CLIPBOARD_RESULT_FAILED;
   }
+  if (data->cacheTransfer)
+  {
+    if (finalSize != data->cacheSize ||
+        data->cacheSize > SIZE_MAX - sizeof(*cache) ||
+        !(cache = countedBufferNew(data->cacheSize)))
+    {
+      LG_UNLOCK(data->lock);
+      return LG_CLIPBOARD_RESULT_FAILED;
+    }
+    if (data->cacheSize)
+      memcpy(cache->data, data->cache, data->cacheSize);
+    data->cacheTerminal = true;
+    transfer            = data->cacheTransfer;
+  }
 
   data->ended = true;
   LG_UNLOCK(data->lock);
+  if (transfer)
+  {
+    clipboardTextComplete(transfer, cache);
+    countedBufferRelease(&cache);
+  }
   clipboardWriteRetireStream(data);
   return LG_CLIPBOARD_RESULT_ACCEPTED;
 }
@@ -1197,6 +1305,7 @@ static void clipboardWriteCancel(void * opaque,
 {
   (void)reason;
   struct ClipboardWrite * data = opaque;
+  clipboardWriteCancelCache(data);
   clipboardWriteRetireStream(data);
 }
 
@@ -1219,10 +1328,34 @@ struct ClipboardFileWrite
   bool                 complete;
 };
 
+static void clipboardPendingClose(struct WCBPending * pending)
+{
+  while (pending)
+  {
+    struct WCBPending * next = pending->next;
+    close(pending->fd);
+    free(pending);
+    pending = next;
+  }
+}
+
+static void clipboardTextDestroy(struct WCBTextCache * cache)
+{
+  if (!cache)
+    return;
+
+  if (cache->data)
+    countedBufferRelease(&cache->data);
+  clipboardPendingClose(cache->pending);
+  LG_LOCK_FREE(cache->lock);
+  free(cache);
+}
+
 static void fileTransferDestroy(struct WCBTransfer * transfer)
 {
   if (transfer->filePresentation)
     clipboardFiles_remotePresentationRelease(transfer->filePresentation);
+  clipboardTextDestroy(transfer->textCache);
   free(transfer->fileUri);
   free(transfer->fileGnome);
   free(transfer->fileKde);
@@ -1315,6 +1448,107 @@ static bool clipboardFileWriteStart(int fd, const void * data, size_t size,
     return false;
   }
   return true;
+}
+
+/* Wayland consumers may request one selection more than once. Retain the
+ * first text transfer and hold overlapping reads until that cache is ready. */
+static void clipboardTextComplete(struct WCBTransfer * transfer,
+    CountedBuffer * buffer)
+{
+  struct WCBTextCache * cache   = transfer->textCache;
+  struct WCBPending   * pending = NULL;
+  CountedBuffer       * cached  = NULL;
+
+  LG_LOCK(cache->lock);
+  if (cache->request)
+  {
+    if (!cache->data)
+    {
+      countedBufferAddRef(buffer);
+      cache->data = buffer;
+    }
+    cache->request = false;
+    pending        = cache->pending;
+    cache->pending = NULL;
+    cached         = cache->data;
+  }
+  LG_UNLOCK(cache->lock);
+
+  while (pending)
+  {
+    struct WCBPending * next = pending->next;
+    if (!cached ||
+        !clipboardFileWriteStart(pending->fd, cached->data,
+          cached->size, transfer, false))
+      close(pending->fd);
+    free(pending);
+    pending = next;
+  }
+}
+
+static void clipboardTextCancel(struct WCBTransfer * transfer)
+{
+  struct WCBTextCache * cache   = transfer->textCache;
+  struct WCBPending   * pending = NULL;
+
+  LG_LOCK(cache->lock);
+  if (cache->request)
+  {
+    cache->request = false;
+    pending        = cache->pending;
+    cache->pending = NULL;
+  }
+  LG_UNLOCK(cache->lock);
+  clipboardPendingClose(pending);
+}
+
+enum ClipboardTextSendResult
+{
+  CLIPBOARD_TEXT_SEND_FAILED,
+  CLIPBOARD_TEXT_SEND_HANDLED,
+  CLIPBOARD_TEXT_SEND_STREAM,
+};
+
+static enum ClipboardTextSendResult clipboardTextSend(
+    struct WCBTransfer * transfer, int fd)
+{
+  struct WCBPending * pending = malloc(sizeof(*pending));
+  if (!pending)
+  {
+    DEBUG_ERROR("Out of memory queuing clipboard request");
+    return CLIPBOARD_TEXT_SEND_FAILED;
+  }
+  pending->fd   = fd;
+  pending->next = NULL;
+
+  struct WCBTextCache * cache  = transfer->textCache;
+  CountedBuffer       * buffer = NULL;
+  bool                  stream = false;
+  LG_LOCK(cache->lock);
+  if (cache->data)
+    buffer = cache->data;
+  else if (cache->request)
+  {
+    pending->next  = cache->pending;
+    cache->pending = pending;
+    pending        = NULL;
+  }
+  else
+  {
+    cache->request = true;
+    stream         = true;
+  }
+  LG_UNLOCK(cache->lock);
+
+  free(pending);
+  if (stream)
+    return CLIPBOARD_TEXT_SEND_STREAM;
+  if (!buffer)
+    return CLIPBOARD_TEXT_SEND_HANDLED;
+  if (clipboardFileWriteStart(fd, buffer->data,
+        buffer->size, transfer, false))
+    return CLIPBOARD_TEXT_SEND_HANDLED;
+  return CLIPBOARD_TEXT_SEND_FAILED;
 }
 
 static bool fileTransferPayload(const struct WCBTransfer * transfer,
@@ -1453,71 +1687,107 @@ static void dataSourceHandleSend(void * data, struct wl_data_source * source,
     close(fd);
     return;
   }
-  if (containsMimetype(transfer->mimetypes, mimetype))
+  if (!containsMimetype(transfer->mimetypes, mimetype))
+    goto error;
+
+  bool cacheText = false;
+  if (transfer->textCache)
   {
-    struct ClipboardWrite * data = calloc(1, sizeof(*data));
-    if (!data)
+    switch (clipboardTextSend(transfer, fd))
     {
-      DEBUG_ERROR("Out of memory trying to allocate ClipboardWrite");
-      goto error;
+      case CLIPBOARD_TEXT_SEND_HANDLED:
+        return;
+
+      case CLIPBOARD_TEXT_SEND_FAILED:
+        goto error;
+
+      case CLIPBOARD_TEXT_SEND_STREAM:
+        cacheText = true;
+        break;
     }
-
-    data->fd      = fd;
-    data->request = LG_CLIPBOARD_REQUEST_INVALID;
-    data->type    = transfer->type;
-    LG_LOCK_INIT(data->lock);
-    const int flags   = fcntl(fd, F_GETFL);
-    const int fdFlags = fcntl(fd, F_GETFD);
-    if (flags < 0 || fdFlags < 0 ||
-        fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC) < 0 ||
-        fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
-    {
-      DEBUG_ERROR("Failed to make clipboard pipe nonblocking: %s",
-          strerror(errno));
-      clipboardWriteDestroy(data);
-      goto error;
-    }
-    data->pollOwned      = true;
-    data->pollRegistered = true;
-    data->streamActive   = true;
-    if (waylandPollRegisterWithCleanup(fd,
-          clipboardWriteCallback, data, clipboardWriteCleanup, 0))
-    {
-      LG_LOCK(data->lock);
-      data->requesting = true;
-      LG_UNLOCK(data->lock);
-      const bool result = clipboard_requestStream(transfer->type,
-          &clipboardWriteStream, data, &data->request);
-
-      int retireFd = -1;
-      bool destroy = false;
-      LG_LOCK(data->lock);
-      data->requesting = false;
-      if (!result || data->request == LG_CLIPBOARD_REQUEST_INVALID ||
-          !data->streamActive)
-      {
-        data->streamActive = false;
-        if (data->pollRegistered)
-        {
-          data->pollRegistered = false;
-          retireFd = data->fd;
-        }
-        destroy = !data->pollOwned;
-      }
-      LG_UNLOCK(data->lock);
-
-      if (retireFd >= 0)
-        waylandPollUnregister(retireFd);
-      else if (destroy)
-        clipboardWriteDestroy(data);
-      return;
-    }
-
-    data->pollOwned      = false;
-    data->pollRegistered = false;
-    data->streamActive   = false;
-    clipboardWriteDestroy(data);
   }
+
+  struct ClipboardWrite * output = calloc(1, sizeof(*output));
+  if (!output)
+  {
+    DEBUG_ERROR("Out of memory trying to allocate ClipboardWrite");
+    if (cacheText)
+      clipboardTextCancel(transfer);
+    goto error;
+  }
+
+  output->fd      = fd;
+  output->request = LG_CLIPBOARD_REQUEST_INVALID;
+  output->type    = transfer->type;
+  LG_LOCK_INIT(output->lock);
+  if (cacheText)
+  {
+    output->cacheTransfer = transfer;
+    fileTransferRetain(transfer);
+  }
+
+  const int flags   = fcntl(fd, F_GETFL);
+  const int fdFlags = fcntl(fd, F_GETFD);
+  if (flags < 0 || fdFlags < 0 ||
+      fcntl(fd, F_SETFD, fdFlags | FD_CLOEXEC) < 0 ||
+      fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0)
+  {
+    DEBUG_ERROR("Failed to make clipboard pipe nonblocking: %s",
+        strerror(errno));
+    clipboardWriteCancelCache(output);
+    clipboardWriteDestroy(output);
+    goto error;
+  }
+
+  output->pollOwned      = true;
+  output->pollRegistered = true;
+  output->streamActive   = true;
+  if (waylandPollRegisterWithCleanup(fd,
+        clipboardWriteCallback, output, clipboardWriteCleanup, 0))
+  {
+    LG_LOCK(output->lock);
+    output->requesting = true;
+    LG_UNLOCK(output->lock);
+    const bool result = clipboard_requestStream(transfer->type,
+        &clipboardWriteStream, output, &output->request);
+
+    int  retireFd    = -1;
+    bool destroy     = false;
+    bool cancelCache = false;
+    LG_LOCK(output->lock);
+    output->requesting = false;
+    if (!result || output->request == LG_CLIPBOARD_REQUEST_INVALID ||
+        !output->streamActive)
+    {
+      output->streamActive = false;
+      if (output->cacheTransfer && !output->cacheTerminal)
+      {
+        output->cacheTerminal = true;
+        cancelCache           = true;
+      }
+      if (output->pollRegistered)
+      {
+        output->pollRegistered = false;
+        retireFd               = output->fd;
+      }
+      destroy = !output->pollOwned;
+    }
+    LG_UNLOCK(output->lock);
+
+    if (cancelCache)
+      clipboardTextCancel(output->cacheTransfer);
+    if (retireFd >= 0)
+      waylandPollUnregister(retireFd);
+    else if (destroy)
+      clipboardWriteDestroy(output);
+    return;
+  }
+
+  output->pollOwned      = false;
+  output->pollRegistered = false;
+  output->streamActive   = false;
+  clipboardWriteCancelCache(output);
+  clipboardWriteDestroy(output);
 
 error:
   close(fd);
@@ -1560,8 +1830,18 @@ static bool waylandCBPublish(LG_ClipboardData type)
   atomic_init(&transfer->references, 1);
 
   transfer->mimetypes = cbTypeToMimetypes(type);
+  transfer->textCache = type == LG_CLIPBOARD_DATA_TEXT ?
+    calloc(1, sizeof(*transfer->textCache)) : NULL;
   transfer->type      = type;
   transfer->next      = NULL;
+  if (type == LG_CLIPBOARD_DATA_TEXT && !transfer->textCache)
+  {
+    DEBUG_ERROR("Out of memory when allocating WCBTextCache");
+    fileTransferRelease(transfer);
+    return false;
+  }
+  if (transfer->textCache)
+    LG_LOCK_INIT(transfer->textCache->lock);
   if (type == LG_CLIPBOARD_DATA_FILES)
     transfer->filePresentation =
       clipboardFiles_remotePresentationAcquire();

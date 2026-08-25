@@ -1311,11 +1311,10 @@ static void testSource(void)
   struct Proxy * source = &proto.source[0];
   CHECK(proto.selection == source);
   CHECK(proto.serial == 77);
-  CHECK(source->mimeN == 6);
-  CHECK(strcmp(source->mime[0], "text/plain") == 0);
-  CHECK(strcmp(source->mime[1], "text/plain;charset=utf-8") == 0);
-  CHECK(strcmp(source->mime[4], "UTF8_STRING") == 0);
-  CHECK(strcmp(source->mime[5], wlCb.lgMimetype) == 0);
+  CHECK(source->mimeN == 3);
+  CHECK(strcmp(source->mime[0], "text/plain;charset=utf-8") == 0);
+  CHECK(strcmp(source->mime[1], "text/plain") == 0);
+  CHECK(strcmp(source->mime[2], wlCb.lgMimetype) == 0);
 
   int bad[2];
   CHECK(pipe(bad) == 0);
@@ -1338,7 +1337,15 @@ static void testSource(void)
   CHECK(rec.requestStream);
   CHECK(rec.requestOpaque);
 
-  const uint8_t first[] = "source ";
+  int queued[2];
+  CHECK(pipe(queued) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source,
+      "text/plain;charset=utf-8", queued[1]);
+  CHECK(rec.pollN == 1);
+  CHECK(rec.requestN == 1);
+
+  const uint8_t first [] = "source ";
   const uint8_t second[] = "data";
   CHECK(rec.requestStream->begin(rec.requestOpaque,
       LG_CLIPBOARD_DATA_TEXT, LG_CLIPBOARD_SIZE_UNKNOWN) ==
@@ -1361,19 +1368,39 @@ static void testSource(void)
   CHECK(rec.requestStream->end(rec.requestOpaque,
       sizeof(first) + sizeof(second) - 2) == LG_CLIPBOARD_RESULT_ACCEPTED);
   CHECK(!rec.poll[0].active);
+  CHECK(rec.pollN == 2);
+  CHECK(rec.poll[1].fd == queued[1]);
+  CHECK(rec.poll[1].events == EPOLLOUT);
+  pollFire(1, EPOLLOUT);
+  checkClosed(good[1]);
+  checkClosed(queued[1]);
+
+  int cached[2];
+  CHECK(pipe(cached) == 0);
+  sourceListener(source)->send(source->data,
+      (struct wl_data_source *)source, "text/plain", cached[1]);
+  CHECK(rec.pollN == 3);
+  CHECK(rec.poll[2].fd == cached[1]);
+  CHECK(rec.poll[2].events == EPOLLOUT);
+  CHECK(rec.requestN == 1);
+  pollFire(2, EPOLLOUT);
+  checkClosed(cached[1]);
 
   sourceListener(source)->cancelled(source->data,
       (struct wl_data_source *)source);
   CHECK(source->dead);
   CHECK(proto.sourceDestroyN == 1);
-  CHECK(rec.pollCleanupN == 1);
-  uint8_t actual[sizeof(first) + sizeof(second)] = {};
+  CHECK(rec.pollCleanupN == 3);
   const size_t expected = sizeof(first) + sizeof(second) - 2;
-  CHECK(read(good[0], actual, sizeof(actual)) == (ssize_t)expected);
-  CHECK(memcmp(actual, "source data", expected) == 0);
-  CHECK(read(good[0], &value, 1) == 0);
-  CHECK(close(good[0]) == 0);
-  checkClosed(good[1]);
+  const int    reads[]  = { good[0], queued[0], cached[0] };
+  for (size_t i = 0; i < ARRAY_LENGTH(reads); ++i)
+  {
+    uint8_t actual[sizeof(first) + sizeof(second)] = {};
+    CHECK(read(reads[i], actual, sizeof(actual)) == (ssize_t)expected);
+    CHECK(memcmp(actual, "source data", expected) == 0);
+    CHECK(read(reads[i], &value, 1) == 0);
+    CHECK(close(reads[i]) == 0);
+  }
 
   finish();
 }

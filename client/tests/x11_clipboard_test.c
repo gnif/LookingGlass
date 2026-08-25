@@ -49,19 +49,21 @@
 #define MAX_TRANSFER (128U * 1024U)
 #define MAX_WINDOW   16U
 
-#define A_CLIPBOARD 10UL
-#define A_TARGETS   11UL
-#define A_SEL_DATA  12UL
-#define A_INCR      13UL
-#define A_TEXT      100UL
-#define A_PNG       101UL
-#define A_BMP       102UL
-#define A_TIFF      103UL
-#define A_JPEG      104UL
-#define A_URI       105UL
-#define A_GNOME     106UL
-#define A_MATE      107UL
-#define A_KDE       108UL
+#define A_CLIPBOARD  10UL
+#define A_TARGETS    11UL
+#define A_SEL_DATA   12UL
+#define A_INCR       13UL
+#define A_TEXT       100UL
+#define A_PNG        101UL
+#define A_BMP        102UL
+#define A_TIFF       103UL
+#define A_JPEG       104UL
+#define A_URI        105UL
+#define A_GNOME      106UL
+#define A_MATE       107UL
+#define A_KDE        108UL
+#define A_TEXT_PLAIN 109UL
+#define A_TEXT_UTF8  110UL
 
 struct WindowLog
 {
@@ -212,6 +214,10 @@ Atom XInternAtom(Display * display, const char * name, Bool onlyIfExists)
   CHECK(!onlyIfExists);
   if (!strcmp(name, "UTF8_STRING"))
     return A_TEXT;
+  if (!strcmp(name, "text/plain"))
+    return A_TEXT_PLAIN;
+  if (!strcmp(name, "text/plain;charset=utf-8"))
+    return A_TEXT_UTF8;
   if (!strcmp(name, "image/png"))
     return A_PNG;
   if (!strcmp(name, "image/bmp"))

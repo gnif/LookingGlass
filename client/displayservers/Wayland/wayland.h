@@ -286,11 +286,14 @@ struct WaylandDSState
   LG_DSEventSource eventSource;
 };
 
+struct WCBTextCache;
+
 struct WCBTransfer
 {
   atomic_uint              references;
   LG_ClipboardData         type;
   const char            ** mimetypes;
+  struct WCBTextCache    * textCache;
   struct wl_data_source  * source;
   struct WCBTransfer     * next;
   uint64_t                 filePresentation;
