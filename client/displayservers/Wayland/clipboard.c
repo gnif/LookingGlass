@@ -41,8 +41,13 @@ struct DataOffer {
 
 static const char * textMimetypes[] =
 {
-  "text/plain",
   "text/plain;charset=utf-8",
+  "text/plain",
+  NULL,
+};
+
+static const char * textMimetypeAliases[] =
+{
   "TEXT",
   "STRING",
   "UTF8_STRING",
@@ -128,9 +133,15 @@ static bool mimetypeEndswith(const char * mimetype, const char * what)
   return !strcmp(mimetype + mimetypeLen - whatLen, what);
 }
 
+static bool isPlainTextMimetype(const char * mimetype)
+{
+  return containsMimetype(textMimetypes, mimetype) ||
+    containsMimetype(textMimetypeAliases, mimetype);
+}
+
 static bool isTextMimetype(const char * mimetype)
 {
-  if (containsMimetype(textMimetypes, mimetype))
+  if (isPlainTextMimetype(mimetype))
     return true;
 
   if (!strcmp(mimetype, "text/ico"))
@@ -437,7 +448,7 @@ static void dataOfferHandleOffer(void * opaque, struct wl_data_offer * offer,
 
   // text/html represents rich text format, which is almost never desirable when
   // and should not be used when a plain text or image format is available.
-  if ((isImageCbtype(type) || containsMimetype(textMimetypes, mimetype)) &&
+  if ((isImageCbtype(type) || isPlainTextMimetype(mimetype)) &&
       data->mimetypes[LG_CLIPBOARD_DATA_TEXT] &&
       strstr(data->mimetypes[LG_CLIPBOARD_DATA_TEXT], "html"))
   {

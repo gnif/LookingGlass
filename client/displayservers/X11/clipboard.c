@@ -93,6 +93,8 @@ struct X11ClipboardState
   LG_Lock                       lock;
   Atom                          aCurSelection;
   Atom                          aTypes[LG_CLIPBOARD_DATA_NONE];
+  Atom                          aTextPlain;
+  Atom                          aTextPlainUtf8;
   Atom                          aFileGnome;
   Atom                          aFileMate;
   Atom                          aFileKde;
@@ -116,10 +118,12 @@ static const char * atomTypes[] =
   "text/uri-list",
 };
 
-static const char fileGnomeMime[] = "x-special/gnome-copied-files";
-static const char fileMateMime [] = "x-special/mate-copied-files";
-static const char fileKdeMime  [] = "application/x-kde-cutselection";
-static const char fileUriMime  [] = "text/uri-list";
+static const char textPlainMime    [] = "text/plain";
+static const char textPlainUtf8Mime[] = "text/plain;charset=utf-8";
+static const char fileGnomeMime    [] = "x-special/gnome-copied-files";
+static const char fileMateMime     [] = "x-special/mate-copied-files";
+static const char fileKdeMime      [] = "application/x-kde-cutselection";
+static const char fileUriMime      [] = "text/uri-list";
 
 static struct X11ClipboardState x11cb;
 
@@ -152,6 +156,15 @@ static const char * fileMimeForAtom(Atom atom)
   if (atom == x11cb.aFileKde)
     return fileKdeMime;
   return NULL;
+}
+
+static bool typeMatchesAtom(LG_ClipboardData type, Atom atom)
+{
+  if (type != LG_CLIPBOARD_DATA_TEXT)
+    return atom == x11cb.aTypes[type];
+
+  return atom == x11cb.aTypes[type] ||
+    atom == x11cb.aTextPlain || atom == x11cb.aTextPlainUtf8;
 }
 
 bool x11CBEventThread(const XEvent * xe)
@@ -290,15 +303,19 @@ bool x11CBInit(void)
     }
   }
 
-  x11cb.aFileGnome = XInternAtom(x11.display, fileGnomeMime, False);
-  x11cb.aFileMate  = XInternAtom(x11.display, fileMateMime , False);
-  x11cb.aFileKde   = XInternAtom(x11.display, fileKdeMime  , False);
+  x11cb.aTextPlain     = XInternAtom(x11.display, textPlainMime    , False);
+  x11cb.aTextPlainUtf8 = XInternAtom(x11.display, textPlainUtf8Mime, False);
+  x11cb.aFileGnome     = XInternAtom(x11.display, fileGnomeMime    , False);
+  x11cb.aFileMate      = XInternAtom(x11.display, fileMateMime     , False);
+  x11cb.aFileKde       = XInternAtom(x11.display, fileKdeMime      , False);
   if (
-    x11cb.aFileGnome == BadAlloc || x11cb.aFileGnome == BadValue ||
-    x11cb.aFileMate  == BadAlloc || x11cb.aFileMate  == BadValue ||
-    x11cb.aFileKde   == BadAlloc || x11cb.aFileKde   == BadValue)
+    x11cb.aTextPlain     == BadAlloc || x11cb.aTextPlain     == BadValue ||
+    x11cb.aTextPlainUtf8 == BadAlloc || x11cb.aTextPlainUtf8 == BadValue ||
+    x11cb.aFileGnome     == BadAlloc || x11cb.aFileGnome     == BadValue ||
+    x11cb.aFileMate      == BadAlloc || x11cb.aFileMate      == BadValue ||
+    x11cb.aFileKde       == BadAlloc || x11cb.aFileKde       == BadValue)
   {
-    DEBUG_ERROR("failed to get clipboard file atoms");
+    DEBUG_ERROR("failed to get clipboard atoms");
     return false;
   }
 
@@ -493,7 +510,12 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     targets[0] = x11atoms.TARGETS;
     targets[1] = x11cb.aTypes[requestType];
     int count = 2;
-    if (requestType == LG_CLIPBOARD_DATA_FILES)
+    if (requestType == LG_CLIPBOARD_DATA_TEXT)
+    {
+      targets[count++] = x11cb.aTextPlain;
+      targets[count++] = x11cb.aTextPlainUtf8;
+    }
+    else if (requestType == LG_CLIPBOARD_DATA_FILES)
     {
       targets[count++] = x11cb.aFileGnome;
       targets[count++] = x11cb.aFileMate;
@@ -602,7 +624,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
 
   // look to see if we can satisfy the data type
   for(int i = 0; i < LG_CLIPBOARD_DATA_NONE; ++i)
-    if (x11cb.aTypes[i] == e.target && requestType == i)
+    if (typeMatchesAtom(i, e.target) && requestType == i)
     {
       struct X11ClipboardWrite * write = calloc(1, sizeof(*write));
       if (!write)
