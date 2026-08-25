@@ -222,14 +222,17 @@ private:
   std::atomic<bool> m_shutdown { false };
   bool m_applyingRemote = false;
   bool m_available = false;
-  uint64_t m_epoch = 0;
-  uint64_t m_localGeneration = 0;
-  DWORD m_localSequence = 0;
-  DWORD m_localRetrySequence = 0;
-  uint64_t m_localRetryDeadline = 0;
-  uint64_t m_remoteGeneration = 0;
-  uint32_t m_remoteFormats = 0;
-  DWORD m_ownedSequence = 0;
+  uint64_t m_epoch                  = 0;
+  uint64_t m_localGeneration        = 0;
+  DWORD m_localSequence             = 0;
+  HWND m_localOwner                 = nullptr;
+  DWORD m_materializedSequence      = 0;
+  uint64_t m_materializedGeneration = 0;
+  DWORD m_localRetrySequence        = 0;
+  uint64_t m_localRetryDeadline     = 0;
+  uint64_t m_remoteGeneration       = 0;
+  uint32_t m_remoteFormats          = 0;
+  DWORD m_ownedSequence             = 0;
   std::atomic<uint64_t> m_liveLocalGeneration { 0 };
   std::atomic<uint64_t> m_nextTransfer {
     KVMFR_CLIPBOARD_TRANSFER_HELPER | UINT64_C(1) };
@@ -321,7 +324,8 @@ private:
   KVMFRClipboardFormat ToWireFormat(UINT format) const;
   UINT ToWindowsFormat(KVMFRClipboardFormat format) const;
   std::shared_ptr<CClipboardSpool> CaptureFormat(
-    KVMFRClipboardFormat format, DWORD sequence);
+    KVMFRClipboardFormat format, DWORD sequence, HWND owner,
+    DWORD& capturedSequence);
   bool MaterializeFormat(KVMFRClipboardFormat format,
     UINT windowsFormat, CClipboardSpool& spool);
 

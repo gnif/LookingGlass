@@ -3404,7 +3404,8 @@ void CClipboardManager::HandleRequest(
       record.clipboardGeneration != m_localGeneration ||
       record.clipboardGeneration != Atomic::Load(
         m_liveLocalGeneration, std::memory_order_acquire) ||
-      GetClipboardSequenceNumber() != m_localSequence)
+      GetClipboardSequenceNumber() != m_localSequence ||
+      GetClipboardOwner() != m_localOwner)
   {
     QueueCancel(record, ERROR_NOT_FOUND);
     return;
@@ -3418,13 +3419,48 @@ void CClipboardManager::HandleRequest(
     return;
   }
 
-  std::shared_ptr<CClipboardSpool> spool =
-    CaptureFormat(record.format, m_localSequence);
+  const DWORD sequence                   = m_localSequence;
+  const HWND owner                       = m_localOwner;
+  DWORD capturedSequence                 = sequence;
+  std::shared_ptr<CClipboardSpool> spool = CaptureFormat(
+    record.format, sequence, owner, capturedSequence);
   if (!spool)
   {
     const DWORD error = GetLastError();
     ReleaseOutgoing(record.transfer);
     QueueCancel(record, error ? error : ERROR_NOT_FOUND);
+    return;
+  }
+
+  bool generationLive = false;
+  bool transferLive   = false;
+  {
+    std::lock_guard<std::mutex> lock(m_outgoingLock);
+    generationLive =
+      record.clipboardGeneration == Atomic::Load(
+        m_liveLocalGeneration, std::memory_order_acquire);
+    transferLive   = generationLive &&
+      record.transfer            == Atomic::Load(
+        m_outgoingTransfer, std::memory_order_acquire);
+    if (generationLive && capturedSequence != sequence)
+    {
+      m_localSequence = capturedSequence;
+      if (capturedSequence)
+      {
+        m_materializedSequence   = capturedSequence;
+        m_materializedGeneration = record.clipboardGeneration;
+      }
+      else
+      {
+        m_materializedSequence   = 0;
+        m_materializedGeneration = 0;
+      }
+    }
+  }
+  if (!transferLive)
+  {
+    ReleaseOutgoing(record.transfer);
+    QueueCancel(record, ERROR_OPERATION_ABORTED);
     return;
   }
 
@@ -3970,6 +4006,23 @@ CClipboardManager::CaptureClipboardFiles(DWORD sequence, int rawFormatCount,
 
 void CClipboardManager::HandleClipboardUpdate()
 {
+  const DWORD sequenceBefore = GetClipboardSequenceNumber();
+  const HWND owner           = GetClipboardOwner();
+  const DWORD sequenceAfter  = GetClipboardSequenceNumber();
+  // GetClipboardData can materialize delayed data and post an update without
+  // changing the clipboard that the current generation represents.
+  if (sequenceBefore &&
+      sequenceBefore           == sequenceAfter &&
+      sequenceBefore           == m_materializedSequence &&
+      owner                    == m_localOwner &&
+      m_materializedGeneration &&
+      m_materializedGeneration == Atomic::Load(
+        m_liveLocalGeneration, std::memory_order_acquire))
+    return;
+
+  m_materializedSequence   = 0;
+  m_materializedGeneration = 0;
+
   if (m_applyingRemote || IsOurClipboard())
   {
     ClearLocalRetry();
@@ -4024,17 +4077,22 @@ void CClipboardManager::PublishLocalClipboard()
     ClearLocalRetry();
     Atomic::Store(m_liveLocalGeneration, UINT64_C(0),
       std::memory_order_release);
-    m_localSequence = GetClipboardSequenceNumber();
+    m_localSequence          = GetClipboardSequenceNumber();
+    m_localOwner             = GetClipboardOwner();
+    m_materializedSequence   = 0;
+    m_materializedGeneration = 0;
     return;
   }
 
-  const DWORD before = GetClipboardSequenceNumber();
-  uint32_t formats = EnumerateFormats();
+  const DWORD before               = GetClipboardSequenceNumber();
+  const HWND ownerBefore           = GetClipboardOwner();
+  uint32_t formats                 = EnumerateFormats();
   const uint32_t recognizedFormats = formats;
-  const int rawFormatCount = CountClipboardFormatsLogged(
+  const int rawFormatCount         = CountClipboardFormatsLogged(
     "PublishLocalClipboard", before);
-  const DWORD after = GetClipboardSequenceNumber();
-  if (before != after)
+  const DWORD after                = GetClipboardSequenceNumber();
+  const HWND ownerAfter            = GetClipboardOwner();
+  if (before != after || ownerBefore != ownerAfter)
   {
     ClearLocalRetry();
     PostMessageW(m_hwnd, WM_CLIPBOARDUPDATE, 0, 0);
@@ -4050,7 +4108,8 @@ void CClipboardManager::PublishLocalClipboard()
     after, rawFormatCount, fileViaOLE, fileRetryStage, fileError,
     fileOleError);
   const DWORD capturedSequence = GetClipboardSequenceNumber();
-  if (capturedSequence != after)
+  const HWND capturedOwner     = GetClipboardOwner();
+  if (capturedSequence != after || capturedOwner != ownerAfter)
   {
     DEBUG_ERROR_HR(HRESULT_FROM_WIN32(ERROR_RETRY),
       "Failed to publish local clipboard: "
@@ -4071,7 +4130,10 @@ void CClipboardManager::PublishLocalClipboard()
   uint64_t generation = ++m_localGeneration;
   if (!generation)
     generation = ++m_localGeneration;
-  m_localSequence = after;
+  m_localSequence          = after;
+  m_localOwner             = ownerAfter;
+  m_materializedSequence   = 0;
+  m_materializedGeneration = 0;
   if (files)
   {
     formats |= KVMFR_CLIPBOARD_FORMAT_MASK_FILES;
@@ -4182,7 +4244,10 @@ void CClipboardManager::InvalidateOutgoing(uint32_t reason)
 
 void CClipboardManager::InvalidateLocalClipboard(uint32_t reason)
 {
-  m_localSequence = 0;
+  m_localSequence          = 0;
+  m_localOwner             = nullptr;
+  m_materializedSequence   = 0;
+  m_materializedGeneration = 0;
   RetireLocalFileDataset();
   InvalidateOutgoing(reason);
 }
@@ -4236,7 +4301,10 @@ void CClipboardManager::ExpireLocalRetry(DWORD sequence)
   uint64_t generation = ++m_localGeneration;
   if (!generation)
     generation = ++m_localGeneration;
-  m_localSequence = sequence;
+  m_localSequence          = sequence;
+  m_localOwner             = GetClipboardOwner();
+  m_materializedSequence   = 0;
+  m_materializedGeneration = 0;
   PublishClear(generation);
 }
 
@@ -4472,9 +4540,12 @@ UINT CClipboardManager::ToWindowsFormat(KVMFRClipboardFormat format) const
 }
 
 std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
-  KVMFRClipboardFormat format, DWORD sequence)
+  KVMFRClipboardFormat format, DWORD sequence, HWND owner,
+  DWORD& capturedSequence)
 {
-  if (GetClipboardSequenceNumber() != sequence)
+  capturedSequence = sequence;
+  if (GetClipboardSequenceNumber() != sequence ||
+      GetClipboardOwner() != owner)
   {
     SetLastError(ERROR_RETRY);
     return nullptr;
@@ -4488,7 +4559,8 @@ std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
     return nullptr;
   }
 
-  if (GetClipboardSequenceNumber() != sequence)
+  if (GetClipboardSequenceNumber() != sequence ||
+      GetClipboardOwner() != owner)
   {
     CloseClipboard();
     SetLastError(ERROR_RETRY);
@@ -4635,7 +4707,12 @@ std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
   if (!success && !error)
     error = ERROR_NOT_ENOUGH_MEMORY;
   GlobalUnlock(handle);
-  if (GetClipboardSequenceNumber() != sequence)
+  const DWORD renderedSequence = GetClipboardSequenceNumber();
+  const HWND renderedOwner     = GetClipboardOwner();
+  const bool sequenceChanged   = renderedSequence != sequence;
+  // With the clipboard still open, another process cannot replace it. A
+  // sequence advance from the same owner is delayed or synthesized rendering.
+  if (renderedOwner != owner || (sequenceChanged && !owner))
   {
     CloseClipboard();
     SetLastError(ERROR_RETRY);
@@ -4647,6 +4724,7 @@ std::shared_ptr<CClipboardSpool> CClipboardManager::CaptureFormat(
     SetLastError(error);
     return nullptr;
   }
+  capturedSequence = renderedSequence;
   return spool;
 }
 
