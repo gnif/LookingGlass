@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0"
+  xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Driver">
+      <UniqueIdentifier>{64B60D55-6E76-4D04-9AE1-F23B2ECA8541}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Miniport">
+      <UniqueIdentifier>{770F1246-D1F5-46C0-B3F6-C645E10435C0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Utilities">
+      <UniqueIdentifier>{A1D5B8F7-A246-4E24-8CCB-743901B04FE4}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Package">
+      <UniqueIdentifier>{5E4626AA-3871-4CDD-B0F0-71315BC11643}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Adapter.cpp"><Filter>Driver</Filter></ClCompile>
+    <ClCompile Include="AudioClock.cpp"><Filter>Driver</Filter></ClCompile>
+    <ClCompile Include="Driver.cpp"><Filter>Driver</Filter></ClCompile>
+    <ClCompile Include="Guids.cpp"><Filter>Driver</Filter></ClCompile>
+    <ClCompile Include="MiniportTopology.cpp"><Filter>Miniport</Filter></ClCompile>
+    <ClCompile Include="MiniportWaveRT.cpp"><Filter>Miniport</Filter></ClCompile>
+    <ClCompile Include="MiniportWaveRTStream.cpp"><Filter>Miniport</Filter></ClCompile>
+    <ClCompile Include="Formats.cpp"><Filter>Utilities</Filter></ClCompile>
+    <ClCompile Include="RingBuffer.cpp"><Filter>Utilities</Filter></ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Adapter.h"><Filter>Driver</Filter></ClInclude>
+    <ClInclude Include="AudioClock.h"><Filter>Driver</Filter></ClInclude>
+    <ClInclude Include="Common.h"><Filter>Driver</Filter></ClInclude>
+    <ClInclude Include="Guids.h"><Filter>Driver</Filter></ClInclude>
+    <ClInclude Include="MiniportTopology.h"><Filter>Miniport</Filter></ClInclude>
+    <ClInclude Include="MiniportWaveRT.h"><Filter>Miniport</Filter></ClInclude>
+    <ClInclude Include="MiniportWaveRTStream.h"><Filter>Miniport</Filter></ClInclude>
+    <ClInclude Include="Formats.h"><Filter>Utilities</Filter></ClInclude>
+    <ClInclude Include="RingBuffer.h"><Filter>Utilities</Filter></ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Inf Include="LGAudio.inx"><Filter>Package</Filter></Inf>
+    <ResourceCompile Include="LGAudio.rc">
+      <Filter>Package</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+</Project>
