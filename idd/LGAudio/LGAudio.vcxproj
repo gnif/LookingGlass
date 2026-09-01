@@ -49,6 +49,8 @@
   <PropertyGroup>
     <TargetName>LGAudio</TargetName>
     <DebuggerFlavor>DbgengKernelDebugger</DebuggerFlavor>
+    <InstallMode>HardwareId</InstallMode>
+    <HardwareIdString>Root\LGAudio</HardwareIdString>
     <Inf2CatUseLocalTime>true</Inf2CatUseLocalTime>
     <InfVerif_AdditionalOptions>/sw2084</InfVerif_AdditionalOptions>
   </PropertyGroup>
