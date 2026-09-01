@@ -29,8 +29,8 @@
 
 #include <common/array.h>
 #include <common/ivshmem.h>
-#include <common/KVMFR.h>
-#include <common/LGMPConfig.h>
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include <common/framebuffer.h>
 #include <lgmp/client.h>
 
@@ -97,7 +97,7 @@ typedef struct
   bool                 unpack;
   uint32_t             drmFormat;
   struct vec2          screenScale;
-  FrameType            type;
+  KVMFRFrameType       type;
   int                  bpp;
   struct IVSHMEM       shmDev;
   PLGMPClient          lgmp;
@@ -709,8 +709,8 @@ static void * frameThread(void * data)
         (const KVMFRFrame *)frameMessage.msg.mem;
       if (frameMessage.owner)
       {
-        const FrameBuffer * fb =
-          (const FrameBuffer *)((const uint8_t *)frame + frame->offset);
+        const KVMFRFrameBuffer * fb =
+          (const KVMFRFrameBuffer *)((const uint8_t *)frame + frame->offset);
         if (framebuffer_wait(
               fb, (size_t)frame->dataHeight * frame->pitch))
         {
@@ -1024,7 +1024,8 @@ static DMAFrameInfo * dmabufOpenDMAFrameInfo(LGPlugin * this, LGMPMessage * msg,
   if (fi->fd == -1)
   {
     const uintptr_t pos    = (uintptr_t) msg->mem - (uintptr_t) this->shmDev.mem;
-    const uintptr_t offset = (uintptr_t) frame->offset + sizeof(FrameBuffer);
+    const uintptr_t offset =
+      (uintptr_t)frame->offset + sizeof(KVMFRFrameBuffer);
 
     fi->dataSize = dataSize;
     fi->fd       = ivshmemGetDMABuf(&this->shmDev, pos + offset, dataSize);
@@ -1599,8 +1600,8 @@ static void lgVideoTick(void * data, float seconds)
     return;
   }
 
-  const FrameBuffer * fb =
-    (const FrameBuffer *)((const uint8_t *)frame + frame->offset);
+  const KVMFRFrameBuffer * fb =
+    (const KVMFRFrameBuffer *)((const uint8_t *)frame + frame->offset);
   bool frameComplete = false;
   if (frameMessage.owner)
   {

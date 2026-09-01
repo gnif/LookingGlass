@@ -48,9 +48,9 @@ void egl_desktopSetNativeHDR(EGL_Desktop * desktop, bool nativeHDR,
 void egl_desktopGetHDRMapping(EGL_Desktop * desktop, bool * enabled,
     float * gain, float * contentPeak);
 bool egl_desktopSetup (EGL_Desktop * desktop, const LG_RendererFormat format);
-bool egl_desktopUpdate(EGL_Desktop * desktop, const FrameBuffer * frame,
+bool egl_desktopUpdate(EGL_Desktop * desktop, const KVMFRFrameBuffer * frame,
     LG_RendererFrameToken frameToken, int dmaFd,
-    const FrameDamageRect * damageRects, int damageRectsCount,
+    const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle);
 void egl_desktopRestart(EGL_Desktop * desktop);

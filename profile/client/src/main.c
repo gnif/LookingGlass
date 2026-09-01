@@ -21,8 +21,8 @@
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/crash.h"
-#include "common/KVMFR.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/locking.h"
 #include "common/stringutils.h"
 #include "common/ivshmem.h"

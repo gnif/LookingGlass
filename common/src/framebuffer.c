@@ -43,7 +43,7 @@ static bool framebuffer_size_mul(size_t a, size_t b, size_t * result)
   return true;
 }
 
-bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
+bool framebuffer_wait_timed(const KVMFRFrameBuffer * frame, size_t size,
     uint64_t * waitTimeNs)
 {
   if (size > UINT_LEAST32_MAX)
@@ -75,27 +75,27 @@ bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
   return true;
 }
 
-bool framebuffer_wait(const FrameBuffer * frame, size_t size)
+bool framebuffer_wait(const KVMFRFrameBuffer * frame, size_t size)
 {
   return framebuffer_wait_timed(frame, size, NULL);
 }
 
-static bool framebuffer_read_linear_timed(const FrameBuffer * frame,
+static bool framebuffer_read_linear_timed(const KVMFRFrameBuffer * frame,
     void * restrict dst, size_t size, uint64_t * waitTimeNs)
 {
   if (size > UINT_LEAST32_MAX)
     return false;
 
 #ifdef FB_PROFILE
-  static RunningAvg ra = NULL;
-  static int raCount = 0;
-  const uint64_t ts = microtime();
+  static RunningAvg ra      = NULL;
+  static int        raCount = 0;
+  const uint64_t    ts      = microtime();
   if (!ra)
     ra = runningavg_new(100);
 #endif
 
-  uint8_t * restrict d     = (uint8_t*)dst;
-  size_t rp                = 0;
+  uint8_t * restrict d  = (uint8_t*)dst;
+  size_t             rp = 0;
 
   // copy in large 1MB chunks if the pitches match
   while(size)
@@ -119,13 +119,14 @@ static bool framebuffer_read_linear_timed(const FrameBuffer * frame,
   return true;
 }
 
-bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
-    size_t size)
+bool framebuffer_read_linear(const KVMFRFrameBuffer * frame,
+    void * restrict dst, size_t size)
 {
   return framebuffer_read_linear_timed(frame, dst, size, NULL);
 }
 
-bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
+bool framebuffer_read_timed(const KVMFRFrameBuffer * frame,
+    void * restrict dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch,
     uint64_t * waitTimeNs)
 {
@@ -147,15 +148,15 @@ bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
         frame, dst, sourceSize, waitTimeNs);
 
 #ifdef FB_PROFILE
-  static RunningAvg ra = NULL;
-  static int raCount = 0;
-  const uint64_t ts = microtime();
+  static RunningAvg ra      = NULL;
+  static int        raCount = 0;
+  const uint64_t    ts      = microtime();
   if (!ra)
     ra = runningavg_new(100);
 #endif
 
-  uint8_t * restrict d     = (uint8_t*)dst;
-  size_t rp                = 0;
+  uint8_t * restrict d  = (uint8_t*)dst;
+  size_t             rp = 0;
 
   // copy per line to match the pitch of the destination buffer
   for(size_t y = 0; y < height; ++y)
@@ -177,15 +178,16 @@ bool framebuffer_read_timed(const FrameBuffer * frame, void * restrict dst,
   return true;
 }
 
-bool framebuffer_read(const FrameBuffer * frame, void * restrict dst,
+bool framebuffer_read(const KVMFRFrameBuffer * frame, void * restrict dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch)
 {
   return framebuffer_read_timed(frame, dst, dstpitch, height, width, bpp,
       pitch, NULL);
 }
 
-bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
-    size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque)
+bool framebuffer_read_fn(const KVMFRFrameBuffer * frame, size_t height,
+    size_t width, size_t bpp, size_t pitch, FrameBufferReadFn fn,
+    void * opaque)
 {
   size_t linewidth;
   size_t sourceSize;
@@ -200,15 +202,15 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
     return true;
 
 #ifdef FB_PROFILE
-  static RunningAvg ra = NULL;
-  static int raCount = 0;
-  const uint64_t ts = microtime();
+  static RunningAvg ra      = NULL;
+  static int        raCount = 0;
+  const uint64_t    ts      = microtime();
   if (!ra)
     ra = runningavg_new(100);
 #endif
 
-  size_t         rp        = 0;
-  size_t         y         = 0;
+  size_t rp = 0;
+  size_t y  = 0;
 
   while(y < height)
   {
@@ -234,37 +236,37 @@ bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
 /**
  * Prepare the framebuffer for writing
  */
-void framebuffer_prepare(FrameBuffer * frame)
+void framebuffer_prepare(KVMFRFrameBuffer * frame)
 {
   atomic_store_explicit(&frame->wp, 0, memory_order_release);
 }
 
-static bool framebuffer_write_sse4_1(FrameBuffer * frame,
+static bool framebuffer_write_sse4_1(KVMFRFrameBuffer * frame,
     const void * restrict src, size_t size)
 {
 #ifdef FB_PROFILE
-  static RunningAvg ra = NULL;
-  static int raCount = 0;
-  const uint64_t ts = microtime();
+  static RunningAvg ra      = NULL;
+  static int        raCount = 0;
+  const uint64_t    ts      = microtime();
   if (!ra)
     ra = runningavg_new(100);
 #endif
 
-  __m128i * restrict s = (__m128i *)src;
-  __m128i * restrict d = (__m128i *)frame->data;
-  size_t wp = 0;
+  __m128i * restrict s  = (__m128i *)src;
+  __m128i * restrict d  = (__m128i *)frame->data;
+  size_t             wp = 0;
 
   _mm_mfence();
 
   /* copy in chunks */
   while(size > 63)
   {
-    __m128i *_d = (__m128i *)d;
-    __m128i *_s = (__m128i *)s;
-    __m128i v1 = _mm_stream_load_si128(_s + 0);
-    __m128i v2 = _mm_stream_load_si128(_s + 1);
-    __m128i v3 = _mm_stream_load_si128(_s + 2);
-    __m128i v4 = _mm_stream_load_si128(_s + 3);
+    __m128i * _d = (__m128i *)d;
+    __m128i * _s = (__m128i *)s;
+    __m128i   v1 = _mm_stream_load_si128(_s + 0);
+    __m128i   v2 = _mm_stream_load_si128(_s + 1);
+    __m128i   v3 = _mm_stream_load_si128(_s + 2);
+    __m128i   v4 = _mm_stream_load_si128(_s + 3);
 
     _mm_store_si128(_d + 0, v1);
     _mm_store_si128(_d + 1, v2);
@@ -303,20 +305,20 @@ static bool framebuffer_write_sse4_1(FrameBuffer * frame,
   #pragma GCC push_options
   #pragma GCC target ("avx2")
 #endif
-bool framebuffer_write_avx2(FrameBuffer * frame,
+bool framebuffer_write_avx2(KVMFRFrameBuffer * frame,
     const void * restrict src, size_t size)
 {
 #ifdef FB_PROFILE
-    static RunningAvg ra = NULL;
-    static int raCount = 0;
-    const uint64_t ts = microtime();
-    if (!ra)
-        ra = runningavg_new(100);
+  static RunningAvg ra      = NULL;
+  static int        raCount = 0;
+  const uint64_t    ts      = microtime();
+  if (!ra)
+    ra = runningavg_new(100);
 #endif
 
-  __m256i *restrict s = (__m256i *)src;
-  __m256i *restrict d = (__m256i *)frame->data;
-  size_t wp = 0;
+  __m256i * restrict s  = (__m256i *)src;
+  __m256i * restrict d  = (__m256i *)frame->data;
+  size_t             wp = 0;
 
   _mm_mfence();
 
@@ -381,7 +383,7 @@ bool framebuffer_write_avx2(FrameBuffer * frame,
   #pragma GCC pop_options
 #endif
 
-static bool _framebuffer_write(FrameBuffer * frame,
+static bool _framebuffer_write(KVMFRFrameBuffer * frame,
     const void * restrict src, size_t size)
 {
   if (cpuInfo_getFeatures()->avx2)
@@ -392,20 +394,20 @@ static bool _framebuffer_write(FrameBuffer * frame,
   return framebuffer_write(frame, src, size);
 }
 
-bool (*framebuffer_write)(FrameBuffer * frame,
-  const void * restrict src, size_t size) = &_framebuffer_write;
+bool (*framebuffer_write)(KVMFRFrameBuffer * frame,
+    const void * restrict src, size_t size) = &_framebuffer_write;
 
-const uint8_t * framebuffer_get_buffer(const FrameBuffer * frame)
+const uint8_t * framebuffer_get_buffer(const KVMFRFrameBuffer * frame)
 {
   return frame->data;
 }
 
-uint8_t * framebuffer_get_data(FrameBuffer * frame)
+uint8_t * framebuffer_get_data(KVMFRFrameBuffer * frame)
 {
   return frame->data;
 }
 
-void framebuffer_set_write_ptr(FrameBuffer * frame, size_t size)
+void framebuffer_set_write_ptr(KVMFRFrameBuffer * frame, size_t size)
 {
   atomic_store_explicit(&frame->wp, size, memory_order_release);
 }

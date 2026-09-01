@@ -104,8 +104,8 @@ struct EGL_Cursor
   _Atomic(float)               mapHDRContentPeak;
 
   bool                colorTransformUpdate;
-  LGColorTransform pendingColorTransform;
-  LGColorTransform activeColorTransform;
+  KVMFRColorTransform pendingColorTransform;
+  KVMFRColorTransform activeColorTransform;
   GLuint              colorLUT;
 
   struct CursorTex norm;
@@ -344,7 +344,7 @@ bool egl_cursorSetShape(EGL_Cursor * cursor, const LG_RendererCursor type,
 }
 
 void egl_cursorSetColorTransform(EGL_Cursor * cursor,
-    const LGColorTransform * transform)
+    const KVMFRColorTransform * transform)
 {
   LG_LOCK(cursor->lock);
   cursor->pendingColorTransform = *transform;

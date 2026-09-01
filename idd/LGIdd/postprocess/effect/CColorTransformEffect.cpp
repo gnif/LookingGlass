@@ -191,8 +191,8 @@ PostProcessStatus CColorTransformEffect::Set(
   if (!matrixEnabled && !lutEnabled)
     return PostProcessStatus::BYPASS_EFFECT;
 
-  DXGI_FORMAT dstFormat;
-  FrameType frameType;
+  DXGI_FORMAT    dstFormat;
+  KVMFRFrameType frameType;
   switch (src.desc.Format)
   {
     case DXGI_FORMAT_B8G8R8A8_UNORM:

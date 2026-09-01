@@ -30,8 +30,8 @@
 #include "common/event.h"
 #include "common/rects.h"
 #include "common/thread.h"
-#include "common/KVMFR.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/vector.h"
 #include <stdlib.h>
 #include <stdatomic.h>
@@ -456,7 +456,7 @@ static void nvfbc_free(void)
 }
 
 static CaptureResult nvfbc_capture(unsigned frameBufferIndex,
-  FrameBuffer * frameBuffer)
+  KVMFRFrameBuffer * frameBuffer)
 {
   // this is a bit of a hack as it causes this thread to block until the next
   // present keeping us locked with the refresh rate of the monitor being
@@ -644,10 +644,10 @@ static void updateDamageRects(CaptureFrame * frame)
         int y1 = ds[c].y1 << this->diffShift;
         int x2 = min((ds[c].x2 + 1) << this->diffShift, this->grabWidth);
         int y2 = min((ds[c].y2 + 1) << this->diffShift, this->grabHeight);
-        frame->damageRects[rectId++] = (FrameDamageRect) {
-          .x = x1,
-          .y = y1,
-          .width = x2 - x1,
+        frame->damageRects[rectId++] = (KVMFRFrameDamageRect) {
+          .x      = x1,
+          .y      = y1,
+          .width  = x2 - x1,
           .height = y2 - y1,
         };
       }
@@ -719,10 +719,10 @@ static CaptureResult nvfbc_waitFrame(unsigned frameBufferIndex,
 }
 
 static CaptureResult nvfbc_getFrame(
-  unsigned       frameBufferIndex,
-  FrameBuffer  * frame,
-  const size_t   maxFrameSize,
-  CaptureFrame * captureFrame)
+  unsigned           frameBufferIndex,
+  KVMFRFrameBuffer * frame,
+  const size_t       maxFrameSize,
+  CaptureFrame     * captureFrame)
 {
   (void)captureFrame;
   const unsigned int h = DIFF_MAP_DIM(this->grabHeight, this->diffShift);

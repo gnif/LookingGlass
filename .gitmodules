@@ -16,3 +16,6 @@
 [submodule "repos/cimplot"]
 	path = repos/gui/cimplot
 	url = https://github.com/cimgui/cimplot.git
+[submodule "repos/LGProtocol"]
+	path = repos/LGProtocol
+	url = https://github.com/gnif/LGProtocol.git

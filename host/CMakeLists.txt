@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(looking-glass-host C)
+project(looking-glass-host C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 

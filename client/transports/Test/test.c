@@ -47,11 +47,11 @@ enum TestDamageMode
 
 struct TestFormat
 {
-  const char * name;
-  FrameType    type;
-  unsigned     bytesPerPixel;
-  bool         hdr;
-  bool         hdrPQ;
+  const char     * name;
+  KVMFRFrameType   type;
+  unsigned         bytesPerPixel;
+  bool             hdr;
+  bool             hdrPQ;
 };
 
 static const struct TestFormat testFormats[] =
@@ -66,7 +66,7 @@ static const struct TestFormat testFormats[] =
 
 struct TestBuffer
 {
-  FrameBuffer * framebuffer;
+  KVMFRFrameBuffer * framebuffer;
 };
 
 struct LG_Transport
@@ -89,7 +89,7 @@ struct LG_Transport
   uint64_t                framePrepareTime;
   unsigned                bufferIndex;
   struct TestBuffer       buffers[TEST_BUFFER_COUNT];
-  FrameDamageRect         damage[LG_TRANSPORT_MAX_DAMAGE_RECTS];
+  KVMFRFrameDamageRect    damage[LG_TRANSPORT_MAX_DAMAGE_RECTS];
   LG_TransportFrameFormat format;
   uint16_t                pqLUT[TEST_PQ_LUT_SIZE + 1];
 };
@@ -348,7 +348,7 @@ static bool test_create(LG_Transport ** result)
       stride < 0 || (stride && stride < width) ||
       bufferStride > UINT32_MAX / maxBytesPerPixel ||
       frameRate < 1 || frameRate > 1000000000 || frameCount < 0 ||
-      bufferStride > (SIZE_MAX - sizeof(FrameBuffer)) /
+      bufferStride > (SIZE_MAX - sizeof(KVMFRFrameBuffer)) /
         maxBytesPerPixel / (size_t)height)
   {
     DEBUG_ERROR(
@@ -373,7 +373,8 @@ static bool test_create(LG_Transport ** result)
     bufferStride * this->height * maxBytesPerPixel;
   for (unsigned i = 0; i < TEST_BUFFER_COUNT; ++i)
   {
-    this->buffers[i].framebuffer = malloc(sizeof(FrameBuffer) + dataSize);
+    this->buffers[i].framebuffer =
+      malloc(sizeof(KVMFRFrameBuffer) + dataSize);
     if (!this->buffers[i].framebuffer)
     {
       for (unsigned j = 0; j < i; ++j)
@@ -515,7 +516,8 @@ static void test_getColor(const struct LG_Transport * this,
   *b = color;
 }
 
-static void test_generateFrame(struct LG_Transport * this, FrameBuffer * fb)
+static void test_generateFrame(struct LG_Transport * this,
+    KVMFRFrameBuffer * fb)
 {
   uint8_t * data = framebuffer_get_data(fb);
   if (this->stride)
@@ -653,13 +655,13 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
       this->width - boxSize : 1;
     const unsigned rangeY = this->height > boxSize ?
       this->height - boxSize : 1;
-    this->damage[0] = (FrameDamageRect) {
+    this->damage[0] = (KVMFRFrameDamageRect) {
       .x      = ((this->serial - 1) * 7) % rangeX,
       .y      = ((this->serial - 1) * 5) % rangeY,
       .width  = boxSize,
       .height = boxSize,
     };
-    this->damage[1] = (FrameDamageRect) {
+    this->damage[1] = (KVMFRFrameDamageRect) {
       .x      = (this->serial * 7) % rangeX,
       .y      = (this->serial * 5) % rangeY,
       .width  = boxSize,
@@ -680,12 +682,12 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
 
       case TEST_DAMAGE_MAX:
         for (unsigned i = 2; i < ARRAY_LENGTH(this->damage); ++i)
-          this->damage[i] = (FrameDamageRect) {0};
+          this->damage[i] = (KVMFRFrameDamageRect) {0};
         frame->damageRectsCount = ARRAY_LENGTH(this->damage);
         break;
 
       case TEST_DAMAGE_INVALID:
-        this->damage[0] = (FrameDamageRect) {
+        this->damage[0] = (KVMFRFrameDamageRect) {
           .x = this->width, .y = 0, .width = 1, .height = 1
         };
         frame->damageRectsCount = 1;
@@ -697,7 +699,7 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
         break;
 
       case TEST_DAMAGE_ZERO:
-        this->damage[2] = (FrameDamageRect) {0};
+        this->damage[2] = (KVMFRFrameDamageRect) {0};
         frame->damageRectsCount = 3;
         break;
 

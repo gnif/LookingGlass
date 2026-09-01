@@ -140,7 +140,7 @@ void egl_hdrOverlaySetState(EGL_HDROverlay * this, bool active, bool pq,
 }
 
 static int convertDamage(EGL_HDROverlay * this, const struct Rect * damage,
-    int damageCount, FrameDamageRect * output)
+    int damageCount, KVMFRFrameDamageRect * output)
 {
   int count = 0;
   for (int i = 0; i < damageCount; ++i)
@@ -152,7 +152,7 @@ static int convertDamage(EGL_HDROverlay * this, const struct Rect * damage,
     if (x2 <= x1 || y2 <= y1)
       continue;
 
-    output[count++] = (FrameDamageRect)
+    output[count++] = (KVMFRFrameDamageRect)
     {
       .x      = x1,
       .y      = this->height - y2,
@@ -185,7 +185,7 @@ bool egl_hdrOverlayBegin(EGL_HDROverlay * this,
   }
   else
   {
-    FrameDamageRect rects[damageCount];
+    KVMFRFrameDamageRect rects[damageCount];
     const int count = convertDamage(this, damage, damageCount, rects);
 
     egl_stateScissor(true);
@@ -227,7 +227,7 @@ void egl_hdrOverlayEnd(EGL_HDROverlay * this,
   }
   else
   {
-    FrameDamageRect rects[damageCount];
+    KVMFRFrameDamageRect rects[damageCount];
     const int count = convertDamage(this, damage, damageCount, rects);
 
     egl_stateScissor(true);

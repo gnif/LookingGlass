@@ -30,7 +30,7 @@ extern "C" {
   #include "lgmp/host.h"
 }
 
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 #include "capture/CFrameScheduler.h"
 #include "capture/FramePipeline.h"
 #include "transport/FrameCaps.h"
@@ -117,13 +117,13 @@ private:
   KVMFRFrame  * m_frame      [LGMP_Q_FRAME_BUFFER_LEN]   = {};
   LGMPBuffer  * m_frameBuffer[LGMP_Q_FRAME_BUFFER_LEN]   = {};
 
-  unsigned    m_width       = 0;
-  unsigned    m_height      = 0;
-  unsigned    m_frameWidth  = 0;
-  unsigned    m_frameHeight = 0;
-  unsigned    m_pitch       = 0;
-  DXGI_FORMAT m_format      = DXGI_FORMAT_UNKNOWN;
-  FrameType   m_frameType   = FRAME_TYPE_INVALID;
+  unsigned       m_width       = 0;
+  unsigned       m_height      = 0;
+  unsigned       m_frameWidth  = 0;
+  unsigned       m_frameHeight = 0;
+  unsigned       m_pitch       = 0;
+  DXGI_FORMAT    m_format      = DXGI_FORMAT_UNKNOWN;
+  KVMFRFrameType m_frameType   = FRAME_TYPE_INVALID;
 
   // Previous HDR metadata used to detect changes for formatVer bumps.
   uint16_t m_lastHDRDisplayPrimary[3][2]      = {};

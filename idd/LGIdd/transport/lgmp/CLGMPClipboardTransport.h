@@ -24,8 +24,8 @@
 #include "transport/IClipboardSource.h"
 #include "transport/lgmp/CLGMPClipboardFiles.h"
 
-#include "common/KVMFRClipboard.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRClipboard.h>
+#include <LGProtocol/LGMPConfig.h>
 
 #include <Windows.h>
 

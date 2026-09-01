@@ -46,14 +46,14 @@ static void testRotations(void)
     { .x = 140, .y = 10, .w = 40, .h = 20 },
     { .x =  20, .y = 10, .w = 40, .h = 20 },
   };
-  const FrameDamageRect damage =
+  const KVMFRFrameDamageRect damage =
   {
     .x      = 10,
     .y      = 5,
     .width  = 20,
     .height = 10,
   };
-  const FrameDamageRect full =
+  const KVMFRFrameDamageRect full =
   {
     .width  = 100,
     .height = 50,
@@ -79,7 +79,7 @@ static void testFractional(void)
   double matrix[6];
   egl_desktopToScreenMatrix(matrix, 3, 2, 0.0, 0.0, 1.0, 1.0,
       LG_ROTATE_0, 10.0, 7.0);
-  const FrameDamageRect damage =
+  const KVMFRFrameDamageRect damage =
   {
     .x      = 1,
     .width  = 1,
@@ -90,7 +90,7 @@ static void testFractional(void)
 
   egl_desktopToScreenMatrix(matrix, 100, 50, 0.1, -0.2, 0.5, 0.75,
       LG_ROTATE_0, 10.0, 7.0);
-  const FrameDamageRect full =
+  const KVMFRFrameDamageRect full =
   {
     .width  = 100,
     .height = 50,
@@ -101,7 +101,7 @@ static void testFractional(void)
 
 static void testRoundTrip(void)
 {
-  const FrameDamageRect damage =
+  const KVMFRFrameDamageRect damage =
   {
     .x      = 10,
     .y      = 5,
@@ -119,7 +119,7 @@ static void testRoundTrip(void)
         (LG_RendererRotate)i, 200.0, 100.0);
 
     const struct Rect screen = egl_desktopToScreen(forward, &damage);
-    FrameDamageRect result;
+    KVMFRFrameDamageRect result;
     CHECK(egl_screenToDesktop(&result, inverse, &screen, 100, 50));
     CHECK(result.x <= damage.x);
     CHECK(result.y <= damage.y);
@@ -141,7 +141,7 @@ static void testClipping(void)
     .w = 10,
     .h = 10,
   };
-  FrameDamageRect result;
+  KVMFRFrameDamageRect result;
   CHECK(!egl_screenToDesktop(&result, matrix, &outside, 100, 50));
 
   const struct Rect edge =

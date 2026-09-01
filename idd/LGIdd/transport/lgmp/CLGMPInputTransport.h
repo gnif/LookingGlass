@@ -23,8 +23,8 @@
 #include "Atomic.h"
 #include "CSRWLock.h"
 #include "transport/IInputSource.h"
-#include "common/KVMFRInput.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRInput.h>
+#include <LGProtocol/LGMPConfig.h>
 
 #include <Windows.h>
 

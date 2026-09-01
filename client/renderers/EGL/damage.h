@@ -29,7 +29,7 @@ struct DesktopDamage
 {
   LG_RendererFrameToken frameToken;
   int                   count;
-  FrameDamageRect       rects[LG_MAX_FRAME_DAMAGE_RECTS];
+  KVMFRFrameDamageRect  rects[LG_MAX_FRAME_DAMAGE_RECTS];
 };
 
 typedef struct EGL_Damage EGL_Damage;

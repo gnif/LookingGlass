@@ -124,17 +124,17 @@ struct Inst
   float           uiScale;
   _Atomic(bool)   frameUpdate;
 
-  LG_Lock               formatLock;
-  LG_RendererFormat     format;
-  GLuint                intFormat;
-  GLuint                vboFormat;
-  GLuint                dataFormat;
-  size_t                texSize;
-  size_t                texPos;
-  bool                  texUploadError;
-  float                 scaleX, scaleY;
-  const FrameBuffer   * frame;
-  LG_RendererFrameToken pendingFrameToken;
+  LG_Lock                    formatLock;
+  LG_RendererFormat          format;
+  GLuint                     intFormat;
+  GLuint                     vboFormat;
+  GLuint                     dataFormat;
+  size_t                     texSize;
+  size_t                     texPos;
+  bool                       texUploadError;
+  float                      scaleX, scaleY;
+  const KVMFRFrameBuffer   * frame;
+  LG_RendererFrameToken      pendingFrameToken;
   struct OpenGL_FrameRelease frameRelease;
 
   uint64_t        drawStart;
@@ -482,8 +482,8 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
   return true;
 }
 
-bool opengl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFd,
-    const FrameDamageRect * damage, int damageCount,
+bool opengl_onFrame(LG_Renderer * renderer, const KVMFRFrameBuffer * frame,
+    int dmaFd, const KVMFRFrameDamageRect * damage, int damageCount,
     LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {
@@ -1383,9 +1383,9 @@ static bool drawFrame(struct Inst * this,
     LG_UNLOCK(this->frameLock);
     return true;
   }
-  const FrameBuffer * frame = this->frame;
-  const LG_RendererFrameToken pendingFrameToken = this->pendingFrameToken;
-  const struct OpenGL_FrameRelease release =
+  const KVMFRFrameBuffer          * frame             = this->frame;
+  const LG_RendererFrameToken       pendingFrameToken = this->pendingFrameToken;
+  const struct OpenGL_FrameRelease  release           =
     takePendingFrameLocked(this);
 
   LG_LOCK(this->formatLock);

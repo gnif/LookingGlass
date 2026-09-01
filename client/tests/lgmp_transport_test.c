@@ -20,9 +20,9 @@
 
 #include "interface/transport.h"
 
-#include "common/KVMFR.h"
-#include "common/KVMFRRecovery.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/KVMFRRecovery.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 #include "common/option.h"
 
@@ -380,7 +380,7 @@ int main(void)
     .subTimeout  = TEST_TIMEOUT,
   };
   const uint32_t frameSize =
-    sizeof(KVMFRFrame) + sizeof(FrameBuffer) + sizeof(uint32_t);
+    sizeof(KVMFRFrame) + sizeof(KVMFRFrameBuffer) + sizeof(uint32_t);
   CHECK(lgmpHostMemAllocAligned(host, frameSize, _Alignof(KVMFRFrame),
         &frameMemory) == LGMP_OK);
   KVMFRFrame * wireFrame = lgmpHostMemPtr(frameMemory);
@@ -404,7 +404,8 @@ int main(void)
   wireFrame->readyTime       = 400;
   wireFrame->timingSerial    = wireFrame->frameSerial;
   wireFrame->timingValid     = 1;
-  FrameBuffer * framebuffer = (FrameBuffer *)((uint8_t *)wireFrame +
+  KVMFRFrameBuffer * framebuffer =
+    (KVMFRFrameBuffer *)((uint8_t *)wireFrame +
       wireFrame->offset);
   atomic_store(&framebuffer->wp, sizeof(uint32_t));
   CHECK(lgmpHostMemAlloc(host, sizeof(KVMFRFrame) - 1,

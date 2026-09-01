@@ -22,7 +22,7 @@
 
 #include "texture.h"
 #include "texture_util.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/LGMPConfig.h>
 #include "common/locking.h"
 
 #define EGL_TEX_BUFFER_MAX LGMP_Q_FRAME_BUFFER_LEN
@@ -30,9 +30,9 @@
 
 typedef struct EGL_TexBufferDamage
 {
-  bool            full;
-  int             count;
-  FrameDamageRect rects[EGL_TEX_BUFFER_DAMAGE_MAX];
+  bool                 full;
+  int                  count;
+  KVMFRFrameDamageRect rects[EGL_TEX_BUFFER_DAMAGE_MAX];
 }
 EGL_TexBufferDamage;
 

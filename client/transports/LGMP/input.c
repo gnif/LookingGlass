@@ -22,8 +22,8 @@
 
 #include "kb.h"
 
-#include "common/KVMFRInput.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRInput.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"

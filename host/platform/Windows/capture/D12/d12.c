@@ -104,13 +104,13 @@ struct D12Interface
   struct
   {
     // the size of the frame buffer
-    unsigned          size;
+    unsigned             size;
     // the frame buffer it itself
-    FrameBuffer    *  frameBuffer;
+    KVMFRFrameBuffer   * frameBuffer;
     // the resource backed by the framebuffer
-    ID3D12Resource ** resource;
+    ID3D12Resource    ** resource;
     // the mapped resource if indirectCopy is in use
-    void           *  map;
+    void               * map;
   }
   frameBuffers[0];
 };
@@ -184,10 +184,10 @@ static bool d12_enumerateDevices(
 static bool d12_heapTest(ID3D12Device3 * device, ID3D12Heap * heap);
 
 static ID3D12Resource * d12_frameBufferToResource(
-  unsigned      frameBufferIndex,
-  FrameBuffer * frameBuffer,
-  unsigned size,
-  void ** map);
+  unsigned             frameBufferIndex,
+  KVMFRFrameBuffer   * frameBuffer,
+  unsigned             size,
+  void              ** map);
 
 static bool d12_copyTimingInit(
   ID3D12Device3 * device, ID3D12CommandQueue * queue);
@@ -778,7 +778,7 @@ static void d12_free(void)
 }
 
 static CaptureResult d12_capture(
-  unsigned frameBufferIndex, FrameBuffer * frameBuffer)
+  unsigned frameBufferIndex, KVMFRFrameBuffer * frameBuffer)
 {
   DEBUG_TRACE("d12_backendCapture");
   return d12_backendCapture(this->backend, frameBufferIndex);
@@ -958,11 +958,11 @@ static CaptureResult d12_waitFrame(unsigned frameBufferIndex,
 
   {
     // create a clean list of rects
-    FrameDamageRect allRects[D12_MAX_DIRTY_RECTS];
-    unsigned count = 0;
+    KVMFRFrameDamageRect allRects[D12_MAX_DIRTY_RECTS];
+    unsigned             count = 0;
     for(const RECT * rect = desc.dirtyRects;
       rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
-      allRects[count++] = (FrameDamageRect){
+      allRects[count++] = (KVMFRFrameDamageRect){
         .x      = rect->left,
         .y      = rect->top,
         .width  = (rect->right  - rect->left),
@@ -993,10 +993,10 @@ exit:
 }
 
 static CaptureResult d12_getFrame(
-  unsigned       frameBufferIndex,
-  FrameBuffer  * frameBuffer,
-  const size_t   maxFrameSize,
-  CaptureFrame * captureFrame)
+  unsigned           frameBufferIndex,
+  KVMFRFrameBuffer * frameBuffer,
+  const size_t       maxFrameSize,
+  CaptureFrame     * captureFrame)
 {
   const uint64_t postProcessStart = nanotime();
   captureFrame->postProcessTime   = 0;
@@ -1006,8 +1006,8 @@ static CaptureResult d12_getFrame(
   CaptureResult result = CAPTURE_RESULT_ERROR;
   comRef_scopePush(3);
 
-  D12FrameDesc desc;
-  FrameDamageRect allRects[D12_MAX_DIRTY_RECTS * 2];
+  D12FrameDesc         desc;
+  KVMFRFrameDamageRect allRects[D12_MAX_DIRTY_RECTS * 2];
 
   comRef_defineLocal(ID3D12Resource, src);
   DEBUG_TRACE("d12_backendFetch");
@@ -1142,7 +1142,7 @@ static CaptureResult d12_getFrame(
        * be redrawn by the client, such as under the cursor */
       for(const RECT * rect = this->dirtyRects;
         rect < this->dirtyRects + this->nbDirtyRects; ++rect)
-        allRects[rectCount++] = (FrameDamageRect){
+        allRects[rectCount++] = (KVMFRFrameDamageRect){
           .x      = rect->left,
           .y      = rect->top,
           .width  = rect->right  - rect->left,
@@ -1152,7 +1152,7 @@ static CaptureResult d12_getFrame(
       /* add the new dirtyRects to the array */
       for(const RECT * rect = desc.dirtyRects;
         rect < desc.dirtyRects + desc.nbDirtyRects; ++rect)
-        allRects[rectCount++] = (FrameDamageRect){
+        allRects[rectCount++] = (KVMFRFrameDamageRect){
           .x      = rect->left,
           .y      = rect->top,
           .width  = rect->right  - rect->left,
@@ -1163,7 +1163,8 @@ static CaptureResult d12_getFrame(
       rectCount = rectsMergeOverlapping(allRects, rectCount);
 
       /* copy all the rects */
-      for(FrameDamageRect * rect = allRects; rect < allRects + rectCount; ++rect)
+      for(KVMFRFrameDamageRect * rect = allRects;
+          rect < allRects + rectCount; ++rect)
       {
         D3D12_BOX box =
         {
@@ -1476,7 +1477,7 @@ exit:
 }
 
 static ID3D12Resource * d12_frameBufferToResource(unsigned frameBufferIndex,
-  FrameBuffer * frameBuffer, unsigned size, void ** map)
+  KVMFRFrameBuffer * frameBuffer, unsigned size, void ** map)
 {
   ID3D12Resource * result = NULL;
   comRef_scopePush(10);

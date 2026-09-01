@@ -167,8 +167,8 @@ static struct
 }
 l_testCapture;
 
-static atomic_uint_least64_t l_testFrameSerial;
-static _Atomic(FrameType)    l_testFrameType;
+static atomic_uint_least64_t     l_testFrameSerial;
+static _Atomic(KVMFRFrameType)   l_testFrameType;
 #endif
 
 static void lgInit(void)
@@ -697,7 +697,7 @@ static void preSwapCallback(void * udata)
     return;
   }
 
-  const FrameType sourceType =
+  const KVMFRFrameType sourceType =
     atomic_load_explicit(&l_testFrameType, memory_order_acquire);
   const LG_TestCaptureHeader header = {
     .magic         = LG_TEST_CAPTURE_MAGIC,
@@ -1605,7 +1605,7 @@ int main_frameThread(void * unused)
       (damageCount && !frame.damageRects);
     for (uint32_t i = 0; !invalidDamage && i < damageCount; ++i)
     {
-      const FrameDamageRect * rect = &frame.damageRects[i];
+      const KVMFRFrameDamageRect * rect = &frame.damageRects[i];
       invalidDamage = !rect->width || !rect->height ||
         rect->x > format->frameWidth ||
         rect->y > format->dataHeight ||

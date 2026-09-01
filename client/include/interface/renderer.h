@@ -75,7 +75,7 @@ LG_RendererRotate;
 
 typedef struct LG_RendererFormat
 {
-  FrameType         type;         // frame type
+  KVMFRFrameType    type;         // frame type
   bool              hdr;          // if the frame is HDR or not
   bool              hdrPQ;        // if the HDR content is PQ mapped
   bool              hdrMetadata;  // if the HDR static metadata is valid
@@ -286,7 +286,7 @@ typedef struct LG_RendererOps
   /* optional display calibration update for hardware cursor composition
    * Context: cursorThread */
   void (*onMouseColorTransform)(LG_Renderer * renderer,
-      const LGColorTransform * transform);
+      const KVMFRColorTransform * transform);
 
   /* updates the cursor-specific SDR white level reported by IddCx
    * Context: cursorThread */
@@ -307,8 +307,8 @@ typedef struct LG_RendererOps
    * when that update is consumed. A non-NULL releaseFn transfers ownership to
    * the renderer on success and must be called exactly once when the imported
    * frame can no longer be sampled. Context: frameThread */
-  bool (*onFrame)(LG_Renderer * renderer, const FrameBuffer * frame, int dmaFD,
-      const FrameDamageRect * damage, int damageCount,
+  bool (*onFrame)(LG_Renderer * renderer, const KVMFRFrameBuffer * frame,
+      int dmaFD, const KVMFRFrameDamageRect * damage, int damageCount,
       LG_RendererFrameToken frameToken,
       LG_FrameReleaseFn releaseFn,
       void * releaseOpaque, uint64_t releaseHandle);

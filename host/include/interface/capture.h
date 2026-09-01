@@ -22,13 +22,9 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 
-#ifdef __cplusplus
-/* using common/framebuffer.h breaks compatibillity with C++ due to it's usage
- * of stdatomic.h, so we need to forward declare the structure here */
-typedef struct stFrameBuffer FrameBuffer;
-#else
+#ifndef __cplusplus
 #include "common/framebuffer.h"
 #endif
 
@@ -95,8 +91,8 @@ typedef struct CaptureFrame
   uint32_t        hdrMaxFrameAverageLightLevel;
   uint32_t        sdrWhiteLevel;
 
-  uint32_t        damageRectsCount;
-  FrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
+  uint32_t             damageRectsCount;
+  KVMFRFrameDamageRect damageRects[KVMFR_MAX_DAMAGE_RECTS];
 
   // Producer-local durations. Absolute timestamps must not cross KVMFR as the
   // client and producer use different monotonic clock domains.
@@ -148,18 +144,18 @@ typedef struct CaptureInterface
   void          (*free         )(void);
 
   CaptureResult (*capture   )(
-    unsigned frameBufferIndex,
-    FrameBuffer * frame);
+    unsigned           frameBufferIndex,
+    KVMFRFrameBuffer * frame);
   CaptureResult (*waitFrame )(
-    unsigned frameBufferIndex,
-    CaptureFrame * frame,
-    /* Capacity of FrameBuffer::data, excluding the message and header. */
-    const size_t maxFrameSize);
-  CaptureResult (*getFrame  )(
     unsigned       frameBufferIndex,
-    FrameBuffer  * frame,
-    /* Capacity of FrameBuffer::data, excluding the message and header. */
-    const size_t   maxFrameSize,
-    CaptureFrame * captureFrame);
+    CaptureFrame * frame,
+    /* Capacity of KVMFRFrameBuffer::data, excluding message and header. */
+    const size_t   maxFrameSize);
+  CaptureResult (*getFrame  )(
+    unsigned           frameBufferIndex,
+    KVMFRFrameBuffer * frame,
+    /* Capacity of KVMFRFrameBuffer::data, excluding message and header. */
+    const size_t       maxFrameSize,
+    CaptureFrame     * captureFrame);
 }
 CaptureInterface;

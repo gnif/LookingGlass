@@ -25,7 +25,7 @@
 #include "CDebug.h"
 #include "VersionInfo.h"
 
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 
 #include <stdlib.h>
 #include <string.h>

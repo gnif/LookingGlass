@@ -44,7 +44,7 @@ bool egl_cursorSetShape(
     const uint8_t * data);
 
 void egl_cursorSetColorTransform(EGL_Cursor * cursor,
-    const LGColorTransform * transform);
+    const KVMFRColorTransform * transform);
 
 void egl_cursorSetSize(EGL_Cursor * cursor, const float x, const float y);
 

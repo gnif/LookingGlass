@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "common/KVMFRInput.h"
+#include <LGProtocol/KVMFRInput.h>
 
 #include <stddef.h>
 #include <stdint.h>

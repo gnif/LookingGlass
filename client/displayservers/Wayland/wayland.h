@@ -35,7 +35,7 @@
 
 #include "app.h"
 #include "egl_dynprocs.h"
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 #include "common/locking.h"
 #include "common/ringbuffer.h"
 #include "interface/displayserver.h"

@@ -959,6 +959,10 @@ target_include_directories(render-tests PRIVATE
   "${PROJECT_TOP}/common/include"
 )
 
+target_link_libraries(render-tests
+  LGProtocol::LGProtocol
+)
+
 if(TARGET GTest::gtest_main)
   target_link_libraries(render-tests GTest::gtest_main)
 else()

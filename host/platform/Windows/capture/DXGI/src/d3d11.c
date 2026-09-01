@@ -147,7 +147,7 @@ static bool d3d11_preCopy(
   ID3D11Texture2D * src,
   unsigned          textureIndex,
   unsigned          frameBufferIndex,
-  FrameBuffer     * frameBuffer)
+  KVMFRFrameBuffer * frameBuffer)
 {
   dxgi_contextLock();
   this->texture[textureIndex].copyTime = microtime();
@@ -166,7 +166,7 @@ static bool d3d11_copyFull(ID3D11Texture2D * src, unsigned textureIndex)
 
 
 static bool d3d11_copyRect(ID3D11Texture2D * src, unsigned textureIndex,
-  FrameDamageRect * rect)
+  KVMFRFrameDamageRect * rect)
 {
   ID3D11Texture2D * dst = *this->texture[textureIndex].tex;
 

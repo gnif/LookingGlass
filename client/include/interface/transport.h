@@ -202,17 +202,17 @@ LG_TransportFrameTiming;
 
 typedef struct LG_TransportFrameFormat
 {
-  uint32_t version;
-  FrameType type;
-  uint32_t screenWidth;
-  uint32_t screenHeight;
-  uint32_t dataWidth;
-  uint32_t dataHeight;
-  uint32_t frameWidth;
-  uint32_t frameHeight;
-  FrameRotation rotation;
-  uint32_t stride;
-  uint32_t pitch;
+  uint32_t           version;
+  KVMFRFrameType     type;
+  uint32_t           screenWidth;
+  uint32_t           screenHeight;
+  uint32_t           dataWidth;
+  uint32_t           dataHeight;
+  uint32_t           frameWidth;
+  uint32_t           frameHeight;
+  KVMFRFrameRotation rotation;
+  uint32_t           stride;
+  uint32_t           pitch;
 
   bool hdr;
   bool hdrPQ;
@@ -340,10 +340,10 @@ typedef struct LG_TransportFrame
   // Backend-owned immutable metadata, valid until releaseFrame.
   const LG_TransportFrameFormat * format;
 
-  const FrameBuffer * framebuffer;
-  int dmaFD;
-  const FrameDamageRect * damageRects;
-  uint32_t damageRectsCount;
+  const KVMFRFrameBuffer     * framebuffer;
+  int                          dmaFD;
+  const KVMFRFrameDamageRect * damageRects;
+  uint32_t                     damageRectsCount;
 
   /* A transport may keep the frame payload alive asynchronously after
    * onFrame returns. The callback is idempotent and releases that ownership. */
@@ -369,19 +369,19 @@ typedef struct LG_TransportPointer
   /* When setStatusListener is present, matches LG_VideoComponentStatus::epoch
    * for the pointer endpoint which returned this payload; otherwise may be 0.
    */
-  uint64_t epoch;
-  LG_TransportPointerFlags flags;
-  int16_t x;
-  int16_t y;
-  CursorType type;
-  int16_t hx;
-  int16_t hy;
-  uint32_t width;
-  uint32_t height;
-  uint32_t pitch;
-  uint32_t sdrWhiteLevel;
-  const uint8_t * shape;
-  const LGColorTransform * colorTransform;
+  uint64_t                    epoch;
+  LG_TransportPointerFlags    flags;
+  int16_t                     x;
+  int16_t                     y;
+  KVMFRCursorType             type;
+  int16_t                     hx;
+  int16_t                     hy;
+  uint32_t                    width;
+  uint32_t                    height;
+  uint32_t                    pitch;
+  uint32_t                    sdrWhiteLevel;
+  const uint8_t             * shape;
+  const KVMFRColorTransform * colorTransform;
 }
 LG_TransportPointer;
 

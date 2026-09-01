@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(profiler-client C)
+project(profiler-client C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/../.." ABSOLUTE)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_TOP}/cmake/" "${PROJECT_SOURCE_DIR}/cmake/")

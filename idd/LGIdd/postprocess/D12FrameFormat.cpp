@@ -87,12 +87,12 @@ DXGI_FORMAT D12::Dxgi(FramePixel pixel)
   return DXGI_FORMAT_UNKNOWN;
 }
 
-FrameType D12::Type(FramePixel pixel)
+KVMFRFrameType D12::Type(FramePixel pixel)
 {
   return Type(Dxgi(pixel));
 }
 
-FrameType D12::Type(DXGI_FORMAT format)
+KVMFRFrameType D12::Type(DXGI_FORMAT format)
 {
   switch (format)
   {

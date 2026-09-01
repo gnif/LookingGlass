@@ -15,6 +15,19 @@ if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
   )
 endif()
 
+function(_lg_common_add_protocol)
+  # Function scope preserves the parent BUILD_TESTING setting while disabling
+  # LGProtocol's standalone tests in the nested build.
+  set(BUILD_TESTING OFF)
+  add_subdirectory(
+    "${CMAKE_CURRENT_SOURCE_DIR}/../repos/LGProtocol"
+    "${CMAKE_CURRENT_BINARY_DIR}/LGProtocol"
+    EXCLUDE_FROM_ALL
+  )
+endfunction()
+
+_lg_common_add_protocol()
+
 add_subdirectory(src/platform)
 
 set(COMMON_SOURCES
@@ -35,7 +48,11 @@ set(COMMON_SOURCES
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
-target_link_libraries(lg_common lg_common_platform)
+target_link_libraries(lg_common
+  PUBLIC
+    lg_common_platform
+    LGProtocol::LGProtocol
+)
 
 if(ENABLE_BACKTRACE)
   target_compile_definitions(lg_common PUBLIC -DENABLE_BACKTRACE)

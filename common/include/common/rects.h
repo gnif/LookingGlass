@@ -33,21 +33,22 @@ extern void (*rectCopyUnaligned)(
 
 void rectScaleOutward(struct Rect * rect, double scale);
 
-bool rectsBufferToFramebuffer(const FrameDamageRect * rects, int count, int bpp,
-  FrameBuffer * frame, int dstPitch, int height,
+bool rectsBufferToFramebuffer(const KVMFRFrameDamageRect * rects, int count,
+  int bpp, KVMFRFrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch);
 
-bool rectsFramebufferToBuffer(const FrameDamageRect * rects, int count, int bpp,
+bool rectsFramebufferToBuffer(const KVMFRFrameDamageRect * rects, int count,
+  int bpp,
   uint8_t * dst, int dstPitch, int height,
-  const FrameBuffer * frame, int srcPitch);
+  const KVMFRFrameBuffer * frame, int srcPitch);
 
 /* As above, accumulating producer wait time in nanoseconds. */
-bool rectsFramebufferToBufferTimed(const FrameDamageRect * rects,
+bool rectsFramebufferToBufferTimed(const KVMFRFrameDamageRect * rects,
   int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
-  const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs);
+  const KVMFRFrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs);
 
-int rectsMergeOverlapping(FrameDamageRect * rects, int count);
-int rectsRejectContained(FrameDamageRect * rects, int count);
+int rectsMergeOverlapping(KVMFRFrameDamageRect * rects, int count);
+int rectsRejectContained(KVMFRFrameDamageRect * rects, int count);
 
 #endif

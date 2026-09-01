@@ -20,8 +20,8 @@
 
 #include "../transports/LGMP/input.h"
 
-#include "common/KVMFRInput.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRInput.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 
 #include <lgmp/client.h>

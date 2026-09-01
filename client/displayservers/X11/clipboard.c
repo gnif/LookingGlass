@@ -32,7 +32,7 @@
 #include "core/clipboard_files.h"
 #include "common/array.h"
 #include "common/debug.h"
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 #include "common/locking.h"
 
 struct X11ClipboardRead

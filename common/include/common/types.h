@@ -23,6 +23,8 @@
 
 #include <stdint.h>
 
+#include <LGProtocol/KVMFRTypes.h>
+
 typedef void (*LG_FrameReleaseFn)(void * opaque, uint64_t handle);
 
 struct Point
@@ -50,66 +52,7 @@ struct Border
   int left, top, right, bottom;
 };
 
-typedef enum FrameType
-{
-  FRAME_TYPE_INVALID   ,
-  FRAME_TYPE_BGRA      , // BGRA interleaved: B,G,R,A 32bpp
-  FRAME_TYPE_RGBA      , // RGBA interleaved: R,G,B,A 32bpp
-  FRAME_TYPE_RGBA10    , // RGBA interleaved: R,G,B,A 10,10,10,2 bpp
-  FRAME_TYPE_RGBA16F   , // RGBA interleaved: R,G,B,A 16,16,16,16 bpp float
-  FRAME_TYPE_BGR_32    , // BGR 24-bpp in 32bpp
-  FRAME_TYPE_RGB_24    , // RGB 24-bpp
-  FRAME_TYPE_MAX       , // sentinel value
-}
-FrameType;
-
-typedef enum FrameRotation
-{
-  FRAME_ROT_0,
-  FRAME_ROT_90,
-  FRAME_ROT_180,
-  FRAME_ROT_270
-}
-FrameRotation;
-
-typedef struct FrameDamageRect
-{
-  uint32_t x;
-  uint32_t y;
-  uint32_t width;
-  uint32_t height;
-}
-FrameDamageRect;
-
 extern const char * FrameTypeStr[FRAME_TYPE_MAX];
-
-typedef enum CursorType
-{
-  CURSOR_TYPE_COLOR       ,
-  CURSOR_TYPE_MONOCHROME  ,
-  CURSOR_TYPE_MASKED_COLOR
-}
-CursorType;
-
-enum
-{
-  LG_COLOR_TRANSFORM_MATRIX = 0x1,
-  LG_COLOR_TRANSFORM_LUT    = 0x2,
-};
-
-typedef uint32_t LGColorTransformFlags;
-
-#define LG_SDR_WHITE_LEVEL_DEFAULT 203
-#define LG_MAX_FRAME_DAMAGE_RECTS  64
-
-typedef struct LGColorTransform
-{
-  LGColorTransformFlags flags;
-  float matrix[3][4];
-  float scalar;
-  float lut[4096][4];
-}
-LGColorTransform;
 
 typedef struct StringPair
 {

@@ -160,8 +160,8 @@ bool egl_textureUpdateRect(EGL_Texture * this,
 }
 
 bool egl_textureUpdateFromFrame(EGL_Texture * this,
-    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const FrameDamageRect * damageRects, int damageRectsCount,
+    const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs)
 {
   const struct EGL_TexUpdate update =
@@ -184,7 +184,7 @@ bool egl_textureUpdateFromFrame(EGL_Texture * this,
 }
 
 bool egl_textureUpdateFromDMA(EGL_Texture * this,
-    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
     const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {

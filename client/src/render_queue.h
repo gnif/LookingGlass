@@ -88,7 +88,7 @@ void renderQueue_sourceCursorImage(RenderQueueSource source,
     int width, int height, int pitch, const void * data);
 
 void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
-    uint64_t generation, const LGColorTransform * transform);
+    uint64_t generation, const KVMFRColorTransform * transform);
 
 void renderQueue_sourceCursorWhiteLevel(RenderQueueSource source,
     uint64_t generation, uint32_t sdrWhiteLevel);

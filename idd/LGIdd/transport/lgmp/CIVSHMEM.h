@@ -24,7 +24,7 @@
 #include <SetupAPI.h>
 #include <vector>
 
-#include "common/KVMFRRecovery.h"
+#include <LGProtocol/KVMFRRecovery.h>
 
 class CIVSHMEM
 {

@@ -57,14 +57,14 @@ struct DXGICopyBackend
   bool (*preCopy)(ID3D11Texture2D * src,
     unsigned textureIndex,
     unsigned frameBufferIndex,
-    FrameBuffer * frameBuffer);
+    KVMFRFrameBuffer * frameBuffer);
 
   // called to copy the full frame
   bool (*copyFull)(ID3D11Texture2D * src, unsigned textureIndex);
 
   // called for each damage rect that needs to be copied
   bool (*copyRect)(ID3D11Texture2D * src, unsigned textureIndex,
-    FrameDamageRect * rect);
+    KVMFRFrameDamageRect * rect);
 
   // called just after the copy has finished
   bool (*postCopy)(ID3D11Texture2D * src, unsigned textureIndex);
@@ -72,8 +72,8 @@ struct DXGICopyBackend
   // maps the copied frame into memory
   CaptureResult (*mapTexture)(unsigned textureIndex, void ** map);
 
-  // [optional] backend specific write into the FrameBuffer
-  CaptureResult (*writeFrame)(int textureIndex, FrameBuffer * frame);
+  // [optional] backend specific write into the KVMFRFrameBuffer
+  CaptureResult (*writeFrame)(int textureIndex, KVMFRFrameBuffer * frame);
 
   // unmaps the copied frame from memory
   void (*unmapTexture)(unsigned textureIndex);

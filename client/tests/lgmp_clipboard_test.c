@@ -20,8 +20,8 @@
 
 #include "clipboard.h"
 
-#include "common/KVMFRClipboard.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRClipboard.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 
 #include <lgmp/client.h>

@@ -21,7 +21,7 @@
 #pragma once
 
 #include <stdbool.h>
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 
 // exit code for user opted to exit looking-glass-host
 #define LG_HOST_EXIT_USER    0x10

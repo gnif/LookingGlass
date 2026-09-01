@@ -57,10 +57,10 @@ constexpr unsigned kFrameSerial = 4;
 
 struct FormatCase
 {
-  const char * name;
-  FrameType type;
-  bool hdr;
-  bool pq;
+  const char   * name;
+  KVMFRFrameType type;
+  bool           hdr;
+  bool           pq;
 };
 
 struct DamageCase

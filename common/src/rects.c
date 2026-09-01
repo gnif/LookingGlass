@@ -52,8 +52,8 @@ void rectScaleOutward(struct Rect * rect, double scale)
   rect->h = bottom - top;
 }
 
-inline static bool rectIntersects(const FrameDamageRect * r1,
-    const FrameDamageRect * r2)
+inline static bool rectIntersects(const KVMFRFrameDamageRect * r1,
+    const KVMFRFrameDamageRect * r2)
 {
   return !(
     r1->x > r2->x + r2->width  ||
@@ -62,8 +62,8 @@ inline static bool rectIntersects(const FrameDamageRect * r1,
     r2->y > r1->y + r1->height);
 }
 
-inline static bool rectContains(const FrameDamageRect * r1,
-    const FrameDamageRect * r2)
+inline static bool rectContains(const KVMFRFrameDamageRect * r1,
+    const KVMFRFrameDamageRect * r2)
 {
   return !(
     r2->x              < r1->x              ||
@@ -72,7 +72,7 @@ inline static bool rectContains(const FrameDamageRect * r1,
     r2->y + r2->height > r1->y + r1->height);
 }
 
-inline static int removeRects(FrameDamageRect * rects, int count,
+inline static int removeRects(KVMFRFrameDamageRect * rects, int count,
     bool removed[])
 {
   int o = 0;
@@ -99,7 +99,7 @@ static int cornerCompare(const void * a_, const void * b_)
   return 0;
 }
 
-static bool rectsBufferCopy(const FrameDamageRect * rects,
+static bool rectsBufferCopy(const KVMFRFrameDamageRect * rects,
   int count, int bpp,
   uint8_t * dst, int dstStride, int height,
   const uint8_t * src, int srcStride, void * opaque,
@@ -117,9 +117,9 @@ static bool rectsBufferCopy(const FrameDamageRect * rects,
 
   for (int i = 0; i < count; ++i)
   {
-    const FrameDamageRect * rect = rects + i;
-    const uint64_t right  = (uint64_t)rect->x + rect->width;
-    const uint64_t bottom = (uint64_t)rect->y + rect->height;
+    const KVMFRFrameDamageRect * rect   = rects + i;
+    const uint64_t               right  = (uint64_t)rect->x + rect->width;
+    const uint64_t               bottom = (uint64_t)rect->y + rect->height;
     if (!rect->width || !rect->height || bottom > (uint32_t)height ||
         right > (uint32_t)dstStride / (uint32_t)bpp ||
         right > (uint32_t)srcStride / (uint32_t)bpp)
@@ -133,7 +133,7 @@ static bool rectsBufferCopy(const FrameDamageRect * rects,
 
   for (int i = 0; i < count; ++i)
   {
-    const FrameDamageRect * rect = rects + i;
+    const KVMFRFrameDamageRect * rect = rects + i;
     corners[4 * i + 0] = (struct Corner) {
       .x = rect->x, .y = rect->y, .delta = 1
     };
@@ -233,8 +233,8 @@ static bool rectsBufferCopy(const FrameDamageRect * rects,
 
 struct ToFramebufferData
 {
-  FrameBuffer * frame;
-  int pitch;
+  KVMFRFrameBuffer * frame;
+  int                pitch;
 };
 
 static void fbRowFinish(int y, void * opaque)
@@ -244,9 +244,9 @@ static void fbRowFinish(int y, void * opaque)
       data->frame, (size_t)y * (size_t)data->pitch);
 }
 
-bool rectsBufferToFramebuffer(const FrameDamageRect * rects,
+bool rectsBufferToFramebuffer(const KVMFRFrameDamageRect * rects,
   int count, int bpp,
-  FrameBuffer * frame, int dstPitch, int height,
+  KVMFRFrameBuffer * frame, int dstPitch, int height,
   const uint8_t * src, int srcPitch)
 {
   if (!rects || !frame || count <= 0)
@@ -271,9 +271,9 @@ bool rectsBufferToFramebuffer(const FrameDamageRect * rects,
 
 struct FromFramebufferData
 {
-  const FrameBuffer * frame;
-  int                 pitch;
-  uint64_t          * waitTimeNs;
+  const KVMFRFrameBuffer * frame;
+  int                      pitch;
+  uint64_t               * waitTimeNs;
 };
 
 static bool fbRowStart(int y, void * opaque)
@@ -283,10 +283,10 @@ static bool fbRowStart(int y, void * opaque)
       data->frame, (size_t)y * (size_t)data->pitch, data->waitTimeNs);
 }
 
-bool rectsFramebufferToBufferTimed(const FrameDamageRect * rects,
+bool rectsFramebufferToBufferTimed(const KVMFRFrameDamageRect * rects,
   int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
-  const FrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs)
+  const KVMFRFrameBuffer * frame, int srcPitch, uint64_t * waitTimeNs)
 {
   if (!rects || !frame || count <= 0)
     return false;
@@ -310,16 +310,16 @@ bool rectsFramebufferToBufferTimed(const FrameDamageRect * rects,
   return true;
 }
 
-bool rectsFramebufferToBuffer(const FrameDamageRect * rects,
+bool rectsFramebufferToBuffer(const KVMFRFrameDamageRect * rects,
   int count, int bpp,
   uint8_t * dst, int dstPitch, int height,
-  const FrameBuffer * frame, int srcPitch)
+  const KVMFRFrameBuffer * frame, int srcPitch)
 {
   return rectsFramebufferToBufferTimed(rects, count, bpp, dst, dstPitch,
       height, frame, srcPitch, NULL);
 }
 
-int rectsMergeOverlapping(FrameDamageRect * rects, int count)
+int rectsMergeOverlapping(KVMFRFrameDamageRect * rects, int count)
 {
   if (count == 0)
     return 0;
@@ -362,7 +362,7 @@ int rectsMergeOverlapping(FrameDamageRect * rects, int count)
   return removeRects(rects, count, removed);
 }
 
-int rectsRejectContained(FrameDamageRect * rects, int count)
+int rectsRejectContained(KVMFRFrameDamageRect * rects, int count)
 {
   bool removed[count];
   memset(removed, 0, sizeof(removed));

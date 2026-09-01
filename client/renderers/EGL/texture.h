@@ -67,9 +67,9 @@ typedef struct EGL_TexUpdate
     /* EGL_TEXTYPE_FRAMEBUFFER */
     struct
     {
-      const FrameBuffer * frame;
-      const FrameDamageRect * rects;
-      int rectCount;
+      const KVMFRFrameBuffer     * frame;
+      const KVMFRFrameDamageRect * rects;
+      int                          rectCount;
     };
 
     /* EGL_TEXTYPE_DMABUF */
@@ -141,12 +141,12 @@ bool egl_textureUpdateRect(EGL_Texture * texture,
     const uint8_t * buffer, bool topDown);
 
 bool egl_textureUpdateFromFrame(EGL_Texture * texture,
-    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const FrameDamageRect * damageRects, int damageRectsCount,
+    const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs);
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
-    const FrameBuffer * frame, LG_RendererFrameToken frameToken,
+    const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
     const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle);
 

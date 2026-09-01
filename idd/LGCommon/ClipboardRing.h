@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 
 #include <stddef.h>
 #include <stdint.h>

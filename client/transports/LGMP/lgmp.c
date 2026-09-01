@@ -23,9 +23,9 @@
 #include "clipboard.h"
 #include "input.h"
 
-#include "common/KVMFR.h"
-#include "common/KVMFRRecovery.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/KVMFRRecovery.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/ivshmem.h"
@@ -1808,10 +1808,11 @@ static bool lgmp_validateFrameMessage(LG_Transport * this,
 
   const size_t messageSize = message->message.size;
   if (frame->offset < sizeof(KVMFRFrame) ||
-      frame->offset > messageSize - sizeof(FrameBuffer) ||
-      frameDataSize > messageSize - frame->offset - sizeof(FrameBuffer) ||
+      frame->offset > messageSize - sizeof(KVMFRFrameBuffer) ||
+      frameDataSize > messageSize - frame->offset -
+        sizeof(KVMFRFrameBuffer) ||
       (uintptr_t)((const uint8_t *)message->message.mem + frame->offset) %
-        _Alignof(FrameBuffer))
+        _Alignof(KVMFRFrameBuffer))
   {
     DEBUG_ERROR("LGMP frame payload contains invalid dimensions or offsets");
     return false;
@@ -1876,10 +1877,10 @@ static int lgmp_getDMA(struct LG_Transport * this,
   const size_t position = address - base;
   if (position > this->lgmpSize ||
       frameOffset > this->lgmpSize - position ||
-      sizeof(FrameBuffer) > this->lgmpSize - position - frameOffset)
+      sizeof(KVMFRFrameBuffer) > this->lgmpSize - position - frameOffset)
     return -1;
 
-  const size_t offset = position + frameOffset + sizeof(FrameBuffer);
+  const size_t offset = position + frameOffset + sizeof(KVMFRFrameBuffer);
   if (dataSize > this->lgmpSize - offset)
     return -1;
 
@@ -2082,7 +2083,7 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
   memcpy(&lease->format, format, sizeof(lease->format));
   result->format = &lease->format;
 
-  result->framebuffer = (const FrameBuffer *)
+  result->framebuffer = (const KVMFRFrameBuffer *)
     ((const uint8_t *)selected->sharedFrame + frame->offset);
   result->dmaFD       = -1;
   if (useDMA)
@@ -2214,7 +2215,8 @@ static void lgmp_getFrameTiming(LG_Transport * this,
     timing->prepareTime = lease->prepareTime;
   }
 
-  /* The producer writes these immediately after publishing FrameBuffer::wp.
+  /* The producer writes these immediately after publishing
+   * KVMFRFrameBuffer::wp.
    * nextFrame can observe the header earlier, so briefly observe the
    * publication tail after onFrame consumes the framebuffer without sleeping
    * the frame-acquisition thread. */

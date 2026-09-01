@@ -95,7 +95,8 @@ void egl_desktopRectsFree(EGL_DesktopRects ** rects_)
   *rects_ = NULL;
 }
 
-inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect)
+inline static void rectToVertices(GLfloat * vertex,
+    const KVMFRFrameDamageRect * rect)
 {
   vertex[0] = rect->x;
   vertex[1] = rect->y;
@@ -108,7 +109,7 @@ inline static void rectToVertices(GLfloat * vertex, const FrameDamageRect * rect
 }
 
 void egl_desktopRectsUpdate(EGL_DesktopRects * rects,
-    const FrameDamageRect * data, int count, int width, int height)
+    const KVMFRFrameDamageRect * data, int count, int width, int height)
 {
   if (count == 0)
   {
@@ -120,7 +121,7 @@ void egl_desktopRectsUpdate(EGL_DesktopRects * rects,
   GLfloat vertices[vertexCount];
   if (count < 0)
   {
-    FrameDamageRect full = {
+    KVMFRFrameDamageRect full = {
       .x = 0, .y = 0, .width = width, .height = height,
     };
     rects->count = 1;
@@ -237,7 +238,8 @@ inline static void matrixMultiply(const double matrix[6], double * nx, double * 
   *ny = matrix[1] * x + matrix[3] * y + matrix[5];
 }
 
-struct Rect egl_desktopToScreen(const double matrix[6], const struct FrameDamageRect * rect)
+struct Rect egl_desktopToScreen(const double matrix[6],
+    const struct KVMFRFrameDamageRect * rect)
 {
   double x1, y1, x2, y2;
   matrixMultiply(matrix, &x1, &y1, rect->x, rect->y);
@@ -270,7 +272,8 @@ void egl_screenToDesktopMatrix(double matrix[6], int frameWidth, int frameHeight
   matrix[5] = (inverted[1] * inverted[4] - inverted[0] * inverted[5]) / det;
 }
 
-bool egl_screenToDesktop(struct FrameDamageRect * output, const double matrix[6],
+bool egl_screenToDesktop(struct KVMFRFrameDamageRect * output,
+    const double matrix[6],
     const struct Rect * rect, int width, int height)
 {
   double x1, y1, x2, y2;

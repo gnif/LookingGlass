@@ -22,8 +22,8 @@
 
 #include "Atomic.h"
 #include "CDebug.h"
-#include "common/KVMFR.h"
-#include "common/KVMFRRecovery.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/KVMFRRecovery.h>
 
 static bool TranslateFrameScheduleFlags(
   uint32_t source, uint32_t& destination)

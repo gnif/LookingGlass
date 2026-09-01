@@ -25,7 +25,7 @@
 #include "transport/lgmp/CLGMPHost.h"
 #include "transport/IControlSink.h"
 
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 
 #include <Windows.h>
 #include <wdf.h>

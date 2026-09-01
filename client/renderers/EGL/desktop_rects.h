@@ -26,8 +26,8 @@
 
 struct DamageRects
 {
-  int count;
-  FrameDamageRect rects[];
+  int                  count;
+  KVMFRFrameDamageRect rects[];
 };
 
 typedef struct EGL_DesktopRects EGL_DesktopRects;
@@ -40,14 +40,16 @@ void egl_desktopRectsMatrix(float matrix[6], int width, int height, float transl
 void egl_desktopToScreenMatrix(double matrix[6], int frameWidth, int frameHeight,
     double translateX, double translateY, double scaleX, double scaleY, LG_RendererRotate rotate,
     double windowWidth, double windowHeight);
-struct Rect egl_desktopToScreen(const double matrix[6], const struct FrameDamageRect * rect);
+struct Rect egl_desktopToScreen(const double matrix[6],
+    const struct KVMFRFrameDamageRect * rect);
 
 void egl_screenToDesktopMatrix(double matrix[6], int frameWidth, int frameHeight,
     double translateX, double translateY, double scaleX, double scaleY, LG_RendererRotate rotate,
     double windowWidth, double windowHeight);
-bool egl_screenToDesktop(struct FrameDamageRect * output, const double matrix[6],
+bool egl_screenToDesktop(struct KVMFRFrameDamageRect * output,
+    const double matrix[6],
     const struct Rect * rect, int width, int height);
 
 void egl_desktopRectsUpdate(EGL_DesktopRects * rects,
-    const FrameDamageRect * data, int count, int width, int height);
+    const KVMFRFrameDamageRect * data, int count, int width, int height);
 void egl_desktopRectsRender(EGL_DesktopRects * rects);

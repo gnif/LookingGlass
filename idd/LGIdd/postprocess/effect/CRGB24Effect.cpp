@@ -56,7 +56,7 @@ struct CRGB24Effect::State
     DXGI_FORMAT                               resourceFormat    = DXGI_FORMAT_UNKNOWN;
     unsigned                                  width             = 0;
     unsigned                                  height            = 0;
-    FrameType                                 format            = FRAME_TYPE_INVALID;
+    KVMFRFrameType                            format            = FRAME_TYPE_INVALID;
     bool                                      hdr               = false;
     bool                                      hdrPQ             = false;
     std::shared_ptr<const D12ColorTransform>  colorTransform;

@@ -25,7 +25,7 @@
 #include <OleIdl.h>
 #include <ShellAPI.h>
 
-#include <common/KVMFRClipboard.h>
+#include <LGProtocol/KVMFRClipboard.h>
 
 #include <atomic>
 #include <cstdint>

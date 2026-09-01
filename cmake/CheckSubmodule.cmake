@@ -2,6 +2,7 @@ if (EXISTS "${PROJECT_TOP}/.git" AND (
     (NOT EXISTS "${PROJECT_TOP}/repos/gui/cimgui/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/gui/cimplot/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/LGMP/.git") OR
+    (NOT EXISTS "${PROJECT_TOP}/repos/LGProtocol/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/PureSpice/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/gui/cimgui/imgui/.git") OR
     (NOT EXISTS "${PROJECT_TOP}/repos/gui/cimplot/implot/.git") OR

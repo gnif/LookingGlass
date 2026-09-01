@@ -453,7 +453,7 @@ static void egl_addSwSurfaceDamage(
   if (right <= x || bottom <= y)
     return;
 
-  const FrameDamageRect rect = {
+  const KVMFRFrameDamageRect rect = {
     .x      = (uint32_t)x,
     .y      = (uint32_t)y,
     .width  = (uint32_t)(right  - x),
@@ -697,7 +697,7 @@ static bool egl_onMouseShape(LG_Renderer * renderer, const LG_RendererCursor cur
 }
 
 static void egl_onMouseColorTransform(LG_Renderer * renderer,
-    const LGColorTransform * transform)
+    const KVMFRColorTransform * transform)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
   egl_cursorSetColorTransform(this->cursor, transform);
@@ -832,8 +832,9 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   return egl_desktopSetup(this->desktop, format);
 }
 
-static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
-    int dmaFd, const FrameDamageRect * damageRects, int damageRectsCount,
+static bool egl_onFrame(LG_Renderer * renderer,
+    const KVMFRFrameBuffer * frame, int dmaFd,
+    const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {
@@ -853,8 +854,9 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
 
   const uint64_t elapsed = nanotime() - start;
 
-  /* Producer Copy already covers the interval before FrameBuffer::wp becomes
-   * ready. Exclude that overlapping wait from the client Import stage. */
+  /* Producer Copy already covers the interval before KVMFRFrameBuffer::wp
+   * becomes ready. Exclude that overlapping wait from the client Import
+   * stage. */
   app_setFrameImportTiming(
       elapsed > waitTimeNs ? elapsed - waitTimeNs : 0, waitTimeNs);
 
@@ -873,7 +875,7 @@ static bool egl_onFrame(LG_Renderer * renderer, const FrameBuffer * frame,
       else
       {
         memcpy(damage->rects + damage->count, damageRects,
-            damageRectsCount * sizeof(FrameDamageRect));
+            damageRectsCount * sizeof(KVMFRFrameDamageRect));
         damage->count += damageRectsCount;
       }
       damage->frameToken = frameToken;
@@ -1327,8 +1329,8 @@ inline static EGLint egl_bufferAge(struct Inst * this)
   return result;
 }
 
-static FrameDamageRect egl_expandDesktopDamage(
-    const struct Inst * this, const FrameDamageRect * rect)
+static KVMFRFrameDamageRect egl_expandDesktopDamage(
+    const struct Inst * this, const KVMFRFrameDamageRect * rect)
 {
   int width, height;
   egl_getDesktopSize(this, &width, &height);
@@ -1342,7 +1344,7 @@ static FrameDamageRect egl_expandDesktopDamage(
   const uint32_t bottom = (uint32_t)min((uint64_t)height,
     (uint64_t)rect->y + rect->height + DESKTOP_DAMAGE_MARGIN);
 
-  return (FrameDamageRect) {
+  return (KVMFRFrameDamageRect) {
     .x      = x,
     .y      = y,
     .width  = right  > x ? right  - x : 0,
@@ -1381,10 +1383,10 @@ static int egl_mergeSurfaceDamage(struct Rect * damage, int count)
   if (count <= 1)
     return count;
 
-  FrameDamageRect rects[count];
+  KVMFRFrameDamageRect rects[count];
   for (int i = 0; i < count; ++i)
   {
-    rects[i] = (FrameDamageRect) {
+    rects[i] = (KVMFRFrameDamageRect) {
       .x      = damage[i].x,
       .y      = damage[i].y,
       .width  = damage[i].w,
@@ -1422,7 +1424,7 @@ static void egl_requeueDesktopDamage(
     else
     {
       memcpy(pending->rects + pending->count, damage->rects,
-          damage->count * sizeof(FrameDamageRect));
+          damage->count * sizeof(KVMFRFrameDamageRect));
       pending->count += damage->count;
     }
 
@@ -1505,7 +1507,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
   struct DamageRects * accumulated = (struct DamageRects *)alloca(
     sizeof(struct DamageRects) +
-    MAX_ACCUMULATED_DAMAGE * sizeof(struct FrameDamageRect)
+    MAX_ACCUMULATED_DAMAGE * sizeof(struct KVMFRFrameDamageRect)
   );
   accumulated->count = 0;
 
@@ -1533,7 +1535,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
         for (int j = 0; j < damage->count; ++j)
         {
-          const FrameDamageRect rect =
+          const KVMFRFrameDamageRect rect =
             egl_expandDesktopDamage(this, damage->rects + j);
           if (rect.width && rect.height)
             accumulated->rects[accumulated->count++] = rect;
@@ -1732,7 +1734,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
 
       for (int i = 0; i < desktopDamage->count; ++i)
       {
-        const FrameDamageRect rect =
+        const KVMFRFrameDamageRect rect =
           egl_expandDesktopDamage(this, desktopDamage->rects + i);
         if (rect.width && rect.height)
           damage[damageIdx++] = egl_desktopToScreen(matrix, &rect);

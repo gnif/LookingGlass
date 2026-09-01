@@ -48,7 +48,7 @@ struct D12FrameFormat
   unsigned                                  pitch         = 0;
   unsigned                                  width         = 0;
   unsigned                                  height        = 0;
-  FrameType                                 format        = FRAME_TYPE_INVALID;
+  KVMFRFrameType                            format        = FRAME_TYPE_INVALID;
   bool                                      hdr           = false;
   bool                                      hdrPQ         = false;
   bool                                      hdrMetadata   = false;
@@ -88,8 +88,8 @@ namespace D12
   };
 
   DXGI_FORMAT Dxgi(FramePixel pixel);
-  FrameType Type(DXGI_FORMAT format);
-  FrameType Type(FramePixel pixel);
+  KVMFRFrameType Type(DXGI_FORMAT format);
+  KVMFRFrameType Type(FramePixel pixel);
 
   bool Profile(const D12FrameFormat& format, FrameStorage storage,
     FrameProfile& profile);

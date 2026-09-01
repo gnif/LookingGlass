@@ -26,8 +26,8 @@
 #include "CDebug.h"
 #include "VersionInfo.h"
 
-#include "common/KVMFR.h"
-#include "common/KVMFRRecovery.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/KVMFRRecovery.h>
 
 #include <lgmp/lgmp.h>
 

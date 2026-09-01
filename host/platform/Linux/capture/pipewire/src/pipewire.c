@@ -406,7 +406,7 @@ static void pipewire_free(void)
 
 static CaptureResult pipewire_capture(
   unsigned frameBufferIndex,
-  FrameBuffer * frame)
+  KVMFRFrameBuffer * frame)
 {
   int result;
 
@@ -463,10 +463,10 @@ static CaptureResult pipewire_waitFrame(
 }
 
 static CaptureResult pipewire_getFrame(
-  unsigned       frameBufferIndex,
-  FrameBuffer  * frame,
-  const size_t   maxFrameSize,
-  CaptureFrame * captureFrame)
+  unsigned           frameBufferIndex,
+  KVMFRFrameBuffer * frame,
+  const size_t       maxFrameSize,
+  CaptureFrame     * captureFrame)
 {
   (void)captureFrame;
   if (this->stop || !this->frameData)

@@ -97,7 +97,7 @@ typedef struct RenderCommand
 
     struct
     {
-      LGColorTransform * data;
+      KVMFRColorTransform * data;
     }
     cursorColorTransform;
 
@@ -144,9 +144,9 @@ typedef struct RenderQueueSwSurface
   int      pitch;
   uint8_t * data;
 
-  bool            damageFull;
-  int             damageCount;
-  FrameDamageRect damage[LG_MAX_FRAME_DAMAGE_RECTS];
+  bool                 damageFull;
+  int                  damageCount;
+  KVMFRFrameDamageRect damage[LG_MAX_FRAME_DAMAGE_RECTS];
 
   bool          updateQueued;
   RenderCommand updateCommand;
@@ -218,9 +218,9 @@ typedef struct RenderQueueCursor
   int               pitch;
   uint8_t         * data;
 
-  uint64_t         colorGeneration;
-  bool             colorValid;
-  LGColorTransform colorTransform;
+  uint64_t            colorGeneration;
+  bool                colorValid;
+  KVMFRColorTransform colorTransform;
 
   uint64_t whiteGeneration;
   bool     whiteValid;
@@ -237,9 +237,9 @@ typedef struct RenderQueueFormat
 }
 RenderQueueFormat;
 
-static RenderQueueCursor l_cursor[RENDER_QUEUE_SOURCE_COUNT];
-static RenderQueueFormat l_format[RENDER_QUEUE_SOURCE_COUNT];
-static const LGColorTransform l_identityColorTransform;
+static RenderQueueCursor         l_cursor[RENDER_QUEUE_SOURCE_COUNT];
+static RenderQueueFormat         l_format[RENDER_QUEUE_SOURCE_COUNT];
+static const KVMFRColorTransform l_identityColorTransform;
 
 static bool sourceValid(RenderQueueSource source)
 {
@@ -289,20 +289,20 @@ static bool commandValid(const RenderCommand * cmd)
   return generationValid(cmd->source, cmd->generation) && cursorCurrent;
 }
 
-static uint64_t swSurfaceDamageArea(const FrameDamageRect * rect)
+static uint64_t swSurfaceDamageArea(const KVMFRFrameDamageRect * rect)
 {
   return (uint64_t)rect->width * rect->height;
 }
 
-static FrameDamageRect swSurfaceDamageUnion(
-    const FrameDamageRect * a, const FrameDamageRect * b)
+static KVMFRFrameDamageRect swSurfaceDamageUnion(
+    const KVMFRFrameDamageRect * a, const KVMFRFrameDamageRect * b)
 {
   const uint32_t left   = min(a->x, b->x);
   const uint32_t top    = min(a->y, b->y);
   const uint32_t right  = max(a->x + a->width, b->x + b->width);
   const uint32_t bottom = max(a->y + a->height, b->y + b->height);
 
-  return (FrameDamageRect)
+  return (KVMFRFrameDamageRect)
   {
     .x      = left,
     .y      = top,
@@ -312,7 +312,7 @@ static FrameDamageRect swSurfaceDamageUnion(
 }
 
 static bool swSurfaceDamageTouches(
-    const FrameDamageRect * a, const FrameDamageRect * b)
+    const KVMFRFrameDamageRect * a, const KVMFRFrameDamageRect * b)
 {
   return a->x <= b->x + b->width  && b->x <= a->x + a->width &&
          a->y <= b->y + b->height && b->y <= a->y + a->height;
@@ -330,7 +330,7 @@ static bool swSurfaceDamagePending(const RenderQueueSwSurface * surface)
 }
 
 static void swSurfaceDamageAdd(RenderQueueSwSurface * surface,
-    const FrameDamageRect * damage)
+    const KVMFRFrameDamageRect * damage)
 {
   if (surface->damageFull)
     return;
@@ -344,7 +344,7 @@ static void swSurfaceDamageAdd(RenderQueueSwSurface * surface,
     return;
   }
 
-  FrameDamageRect rect = *damage;
+  KVMFRFrameDamageRect rect = *damage;
   for (;;)
   {
     for (int i = 0; i < surface->damageCount;)
@@ -367,9 +367,9 @@ static void swSurfaceDamageAdd(RenderQueueSwSurface * surface,
     uint64_t bestCost = UINT64_MAX;
     for (int i = 0; i < surface->damageCount; ++i)
     {
-      const FrameDamageRect merged =
+      const KVMFRFrameDamageRect merged =
         swSurfaceDamageUnion(&rect, &surface->damage[i]);
-      const uint64_t cost = swSurfaceDamageArea(&merged) -
+      const uint64_t             cost   = swSurfaceDamageArea(&merged) -
         swSurfaceDamageArea(&surface->damage[i]);
       if (cost < bestCost)
       {
@@ -940,7 +940,7 @@ void renderQueue_sourceSwSurfaceDrawFill(RenderQueueSource source,
     row += surface->pitch;
   }
 
-  const FrameDamageRect damage =
+  const KVMFRFrameDamageRect damage =
   {
     .x      = (uint32_t)x,
     .y      = (uint32_t)y,
@@ -1016,7 +1016,7 @@ void renderQueue_sourceSwSurfaceDrawBitmap(RenderQueueSource source,
     dst += surface->pitch;
   }
 
-  const FrameDamageRect damage =
+  const KVMFRFrameDamageRect damage =
   {
     .x      = (uint32_t)x,
     .y      = (uint32_t)y,
@@ -1093,7 +1093,7 @@ void renderQueue_sourceCursorImage(RenderQueueSource source,
 }
 
 void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
-    uint64_t generation, const LGColorTransform * transform)
+    uint64_t generation, const KVMFRColorTransform * transform)
 {
   if (!generationValid(source, generation) || !transform)
     return;
@@ -1102,7 +1102,7 @@ void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
   if (!cmd)
     return;
 
-  LGColorTransform * copy = malloc(sizeof(*copy));
+  KVMFRColorTransform * copy = malloc(sizeof(*copy));
   if (!copy)
   {
     free(cmd);
@@ -1176,8 +1176,8 @@ static void uploadSwSurfaceDamage(RenderQueueSource source,
   else
     for (int i = 0; i < surface->damageCount; ++i)
     {
-      const FrameDamageRect * damage = &surface->damage[i];
-      uint8_t * data = surface->data +
+      const KVMFRFrameDamageRect * damage = &surface->damage[i];
+      uint8_t                    * data   = surface->data +
         (size_t)damage->y * surface->pitch + (size_t)damage->x * 4;
       RENDERER(swSurfaceDrawBitmap,
           damage->x, damage->y, damage->width, damage->height,

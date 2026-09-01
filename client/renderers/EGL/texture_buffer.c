@@ -31,20 +31,20 @@ extern const EGL_TextureOps EGL_TextureBufferStream;
 
 // internal functions
 
-static uint64_t egl_texBufferDamageArea(const FrameDamageRect * rect)
+static uint64_t egl_texBufferDamageArea(const KVMFRFrameDamageRect * rect)
 {
   return (uint64_t)rect->width * rect->height;
 }
 
-static FrameDamageRect egl_texBufferDamageUnion(
-    const FrameDamageRect * a, const FrameDamageRect * b)
+static KVMFRFrameDamageRect egl_texBufferDamageUnion(
+    const KVMFRFrameDamageRect * a, const KVMFRFrameDamageRect * b)
 {
   const uint32_t left   = min(a->x, b->x);
   const uint32_t top    = min(a->y, b->y);
   const uint32_t right  = max(a->x + a->width, b->x + b->width);
   const uint32_t bottom = max(a->y + a->height, b->y + b->height);
 
-  return (FrameDamageRect)
+  return (KVMFRFrameDamageRect)
   {
     .x      = left,
     .y      = top,
@@ -53,8 +53,8 @@ static FrameDamageRect egl_texBufferDamageUnion(
   };
 }
 
-static bool egl_texBufferDamageTouches(const FrameDamageRect * a,
-    const FrameDamageRect * b)
+static bool egl_texBufferDamageTouches(const KVMFRFrameDamageRect * a,
+    const KVMFRFrameDamageRect * b)
 {
   return a->x <= b->x + b->width  && b->x <= a->x + a->width &&
          a->y <= b->y + b->height && b->y <= a->y + a->height;
@@ -78,7 +78,7 @@ static void egl_texBufferDamageAdd(TextureBuffer * this, int index,
     return;
   }
 
-  FrameDamageRect rect =
+  KVMFRFrameDamageRect rect =
   {
     .x      = update->x,
     .y      = update->y,
@@ -108,9 +108,9 @@ static void egl_texBufferDamageAdd(TextureBuffer * this, int index,
     uint64_t bestCost = UINT64_MAX;
     for (int i = 0; i < damage->count; ++i)
     {
-      const FrameDamageRect merged =
+      const KVMFRFrameDamageRect merged =
         egl_texBufferDamageUnion(&rect, &damage->rects[i]);
-      const uint64_t cost = egl_texBufferDamageArea(&merged) -
+      const uint64_t             cost   = egl_texBufferDamageArea(&merged) -
         egl_texBufferDamageArea(&damage->rects[i]);
       if (cost < bestCost)
       {
@@ -479,8 +479,8 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
   else
     for (int i = 0; i < damage->count; ++i)
     {
-      const FrameDamageRect * rect = &damage->rects[i];
-      const uintptr_t offset =
+      const KVMFRFrameDamageRect * rect   = &damage->rects[i];
+      const uintptr_t              offset =
         (uintptr_t)rect->y * texture->format.pitch +
         (uintptr_t)rect->x * texture->format.bpp;
       glTexSubImage2D(GL_TEXTURE_2D,

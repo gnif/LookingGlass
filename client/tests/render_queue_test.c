@@ -73,26 +73,26 @@ struct Fake
   uint8_t              bitmap[64];
   size_t               bitmapSize;
 
-  unsigned int          shapeCount;
-  LG_RendererCursor     shapeType;
-  int                   shapeWidth;
-  int                   shapeHeight;
-  int                   shapePitch;
-  uint8_t               shape[64];
-  size_t                shapeSize;
-  unsigned int          cursorCount;
-  bool                  cursorVisible;
-  int                   cursorX;
-  int                   cursorY;
-  int                   cursorHX;
-  int                   cursorHY;
-  unsigned int          colorCount;
-  LGColorTransformFlags colorFlags;
-  float                 colorScalar;
-  float                 colorMatrix;
-  float                 colorLut;
-  unsigned int          whiteCount;
-  uint32_t              whiteLevel;
+  unsigned int             shapeCount;
+  LG_RendererCursor        shapeType;
+  int                      shapeWidth;
+  int                      shapeHeight;
+  int                      shapePitch;
+  uint8_t                  shape[64];
+  size_t                   shapeSize;
+  unsigned int             cursorCount;
+  bool                     cursorVisible;
+  int                      cursorX;
+  int                      cursorY;
+  int                      cursorHX;
+  int                      cursorHY;
+  unsigned int             colorCount;
+  KVMFRColorTransformFlags colorFlags;
+  float                    colorScalar;
+  float                    colorMatrix;
+  float                    colorLut;
+  unsigned int             whiteCount;
+  uint32_t                 whiteLevel;
 
   unsigned int         hdrCount;
   LG_RendererFormat    hdr[8];
@@ -200,7 +200,7 @@ static bool mouseEvent(LG_Renderer * renderer, bool visible,
 }
 
 static void mouseColor(LG_Renderer * renderer,
-    const LGColorTransform * color)
+    const KVMFRColorTransform * color)
 {
   (void)renderer;
   ++f.colorCount;
@@ -436,7 +436,7 @@ static void testPayload(void)
     11, 12, 13, 14, 15, 16, 17, 18,
     19, 20, 21, 22, 23, 24, 25, 26,
   };
-  LGColorTransform color =
+  KVMFRColorTransform color =
   {
     .flags        = LG_COLOR_TRANSFORM_MATRIX | LG_COLOR_TRANSFORM_LUT,
     .matrix[0][0] = 2.0f,
@@ -540,7 +540,7 @@ static void testCache(void)
   const uint64_t generation =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
   const uint8_t shape[] = { 1, 2, 3, 4 };
-  LGColorTransform color =
+  KVMFRColorTransform color =
   {
     .flags        = LG_COLOR_TRANSFORM_MATRIX,
     .matrix[0][0] = 1.5f,
@@ -637,7 +637,7 @@ static void testCursorReplacement(void)
   const uint64_t generation =
     renderQueue_sourceBegin(RENDER_QUEUE_SOURCE_PRIMARY);
   const uint8_t shape[] = { 1, 2, 3, 4 };
-  LGColorTransform color =
+  KVMFRColorTransform color =
   {
     .flags  = LG_COLOR_TRANSFORM_LUT,
     .scalar = 2.0f,

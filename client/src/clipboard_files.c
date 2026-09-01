@@ -23,7 +23,7 @@
 #include "core/clipboard_files.h"
 #include "core/clipboard.h"
 
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"

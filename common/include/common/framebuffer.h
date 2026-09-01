@@ -24,86 +24,80 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdatomic.h>
+
+#include <LGProtocol/KVMFR.h>
 
 #define FB_CHUNK_SIZE           1048576 // 1MB
 #define FB_SPIN_LIMIT           10000   // 10ms
-#define FB_WP_TYPE              atomic_uint_least32_t
-#define FB_WP_SIZE              sizeof(FB_WP_TYPE)
-
-typedef struct stFrameBuffer
-{
-  FB_WP_TYPE wp;
-  uint8_t    data[0];
-} FrameBuffer;
 
 typedef bool (*FrameBufferReadFn)(void * opaque, const void * src, size_t size);
 
 /**
  * Wait for the framebuffer to fill to the specified size
  */
-bool framebuffer_wait(const FrameBuffer * frame, size_t size);
+bool framebuffer_wait(const KVMFRFrameBuffer * frame, size_t size);
 
 /**
  * Wait for the framebuffer to fill to the specified size and accumulate the
  * nanoseconds spent waiting for the producer in `waitTimeNs`.
  */
-bool framebuffer_wait_timed(const FrameBuffer * frame, size_t size,
+bool framebuffer_wait_timed(const KVMFRFrameBuffer * frame, size_t size,
     uint64_t * waitTimeNs);
 
 /**
  * Read `size` bytes from the KVMFRFrame into the dst buffer
  */
-bool framebuffer_read_linear(const FrameBuffer * frame, void * restrict dst,
-    size_t size);
+bool framebuffer_read_linear(const KVMFRFrameBuffer * frame,
+    void * restrict dst, size_t size);
 
 /**
  * Read data from the KVMFRFrame into the dst buffer
  */
-bool framebuffer_read(const FrameBuffer * frame, void * dst, size_t dstpitch,
-    size_t height, size_t width, size_t bpp, size_t pitch);
+bool framebuffer_read(const KVMFRFrameBuffer * frame, void * dst,
+    size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch);
 
 /**
  * Read data from the KVMFRFrame and accumulate the nanoseconds spent waiting
  * for the producer in `waitTimeNs`.
  */
-bool framebuffer_read_timed(const FrameBuffer * frame, void * dst,
+bool framebuffer_read_timed(const KVMFRFrameBuffer * frame, void * dst,
     size_t dstpitch, size_t height, size_t width, size_t bpp, size_t pitch,
     uint64_t * waitTimeNs);
 
 /**
  * Read data from the KVMFRFrame using a callback
  */
-bool framebuffer_read_fn(const FrameBuffer * frame, size_t height, size_t width,
-    size_t bpp, size_t pitch, FrameBufferReadFn fn, void * opaque);
+bool framebuffer_read_fn(const KVMFRFrameBuffer * frame, size_t height,
+    size_t width, size_t bpp, size_t pitch, FrameBufferReadFn fn,
+    void * opaque);
 
 /**
  * Prepare the framebuffer for writing
  */
-void framebuffer_prepare(FrameBuffer * frame);
+void framebuffer_prepare(KVMFRFrameBuffer * frame);
 
 /**
  * Write data from the src buffer into the KVMFRFrame
  */
-extern bool (*framebuffer_write)(FrameBuffer * frame,
+extern bool (*framebuffer_write)(KVMFRFrameBuffer * frame,
     const void * restrict src, size_t size);
 
 /**
  * Gets the underlying data buffer of the framebuffer.
  * For custom read routines only.
  */
-const uint8_t * framebuffer_get_buffer(const FrameBuffer * frame);
+const uint8_t * framebuffer_get_buffer(const KVMFRFrameBuffer * frame);
 
 /**
  * Gets the underlying data buffer of the framebuffer.
  * For custom write routines only.
  */
-uint8_t * framebuffer_get_data(FrameBuffer * frame);
+uint8_t * framebuffer_get_data(KVMFRFrameBuffer * frame);
 
 /**
  * Sets the write pointer of the framebuffer.
  * For custom write routines only.
  */
-void framebuffer_set_write_ptr(FrameBuffer * frame, size_t size);
+void framebuffer_set_write_ptr(KVMFRFrameBuffer * frame, size_t size);
 
 #endif

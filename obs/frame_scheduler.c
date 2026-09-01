@@ -20,7 +20,7 @@
 
 #include "frame_scheduler.h"
 
-#include <common/KVMFR.h>
+#include <LGProtocol/KVMFR.h>
 
 #include <string.h>
 

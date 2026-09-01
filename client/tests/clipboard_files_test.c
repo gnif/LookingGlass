@@ -23,7 +23,7 @@
 #include "test.h"
 
 #include "common/debug.h"
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 
 #include <fcntl.h>
 #include <pthread.h>

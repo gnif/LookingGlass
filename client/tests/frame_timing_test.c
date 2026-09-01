@@ -126,7 +126,7 @@ void renderQueue_sourceCursorImage(RenderQueueSource source,
 }
 
 void renderQueue_sourceCursorColorTransform(RenderQueueSource source,
-    uint64_t generation, const LGColorTransform * transform)
+    uint64_t generation, const KVMFRColorTransform * transform)
 {
   (void)source;
   (void)generation;

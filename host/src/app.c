@@ -25,8 +25,8 @@
 #include "common/debug.h"
 #include "common/option.h"
 #include "common/locking.h"
-#include "common/KVMFR.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/crash.h"
 #include "common/thread.h"
 #include "common/ivshmem.h"
@@ -97,13 +97,13 @@ struct app
   unsigned int   pointerIndex;
   unsigned int   pointerShapeIndex;
 
-  unsigned       alignSize;
-  size_t         frameMemorySize;
-  size_t         maxFrameSize;
-  PLGMPHostQueue frameQueue;
-  PLGMPMemory    frameMemory[LGMP_Q_FRAME_LEN];
-  KVMFRFrame   * frame      [LGMP_Q_FRAME_LEN];
-  FrameBuffer  * frameBuffer[LGMP_Q_FRAME_LEN];
+  unsigned           alignSize;
+  size_t             frameMemorySize;
+  size_t             maxFrameSize;
+  PLGMPHostQueue     frameQueue;
+  PLGMPMemory        frameMemory[LGMP_Q_FRAME_LEN];
+  KVMFRFrame       * frame      [LGMP_Q_FRAME_LEN];
+  KVMFRFrameBuffer * frameBuffer[LGMP_Q_FRAME_LEN];
 
   unsigned int   captureIndex;
   unsigned int   readIndex;
@@ -435,7 +435,7 @@ static bool sendFrame(CaptureResult result, bool * restart)
   }
   fi->damageRectsCount  = frame.damageRectsCount;
   memcpy(fi->damageRects, frame.damageRects,
-    frame.damageRectsCount * sizeof(FrameDamageRect));
+    frame.damageRectsCount * sizeof(KVMFRFrameDamageRect));
 
   app.frameValid = true;
 
@@ -879,7 +879,8 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
 
   const size_t frameMemoryAvail = lgmpHostMemAvail(app.lgmp);
   if (!app.alignSize ||
-      (size_t)app.alignSize < sizeof(KVMFRFrame) + sizeof(FrameBuffer) ||
+      (size_t)app.alignSize <
+        sizeof(KVMFRFrame) + sizeof(KVMFRFrameBuffer) ||
       (app.alignSize & (app.alignSize - 1)) ||
       frameMemoryAvail <= app.alignSize - 1)
   {
@@ -888,8 +889,8 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
   }
 
   /* Reserve the worst-case alignment padding once, then round each message
-   * down so all frame allocations are guaranteed to fit. The FrameBuffer data
-   * begins one alignment unit into each message. */
+   * down so all frame allocations are guaranteed to fit. The KVMFRFrameBuffer
+   * data begins one alignment unit into each message. */
   app.frameMemorySize = (frameMemoryAvail - (app.alignSize - 1)) /
     LGMP_Q_FRAME_LEN;
   app.frameMemorySize &= ~((size_t)app.alignSize - 1);
@@ -918,9 +919,10 @@ static bool lgmpSetup(struct IVSHMEM * shmDev)
 
     /* put the framebuffer on the border of the next page, this is to allow for
        aligned DMA transfers by the receiver */
-    const unsigned alignOffset = app.alignSize - sizeof(FrameBuffer);
+    const unsigned alignOffset = app.alignSize - sizeof(KVMFRFrameBuffer);
     app.frame[i]->offset = alignOffset;
-    app.frameBuffer[i] = (FrameBuffer *)(((uint8_t*)app.frame[i]) + alignOffset);
+    app.frameBuffer[i] =
+      (KVMFRFrameBuffer *)(((uint8_t *)app.frame[i]) + alignOffset);
   }
 
   atomic_store(&app.sdrWhiteLevel,

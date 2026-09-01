@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "common/KVMFR.h"
+#include <LGProtocol/KVMFR.h>
 
 const char * FrameTypeStr[FRAME_TYPE_MAX] =
 {

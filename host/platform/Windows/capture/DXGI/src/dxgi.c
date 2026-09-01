@@ -29,8 +29,8 @@
 #include "common/event.h"
 #include "common/rects.h"
 #include "common/runningavg.h"
-#include "common/KVMFR.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/vector.h"
 
 #include <math.h>
@@ -90,9 +90,9 @@ typedef struct Texture
   volatile enum TextureState state;
   void                     * map;
   uint32_t                   damageRectsCount;
-  FrameDamageRect            damageRects[KVMFR_MAX_DAMAGE_RECTS];
+  KVMFRFrameDamageRect       damageRects[KVMFR_MAX_DAMAGE_RECTS];
   int                        texDamageCount;
-  FrameDamageRect            texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
+  KVMFRFrameDamageRect       texDamageRects[KVMFR_MAX_DAMAGE_RECTS];
 
   // post processing
   Vector                     pp;
@@ -101,8 +101,8 @@ Texture;
 
 typedef struct FrameDamage
 {
-  int             count;
-  FrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
+  int                  count;
+  KVMFRFrameDamageRect rects[KVMFR_MAX_DAMAGE_RECTS];
 }
 FrameDamage;
 
@@ -1022,9 +1022,9 @@ static CaptureResult dxgi_hResultToCaptureResult(const HRESULT status)
   }
 }
 
-static void rectToFrameDamageRect(RECT * src, FrameDamageRect * dst)
+static void rectToFrameDamageRect(RECT * src, KVMFRFrameDamageRect * dst)
 {
-  *dst = (FrameDamageRect)
+  *dst = (KVMFRFrameDamageRect)
   {
     .x      = floor((double)src->left * this->scaleX),
     .y      = floor((double)src->top  * this->scaleY),
@@ -1068,7 +1068,7 @@ static void computeFrameDamage(Texture * tex)
 
   const int moveRectsCount = moveRectsBufferSizeRequired / sizeof(*moveRects);
 
-  FrameDamageRect * texDamageRect = tex->damageRects;
+  KVMFRFrameDamageRect * texDamageRect = tex->damageRects;
   for (RECT *dirtyRect = dirtyRects;
        dirtyRect < dirtyRects + dirtyRectsCount;
        dirtyRect++)
@@ -1085,7 +1085,7 @@ static void computeFrameDamage(Texture * tex)
         moveRect->SourcePoint.y == moveRect->DestinationRect.top)
       continue;
 
-    *texDamageRect++ = (FrameDamageRect)
+    *texDamageRect++ = (KVMFRFrameDamageRect)
     {
       .x      = floor((double)moveRect->SourcePoint.x * this->scaleX),
       .y      = floor((double)moveRect->SourcePoint.y * this->scaleY),
@@ -1110,14 +1110,14 @@ static void computeTexDamage(Texture * tex)
   else
   {
     memcpy(tex->texDamageRects + tex->texDamageCount, tex->damageRects,
-      tex->damageRectsCount * sizeof(FrameDamageRect));
+      tex->damageRectsCount * sizeof(KVMFRFrameDamageRect));
     tex->texDamageCount += tex->damageRectsCount;
     tex->texDamageCount = rectsMergeOverlapping(tex->texDamageRects, tex->texDamageCount);
   }
 }
 
 static CaptureResult dxgi_capture(unsigned frameBufferIndex,
-  FrameBuffer * frameBuffer)
+  KVMFRFrameBuffer * frameBuffer)
 {
   DEBUG_ASSERT(this);
   DEBUG_ASSERT(this->initialized);
@@ -1317,7 +1317,7 @@ static CaptureResult dxgi_capture(unsigned frameBufferIndex,
       {
         for (int i = 0; i < tex->texDamageCount; ++i)
         {
-          FrameDamageRect rect = tex->texDamageRects[i];
+          KVMFRFrameDamageRect rect = tex->texDamageRects[i];
 
           // correct the damage rect for BGR packed data
           if (this->outputFormat == CAPTURE_FMT_BGR_32)
@@ -1505,10 +1505,10 @@ static CaptureResult dxgi_waitFrame(unsigned frameBufferIndex,
 }
 
 static CaptureResult dxgi_getFrame(
-  unsigned       frameBufferIndex,
-  FrameBuffer  * frame,
-  const size_t   maxFrameSize,
-  CaptureFrame * captureFrame)
+  unsigned           frameBufferIndex,
+  KVMFRFrameBuffer * frame,
+  const size_t       maxFrameSize,
+  CaptureFrame     * captureFrame)
 {
   (void)captureFrame;
   DEBUG_ASSERT(this);
@@ -1550,12 +1550,13 @@ static CaptureResult dxgi_getFrame(
 
       if (this->outputFormat == CAPTURE_FMT_BGR_32)
       {
-        FrameDamageRect scaledDamageRects[damage->count];
-        for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++) {
-          FrameDamageRect rect = damage->rects[i];
-          int originalX = rect.x;
-          int scaledX = originalX * 3 / 4;
-          rect.x = scaledX;
+        KVMFRFrameDamageRect scaledDamageRects[damage->count];
+        for (int i = 0; i < ARRAYSIZE(scaledDamageRects); i++)
+        {
+          KVMFRFrameDamageRect rect      = damage->rects[i];
+          int                  originalX = rect.x;
+          int                  scaledX   = originalX * 3 / 4;
+          rect.x     = scaledX;
           rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
 
           scaledDamageRects[i] = rect;

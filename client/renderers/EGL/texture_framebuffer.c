@@ -26,8 +26,8 @@
 
 struct TexDamage
 {
-  int             count;
-  FrameDamageRect rects[LG_MAX_FRAME_DAMAGE_RECTS];
+  int                  count;
+  KVMFRFrameDamageRect rects[LG_MAX_FRAME_DAMAGE_RECTS];
 };
 
 typedef struct TexFB
@@ -108,17 +108,17 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   else
   {
     memcpy(damage->rects + damage->count, update->rects,
-      update->rectCount * sizeof(FrameDamageRect));
+      update->rectCount * sizeof(KVMFRFrameDamageRect));
     damage->count += update->rectCount;
 
     if (texture->format.pixFmt == EGL_PF_BGR_32)
     {
-      FrameDamageRect scaledDamageRects[damage->count];
+      KVMFRFrameDamageRect scaledDamageRects[damage->count];
       for (int i = 0; i < damage->count; i++)
       {
-        FrameDamageRect rect = damage->rects[i];
-        int originalX = rect.x;
-        int scaledX = originalX * 3 / 4;
+        KVMFRFrameDamageRect rect      = damage->rects[i];
+        int                  originalX = rect.x;
+        int                  scaledX   = originalX * 3 / 4;
         rect.x = scaledX;
         rect.width = (((originalX + rect.width) * 3 + 3) / 4) - scaledX;
         scaledDamageRects[i] = rect;
@@ -175,7 +175,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
              damage->count + update->rectCount <= LG_MAX_FRAME_DAMAGE_RECTS)
     {
       memcpy(damage->rects + damage->count, update->rects,
-        update->rectCount * sizeof(FrameDamageRect));
+        update->rectCount * sizeof(KVMFRFrameDamageRect));
       damage->count += update->rectCount;
     }
     else

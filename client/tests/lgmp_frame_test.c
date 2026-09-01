@@ -20,8 +20,8 @@
 
 #include "interface/transport.h"
 
-#include "common/KVMFR.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFR.h>
+#include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
 #include "common/option.h"
 
@@ -110,7 +110,7 @@ static bool allocMemory(TestState * state, uint32_t size, uint32_t alignment,
 
 static bool newFrame(TestState * state, uint32_t serial, TestFrame * result)
 {
-  const uint32_t size = sizeof(KVMFRFrame) + sizeof(FrameBuffer) +
+  const uint32_t size = sizeof(KVMFRFrame) + sizeof(KVMFRFrameBuffer) +
     TEST_FRAME_DATA;
   void * pointer;
   CHECK(allocMemory(state, size, _Alignof(KVMFRFrame),
@@ -132,7 +132,8 @@ static bool newFrame(TestState * state, uint32_t serial, TestFrame * result)
   result->wire->offset        = sizeof(KVMFRFrame);
   result->wire->sdrWhiteLevel = KVMFR_SDR_WHITE_LEVEL_DEFAULT;
 
-  FrameBuffer * framebuffer = (FrameBuffer *)((uint8_t *)result->wire +
+  KVMFRFrameBuffer * framebuffer =
+    (KVMFRFrameBuffer *)((uint8_t *)result->wire +
       result->wire->offset);
   atomic_store(&framebuffer->wp, TEST_FRAME_DATA);
   return true;

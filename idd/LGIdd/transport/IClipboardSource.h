@@ -21,7 +21,7 @@
 #pragma once
 
 #include "CClipboardChannel.h"
-#include "common/KVMFRClipboard.h"
+#include <LGProtocol/KVMFRClipboard.h>
 
 #include <stdint.h>
 

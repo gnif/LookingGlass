@@ -31,8 +31,8 @@
 #include "CSRWLock.h"
 #include "Seq.h"
 
-#include "common/KVMFRInput.h"
-#include "common/LGMPConfig.h"
+#include <LGProtocol/KVMFRInput.h>
+#include <LGProtocol/LGMPConfig.h>
 
 #include <avrt.h>
 #include <string.h>
