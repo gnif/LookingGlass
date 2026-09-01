@@ -68,6 +68,9 @@ public:
     _In_ ULONG bytes);
 
   _IRQL_requires_max_(DISPATCH_LEVEL)
+  void MarkRenderDiscontinuity();
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
   void ReadCaptureFrames(
     _In_ const FormatFingerprint &format,
     _Out_writes_bytes_(bytes) BYTE *data,

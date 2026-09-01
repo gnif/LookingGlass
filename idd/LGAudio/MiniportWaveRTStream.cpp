@@ -23,6 +23,8 @@
 
 namespace
 {
+constexpr ULONG kRenderPublicationRateHz = 4000;
+
 ULONGLONG MinUlonglong(ULONGLONG left, ULONGLONG right)
 {
   return left < right ? left : right;
@@ -50,6 +52,7 @@ CMiniportWaveRTStream::CMiniportWaveRTStream(
   m_bufferSize(0),
   m_notificationCount(0),
   m_packetSize(0),
+  m_renderPublicationSliceBytes(0),
   m_notificationEvents{},
   m_notificationEventCount(0),
   m_clockFrequency(0),
@@ -61,6 +64,7 @@ CMiniportWaveRTStream::CMiniportWaveRTStream(
   m_pendingBytes(0),
   m_linearPosition(0),
   m_cyclicPosition(0),
+  m_renderPublishedPosition(0),
   m_completedPackets(0),
   m_lastReadPacket(~0ULL),
   m_lastWritePacket(MAXULONG),
@@ -205,12 +209,14 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
 
   if (state == KSSTATE_RUN)
   {
-    const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
-    if (!clock.Frequency || !clock.QpcFrequency)
-      return STATUS_DEVICE_HARDWARE_ERROR;
-
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_positionLock, &oldIrql);
+    const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+    if (!clock.Frequency || !clock.QpcFrequency)
+    {
+      KeReleaseSpinLock(&m_positionLock, oldIrql);
+      return STATUS_DEVICE_HARDWARE_ERROR;
+    }
     if (!m_buffer || !m_bufferSize)
     {
       KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -251,9 +257,9 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
     return STATUS_SUCCESS;
   }
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   if (m_state == KSSTATE_RUN)
     AdvanceLocked(clock);
   m_state = state;
@@ -269,6 +275,7 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
     m_pendingBytes = 0;
     m_linearPosition = 0;
     m_cyclicPosition = 0;
+    m_renderPublishedPosition = 0;
     m_completedPackets = 0;
     m_lastReadPacket = ~0ULL;
     m_lastWritePacket = MAXULONG;
@@ -290,9 +297,9 @@ NTSTATUS CMiniportWaveRTStream::GetPosition(
   if (!position)
     return STATUS_INVALID_PARAMETER;
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   AdvanceLocked(clock);
   ULONG reportedPosition = m_cyclicPosition;
   if (m_notificationCount && m_bufferSize)
@@ -434,9 +441,9 @@ NTSTATUS CMiniportWaveRTStream::GetReadPacket(
       !performanceCounterValue || !moreData)
     return STATUS_INVALID_PARAMETER;
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -496,9 +503,9 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket(
   if (flags & ~allowedFlags)
     return STATUS_INVALID_PARAMETER;
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -548,7 +555,8 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket(
   }
 
   m_lastWritePacket = packetNumber;
-  if (m_eosReceived && m_state == KSSTATE_RUN)
+  PublishRenderFramesLocked();
+  if (m_state == KSSTATE_RUN)
     ArmTimerLocked();
   KeReleaseSpinLock(&m_positionLock, oldIrql);
   return STATUS_SUCCESS;
@@ -560,9 +568,9 @@ NTSTATUS CMiniportWaveRTStream::GetOutputStreamPresentationPosition(
   if (m_kind != EndpointKind::Render || !position)
     return STATUS_INVALID_PARAMETER;
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -599,9 +607,9 @@ NTSTATUS CMiniportWaveRTStream::GetPacketCount(
   if (m_kind != EndpointKind::Render || !packetCount)
     return STATUS_INVALID_PARAMETER;
 
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
+  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -687,6 +695,16 @@ NTSTATUS CMiniportWaveRTStream::AllocateBuffer(
   m_notificationCount = notificationCount;
   m_packetSize = notificationCount ?
     requestedSize / notificationCount : 0;
+  m_renderPublicationSliceBytes = 0;
+  if (m_kind == EndpointKind::Render && notificationCount)
+  {
+    const ULONG sampleRate =
+      m_format.WaveFormatExt.Format.nSamplesPerSec;
+    const ULONG publicationFrames =
+      (sampleRate + kRenderPublicationRateHz - 1) /
+        kRenderPublicationRateHz;
+    m_renderPublicationSliceBytes = publicationFrames * blockAlign;
+  }
   KeReleaseSpinLock(&m_positionLock, oldIrql);
 
   *audioBufferMdl = mdl;
@@ -719,6 +737,8 @@ void CMiniportWaveRTStream::FreeBuffer(_In_opt_ PMDL audioBufferMdl)
   m_bufferSize = 0;
   m_notificationCount = 0;
   m_packetSize = 0;
+  m_renderPublicationSliceBytes = 0;
+  m_renderPublishedPosition = 0;
   KeReleaseSpinLock(&m_positionLock, oldIrql);
 
   if (buffer)
@@ -752,6 +772,21 @@ void CMiniportWaveRTStream::ArmTimerLocked()
       m_eosLinearPosition - m_linearPosition : 0;
     if (remaining < targetBytes)
       targetBytes = remaining;
+  }
+
+  // Render PCM is already immutable once SetWritePacket commits its WaveRT
+  // packet. Publish the elapsed part at 4 kHz while keeping targetBytes at
+  // the original packet boundary for completion and notification purposes.
+  if (m_kind == EndpointKind::Render && m_renderPublicationSliceBytes &&
+      RenderPacketCommittedLocked(m_renderPublishedPosition))
+  {
+    const ULONGLONG publishedBytes =
+      m_renderPublishedPosition > m_linearPosition ?
+        m_renderPublishedPosition - m_linearPosition : 0;
+    const ULONGLONG publicationTarget =
+      publishedBytes + m_renderPublicationSliceBytes;
+    if (publicationTarget < targetBytes)
+      targetBytes = publicationTarget;
   }
 
   const ULONGLONG bytesUntilTarget = targetBytes > m_pendingBytes ?
@@ -851,6 +886,7 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
       const ULONGLONG skippedPackets =
         readyPackets - m_notificationCount;
       const ULONGLONG skippedBytes = skippedPackets * m_packetSize;
+      const ULONGLONG oldLinearPosition = m_linearPosition;
 
       if (m_kind == EndpointKind::Capture)
         m_adapter->DiscardCaptureFrames(m_fingerprint, skippedBytes);
@@ -860,9 +896,22 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
       m_cyclicPosition = static_cast<ULONG>(
         (m_cyclicPosition + (skippedBytes % m_bufferSize)) %
           m_bufferSize);
+      if (m_kind == EndpointKind::Render &&
+          m_renderPublishedPosition < m_linearPosition)
+      {
+        // A delayed timer can make the WaveRT buffer wrap after the prefix
+        // of this packet was already published. Mark the resulting splice;
+        // a wholly uncommitted packet keeps the legacy silent-drop behavior.
+        if (m_renderPublishedPosition > oldLinearPosition)
+          m_adapter->MarkRenderDiscontinuity();
+        m_renderPublishedPosition = m_linearPosition;
+      }
       m_completedPackets = m_linearPosition / m_packetSize;
     }
   }
+
+  if (m_kind == EndpointKind::Render)
+    PublishRenderFramesLocked();
 
   while (m_state == KSSTATE_RUN)
   {
@@ -887,8 +936,12 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
     const ULONGLONG oldPacketCount = m_completedPackets;
     if (transferBytes)
     {
-      TransferFramesLocked(transferBytes);
+      TransferFramesLocked(transferBytes,
+        m_kind != EndpointKind::Render);
       m_pendingBytes -= transferBytes;
+      if (m_kind == EndpointKind::Render &&
+          m_renderPublishedPosition < m_linearPosition)
+        m_renderPublishedPosition = m_linearPosition;
     }
 
     UpdatePresentationQpcLocked(clock);
@@ -907,6 +960,59 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
       m_frameRemainder = 0;
       break;
     }
+  }
+}
+
+bool CMiniportWaveRTStream::RenderPacketCommittedLocked(
+  _In_ ULONGLONG position) const
+{
+  if (m_kind != EndpointKind::Render || !m_notificationCount ||
+      !m_packetSize)
+    return false;
+
+  const ULONG packet = static_cast<ULONG>(position / m_packetSize);
+  return static_cast<LONG>(m_lastWritePacket - packet) >= 0;
+}
+
+void CMiniportWaveRTStream::PublishRenderFramesLocked()
+{
+  if (m_kind != EndpointKind::Render || !m_notificationCount ||
+      !m_packetSize || !m_renderPublicationSliceBytes || !m_bufferSize)
+    return;
+
+  if (m_renderPublishedPosition < m_linearPosition)
+    m_renderPublishedPosition = m_linearPosition;
+
+  ULONGLONG availableEnd = m_linearPosition + m_pendingBytes;
+  if (m_eosReceived && availableEnd > m_eosLinearPosition)
+    availableEnd = m_eosLinearPosition;
+
+  while (m_renderPublishedPosition < availableEnd &&
+      RenderPacketCommittedLocked(m_renderPublishedPosition))
+  {
+    const ULONGLONG packet =
+      m_renderPublishedPosition / m_packetSize;
+    const ULONGLONG packetEnd = (packet + 1) * m_packetSize;
+    const ULONGLONG copyEnd = MinUlonglong(availableEnd, packetEnd);
+    const ULONGLONG bytes = copyEnd - m_renderPublishedPosition;
+    ULONG offset = static_cast<ULONG>(
+      m_renderPublishedPosition % m_bufferSize);
+    ULONGLONG remaining = bytes;
+
+    // Timer slippage may make more than one 0.25 ms slice available. Copy all
+    // elapsed committed data now, but never cross a WaveRT packet commit
+    // fence or the cyclic-buffer boundary in one adapter operation.
+    while (remaining)
+    {
+      const ULONG untilWrap = m_bufferSize - offset;
+      const ULONG chunk = static_cast<ULONG>(MinUlonglong(
+        remaining, untilWrap));
+      m_adapter->WriteRenderFrames(m_buffer + offset, chunk);
+      remaining -= chunk;
+      offset = (offset + chunk) % m_bufferSize;
+    }
+
+    m_renderPublishedPosition = copyEnd;
   }
 }
 
@@ -936,7 +1042,9 @@ void CMiniportWaveRTStream::UpdatePresentationQpcLocked(
     clock.QpcPosition - ticksSinceBoundary : 0;
 }
 
-void CMiniportWaveRTStream::TransferFramesLocked(_In_ ULONGLONG bytes)
+void CMiniportWaveRTStream::TransferFramesLocked(
+  _In_ ULONGLONG bytes,
+  _In_ bool transferRender)
 {
   if (!bytes || !m_bufferSize)
     return;
@@ -982,7 +1090,7 @@ void CMiniportWaveRTStream::TransferFramesLocked(_In_ ULONGLONG bytes)
       // slot. On an underrun, neither read nor modify a slot that the client
       // may still be updating. The capture side zero-fills the resulting
       // absence when the render-to-capture FIFO is exhausted.
-      if (renderDataCommitted)
+      if (transferRender && renderDataCommitted)
         m_adapter->WriteRenderFrames(m_buffer + offset, chunk);
     }
     else
@@ -1022,9 +1130,9 @@ void CMiniportWaveRTStream::TimerCallback(
   if (!stream)
     return;
 
+  KeAcquireSpinLockAtDpcLevel(&stream->m_positionLock);
   const AudioClockSnapshot clock =
     stream->m_adapter->GetClockSnapshot();
-  KeAcquireSpinLockAtDpcLevel(&stream->m_positionLock);
   stream->AdvanceLocked(clock);
   if (stream->m_state == KSSTATE_RUN)
     stream->ArmTimerLocked();

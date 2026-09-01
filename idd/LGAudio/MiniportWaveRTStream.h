@@ -117,9 +117,13 @@ private:
   void AdvanceLocked(_In_ const AudioClockSnapshot &clock);
   void AdvanceEventPacketsLocked(
     _In_ const AudioClockSnapshot &clock);
+  bool RenderPacketCommittedLocked(_In_ ULONGLONG position) const;
+  void PublishRenderFramesLocked();
   void UpdatePresentationQpcLocked(
     _In_ const AudioClockSnapshot &clock);
-  void TransferFramesLocked(_In_ ULONGLONG bytes);
+  void TransferFramesLocked(
+    _In_ ULONGLONG bytes,
+    _In_ bool transferRender = true);
   void SignalNotificationsLocked();
 
   volatile LONG m_refCount;
@@ -142,6 +146,7 @@ private:
   ULONG m_bufferSize;
   ULONG m_notificationCount;
   ULONG m_packetSize;
+  ULONG m_renderPublicationSliceBytes;
   PKEVENT m_notificationEvents[8];
   ULONG m_notificationEventCount;
 
@@ -154,6 +159,7 @@ private:
   ULONGLONG m_pendingBytes;
   ULONGLONG m_linearPosition;
   ULONG m_cyclicPosition;
+  ULONGLONG m_renderPublishedPosition;
   ULONGLONG m_completedPackets;
   ULONGLONG m_lastReadPacket;
   ULONG m_lastWritePacket;

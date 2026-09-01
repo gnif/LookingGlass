@@ -264,6 +264,12 @@ void CAudioAdapter::WriteRenderFrames(
 }
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
+void CAudioAdapter::MarkRenderDiscontinuity()
+{
+  InterlockedExchange(&m_renderDiscontinuity, 1);
+}
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
 void CAudioAdapter::ReadCaptureFrames(
   _In_ const FormatFingerprint &format,
   _Out_writes_bytes_(bytes) BYTE *data,
