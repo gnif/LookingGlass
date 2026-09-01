@@ -19,6 +19,7 @@
  */
 
 #include "Adapter.h"
+#include "BrokerDevice.h"
 #include "Formats.h"
 #include "MiniportTopology.h"
 #include "MiniportWaveRT.h"
@@ -236,6 +237,17 @@ NTSTATUS StartAudioDevice(
   if (NT_SUCCESS(status))
     status = PcRegisterPhysicalConnection(deviceObject, topologyCapture,
       kCaptureTopologyBridgePin, waveCapture, kCaptureWaveBridgePin);
+
+  if (NT_SUCCESS(status))
+  {
+    const NTSTATUS brokerStatus =
+      BrokerDeviceAttachAdapter(deviceObject, adapter);
+    if (!NT_SUCCESS(brokerStatus))
+    {
+      LGAUDIO_TRACE_ERROR("broker adapter unavailable: 0x%08X",
+        brokerStatus);
+    }
+  }
 
   SafeRelease(waveCapture);
   SafeRelease(topologyCapture);

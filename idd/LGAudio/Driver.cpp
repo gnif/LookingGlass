@@ -20,18 +20,77 @@
 
 #include "Common.h"
 #include "Adapter.h"
+#include "BrokerDevice.h"
 
 extern "C" DRIVER_INITIALIZE DriverEntry;
 
 namespace
 {
+PDRIVER_UNLOAD g_portClsUnload = nullptr;
+
 NTSTATUS AddAudioDevice(
   _In_ PDRIVER_OBJECT driverObject,
   _In_ PDEVICE_OBJECT physicalDeviceObject)
 {
   constexpr ULONG kSubdeviceCount = 4;
-  return PcAddAdapterDevice(driverObject, physicalDeviceObject,
-    StartAudioDevice, kSubdeviceCount, 0);
+  const NTSTATUS status = PcAddAdapterDevice(driverObject,
+    physicalDeviceObject, StartAudioDevice, kSubdeviceCount,
+    kLGAudioPortClsDeviceExtensionSize);
+  if (NT_SUCCESS(status))
+    BrokerDeviceNotifyPnpDeviceAdded();
+  return status;
+}
+
+NTSTATUS DispatchIrp(
+  _In_ PDEVICE_OBJECT deviceObject,
+  _Inout_ PIRP irp)
+{
+  if (BrokerDeviceIsControlDevice(deviceObject))
+    return BrokerDeviceDispatch(deviceObject, irp);
+
+  PIO_STACK_LOCATION stack = IoGetCurrentIrpStackLocation(irp);
+  const bool removeDevice =
+    stack->MajorFunction == IRP_MJ_PNP &&
+    stack->MinorFunction == IRP_MN_REMOVE_DEVICE;
+  if (stack->MajorFunction == IRP_MJ_PNP &&
+      (removeDevice ||
+       stack->MinorFunction == IRP_MN_STOP_DEVICE ||
+       stack->MinorFunction == IRP_MN_SURPRISE_REMOVAL))
+    BrokerDeviceDetachAdapter(deviceObject);
+
+  const NTSTATUS status = PcDispatchIrp(deviceObject, irp);
+  if (removeDevice)
+    BrokerDeviceNotifyPnpDeviceRemoved();
+  return status;
+}
+
+void DriverUnload(_In_ PDRIVER_OBJECT driverObject)
+{
+  BrokerDeviceShutdown();
+  if (g_portClsUnload)
+    g_portClsUnload(driverObject);
+}
+
+void InstallDispatchHooks(_In_ PDRIVER_OBJECT driverObject)
+{
+  constexpr UCHAR majors[] =
+  {
+    IRP_MJ_CLOSE,
+    IRP_MJ_CREATE,
+    IRP_MJ_DEVICE_CONTROL,
+    IRP_MJ_FLUSH_BUFFERS,
+    IRP_MJ_PNP,
+    IRP_MJ_POWER,
+    IRP_MJ_QUERY_SECURITY,
+    IRP_MJ_READ,
+    IRP_MJ_SET_SECURITY,
+    IRP_MJ_SYSTEM_CONTROL,
+    IRP_MJ_WRITE,
+    IRP_MJ_CLEANUP
+  };
+
+  for (const UCHAR major : majors)
+    driverObject->MajorFunction[major] = DispatchIrp;
 }
 }
 
@@ -39,8 +98,22 @@ extern "C" NTSTATUS DriverEntry(
   _In_ PDRIVER_OBJECT driverObject,
   _In_ PUNICODE_STRING registryPath)
 {
-  return PcInitializeAdapterDriver(driverObject, registryPath,
+  NTSTATUS status = PcInitializeAdapterDriver(driverObject, registryPath,
     AddAudioDevice);
+  if (!NT_SUCCESS(status))
+    return status;
+
+  g_portClsUnload = driverObject->DriverUnload;
+  InstallDispatchHooks(driverObject);
+  driverObject->DriverUnload = DriverUnload;
+
+  const NTSTATUS brokerStatus = BrokerDeviceInitialize(driverObject);
+  if (!NT_SUCCESS(brokerStatus))
+  {
+    LGAUDIO_TRACE_ERROR("broker initialization unavailable: 0x%08X",
+      brokerStatus);
+  }
+  return STATUS_SUCCESS;
 }
 
 #pragma warning(push)

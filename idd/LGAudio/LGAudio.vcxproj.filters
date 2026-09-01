@@ -18,6 +18,7 @@
   <ItemGroup>
     <ClCompile Include="Adapter.cpp"><Filter>Driver</Filter></ClCompile>
     <ClCompile Include="AudioClock.cpp"><Filter>Driver</Filter></ClCompile>
+    <ClCompile Include="BrokerDevice.cpp"><Filter>Driver</Filter></ClCompile>
     <ClCompile Include="Driver.cpp"><Filter>Driver</Filter></ClCompile>
     <ClCompile Include="Guids.cpp"><Filter>Driver</Filter></ClCompile>
     <ClCompile Include="MiniportTopology.cpp"><Filter>Miniport</Filter></ClCompile>
@@ -29,6 +30,7 @@
   <ItemGroup>
     <ClInclude Include="Adapter.h"><Filter>Driver</Filter></ClInclude>
     <ClInclude Include="AudioClock.h"><Filter>Driver</Filter></ClInclude>
+    <ClInclude Include="BrokerDevice.h"><Filter>Driver</Filter></ClInclude>
     <ClInclude Include="Common.h"><Filter>Driver</Filter></ClInclude>
     <ClInclude Include="Guids.h"><Filter>Driver</Filter></ClInclude>
     <ClInclude Include="MiniportTopology.h"><Filter>Miniport</Filter></ClInclude>
@@ -36,6 +38,9 @@
     <ClInclude Include="MiniportWaveRTStream.h"><Filter>Miniport</Filter></ClInclude>
     <ClInclude Include="Formats.h"><Filter>Utilities</Filter></ClInclude>
     <ClInclude Include="RingBuffer.h"><Filter>Utilities</Filter></ClInclude>
+    <ClInclude Include="..\LGCommon\LGAudioBroker.h">
+      <Filter>Driver</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Inf Include="LGAudio.inx"><Filter>Package</Filter></Inf>

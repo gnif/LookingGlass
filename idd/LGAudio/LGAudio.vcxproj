@@ -54,7 +54,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)..\LGCommon;$(DDK_INC_PATH);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_WIN32;_WIN32_WINNT=0x0A00;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;_NEW_DELETE_OPERATORS_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <WarningLevel>Level4</WarningLevel>
@@ -66,7 +66,7 @@
       <PreprocessorDefinitions>_WIN32;_WIN32_WINNT=0x0A00;UNICODE;_UNICODE;PC_IMPLEMENTATION;_USE_WAVERT_;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ResourceCompile>
     <Link>
-      <AdditionalDependencies>portcls.lib;stdunk.lib;libcntpr.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>portcls.lib;stdunk.lib;libcntpr.lib;wdmsec.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <DriverSign>
       <FileDigestAlgorithm>SHA256</FileDigestAlgorithm>
@@ -75,6 +75,7 @@
   <ItemGroup>
     <ClCompile Include="Adapter.cpp" />
     <ClCompile Include="AudioClock.cpp" />
+    <ClCompile Include="BrokerDevice.cpp" />
     <ClCompile Include="Driver.cpp" />
     <ClCompile Include="Formats.cpp" />
     <ClCompile Include="Guids.cpp" />
@@ -86,6 +87,7 @@
   <ItemGroup>
     <ClInclude Include="Adapter.h" />
     <ClInclude Include="AudioClock.h" />
+    <ClInclude Include="BrokerDevice.h" />
     <ClInclude Include="Common.h" />
     <ClInclude Include="Formats.h" />
     <ClInclude Include="Guids.h" />
@@ -93,6 +95,7 @@
     <ClInclude Include="MiniportWaveRT.h" />
     <ClInclude Include="MiniportWaveRTStream.h" />
     <ClInclude Include="RingBuffer.h" />
+    <ClInclude Include="..\LGCommon\LGAudioBroker.h" />
   </ItemGroup>
   <ItemGroup>
     <Inf Include="LGAudio.inx" />
