@@ -68,6 +68,8 @@ enum
   LG_TRANSPORT_FEATURE_FRAME_SCHEDULE = 0x4,
   LG_TRANSPORT_FEATURE_INPUT          = 0x8,
   LG_TRANSPORT_FEATURE_CLIPBOARD      = 0x10,
+  /* The remote implements audio mediation; its driver may still be absent. */
+  LG_TRANSPORT_FEATURE_AUDIO          = 0x20,
 };
 
 typedef uint32_t LG_TransportFeatureFlags;
