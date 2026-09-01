@@ -660,7 +660,8 @@ static void testPlaybackRecovery(void)
   startAudio();
 
   const LG_AudioFormat format = makeFormat(LG_AUDIO_FMT_S16_LE);
-  CHECK(playbackStart(&format, NULL, false, false));
+  const PlaybackPolicy policy = playbackPolicyFromOps(&ops);
+  CHECK(playbackStart(&format, NULL, false, false, &policy));
   CHECK(audio.playback.rateControl == PLAYBACK_RATE_BACKEND);
   playbackSetState(STREAM_STATE_RUN);
 
@@ -708,7 +709,8 @@ static void testPlaybackStableUnderrun(void)
   startAudio();
 
   const LG_AudioFormat format = makeFormat(LG_AUDIO_FMT_S16_LE);
-  CHECK(playbackStart(&format, NULL, false, false));
+  const PlaybackPolicy policy = playbackPolicyFromOps(&ops);
+  CHECK(playbackStart(&format, NULL, false, false, &policy));
   CHECK(audio.playback.rateControl == PLAYBACK_RATE_BACKEND);
   playbackSetState(STREAM_STATE_RUN);
 
@@ -892,6 +894,91 @@ static void testPlaybackResume(void)
   stopAudio();
 }
 
+static bool testClockFeedback(void * opaque, uint32_t generation,
+    const LG_AudioClock * clock, double targetRate)
+{
+  (void)opaque;
+  (void)generation;
+  (void)clock;
+  (void)targetRate;
+  return true;
+}
+
+static bool testClockFeedbackAvailable(void * opaque)
+{
+  return *(const bool *)opaque;
+}
+
+static void testLatencyPolicy(void)
+{
+  LG_AudioOps providerOps = ops;
+  PlaybackPolicy policy   = playbackPolicyFromOps(&providerOps);
+  CHECK(policy.flags == 0);
+  CHECK(policy.arrivalReserveUs ==
+      PLAYBACK_DEFAULT_ARRIVAL_RESERVE_US);
+  CHECK(playbackComputeLatencyOffsetFrames(
+        false, &policy, 6, 48000) == 0.0);
+
+  providerOps.playbackFlags =
+    LG_AUDIO_PLAYBACK_LEGACY_LATENCY_OFFSET;
+  policy                    = playbackPolicyFromOps(&providerOps);
+  CHECK(playbackComputeLatencyOffsetFrames(
+        false, &policy, 6, 48000) == 288.0);
+  CHECK(playbackComputeLatencyOffsetFrames(
+        true, &policy, 6, 48000) == 0.0);
+
+  providerOps.playbackFlags             = 0;
+  providerOps.playbackArrivalReserveUs  = 250;
+  const PlaybackPolicy lowLatencyPolicy =
+    playbackPolicyFromOps(&providerOps);
+  CHECK(lowLatencyPolicy.arrivalReserveUs == 250);
+  CHECK(fabs(playbackArrivalReserveFrames(
+        0.0, 48000, lowLatencyPolicy.arrivalReserveUs) - 12.0) < 0.001);
+  CHECK(fabs(playbackArrivalReserveFrames(
+        0.010, 48000, lowLatencyPolicy.arrivalReserveUs) - 492.0) <
+      0.001);
+
+  CHECK(validOps(&providerOps));
+  providerOps.playbackFlags = 1U << 31;
+  CHECK(!validOps(&providerOps));
+  providerOps.playbackFlags            = 0;
+  providerOps.playbackArrivalReserveUs =
+    PLAYBACK_MAX_ARRIVAL_RESERVE_US + 1U;
+  CHECK(!validOps(&providerOps));
+
+  providerOps.playbackArrivalReserveUs = 0;
+  providerOps.clockFeedback            = testClockFeedback;
+  CHECK(playbackProviderRateControlAvailable(&providerOps, NULL));
+  providerOps.clockFeedbackAvailable   = testClockFeedbackAvailable;
+  bool feedbackAvailable               = false;
+  CHECK(!playbackProviderRateControlAvailable(
+        &providerOps, &feedbackAvailable));
+  feedbackAvailable = true;
+  CHECK(playbackProviderRateControlAvailable(
+        &providerOps, &feedbackAvailable));
+  providerOps.clockFeedback = NULL;
+  CHECK(!validOps(&providerOps));
+
+  reset();
+  startAudio();
+  const LG_AudioFormat format        = makeFormat(LG_AUDIO_FMT_S16_LE);
+  const PlaybackPolicy defaultPolicy = playbackPolicyFromOps(&ops);
+  CHECK(playbackStart(&format, NULL, false, false, &defaultPolicy));
+  CHECK(atomic_load(&b.setupN) == 1);
+
+  playbackSetState(STREAM_STATE_KEEP_ALIVE);
+  CHECK(playbackStart(&format, NULL, false, false, &defaultPolicy));
+  CHECK(atomic_load(&b.setupN) == 1);
+  CHECK(playbackGetState() == STREAM_STATE_RESUMING);
+
+  playbackSetState(STREAM_STATE_KEEP_ALIVE);
+  CHECK(playbackStart(
+        &format, NULL, false, false, &lowLatencyPolicy));
+  CHECK(atomic_load(&b.setupN) == 2);
+  CHECK(playbackGetState() == STREAM_STATE_SETUP_SOURCE);
+  stopAudio();
+}
+
 static void testConsent(void)
 {
   reset();
@@ -1022,6 +1109,7 @@ static const struct Test tests[] =
   { "recovery"       , testPlaybackRecovery        },
   { "stable-underrun", testPlaybackStableUnderrun  },
   { "resume"         , testPlaybackResume          },
+  { "latency-policy" , testLatencyPolicy           },
   { "consent"        , testConsent                 },
   { "quiesce"        , testQuiesce                 },
 };

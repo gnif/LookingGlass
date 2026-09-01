@@ -517,7 +517,7 @@ static struct Option options[] =
   {
     .module         = "audio",
     .name           = "latencyOffset",
-    .description    = "Latency offset added to the calculated minimum in milliseconds",
+    .description    = "Extra classic SPICE playback latency in milliseconds",
     .type           = OPTION_TYPE_INT,
     .value.x_int    = 6
   },

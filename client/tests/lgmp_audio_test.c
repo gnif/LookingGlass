@@ -308,6 +308,10 @@ static bool fixtureInit(struct Fixture * fixture)
   CHECK(lgmpAudio_connect(fixture->audio, fixture->clientID));
   fixture->ops = lgmpAudio_getOps();
   CHECK(fixture->ops);
+  CHECK(fixture->ops->playbackFlags == 0);
+  CHECK(fixture->ops->playbackArrivalReserveUs == 250);
+  CHECK(fixture->ops->clockFeedbackAvailable);
+  CHECK(!fixture->ops->clockFeedbackAvailable(fixture->audio));
   fixture->endpointGeneration = UINT64_C(0x100000001);
   return true;
 }
@@ -930,6 +934,7 @@ static bool testDataPlane(void)
   };
   CHECK(!fixture.ops->clockFeedback(fixture.audio, playbackLocal,
         &playbackClock, 192000.0));
+  CHECK(!fixture.ops->clockFeedbackAvailable(fixture.audio));
 
   const uint64_t currentPlayWire =
     UINT64_C(0x300000000) + KVMFR_AUDIO_MAX_CHANNELS - 1;
@@ -946,6 +951,7 @@ static bool testDataPlane(void)
         captureWire, &captureFormat));
   CHECK(waitCount(&fixture, &fixture.trace.statusCount,
         clockStatusBefore + 1, WAIT_MS));
+  CHECK(fixture.ops->clockFeedbackAvailable(fixture.audio));
   CHECK(fixture.ops->clockFeedback(fixture.audio, playbackLocal,
         &playbackClock, 192000.0));
   CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK,

@@ -52,6 +52,8 @@
 #define PLAYBACK_MAX_RATE_SLEW_PER_SEC 0.005
 #define PLAYBACK_MAX_JITTER_SEC 0.1
 #define PLAYBACK_JITTER_DECAY_SEC 10.0
+#define PLAYBACK_DEFAULT_ARRIVAL_RESERVE_US 1000U
+#define PLAYBACK_MAX_ARRIVAL_RESERVE_US 100000U
 #define AUDIO_START_RETRY_MIN_NS INT64_C(5000000)
 #define AUDIO_START_RETRY_MAX_NS INT64_C(250000000)
 #define AUDIO_RETRY_RESET_NS INT64_C(1000000000)
@@ -104,6 +106,13 @@ typedef enum
   PLAYBACK_RATE_PROVIDER,
 }
 PlaybackRateControl;
+
+typedef struct
+{
+  uint32_t flags;
+  uint32_t arrivalReserveUs;
+}
+PlaybackPolicy;
 
 typedef enum
 {
@@ -309,6 +318,7 @@ typedef struct
     LG_AudioFormat       requestedFormat;
     bool                 requestedFormatValid;
     bool                 requestedProviderRateControl;
+    PlaybackPolicy       requestedPolicy;
     bool                 forceSoftwareResampler;
     bool                 startPending;
     bool                 startInProgress;
@@ -339,6 +349,8 @@ typedef struct
     int64_t              startupPacketPeriod;
     PlaybackRateControl rateControl;
     bool                lastProviderRateControl;
+    PlaybackPolicy      policy;
+    PlaybackPolicy      lastPolicy;
     _Atomic(double) backendResampleRatio;
     atomic_bool     backendResamplerFailed;
     RingBuffer            buffer;
@@ -417,6 +429,48 @@ typedef struct
 AudioState;
 
 static AudioState audio = { 0 };
+
+static PlaybackPolicy playbackPolicyFromOps(const LG_AudioOps * ops)
+{
+  return (PlaybackPolicy)
+  {
+    .flags            = ops->playbackFlags,
+    .arrivalReserveUs = ops->playbackArrivalReserveUs ?
+      ops->playbackArrivalReserveUs :
+      PLAYBACK_DEFAULT_ARRIVAL_RESERVE_US,
+  };
+}
+
+static bool playbackPolicyEqual(
+    const PlaybackPolicy * a, const PlaybackPolicy * b)
+{
+  return a->flags == b->flags &&
+    a->arrivalReserveUs == b->arrivalReserveUs;
+}
+
+static bool playbackProviderRateControlAvailable(
+    const LG_AudioOps * ops, void * opaque)
+{
+  return ops->clockFeedback &&
+    (!ops->clockFeedbackAvailable ||
+      ops->clockFeedbackAvailable(opaque));
+}
+
+static double playbackArrivalReserveFrames(double arrivalJitterSec,
+    int sampleRate, uint32_t fixedReserveUs)
+{
+  return (arrivalJitterSec + fixedReserveUs * 1.0e-6) * sampleRate;
+}
+
+static double playbackComputeLatencyOffsetFrames(bool providerRateControl,
+    const PlaybackPolicy * policy, int latencyOffsetMs, int sampleRate)
+{
+  if (providerRateControl || !(policy->flags &
+        LG_AUDIO_PLAYBACK_LEGACY_LATENCY_OFFSET))
+    return 0.0;
+
+  return max(latencyOffsetMs, 0) * sampleRate / 1000.0;
+}
 
 static size_t audioSampleSize(LG_AudioSampleFormat format)
 {
@@ -1420,11 +1474,12 @@ static bool playbackSetupDevice(const LG_AudioFormat * format,
 
 static bool playbackResume(const LG_AudioFormat * format,
     const LG_AudioClock * sourceClock, bool providerRateControl,
-    bool forceSoftwareResampler)
+    bool forceSoftwareResampler, const PlaybackPolicy * policy)
 {
   if (forceSoftwareResampler ||
       !audio.playback.lastFormatValid ||
       audio.playback.lastProviderRateControl != providerRateControl ||
+      !playbackPolicyEqual(&audio.playback.lastPolicy, policy) ||
       !audioFormatEqual(format, &audio.playback.lastFormat))
     return false;
 
@@ -1442,7 +1497,7 @@ static bool playbackResume(const LG_AudioFormat * format,
 
 static bool playbackStart(const LG_AudioFormat * format,
     const LG_AudioClock * sourceClock, bool providerRateControl,
-    bool forceSoftwareResampler)
+    bool forceSoftwareResampler, const PlaybackPolicy * policy)
 {
   if (!audio.audioDev)
     return false;
@@ -1459,7 +1514,7 @@ static bool playbackStart(const LG_AudioFormat * format,
   const int sampleRate = format->sampleRate;
 
   if (playbackResume(format, sourceClock, providerRateControl,
-        forceSoftwareResampler))
+        forceSoftwareResampler, policy))
     return true;
 
   const StreamState state = playbackGetState();
@@ -1471,6 +1526,8 @@ static bool playbackStart(const LG_AudioFormat * format,
   audio.playback.lastFormat              = *format;
   audio.playback.lastFormatValid         = true;
   audio.playback.lastProviderRateControl = providerRateControl;
+  audio.playback.policy                  = *policy;
+  audio.playback.lastPolicy              = *policy;
 
   audio.playback.channels   = channels;
   audio.playback.sampleRate = sampleRate;
@@ -1804,6 +1861,7 @@ static void playbackProcessStart(void)
   uint32_t       generation;
   bool           providerRateControl;
   bool           forceSoftwareResampler;
+  PlaybackPolicy policy;
 
   LG_LOCK(audio.playback.sourceLock);
   if (!audio.playback.startPending ||
@@ -1825,11 +1883,12 @@ static void playbackProcessStart(void)
     audio.playback.requestedProviderRateControl;
   forceSoftwareResampler           =
     audio.playback.forceSoftwareResampler;
+  policy                           = audio.playback.requestedPolicy;
   LG_UNLOCK(audio.playback.sourceLock);
 
   LG_LOCK(audio.playback.deviceLock);
   const bool started = playbackStart(&format, NULL,
-      providerRateControl, forceSoftwareResampler);
+      providerRateControl, forceSoftwareResampler, &policy);
   LG_UNLOCK(audio.playback.deviceLock);
 
   bool stopStale = false;
@@ -1843,7 +1902,8 @@ static void playbackProcessStart(void)
     providerRateControl ==
       audio.playback.requestedProviderRateControl &&
     forceSoftwareResampler ==
-      audio.playback.forceSoftwareResampler;
+      audio.playback.forceSoftwareResampler &&
+    playbackPolicyEqual(&policy, &audio.playback.requestedPolicy);
 
   audio.playback.startInProgress = false;
   if (started && current)
@@ -2552,15 +2612,14 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
     max((double)maxPeriodFrames,
         sourceData->sourcePacketDurationSec * audio.playback.sampleRate);
   /* The device period, delivery jitter, packet phase, and resampler delay
-   * define the minimum viable latency. Provider feedback directly controls
-   * the source rate, so latencyOffset only applies to local rate control. */
-  const double latencyOffsetFrames          = providerRateControl ? 0.0 :
-    max(g_params.audioLatencyOffset, 0) *
-      audio.playback.sampleRate / 1000.0;
-  const double arrivalJitterFrames          =
-    sourceData->arrivalJitterSec * audio.playback.sampleRate;
-  const double arrivalReserveFrames         =
-    arrivalJitterFrames + 0.001 * audio.playback.sampleRate;
+   * define the minimum viable latency. latencyOffset is a compatibility
+   * margin used only by providers which explicitly request it. */
+  const double latencyOffsetFrames          = playbackComputeLatencyOffsetFrames(
+      providerRateControl, &audio.playback.policy,
+      g_params.audioLatencyOffset, audio.playback.sampleRate);
+  const double arrivalReserveFrames         = playbackArrivalReserveFrames(
+      sourceData->arrivalJitterSec, audio.playback.sampleRate,
+      audio.playback.policy.arrivalReserveUs);
   const double minimumLowWaterReserveFrames =
     maxPeriodFrames * 0.1 + arrivalReserveFrames;
   const double minimumLowWaterFrames        =
@@ -3812,10 +3871,12 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
   if (!eventBegin(binding, &active))
     return;
 
-  const bool providerRateControl =
-    active.ops->clockFeedback &&
+  const bool           providerRateControl =
+    playbackProviderRateControlAvailable(active.ops, active.opaque) &&
     audio.feedback.wakeInitialized && audio.feedback.thread;
-  bool       wake                = false;
+  const PlaybackPolicy policy              =
+    playbackPolicyFromOps(active.ops);
+  bool                 wake                = false;
 
   LG_LOCK(audio.playback.sourceLock);
   ++audio.playback.requestSerial;
@@ -3823,6 +3884,7 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
   audio.playback.requestedFormatValid         =
     generation && audioFormatValid(format);
   audio.playback.requestedProviderRateControl = providerRateControl;
+  audio.playback.requestedPolicy              = policy;
   audio.playback.forceSoftwareResampler       = false;
   audio.playback.startPending                 = false;
   audio.playback.startFailures                = 0;
@@ -3840,7 +3902,7 @@ static void eventPlaybackStart(void * opaque, uint32_t generation,
     {
       LG_LOCK(audio.playback.deviceLock);
       resumed = playbackResume(format, NULL, providerRateControl,
-          false);
+          false, &policy);
       if (resumed)
       {
         if (atomic_load_explicit(&audio.playback.activeAttemptSerial,
@@ -3906,6 +3968,7 @@ static void eventPlaybackStop(void * opaque, uint32_t generation)
     audio.playback.requestedGeneration          = 0;
     audio.playback.requestedFormatValid         = false;
     audio.playback.requestedProviderRateControl = false;
+    audio.playback.requestedPolicy              = (PlaybackPolicy) { 0 };
     audio.playback.forceSoftwareResampler       = false;
     audio.playback.startPending                 = false;
     audio.playback.startFailures                = 0;
@@ -4094,7 +4157,14 @@ static const LG_AudioEventOps eventOps =
 
 static bool validOps(const LG_AudioOps * ops)
 {
-  return ops && ops->name && ops->attach && ops->detach;
+  const uint32_t playbackFlagMask =
+    LG_AUDIO_PLAYBACK_LEGACY_LATENCY_OFFSET;
+  return ops && ops->name &&
+    !(ops->playbackFlags & ~playbackFlagMask) &&
+    ops->playbackArrivalReserveUs <=
+      PLAYBACK_MAX_ARRIVAL_RESERVE_US &&
+    (!ops->clockFeedbackAvailable || ops->clockFeedback) &&
+    ops->attach && ops->detach;
 }
 
 static AudioBinding makeBinding(const LG_AudioOps * ops, void * opaque)
@@ -4139,6 +4209,7 @@ static void stopStreams(void)
   audio.playback.requestedGeneration          = 0;
   audio.playback.requestedFormatValid         = false;
   audio.playback.requestedProviderRateControl = false;
+  audio.playback.requestedPolicy              = (PlaybackPolicy) { 0 };
   audio.playback.forceSoftwareResampler       = false;
   audio.playback.startPending                 = false;
   audio.playback.startFailures                = 0;

@@ -853,6 +853,7 @@ if(ENABLE_AUDIO)
     recovery
     stable-underrun
     resume
+    latency-policy
     consent
     quiesce
   )

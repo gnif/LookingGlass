@@ -547,6 +547,7 @@ static bool spiceRecordData(void * opaque, uint32_t generation,
 static const LG_AudioOps l_spiceAudioOps =
 {
   .name              = "SPICE",
+  .playbackFlags     = LG_AUDIO_PLAYBACK_LEGACY_LATENCY_OFFSET,
   .setStatusListener = spiceSetStatusListener,
   .attach            = spiceAttach,
   .detach            = spiceDetach,

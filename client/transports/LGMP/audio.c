@@ -125,6 +125,7 @@ struct LGMPAudio
   atomic_bool       stop;
   atomic_bool       dataPlaneLost;
   atomic_bool       captureDiscontinuity;
+  atomic_bool       clockFeedbackAvailable;
   atomic_uint       statusInFlight;
   struct AudioCallbackWaitQueue statusWait;
 
@@ -526,6 +527,9 @@ static void markStatusNL(LGMPAudio * audio, bool available,
       oldGeneration != audio->endpointGeneration.local)
     audio->statusDirty = true;
   audio->statusAvailable = available;
+  atomic_store_explicit(&audio->clockFeedbackAvailable,
+      available && (audio->remoteStatus.capabilities &
+        KVMFR_AUDIO_CAP_CLOCK_FEEDBACK), memory_order_release);
 }
 
 static void publishStatus(LGMPAudio * audio)
@@ -1824,6 +1828,7 @@ bool lgmpAudio_create(PLGMPClient client, LGEvent * pointerWake,
   atomic_init(&audio->stop, false);
   atomic_init(&audio->dataPlaneLost, false);
   atomic_init(&audio->captureDiscontinuity, false);
+  atomic_init(&audio->clockFeedbackAvailable, false);
   atomic_init(&audio->statusInFlight, 0);
   atomic_init(&audio->statusWait.count, 0);
   *result = audio;
@@ -2322,14 +2327,23 @@ static bool clockFeedback(void * opaque, uint32_t generation,
   return result == WRITE_OK;
 }
 
+static bool clockFeedbackAvailable(void * opaque)
+{
+  LGMPAudio * audio = opaque;
+  return atomic_load_explicit(
+      &audio->clockFeedbackAvailable, memory_order_acquire);
+}
+
 static const LG_AudioOps l_audioOps =
 {
-  .name              = "LGMP",
-  .setStatusListener = setStatusListener,
-  .attach            = attach,
-  .detach            = detach,
-  .recordData        = recordData,
-  .clockFeedback     = clockFeedback,
+  .name                     = "LGMP",
+  .playbackArrivalReserveUs = AUDIO_ACTIVE_POLL_US,
+  .setStatusListener        = setStatusListener,
+  .attach                   = attach,
+  .detach                   = detach,
+  .recordData               = recordData,
+  .clockFeedback            = clockFeedback,
+  .clockFeedbackAvailable   = clockFeedbackAvailable,
 };
 
 const LG_AudioOps * lgmpAudio_getOps(void)

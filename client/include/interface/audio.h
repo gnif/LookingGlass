@@ -131,9 +131,23 @@ typedef struct LG_AudioEventOps
 }
 LG_AudioEventOps;
 
+typedef enum LG_AudioPlaybackFlag
+{
+  /* Apply audio:latencyOffset when local playback rate control is active.
+   * This preserves the legacy safety margin required by classic SPICE. */
+  LG_AUDIO_PLAYBACK_LEGACY_LATENCY_OFFSET = 1U << 0,
+}
+LG_AudioPlaybackFlag;
+
 typedef struct LG_AudioOps
 {
   const char * name;
+
+  /* A zero arrival reserve selects the client's default. Providers with a
+   * tighter, measured delivery bound may request a smaller value. Runtime
+   * delivery jitter is learned and added independently. */
+  uint32_t playbackFlags;
+  uint32_t playbackArrivalReserveUs;
 
   /* Registration must synchronously report the current status after releasing
    * any backend locks. Passing NULL unregisters the listener. Providers with
@@ -169,6 +183,11 @@ typedef struct LG_AudioOps
    * restart playback with local rate control. */
   bool (*clockFeedback)(void * opaque, uint32_t generation,
       const LG_AudioClock * playbackClock, double targetRate);
+
+  /* Optional nonblocking capability check used before selecting provider
+   * rate control for a new stream. If omitted, clockFeedback is assumed to
+   * be available. */
+  bool (*clockFeedbackAvailable)(void * opaque);
 }
 LG_AudioOps;
 
