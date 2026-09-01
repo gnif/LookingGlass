@@ -21,6 +21,9 @@
 #include "interface/transport.h"
 
 #include <LGProtocol/KVMFR.h>
+#ifdef ENABLE_AUDIO
+#include "common/KVMFRAudio.h"
+#endif
 #include <LGProtocol/KVMFRRecovery.h>
 #include <LGProtocol/LGMPConfig.h>
 #include "common/debug.h"
@@ -95,6 +98,42 @@ static bool waitForQueuesEmpty(PLGMPHost host, PLGMPHostQueue frameQueue,
 }
 
 struct VideoStatusTrace;
+
+#ifdef ENABLE_AUDIO
+struct AudioStatusTrace
+{
+  atomic_uint count;
+  atomic_bool available;
+};
+
+static void audioStatusChanged(void * opaque,
+    const LG_AudioStatus * status)
+{
+  struct AudioStatusTrace * trace = opaque;
+  atomic_store_explicit(
+      &trace->available, status->available, memory_order_relaxed);
+  atomic_fetch_add_explicit(&trace->count, 1, memory_order_release);
+}
+
+static bool readAudioClaim(PLGMPHost host, PLGMPHostQueue queue,
+    KVMFRAudioClaim * claim, uint32_t * clientID)
+{
+  for (unsigned i = 0; i < WAIT_TIMEOUT; ++i)
+  {
+    size_t size = sizeof(*claim);
+    const LGMP_STATUS status = lgmpHostReadDataWithSource(
+        queue, claim, &size, clientID);
+    if (status == LGMP_OK)
+      return size == sizeof(*claim) && *clientID != 0 &&
+        lgmpHostAckData(queue) == LGMP_OK;
+    if (status != LGMP_ERR_QUEUE_EMPTY ||
+        lgmpHostProcess(host) != LGMP_OK)
+      return false;
+    usleep(1000);
+  }
+  return false;
+}
+#endif
 
 struct WaitState
 {
@@ -330,12 +369,20 @@ int main(void)
   PLGMPMemory malformedFrameMemory = NULL;
   PLGMPMemory pointerMemory = NULL;
   PLGMPMemory malformedPointerMemory = NULL;
+#ifdef ENABLE_AUDIO
+  PLGMPMemory audioResponseMemory = NULL;
+#endif
   LG_Transport * transport = NULL;
   LG_Transport * secondTransport = NULL;
   LG_Transport * thirdTransport = NULL;
   LG_Transport * nestedTransport = NULL;
   LG_Transport * admittedTransport = NULL;
   const LG_FrameOps * frameOps = NULL;
+#ifdef ENABLE_AUDIO
+  const LG_AudioOps * audioOps = NULL;
+  void * audioOpaque = NULL;
+  struct AudioStatusTrace audioTrace = { 0 };
+#endif
   struct VideoStatusTrace videoTrace;
   struct VideoStatusTrace secondVideoTrace;
   memset(&videoTrace, 0, sizeof(videoTrace));
@@ -364,6 +411,7 @@ int main(void)
   KVMFR session = { 0 };
   memcpy(session.magic, KVMFR_MAGIC, sizeof(session.magic));
   session.version = KVMFR_VERSION;
+  session.features = KVMFR_FEATURE_AUDIO;
   memcpy(session.hostver, "transport-test", sizeof("transport-test"));
 
   CHECK(lgmpHostInit(hostMemory, TEST_SHM_SIZE, &host, sizeof(session),
@@ -415,6 +463,10 @@ int main(void)
       LGMP_OK);
   CHECK(lgmpHostMemAlloc(host, sizeof(KVMFRCursor),
         &malformedPointerMemory) == LGMP_OK);
+#ifdef ENABLE_AUDIO
+  CHECK(lgmpHostMemAlloc(host, sizeof(KVMFRAudioStreamResponse),
+        &audioResponseMemory) == LGMP_OK);
+#endif
   KVMFRCursor * malformedPointer = lgmpHostMemPtr(malformedPointerMemory);
   malformedPointer->height = 2;
   malformedPointer->pitch  = UINT32_MAX;
@@ -484,6 +536,14 @@ int main(void)
   LG_TransportSession admittedSession;
   CHECK(LGT_LGMP.connectCancellable(
         admittedTransport, &admittedSession, NULL, NULL) == LG_TRANSPORT_OK);
+  CHECK(transportSession.features & LG_TRANSPORT_FEATURE_AUDIO);
+#ifdef ENABLE_AUDIO
+  CHECK(LGT_LGMP.getAudioOps);
+  audioOps = LGT_LGMP.getAudioOps(transport, &audioOpaque);
+  CHECK(audioOps && audioOpaque);
+#else
+  CHECK(!LGT_LGMP.getAudioOps);
+#endif
   videoTrace.transport = transport;
   videoTrace.ops       = frameOps;
   frameOps->setStatusListener(
@@ -559,6 +619,69 @@ int main(void)
   CHECK(pointer.epoch == atomic_load_explicit(
         &videoTrace.pointerEpoch, memory_order_acquire));
   frameOps->releasePointer(transport, &pointer);
+
+#ifdef ENABLE_AUDIO
+  audioOps->setStatusListener(audioOpaque,
+      audioStatusChanged, &audioTrace);
+  CHECK(atomic_load_explicit(&audioTrace.count, memory_order_acquire) == 1);
+  CHECK(!atomic_load_explicit(
+        &audioTrace.available, memory_order_acquire));
+
+  struct WaitState audioPointerWait =
+  {
+    .transport = transport,
+    .ops       = frameOps,
+    .status    = LG_TRANSPORT_ERROR,
+  };
+  pthread_t audioPointerThread;
+  CHECK(pthread_create(&audioPointerThread, NULL,
+        waitForVideo, &audioPointerWait) == 0);
+
+  KVMFRAudioClaim audioClaim;
+  uint32_t audioClientID = 0;
+  CHECK(readAudioClaim(host, pointerQueue,
+        &audioClaim, &audioClientID));
+  CHECK(audioClaim.messageType == KVMFR_MESSAGE_AUDIO_CLAIM);
+  CHECK(audioClaim.version == KVMFR_AUDIO_CONTROL_VERSION);
+  CHECK(audioClaim.size == sizeof(audioClaim));
+  frameOps->cancelPointerWait(transport);
+  CHECK(pthread_join(audioPointerThread, NULL) == 0);
+  CHECK(audioPointerWait.status == LG_TRANSPORT_TIMEOUT);
+
+  KVMFRAudioStreamResponse * audioResponse =
+    lgmpHostMemPtr(audioResponseMemory);
+  *audioResponse = (KVMFRAudioStreamResponse)
+  {
+    .magic             = KVMFR_AUDIO_RESPONSE_MAGIC,
+    .version           = KVMFR_AUDIO_CONTROL_VERSION,
+    .size              = sizeof(*audioResponse),
+    .requestGeneration = audioClaim.requestGeneration,
+    .boundClientID     = audioClientID,
+    .result            = KVMFR_AUDIO_RESPONSE_BUSY,
+    .claimToken        = audioClaim.claimToken,
+  };
+
+  unsigned audioRecipients = 0;
+  CHECK(lgmpHostQueuePostForClients(pointerQueue,
+        UINT64_C(0x7f7f7f7f) << 32, pointerMemory,
+        &audioClientID, 1, &audioRecipients) == LGMP_OK);
+  CHECK(audioRecipients == 1);
+  CHECK(lgmpHostQueuePostForClients(pointerQueue,
+        KVMFR_AUDIO_CONTROL_UDATA, pointerMemory,
+        &audioClientID, 1, &audioRecipients) == LGMP_OK);
+  CHECK(audioRecipients == 1);
+  CHECK(lgmpHostQueuePostForClients(pointerQueue,
+        KVMFR_AUDIO_CONTROL_UDATA, audioResponseMemory,
+        &audioClientID, 1, &audioRecipients) == LGMP_OK);
+  CHECK(audioRecipients == 1);
+  CHECK(lgmpHostQueuePost(pointerQueue, CURSOR_FLAG_POSITION,
+        pointerMemory) == LGMP_OK);
+  CHECK(frameOps->nextPointer(transport, &pointer) == LG_TRANSPORT_OK);
+  CHECK(pointer.x == wirePointer->x && pointer.y == wirePointer->y);
+  frameOps->releasePointer(transport, &pointer);
+  CHECK(waitForQueuesEmpty(host, frameQueue, pointerQueue));
+  audioOps->setStatusListener(audioOpaque, NULL, NULL);
+#endif
 
   const uint64_t frameEpoch = atomic_load_explicit(
       &videoTrace.frameEpoch, memory_order_acquire);
@@ -1024,6 +1147,9 @@ cleanup:
   if (transport)
     LGT_LGMP.destroy(&transport);
   option_free();
+#ifdef ENABLE_AUDIO
+  lgmpHostMemFree(&audioResponseMemory);
+#endif
   lgmpHostMemFree(&pointerMemory);
   lgmpHostMemFree(&malformedPointerMemory);
   lgmpHostMemFree(&malformedFrameMemory);

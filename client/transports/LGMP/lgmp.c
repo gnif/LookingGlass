@@ -22,6 +22,9 @@
 
 #include "clipboard.h"
 #include "input.h"
+#ifdef ENABLE_AUDIO
+#include "audio.h"
+#endif
 
 #include <LGProtocol/KVMFR.h>
 #include <LGProtocol/KVMFRRecovery.h>
@@ -120,6 +123,9 @@ struct LG_Transport
   PLGMPClientQueue  pointerQueue;
   LGMPInput        * input;
   LGMPClipboard    * clipboard;
+#ifdef ENABLE_AUDIO
+  LGMPAudio        * audio;
+#endif
   LG_Lock           frameLock;
   LG_Lock           pointerLock;
   LG_RWLock         videoStatusLock;
@@ -145,6 +151,9 @@ struct LG_Transport
   bool     frameScheduleSupported;
   atomic_bool inputSupported;
   atomic_bool clipboardSupported;
+#ifdef ENABLE_AUDIO
+  atomic_bool audioSupported;
+#endif
   uint64_t frameLeaseHandle;
   uint32_t frameGeneration;
   uint32_t clientID;
@@ -671,6 +680,9 @@ static bool lgmp_create(LG_Transport ** result)
   atomic_init(&this->connected, false);
   atomic_init(&this->inputSupported, false);
   atomic_init(&this->clipboardSupported, false);
+#ifdef ENABLE_AUDIO
+  atomic_init(&this->audioSupported, false);
+#endif
   atomic_init(&this->destroyPending, false);
 
   this->frameWake   = lgCreateEvent(true, 0);
@@ -884,6 +896,10 @@ static void lgmp_destroyNow(LG_Transport * this)
 {
   if (this->client)
   {
+    lgmp_stopPointer(this);
+#ifdef ENABLE_AUDIO
+    lgmpAudio_destroy(&this->audio);
+#endif
     lgmpClipboard_destroy(&this->clipboard);
     lgmpInput_destroy(&this->input);
     lgmp_closeQueues(this);
@@ -986,6 +1002,9 @@ static bool lgmp_parseSession(struct LG_Transport * this,
     session->features |= LG_TRANSPORT_FEATURE_INPUT;
   if (header.features & KVMFR_FEATURE_CLIPBOARD)
     session->features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
+  if (header.features & KVMFR_FEATURE_AUDIO)
+    session->features |= LG_TRANSPORT_FEATURE_AUDIO;
+
   data += sizeof(header);
   size -= sizeof(header);
   while (size >= sizeof(KVMFRRecord))
@@ -1095,6 +1114,18 @@ static LG_TransportStatus lgmp_connectInternal(LG_Transport * this,
       if (!lgmp_parseSession(this, data, size, session))
         return LG_TRANSPORT_INVALID_VERSION;
 
+#ifdef ENABLE_AUDIO
+      const bool audioSupported =
+        (session->features & LG_TRANSPORT_FEATURE_AUDIO) != 0;
+      if (audioSupported && !this->audio &&
+          !lgmpAudio_create(this->client, this->pointerWake,
+            &this->audio))
+        DEBUG_WARN("Failed to create the optional LGMP audio transport");
+      if (audioSupported && this->audio &&
+          !lgmpAudio_connect(this->audio, this->clientID))
+        DEBUG_WARN("Failed to start the optional LGMP audio transport");
+#endif
+
       LGMPVideoStatusDispatch dispatch;
       LG_LOCK(this->frameLock);
       if (++this->frameGeneration == 0)
@@ -1108,6 +1139,10 @@ static LG_TransportStatus lgmp_connectInternal(LG_Transport * this,
       atomic_store_explicit(&this->clipboardSupported,
           session->features & LG_TRANSPORT_FEATURE_CLIPBOARD,
           memory_order_release);
+#ifdef ENABLE_AUDIO
+      atomic_store_explicit(&this->audioSupported, audioSupported,
+          memory_order_release);
+#endif
       this->frameSerial            = 0;
       this->frameSerialValid       = false;
       this->formatValid            = false;
@@ -1169,6 +1204,10 @@ static void lgmp_disconnect(LG_Transport * this)
 
   lgmpInput_disconnect(this->input);
   lgmpClipboard_disconnect(this->clipboard);
+  lgmp_stopPointer(this);
+#ifdef ENABLE_AUDIO
+  lgmpAudio_disconnect(this->audio);
+#endif
 
   LG_LOCK(this->frameLock);
   if (++this->frameGeneration == 0)
@@ -1180,6 +1219,10 @@ static void lgmp_disconnect(LG_Transport * this)
       &this->inputSupported, false, memory_order_release);
   atomic_store_explicit(
       &this->clipboardSupported, false, memory_order_release);
+#ifdef ENABLE_AUDIO
+  atomic_store_explicit(
+      &this->audioSupported, false, memory_order_release);
+#endif
   this->clientID               = 0;
   LG_UNLOCK(this->frameLock);
 
@@ -2346,6 +2389,10 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
         &this->pointerQueue);
   }
   pointerQueue = this->pointerQueue;
+#ifdef ENABLE_AUDIO
+  if (status == LG_TRANSPORT_OK && pointerQueue && this->audio)
+    lgmpAudio_pumpClaim(this->audio, pointerQueue);
+#endif
   LG_UNLOCK(this->pointerLock);
   if (status == LG_TRANSPORT_TIMEOUT)
     lgmp_waitPoll(this->pointerWake, 1000);
@@ -2353,10 +2400,56 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
   {
     LGMPMessage message;
     PLGMPClientQueue processedQueue = pointerQueue;
-    status = lgmp_process(&processedQueue, this->cursorPollInterval,
-        this->pointerWake, &message);
-    if (!processedQueue)
-      lgmp_clearPointerQueue(this, pointerQueue);
+    const uint64_t deadline = this->cursorPollInterval ?
+      microtime() + this->cursorPollInterval : 0;
+    unsigned interval = this->cursorPollInterval;
+    for (unsigned skipped = 0;; ++skipped)
+    {
+      status = lgmp_process(&processedQueue, interval,
+          this->pointerWake, &message);
+      if (!processedQueue)
+        lgmp_clearPointerQueue(this, pointerQueue);
+      if (status != LG_TRANSPORT_OK)
+        break;
+
+      const uint32_t tag = (uint32_t)(message.udata >> 32);
+      if (!tag)
+        break;
+
+#ifdef ENABLE_AUDIO
+      KVMFRAudioStreamResponse audioResponse;
+      const bool audioResponseValid =
+        tag == KVMFR_AUDIO_CONTROL_TAG && this->audio &&
+        message.size == sizeof(audioResponse);
+      if (audioResponseValid)
+        memcpy(&audioResponse, message.mem, sizeof(audioResponse));
+#endif
+      status = lgmp_donePointerMessage(this, pointerQueue);
+      if (status != LG_TRANSPORT_OK)
+        break;
+#ifdef ENABLE_AUDIO
+      if (audioResponseValid)
+        lgmpAudio_handleResponse(this->audio, &audioResponse);
+#endif
+
+      if (skipped + 1 >= LGMP_Q_POINTER_LEN)
+      {
+        status = LG_TRANSPORT_TIMEOUT;
+        break;
+      }
+      if (!deadline)
+      {
+        interval = 0;
+        continue;
+      }
+      const uint64_t now = microtime();
+      if (now >= deadline)
+      {
+        status = LG_TRANSPORT_TIMEOUT;
+        break;
+      }
+      interval = (unsigned)(deadline - now);
+    }
     if (status == LG_TRANSPORT_OK)
     {
       if (!message.mem || message.size < sizeof(KVMFRCursor) ||
@@ -2623,6 +2716,26 @@ static const LG_ClipboardOps * lgmp_getClipboardOps(
   return lgmpClipboard_getOps();
 }
 
+#ifdef ENABLE_AUDIO
+static const LG_AudioOps * lgmp_getAudioOps(
+    LG_Transport * this, void ** opaque)
+{
+  *opaque = NULL;
+  if (!atomic_load_explicit(&this->connected, memory_order_acquire) ||
+      !atomic_load_explicit(
+          &this->audioSupported, memory_order_acquire))
+    return NULL;
+
+  if (!this->audio &&
+      !lgmpAudio_create(this->client, this->pointerWake, &this->audio))
+    return NULL;
+  if (!lgmpAudio_connect(this->audio, this->clientID))
+    return NULL;
+  *opaque = this->audio;
+  return lgmpAudio_getOps();
+}
+#endif
+
 static void lgmp_probeVideoStatus(LG_Transport * this)
 {
   bool frameAvailable   = false;
@@ -2766,6 +2879,9 @@ const LG_TransportOps LGT_LGMP =
   .sessionValid     = lgmp_sessionValid,
   .getVideoOps      = lgmp_getVideoOps,
   .getInputOps      = lgmp_getInputOps,
+#ifdef ENABLE_AUDIO
+  .getAudioOps      = lgmp_getAudioOps,
+#endif
   .getClipboardOps  = lgmp_getClipboardOps,
   .getRecoveryInfo  = lgmp_getRecoveryInfo,
   .requestRecovery  = lgmp_requestRecovery,

@@ -41,6 +41,11 @@ target_link_libraries(lgmp-transport-tests
   lg_common
   lgmp
 )
+if(ENABLE_AUDIO)
+  target_compile_definitions(lgmp-transport-tests PRIVATE
+    ENABLE_AUDIO
+  )
+endif()
 add_test(NAME lgmp-transport-tests
   COMMAND lgmp-transport-tests
 )
@@ -140,6 +145,31 @@ foreach(name IN LISTS LGMP_CLIPBOARD_CASES)
     TIMEOUT 10
   )
 endforeach()
+
+if(ENABLE_AUDIO)
+  add_executable(lgmp-audio-tests
+    lgmp_audio_test.c
+    ../src/kb_hid.c
+  )
+  target_compile_definitions(lgmp-audio-tests PRIVATE
+    ENABLE_AUDIO
+  )
+  target_include_directories(lgmp-audio-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
+  )
+  target_link_libraries(lgmp-audio-tests
+    ${EXE_FLAGS}
+    transport_LGMP
+    lg_common
+    lgmp
+  )
+  add_test(NAME lgmp-audio
+    COMMAND lgmp-audio-tests
+  )
+  set_tests_properties(lgmp-audio PROPERTIES
+    TIMEOUT 20
+  )
+endif()
 
 add_executable(wayland-motion-tests
   motion_test.c
