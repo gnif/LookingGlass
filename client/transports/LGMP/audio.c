@@ -37,7 +37,7 @@
 #include <sys/random.h>
 
 #define AUDIO_IDLE_POLL_MS        20U
-#define AUDIO_ACTIVE_POLL_MS       2U
+#define AUDIO_ACTIVE_POLL_US     250U
 #define AUDIO_CLAIM_RETRY_US  200000U
 #define AUDIO_OWNER_RETRY_US 1200000U
 #define AUDIO_DRAIN_MAX            32U
@@ -1740,9 +1740,9 @@ static int audioThread(void * opaque)
   LGMPAudio * audio = opaque;
   const struct LGMPStreamPollConfig pollConfig =
   {
-    .spinCount = 32,
-    .minWaitUs = 100,
-    .maxWaitUs = AUDIO_ACTIVE_POLL_MS * 1000U,
+    .spinCount = 64,
+    .minWaitUs = 25,
+    .maxWaitUs = AUDIO_ACTIVE_POLL_US,
   };
   if (lgmpStreamPollInit(&audio->streamPoll, pollConfig) != LGMP_OK)
     return -1;
@@ -1751,6 +1751,8 @@ static int audioThread(void * opaque)
   {
     processResponse(audio);
     const unsigned drained = drainInbound(audio);
+    if (drained)
+      lgmpStreamPollActivity(&audio->streamPoll);
     maintainBinding(audio);
     if (atomic_exchange_explicit(
           &audio->dataPlaneLost, false, memory_order_acq_rel))
