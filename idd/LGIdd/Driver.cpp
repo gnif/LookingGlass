@@ -27,8 +27,13 @@
 #include "ipc/CInputPipeServer.h"
 #include "ipc/CPipeServer.h"
 
+#include <stdlib.h>
+#include <time.h>
+
 NTSTATUS DriverEntry(_In_ PDRIVER_OBJECT  DriverObject, _In_ PUNICODE_STRING RegistryPath)
 {
+  srand((unsigned int)time(NULL));
+
   g_debug.Init(L"looking-glass-idd");
   DEBUG_INFO("Looking Glass IDD Driver (" LG_VERSION_STR ")");
 
