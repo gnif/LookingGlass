@@ -25,6 +25,8 @@
 #include <LGProtocol/KVMFR.h>
 #include <LGProtocol/KVMFRRecovery.h>
 
+#include <string.h>
+
 static bool TranslateFrameScheduleFlags(
   uint32_t source, uint32_t& destination)
 {
@@ -66,6 +68,7 @@ static const FrameProfile FRAME_PROFILES[] =
 CLGMPTransport::CLGMPTransport(const TransportInstance& config) :
   m_config(config),
   m_control(m_host),
+  m_audio(m_host, m_control),
   m_frames(m_host, m_ivshmem),
   m_input(m_host),
   m_clipboard(m_host)
@@ -91,11 +94,15 @@ bool CLGMPTransport::Initialize()
   if (!m_host.Initialize(m_ivshmem))
     return false;
 
-  // Preserve the existing shared-memory layout by appending input and then
-  // clipboard after the frame/pointer queues and retained pointer state.
+  // Preserve the existing shared-memory layout by appending input,
+  // clipboard, and optional audio after the frame/pointer queues and
+  // retained pointer state.
   if (!m_frames.Initialize() || !m_control.Initialize() ||
       !m_input.Initialize() || !m_clipboard.Initialize())
     return false;
+
+  if (!m_audio.Initialize())
+    DEBUG_WARN("LGMP audio transport is unavailable");
 
   m_frames.SealMemoryLayout();
   return true;
@@ -122,12 +129,6 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
         recovery.active, admission.state, admission.error);
   }
 
-  // Before the swap chain establishes the frame-buffer alignment, service
-  // only the protocol-independent recovery channel. This preserves the old
-  // transport startup boundary while keeping recovery available immediately.
-  if (!Atomic::Load(m_ready, std::memory_order_acquire))
-    return ProcessResult::OK;
-
   const LGMP_STATUS processStatus = m_host.Process();
   if (processStatus != LGMP_OK)
   {
@@ -143,14 +144,16 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
     return ProcessResult::FAILURE;
   }
 
-  m_input.FlushStatus();
-
+  const bool ready = Atomic::Load(m_ready, std::memory_order_acquire);
   const uint64_t now = CFrameScheduler::Nanotime();
 
   // Take the frame subscriber snapshot before processing scheduling messages,
   // then publish both updates together just as the original timer did.
-  const CLGMPFrameTransport::SubscriberSnapshot subscribers =
-    m_frames.SnapshotSubscribers();
+  CLGMPFrameTransport::SubscriberSnapshot subscribers;
+  if (ready)
+    subscribers = m_frames.SnapshotSubscribers();
+
+  m_audio.Process();
 
   uint8_t  data[LGMP_MSGS_SIZE];
   size_t   size;
@@ -225,12 +228,35 @@ ITransport::ProcessResult CLGMPTransport::Process(ITransportEvents& events)
           DEBUG_WARN("Ignoring invalid KVMFR frame schedule");
         break;
       }
+
+      case KVMFR_MESSAGE_AUDIO_CLAIM:
+      {
+        KVMFRAudioClaim claim = {};
+        const bool valid = size == sizeof(claim);
+        if (valid)
+          memcpy(&claim, data, sizeof(claim));
+        else
+          DEBUG_WARN("Ignoring invalid KVMFR audio claim");
+
+        // Do not let stream binding or a full response queue hold the
+        // shared pointer/control receive head.
+        m_control.AckData();
+        if (valid)
+          m_audio.HandleClaim(sourceClientID, claim);
+        continue;
+      }
     }
 
     m_control.AckData();
   }
 
-  m_frames.FinalizeSubscribers(subscribers, now);
+  m_audio.Process();
+
+  if (ready)
+  {
+    m_input.FlushStatus();
+    m_frames.FinalizeSubscribers(subscribers, now);
+  }
 
   if (m_control.HasNewSubscribers())
     m_control.RequestReplay();
@@ -245,6 +271,7 @@ void CLGMPTransport::Stop()
   m_hasActive = false;
   m_clipboard.Stop();
   m_input.Stop();
+  m_audio.TransportStop();
 }
 
 void CLGMPTransport::SyncRecovery()

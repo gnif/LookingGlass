@@ -79,6 +79,7 @@
     <ClCompile Include="transport\TransportFactory.cpp" />
     <ClCompile Include="transport\lgmp\CIVSHMEM.cpp" />
     <ClCompile Include="transport\lgmp\CRecovery.cpp" />
+    <ClCompile Include="transport\lgmp\CLGMPAudioTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPClipboardTransport.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPClipboardFiles.cpp" />
     <ClCompile Include="transport\lgmp\CLGMPControl.cpp" />
@@ -158,6 +159,7 @@
     <ClInclude Include="transport\TransportFactory.h" />
     <ClInclude Include="transport\lgmp\CIVSHMEM.h" />
     <ClInclude Include="transport\lgmp\CRecovery.h" />
+    <ClInclude Include="transport\lgmp\CLGMPAudioTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPClipboardTransport.h" />
     <ClInclude Include="transport\lgmp\CLGMPClipboardFiles.h" />
     <ClInclude Include="transport\lgmp\CLGMPControl.h" />

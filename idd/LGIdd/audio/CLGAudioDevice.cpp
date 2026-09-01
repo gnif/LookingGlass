@@ -1348,7 +1348,8 @@ public:
   AudioResult SetClockFeedback(const AudioClockFeedback& feedback)
   {
     const uint32_t allowedFlags =
-      AUDIO_CLOCK_VALID | AUDIO_CLOCK_STABLE;
+      AUDIO_CLOCK_VALID | AUDIO_CLOCK_STABLE |
+      AUDIO_CLOCK_DISCONTINUITY;
     if ((feedback.flags & ~allowedFlags) ||
         !(feedback.flags & AUDIO_CLOCK_VALID))
       return AudioResult::REJECTED;

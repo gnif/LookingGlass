@@ -23,6 +23,7 @@
 #include "Atomic.h"
 #include "transport/ITransport.h"
 #include "transport/lgmp/CIVSHMEM.h"
+#include "transport/lgmp/CLGMPAudioTransport.h"
 #include "transport/lgmp/CLGMPClipboardTransport.h"
 #include "transport/lgmp/CLGMPControl.h"
 #include "transport/lgmp/CLGMPFrameTransport.h"
@@ -39,6 +40,7 @@ private:
   CIVSHMEM                 m_ivshmem;
   CLGMPHost                m_host;
   CLGMPControl             m_control;
+  CLGMPAudioTransport      m_audio;
   CLGMPFrameTransport      m_frames;
   CLGMPInputTransport      m_input;
   CLGMPClipboardTransport  m_clipboard;
@@ -76,6 +78,7 @@ public:
   DirectFrameBufferMemory GetDirectMemory() const override;
 
   IFrameSink * FrameSink() override { return &m_frames; }
+  IAudioSource * Audio() override { return &m_audio; }
   IControlSink * Control() override { return &m_control; }
   IInputSource * Input() override { return &m_input; }
   IClipboardSource * Clipboard() override { return &m_clipboard; }

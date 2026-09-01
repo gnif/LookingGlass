@@ -128,6 +128,31 @@ LGMP_STATUS CLGMPControl::AckData()
   return lgmpHostAckData(m_pointerQueue);
 }
 
+LGMP_STATUS CLGMPControl::PostForClient(uint64_t udata,
+  PLGMPMemory memory, uint32_t clientID, unsigned& recipients)
+{
+  recipients = 0;
+  if (!m_pointerQueue || !memory || !clientID)
+    return LGMP_ERR_INVALID_ARGUMENT;
+  return lgmpHostQueuePostForClients(m_pointerQueue, udata, memory,
+    &clientID, 1, &recipients);
+}
+
+bool CLGMPControl::PayloadPending(PLGMPMemory memory) const
+{
+  return m_pointerQueue && memory &&
+    lgmpHostQueuePayloadPending(m_pointerQueue, memory);
+}
+
+LGMP_STATUS CLGMPControl::GetClientIDs(
+  uint32_t clientIDs[LGMP_MAX_CLIENTS], unsigned& count) const
+{
+  count = 0;
+  if (!m_pointerQueue || !clientIDs)
+    return LGMP_ERR_INVALID_ARGUMENT;
+  return lgmpHostGetClientIDs(m_pointerQueue, clientIDs, &count);
+}
+
 bool CLGMPControl::HasNewSubscribers()
 {
   return lgmpHostQueueNewSubs(m_pointerQueue) != 0;

@@ -53,7 +53,8 @@ bool CLGMPHost::Initialize(CIVSHMEM& ivshmem)
       KVMFR_FEATURE_WINDOWSIZE     |
       KVMFR_FEATURE_FRAME_SCHEDULE |
       KVMFR_FEATURE_INPUT          |
-      KVMFR_FEATURE_CLIPBOARD;
+      KVMFR_FEATURE_CLIPBOARD      |
+      KVMFR_FEATURE_AUDIO;
     strncpy_s(kvmfr.hostver, LG_VERSION_STR, sizeof(kvmfr.hostver) - 1);
     ss.write(reinterpret_cast<const char *>(&kvmfr), sizeof(kvmfr));
   }

@@ -34,11 +34,13 @@
 #include <memory>
 
 class CLGMPTransport;
+class CLGMPAudioTransport;
 
 class CLGMPControl final : public IControlSink
 {
 private:
   friend class CLGMPTransport;
+  friend class CLGMPAudioTransport;
 
   static constexpr int POINTER_SHAPE_BUFFERS   = 3;
   static constexpr int COLOR_TRANSFORM_BUFFERS = 3;
@@ -66,6 +68,11 @@ private:
   LGMP_STATUS ReadDataWithSource(void * data, size_t * size,
     uint32_t * sourceClientID);
   LGMP_STATUS AckData();
+  LGMP_STATUS PostForClient(uint64_t udata, PLGMPMemory memory,
+    uint32_t clientID, unsigned& recipients);
+  bool PayloadPending(PLGMPMemory memory) const;
+  LGMP_STATUS GetClientIDs(
+    uint32_t clientIDs[LGMP_MAX_CLIENTS], unsigned& count) const;
   bool HasNewSubscribers();
   void RequestReplay();
 

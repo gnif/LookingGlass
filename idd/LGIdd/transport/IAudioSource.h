@@ -49,8 +49,9 @@ enum AudioPacketFlag : uint32_t
 
 enum AudioClockFlag : uint32_t
 {
-  AUDIO_CLOCK_VALID  = 1U << 0,
-  AUDIO_CLOCK_STABLE = 1U << 1,
+  AUDIO_CLOCK_VALID         = 1U << 0,
+  AUDIO_CLOCK_STABLE        = 1U << 1,
+  AUDIO_CLOCK_DISCONTINUITY = 1U << 2,
 };
 
 enum class AudioStreamState : uint32_t
@@ -118,6 +119,7 @@ struct AudioClockFeedback
   uint64_t playbackGeneration = 0;
   uint64_t position           = 0;
   int64_t  timeNs             = 0;
+  uint64_t rateQ32            = 0;
   uint64_t targetRateQ32      = 0;
   uint32_t flags              = 0;
 };
