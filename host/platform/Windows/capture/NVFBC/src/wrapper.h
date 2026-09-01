@@ -21,11 +21,11 @@
 #include <stdbool.h>
 #include <NvFBC/nvFBC.h>
 
+#include "interface/capture.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-#include "interface/capture.h"
 
 typedef struct stNvFBCHandle * NvFBCHandle;
 
