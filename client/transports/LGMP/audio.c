@@ -1608,6 +1608,12 @@ static bool bindingGone(LGMPAudio * audio)
   return any;
 }
 
+static bool bindingPhaseActiveNL(const LGMPAudio * audio)
+{
+  return audio->phase == AUDIO_PHASE_BOUND ||
+    audio->phase == AUDIO_PHASE_RELEASING;
+}
+
 static void maintainBinding(LGMPAudio * audio)
 {
   const uint64_t now = microtime();
@@ -1716,8 +1722,7 @@ static void maintainBinding(LGMPAudio * audio)
 static void stopWorkerBinding(LGMPAudio * audio)
 {
   LG_LOCK(audio->lock);
-  const bool active = audio->phase == AUDIO_PHASE_BOUND ||
-    audio->phase == AUDIO_PHASE_RELEASING;
+  const bool active = bindingPhaseActiveNL(audio);
   audio->phase = active ? AUDIO_PHASE_RELEASING : audio->phase;
   LG_UNLOCK(audio->lock);
   if (!active)
@@ -1731,7 +1736,11 @@ static void stopWorkerBinding(LGMPAudio * audio)
   {
     drainInbound(audio);
     maintainBinding(audio);
-    if (bindingGone(audio) || !lgmpClientSessionValid(audio->client))
+
+    LG_LOCK(audio->lock);
+    const bool bindingActive = bindingPhaseActiveNL(audio);
+    LG_UNLOCK(audio->lock);
+    if (!bindingActive || !lgmpClientSessionValid(audio->client))
       break;
     lgWaitEvent(audio->event, 1);
   }
@@ -1770,8 +1779,7 @@ static int audioThread(void * opaque)
     if (atomic_load_explicit(&audio->stop, memory_order_acquire))
       break;
     LG_LOCK(audio->lock);
-    const bool active = audio->phase == AUDIO_PHASE_BOUND ||
-      audio->phase == AUDIO_PHASE_RELEASING;
+    const bool active = bindingPhaseActiveNL(audio);
     LG_UNLOCK(audio->lock);
     if (active)
     {

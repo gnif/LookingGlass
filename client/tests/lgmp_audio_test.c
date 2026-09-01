@@ -224,6 +224,12 @@ struct RecordStress
   atomic_uint successes;
 };
 
+struct DisconnectTask
+{
+  LGMPAudio * audio;
+  atomic_bool done;
+};
+
 static void * recordStress(void * opaque)
 {
   struct RecordStress * stress = opaque;
@@ -240,6 +246,14 @@ static void * removeStatusListener(void * opaque)
 {
   struct RecordStress * stress = opaque;
   stress->ops->setStatusListener(stress->audio, NULL, NULL);
+  return NULL;
+}
+
+static void * disconnectAudio(void * opaque)
+{
+  struct DisconnectTask * task = opaque;
+  lgmpAudio_disconnect(task->audio);
+  atomic_store_explicit(&task->done, true, memory_order_release);
   return NULL;
 }
 
@@ -265,6 +279,21 @@ static bool waitCount(struct Fixture * fixture, atomic_uint * value,
     nanosleep(&delay, NULL);
   }
   return atomic_load_explicit(value, memory_order_acquire) >= expected;
+}
+
+static bool waitDone(struct Fixture * fixture, atomic_bool * done,
+    unsigned timeoutMs)
+{
+  const uint64_t deadline = microtime() + (uint64_t)timeoutMs * 1000U;
+  while (microtime() < deadline)
+  {
+    lgmpHostProcess(fixture->host);
+    if (atomic_load_explicit(done, memory_order_acquire))
+      return true;
+    const struct timespec delay = { .tv_nsec = 1000000L };
+    nanosleep(&delay, NULL);
+  }
+  return atomic_load_explicit(done, memory_order_acquire);
 }
 
 static bool fixtureInit(struct Fixture * fixture)
@@ -1210,6 +1239,35 @@ static bool testFaultReleaseReclaim(void)
   return true;
 }
 
+static bool testBoundDisconnect(void)
+{
+  struct Fixture fixture;
+  CHECK(fixtureInit(&fixture));
+  CHECK(beginClaim(&fixture, false));
+  CHECK(createStreams(&fixture));
+  CHECK(bindStreams(&fixture));
+  CHECK(deliverBoundResponse(&fixture, &fixture.claim, true));
+
+  KVMFRAudioMessage message;
+  uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
+  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
+        &message, payload, WAIT_MS));
+
+  struct DisconnectTask task = { .audio = fixture.audio };
+  atomic_init(&task.done, false);
+  pthread_t thread;
+  CHECK(!pthread_create(&thread, NULL, disconnectAudio, &task));
+  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+        &message, payload, WAIT_MS));
+  CHECK(!atomic_load_explicit(&task.done, memory_order_acquire));
+  CHECK(unbindBoth(&fixture));
+  CHECK(waitDone(&fixture, &task.done, WAIT_MS));
+  CHECK(!pthread_join(thread, NULL));
+
+  fixtureCleanup(&fixture);
+  return true;
+}
+
 int main(void)
 {
   debug_init();
@@ -1230,6 +1288,9 @@ int main(void)
   if (!testFaultReleaseReclaim())
     return 1;
   ++passed;
-  printf("PASS %u/5 client LGMP audio integration groups\n", passed);
+  if (!testBoundDisconnect())
+    return 1;
+  ++passed;
+  printf("PASS %u/6 client LGMP audio integration groups\n", passed);
   return 0;
 }
