@@ -114,8 +114,7 @@ NTSTATUS CMiniportWaveRTStream::Initialize(
   m_format = *format;
   m_fingerprint = fingerprint;
 
-  if (m_kind == EndpointKind::Render)
-    status = m_adapter->ConfigureRender(m_fingerprint);
+  status = m_adapter->ConfigureStream(m_kind, m_fingerprint);
   return status;
 }
 
@@ -195,8 +194,7 @@ NTSTATUS CMiniportWaveRTStream::SetFormat(
   m_fingerprint = fingerprint;
   KeReleaseSpinLock(&m_positionLock, oldIrql);
 
-  if (m_kind == EndpointKind::Render)
-    status = m_adapter->ConfigureRender(m_fingerprint);
+  status = m_adapter->ConfigureStream(m_kind, m_fingerprint);
   return status;
 }
 
@@ -244,6 +242,8 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
     if (resetCapture)
       m_adapter->ResetCapture();
 
+    m_adapter->SetStreamState(m_kind, KSSTATE_RUN);
+
     KeAcquireSpinLock(&m_positionLock, &oldIrql);
     if (m_state == KSSTATE_RUN)
       ArmTimerLocked();
@@ -280,6 +280,7 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
   KeReleaseSpinLock(&m_positionLock, oldIrql);
 
   StopTimer();
+  m_adapter->SetStreamState(m_kind, state);
   return STATUS_SUCCESS;
 }
 
@@ -901,6 +902,7 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
     {
       m_eosNotificationSent = true;
       m_state = KSSTATE_PAUSE;
+      m_adapter->SetStreamState(m_kind, KSSTATE_PAUSE);
       m_pendingBytes = 0;
       m_frameRemainder = 0;
       break;
@@ -944,6 +946,7 @@ void CMiniportWaveRTStream::TransferFramesLocked(_In_ ULONGLONG bytes)
     if (m_linearPosition >= m_eosLinearPosition)
     {
       m_state = KSSTATE_PAUSE;
+      m_adapter->SetStreamState(m_kind, KSSTATE_PAUSE);
       return;
     }
 
@@ -997,7 +1000,10 @@ void CMiniportWaveRTStream::TransferFramesLocked(_In_ ULONGLONG bytes)
 
   if (m_kind == EndpointKind::Render && m_eosReceived &&
       m_linearPosition >= m_eosLinearPosition)
+  {
     m_state = KSSTATE_PAUSE;
+    m_adapter->SetStreamState(m_kind, KSSTATE_PAUSE);
+  }
 }
 
 void CMiniportWaveRTStream::SignalNotificationsLocked()

@@ -44,11 +44,12 @@ static const GUID LGAUDIO_BROKER_DEVICE_CLASS_GUID =
     { 0xb4, 0x90, 0x28, 0xc5, 0x30, 0xd2, 0x38, 0xcd } };
 
 static constexpr UINT32 LGAUDIO_BROKER_ABI_VERSION = 1U;
+// The transfer limits in LGAudioBrokerCaps exclude the packet header.
+static constexpr UINT32 LGAUDIO_BROKER_MAX_PAYLOAD_BYTES = 64U * 1024U;
 
 enum LGAudioBrokerCapability : UINT32
 {
   LGAUDIO_BROKER_CAP_CONTROL = 1U << 0,
-  // These remain clear until the corresponding data plane is implemented.
   LGAUDIO_BROKER_CAP_RENDER_READ = 1U << 1,
   LGAUDIO_BROKER_CAP_CAPTURE_WRITE = 1U << 2,
   LGAUDIO_BROKER_CAP_CLOCK_CONTROL = 1U << 3
@@ -68,6 +69,22 @@ enum LGAudioBrokerStreamStateValue : UINT32
   LGAUDIO_BROKER_STREAM_ACQUIRED = 2,
   LGAUDIO_BROKER_STREAM_PAUSED = 3,
   LGAUDIO_BROKER_STREAM_RUNNING = 4
+};
+
+enum LGAudioBrokerStreamFlag : UINT32
+{
+  LGAUDIO_BROKER_STREAM_FORMAT_VALID = 1U << 0
+};
+
+enum LGAudioBrokerPacketDirection : UINT32
+{
+  LGAUDIO_BROKER_PACKET_RENDER = 1,
+  LGAUDIO_BROKER_PACKET_CAPTURE = 2
+};
+
+enum LGAudioBrokerPacketFlag : UINT32
+{
+  LGAUDIO_BROKER_PACKET_DISCONTINUITY = 1U << 0
 };
 
 static constexpr UINT32 IOCTL_LGAUDIO_BROKER_QUERY_CAPS =
@@ -106,10 +123,31 @@ struct LGAudioBrokerFormat
 
 struct LGAudioBrokerStreamState
 {
+  // Changes on format configuration and each transition to STOP.
   UINT64 generation;
   UINT32 state;
   UINT32 flags;
   LGAudioBrokerFormat format;
+};
+
+struct LGAudioBrokerPacketHeader
+{
+  // READ returns this header followed by render payload. WRITE accepts this
+  // header followed by capture payload. size is always the header size.
+  UINT32 size;
+  UINT32 version;
+  UINT32 flags;
+  UINT32 direction;
+  UINT64 adapterGeneration;
+  UINT64 bindingGeneration;
+  UINT64 streamGeneration;
+  // Render sequence is monotonic for the driver lifetime. Capture starts at
+  // zero for each binding/stream-generation pair and must be contiguous.
+  UINT64 sequence;
+  LGAudioBrokerFormat format;
+  UINT32 frameCount;
+  UINT32 payloadBytes;
+  UINT32 reserved[2];
 };
 
 struct LGAudioBrokerCaps
@@ -160,7 +198,15 @@ struct LGAudioBrokerStats
   UINT64 unbindCount;
   UINT64 cleanupCount;
   UINT64 rejectedRequestCount;
-  UINT64 reserved[2];
+  UINT64 renderPacketCount;
+  UINT64 renderByteCount;
+  UINT64 renderDropBytes;
+  UINT64 capturePacketCount;
+  UINT64 captureByteCount;
+  UINT64 captureDropBytes;
+  UINT64 captureUnderrunBytes;
+  UINT64 cancelledReadCount;
+  UINT64 reserved[4];
 };
 
 #pragma pack(pop)
@@ -171,11 +217,16 @@ static_assert(sizeof(LGAudioBrokerFormat) == 16,
   "LGAudio broker format layout changed");
 static_assert(sizeof(LGAudioBrokerStreamState) == 32,
   "LGAudio broker stream-state layout changed");
+static_assert(sizeof(LGAudioBrokerPacketHeader) == 80,
+  "LGAudio broker packet layout changed");
 static_assert(sizeof(LGAudioBrokerCaps) == 64,
   "LGAudio broker capabilities layout changed");
 static_assert(sizeof(LGAudioBrokerState) == 104,
   "LGAudio broker state layout changed");
 static_assert(sizeof(LGAudioBrokerBind) == 48,
   "LGAudio broker binding layout changed");
-static_assert(sizeof(LGAudioBrokerStats) == 80,
+static_assert(sizeof(LGAudioBrokerStats) == 160,
   "LGAudio broker statistics layout changed");
+static_assert(LGAUDIO_BROKER_MAX_PAYLOAD_BYTES >=
+    (192000U / 100U) * 8U * 3U,
+  "LGAudio broker payload cannot hold 10 ms at the maximum format");

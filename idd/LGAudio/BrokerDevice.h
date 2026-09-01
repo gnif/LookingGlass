@@ -21,6 +21,7 @@
 #pragma once
 
 #include "Common.h"
+#include "Formats.h"
 
 class CAudioAdapter;
 
@@ -75,3 +76,19 @@ CAudioAdapter *BrokerDeviceAcquireAdapter(
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
 void BrokerDeviceReleaseAdapter();
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+void BrokerDeviceNotifyStreamChanged(
+  _In_ CAudioAdapter *adapter,
+  _In_ EndpointKind kind);
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+void BrokerDeviceNotifyRenderAvailable(
+  _In_ CAudioAdapter *adapter,
+  _In_ ULONG bytes,
+  _In_ ULONG droppedBytes);
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+void BrokerDeviceRecordCaptureUnderrun(
+  _In_ CAudioAdapter *adapter,
+  _In_ ULONGLONG bytes);

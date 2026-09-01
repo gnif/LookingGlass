@@ -24,6 +24,15 @@
 #include "Common.h"
 #include "RingBuffer.h"
 
+struct AudioStreamSnapshot
+{
+  KSSTATE state;
+  bool formatValid;
+  UCHAR reserved[3];
+  ULONGLONG generation;
+  FormatFingerprint format;
+};
+
 class CAudioAdapter final : public IUnknown
 {
 public:
@@ -33,8 +42,22 @@ public:
   NTSTATUS Initialize();
 
   _IRQL_requires_max_(DISPATCH_LEVEL)
-  NTSTATUS ConfigureRender(
+  NTSTATUS ConfigureStream(
+    _In_ EndpointKind kind,
     _In_ const FormatFingerprint &format);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
+  void SetStreamState(
+    _In_ EndpointKind kind,
+    _In_ KSSTATE state);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
+  void GetStreamSnapshot(
+    _In_ EndpointKind kind,
+    _Out_ AudioStreamSnapshot *snapshot);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
+  void SetBrokerActive(_In_ bool active);
 
   _IRQL_requires_max_(DISPATCH_LEVEL)
   void ResetCapture();
@@ -56,6 +79,24 @@ public:
     _In_ ULONGLONG bytes);
 
   _IRQL_requires_max_(DISPATCH_LEVEL)
+  NTSTATUS ReadRenderFrames(
+    _In_ const FormatFingerprint &format,
+    _In_ ULONGLONG streamGeneration,
+    _Out_writes_bytes_(capacity) BYTE *data,
+    _In_ ULONG capacity,
+    _Out_ PULONG bytesRead,
+    _Out_ bool *discontinuity);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
+  NTSTATUS WriteCaptureFrames(
+    _In_ const FormatFingerprint &format,
+    _In_ ULONGLONG streamGeneration,
+    _In_ bool discontinuity,
+    _In_reads_bytes_(bytes) const BYTE *data,
+    _In_ ULONG bytes,
+    _Out_ PULONG droppedBytes);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
   AudioClockSnapshot GetClockSnapshot() const;
 
   STDMETHODIMP_(NTSTATUS) QueryInterface(
@@ -66,8 +107,15 @@ public:
 
 private:
   volatile LONG m_refCount;
+  volatile LONG m_brokerActive;
+  volatile LONG m_renderDiscontinuity;
+  KSPIN_LOCK m_transportLock;
+  KSPIN_LOCK m_streamStateLock;
+  AudioStreamSnapshot m_renderState;
+  AudioStreamSnapshot m_captureState;
   CAudioClock m_clock;
-  CAudioRingBuffer m_ring;
+  CAudioRingBuffer m_renderRing;
+  CAudioRingBuffer m_captureRing;
 };
 
 NTSTATUS StartAudioDevice(
