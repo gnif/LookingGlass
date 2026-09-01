@@ -29,9 +29,14 @@
 #include "transport/lgmp/CLGMPControl.h"
 #include "transport/lgmp/CLGMPHost.h"
 
+#include <avrt.h>
 #include <initializer_list>
 #include <limits>
 #include <string.h>
+
+#ifndef CREATE_WAITABLE_TIMER_HIGH_RESOLUTION
+  #define CREATE_WAITABLE_TIMER_HIGH_RESOLUTION 0x00000002
+#endif
 
 namespace
 {
@@ -71,6 +76,13 @@ namespace
     KVMFR_AUDIO_MESSAGE_CLOCK_STABLE;
   constexpr size_t AUDIO_SHARED_MEMORY_PREFLIGHT =
     2U * 1024U * 1024U;
+
+  bool ArmAudioPollTimer(HANDLE timer, uint32_t waitUs)
+  {
+    LARGE_INTEGER due = {};
+    due.QuadPart = -static_cast<LONGLONG>(waitUs) * 10;
+    return SetWaitableTimer(timer, &due, 0, nullptr, nullptr, FALSE) != FALSE;
+  }
 
   uint32_t ChannelCount(uint32_t mask)
   {
@@ -246,6 +258,199 @@ void CLGMPAudioTransport::FreeStreams()
   m_hostToClientDescriptor = {};
 }
 
+DWORD CALLBACK CLGMPAudioTransport::InboundThreadProc(void * context)
+{
+  static_cast<CLGMPAudioTransport *>(context)->InboundThread();
+  return 0;
+}
+
+bool CLGMPAudioTransport::StartInboundWorker()
+{
+  m_inboundStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  m_inboundWakeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  m_inboundPollTimer = CreateWaitableTimerExW(nullptr, nullptr,
+    CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+  if (!m_inboundPollTimer)
+    m_inboundPollTimer = CreateWaitableTimerExW(
+      nullptr, nullptr, 0, TIMER_ALL_ACCESS);
+
+  if (!m_inboundStopEvent || !m_inboundWakeEvent ||
+      !m_inboundPollTimer)
+  {
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to create LGMP audio worker resources");
+    if (m_inboundPollTimer)
+      CloseHandle(m_inboundPollTimer);
+    if (m_inboundWakeEvent)
+      CloseHandle(m_inboundWakeEvent);
+    if (m_inboundStopEvent)
+      CloseHandle(m_inboundStopEvent);
+    m_inboundPollTimer = nullptr;
+    m_inboundWakeEvent = nullptr;
+    m_inboundStopEvent = nullptr;
+    return false;
+  }
+
+  m_inboundThread = CreateThread(nullptr, 0, InboundThreadProc,
+    this, 0, nullptr);
+  if (!m_inboundThread)
+  {
+    DEBUG_ERROR_HR(GetLastError(),
+      "Failed to create LGMP audio worker");
+    CloseHandle(m_inboundPollTimer);
+    CloseHandle(m_inboundWakeEvent);
+    CloseHandle(m_inboundStopEvent);
+    m_inboundPollTimer = nullptr;
+    m_inboundWakeEvent = nullptr;
+    m_inboundStopEvent = nullptr;
+    return false;
+  }
+  return true;
+}
+
+void CLGMPAudioTransport::StopInboundWorker()
+{
+  HANDLE thread = nullptr;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    m_inboundStopping = true;
+    thread = m_inboundThread;
+    if (m_inboundStopEvent)
+      SetEvent(m_inboundStopEvent);
+  }
+  if (thread)
+    WaitForSingleObject(thread, INFINITE);
+
+  CSRWExclusiveLock lock(m_lock);
+  if (m_inboundThread)
+    CloseHandle(m_inboundThread);
+  if (m_inboundPollTimer)
+    CloseHandle(m_inboundPollTimer);
+  if (m_inboundWakeEvent)
+    CloseHandle(m_inboundWakeEvent);
+  if (m_inboundStopEvent)
+    CloseHandle(m_inboundStopEvent);
+  m_inboundThread    = nullptr;
+  m_inboundPollTimer = nullptr;
+  m_inboundWakeEvent = nullptr;
+  m_inboundStopEvent = nullptr;
+}
+
+void CLGMPAudioTransport::InboundThread()
+{
+  DWORD avTask = 0;
+  HANDLE avTaskHandle =
+    AvSetMmThreadCharacteristicsW(L"Pro Audio", &avTask);
+  if (avTaskHandle &&
+      !AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH))
+    DEBUG_WARN("Failed to raise audio ingress MMCSS priority: %lu",
+      GetLastError());
+
+  LGMPStreamPollState streamPoll = {};
+  LGMPStreamPollConfig pollConfig = {};
+  pollConfig.spinCount = 64U;
+  pollConfig.minWaitUs = 25U;
+  pollConfig.maxWaitUs = 250U;
+  const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+    pollConfig);
+  if (pollStatus != LGMP_OK)
+  {
+    DEBUG_ERROR("Failed to initialize LGMP audio polling: %s",
+      lgmpStatusString(pollStatus));
+    if (avTaskHandle)
+      AvRevertMmThreadCharacteristics(avTaskHandle);
+    return;
+  }
+
+  const HANDLE idleWaits[] =
+    { m_inboundStopEvent, m_inboundWakeEvent };
+  const HANDLE activeWaits[] =
+    { m_inboundStopEvent, m_inboundWakeEvent, m_inboundPollTimer };
+  for (;;)
+  {
+    if (WaitForSingleObject(m_inboundStopEvent, 0) == WAIT_OBJECT_0)
+      break;
+
+    uint64_t before = 0;
+    uint64_t hostBefore = 0;
+    bool active = false;
+    bool playbackCreditAcquired = false;
+    {
+      CSRWSharedLock lock(m_lock);
+      before = m_inboundActivitySerial;
+      hostBefore = m_hostSequence;
+      active = m_ownerState != OwnerState::NONE;
+    }
+
+    if (active)
+    {
+      DrainInbound();
+      {
+        CSRWExclusiveLock lock(m_lock);
+        const bool hadPlaybackCredit = m_playbackCreditValid;
+        PumpState();
+        CheckPlaybackCredit();
+        playbackCreditAcquired = !hadPlaybackCredit &&
+          m_playbackCreditValid;
+      }
+      NotifyPlaybackReady();
+    }
+
+    {
+      CSRWSharedLock lock(m_lock);
+      if (before != m_inboundActivitySerial ||
+          hostBefore != m_hostSequence || playbackCreditAcquired)
+        lgmpStreamPollActivity(&streamPoll);
+      active = m_ownerState != OwnerState::NONE;
+    }
+
+    if (!active)
+    {
+      const DWORD wait = WaitForMultipleObjects(
+        _countof(idleWaits), idleWaits, FALSE, INFINITE);
+      if (wait == WAIT_OBJECT_0)
+        break;
+      if (wait != WAIT_OBJECT_0 + 1)
+      {
+        DEBUG_ERROR_HR(GetLastError(),
+          "LGMP audio worker wait failed");
+        break;
+      }
+      lgmpStreamPollActivity(&streamPoll);
+      continue;
+    }
+
+    const uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+    if (!waitUs)
+      continue;
+    if (!ArmAudioPollTimer(m_inboundPollTimer, waitUs))
+    {
+      DEBUG_ERROR_HR(GetLastError(),
+        "Failed to arm LGMP audio timer");
+      break;
+    }
+
+    const DWORD wait = WaitForMultipleObjects(
+      _countof(activeWaits), activeWaits, FALSE, INFINITE);
+    if (wait == WAIT_OBJECT_0)
+      break;
+    if (wait == WAIT_OBJECT_0 + 1)
+    {
+      lgmpStreamPollActivity(&streamPoll);
+      continue;
+    }
+    if (wait != WAIT_OBJECT_0 + 2)
+    {
+      DEBUG_ERROR_HR(GetLastError(),
+        "LGMP audio worker wait failed");
+      break;
+    }
+  }
+
+  if (avTaskHandle)
+    AvRevertMmThreadCharacteristics(avTaskHandle);
+}
+
 bool CLGMPAudioTransport::Initialize()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
@@ -288,6 +493,15 @@ bool CLGMPAudioTransport::Initialize()
 
   m_state.generation = 1;
   m_initialized = true;
+  m_inboundStopping = false;
+  if (!StartInboundWorker())
+  {
+    m_initialized = false;
+    for (ResponseMemory& response : m_responseMemory)
+      lgmpHostMemFree(&response.memory);
+    FreeStreams();
+    return false;
+  }
   return true;
 }
 
@@ -535,6 +749,7 @@ void CLGMPAudioTransport::ReleasePendingCapture()
       status != LGMP_ERR_STREAM_STALE)
     Fail("lgmpHostStreamReadRelease(audio)", status);
   m_pendingCapture = {};
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
 }
 
 void CLGMPAudioTransport::CancelPlaybackCredit()
@@ -594,7 +809,10 @@ void CLGMPAudioTransport::BeginRelease(const char * reason)
     m_announcedPlayback  = 0;
     m_announcedCapture   = 0;
     ClearBlockedPlayback(true);
-    ReleasePendingCapture();
+    if (!m_captureCallbackInFlight)
+      ReleasePendingCapture();
+    if (!m_inboundStopping && m_inboundWakeEvent)
+      SetEvent(m_inboundWakeEvent);
 
     for (PendingResponse& pending : m_pendingResponse)
       if (pending.valid && pending.clientID == m_ownerClientID &&
@@ -634,6 +852,7 @@ void CLGMPAudioTransport::ResetOwner()
   m_nextClientSequence  = 0;
   m_clientSequenceKnown = false;
   m_captureDiscontinuity = false;
+  m_captureCallbackInFlight = false;
   m_pendingCapture       = {};
   m_ownerSerial = NextSerial(m_ownerSerial);
 }
@@ -691,6 +910,8 @@ void CLGMPAudioTransport::InitializeOwner(uint32_t clientID,
   m_pendingCapture       = {};
   m_ownerSerial = NextSerial(m_ownerSerial);
   RenewLease();
+  if (!m_inboundStopping && m_inboundWakeEvent)
+    SetEvent(m_inboundWakeEvent);
 }
 
 void CLGMPAudioTransport::HandleClaim(
@@ -1137,6 +1358,7 @@ bool CLGMPAudioTransport::PrepareCapture(
   m_pendingCapture.readySerial = m_captureReadySerial;
   m_nextClientSequence = message.sequence + 1;
   m_clientSequenceKnown = true;
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
   return true;
 }
 
@@ -1152,6 +1374,32 @@ void CLGMPAudioTransport::DrainInbound()
     uint64_t ownerSerial = 0;
     {
       CSRWExclusiveLock lock(m_lock);
+      if (m_ownerState == OwnerState::RELEASING)
+      {
+        ReleasePendingCapture();
+        LGMPStreamBuffer buffer = {};
+        const LGMP_STATUS status = lgmpHostStreamReadPeek(
+          m_clientToHostStream, &buffer);
+        if (status == LGMP_ERR_STREAM_EMPTY ||
+            status == LGMP_ERR_STREAM_UNBOUND ||
+            status == LGMP_ERR_STREAM_STALE)
+          return;
+        if (status != LGMP_OK)
+        {
+          Fail("lgmpHostStreamReadPeek(audio release)", status);
+          return;
+        }
+        const LGMP_STATUS release = lgmpHostStreamReadRelease(
+          m_clientToHostStream, &buffer);
+        if (release != LGMP_OK)
+        {
+          Fail("lgmpHostStreamReadRelease(audio release)", release);
+          return;
+        }
+        m_inboundActivitySerial =
+          NextSerial(m_inboundActivitySerial);
+        continue;
+      }
       if (m_ownerState != OwnerState::BOUND ||
           !m_responseAdmitted || m_failed)
         return;
@@ -1216,6 +1464,8 @@ void CLGMPAudioTransport::DrainInbound()
           }
           m_nextClientSequence = message.sequence + 1;
           m_clientSequenceKnown = true;
+          m_inboundActivitySerial =
+            NextSerial(m_inboundActivitySerial);
           return true;
         };
 
@@ -1385,6 +1635,7 @@ void CLGMPAudioTransport::DrainInbound()
             return;
         }
       }
+      m_captureCallbackInFlight = target && callCapture;
     }
 
     AudioResult result = AudioResult::UNAVAILABLE;
@@ -1396,9 +1647,15 @@ void CLGMPAudioTransport::DrainInbound()
 
     {
       CSRWExclusiveLock lock(m_lock);
+      if (callCapture)
+        m_captureCallbackInFlight = false;
       if (ownerSerial != m_ownerSerial ||
           m_ownerState != OwnerState::BOUND)
+      {
+        if (m_pendingCapture.valid)
+          ReleasePendingCapture();
         return;
+      }
       if (callClock)
       {
         if (result == AudioResult::FAILED)
@@ -1425,6 +1682,8 @@ void CLGMPAudioTransport::DrainInbound()
         return;
       }
       m_pendingCapture = {};
+      m_inboundActivitySerial =
+        NextSerial(m_inboundActivitySerial);
       m_captureDiscontinuity = result != AudioResult::ACCEPTED;
       if (result == AudioResult::FAILED ||
           result == AudioResult::REJECTED)
@@ -1531,8 +1790,6 @@ void CLGMPAudioTransport::Process()
     PumpResponses();
   }
 
-  DrainInbound();
-
   {
     CSRWExclusiveLock lock(m_lock);
     MaintainOwner(GetTickCount64());
@@ -1580,6 +1837,7 @@ void CLGMPAudioTransport::Stop()
 void CLGMPAudioTransport::TransportStop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
+  StopInboundWorker();
   CSRWExclusiveLock callbackLock(m_callbackLock);
   CSRWExclusiveLock lock(m_lock);
   m_started = false;
@@ -1622,6 +1880,8 @@ void CLGMPAudioTransport::AudioState(
   m_stateKnown = true;
   if (m_ownerState == OwnerState::BOUND && m_responseAdmitted)
     m_statusDirty = true;
+  if (!m_inboundStopping && m_inboundWakeEvent)
+    SetEvent(m_inboundWakeEvent);
 }
 
 AudioResult CLGMPAudioTransport::SendPlayback(
@@ -1754,5 +2014,9 @@ void CLGMPAudioTransport::CaptureReceiveReady()
 {
   CSRWExclusiveLock lock(m_lock);
   if (m_started)
+  {
     m_captureReadySerial = NextSerial(m_captureReadySerial);
+    if (!m_inboundStopping && m_inboundWakeEvent)
+      SetEvent(m_inboundWakeEvent);
+  }
 }

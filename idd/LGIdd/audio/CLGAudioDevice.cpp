@@ -26,6 +26,7 @@
 
 #include <Windows.h>
 
+#include <avrt.h>
 #include <algorithm>
 #include <memory>
 #include <new>
@@ -1078,6 +1079,14 @@ private:
 
   void Thread()
   {
+    DWORD avTask = 0;
+    HANDLE avTaskHandle =
+      AvSetMmThreadCharacteristicsW(L"Pro Audio", &avTask);
+    if (avTaskHandle &&
+        !AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH))
+      DEBUG_WARN("Failed to raise audio broker MMCSS priority: %lu",
+        GetLastError());
+
     while (!Stopping())
     {
       if (m_handle == INVALID_HANDLE_VALUE)
@@ -1131,6 +1140,8 @@ private:
       CloseBroker(false);
     }
     FinishAbsentDeactivation();
+    if (avTaskHandle)
+      AvRevertMmThreadCharacteristics(avTaskHandle);
   }
 
   void CloseEvents()

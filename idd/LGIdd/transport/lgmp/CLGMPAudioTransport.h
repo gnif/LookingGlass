@@ -106,6 +106,11 @@ private:
   CSRWLock m_lifecycleLock;
   CSRWLock m_callbackLock;
   CSRWLock m_lock;
+  HANDLE m_inboundStopEvent = nullptr;
+  HANDLE m_inboundWakeEvent = nullptr;
+  HANDLE m_inboundPollTimer = nullptr;
+  HANDLE m_inboundThread = nullptr;
+  bool m_inboundStopping = false;
   IAudioTarget * m_target = nullptr;
   bool m_initialized = false;
   bool m_started = false;
@@ -135,6 +140,7 @@ private:
   uint64_t m_nextClientSequence = 0;
   bool m_clientSequenceKnown = false;
   bool m_captureDiscontinuity = false;
+  bool m_captureCallbackInFlight = false;
   bool m_playbackBlocked = false;
   bool m_playbackReadyPending = false;
   bool m_playbackCreditValid = false;
@@ -142,10 +148,15 @@ private:
   AudioPacket m_blockedPlayback = {};
   size_t m_blockedPlaybackSize = 0;
   uint64_t m_captureReadySerial = 0;
+  uint64_t m_inboundActivitySerial = 0;
   PendingCapture m_pendingCapture;
 
   bool InitializeStreams();
   void FreeStreams();
+  bool StartInboundWorker();
+  void StopInboundWorker();
+  void InboundThread();
+  static DWORD CALLBACK InboundThreadProc(void * context);
   bool BindStreams(uint32_t clientID);
   bool TryUnbindStreams();
   void ForceUnbindStreams();
