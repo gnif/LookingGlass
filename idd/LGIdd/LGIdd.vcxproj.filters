@@ -17,6 +17,9 @@
     <Filter Include="Capture">
       <UniqueIdentifier>{202B79B2-5CCF-4AD4-B4C5-F5602419683D}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Audio">
+      <UniqueIdentifier>{86750913-8C21-4F76-8E51-9737D4963E50}</UniqueIdentifier>
+    </Filter>
     <Filter Include="D3D">
       <UniqueIdentifier>{4B3C58D3-5F40-49AB-894E-B83EB44E6CF5}</UniqueIdentifier>
     </Filter>
@@ -165,6 +168,15 @@
     </ClInclude>
     <ClInclude Include="postprocess\effect\CRGB24Effect.h">
       <Filter>Post-processing\Effects</Filter>
+    </ClInclude>
+    <ClInclude Include="audio\CLGAudioDevice.h">
+      <Filter>Audio</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\CAudioHub.h">
+      <Filter>Transport</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\IAudioSource.h">
+      <Filter>Transport</Filter>
     </ClInclude>
     <ClInclude Include="transport\CClipboardHub.h">
       <Filter>Transport</Filter>
@@ -377,6 +389,12 @@
     </ClCompile>
     <ClCompile Include="postprocess\effect\CRGB24Effect.cpp">
       <Filter>Post-processing\Effects</Filter>
+    </ClCompile>
+    <ClCompile Include="audio\CLGAudioDevice.cpp">
+      <Filter>Audio</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\CAudioHub.cpp">
+      <Filter>Transport</Filter>
     </ClCompile>
     <ClCompile Include="transport\CClipboardHub.cpp">
       <Filter>Transport</Filter>

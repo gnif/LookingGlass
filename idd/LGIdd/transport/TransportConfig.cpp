@@ -127,6 +127,8 @@ namespace
       service = TRANSPORT_SERVICE_INPUT;
     else if (Equal(name, L"clipboard"))
       service = TRANSPORT_SERVICE_CLIPBOARD;
+    else if (Equal(name, L"audio"))
+      service = TRANSPORT_SERVICE_AUDIO;
     else
       return false;
 

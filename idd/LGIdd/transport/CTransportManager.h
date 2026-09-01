@@ -22,6 +22,7 @@
 
 #include "Atomic.h"
 #include "CSRWLock.h"
+#include "transport/CAudioHub.h"
 #include "transport/CClipboardHub.h"
 #include "transport/CControlHub.h"
 #include "transport/CFrameHub.h"
@@ -113,6 +114,9 @@ private:
     bool                        clipboardAdded   = false;
     bool                        clipboardFailed  = false;
     bool                        clipboardAbsent  = false;
+    bool                        audioAdded        = false;
+    bool                        audioAbsent       = false;
+    uint64_t                    audioRetryAt      = 0;
     bool                        frameAdded       = false;
     bool                        frameLegacy      = false;
     ITexSink                  * texSink          = nullptr;
@@ -137,6 +141,7 @@ private:
   CTexHub                             m_tex;
   CInputHub                           m_input;
   CClipboardHub                       m_clipboard;
+  CAudioHub                           m_audio;
   CRecoveryHub                        m_recovery;
   Entry                              * m_primary     = nullptr;
   bool                                 m_initialized = false;
@@ -165,6 +170,7 @@ private:
   OpenResult OpenEntry(Entry& entry);
   bool InitializeEntry(Entry& entry);
   bool SetupEntry(Entry& entry, size_t alignment);
+  void AddAudioService(Entry& entry);
   bool AddServices(Entry& entry);
   void HandleServiceFailures();
   void RetryEntry(Entry& entry, uint64_t now, bool initialized,

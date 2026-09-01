@@ -30,6 +30,7 @@
 #include <stdint.h>
 
 class IClipboardSource;
+class IAudioSource;
 class IControlSink;
 class IFrameSink;
 class IInputSource;
@@ -174,7 +175,9 @@ public:
   }
   virtual DirectFrameBufferMemory GetDirectMemory() const = 0;
 
-  // Component pointers are fixed after Setup and remain valid until Stop.
+  // Audio is fixed after Initialize. The remaining component pointers are
+  // fixed after Setup. All remain valid until Stop.
+  virtual IAudioSource * Audio() { return nullptr; }
   virtual IFrameSink * FrameSink() { return nullptr; }
   virtual ITexSink * TexSink() { return nullptr; }
   virtual IControlSink * Control() { return nullptr; }

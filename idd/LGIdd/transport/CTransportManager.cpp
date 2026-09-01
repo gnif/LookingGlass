@@ -26,6 +26,7 @@
 #include "ipc/CPipeServer.h"
 #include "Seq.h"
 #include "transport/IClipboardSource.h"
+#include "transport/IAudioSource.h"
 #include "transport/ITexStage.h"
 
 #include <Windows.h>
@@ -489,7 +490,67 @@ bool CTransportManager::InitializeEntry(Entry& entry)
     if (entry.id == id && entry.epoch == epoch && entry.recoveryAttached)
       entry.syncPending = true;
   }
+  AddAudioService(entry);
   return true;
+}
+
+void CTransportManager::AddAudioService(Entry& entry)
+{
+  std::shared_ptr<ITransport> transport;
+  BackendId id       = 0;
+  uint32_t epoch     = 0;
+  uint32_t services  = 0;
+  bool audioAdded    = false;
+  bool audioAbsent   = false;
+  uint64_t retryAt   = 0;
+  State state        = State::CLOSED;
+  {
+    CSRWSharedLock entryLock(entry.lock);
+    transport    = entry.transport;
+    id           = entry.id;
+    epoch        = entry.epoch;
+    services     = entry.config.services;
+    audioAdded   = entry.audioAdded;
+    audioAbsent  = entry.audioAbsent;
+    retryAt      = entry.audioRetryAt;
+    state        = entry.state;
+  }
+
+  if (state != State::INITIALIZED && state != State::READY)
+    return;
+  if (!(services & TRANSPORT_SERVICE_AUDIO))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    entry.audioAbsent = true;
+    return;
+  }
+  if (!transport || audioAdded || audioAbsent ||
+      GetTickCount64() < retryAt)
+    return;
+
+  IAudioSource * audio = transport->Audio();
+  if (!audio)
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    if (entry.transport == transport && entry.epoch == epoch)
+      entry.audioAbsent = true;
+    return;
+  }
+
+  if (m_audio.Bind(id, epoch, *audio))
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    if (entry.transport == transport && entry.epoch == epoch)
+    {
+      entry.audioAdded   = true;
+      entry.audioRetryAt = 0;
+    }
+    return;
+  }
+
+  CSRWExclusiveLock entryLock(entry.lock);
+  if (entry.transport == transport && entry.epoch == epoch)
+    entry.audioRetryAt = GetTickCount64() + SERVICE_RETRY_DELAY_MS;
 }
 
 bool CTransportManager::AddServices(Entry& entry)
@@ -665,6 +726,28 @@ bool CTransportManager::AddServices(Entry& entry)
 
 void CTransportManager::HandleServiceFailures()
 {
+  SourceKey audioSource;
+  while (m_audio.TakeFailure(audioSource))
+  {
+    Entry * entries[FRAME_MAX_SINKS] = {};
+    const unsigned count = Entries(entries);
+    for (unsigned i = 0; i < count; ++i)
+    {
+      Entry& entry = *entries[i];
+      {
+        CSRWExclusiveLock entryLock(entry.lock);
+        if (entry.id != audioSource.backend ||
+            entry.epoch != audioSource.epoch || !entry.audioAdded)
+          continue;
+        entry.audioAdded   = false;
+        entry.audioRetryAt =
+          GetTickCount64() + SERVICE_RETRY_DELAY_MS;
+      }
+      m_audio.Unbind(audioSource.backend, audioSource.epoch);
+      break;
+    }
+  }
+
   BackendId frameId = 0;
   uint32_t frameEpoch = 0;
   while (m_tex.TakeFailure(frameId, frameEpoch))
@@ -840,6 +923,7 @@ void CTransportManager::RemoveServices(Entry& entry)
   bool      controlAdded   = false;
   bool      inputAdded     = false;
   bool      clipboardAdded = false;
+  bool      audioAdded     = false;
   {
     CSRWExclusiveLock entryLock(entry.lock);
     id                   = entry.id;
@@ -849,16 +933,22 @@ void CTransportManager::RemoveServices(Entry& entry)
     controlAdded         = entry.controlAdded;
     inputAdded           = entry.inputAdded;
     clipboardAdded       = entry.clipboardAdded;
+    audioAdded           = entry.audioAdded;
     entry.frameAdded     = false;
     entry.frameLegacy    = false;
     entry.texSink        = nullptr;
     entry.controlAdded   = false;
     entry.inputAdded     = false;
     entry.clipboardAdded = false;
+    entry.audioAdded     = false;
+    entry.audioAbsent    = false;
+    entry.audioRetryAt   = 0;
     entry.frameRetryAt   = 0;
   }
 
   m_input.RevokeInteraction(id, epoch);
+  if (audioAdded)
+    m_audio.Unbind(id, epoch);
   m_tex.Drop(id, epoch);
   if (inputAdded)
     m_input.Unbind(id, epoch);
@@ -905,6 +995,8 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.inputAbsent       = false;
     entry.clipboardFailed   = false;
     entry.clipboardAbsent   = false;
+    entry.audioAbsent       = false;
+    entry.audioRetryAt      = 0;
     entry.frameAbsent       = false;
     entry.serviceRetryAt    = 0;
     Seq::Inc(entry.epoch);
@@ -1542,6 +1634,7 @@ ITransport::ProcessResult CTransportManager::Process(
       continue;
 
     RetryEntry(entry, now, initialized, setup, alignment);
+    AddAudioService(entry);
 
     std::shared_ptr<ITransport> transport;
     BackendId id = 0;
@@ -1685,6 +1778,7 @@ void CTransportManager::Stop()
 
   m_input.Stop();
   m_clipboard.Stop();
+  m_audio.Stop();
 
   for (unsigned i = count; i > 0; --i)
   {
