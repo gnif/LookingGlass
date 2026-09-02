@@ -811,6 +811,89 @@ static bool testRetiredClaim(void)
   return true;
 }
 
+static bool testPlaybackRestartSameGeneration(void)
+{
+  struct Fixture fixture;
+  CHECK(fixtureInit(&fixture));
+  CHECK(beginClaim(&fixture, false));
+  CHECK(createStreams(&fixture));
+  CHECK(bindStreams(&fixture));
+  CHECK(deliverBoundResponse(&fixture, &fixture.claim, true));
+
+  KVMFRAudioMessage message;
+  uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
+  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
+        &message, payload, WAIT_MS));
+
+  const uint64_t wireGeneration = UINT64_C(0x300000001);
+  const KVMFRAudioFormat format = makeFormat(
+      KVMFR_AUDIO_CHANNEL_FRONT_LEFT, KVMFR_AUDIO_SAMPLE_S24_LE);
+  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
+        wireGeneration, 0, 0, 0, 0, 0,
+        &format, sizeof(format)));
+  CHECK(sendStatus(&fixture, true, KVMFR_AUDIO_CAP_PLAYBACK,
+        wireGeneration, &format, 0, NULL));
+  CHECK(waitCount(&fixture, &fixture.trace.statusCount, 2, WAIT_MS));
+  CHECK(fixture.ops->attach(fixture.audio, &eventOps, &fixture.trace));
+  CHECK(waitCount(&fixture, &fixture.trace.playStartCount, 1, WAIT_MS));
+
+  pthread_mutex_lock(&fixture.trace.mutex);
+  const uint32_t oldLocalGeneration = fixture.trace.playGeneration;
+  const unsigned eventBefore        = fixture.trace.eventCount;
+  pthread_mutex_unlock(&fixture.trace.mutex);
+  CHECK(oldLocalGeneration != 0);
+
+  uint8_t pcm[12];
+  for (unsigned i = 0; i < sizeof(pcm); ++i)
+    pcm[i] = (uint8_t)(0xa0U + i);
+
+  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
+        wireGeneration, 0, 0, 0, 0, 0, NULL, 0));
+  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
+        wireGeneration, 0, 0, 0, 0, 0,
+        &format, sizeof(format)));
+  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
+        wireGeneration, 0, 0, 0, 0, 4, pcm, sizeof(pcm)));
+
+  CHECK(waitCount(&fixture, &fixture.trace.playStopCount, 1, WAIT_MS));
+  CHECK(waitCount(&fixture, &fixture.trace.playStartCount, 2, WAIT_MS));
+  CHECK(waitCount(&fixture, &fixture.trace.playDataCount, 1, WAIT_MS));
+
+  pthread_mutex_lock(&fixture.trace.mutex);
+  const unsigned eventCount          = fixture.trace.eventCount;
+  const struct TraceEvent stopEvent  = fixture.trace.events[eventBefore];
+  const struct TraceEvent startEvent = fixture.trace.events[eventBefore + 1];
+  const struct TraceEvent dataEvent  = fixture.trace.events[eventBefore + 2];
+  const uint32_t dataGeneration      = fixture.trace.playGeneration;
+  const size_t dataFrames            = fixture.trace.playFrames;
+  uint8_t received[sizeof(pcm)];
+  memcpy(received, fixture.trace.playData, sizeof(received));
+  pthread_mutex_unlock(&fixture.trace.mutex);
+
+  CHECK(eventCount == eventBefore + 3);
+  CHECK(stopEvent.kind == TRACE_PLAY_STOP);
+  CHECK(stopEvent.generation == oldLocalGeneration);
+  CHECK(startEvent.kind == TRACE_PLAY_START);
+  CHECK(startEvent.generation != 0);
+  CHECK(startEvent.generation != oldLocalGeneration);
+  CHECK(dataEvent.kind == TRACE_PLAY_DATA);
+  CHECK(dataEvent.generation == startEvent.generation);
+  CHECK(dataGeneration == startEvent.generation);
+  CHECK(dataFrames == 4);
+  CHECK(!memcmp(received, pcm, sizeof(pcm)));
+
+  fixture.ops->detach(fixture.audio);
+  fixture.ops->setStatusListener(fixture.audio, NULL, NULL);
+  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+        &message, payload, WAIT_MS));
+  CHECK(unbindBoth(&fixture));
+  const struct timespec settle = { .tv_nsec = 30000000L };
+  nanosleep(&settle, NULL);
+
+  fixtureCleanup(&fixture);
+  return true;
+}
+
 static bool testDataPlane(void)
 {
   static const LG_AudioChannel expectedChannels[KVMFR_AUDIO_MAX_CHANNELS] =
@@ -1279,6 +1362,9 @@ int main(void)
   if (!testRetiredClaim())
     return 1;
   ++passed;
+  if (!testPlaybackRestartSameGeneration())
+    return 1;
+  ++passed;
   if (!testDataPlane())
     return 1;
   ++passed;
@@ -1291,6 +1377,6 @@ int main(void)
   if (!testBoundDisconnect())
     return 1;
   ++passed;
-  printf("PASS %u/6 client LGMP audio integration groups\n", passed);
+  printf("PASS %u/7 client LGMP audio integration groups\n", passed);
   return 0;
 }
