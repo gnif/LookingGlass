@@ -802,12 +802,12 @@ void CLGMPAudioTransport::BeginRelease(const char * reason)
   {
     DEBUG_INFO("Audio owner %u generation %u releasing: %s",
       m_ownerClientID, m_ownerGeneration, reason);
-    m_ownerState       = OwnerState::RELEASING;
-    m_releaseGeneration = m_state.generation;
-    m_deactivationIssued = false;
-    m_statusDirty        = false;
-    m_announcedPlayback  = 0;
-    m_announcedCapture   = 0;
+    m_ownerState          = OwnerState::RELEASING;
+    m_releaseGeneration   = m_state.generation;
+    m_deactivationIssued  = false;
+    m_statusDirty         = false;
+    m_announcedPlayback   = 0;
+    m_announcedCapture    = 0;
     ClearBlockedPlayback(true);
     if (!m_captureCallbackInFlight)
       ReleasePendingCapture();
@@ -833,28 +833,28 @@ void CLGMPAudioTransport::ResetOwner()
       break;
     }
 
-  m_ownerState          = OwnerState::NONE;
-  m_ownerClientID       = 0;
-  m_ownerGeneration     = 0;
-  m_clientCapabilities  = 0;
-  m_ownerToken          = 0;
-  m_ownerDeadline       = 0;
-  m_releaseGeneration   = 0;
-  m_responseAdmitted    = false;
-  m_clientReady         = false;
-  m_activationIssued    = false;
-  m_deactivationIssued  = false;
-  m_ownerResponse       = {};
-  m_statusDirty         = false;
-  m_announcedPlayback   = 0;
-  m_announcedCapture    = 0;
-  m_hostSequence        = 0;
-  m_nextClientSequence  = 0;
-  m_clientSequenceKnown = false;
-  m_captureDiscontinuity = false;
+  m_ownerState              = OwnerState::NONE;
+  m_ownerClientID           = 0;
+  m_ownerGeneration         = 0;
+  m_clientCapabilities      = 0;
+  m_ownerToken              = 0;
+  m_ownerDeadline           = 0;
+  m_releaseGeneration       = 0;
+  m_responseAdmitted        = false;
+  m_clientReady             = false;
+  m_activationIssued        = false;
+  m_deactivationIssued      = false;
+  m_ownerResponse           = {};
+  m_statusDirty             = false;
+  m_announcedPlayback       = 0;
+  m_announcedCapture        = 0;
+  m_hostSequence            = 0;
+  m_nextClientSequence      = 0;
+  m_clientSequenceKnown     = false;
+  m_captureDiscontinuity    = false;
   m_captureCallbackInFlight = false;
-  m_pendingCapture       = {};
-  m_ownerSerial = NextSerial(m_ownerSerial);
+  m_pendingCapture          = {};
+  m_ownerSerial             = NextSerial(m_ownerSerial);
 }
 
 void CLGMPAudioTransport::MaintainOwner(uint64_t now)
@@ -890,25 +890,25 @@ void CLGMPAudioTransport::MaintainOwner(uint64_t now)
 void CLGMPAudioTransport::InitializeOwner(uint32_t clientID,
   const KVMFRAudioClaim& claim)
 {
-  m_ownerState         = OwnerState::BOUND;
-  m_ownerClientID      = clientID;
-  m_ownerGeneration    = claim.requestGeneration;
-  m_clientCapabilities = claim.clientCapabilities;
-  m_ownerToken         = claim.claimToken;
-  m_responseAdmitted   = false;
-  m_clientReady        = false;
-  m_activationIssued   = false;
-  m_deactivationIssued = false;
-  m_statusDirty        = true;
-  m_announcedPlayback  = 0;
-  m_announcedCapture   = 0;
-  m_hostSequence       = 0;
-  m_nextClientSequence = 0;
-  m_clientSequenceKnown = false;
-  m_captureDiscontinuity = false;
+  m_ownerState             = OwnerState::BOUND;
+  m_ownerClientID          = clientID;
+  m_ownerGeneration        = claim.requestGeneration;
+  m_clientCapabilities     = claim.clientCapabilities;
+  m_ownerToken             = claim.claimToken;
+  m_responseAdmitted       = false;
+  m_clientReady            = false;
+  m_activationIssued       = false;
+  m_deactivationIssued     = false;
+  m_statusDirty            = true;
+  m_announcedPlayback      = 0;
+  m_announcedCapture       = 0;
+  m_hostSequence           = 0;
+  m_nextClientSequence     = 0;
+  m_clientSequenceKnown    = false;
+  m_captureDiscontinuity   = false;
   ClearBlockedPlayback(false);
-  m_pendingCapture       = {};
-  m_ownerSerial = NextSerial(m_ownerSerial);
+  m_pendingCapture         = {};
+  m_ownerSerial            = NextSerial(m_ownerSerial);
   RenewLease();
   if (!m_inboundStopping && m_inboundWakeEvent)
     SetEvent(m_inboundWakeEvent);
@@ -1051,15 +1051,9 @@ KVMFRAudioStatus CLGMPAudioTransport::WireStatus() const
     status.flags |= KVMFR_AUDIO_STATUS_PLAYBACK_AVAILABLE;
   if (status.capabilities & KVMFR_AUDIO_CAP_CAPTURE)
     status.flags |= KVMFR_AUDIO_STATUS_CAPTURE_AVAILABLE;
-  if ((status.capabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
-      m_state.available && m_state.active &&
-      m_state.playback.state != AudioStreamState::UNAVAILABLE &&
-      m_state.playback.state != AudioStreamState::STOPPED)
+  if (m_announcedPlayback)
     status.flags |= KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE;
-  if ((status.capabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
-      m_state.available && m_state.active &&
-      m_state.capture.state != AudioStreamState::UNAVAILABLE &&
-      m_state.capture.state != AudioStreamState::STOPPED)
+  if (m_announcedCapture)
     status.flags |= KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
   return status;
 }
@@ -1154,13 +1148,20 @@ void CLGMPAudioTransport::PumpState()
       m_playbackCreditValid)
     return;
 
+  if (m_state.playback.state == AudioStreamState::RUNNING)
+    m_playbackRunGeneration = m_state.playback.generation;
+
+  const bool playbackPrewarm =
+    (m_state.playback.state == AudioStreamState::ACQUIRED ||
+      m_state.playback.state == AudioStreamState::PAUSED) &&
+    m_playbackRunGeneration != m_state.playback.generation;
   const bool playbackCurrent = m_state.available && m_state.active &&
     (m_clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
     (m_state.capabilities & AUDIO_CAP_PLAYBACK) &&
     m_state.playback.formatValid &&
     ValidFormat(m_state.playback.format) &&
-    m_state.playback.state != AudioStreamState::UNAVAILABLE &&
-    m_state.playback.state != AudioStreamState::STOPPED;
+    (m_state.playback.state == AudioStreamState::RUNNING ||
+      playbackPrewarm);
   if (m_announcedPlayback &&
       (!playbackCurrent ||
         m_announcedPlayback != m_state.playback.generation))
@@ -1176,8 +1177,7 @@ void CLGMPAudioTransport::PumpState()
     (m_state.capabilities & AUDIO_CAP_CAPTURE) &&
     m_state.capture.formatValid &&
     ValidFormat(m_state.capture.format) &&
-    m_state.capture.state != AudioStreamState::UNAVAILABLE &&
-    m_state.capture.state != AudioStreamState::STOPPED;
+    m_state.capture.state == AudioStreamState::RUNNING;
   if (m_announcedCapture &&
       (!captureCurrent ||
         m_announcedCapture != m_state.capture.generation))
@@ -1859,6 +1859,9 @@ void CLGMPAudioTransport::AudioState(
   CSRWExclusiveLock lock(m_lock);
   if (!m_started)
     return;
+
+  if (state.playback.state == AudioStreamState::RUNNING)
+    m_playbackRunGeneration = state.playback.generation;
 
   if (m_playbackBlocked)
   {
