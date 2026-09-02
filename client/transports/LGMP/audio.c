@@ -37,7 +37,7 @@
 #include <sys/random.h>
 
 #define AUDIO_IDLE_POLL_MS        20U
-#define AUDIO_ACTIVE_POLL_US     125U
+#define AUDIO_ACTIVE_POLL_US      25U
 #define AUDIO_CLAIM_RETRY_US  200000U
 #define AUDIO_OWNER_RETRY_US 1200000U
 #define AUDIO_DRAIN_MAX            32U

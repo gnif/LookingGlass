@@ -338,7 +338,7 @@ static bool fixtureInit(struct Fixture * fixture)
   fixture->ops = lgmpAudio_getOps();
   CHECK(fixture->ops);
   CHECK(fixture->ops->playbackFlags == 0);
-  CHECK(fixture->ops->playbackArrivalReserveUs == 125);
+  CHECK(fixture->ops->playbackArrivalReserveUs == 25);
   CHECK(fixture->ops->clockFeedbackAvailable);
   CHECK(!fixture->ops->clockFeedbackAvailable(fixture->audio));
   fixture->endpointGeneration = UINT64_C(0x100000001);
