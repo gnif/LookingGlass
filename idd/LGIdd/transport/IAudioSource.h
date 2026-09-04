@@ -26,7 +26,7 @@
 static constexpr uint32_t AUDIO_MAX_CHANNELS = 18;
 static constexpr uint32_t AUDIO_STREAM_MAX_CHANNELS = 8;
 static constexpr uint32_t AUDIO_MAX_FRAMES_PER_PACKET = 2048;
-static constexpr uint32_t AUDIO_MAX_BYTES_PER_SAMPLE = 3;
+static constexpr uint32_t AUDIO_MAX_BYTES_PER_SAMPLE = 4;
 static constexpr uint32_t AUDIO_MAX_PCM_BYTES =
   AUDIO_MAX_FRAMES_PER_PACKET * AUDIO_STREAM_MAX_CHANNELS *
   AUDIO_MAX_BYTES_PER_SAMPLE;
@@ -54,6 +54,15 @@ enum AudioClockFlag : uint32_t
   AUDIO_CLOCK_DISCONTINUITY = 1U << 2,
 };
 
+enum class AudioSampleFormat : uint32_t
+{
+  UNKNOWN = 0,
+  S16_LE  = 1,
+  S24_LE  = 2,
+  S32_LE  = 3,
+  F32_LE  = 4,
+};
+
 enum class AudioStreamState : uint32_t
 {
   UNAVAILABLE,
@@ -75,12 +84,13 @@ enum class AudioResult
 
 struct AudioFormat
 {
-  uint32_t sampleRate    = 0;
-  uint32_t channelMask   = 0;
-  uint16_t channels      = 0;
-  uint16_t containerBits = 0;
-  uint16_t validBits     = 0;
-  uint16_t blockAlign    = 0;
+  AudioSampleFormat sampleFormat = AudioSampleFormat::UNKNOWN;
+  uint32_t          sampleRate    = 0;
+  uint32_t          channelMask   = 0;
+  uint16_t          channels      = 0;
+  uint16_t          containerBits = 0;
+  uint16_t          validBits     = 0;
+  uint16_t          blockAlign    = 0;
 };
 
 struct AudioStreamStatus

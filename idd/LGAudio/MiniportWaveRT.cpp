@@ -46,7 +46,7 @@ PCPIN_DESCRIPTOR g_RenderWavePins[] =
     {
       0, nullptr,
       0, nullptr,
-      kRenderFormatCount, g_renderDataRangePointers,
+      kRenderDataRangeCount, g_renderDataRangePointers,
       KSPIN_DATAFLOW_IN,
       KSPIN_COMMUNICATION_SINK,
       &KSCATEGORY_AUDIO,
@@ -115,7 +115,7 @@ PCPIN_DESCRIPTOR g_CaptureWavePins[] =
     {
       0, nullptr,
       0, nullptr,
-      kCaptureFormatCount, g_captureDataRangePointers,
+      kCaptureDataRangeCount, g_captureDataRangePointers,
       KSPIN_DATAFLOW_OUT,
       KSPIN_COMMUNICATION_SINK,
       &KSCATEGORY_AUDIO,
@@ -284,8 +284,8 @@ NTSTATUS CMiniportWaveRT::NewStream(
   if (InterlockedCompareExchange(&m_streamOpen, 1, 0) != 0)
     return STATUS_DEVICE_BUSY;
 
-  CMiniportWaveRTStream *newStream =
-    new(NonPagedPoolNx, LGAUDIO_POOL_TAG) CMiniportWaveRTStream(
+  CWS *newStream =
+    new(NonPagedPoolNx, LGAUDIO_POOL_TAG) CWS(
       this, m_adapter, portStream, m_kind);
   if (!newStream)
   {

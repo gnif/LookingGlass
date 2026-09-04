@@ -43,7 +43,7 @@ static const GUID LGAUDIO_BROKER_DEVICE_CLASS_GUID =
   { 0x98f877f1, 0x73d6, 0x4429,
     { 0xb4, 0x90, 0x28, 0xc5, 0x30, 0xd2, 0x38, 0xcd } };
 
-static constexpr UINT32 LGAUDIO_BROKER_ABI_VERSION = 1U;
+static constexpr UINT32 LGAUDIO_BROKER_ABI_VERSION = 2U;
 // The transfer limits in LGAudioBrokerCaps exclude the packet header.
 static constexpr UINT32 LGAUDIO_BROKER_MAX_PAYLOAD_BYTES = 64U * 1024U;
 
@@ -87,6 +87,14 @@ enum LGAudioBrokerPacketFlag : UINT32
   LGAUDIO_BROKER_PACKET_DISCONTINUITY = 1U << 0
 };
 
+enum LGAudioBrokerSampleFormat : UINT32
+{
+  LGAUDIO_BROKER_SAMPLE_S16_LE = 1,
+  LGAUDIO_BROKER_SAMPLE_S24_LE = 2,
+  LGAUDIO_BROKER_SAMPLE_S32_LE = 3,
+  LGAUDIO_BROKER_SAMPLE_F32_LE = 4
+};
+
 static constexpr UINT32 IOCTL_LGAUDIO_BROKER_QUERY_CAPS =
   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x900, METHOD_BUFFERED,
     FILE_READ_ACCESS | FILE_WRITE_ACCESS);
@@ -116,12 +124,14 @@ struct LGAudioBrokerHeader
 
 struct LGAudioBrokerFormat
 {
+  UINT32 sampleFormat;
   UINT32 sampleRate;
   UINT32 channelMask;
   UINT16 channels;
   UINT16 containerBits;
   UINT16 validBits;
   UINT16 blockAlign;
+  UINT32 reserved;
 };
 
 struct LGAudioBrokerStreamState
@@ -230,15 +240,15 @@ struct LGAudioBrokerClockControl
 
 static_assert(sizeof(LGAudioBrokerHeader) == 8,
   "LGAudio broker header layout changed");
-static_assert(sizeof(LGAudioBrokerFormat) == 16,
+static_assert(sizeof(LGAudioBrokerFormat) == 24,
   "LGAudio broker format layout changed");
-static_assert(sizeof(LGAudioBrokerStreamState) == 32,
+static_assert(sizeof(LGAudioBrokerStreamState) == 40,
   "LGAudio broker stream-state layout changed");
-static_assert(sizeof(LGAudioBrokerPacketHeader) == 80,
+static_assert(sizeof(LGAudioBrokerPacketHeader) == 88,
   "LGAudio broker packet layout changed");
 static_assert(sizeof(LGAudioBrokerCaps) == 64,
   "LGAudio broker capabilities layout changed");
-static_assert(sizeof(LGAudioBrokerState) == 104,
+static_assert(sizeof(LGAudioBrokerState) == 120,
   "LGAudio broker state layout changed");
 static_assert(sizeof(LGAudioBrokerBind) == 48,
   "LGAudio broker binding layout changed");
@@ -247,5 +257,5 @@ static_assert(sizeof(LGAudioBrokerStats) == 160,
 static_assert(sizeof(LGAudioBrokerClockControl) == 64,
   "LGAudio broker clock-control layout changed");
 static_assert(LGAUDIO_BROKER_MAX_PAYLOAD_BYTES >=
-    (192000U / 100U) * 8U * 3U,
+    (192000U / 100U) * 8U * 4U,
   "LGAudio broker payload cannot hold 10 ms at the maximum format");

@@ -25,6 +25,8 @@ namespace LGAudio
   namespace
   {
     constexpr ULONG kRingPoolTag = 'rAGL';
+    // LCM of every supported channel-count and sample-width block alignment.
+    constexpr ULONG kRingBufferAlignment = 288;
 
     ULONG MinUlong(_In_ ULONG left, _In_ ULONG right)
     {
@@ -56,8 +58,8 @@ namespace LGAudio
       return STATUS_SUCCESS;
 
     constexpr ULONG capacity =
-      (kMaximumBytesPerSecond + kMaximumBlockAlign - 1) /
-      kMaximumBlockAlign * kMaximumBlockAlign;
+      (kMaximumBytesPerSecond + kRingBufferAlignment - 1) /
+      kRingBufferAlignment * kRingBufferAlignment;
 
 #pragma warning(push)
 #pragma warning(disable:4996) // Required for pre-2004 Windows 10 releases.
@@ -110,7 +112,8 @@ namespace LGAudio
   NTSTATUS CAudioRingBuffer::Configure(
     _In_ const FormatFingerprint & format)
   {
-    if (format.sampleRate == 0 ||
+    if (format.sampleFormat == SampleFormat::Unknown ||
+        format.sampleRate == 0 ||
         format.channels == 0 ||
         format.containerBits == 0 ||
         (format.containerBits % 8) != 0 ||

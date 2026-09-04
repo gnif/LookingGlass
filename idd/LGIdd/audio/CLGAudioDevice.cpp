@@ -70,12 +70,29 @@ namespace
 
   bool SameFormat(const AudioFormat& left, const AudioFormat& right)
   {
-    return left.sampleRate == right.sampleRate &&
+    return left.sampleFormat == right.sampleFormat &&
+      left.sampleRate == right.sampleRate &&
       left.channelMask == right.channelMask &&
       left.channels == right.channels &&
       left.containerBits == right.containerBits &&
       left.validBits == right.validBits &&
       left.blockAlign == right.blockAlign;
+  }
+
+  bool ValidSampleFormat(const AudioFormat& format)
+  {
+    switch (format.sampleFormat)
+    {
+      case AudioSampleFormat::S16_LE:
+        return format.containerBits == 16 && format.validBits == 16;
+      case AudioSampleFormat::S24_LE:
+        return format.containerBits == 24 && format.validBits == 24;
+      case AudioSampleFormat::S32_LE:
+      case AudioSampleFormat::F32_LE:
+        return format.containerBits == 32 && format.validBits == 32;
+      default:
+        return false;
+    }
   }
 
   bool ValidFormat(const AudioFormat& format)
@@ -85,15 +102,52 @@ namespace
       format.channelMask &&
       !(format.channelMask & ~AUDIO_CHANNEL_POSITION_MASK) &&
       PopCount(format.channelMask) == format.channels &&
-      (format.containerBits == 16 || format.containerBits == 24) &&
-      format.validBits == format.containerBits &&
+      ValidSampleFormat(format) &&
       format.blockAlign ==
         format.channels * (format.containerBits / 8);
+  }
+
+  AudioSampleFormat BrokerSampleFormat(uint32_t source)
+  {
+    switch (source)
+    {
+      case LGAUDIO_BROKER_SAMPLE_S16_LE:
+        return AudioSampleFormat::S16_LE;
+      case LGAUDIO_BROKER_SAMPLE_S24_LE:
+        return AudioSampleFormat::S24_LE;
+      case LGAUDIO_BROKER_SAMPLE_S32_LE:
+        return AudioSampleFormat::S32_LE;
+      case LGAUDIO_BROKER_SAMPLE_F32_LE:
+        return AudioSampleFormat::F32_LE;
+      default:
+        return AudioSampleFormat::UNKNOWN;
+    }
+  }
+
+  uint32_t DeviceSampleFormat(AudioSampleFormat source)
+  {
+    switch (source)
+    {
+      case AudioSampleFormat::S16_LE:
+        return LGAUDIO_BROKER_SAMPLE_S16_LE;
+      case AudioSampleFormat::S24_LE:
+        return LGAUDIO_BROKER_SAMPLE_S24_LE;
+      case AudioSampleFormat::S32_LE:
+        return LGAUDIO_BROKER_SAMPLE_S32_LE;
+      case AudioSampleFormat::F32_LE:
+        return LGAUDIO_BROKER_SAMPLE_F32_LE;
+      default:
+        return 0;
+    }
   }
 
   AudioFormat BrokerFormat(const LGAudioBrokerFormat& source)
   {
     AudioFormat result;
+    if (source.reserved)
+      return result;
+
+    result.sampleFormat  = BrokerSampleFormat(source.sampleFormat);
     result.sampleRate    = source.sampleRate;
     result.channelMask   = source.channelMask;
     result.channels      = source.channels;
@@ -106,6 +160,7 @@ namespace
   LGAudioBrokerFormat DeviceFormat(const AudioFormat& source)
   {
     LGAudioBrokerFormat result = {};
+    result.sampleFormat  = DeviceSampleFormat(source.sampleFormat);
     result.sampleRate    = source.sampleRate;
     result.channelMask   = source.channelMask;
     result.channels      = source.channels;

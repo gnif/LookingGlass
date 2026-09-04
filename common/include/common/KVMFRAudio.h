@@ -51,7 +51,7 @@ enum
 #define KVMFR_AUDIO_MAX_CHANNELS          18U
 #define KVMFR_AUDIO_MAX_SAMPLE_RATE       192000U
 #define KVMFR_AUDIO_MAX_FRAMES_PER_PACKET 2048U
-#define KVMFR_AUDIO_MAX_BYTES_PER_SAMPLE  3U
+#define KVMFR_AUDIO_MAX_BYTES_PER_SAMPLE  4U
 #define KVMFR_AUDIO_STREAM_MAX_CHANNELS   8U
 #define KVMFR_AUDIO_STREAM_SLOT_COUNT     16U
 #define KVMFR_AUDIO_OWNER_LEASE_MS        1000U
@@ -75,6 +75,9 @@ enum
   KVMFR_AUDIO_SAMPLE_S16_LE = 1,
   /* Signed little-endian samples packed into exactly three bytes. */
   KVMFR_AUDIO_SAMPLE_S24_LE = 2,
+  KVMFR_AUDIO_SAMPLE_S32_LE = 3,
+  /* IEEE 754 little-endian floating-point samples. */
+  KVMFR_AUDIO_SAMPLE_F32_LE = 4,
 };
 
 typedef uint32_t KVMFRAudioSampleFormat;
@@ -83,6 +86,8 @@ enum
 {
   KVMFR_AUDIO_SAMPLE_MASK_S16_LE = 1U << 0,
   KVMFR_AUDIO_SAMPLE_MASK_S24_LE = 1U << 1,
+  KVMFR_AUDIO_SAMPLE_MASK_S32_LE = 1U << 2,
+  KVMFR_AUDIO_SAMPLE_MASK_F32_LE = 1U << 3,
 };
 
 typedef uint32_t KVMFRAudioSampleFormatFlags;

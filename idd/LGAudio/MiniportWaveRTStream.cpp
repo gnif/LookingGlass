@@ -129,7 +129,7 @@ ULONGLONG FramesToQpcTicks(
 }
 }
 
-CMiniportWaveRTStream::CMiniportWaveRTStream(
+CWS::CWS(
   _In_ CMiniportWaveRT *miniport,
   _In_ CAudioAdapter *adapter,
   _In_ PPORTWAVERTSTREAM portStream,
@@ -177,7 +177,7 @@ CMiniportWaveRTStream::CMiniportWaveRTStream(
   KeInitializeSpinLock(&m_positionLock);
 }
 
-CMiniportWaveRTStream::~CMiniportWaveRTStream()
+CWS::~CWS()
 {
   SetState(KSSTATE_STOP);
 
@@ -195,7 +195,7 @@ CMiniportWaveRTStream::~CMiniportWaveRTStream()
   m_miniport->Release();
 }
 
-NTSTATUS CMiniportWaveRTStream::Initialize(
+NTSTATUS CWS::Initialize(
   _In_ const KSDATAFORMAT_WAVEFORMATEXTENSIBLE *format)
 {
   if (!format)
@@ -221,7 +221,7 @@ NTSTATUS CMiniportWaveRTStream::Initialize(
   return status;
 }
 
-NTSTATUS CMiniportWaveRTStream::QueryInterface(
+NTSTATUS CWS::QueryInterface(
   _In_ REFIID interfaceId,
   _COM_Outptr_ void **object)
 {
@@ -254,12 +254,12 @@ NTSTATUS CMiniportWaveRTStream::QueryInterface(
   return STATUS_SUCCESS;
 }
 
-ULONG CMiniportWaveRTStream::AddRef()
+ULONG CWS::AddRef()
 {
   return static_cast<ULONG>(InterlockedIncrement(&m_refCount));
 }
 
-ULONG CMiniportWaveRTStream::Release()
+ULONG CWS::Release()
 {
   const LONG count = InterlockedDecrement(&m_refCount);
   if (!count)
@@ -267,7 +267,7 @@ ULONG CMiniportWaveRTStream::Release()
   return static_cast<ULONG>(count);
 }
 
-NTSTATUS CMiniportWaveRTStream::SetFormat(
+NTSTATUS CWS::SetFormat(
   _In_ PKSDATAFORMAT dataFormat)
 {
   if (!dataFormat)
@@ -301,7 +301,7 @@ NTSTATUS CMiniportWaveRTStream::SetFormat(
   return status;
 }
 
-NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
+NTSTATUS CWS::SetState(_In_ KSSTATE state)
 {
   if (state < KSSTATE_STOP || state > KSSTATE_RUN)
     return STATUS_INVALID_PARAMETER;
@@ -394,7 +394,7 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::GetPosition(
+NTSTATUS CWS::GetPosition(
   _Out_ PKSAUDIO_POSITION position)
 {
   if (!position)
@@ -418,7 +418,7 @@ NTSTATUS CMiniportWaveRTStream::GetPosition(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::AllocateAudioBuffer(
+NTSTATUS CWS::AllocateAudioBuffer(
   _In_ ULONG requestedSize,
   _Out_ PMDL *audioBufferMdl,
   _Out_ ULONG *actualSize,
@@ -429,7 +429,7 @@ NTSTATUS CMiniportWaveRTStream::AllocateAudioBuffer(
     offsetFromFirstPage, cacheType);
 }
 
-void CMiniportWaveRTStream::FreeAudioBuffer(
+void CWS::FreeAudioBuffer(
   _In_opt_ PMDL audioBufferMdl,
   _In_ ULONG bufferSize)
 {
@@ -437,14 +437,14 @@ void CMiniportWaveRTStream::FreeAudioBuffer(
   FreeBuffer(audioBufferMdl);
 }
 
-void CMiniportWaveRTStream::GetHWLatency(
+void CWS::GetHWLatency(
   _Out_ PKSRTAUDIO_HWLATENCY latency)
 {
   if (latency)
     RtlZeroMemory(latency, sizeof(*latency));
 }
 
-NTSTATUS CMiniportWaveRTStream::GetPositionRegister(
+NTSTATUS CWS::GetPositionRegister(
   _Out_ PKSRTAUDIO_HWREGISTER positionRegister)
 {
   if (positionRegister)
@@ -452,7 +452,7 @@ NTSTATUS CMiniportWaveRTStream::GetPositionRegister(
   return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS CMiniportWaveRTStream::GetClockRegister(
+NTSTATUS CWS::GetClockRegister(
   _Out_ PKSRTAUDIO_HWREGISTER clockRegister)
 {
   if (clockRegister)
@@ -460,7 +460,7 @@ NTSTATUS CMiniportWaveRTStream::GetClockRegister(
   return STATUS_NOT_IMPLEMENTED;
 }
 
-NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification(
+NTSTATUS CWS::AllocateBufferWithNotification(
   _In_ ULONG notificationCount,
   _In_ ULONG requestedSize,
   _Out_ PMDL *audioBufferMdl,
@@ -475,7 +475,7 @@ NTSTATUS CMiniportWaveRTStream::AllocateBufferWithNotification(
     actualSize, offsetFromFirstPage, cacheType);
 }
 
-void CMiniportWaveRTStream::FreeBufferWithNotification(
+void CWS::FreeBufferWithNotification(
   _In_ PMDL audioBufferMdl,
   _In_ ULONG bufferSize)
 {
@@ -483,7 +483,7 @@ void CMiniportWaveRTStream::FreeBufferWithNotification(
   FreeBuffer(audioBufferMdl);
 }
 
-NTSTATUS CMiniportWaveRTStream::RegisterNotificationEvent(
+NTSTATUS CWS::RegisterNotificationEvent(
   _In_ PKEVENT notificationEvent)
 {
   if (!notificationEvent)
@@ -511,7 +511,7 @@ NTSTATUS CMiniportWaveRTStream::RegisterNotificationEvent(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::UnregisterNotificationEvent(
+NTSTATUS CWS::UnregisterNotificationEvent(
   _In_ PKEVENT notificationEvent)
 {
   if (!notificationEvent)
@@ -535,7 +535,7 @@ NTSTATUS CMiniportWaveRTStream::UnregisterNotificationEvent(
   return STATUS_NOT_FOUND;
 }
 
-NTSTATUS CMiniportWaveRTStream::GetReadPacket(
+NTSTATUS CWS::GetReadPacket(
   _Out_ ULONG *packetNumber,
   _Out_ DWORD *flags,
   _Out_ ULONG64 *performanceCounterValue,
@@ -597,7 +597,7 @@ NTSTATUS CMiniportWaveRTStream::GetReadPacket(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::SetWritePacket(
+NTSTATUS CWS::SetWritePacket(
   _In_ ULONG packetNumber,
   _In_ DWORD flags,
   _In_ ULONG eosPacketLength)
@@ -669,7 +669,7 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::GetOutputStreamPresentationPosition(
+NTSTATUS CWS::GetOutputStreamPresentationPosition(
   _Out_ KSAUDIO_PRESENTATION_POSITION *position)
 {
   if (m_kind != EndpointKind::Render || !position)
@@ -710,7 +710,7 @@ NTSTATUS CMiniportWaveRTStream::GetOutputStreamPresentationPosition(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::GetPacketCount(
+NTSTATUS CWS::GetPacketCount(
   _Out_ ULONG *packetCount)
 {
   if (m_kind != EndpointKind::Render || !packetCount)
@@ -732,7 +732,7 @@ NTSTATUS CMiniportWaveRTStream::GetPacketCount(
   return STATUS_SUCCESS;
 }
 
-NTSTATUS CMiniportWaveRTStream::AllocateBuffer(
+NTSTATUS CWS::AllocateBuffer(
   _In_ ULONG notificationCount,
   _In_ ULONG requestedSize,
   _Out_ PMDL *audioBufferMdl,
@@ -824,7 +824,7 @@ NTSTATUS CMiniportWaveRTStream::AllocateBuffer(
   return STATUS_SUCCESS;
 }
 
-void CMiniportWaveRTStream::FreeBuffer(_In_opt_ PMDL audioBufferMdl)
+void CWS::FreeBuffer(_In_opt_ PMDL audioBufferMdl)
 {
   if (!audioBufferMdl)
     return;
@@ -856,13 +856,13 @@ void CMiniportWaveRTStream::FreeBuffer(_In_opt_ PMDL audioBufferMdl)
   m_portStream->FreePagesFromMdl(mdl);
 }
 
-void CMiniportWaveRTStream::StopTimer()
+void CWS::StopTimer()
 {
   if (m_timer)
     ExCancelTimer(m_timer, nullptr);
 }
 
-void CMiniportWaveRTStream::ArmTimerLocked()
+void CWS::ArmTimerLocked()
 {
   if (!m_timer || m_state != KSSTATE_RUN || !m_notificationCount ||
       !m_packetSize || !m_clockFrequency || !m_qpcFrequency ||
@@ -927,7 +927,7 @@ void CMiniportWaveRTStream::ArmTimerLocked()
   ExSetTimer(m_timer, -static_cast<LONGLONG>(dueTime), 0, nullptr);
 }
 
-void CMiniportWaveRTStream::AdvanceLocked(
+void CWS::AdvanceLocked(
   _In_ const AudioClockSnapshot &clock)
 {
   if (m_state != KSSTATE_RUN || !m_buffer || !m_bufferSize ||
@@ -986,7 +986,7 @@ void CMiniportWaveRTStream::AdvanceLocked(
     AdvanceEventPacketsLocked(clock);
 }
 
-void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
+void CWS::AdvanceEventPacketsLocked(
   _In_ const AudioClockSnapshot &clock)
 {
   if (!m_packetSize)
@@ -1080,7 +1080,7 @@ void CMiniportWaveRTStream::AdvanceEventPacketsLocked(
   }
 }
 
-bool CMiniportWaveRTStream::RenderPacketCommittedLocked(
+bool CWS::RenderPacketCommittedLocked(
   _In_ ULONGLONG position) const
 {
   if (m_kind != EndpointKind::Render || !m_notificationCount ||
@@ -1091,7 +1091,7 @@ bool CMiniportWaveRTStream::RenderPacketCommittedLocked(
   return static_cast<LONG>(m_lastWritePacket - packet) >= 0;
 }
 
-void CMiniportWaveRTStream::PublishRenderFramesLocked()
+void CWS::PublishRenderFramesLocked()
 {
   if (m_kind != EndpointKind::Render || !m_notificationCount ||
       !m_packetSize || !m_renderPublicationSliceBytes || !m_bufferSize)
@@ -1133,7 +1133,7 @@ void CMiniportWaveRTStream::PublishRenderFramesLocked()
   }
 }
 
-void CMiniportWaveRTStream::UpdatePresentationQpcLocked(
+void CWS::UpdatePresentationQpcLocked(
   _In_ const AudioClockSnapshot &clock)
 {
   const ULONG blockAlign =
@@ -1161,7 +1161,7 @@ void CMiniportWaveRTStream::UpdatePresentationQpcLocked(
     clock.QpcPosition - ticksSinceBoundary : 0;
 }
 
-void CMiniportWaveRTStream::TransferFramesLocked(
+void CWS::TransferFramesLocked(
   _In_ ULONGLONG bytes,
   _In_ bool transferRender)
 {
@@ -1233,19 +1233,19 @@ void CMiniportWaveRTStream::TransferFramesLocked(
   }
 }
 
-void CMiniportWaveRTStream::SignalNotificationsLocked()
+void CWS::SignalNotificationsLocked()
 {
   for (ULONG i = 0; i < m_notificationEventCount; ++i)
     KeSetEvent(m_notificationEvents[i], IO_NO_INCREMENT, FALSE);
 }
 
-void CMiniportWaveRTStream::TimerCallback(
+void CWS::TimerCallback(
   _In_ PEX_TIMER timer,
   _In_opt_ void *context)
 {
   UNREFERENCED_PARAMETER(timer);
 
-  auto *stream = static_cast<CMiniportWaveRTStream *>(context);
+  auto *stream = static_cast<CWS *>(context);
   if (!stream)
     return;
 

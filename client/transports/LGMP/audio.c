@@ -420,6 +420,20 @@ static bool validFormat(const KVMFRAudioFormat * wire,
         return false;
       break;
 
+    case KVMFR_AUDIO_SAMPLE_S32_LE:
+      format = LG_AUDIO_FMT_S32_LE;
+      bytesPerSample = 4;
+      if (wire->validBits != 32 || wire->containerBits != 32)
+        return false;
+      break;
+
+    case KVMFR_AUDIO_SAMPLE_F32_LE:
+      format = LG_AUDIO_FMT_F32_LE;
+      bytesPerSample = 4;
+      if (wire->validBits != 32 || wire->containerBits != 32)
+        return false;
+      break;
+
     default:
       return false;
   }

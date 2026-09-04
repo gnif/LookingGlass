@@ -50,6 +50,16 @@ namespace
     "audio packet limits differ");
   static_assert(AUDIO_MAX_PCM_BYTES == KVMFR_AUDIO_PCM_BYTES,
     "audio PCM limits differ");
+  static_assert(
+      static_cast<uint32_t>(AudioSampleFormat::S16_LE) ==
+        KVMFR_AUDIO_SAMPLE_S16_LE &&
+      static_cast<uint32_t>(AudioSampleFormat::S24_LE) ==
+        KVMFR_AUDIO_SAMPLE_S24_LE &&
+      static_cast<uint32_t>(AudioSampleFormat::S32_LE) ==
+        KVMFR_AUDIO_SAMPLE_S32_LE &&
+      static_cast<uint32_t>(AudioSampleFormat::F32_LE) ==
+        KVMFR_AUDIO_SAMPLE_F32_LE,
+    "audio sample formats differ");
   static_assert(static_cast<uint32_t>(AUDIO_CAP_PLAYBACK) ==
       static_cast<uint32_t>(KVMFR_AUDIO_CAP_PLAYBACK) &&
       static_cast<uint32_t>(AUDIO_CAP_CAPTURE) ==
@@ -75,7 +85,7 @@ namespace
     KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
     KVMFR_AUDIO_MESSAGE_CLOCK_STABLE;
   constexpr size_t AUDIO_SHARED_MEMORY_PREFLIGHT =
-    2U * 1024U * 1024U;
+    3U * 1024U * 1024U;
 
   bool ArmAudioPollTimer(HANDLE timer, uint32_t waitUs)
   {
@@ -122,7 +132,8 @@ CLGMPAudioTransport::~CLGMPAudioTransport()
 bool CLGMPAudioTransport::SameFormat(
   const AudioFormat& left, const AudioFormat& right)
 {
-  return left.sampleRate == right.sampleRate &&
+  return left.sampleFormat == right.sampleFormat &&
+    left.sampleRate == right.sampleRate &&
     left.channelMask == right.channelMask &&
     left.channels == right.channels &&
     left.containerBits == right.containerBits &&
@@ -152,11 +163,29 @@ bool CLGMPAudioTransport::ValidFormat(const AudioFormat& format)
       ChannelCount(format.channelMask) != format.channels)
     return false;
 
-  const bool s16 = format.containerBits == 16 && format.validBits == 16;
-  const bool s24 = format.containerBits == 24 && format.validBits == 24;
+  bool validSampleFormat = false;
+  switch (format.sampleFormat)
+  {
+    case AudioSampleFormat::S16_LE:
+      validSampleFormat =
+        format.containerBits == 16 && format.validBits == 16;
+      break;
+    case AudioSampleFormat::S24_LE:
+      validSampleFormat =
+        format.containerBits == 24 && format.validBits == 24;
+      break;
+    case AudioSampleFormat::S32_LE:
+    case AudioSampleFormat::F32_LE:
+      validSampleFormat =
+        format.containerBits == 32 && format.validBits == 32;
+      break;
+    default:
+      return false;
+  }
+
   const uint16_t bytes = static_cast<uint16_t>(
     format.channels * (format.containerBits / 8U));
-  return (s16 || s24) && format.blockAlign == bytes;
+  return validSampleFormat && format.blockAlign == bytes;
 }
 
 KVMFRAudioFormat CLGMPAudioTransport::WireFormat(
@@ -165,8 +194,8 @@ KVMFRAudioFormat CLGMPAudioTransport::WireFormat(
   KVMFRAudioFormat result = {};
   result.version       = KVMFR_AUDIO_FORMAT_VERSION;
   result.size          = sizeof(result);
-  result.sampleFormat  = format.containerBits == 16 ?
-    KVMFR_AUDIO_SAMPLE_S16_LE : KVMFR_AUDIO_SAMPLE_S24_LE;
+  result.sampleFormat  =
+    static_cast<uint32_t>(format.sampleFormat);
   result.sampleRate    = format.sampleRate;
   result.channelMask   = format.channelMask;
   result.channelCount  = format.channels;

@@ -26,18 +26,18 @@
 
 class CMiniportWaveRT;
 
-class CMiniportWaveRTStream final :
+class CWS final :
   public IMiniportWaveRTStreamNotification,
   public IMiniportWaveRTInputStream,
   public IMiniportWaveRTOutputStream
 {
 public:
-  CMiniportWaveRTStream(
+  CWS(
     _In_ CMiniportWaveRT *miniport,
     _In_ CAudioAdapter *adapter,
     _In_ PPORTWAVERTSTREAM portStream,
     _In_ EndpointKind kind);
-  ~CMiniportWaveRTStream();
+  ~CWS();
 
   NTSTATUS Initialize(
     _In_ const KSDATAFORMAT_WAVEFORMATEXTENSIBLE *format);

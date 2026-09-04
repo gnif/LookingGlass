@@ -26,6 +26,15 @@
 
 namespace LGAudio
 {
+  enum class SampleFormat : ULONG
+  {
+    Unknown = 0,
+    S16LE   = 1,
+    S24LE   = 2,
+    S32LE   = 3,
+    F32LE   = 4
+  };
+
   enum class EndpointKind : UCHAR
   {
     Render,
@@ -34,6 +43,7 @@ namespace LGAudio
 
   struct FormatFingerprint
   {
+    SampleFormat sampleFormat;
     ULONG  sampleRate;
     ULONG  channelMask;
     USHORT channels;
@@ -44,15 +54,21 @@ namespace LGAudio
 
   constexpr ULONG kSampleRate = 48000;
   constexpr ULONG kSampleRateCount = 6;
-  constexpr ULONG kRenderFormatsPerRate = 4;
-  constexpr ULONG kCaptureFormatsPerRate = 5;
+  constexpr ULONG kRenderFormatsPerRate = 24;
+  constexpr ULONG kCaptureFormatsPerRate = 24;
+  constexpr ULONG kRenderDataRangesPerRate = 20;
+  constexpr ULONG kCaptureDataRangesPerRate = 20;
   constexpr ULONG kRenderFormatCount =
     kSampleRateCount * kRenderFormatsPerRate;
   constexpr ULONG kCaptureFormatCount =
     kSampleRateCount * kCaptureFormatsPerRate;
+  constexpr ULONG kRenderDataRangeCount =
+    kSampleRateCount * kRenderDataRangesPerRate;
+  constexpr ULONG kCaptureDataRangeCount =
+    kSampleRateCount * kCaptureDataRangesPerRate;
   constexpr ULONG kMaximumSampleRate = 192000;
   constexpr ULONG kMaximumBlockAlign =
-    8 * 3;
+    8 * 4;
   constexpr ULONG kMaximumBytesPerSecond =
     kMaximumSampleRate * kMaximumBlockAlign;
 
@@ -61,11 +77,11 @@ namespace LGAudio
   extern KSDATAFORMAT_WAVEFORMATEXTENSIBLE
     g_captureFormats[kCaptureFormatCount];
 
-  extern KSDATARANGE_AUDIO g_renderDataRanges[kRenderFormatCount];
-  extern KSDATARANGE_AUDIO g_captureDataRanges[kCaptureFormatCount];
+  extern KSDATARANGE_AUDIO g_renderDataRanges[kRenderDataRangeCount];
+  extern KSDATARANGE_AUDIO g_captureDataRanges[kCaptureDataRangeCount];
 
-  extern PKSDATARANGE g_renderDataRangePointers[kRenderFormatCount];
-  extern PKSDATARANGE g_captureDataRangePointers[kCaptureFormatCount];
+  extern PKSDATARANGE g_renderDataRangePointers[kRenderDataRangeCount];
+  extern PKSDATARANGE g_captureDataRangePointers[kCaptureDataRangeCount];
 
   /**
    * Validate an instantiated WaveRT format against the endpoint's exact
@@ -106,6 +122,7 @@ namespace LGAudio
 // The rest of the driver uses these as its shared, unqualified audio types.
 using LGAudio::EndpointKind;
 using LGAudio::FormatFingerprint;
+using LGAudio::SampleFormat;
 using LGAudio::EqualFormatFingerprint;
 using LGAudio::GetFormatFingerprint;
 using LGAudio::SelectFormatIntersection;
@@ -117,9 +134,11 @@ using LGAudio::g_renderDataRangePointers;
 using LGAudio::g_renderDataRanges;
 using LGAudio::g_renderFormats;
 using LGAudio::kCaptureFormatCount;
+using LGAudio::kCaptureDataRangeCount;
 using LGAudio::kMaximumBlockAlign;
 using LGAudio::kMaximumBytesPerSecond;
 using LGAudio::kMaximumSampleRate;
 using LGAudio::kRenderFormatCount;
+using LGAudio::kRenderDataRangeCount;
 using LGAudio::kSampleRate;
 using LGAudio::kSampleRateCount;

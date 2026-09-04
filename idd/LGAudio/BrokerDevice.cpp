@@ -778,11 +778,39 @@ namespace
     _In_ const LGAudioBrokerFormat &format,
     _Out_opt_ FormatFingerprint *fingerprint)
   {
+    if (format.reserved)
+      return false;
+
+    SampleFormat sampleFormat = SampleFormat::Unknown;
+    switch (format.sampleFormat)
+    {
+      case LGAUDIO_BROKER_SAMPLE_S16_LE:
+        if (format.containerBits != 16 || format.validBits != 16)
+          return false;
+        sampleFormat = SampleFormat::S16LE;
+        break;
+      case LGAUDIO_BROKER_SAMPLE_S24_LE:
+        if (format.containerBits != 24 || format.validBits != 24)
+          return false;
+        sampleFormat = SampleFormat::S24LE;
+        break;
+      case LGAUDIO_BROKER_SAMPLE_S32_LE:
+        if (format.containerBits != 32 || format.validBits != 32)
+          return false;
+        sampleFormat = SampleFormat::S32LE;
+        break;
+      case LGAUDIO_BROKER_SAMPLE_F32_LE:
+        if (format.containerBits != 32 || format.validBits != 32)
+          return false;
+        sampleFormat = SampleFormat::F32LE;
+        break;
+      default:
+        return false;
+    }
+
     if (!format.sampleRate ||
         format.sampleRate > kMaximumSampleRate ||
         !format.channels || format.channels > 8 ||
-        (format.containerBits != 16 && format.containerBits != 24) ||
-        format.validBits != format.containerBits ||
         format.blockAlign !=
           format.channels * (format.containerBits / 8))
     {
@@ -791,6 +819,7 @@ namespace
 
     if (fingerprint)
     {
+      fingerprint->sampleFormat = sampleFormat;
       fingerprint->sampleRate = format.sampleRate;
       fingerprint->channelMask = format.channelMask;
       fingerprint->channels = format.channels;
@@ -805,12 +834,31 @@ namespace
     _In_ const FormatFingerprint &source,
     _Out_ LGAudioBrokerFormat *destination)
   {
+    switch (source.sampleFormat)
+    {
+      case SampleFormat::S16LE:
+        destination->sampleFormat = LGAUDIO_BROKER_SAMPLE_S16_LE;
+        break;
+      case SampleFormat::S24LE:
+        destination->sampleFormat = LGAUDIO_BROKER_SAMPLE_S24_LE;
+        break;
+      case SampleFormat::S32LE:
+        destination->sampleFormat = LGAUDIO_BROKER_SAMPLE_S32_LE;
+        break;
+      case SampleFormat::F32LE:
+        destination->sampleFormat = LGAUDIO_BROKER_SAMPLE_F32_LE;
+        break;
+      default:
+        destination->sampleFormat = 0;
+        break;
+    }
     destination->sampleRate = source.sampleRate;
     destination->channelMask = source.channelMask;
     destination->channels = source.channels;
     destination->containerBits = source.containerBits;
     destination->validBits = source.validBits;
     destination->blockAlign = source.blockAlign;
+    destination->reserved = 0;
   }
 
   UINT32 GetBrokerStreamState(_In_ KSSTATE state)
