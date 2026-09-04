@@ -860,7 +860,8 @@ namespace
     caps->maximumVersion = LGAUDIO_BROKER_ABI_VERSION;
     caps->capabilities = LGAUDIO_BROKER_CAP_CONTROL |
       LGAUDIO_BROKER_CAP_RENDER_READ |
-      LGAUDIO_BROKER_CAP_CAPTURE_WRITE;
+      LGAUDIO_BROKER_CAP_CAPTURE_WRITE |
+      LGAUDIO_BROKER_CAP_CLOCK_CONTROL;
     caps->maximumRenderTransfer = LGAUDIO_BROKER_MAX_PAYLOAD_BYTES;
     caps->maximumCaptureTransfer = LGAUDIO_BROKER_MAX_PAYLOAD_BYTES;
     return CompleteIrp(irp, STATUS_SUCCESS, sizeof(*caps));
@@ -1025,6 +1026,48 @@ namespace
     FinishUnbind(extension, adapter);
     DrainQueuedReads(extension, fileObject, STATUS_CANCELLED);
     ExReleaseFastMutex(&extension->bindingLock);
+    return CompleteIrp(irp, status);
+  }
+
+  NTSTATUS SetClockControl(
+    _In_ BrokerControlExtension *extension,
+    _In_ PFILE_OBJECT fileObject,
+    _Inout_ PIRP irp,
+    _In_ ULONG inputLength)
+  {
+    const void *input = irp->AssociatedIrp.SystemBuffer;
+    if (!ValidateVersionedInput(input, inputLength,
+        sizeof(LGAudioBrokerClockControl)))
+      return CompleteIrp(irp, STATUS_INVALID_PARAMETER);
+
+    const auto *control =
+      static_cast<const LGAudioBrokerClockControl *>(input);
+    if (control->flags || control->reserved0 ||
+        control->reserved[0] || control->reserved[1] ||
+        !control->adapterGeneration || !control->bindingGeneration ||
+        !control->streamGeneration || !control->targetRateQ32)
+    {
+      return CompleteIrp(irp, STATUS_INVALID_PARAMETER);
+    }
+
+    BindingSnapshot binding{};
+    NTSTATUS status = AcquireBinding(extension, fileObject, &binding);
+    if (NT_SUCCESS(status) &&
+        (control->adapterGeneration != binding.adapterGeneration ||
+         control->bindingGeneration != binding.bindingGeneration))
+    {
+      status = STATUS_RETRY;
+    }
+    if (NT_SUCCESS(status) && !IsCurrentAdapter(binding))
+      status = STATUS_DEVICE_NOT_CONNECTED;
+    if (NT_SUCCESS(status))
+    {
+      status = binding.adapter->SetRenderClockRate(
+        control->streamGeneration, control->targetRateQ32);
+    }
+
+    if (binding.adapter)
+      ExReleaseRundownProtection(&extension->bindingRundown);
     return CompleteIrp(irp, status);
   }
 
@@ -1490,6 +1533,10 @@ namespace
 
       case IOCTL_LGAUDIO_BROKER_QUERY_STATS:
         status = QueryStats(irp, outputLength);
+        break;
+
+      case IOCTL_LGAUDIO_BROKER_SET_CLOCK_CONTROL:
+        status = SetClockControl(extension, fileObject, irp, inputLength);
         break;
 
       default:

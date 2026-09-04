@@ -1188,8 +1188,23 @@ void CLGMPAudioTransport::PumpState()
     m_announcedCapture = 0;
   }
 
-  if (playbackCurrent &&
-      m_announcedPlayback != m_state.playback.generation)
+  const bool startPlayback = playbackCurrent &&
+    m_announcedPlayback != m_state.playback.generation;
+  const bool startCapture = captureCurrent &&
+    m_announcedCapture != m_state.capture.generation;
+
+  // Publish capabilities before starts so the client selects the correct
+  // rate-control path. A second status below records the announced streams.
+  if (m_statusDirty && (startPlayback || startCapture))
+  {
+    const KVMFRAudioStatus status = WireStatus();
+    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_STATUS,
+        0, 0, 0, 0, 0, 0, &status, sizeof(status)))
+      return;
+    m_statusDirty = false;
+  }
+
+  if (startPlayback)
   {
     const KVMFRAudioFormat format = WireFormat(m_state.playback.format);
     if (!WriteMessage(KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
@@ -1197,10 +1212,10 @@ void CLGMPAudioTransport::PumpState()
         &format, sizeof(format)))
       return;
     m_announcedPlayback = m_state.playback.generation;
+    m_statusDirty       = true;
   }
 
-  if (captureCurrent &&
-      m_announcedCapture != m_state.capture.generation)
+  if (startCapture)
   {
     const KVMFRAudioFormat format = WireFormat(m_state.capture.format);
     if (!WriteMessage(KVMFR_AUDIO_MESSAGE_CAPTURE_START,
@@ -1208,6 +1223,7 @@ void CLGMPAudioTransport::PumpState()
         &format, sizeof(format)))
       return;
     m_announcedCapture = m_state.capture.generation;
+    m_statusDirty      = true;
   }
 
   if (!m_statusDirty)
@@ -1658,7 +1674,8 @@ void CLGMPAudioTransport::DrainInbound()
       }
       if (callClock)
       {
-        if (result == AudioResult::FAILED)
+        if (result == AudioResult::FAILED ||
+            result == AudioResult::REJECTED)
           BeginRelease("audio clock target failed");
         continue;
       }

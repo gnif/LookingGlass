@@ -100,7 +100,12 @@ public:
     _Out_ PULONG droppedBytes);
 
   _IRQL_requires_max_(DISPATCH_LEVEL)
-  AudioClockSnapshot GetClockSnapshot() const;
+  NTSTATUS SetRenderClockRate(
+    _In_ ULONGLONG streamGeneration,
+    _In_ ULONGLONG targetRateQ32);
+
+  _IRQL_requires_max_(DISPATCH_LEVEL)
+  AudioClockSnapshot GetClockSnapshot(_In_ EndpointKind kind);
 
   STDMETHODIMP_(NTSTATUS) QueryInterface(
     _In_ REFIID interfaceId,
@@ -116,7 +121,8 @@ private:
   KSPIN_LOCK m_streamStateLock;
   AudioStreamSnapshot m_renderState;
   AudioStreamSnapshot m_captureState;
-  CAudioClock m_clock;
+  CAudioClock m_renderClock;
+  CAudioClock m_captureClock;
   CAudioRingBuffer m_renderRing;
   CAudioRingBuffer m_captureRing;
 };

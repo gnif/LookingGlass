@@ -152,6 +152,7 @@ private:
 
   ULONGLONG m_clockFrequency;
   ULONGLONG m_qpcFrequency;
+  ULONGLONG m_clockRateQ32;
   ULONGLONG m_lastClockPosition;
   ULONGLONG m_lastQpcPosition;
   ULONGLONG m_lastPresentationQpc;

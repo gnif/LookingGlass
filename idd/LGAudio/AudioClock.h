@@ -35,17 +35,18 @@ namespace LGAudio
     ULONGLONG Frequency;
     ULONGLONG QpcPosition;
     ULONGLONG QpcFrequency;
+    // Audio-position ticks advanced per QPC tick in unsigned Q32.32.
+    ULONGLONG RateQ32;
   };
 
+  constexpr ULONGLONG kAudioClockRateOneQ32 = 1ULL << 32;
+  constexpr ULONG kAudioClockMaximumCorrectionPpm = 5000;
+  constexpr ULONG kAudioClockMaximumSlewPpmPerSecond = 5000;
+
   /**
-   * Adapter-owned clock shared by all render and capture streams.
-   *
-   * The local fallback uses QPC for both domains. A transport-disciplined
-   * implementation can later synthesize a continuous, monotonic Position
-   * while preserving its correlation with the local QPC fields. Before a
-   * non-unity clock rate is enabled, the stream deadline and timestamp
-   * conversions must consume an explicit fixed-point affine mapping between
-   * the two domains.
+   * Adapter-owned affine clock. Position is continuous and monotonic while
+   * RateQ32 may be updated to discipline a render endpoint to a remote sink.
+   * QpcPosition always remains in the local Windows QPC domain.
    */
   class CAudioClock final
   {
@@ -59,12 +60,34 @@ namespace LGAudio
     NTSTATUS Initialize();
 
     _IRQL_requires_max_(DISPATCH_LEVEL)
-    AudioClockSnapshot GetSnapshot() const;
+    AudioClockSnapshot GetSnapshot();
+
+    _IRQL_requires_max_(DISPATCH_LEVEL)
+    bool SetRate(_In_ ULONGLONG rateQ32);
+
+    _IRQL_requires_max_(DISPATCH_LEVEL)
+    void ResetRate();
 
   private:
+    _Requires_lock_held_(m_lock)
+    void AdvanceLocked(_In_ ULONGLONG qpcPosition);
+
+    _Requires_lock_held_(m_lock)
+    void UpdateLocked(_In_ ULONGLONG qpcPosition);
+
+    KSPIN_LOCK m_lock;
     ULONGLONG m_frequency;
+    ULONGLONG m_position;
+    ULONGLONG m_positionFractionQ32;
+    ULONGLONG m_lastQpcPosition;
+    ULONGLONG m_rateQ32;
+    ULONGLONG m_lastRateUpdateQpc;
+    ULONGLONG m_feedbackDeadlineQpc;
   };
 }
 
 using LGAudio::AudioClockSnapshot;
 using LGAudio::CAudioClock;
+using LGAudio::kAudioClockMaximumCorrectionPpm;
+using LGAudio::kAudioClockMaximumSlewPpmPerSecond;
+using LGAudio::kAudioClockRateOneQ32;

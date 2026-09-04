@@ -132,7 +132,9 @@ CAudioAdapter::~CAudioAdapter()
 
 NTSTATUS CAudioAdapter::Initialize()
 {
-  NTSTATUS status = m_clock.Initialize();
+  NTSTATUS status = m_renderClock.Initialize();
+  if (NT_SUCCESS(status))
+    status = m_captureClock.Initialize();
   if (NT_SUCCESS(status))
     status = m_renderRing.Init();
   if (NT_SUCCESS(status))
@@ -149,6 +151,8 @@ NTSTATUS CAudioAdapter::ConfigureStream(
     m_renderRing : m_captureRing;
   KIRQL transportIrql;
   KeAcquireSpinLock(&m_transportLock, &transportIrql);
+  if (kind == EndpointKind::Render)
+    m_renderClock.ResetRate();
   const NTSTATUS status = ring.Configure(format);
   if (!NT_SUCCESS(status))
   {
@@ -194,7 +198,10 @@ void CAudioAdapter::SetStreamState(
   if (reset)
   {
     if (kind == EndpointKind::Render)
+    {
+      m_renderClock.ResetRate();
       m_renderRing.Reset();
+    }
     else
       m_captureRing.Reset();
   }
@@ -232,6 +239,7 @@ void CAudioAdapter::SetBrokerActive(_In_ bool active)
 
   m_captureRing.Reset();
   m_renderRing.Reset();
+  m_renderClock.ResetRate();
   InterlockedExchange(&m_renderDiscontinuity, active ? 1 : 0);
   KeReleaseSpinLock(&m_transportLock, oldIrql);
 }
@@ -396,9 +404,56 @@ NTSTATUS CAudioAdapter::WriteCaptureFrames(
 }
 
 _IRQL_requires_max_(DISPATCH_LEVEL)
-AudioClockSnapshot CAudioAdapter::GetClockSnapshot() const
+NTSTATUS CAudioAdapter::SetRenderClockRate(
+  _In_ ULONGLONG streamGeneration,
+  _In_ ULONGLONG targetRateQ32)
 {
-  return m_clock.GetSnapshot();
+  NTSTATUS status = STATUS_SUCCESS;
+  KIRQL transportIrql;
+  KeAcquireSpinLock(&m_transportLock, &transportIrql);
+
+  KIRQL stateIrql;
+  KeAcquireSpinLock(&m_streamStateLock, &stateIrql);
+  const AudioStreamSnapshot render = m_renderState;
+  const bool active =
+    InterlockedCompareExchange(&m_brokerActive, 0, 0) != 0;
+  KeReleaseSpinLock(&m_streamStateLock, stateIrql);
+
+  if (!active || render.state != KSSTATE_RUN || !render.formatValid)
+    status = STATUS_DEVICE_NOT_READY;
+  else if (render.generation != streamGeneration)
+    status = STATUS_RETRY;
+  else
+  {
+    const ULONGLONG nominalRateQ32 =
+      static_cast<ULONGLONG>(render.format.sampleRate) << 32;
+    const ULONGLONG maximumDelta = nominalRateQ32 *
+      kAudioClockMaximumCorrectionPpm / 1000000;
+    if (!render.format.sampleRate ||
+        targetRateQ32 < nominalRateQ32 - maximumDelta ||
+        targetRateQ32 > nominalRateQ32 + maximumDelta)
+    {
+      status = STATUS_INVALID_PARAMETER;
+    }
+    else
+    {
+      const ULONGLONG rateQ32 =
+        (targetRateQ32 + render.format.sampleRate / 2) /
+          render.format.sampleRate;
+      if (!m_renderClock.SetRate(rateQ32))
+        status = STATUS_INVALID_PARAMETER;
+    }
+  }
+
+  KeReleaseSpinLock(&m_transportLock, transportIrql);
+  return status;
+}
+
+_IRQL_requires_max_(DISPATCH_LEVEL)
+AudioClockSnapshot CAudioAdapter::GetClockSnapshot(_In_ EndpointKind kind)
+{
+  return kind == EndpointKind::Render ?
+    m_renderClock.GetSnapshot() : m_captureClock.GetSnapshot();
 }
 
 NTSTATUS CAudioAdapter::QueryInterface(

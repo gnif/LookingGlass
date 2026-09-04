@@ -102,6 +102,9 @@ static constexpr UINT32 IOCTL_LGAUDIO_BROKER_UNBIND =
 static constexpr UINT32 IOCTL_LGAUDIO_BROKER_QUERY_STATS =
   CTL_CODE(FILE_DEVICE_UNKNOWN, 0x904, METHOD_BUFFERED,
     FILE_READ_ACCESS | FILE_WRITE_ACCESS);
+static constexpr UINT32 IOCTL_LGAUDIO_BROKER_SET_CLOCK_CONTROL =
+  CTL_CODE(FILE_DEVICE_UNKNOWN, 0x905, METHOD_BUFFERED,
+    FILE_READ_ACCESS | FILE_WRITE_ACCESS);
 
 #pragma pack(push, 8)
 
@@ -209,6 +212,20 @@ struct LGAudioBrokerStats
   UINT64 reserved[4];
 };
 
+struct LGAudioBrokerClockControl
+{
+  UINT32 size;
+  UINT32 version;
+  UINT32 flags;
+  UINT32 reserved0;
+  UINT64 adapterGeneration;
+  UINT64 bindingGeneration;
+  UINT64 streamGeneration;
+  // Absolute render frames per second in unsigned Q32.32 format.
+  UINT64 targetRateQ32;
+  UINT64 reserved[2];
+};
+
 #pragma pack(pop)
 
 static_assert(sizeof(LGAudioBrokerHeader) == 8,
@@ -227,6 +244,8 @@ static_assert(sizeof(LGAudioBrokerBind) == 48,
   "LGAudio broker binding layout changed");
 static_assert(sizeof(LGAudioBrokerStats) == 160,
   "LGAudio broker statistics layout changed");
+static_assert(sizeof(LGAudioBrokerClockControl) == 64,
+  "LGAudio broker clock-control layout changed");
 static_assert(LGAUDIO_BROKER_MAX_PAYLOAD_BYTES >=
     (192000U / 100U) * 8U * 3U,
   "LGAudio broker payload cannot hold 10 ms at the maximum format");

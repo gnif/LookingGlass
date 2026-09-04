@@ -45,6 +45,9 @@ namespace
   static constexpr DWORD OPEN_RETRY_MS = 500;
   static constexpr DWORD ACTIVE_POLL_MS = 10;
   static constexpr DWORD IDLE_POLL_MS = 100;
+  // Let the driver's 75 ms watchdog restore unity before local fallback.
+  static constexpr DWORD CLOCK_CONTROL_FAILURE_GRACE_MS = 100;
+  static constexpr uint32_t CLOCK_MAXIMUM_CORRECTION_PPM = 5000;
   static constexpr size_t BROKER_PACKET_BYTES =
     sizeof(LGAudioBrokerPacketHeader) + AUDIO_MAX_PCM_BYTES;
 
@@ -176,6 +179,19 @@ namespace
       error == ERROR_RETRY ||
       error == ERROR_DEVICE_NOT_CONNECTED;
   }
+
+  bool ValidClockTarget(uint64_t targetRateQ32, uint32_t sampleRate)
+  {
+    if (!targetRateQ32 || !sampleRate)
+      return false;
+
+    const uint64_t nominalRateQ32 =
+      static_cast<uint64_t>(sampleRate) << 32;
+    const uint64_t maximumDelta = nominalRateQ32 *
+      CLOCK_MAXIMUM_CORRECTION_PPM / 1000000;
+    return targetRateQ32 >= nominalRateQ32 - maximumDelta &&
+      targetRateQ32 <= nominalRateQ32 + maximumDelta;
+  }
 }
 
 class CLGAudioDevice::CState
@@ -224,6 +240,10 @@ private:
   bool   m_bound        = false;
   ActivationState m_activation = ActivationState::IDLE;
   bool   m_controlDirty  = true;
+  AudioClockFeedback m_clockFeedback;
+  bool m_clockFeedbackPending = false;
+  bool m_clockControlFailureActive = false;
+  uint64_t m_clockControlFailureSince = 0;
 
   AudioEndpointStatus m_status;
   uint64_t m_endpointGeneration = 1;
@@ -275,6 +295,30 @@ private:
   {
     CSRWSharedLock lock(m_lock);
     return m_playbackBlocked;
+  }
+
+  void ClearClockFeedbackLocked()
+  {
+    m_clockFeedback = {};
+    m_clockFeedbackPending = false;
+  }
+
+  void ClearClockControlFailureLocked()
+  {
+    m_clockControlFailureActive = false;
+    m_clockControlFailureSince = 0;
+  }
+
+  void ResetClockControlLocked()
+  {
+    ClearClockFeedbackLocked();
+    ClearClockControlFailureLocked();
+  }
+
+  void ResetClockControl()
+  {
+    CSRWExclusiveLock lock(m_lock);
+    ResetClockControlLocked();
   }
 
   static DWORD CALLBACK ThreadProc(void * opaque)
@@ -342,6 +386,14 @@ private:
       if (advance)
         m_endpointGeneration = NextGeneration(m_endpointGeneration);
       next.generation = m_endpointGeneration;
+      if (next.generation != m_status.generation ||
+          next.capabilities != m_status.capabilities ||
+          next.available != m_status.available ||
+          next.active != m_status.active ||
+          !SameStream(next.playback, m_status.playback))
+      {
+        ResetClockControlLocked();
+      }
       if (SameStatus(next, m_status))
         return;
       m_status = next;
@@ -535,6 +587,7 @@ private:
 
   void CloseBroker(bool publish = true)
   {
+    ResetClockControl();
     if (m_handle == INVALID_HANDLE_VALUE)
       return;
 
@@ -575,6 +628,7 @@ private:
           m_activation != ActivationState::DEACTIVATING)
         return false;
       m_activation = ActivationState::IDLE;
+      ResetClockControlLocked();
       m_captureHead  = 0;
       m_captureCount = 0;
     }
@@ -651,6 +705,7 @@ private:
     else if (!bound && m_activation == ActivationState::DEACTIVATING)
     {
       m_activation = ActivationState::IDLE;
+      ResetClockControlLocked();
       return true;
     }
     return false;
@@ -731,6 +786,95 @@ private:
     m_nextPollAt = now +
       (desired ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     return true;
+  }
+
+  void ProcessClockControl()
+  {
+    AudioClockFeedback feedback;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (!m_clockFeedbackPending)
+        return;
+
+      feedback = m_clockFeedback;
+      ClearClockFeedbackLocked();
+      if (!m_started || m_stopping ||
+          m_activation != ActivationState::ACTIVE ||
+          !(m_status.capabilities & AUDIO_CAP_CLOCK_FEEDBACK) ||
+          !m_status.available || !m_status.active ||
+          !m_status.playback.formatValid ||
+          m_status.playback.state != AudioStreamState::RUNNING ||
+          feedback.endpointGeneration != m_status.generation ||
+          feedback.playbackGeneration != m_status.playback.generation)
+      {
+        return;
+      }
+    }
+
+    const uint32_t requiredFlags = LGAUDIO_BROKER_STATE_BOUND |
+      LGAUDIO_BROKER_STATE_DATA_PLANE_ACTIVE;
+    if (m_handle == INVALID_HANDLE_VALUE ||
+        !(m_caps.capabilities & LGAUDIO_BROKER_CAP_CLOCK_CONTROL) ||
+        (m_brokerState.flags & requiredFlags) != requiredFlags ||
+        m_brokerState.render.state != LGAUDIO_BROKER_STREAM_RUNNING ||
+        feedback.playbackGeneration != m_brokerState.render.generation)
+    {
+      return;
+    }
+
+    LGAudioBrokerClockControl control = {};
+    control.size              = sizeof(control);
+    control.version           = LGAUDIO_BROKER_ABI_VERSION;
+    control.adapterGeneration = m_brokerState.adapterGeneration;
+    control.bindingGeneration = m_brokerState.bindingGeneration;
+    control.streamGeneration  = feedback.playbackGeneration;
+    control.targetRateQ32     = feedback.targetRateQ32;
+
+    DWORD returned = 0;
+    DWORD error = ERROR_SUCCESS;
+    if (Ioctl(IOCTL_LGAUDIO_BROKER_SET_CLOCK_CONTROL,
+          &control, sizeof(control), nullptr, 0, returned, error) &&
+        returned == 0)
+    {
+      CSRWExclusiveLock lock(m_lock);
+      ClearClockControlFailureLocked();
+      return;
+    }
+
+    if (error == ERROR_SUCCESS)
+      error = ERROR_INVALID_DATA;
+    if (Stopping())
+      return;
+
+    if (RecoverableIoError(error))
+      m_nextPollAt = 0;
+
+    const uint64_t now = GetTickCount64();
+    bool sustained = false;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (!m_clockControlFailureActive)
+      {
+        m_clockControlFailureActive = true;
+        m_clockControlFailureSince = now;
+      }
+      else
+      {
+        sustained = now - m_clockControlFailureSince >=
+          CLOCK_CONTROL_FAILURE_GRACE_MS;
+      }
+    }
+    if (!sustained)
+      return;
+
+    DEBUG_WARN("Looking Glass Audio clock control failed: %lu", error);
+    m_caps.capabilities &= ~LGAUDIO_BROKER_CAP_CLOCK_CONTROL;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      m_lastError = error;
+      ResetClockControlLocked();
+    }
+    PublishBrokerState(true);
   }
 
   bool ValidateRender(const LGAudioBrokerPacketHeader& header,
@@ -1111,6 +1255,7 @@ private:
 
       if (!Reconcile(false))
         continue;
+      ProcessClockControl();
       DeliverRender();
       StartWriteIo();
       StartRenderIo();
@@ -1128,6 +1273,7 @@ private:
     {
       CSRWExclusiveLock lock(m_lock);
       m_activation = ActivationState::DEACTIVATING;
+      ResetClockControlLocked();
     }
     if (m_handle != INVALID_HANDLE_VALUE)
     {
@@ -1209,6 +1355,7 @@ public:
     m_events   = &events;
     m_started  = true;
     m_stopping = false;
+    ResetClockControlLocked();
     m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
     if (!m_thread)
     {
@@ -1228,6 +1375,7 @@ public:
       if (!m_started)
         return;
       m_stopping = true;
+      ResetClockControlLocked();
       thread = m_thread;
       SetEvent(m_stopEvent);
       SetEvent(m_wakeEvent);
@@ -1248,6 +1396,7 @@ public:
     m_captureCount = 0;
     m_activation   = ActivationState::IDLE;
     m_controlDirty = true;
+    ResetClockControlLocked();
     m_status = {};
     m_status.generation = m_endpointGeneration;
     CloseEvents();
@@ -1290,12 +1439,16 @@ public:
       if (m_activation == ActivationState::DEACTIVATING)
         return AudioResult::BUSY;
       if (m_activation == ActivationState::IDLE)
+      {
+        ResetClockControlLocked();
         m_activation = ActivationState::ACTIVATING;
+      }
     }
     else if (m_activation == ActivationState::ACTIVATING ||
              m_activation == ActivationState::ACTIVE)
     {
       m_activation = ActivationState::DEACTIVATING;
+      ResetClockControlLocked();
       m_controlDirty  = true;
       SetEvent(m_wakeEvent);
     }
@@ -1362,16 +1515,29 @@ public:
       AUDIO_CLOCK_VALID | AUDIO_CLOCK_STABLE |
       AUDIO_CLOCK_DISCONTINUITY;
     if ((feedback.flags & ~allowedFlags) ||
-        !(feedback.flags & AUDIO_CLOCK_VALID))
+        !(feedback.flags & AUDIO_CLOCK_VALID) ||
+        !feedback.endpointGeneration ||
+        !feedback.playbackGeneration || !feedback.targetRateQ32)
       return AudioResult::REJECTED;
-    CSRWSharedLock lock(m_lock);
-    if (!m_started || m_stopping || !m_status.active)
+    CSRWExclusiveLock lock(m_lock);
+    if (!m_started || m_stopping ||
+        m_activation != ActivationState::ACTIVE ||
+        !(m_status.capabilities & AUDIO_CAP_CLOCK_FEEDBACK) ||
+        !m_status.available || !m_status.active ||
+        !m_status.playback.formatValid ||
+        m_status.playback.state != AudioStreamState::RUNNING)
       return AudioResult::UNAVAILABLE;
     if (feedback.endpointGeneration != m_status.generation ||
         feedback.playbackGeneration != m_status.playback.generation)
       return AudioResult::STALE;
-    // The v1 broker advertises no clock-control capability or IOCTL yet.
-    return AudioResult::UNAVAILABLE;
+    if (!ValidClockTarget(feedback.targetRateQ32,
+          m_status.playback.format.sampleRate))
+      return AudioResult::REJECTED;
+
+    m_clockFeedback = feedback;
+    m_clockFeedbackPending = true;
+    SetEvent(m_wakeEvent);
+    return AudioResult::ACCEPTED;
   }
 
   void PlaybackReceiveReady()

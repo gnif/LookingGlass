@@ -21,13 +21,111 @@
 #include "MiniportWaveRTStream.h"
 #include "MiniportWaveRT.h"
 
+#include <intrin.h>
+
 namespace
 {
 constexpr ULONG kRenderPublicationRateHz = 4000;
+constexpr ULONGLONG kMaximumTimeInterval = MAXULONGLONG >> 1;
 
 ULONGLONG MinUlonglong(ULONGLONG left, ULONGLONG right)
 {
   return left < right ? left : right;
+}
+
+bool Divide128(
+  ULONGLONG high,
+  ULONGLONG low,
+  ULONGLONG divisor,
+  ULONGLONG *quotient)
+{
+  if (!divisor || !quotient || high >= divisor)
+    return false;
+  if (!high)
+  {
+    *quotient = low / divisor;
+    return true;
+  }
+
+  ULONGLONG result = 0;
+  ULONGLONG remainder = high;
+  for (ULONG bit = 64; bit; --bit)
+  {
+    const ULONG index = bit - 1;
+    const bool carry = (remainder & (1ULL << 63)) != 0;
+    remainder = (remainder << 1) | ((low >> index) & 1);
+    if (carry || remainder >= divisor)
+    {
+      remainder -= divisor;
+      result |= 1ULL << index;
+    }
+  }
+
+  *quotient = result;
+  return true;
+}
+
+ULONGLONG MultiplyDivide(
+  ULONGLONG value,
+  ULONGLONG multiplier,
+  ULONGLONG divisor,
+  bool roundUp)
+{
+  if (!divisor)
+    return 0;
+
+  ULONGLONG high = 0;
+  ULONGLONG low = _umul128(value, multiplier, &high);
+  if (roundUp)
+  {
+    const ULONGLONG add = divisor - 1;
+    const ULONGLONG oldLow = low;
+    low += add;
+    if (low < oldLow)
+    {
+      if (high == MAXULONGLONG)
+        return kMaximumTimeInterval;
+      ++high;
+    }
+  }
+
+  ULONGLONG result = 0;
+  if (!Divide128(high, low, divisor, &result))
+    return kMaximumTimeInterval;
+
+  return result < kMaximumTimeInterval ?
+    result : kMaximumTimeInterval;
+}
+
+ULONGLONG AudioTicksToQpcTicks(
+  ULONGLONG audioTicks,
+  ULONGLONG audioFrequency,
+  ULONGLONG qpcFrequency,
+  ULONGLONG rateQ32,
+  bool roundUp)
+{
+  if (!audioFrequency || !qpcFrequency || !rateQ32)
+    return 0;
+
+  const ULONGLONG unityQpcTicks = MultiplyDivide(
+    audioTicks, qpcFrequency, audioFrequency, roundUp);
+  return MultiplyDivide(
+    unityQpcTicks, kAudioClockRateOneQ32, rateQ32, roundUp);
+}
+
+ULONGLONG FramesToQpcTicks(
+  ULONGLONG frames,
+  ULONG sampleRate,
+  ULONGLONG qpcFrequency,
+  ULONGLONG rateQ32)
+{
+  if (!sampleRate || !qpcFrequency || !rateQ32)
+    return 0;
+
+  const ULONGLONG unityQpcTicks = MultiplyDivide(
+    frames, qpcFrequency, sampleRate, false);
+  return MultiplyDivide(
+    unityQpcTicks, kAudioClockRateOneQ32, rateQ32, false);
 }
 }
 
@@ -57,6 +155,7 @@ CMiniportWaveRTStream::CMiniportWaveRTStream(
   m_notificationEventCount(0),
   m_clockFrequency(0),
   m_qpcFrequency(0),
+  m_clockRateQ32(kAudioClockRateOneQ32),
   m_lastClockPosition(0),
   m_lastQpcPosition(0),
   m_lastPresentationQpc(0),
@@ -211,8 +310,9 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
   {
     KIRQL oldIrql;
     KeAcquireSpinLock(&m_positionLock, &oldIrql);
-    const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
-    if (!clock.Frequency || !clock.QpcFrequency)
+    const AudioClockSnapshot clock =
+      m_adapter->GetClockSnapshot(m_kind);
+    if (!clock.Frequency || !clock.QpcFrequency || !clock.RateQ32)
     {
       KeReleaseSpinLock(&m_positionLock, oldIrql);
       return STATUS_DEVICE_HARDWARE_ERROR;
@@ -238,6 +338,7 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
       m_kind == EndpointKind::Capture && !m_hasRun;
     m_clockFrequency = clock.Frequency;
     m_qpcFrequency = clock.QpcFrequency;
+    m_clockRateQ32 = clock.RateQ32;
     m_lastClockPosition = clock.Position;
     m_lastQpcPosition = clock.QpcPosition;
     m_lastPresentationQpc = clock.QpcPosition;
@@ -259,7 +360,8 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   if (m_state == KSSTATE_RUN)
     AdvanceLocked(clock);
   m_state = state;
@@ -268,6 +370,7 @@ NTSTATUS CMiniportWaveRTStream::SetState(_In_ KSSTATE state)
   {
     m_clockFrequency = 0;
     m_qpcFrequency = 0;
+    m_clockRateQ32 = kAudioClockRateOneQ32;
     m_lastClockPosition = 0;
     m_lastQpcPosition = 0;
     m_lastPresentationQpc = 0;
@@ -299,7 +402,8 @@ NTSTATUS CMiniportWaveRTStream::GetPosition(
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   AdvanceLocked(clock);
   ULONG reportedPosition = m_cyclicPosition;
   if (m_notificationCount && m_bufferSize)
@@ -443,7 +547,8 @@ NTSTATUS CMiniportWaveRTStream::GetReadPacket(
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -482,8 +587,9 @@ NTSTATUS CMiniportWaveRTStream::GetReadPacket(
     availablePacket * (m_packetSize / blockAlign);
   const ULONGLONG currentFrame = m_linearPosition / blockAlign;
   const ULONGLONG elapsedFrames = currentFrame - packetStartFrame;
-  const ULONGLONG elapsedTicks =
-    elapsedFrames * m_qpcFrequency / sampleRate;
+  const ULONGLONG elapsedTicks = FramesToQpcTicks(
+    elapsedFrames, static_cast<ULONG>(sampleRate),
+    m_qpcFrequency, m_clockRateQ32);
   *performanceCounterValue = elapsedTicks < m_lastPresentationQpc ?
     m_lastPresentationQpc - elapsedTicks : 0;
   *moreData = FALSE;
@@ -505,7 +611,8 @@ NTSTATUS CMiniportWaveRTStream::SetWritePacket(
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -570,7 +677,8 @@ NTSTATUS CMiniportWaveRTStream::GetOutputStreamPresentationPosition(
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -585,10 +693,11 @@ NTSTATUS CMiniportWaveRTStream::GetOutputStreamPresentationPosition(
 
   const ULONG sampleRate =
     m_format.WaveFormatExt.Format.nSamplesPerSec;
-  const ULONGLONG ticksSinceReportedFrame =
-    sampleRate && clock.Frequency && clock.QpcFrequency ?
-      (m_frameRemainder * clock.QpcFrequency / clock.Frequency) /
-        sampleRate : 0;
+  const ULONGLONG fractionalAudioTicks =
+    sampleRate ? m_frameRemainder / sampleRate : 0;
+  const ULONGLONG ticksSinceReportedFrame = AudioTicksToQpcTicks(
+    fractionalAudioTicks, clock.Frequency, clock.QpcFrequency,
+    clock.RateQ32, false);
   if (m_pendingBytes || m_state == KSSTATE_RUN)
   {
     position->u64QPCPosition =
@@ -609,7 +718,8 @@ NTSTATUS CMiniportWaveRTStream::GetPacketCount(
 
   KIRQL oldIrql;
   KeAcquireSpinLock(&m_positionLock, &oldIrql);
-  const AudioClockSnapshot clock = m_adapter->GetClockSnapshot();
+  const AudioClockSnapshot clock =
+    m_adapter->GetClockSnapshot(m_kind);
   if (!m_notificationCount)
   {
     KeReleaseSpinLock(&m_positionLock, oldIrql);
@@ -755,7 +865,8 @@ void CMiniportWaveRTStream::StopTimer()
 void CMiniportWaveRTStream::ArmTimerLocked()
 {
   if (!m_timer || m_state != KSSTATE_RUN || !m_notificationCount ||
-      !m_packetSize || !m_clockFrequency)
+      !m_packetSize || !m_clockFrequency || !m_qpcFrequency ||
+      !m_clockRateQ32)
     return;
 
   const ULONG blockAlign =
@@ -798,15 +909,18 @@ void CMiniportWaveRTStream::ArmTimerLocked()
   const ULONGLONG frameTicks = framesUntilTarget * frequency;
   const ULONGLONG ticksNumerator = frameTicks > m_frameRemainder ?
     frameTicks - m_frameRemainder : 0;
-  ULONGLONG qpcTicks =
+  const ULONGLONG audioTicks =
     (ticksNumerator + sampleRate - 1) / sampleRate;
+  ULONGLONG qpcTicks = AudioTicksToQpcTicks(
+    audioTicks, m_clockFrequency, m_qpcFrequency,
+    m_clockRateQ32, true);
   if (!qpcTicks)
     qpcTicks = 1;
 
   constexpr ULONGLONG kHundredNanosecondsPerSecond = 10000000;
   ULONGLONG dueTime =
-    (qpcTicks * kHundredNanosecondsPerSecond + frequency - 1) /
-      frequency;
+    MultiplyDivide(qpcTicks, kHundredNanosecondsPerSecond,
+      m_qpcFrequency, true);
   if (!dueTime)
     dueTime = 1;
 
@@ -817,7 +931,7 @@ void CMiniportWaveRTStream::AdvanceLocked(
   _In_ const AudioClockSnapshot &clock)
 {
   if (m_state != KSSTATE_RUN || !m_buffer || !m_bufferSize ||
-      !clock.Frequency || !clock.QpcFrequency)
+      !clock.Frequency || !clock.QpcFrequency || !clock.RateQ32)
     return;
 
   const bool clockDiscontinuity =
@@ -827,6 +941,7 @@ void CMiniportWaveRTStream::AdvanceLocked(
   {
     m_clockFrequency = clock.Frequency;
     m_qpcFrequency = clock.QpcFrequency;
+    m_clockRateQ32 = clock.RateQ32;
     m_lastClockPosition = clock.Position;
     m_lastQpcPosition = clock.QpcPosition;
     m_lastPresentationQpc = clock.QpcPosition;
@@ -837,6 +952,7 @@ void CMiniportWaveRTStream::AdvanceLocked(
   if (clock.Position == m_lastClockPosition)
   {
     m_qpcFrequency = clock.QpcFrequency;
+    m_clockRateQ32 = clock.RateQ32;
     m_lastQpcPosition = clock.QpcPosition;
     return;
   }
@@ -849,6 +965,7 @@ void CMiniportWaveRTStream::AdvanceLocked(
   m_frameRemainder = numerator % clock.Frequency;
   m_clockFrequency = clock.Frequency;
   m_qpcFrequency = clock.QpcFrequency;
+  m_clockRateQ32 = clock.RateQ32;
   m_lastClockPosition = clock.Position;
   m_lastQpcPosition = clock.QpcPosition;
 
@@ -1023,19 +1140,21 @@ void CMiniportWaveRTStream::UpdatePresentationQpcLocked(
     m_format.WaveFormatExt.Format.nBlockAlign;
   const ULONG sampleRate =
     m_format.WaveFormatExt.Format.nSamplesPerSec;
-  if (!clock.Frequency || !clock.QpcFrequency || !blockAlign ||
-      !sampleRate)
+  if (!clock.Frequency || !clock.QpcFrequency || !clock.RateQ32 ||
+      !blockAlign || !sampleRate)
   {
     m_lastPresentationQpc = clock.QpcPosition;
     return;
   }
 
   const ULONGLONG pendingFrames = m_pendingBytes / blockAlign;
-  const ULONGLONG wholeQpcTicks =
-    pendingFrames * clock.QpcFrequency / sampleRate;
-  const ULONGLONG fractionalQpcTicks =
-    (m_frameRemainder * clock.QpcFrequency / clock.Frequency) /
-      sampleRate;
+  const ULONGLONG wholeQpcTicks = FramesToQpcTicks(
+    pendingFrames, sampleRate, clock.QpcFrequency, clock.RateQ32);
+  const ULONGLONG fractionalAudioTicks =
+    m_frameRemainder / sampleRate;
+  const ULONGLONG fractionalQpcTicks = AudioTicksToQpcTicks(
+    fractionalAudioTicks, clock.Frequency, clock.QpcFrequency,
+    clock.RateQ32, false);
   const ULONGLONG ticksSinceBoundary =
     wholeQpcTicks + fractionalQpcTicks;
   m_lastPresentationQpc = ticksSinceBoundary < clock.QpcPosition ?
@@ -1132,7 +1251,7 @@ void CMiniportWaveRTStream::TimerCallback(
 
   KeAcquireSpinLockAtDpcLevel(&stream->m_positionLock);
   const AudioClockSnapshot clock =
-    stream->m_adapter->GetClockSnapshot();
+    stream->m_adapter->GetClockSnapshot(stream->m_kind);
   stream->AdvanceLocked(clock);
   if (stream->m_state == KSSTATE_RUN)
     stream->ArmTimerLocked();
