@@ -39,10 +39,10 @@ struct LGAudioDeviceSnapshot
   uint32_t lastError       = 0;
 };
 
-class ILGAudioDeviceEvents
+class IAudioDeviceEvents
 {
 public:
-  virtual ~ILGAudioDeviceEvents() = default;
+  virtual ~IAudioDeviceEvents() = default;
 
   virtual void LGAudioState(const AudioEndpointStatus& state) = 0;
   virtual AudioResult LGAudioPlayback(const AudioPacket& packet,
@@ -57,7 +57,7 @@ public:
 
   // Methods are thread-safe and nonblocking except Stop. Stop is a callback-
   // quiescence barrier; after it returns no event callback can still run.
-  virtual bool Start(ILGAudioDeviceEvents& events) = 0;
+  virtual bool Start(IAudioDeviceEvents& events) = 0;
   virtual void Stop() = 0;
   virtual LGAudioDeviceSnapshot Snapshot() const = 0;
   virtual AudioResult SetActive(bool active) = 0;
@@ -81,7 +81,7 @@ public:
   CLGAudioDevice(const CLGAudioDevice&) = delete;
   CLGAudioDevice& operator=(const CLGAudioDevice&) = delete;
 
-  bool Start(ILGAudioDeviceEvents& events) override;
+  bool Start(IAudioDeviceEvents& events) override;
   void Stop() override;
 
   LGAudioDeviceSnapshot Snapshot() const override;

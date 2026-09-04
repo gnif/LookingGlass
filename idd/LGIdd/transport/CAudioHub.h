@@ -28,7 +28,7 @@
 #include <memory>
 
 class CAudioHub final : public IAudioTarget,
-  private ILGAudioDeviceEvents
+  private IAudioDeviceEvents
 {
 private:
   CSRWLock m_lifecycleLock;

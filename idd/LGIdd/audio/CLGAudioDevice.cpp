@@ -283,7 +283,7 @@ private:
   };
 
   mutable CSRWLock m_lock;
-  ILGAudioDeviceEvents * m_events = nullptr;
+  IAudioDeviceEvents * m_events = nullptr;
   HANDLE m_stopEvent    = nullptr;
   HANDLE m_wakeEvent    = nullptr;
   HANDLE m_controlEvent = nullptr;
@@ -340,7 +340,7 @@ private:
     return WaitForSingleObject(m_stopEvent, 0) == 0;
   }
 
-  void ClearPlaybackBlock()
+  void UnblockPlayback()
   {
     CSRWExclusiveLock lock(m_lock);
     m_playbackBlocked = false;
@@ -352,28 +352,28 @@ private:
     return m_playbackBlocked;
   }
 
-  void ClearClockFeedbackLocked()
+  void ClearFeedback()
   {
     m_clockFeedback = {};
     m_clockFeedbackPending = false;
   }
 
-  void ClearClockControlFailureLocked()
+  void ClearFaultLocked()
   {
     m_clockControlFailureActive = false;
     m_clockControlFailureSince = 0;
   }
 
-  void ResetClockControlLocked()
+  void ResetClockLocked()
   {
-    ClearClockFeedbackLocked();
-    ClearClockControlFailureLocked();
+    ClearFeedback();
+    ClearFaultLocked();
   }
 
-  void ResetClockControl()
+  void ResetClock()
   {
     CSRWExclusiveLock lock(m_lock);
-    ResetClockControlLocked();
+    ResetClockLocked();
   }
 
   static DWORD CALLBACK ThreadProc(void * opaque)
@@ -435,7 +435,7 @@ private:
 
   void Publish(AudioEndpointStatus next, bool advance)
   {
-    ILGAudioDeviceEvents * events = nullptr;
+    IAudioDeviceEvents * events = nullptr;
     {
       CSRWExclusiveLock lock(m_lock);
       if (advance)
@@ -447,7 +447,7 @@ private:
           next.active != m_status.active ||
           !SameStream(next.playback, m_status.playback))
       {
-        ResetClockControlLocked();
+        ResetClockLocked();
       }
       if (SameStatus(next, m_status))
         return;
@@ -458,7 +458,7 @@ private:
       events->LGAudioState(next);
   }
 
-  void PublishUnavailable(bool advance)
+  void PublishOffline(bool advance)
   {
     AudioEndpointStatus next;
     next.capabilities = 0;
@@ -477,7 +477,7 @@ private:
     return result;
   }
 
-  void PublishBrokerState(bool forceAdvance = false)
+  void PublishBroker(bool forceAdvance = false)
   {
     AudioEndpointStatus previous = Status();
     AudioEndpointStatus next;
@@ -519,7 +519,7 @@ private:
     if (previous.playback.generation != next.playback.generation ||
         previous.active != next.active || bindingChanged)
     {
-      ClearPlaybackBlock();
+      UnblockPlayback();
       m_renderSequenceValid = false;
       m_renderDiscontinuity = true;
     }
@@ -628,12 +628,12 @@ private:
     m_writeBytes   = 0;
     ResetEvent(m_writeOverlapped.hEvent);
     m_captureDiscontinuity = false;
-    ClearPlaybackBlock();
+    UnblockPlayback();
     m_renderSequenceValid = false;
     m_renderDiscontinuity = true;
   }
 
-  void ClearCaptureQueue()
+  void ClearCapture()
   {
     CSRWExclusiveLock lock(m_lock);
     m_captureHead  = 0;
@@ -642,7 +642,7 @@ private:
 
   void CloseBroker(bool publish = true)
   {
-    ResetClockControl();
+    ResetClock();
     if (m_handle == INVALID_HANDLE_VALUE)
       return;
 
@@ -668,14 +668,14 @@ private:
     m_captureStreamGeneration = 0;
     m_nextCaptureSequence = 0;
     m_captureDiscontinuity = false;
-    ClearCaptureQueue();
+    ClearCapture();
     if (!Stopping())
       m_nextOpenAt = GetTickCount64() + OPEN_RETRY_MS;
     if (publish || inactiveBarrier)
-      PublishUnavailable(true);
+      PublishOffline(true);
   }
 
-  bool FinishAbsentDeactivation()
+  bool FinishAbsentStop()
   {
     {
       CSRWExclusiveLock lock(m_lock);
@@ -683,11 +683,11 @@ private:
           m_activation != ActivationState::DEACTIVATING)
         return false;
       m_activation = ActivationState::IDLE;
-      ResetClockControlLocked();
+      ResetClockLocked();
       m_captureHead  = 0;
       m_captureCount = 0;
     }
-    PublishUnavailable(true);
+    PublishOffline(true);
     return true;
   }
 
@@ -724,7 +724,7 @@ private:
         DEBUG_WARN("Looking Glass Audio broker query failed: %lu", error);
       CloseBroker(false);
       m_nextOpenAt = now + OPEN_RETRY_MS;
-      PublishUnavailable(false);
+      PublishOffline(false);
       return false;
     }
 
@@ -738,7 +738,7 @@ private:
     }
     m_nextPollAt    = 0;
     DEBUG_INFO("Looking Glass Audio broker connected");
-    PublishBrokerState();
+    PublishBroker();
     return true;
   }
 
@@ -760,16 +760,16 @@ private:
     else if (!bound && m_activation == ActivationState::DEACTIVATING)
     {
       m_activation = ActivationState::IDLE;
-      ResetClockControlLocked();
+      ResetClockLocked();
       return true;
     }
     return false;
   }
 
-  void DropQueuedCapture()
+  void DropCapture()
   {
     bool ready = false;
-    ILGAudioDeviceEvents * events = nullptr;
+    IAudioDeviceEvents * events = nullptr;
     {
       CSRWExclusiveLock lock(m_lock);
       ready = m_captureCount == CAPTURE_SLOT_COUNT;
@@ -820,7 +820,7 @@ private:
     else if (!desired && initiallyBound)
     {
       CancelDataIo();
-      DropQueuedCapture();
+      DropCapture();
       if (!Unbind(error) && !Stopping())
         DEBUG_WARN("Looking Glass Audio broker unbind failed: %lu", error);
       if (!QueryState(error))
@@ -837,13 +837,13 @@ private:
         LGAUDIO_BROKER_STATE_DATA_PLANE_ACTIVE) != 0;
     const bool inactiveBarrier =
       FinishActivation(bound, dataPlaneActive);
-    PublishBrokerState(inactiveBarrier);
+    PublishBroker(inactiveBarrier);
     m_nextPollAt = now +
       (desired ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     return true;
   }
 
-  void ProcessClockControl()
+  void ProcessClock()
   {
     AudioClockFeedback feedback;
     {
@@ -852,7 +852,7 @@ private:
         return;
 
       feedback = m_clockFeedback;
-      ClearClockFeedbackLocked();
+      ClearFeedback();
       if (!m_started || m_stopping ||
           m_activation != ActivationState::ACTIVE ||
           !(m_status.capabilities & AUDIO_CAP_CLOCK_FEEDBACK) ||
@@ -892,7 +892,7 @@ private:
         returned == 0)
     {
       CSRWExclusiveLock lock(m_lock);
-      ClearClockControlFailureLocked();
+      ClearFaultLocked();
       return;
     }
 
@@ -927,9 +927,9 @@ private:
     {
       CSRWExclusiveLock lock(m_lock);
       m_lastError = error;
-      ResetClockControlLocked();
+      ResetClockLocked();
     }
-    PublishBrokerState(true);
+    PublishBroker(true);
   }
 
   bool ValidateRender(const LGAudioBrokerPacketHeader& header,
@@ -1027,7 +1027,7 @@ private:
       if (m_renderDiscontinuity)
         packet.flags |= AUDIO_PACKET_DISCONTINUITY;
 
-      ILGAudioDeviceEvents * events = nullptr;
+      IAudioDeviceEvents * events = nullptr;
       uint64_t readySerial = 0;
       {
         CSRWSharedLock lock(m_lock);
@@ -1148,7 +1148,7 @@ private:
 
   bool PopCapture(CaptureSlot& result, bool& becameReady)
   {
-    ILGAudioDeviceEvents * events = nullptr;
+    IAudioDeviceEvents * events = nullptr;
     {
       CSRWExclusiveLock lock(m_lock);
       if (!m_captureCount)
@@ -1289,7 +1289,7 @@ private:
     while (!Stopping())
     {
       if (m_handle == INVALID_HANDLE_VALUE)
-        FinishAbsentDeactivation();
+        FinishAbsentStop();
       if (m_handle == INVALID_HANDLE_VALUE && !OpenBroker())
       {
         const HANDLE waits[] = { m_stopEvent, m_wakeEvent };
@@ -1310,7 +1310,7 @@ private:
 
       if (!Reconcile(false))
         continue;
-      ProcessClockControl();
+      ProcessClock();
       DeliverRender();
       StartWriteIo();
       StartRenderIo();
@@ -1328,7 +1328,7 @@ private:
     {
       CSRWExclusiveLock lock(m_lock);
       m_activation = ActivationState::DEACTIVATING;
-      ResetClockControlLocked();
+      ResetClockLocked();
     }
     if (m_handle != INVALID_HANDLE_VALUE)
     {
@@ -1340,7 +1340,7 @@ private:
       }
       CloseBroker(false);
     }
-    FinishAbsentDeactivation();
+    FinishAbsentStop();
     if (avTaskHandle)
       AvRevertMmThreadCharacteristics(avTaskHandle);
   }
@@ -1380,7 +1380,7 @@ public:
     Stop();
   }
 
-  bool Start(ILGAudioDeviceEvents& events)
+  bool Start(IAudioDeviceEvents& events)
   {
     CSRWExclusiveLock lock(m_lock);
     if (m_started)
@@ -1410,7 +1410,7 @@ public:
     m_events   = &events;
     m_started  = true;
     m_stopping = false;
-    ResetClockControlLocked();
+    ResetClockLocked();
     m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
     if (!m_thread)
     {
@@ -1430,7 +1430,7 @@ public:
       if (!m_started)
         return;
       m_stopping = true;
-      ResetClockControlLocked();
+      ResetClockLocked();
       thread = m_thread;
       SetEvent(m_stopEvent);
       SetEvent(m_wakeEvent);
@@ -1451,7 +1451,7 @@ public:
     m_captureCount = 0;
     m_activation   = ActivationState::IDLE;
     m_controlDirty = true;
-    ResetClockControlLocked();
+    ResetClockLocked();
     m_status = {};
     m_status.generation = m_endpointGeneration;
     CloseEvents();
@@ -1495,7 +1495,7 @@ public:
         return AudioResult::BUSY;
       if (m_activation == ActivationState::IDLE)
       {
-        ResetClockControlLocked();
+        ResetClockLocked();
         m_activation = ActivationState::ACTIVATING;
       }
     }
@@ -1503,7 +1503,7 @@ public:
              m_activation == ActivationState::ACTIVE)
     {
       m_activation = ActivationState::DEACTIVATING;
-      ResetClockControlLocked();
+      ResetClockLocked();
       m_controlDirty  = true;
       SetEvent(m_wakeEvent);
     }
@@ -1548,6 +1548,30 @@ public:
         m_status.capture.state != AudioStreamState::RUNNING ||
         !SameFormat(packet.format, m_status.capture.format))
       return AudioResult::UNAVAILABLE;
+
+    if (m_captureCount &&
+        !(packet.flags & AUDIO_PACKET_DISCONTINUITY))
+    {
+      CaptureSlot& tail = m_capture[
+        (m_captureHead + m_captureCount - 1) % CAPTURE_SLOT_COUNT];
+      if (tail.packet.endpointGeneration == packet.endpointGeneration &&
+          tail.packet.streamGeneration == packet.streamGeneration &&
+          SameFormat(tail.packet.format, packet.format) &&
+          packet.frames <=
+            AUDIO_MAX_FRAMES_PER_PACKET - tail.packet.frames &&
+          pcmBytes <= AUDIO_MAX_PCM_BYTES - tail.size)
+      {
+        if (silent)
+          memset(tail.data + tail.size, 0, pcmBytes);
+        else
+          memcpy(tail.data + tail.size, data, pcmBytes);
+        tail.packet.frames += packet.frames;
+        tail.size          += pcmBytes;
+        SetEvent(m_wakeEvent);
+        return AudioResult::ACCEPTED;
+      }
+    }
+
     if (m_captureCount == CAPTURE_SLOT_COUNT)
       return AudioResult::BUSY;
 
@@ -1595,7 +1619,7 @@ public:
     return AudioResult::ACCEPTED;
   }
 
-  void PlaybackReceiveReady()
+  void PlaybackReady()
   {
     bool wake = false;
     {
@@ -1622,7 +1646,7 @@ CLGAudioDevice::~CLGAudioDevice()
   Stop();
 }
 
-bool CLGAudioDevice::Start(ILGAudioDeviceEvents& events)
+bool CLGAudioDevice::Start(IAudioDeviceEvents& events)
 {
   return m_state && m_state->Start(events);
 }
@@ -1661,5 +1685,5 @@ AudioResult CLGAudioDevice::SetClockFeedback(
 void CLGAudioDevice::PlaybackReceiveReady()
 {
   if (m_state)
-    m_state->PlaybackReceiveReady();
+    m_state->PlaybackReady();
 }

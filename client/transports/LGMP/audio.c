@@ -41,6 +41,8 @@
 #define AUDIO_CLAIM_RETRY_US  200000U
 #define AUDIO_OWNER_RETRY_US 1200000U
 #define AUDIO_DRAIN_MAX            32U
+#define AUDIO_CAPTURE_WRITE_TIMEOUT_US 5000U
+#define AUDIO_CAPTURE_WRITE_MAX_WAIT_US 250U
 
 #define AUDIO_CAPABILITIES \
   (KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE | \
@@ -2226,12 +2228,7 @@ static bool recordData(void * opaque, uint32_t generation,
   if (!generation || !data || !frames ||
       frames > KVMFR_AUDIO_MAX_FRAMES_PER_PACKET)
     return false;
-  if (!tryWriteGate(audio))
-  {
-    atomic_store_explicit(
-        &audio->captureDiscontinuity, true, memory_order_release);
-    return false;
-  }
+  lockWriteGate(audio);
 
   if (!audio->publicDataAllowed || !audio->writeBound ||
       generation != audio->writeCaptureLocalGeneration ||
@@ -2271,10 +2268,43 @@ static bool recordData(void * opaque, uint32_t generation,
         &audio->captureDiscontinuity, false, memory_order_acq_rel))
     flags |= KVMFR_AUDIO_MESSAGE_DISCONTINUITY;
 
-  const enum WriteResult result = writeMessageLocked(audio,
+  enum WriteResult result = writeMessageLocked(audio,
       KVMFR_AUDIO_MESSAGE_CAPTURE_DATA,
       audio->writeCaptureGeneration, flags, position, timeNs, rateQ32,
       (uint32_t)frames, data, (uint32_t)bytes);
+  if (result == WRITE_FULL)
+  {
+    LGMPStreamPollState streamPoll;
+    const LGMP_STATUS pollStatus = lgmpStreamPollInit(&streamPoll,
+        (struct LGMPStreamPollConfig)
+        {
+          .spinCount = 64U,
+          .minWaitUs = AUDIO_ACTIVE_POLL_US,
+          .maxWaitUs = AUDIO_CAPTURE_WRITE_MAX_WAIT_US,
+        });
+    DEBUG_ASSERT(pollStatus == LGMP_OK);
+
+    const uint64_t deadline =
+      microtime() + AUDIO_CAPTURE_WRITE_TIMEOUT_US;
+    while (result == WRITE_FULL && pollStatus == LGMP_OK)
+    {
+      const uint64_t now = microtime();
+      if (now >= deadline)
+        break;
+
+      uint32_t waitUs = lgmpStreamPollIdle(&streamPoll);
+      const uint64_t remainingUs = deadline - now;
+      if (waitUs > remainingUs)
+        waitUs = (uint32_t)remainingUs;
+      if (waitUs)
+        nsleep((uint64_t)waitUs * 1000U);
+
+      result = writeMessageLocked(audio,
+          KVMFR_AUDIO_MESSAGE_CAPTURE_DATA,
+          audio->writeCaptureGeneration, flags, position, timeNs, rateQ32,
+          (uint32_t)frames, data, (uint32_t)bytes);
+    }
+  }
   if (result != WRITE_OK)
   {
     if (result == WRITE_FULL)
@@ -2298,11 +2328,7 @@ static bool clockFeedback(void * opaque, uint32_t generation,
     return false;
 
   if (!tryWriteGate(audio))
-  {
-    atomic_store_explicit(
-        &audio->captureDiscontinuity, true, memory_order_release);
     return false;
-  }
   LG_LOCK(audio->lock);
   const bool supported = audio->phase == AUDIO_PHASE_BOUND &&
     !audio->releaseRequested && audio->statusAvailable &&
@@ -2338,13 +2364,6 @@ static bool clockFeedback(void * opaque, uint32_t generation,
       audio->writePlaybackGeneration, flags,
       playbackClock->position, playbackClock->time, rateQ32, 0,
       &feedback, sizeof(feedback));
-  if (result != WRITE_OK)
-  {
-    if (result == WRITE_FULL)
-      ++audio->clientSequence;
-    atomic_store_explicit(
-        &audio->captureDiscontinuity, true, memory_order_release);
-  }
   unlockWriteGate(audio);
   return result == WRITE_OK;
 }
