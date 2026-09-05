@@ -76,6 +76,7 @@
 #define PLAYBACK_MAX_SOURCE_PACKET_MS 100
 #define PLAYBACK_FEEDBACK_INTERVAL_NS INT64_C(10000000)
 #define PLAYBACK_FEEDBACK_FAILURE_NS INT64_C(100000000)
+#define PLAYBACK_FEEDBACK_MISSING_NS INT64_C(500000000)
 #define PLAYBACK_GRAPH_INTERVAL_NS INT64_C(25000000)
 
 typedef enum
@@ -216,6 +217,7 @@ typedef struct
   double  ratioIntegral;
   double  lastRatio;
   double  lastClockRatio;
+  int64_t feedbackMissingSince;
   int64_t nextFeedbackTime;
   int64_t nextGraphTime;
   int64_t nextLogTime;
@@ -1038,6 +1040,7 @@ static int64_t playbackMapMediaTime(PlaybackSourceData * sourceData,
 }
 
 static void playbackStop(void);
+static void playbackFeedbackFailed(uint32_t generation);
 static bool playbackEnsureConversionBuffers(
     PlaybackSourceData * sourceData, int frames);
 static MsgBoxHandle recordCancelConfirmLocked(void);
@@ -1570,6 +1573,7 @@ static bool playbackStart(const LG_AudioFormat * format,
   audio.playback.sourceData.sourcePacketRecovering   = false;
   audio.playback.sourceData.deviceClock.valid        = false;
   audio.playback.sourceData.outputClock.valid        = false;
+  audio.playback.sourceData.feedbackMissingSince     = 0;
   playbackPrepareMediaClock(&audio.playback.sourceData, sourceClock);
 
   atomic_store_explicit(
@@ -4048,6 +4052,7 @@ static void eventPlaybackData(void * opaque, uint32_t generation,
   if (!eventBegin(binding, &active))
     return;
 
+  bool feedbackMissing = false;
   LG_LOCK(audio.playback.sourceLock);
   if (audio.playback.requestedGeneration == generation)
   {
@@ -4081,12 +4086,32 @@ static void eventPlaybackData(void * opaque, uint32_t generation,
     LG_AudioClock feedback;
     double targetRate;
     if (result == PLAYBACK_DATA_PROCESSED &&
-        active.ops->clockFeedback &&
-        playbackGetFeedback(&feedback, &targetRate))
-      queueFeedback(active.ops, active.opaque, active.epoch,
-          active.generation, generation, &feedback, targetRate);
+        active.ops->clockFeedback)
+    {
+      if (playbackGetFeedback(&feedback, &targetRate))
+      {
+        audio.playback.sourceData.feedbackMissingSince = 0;
+        queueFeedback(active.ops, active.opaque, active.epoch,
+            active.generation, generation, &feedback, targetRate);
+      }
+      else if (audio.playback.rateControl == PLAYBACK_RATE_PROVIDER)
+      {
+        const int64_t now = arrivalTime;
+        if (!audio.playback.sourceData.feedbackMissingSince)
+          audio.playback.sourceData.feedbackMissingSince = now;
+        else if (now -
+            audio.playback.sourceData.feedbackMissingSince >=
+              PLAYBACK_FEEDBACK_MISSING_NS)
+        {
+          audio.playback.sourceData.feedbackMissingSince = 0;
+          feedbackMissing = true;
+        }
+      }
+    }
   }
   LG_UNLOCK(audio.playback.sourceLock);
+  if (feedbackMissing)
+    playbackFeedbackFailed(generation);
   eventEnd();
 }
 
