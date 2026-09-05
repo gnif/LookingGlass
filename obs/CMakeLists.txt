@@ -8,6 +8,8 @@ include(CheckSubmodule)
 include(GNUInstallDirs)
 include(CheckCCompilerFlag)
 include(FeatureSummary)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
 
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
@@ -104,6 +106,7 @@ link_libraries(
 
 set(SOURCES
   ${CMAKE_BINARY_DIR}/version.c
+  audio.c
   frame_scheduler.c
   main.c
   lg.c
@@ -120,6 +123,7 @@ target_link_libraries(looking-glass-obs
   ${EXE_FLAGS}
   lg_common
   lgmp
+  PkgConfig::SAMPLERATE
 )
 
 install(TARGETS looking-glass-obs

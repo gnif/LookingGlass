@@ -42,6 +42,7 @@
 #include "hdrpq.effect.h"
 #include "cursor.effect.h"
 #include "frame_scheduler.h"
+#include "audio.h"
 
 #define LG_FRAME_TIMING_SPIN_COUNT 4096
 
@@ -136,6 +137,7 @@ typedef struct
   pthread_mutex_t      pointerLock;
   LGFrameScheduler     frameScheduler;
   _Atomic(bool)        sourceActive;
+  LGOBSAudio         * audio;
 
   bool                 cursorMono;
   gs_texture_t       * cursorTex;
@@ -439,6 +441,20 @@ static void * lgCreate(obs_data_t * settings, obs_source_t * context)
   atomic_store(&this->cursorTransformVer, 0);
   atomic_store(&this->sdrWhiteLevel, KVMFR_SDR_WHITE_LEVEL_DEFAULT);
   atomic_store(&this->sourceActive, obs_source_active(context));
+  if (!lgObsAudioCreate(&this->audio, context))
+  {
+    blog(LOG_ERROR, "Failed to initialize Looking Glass audio");
+    os_sem_destroy(this->frameSem);
+    os_sem_destroy(this->cursorSem);
+    pthread_mutex_destroy(&this->pointerLock);
+    obs_enter_graphics();
+    gs_effect_destroy(this->unpackEffect);
+    gs_effect_destroy(this->hdrEffect);
+    gs_effect_destroy(this->cursorEffect);
+    obs_leave_graphics();
+    bfree(this);
+    return NULL;
+  }
   lgUpdate(this, settings);
   return this;
 }
@@ -514,6 +530,7 @@ static void dmabufReset(LGPlugin * this)
 
 static void deinit(LGPlugin * this)
 {
+  lgObsAudioDisconnect(this->audio);
   bool closeShm = false;
   switch(this->state)
   {
@@ -610,6 +627,7 @@ static void lgDestroy(void * data)
 {
   LGPlugin * this = (LGPlugin *)data;
   deinit(this);
+  lgObsAudioDestroy(&this->audio);
   os_sem_destroy(this->frameSem );
   os_sem_destroy(this->cursorSem);
   pthread_mutex_destroy(&this->pointerLock);
@@ -626,6 +644,7 @@ static void lgDestroy(void * data)
 static void lgGetDefaults(obs_data_t * defaults)
 {
   obs_data_set_default_string(defaults, "shmFile", "/dev/kvmfr0");
+  obs_data_set_default_bool(defaults, "captureAudio", true);
 #if LIBOBS_API_MAJOR_VER >= 27
   obs_data_set_default_bool(defaults, "dmabuf", true);
 #endif
@@ -639,6 +658,8 @@ static obs_properties_t * lgGetProperties(void * data)
       obs_module_text("SHM File"), OBS_TEXT_DEFAULT);
   obs_properties_add_bool(props, "hideMouse",
       obs_module_text("Hide mouse cursor"));
+  obs_properties_add_bool(props, "captureAudio",
+      obs_module_text("Capture guest audio"));
 #if LIBOBS_API_MAJOR_VER >= 27
   obs_properties_add_bool(props, "dmabuf",
       obs_module_text("Use DMABUF import (requires kvmfr device)"));
@@ -771,6 +792,7 @@ static void * pointerThread(void * data)
     LGMPMessage msg;
 
     pthread_mutex_lock(&this->pointerLock);
+    lgObsAudioPumpPointer(this->audio, this->pointerQueue);
     if ((status = lgmpClientProcess(this->pointerQueue, &msg)) != LGMP_OK)
     {
       pthread_mutex_unlock(&this->pointerLock);
@@ -781,6 +803,31 @@ static void * pointerThread(void * data)
       }
 
       usleep(1000);
+      continue;
+    }
+
+    const uint32_t pointerTag = (uint32_t)(msg.udata >> 32);
+    if (pointerTag)
+    {
+      KVMFRAudioStreamResponse response;
+      const bool audioResponse =
+        pointerTag == KVMFR_AUDIO_CONTROL_TAG;
+      const bool valid = audioResponse &&
+        msg.udata == KVMFR_AUDIO_CONTROL_UDATA &&
+        msg.mem && msg.size == sizeof(response);
+      if (valid)
+        memcpy(&response, msg.mem, sizeof(response));
+      status = lgmpClientMessageDone(this->pointerQueue);
+      pthread_mutex_unlock(&this->pointerLock);
+      if (status != LGMP_OK)
+      {
+        printf("lgmpClientMessageDone: %s\n", lgmpStatusString(status));
+        break;
+      }
+      if (valid)
+        lgObsAudioHandleResponse(this->audio, &response);
+      else if (audioResponse)
+        blog(LOG_WARNING, "Ignoring malformed Looking Glass audio response");
       continue;
     }
 
@@ -920,6 +967,8 @@ static void lgUpdate(void * data, obs_data_t * settings)
   LGPlugin * this = (LGPlugin *)data;
 
   deinit(this);
+  lgObsAudioSetEnabled(this->audio,
+      obs_data_get_bool(settings, "captureAudio"));
   this->shmFile = bstrdup(obs_data_get_string(settings, "shmFile"));
   if (!ivshmemOpenDev(&this->shmDev, this->shmFile))
     return;
@@ -974,6 +1023,9 @@ static void lgUpdate(void * data, obs_data_t * settings)
 
   lgFrameSchedulerInit(&this->frameScheduler,
     udata->features & KVMFR_FEATURE_FRAME_SCHEDULE, clientID);
+  if ((udata->features & KVMFR_FEATURE_AUDIO) &&
+      !lgObsAudioConnect(this->audio, this->lgmp, clientID))
+    blog(LOG_WARNING, "Failed to connect Looking Glass audio transport");
 
   this->state = STATE_STARTING;
   createThreads(this);
@@ -1738,6 +1790,7 @@ static void lgActivate(void * data)
   LGPlugin * this = (LGPlugin *)data;
   atomic_store_explicit(
     &this->sourceActive, true, memory_order_release);
+  lgObsAudioSetActive(this->audio, true);
 }
 
 static void lgDeactivate(void * data)
@@ -1745,6 +1798,7 @@ static void lgDeactivate(void * data)
   LGPlugin * this = (LGPlugin *)data;
   atomic_store_explicit(
     &this->sourceActive, false, memory_order_release);
+  lgObsAudioSetActive(this->audio, false);
 }
 
 static void lgSetupCursorEffect(LGPlugin * this, int outputTransfer)
@@ -1931,7 +1985,8 @@ struct obs_source_info lg_source =
 {
   .id                    = "looking-glass-obs",
   .type                  = OBS_SOURCE_TYPE_INPUT,
-  .output_flags          = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW |
+  .output_flags          = OBS_SOURCE_VIDEO | OBS_SOURCE_AUDIO |
+                           OBS_SOURCE_CUSTOM_DRAW |
                            OBS_SOURCE_DO_NOT_DUPLICATE | OBS_SOURCE_SRGB,
   .get_name              = lgGetName,
   .create                = lgCreate,
