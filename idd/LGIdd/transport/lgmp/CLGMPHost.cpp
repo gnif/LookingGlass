@@ -157,6 +157,12 @@ LGMP_STATUS CLGMPHost::CreateStream(
   return lgmpHostStreamNew(m_host, config, stream);
 }
 
+LGMP_STATUS CLGMPHost::CreateSPMC(
+  const struct LGMPSPMCConfig& config, PLGMPHostSPMC * stream)
+{
+  return lgmpHostSPMCNew(m_host, config, stream);
+}
+
 LGMP_STATUS CLGMPHost::Allocate(uint32_t size, PLGMPMemory * memory)
 {
   return lgmpHostMemAlloc(m_host, size, memory);

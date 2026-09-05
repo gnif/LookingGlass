@@ -102,7 +102,11 @@ bool CLGMPTransport::Initialize()
     return false;
 
   if (!m_audio.Initialize())
+  {
+    if (!m_audio.CanRespondToClaims())
+      return false;
     DEBUG_WARN("LGMP audio transport is unavailable");
+  }
 
   m_frames.SealMemoryLayout();
   return true;

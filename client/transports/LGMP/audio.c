@@ -27,6 +27,7 @@
 #include "common/time.h"
 
 #include <lgmp/stream.h>
+#include <lgmp/spmc.h>
 
 #include <errno.h>
 #include <math.h>
@@ -48,8 +49,11 @@
   (KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE | \
    KVMFR_AUDIO_CAP_CLOCK_FEEDBACK)
 
+#define AUDIO_SUBSCRIPTIONS \
+  (KVMFR_AUDIO_SUBSCRIBE_PLAYBACK | KVMFR_AUDIO_SUBSCRIBE_CAPTURE)
+
 #define AUDIO_STATUS_FLAGS \
-  (KVMFR_AUDIO_STATUS_AVAILABLE | KVMFR_AUDIO_STATUS_HAS_OWNER | \
+  (KVMFR_AUDIO_STATUS_AVAILABLE | KVMFR_AUDIO_STATUS_BOUND | \
    KVMFR_AUDIO_STATUS_PLAYBACK_AVAILABLE | \
    KVMFR_AUDIO_STATUS_CAPTURE_AVAILABLE | \
    KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE | \
@@ -123,7 +127,8 @@ struct LGMPAudio
   LGThread        * thread;
   LG_Lock           lock;
   LG_Lock           eventLock;
-  atomic_flag       writeGate;
+  atomic_flag       controlWriteGate;
+  atomic_flag       captureWriteGate;
   atomic_bool       stop;
   atomic_bool       dataPlaneLost;
   atomic_bool       captureDiscontinuity;
@@ -138,12 +143,18 @@ struct LGMPAudio
   bool              statusDirty;
   bool              responsePending;
   bool              claimPosting;
-  bool              sequenceKnown;
+  bool              controlSequenceKnown;
+  bool              playbackSequenceKnown;
   bool              playbackDiscontinuity;
+  bool              playbackReadActive;
+  bool              stateAcknowledged;
+  bool              stateAckPending;
+  bool              subscriptionPending;
   bool              releaseRequested;
   bool              releaseSent;
-  bool              hostReadActive;
-  bool              clientWriteActive;
+  bool              hostControlActive;
+  bool              clientControlActive;
+  bool              captureWriteActive;
   enum AudioPhase   phase;
   uint32_t          clientID;
   uint32_t          requestSerial;
@@ -154,8 +165,15 @@ struct LGMPAudio
   uint64_t          releaseDeadline;
   uint64_t          nextKeepalive;
   uint64_t          nextAttachAt;
-  uint64_t          expectedSequence;
+  uint64_t          expectedControlSequence;
+  uint64_t          expectedPlaybackSequence;
+  uint64_t          stateAckGeneration;
+  uint32_t          bindingEpoch;
+  uint32_t          roleEpoch;
+  uint32_t          playbackReaderEpoch;
   uint32_t          generationSerial;
+  KVMFRAudioStateBarrier stateAck;
+  KVMFRAudioSubscription subscription;
   struct AudioGeneration endpointGeneration;
   KVMFRAudioClaim   claim;
   KVMFRAudioStreamResponse response;
@@ -163,14 +181,23 @@ struct LGMPAudio
   struct AudioStreamState playback;
   struct AudioStreamState capture;
 
-  PLGMPClientStream hostToClientStream;
-  PLGMPClientStream clientToHostStream;
+  PLGMPClientSPMC   playbackStream;
+  PLGMPClientStream hostControlStream;
+  PLGMPClientStream clientControlStream;
+  PLGMPClientStream captureStream;
   LGMPStreamPollState streamPoll;
+  uint8_t playbackRecord[KVMFR_AUDIO_PLAYBACK_SLOT_BYTES];
 
-  /* Protected by writeGate. */
-  uint64_t          clientSequence;
-  bool              writeBound;
+  /* Protected by the corresponding write gate. Shared admission fields are
+   * changed only while both gates are held. */
+  uint64_t          clientControlSequence;
+  uint64_t          captureSequence;
+  bool              controlWriteBound;
+  bool              captureWriteBound;
   bool              publicDataAllowed;
+  KVMFRAudioCapabilities writeGrantedCapabilities;
+  uint32_t          writeBindingEpoch;
+  uint32_t          writeRoleEpoch;
   uint64_t          writeCaptureGeneration;
   uint32_t          writeCaptureLocalGeneration;
   KVMFRAudioFormat  writeCaptureFormat;
@@ -185,15 +212,26 @@ struct LGMPAudio
 
 static _Thread_local struct AudioStatusCallbackFrame * l_statusFrames;
 
+_Static_assert(sizeof(KVMFRCursor) == KVMFR_AUDIO_CURSOR_COMPAT_BYTES,
+    "KVMFR cursor compatibility layout changed");
 _Static_assert(sizeof(struct LGMPStreamDescriptor) ==
     sizeof(KVMFRStreamDescriptor),
     "LGMP and KVMFR stream descriptor sizes differ");
+_Static_assert(sizeof(struct LGMPSPMCDescriptor) ==
+    sizeof(KVMFRSPMCDescriptor),
+    "LGMP and KVMFR SPMC descriptor sizes differ");
 _Static_assert(offsetof(struct LGMPStreamDescriptor, offset) ==
     offsetof(KVMFRStreamDescriptor, offset),
     "LGMP and KVMFR stream descriptor offsets differ");
 _Static_assert(offsetof(struct LGMPStreamDescriptor, slotSize) ==
     offsetof(KVMFRStreamDescriptor, slotSize),
     "LGMP and KVMFR stream descriptor geometry differs");
+_Static_assert(offsetof(struct LGMPSPMCDescriptor, offset) ==
+    offsetof(KVMFRSPMCDescriptor, offset),
+    "LGMP and KVMFR SPMC descriptor offsets differ");
+_Static_assert(offsetof(struct LGMPSPMCDescriptor, maxReaders) ==
+    offsetof(KVMFRSPMCDescriptor, maxReaders),
+    "LGMP and KVMFR SPMC descriptor geometry differs");
 _Static_assert(KVMFR_AUDIO_MAX_CHANNELS <= LG_AUDIO_MAX_CHANNELS,
     "client audio cannot represent every KVMFR speaker position");
 
@@ -220,28 +258,60 @@ static bool randomBytes(void * buffer, size_t size)
   return true;
 }
 
-static bool tryWriteGate(LGMPAudio * audio)
+static bool tryControlWriteGate(LGMPAudio * audio)
 {
   return !atomic_flag_test_and_set_explicit(
-      &audio->writeGate, memory_order_acquire);
+      &audio->controlWriteGate, memory_order_acquire);
 }
 
-static void lockWriteGate(LGMPAudio * audio)
+static void lockControlWriteGate(LGMPAudio * audio)
 {
-  while (!tryWriteGate(audio))
+  while (!tryControlWriteGate(audio))
   {
   }
 }
 
-static void unlockWriteGate(LGMPAudio * audio)
+static void unlockControlWriteGate(LGMPAudio * audio)
 {
-  atomic_flag_clear_explicit(&audio->writeGate, memory_order_release);
+  atomic_flag_clear_explicit(
+      &audio->controlWriteGate, memory_order_release);
 }
 
-/* writeGate must be held. */
+static void lockCaptureWriteGate(LGMPAudio * audio)
+{
+  while (atomic_flag_test_and_set_explicit(
+        &audio->captureWriteGate, memory_order_acquire))
+  {
+  }
+}
+
+static void unlockCaptureWriteGate(LGMPAudio * audio)
+{
+  atomic_flag_clear_explicit(
+      &audio->captureWriteGate, memory_order_release);
+}
+
+/* Lifecycle updates acquire the capture gate before the control gate. This
+ * keeps capture backpressure from suppressing clock feedback. */
+static void lockWriteGates(LGMPAudio * audio)
+{
+  lockCaptureWriteGate(audio);
+  lockControlWriteGate(audio);
+}
+
+static void unlockWriteGates(LGMPAudio * audio)
+{
+  unlockControlWriteGate(audio);
+  unlockCaptureWriteGate(audio);
+}
+
+/* Both write gates must be held. */
 static void closePublicDataLocked(LGMPAudio * audio)
 {
   audio->publicDataAllowed = false;
+  audio->writeGrantedCapabilities = 0;
+  audio->writeBindingEpoch = 0;
+  audio->writeRoleEpoch = 0;
   audio->writeCaptureGeneration      = 0;
   audio->writeCaptureLocalGeneration = 0;
   audio->writePlaybackGeneration      = 0;
@@ -520,8 +590,25 @@ static struct LGMPStreamDescriptor descriptorFromWire(
   };
 }
 
+static struct LGMPSPMCDescriptor spmcDescriptorFromWire(
+    const KVMFRSPMCDescriptor * wire)
+{
+  return (struct LGMPSPMCDescriptor)
+  {
+    .magic      = wire->magic,
+    .version    = wire->version,
+    .size       = wire->size,
+    .offset     = wire->offset,
+    .regionSize = wire->regionSize,
+    .slotCount  = wire->slotCount,
+    .slotSize   = wire->slotSize,
+    .maxReaders = wire->maxReaders,
+    .reserved   = wire->reserved,
+  };
+}
+
 static bool validDescriptor(const KVMFRStreamDescriptor * descriptor,
-    enum LGMPStreamDirection direction)
+    enum LGMPStreamDirection direction, uint32_t slotSize)
 {
   return descriptor->magic == LGMP_STREAM_DESCRIPTOR_MAGIC &&
     descriptor->version == LGMP_STREAM_DESCRIPTOR_VERSION &&
@@ -530,7 +617,19 @@ static bool validDescriptor(const KVMFRStreamDescriptor * descriptor,
     descriptor->direction == (uint32_t)direction &&
     descriptor->policy == LGMP_STREAM_RELIABLE_FIFO &&
     descriptor->slotCount == KVMFR_AUDIO_STREAM_SLOT_COUNT &&
-    descriptor->slotSize == KVMFR_AUDIO_STREAM_SLOT_BYTES;
+    descriptor->slotSize == slotSize;
+}
+
+static bool validSPMCDescriptor(const KVMFRSPMCDescriptor * descriptor)
+{
+  return descriptor->magic == LGMP_SPMC_DESCRIPTOR_MAGIC &&
+    descriptor->version == LGMP_SPMC_DESCRIPTOR_VERSION &&
+    descriptor->size == sizeof(*descriptor) && descriptor->offset &&
+    descriptor->regionSize &&
+    descriptor->slotCount == KVMFR_AUDIO_STREAM_SLOT_COUNT &&
+    descriptor->slotSize == KVMFR_AUDIO_PLAYBACK_SLOT_BYTES &&
+    descriptor->maxReaders == KVMFR_AUDIO_MAX_PLAYBACK_READERS &&
+    !descriptor->reserved;
 }
 
 static void markStatusNL(LGMPAudio * audio, bool available,
@@ -544,7 +643,7 @@ static void markStatusNL(LGMPAudio * audio, bool available,
     audio->statusDirty = true;
   audio->statusAvailable = available;
   atomic_store_explicit(&audio->clockFeedbackAvailable,
-      available && (audio->remoteStatus.capabilities &
+      available && (audio->remoteStatus.grantedCapabilities &
         KVMFR_AUDIO_CAP_CLOCK_FEEDBACK), memory_order_release);
 }
 
@@ -577,14 +676,24 @@ static void publishStatus(LGMPAudio * audio)
 
 static void updateWriteStreamState(LGMPAudio * audio)
 {
-  lockWriteGate(audio);
+  lockWriteGates(audio);
   LG_LOCK(audio->lock);
-  const bool admitted = audio->writeBound &&
+  const bool admitted = audio->controlWriteBound &&
     audio->phase == AUDIO_PHASE_BOUND && !audio->releaseRequested;
-  const uint64_t captureGeneration = admitted && audio->capture.active ?
+  const bool playbackAdmitted = admitted && audio->stateAcknowledged;
+  const KVMFRAudioCapabilities granted =
+    admitted && audio->statusAvailable ?
+      audio->remoteStatus.grantedCapabilities : 0;
+  const bool captureGranted =
+    (granted & KVMFR_AUDIO_CAP_CAPTURE) != 0 &&
+    (audio->subscription.subscriptions &
+      KVMFR_AUDIO_SUBSCRIBE_CAPTURE) != 0;
+  const uint64_t captureGeneration = admitted && captureGranted &&
+    audio->captureWriteBound && audio->capture.active ?
     audio->capture.generation.wire : 0;
   const uint32_t captureLocalGeneration =
-    admitted && audio->capture.active ?
+    admitted && captureGranted && audio->captureWriteBound &&
+    audio->capture.active ?
     audio->capture.generation.local : 0;
   const bool captureChanged =
     audio->writeCaptureGeneration != captureGeneration ||
@@ -592,18 +701,29 @@ static void updateWriteStreamState(LGMPAudio * audio)
   audio->writeCaptureGeneration      = captureGeneration;
   audio->writeCaptureLocalGeneration = captureLocalGeneration;
   audio->writeCaptureFormat = audio->capture.wireFormat;
-  audio->writePlaybackGeneration = admitted && audio->playback.active ?
+  audio->writePlaybackGeneration = playbackAdmitted &&
+    (granted & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+    (audio->subscription.subscriptions &
+      KVMFR_AUDIO_SUBSCRIBE_PLAYBACK) &&
+    audio->playback.active ?
     audio->playback.generation.wire : 0;
   audio->writePlaybackLocalGeneration =
-    admitted && audio->playback.active ?
+    playbackAdmitted &&
+    (granted & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+    (audio->subscription.subscriptions &
+      KVMFR_AUDIO_SUBSCRIBE_PLAYBACK) &&
+    audio->playback.active ?
     audio->playback.generation.local : 0;
+  audio->writeGrantedCapabilities = granted;
+  audio->writeBindingEpoch = admitted ? audio->bindingEpoch : 0;
+  audio->writeRoleEpoch = admitted ? audio->roleEpoch : 0;
   audio->publicDataAllowed = admitted &&
     (audio->writeCaptureGeneration || audio->writePlaybackGeneration);
   LG_UNLOCK(audio->lock);
   if (captureChanged)
     atomic_store_explicit(
         &audio->captureDiscontinuity, false, memory_order_release);
-  unlockWriteGate(audio);
+  unlockWriteGates(audio);
 }
 
 static void stopActiveStreams(LGMPAudio * audio)
@@ -636,9 +756,13 @@ static void stopActiveStreams(LGMPAudio * audio)
 
 static void detachStreams(LGMPAudio * audio)
 {
-  lockWriteGate(audio);
+  lockWriteGates(audio);
   audio->publicDataAllowed = false;
-  audio->writeBound = false;
+  audio->controlWriteBound = false;
+  audio->captureWriteBound = false;
+  audio->writeGrantedCapabilities = 0;
+  audio->writeBindingEpoch = 0;
+  audio->writeRoleEpoch = 0;
   audio->writeCaptureGeneration      = 0;
   audio->writeCaptureLocalGeneration = 0;
   audio->writePlaybackGeneration      = 0;
@@ -646,14 +770,21 @@ static void detachStreams(LGMPAudio * audio)
   memset(&audio->writeCaptureFormat, 0,
       sizeof(audio->writeCaptureFormat));
 
-  lgmpClientStreamDetach(&audio->clientToHostStream);
-  lgmpClientStreamDetach(&audio->hostToClientStream);
-  audio->hostReadActive    = false;
-  audio->clientWriteActive = false;
-  audio->clientSequence = 0;
+  lgmpClientStreamDetach(&audio->captureStream);
+  lgmpClientStreamDetach(&audio->clientControlStream);
+  lgmpClientStreamDetach(&audio->hostControlStream);
+  lgmpClientSPMCDetach(&audio->playbackStream);
+  audio->hostControlActive   = false;
+  audio->clientControlActive = false;
+  audio->captureWriteActive  = false;
+  audio->playbackReadActive  = false;
+  audio->stateAcknowledged   = false;
+  audio->playbackReaderEpoch = 0;
+  audio->clientControlSequence = 0;
+  audio->captureSequence = 0;
   atomic_store_explicit(
       &audio->captureDiscontinuity, false, memory_order_release);
-  unlockWriteGate(audio);
+  unlockWriteGates(audio);
 }
 
 static void scheduleRetryNL(LGMPAudio * audio, uint64_t delay)
@@ -678,8 +809,18 @@ static void finishBinding(LGMPAudio * audio, uint64_t delay)
 
   LG_LOCK(audio->lock);
   memset(&audio->remoteStatus, 0, sizeof(audio->remoteStatus));
-  audio->sequenceKnown = false;
-  audio->expectedSequence = 0;
+  audio->controlSequenceKnown = false;
+  audio->playbackSequenceKnown = false;
+  audio->expectedControlSequence = 0;
+  audio->expectedPlaybackSequence = 0;
+  audio->stateAckPending = false;
+  audio->stateAcknowledged = false;
+  audio->subscriptionPending = false;
+  audio->bindingEpoch = 0;
+  audio->roleEpoch = 0;
+  audio->stateAckGeneration = 0;
+  memset(&audio->stateAck, 0, sizeof(audio->stateAck));
+  memset(&audio->subscription, 0, sizeof(audio->subscription));
   audio->releaseRequested = false;
   audio->releaseSent      = false;
   audio->responsePending  = false;
@@ -703,104 +844,220 @@ static void finishBinding(LGMPAudio * audio, uint64_t delay)
 static bool attachStreams(LGMPAudio * audio,
     const KVMFRAudioStreamResponse * response)
 {
-  if (!validDescriptor(&response->hostToClient,
-        LGMP_STREAM_HOST_TO_CLIENT) ||
-      !validDescriptor(&response->clientToHost,
-        LGMP_STREAM_CLIENT_TO_HOST))
+  if (!validSPMCDescriptor(&response->playback) ||
+      !validDescriptor(&response->hostControl,
+        LGMP_STREAM_HOST_TO_CLIENT,
+        KVMFR_AUDIO_HOST_CONTROL_SLOT_BYTES) ||
+      !validDescriptor(&response->clientControl,
+        LGMP_STREAM_CLIENT_TO_HOST,
+        KVMFR_AUDIO_CLIENT_CONTROL_SLOT_BYTES) ||
+      !validDescriptor(&response->capture,
+        LGMP_STREAM_CLIENT_TO_HOST, KVMFR_AUDIO_CAPTURE_SLOT_BYTES))
   {
     DEBUG_WARN("Invalid LGMP audio stream descriptors");
     return false;
   }
 
-  LGMP_STATUS hostStatus = LGMP_OK;
-  if (!audio->hostToClientStream)
+  LGMP_STATUS playbackStatus = LGMP_OK;
+  if (!audio->playbackStream)
   {
-    const struct LGMPStreamDescriptor hostToClient =
-      descriptorFromWire(&response->hostToClient);
+    const struct LGMPSPMCDescriptor playback =
+      spmcDescriptorFromWire(&response->playback);
+    playbackStatus = lgmpClientSPMCAttach(audio->client, &playback,
+        response->playbackReaderID, &audio->playbackStream);
+  }
+  uint32_t playbackEpoch = 0;
+  if (playbackStatus == LGMP_OK)
+    playbackStatus = lgmpClientSPMCActivate(
+        audio->playbackStream, &playbackEpoch);
+  bool playbackOwner = playbackStatus == LGMP_OK;
+  if (playbackOwner)
+  {
+    uint32_t clientID = 0;
+    uint32_t epoch = 0;
+    playbackOwner = lgmpClientSPMCGetBinding(audio->playbackStream,
+        &clientID, &epoch) == LGMP_OK && clientID == audio->clientID &&
+      epoch && epoch == playbackEpoch;
+  }
+  if (playbackStatus != LGMP_OK)
+    DEBUG_WARN("Failed to attach/activate playback audio stream: %s",
+        lgmpStatusString(playbackStatus));
+  audio->playbackReaderEpoch = playbackOwner ? playbackEpoch : 0;
+  audio->playbackReadActive  = false;
+
+  LGMP_STATUS hostStatus = LGMP_OK;
+  if (!audio->hostControlStream)
+  {
+    const struct LGMPStreamDescriptor descriptor =
+      descriptorFromWire(&response->hostControl);
     hostStatus = lgmpClientStreamAttach(audio->client,
-        &hostToClient, &audio->hostToClientStream);
+        &descriptor, &audio->hostControlStream);
   }
   if (hostStatus == LGMP_OK)
   {
     uint32_t epoch = 0;
     hostStatus = lgmpClientStreamActivate(
-        audio->hostToClientStream, &epoch);
-    audio->hostReadActive = hostStatus == LGMP_OK;
+        audio->hostControlStream, &epoch);
+    audio->hostControlActive = hostStatus == LGMP_OK;
   }
-  if (hostStatus != LGMP_OK)
-    DEBUG_WARN("Failed to attach/activate host-to-client audio stream: %s",
-        lgmpStatusString(hostStatus));
-
-  bool hostOwner = audio->hostReadActive;
+  bool hostOwner = audio->hostControlActive;
   if (hostOwner)
   {
     uint32_t clientID = 0;
     uint32_t epoch = 0;
     hostOwner = lgmpClientStreamGetBinding(
-        audio->hostToClientStream, &clientID, &epoch) == LGMP_OK &&
+        audio->hostControlStream, &clientID, &epoch) == LGMP_OK &&
       clientID == audio->clientID && epoch;
   }
+  if (hostStatus != LGMP_OK)
+    DEBUG_WARN("Failed to attach/activate host audio control stream: %s",
+        lgmpStatusString(hostStatus));
+  audio->hostControlActive = hostOwner;
 
-  lockWriteGate(audio);
+  lockWriteGates(audio);
   LGMP_STATUS clientStatus = LGMP_OK;
-  if (!audio->clientToHostStream)
+  if (!audio->clientControlStream)
   {
-    const struct LGMPStreamDescriptor clientToHost =
-      descriptorFromWire(&response->clientToHost);
+    const struct LGMPStreamDescriptor descriptor =
+      descriptorFromWire(&response->clientControl);
     clientStatus = lgmpClientStreamAttach(audio->client,
-        &clientToHost, &audio->clientToHostStream);
+        &descriptor, &audio->clientControlStream);
   }
   if (clientStatus == LGMP_OK)
   {
     uint32_t epoch = 0;
     clientStatus = lgmpClientStreamActivate(
-        audio->clientToHostStream, &epoch);
-    audio->clientWriteActive = clientStatus == LGMP_OK;
+        audio->clientControlStream, &epoch);
+    audio->clientControlActive = clientStatus == LGMP_OK;
   }
-  bool clientOwner = audio->clientWriteActive;
+  bool clientOwner = audio->clientControlActive;
   if (clientOwner)
   {
     uint32_t clientID = 0;
     uint32_t epoch = 0;
     clientOwner = lgmpClientStreamGetBinding(
-        audio->clientToHostStream, &clientID, &epoch) == LGMP_OK &&
+        audio->clientControlStream, &clientID, &epoch) == LGMP_OK &&
       clientID == audio->clientID && epoch;
   }
-  audio->clientWriteActive = clientOwner;
-  const bool wasWriteBound = audio->writeBound;
-  audio->writeBound = clientOwner;
-  if (audio->writeBound && !wasWriteBound)
-    audio->clientSequence = 0;
-  unlockWriteGate(audio);
+  audio->clientControlActive = clientOwner;
+  const bool wasControlBound = audio->controlWriteBound;
+  audio->controlWriteBound = clientOwner;
+  if (audio->controlWriteBound && !wasControlBound)
+    audio->clientControlSequence = 0;
+
+  LGMP_STATUS captureStatus = LGMP_OK;
+  if (!audio->captureStream)
+  {
+    const struct LGMPStreamDescriptor descriptor =
+      descriptorFromWire(&response->capture);
+    captureStatus = lgmpClientStreamAttach(audio->client,
+        &descriptor, &audio->captureStream);
+  }
+  const bool captureGranted =
+    (response->grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) != 0;
+  if (captureStatus == LGMP_OK && captureGranted)
+  {
+    uint32_t epoch = 0;
+    captureStatus = lgmpClientStreamActivate(
+        audio->captureStream, &epoch);
+    audio->captureWriteActive = captureStatus == LGMP_OK;
+  }
+  else
+    audio->captureWriteActive = false;
+  bool captureOwner = captureStatus == LGMP_OK &&
+    (!captureGranted || audio->captureWriteActive);
+  if (captureGranted && captureOwner)
+  {
+    uint32_t clientID = 0;
+    uint32_t epoch = 0;
+    captureOwner = lgmpClientStreamGetBinding(audio->captureStream,
+        &clientID, &epoch) == LGMP_OK && clientID == audio->clientID && epoch;
+  }
+  audio->captureWriteActive = captureGranted && captureOwner;
+  const bool wasCaptureBound = audio->captureWriteBound;
+  audio->captureWriteBound = audio->captureWriteActive;
+  if (audio->captureWriteBound && !wasCaptureBound)
+    audio->captureSequence = 0;
+  unlockWriteGates(audio);
 
   if (clientStatus != LGMP_OK)
-    DEBUG_WARN("Failed to attach/activate client-to-host audio stream: %s",
+    DEBUG_WARN("Failed to attach/activate client audio control stream: %s",
         lgmpStatusString(clientStatus));
-  audio->hostReadActive = hostOwner;
+  if (captureStatus != LGMP_OK)
+    DEBUG_WARN("Failed to attach/activate capture audio stream: %s",
+        lgmpStatusString(captureStatus));
   lgmpStreamPollActivity(&audio->streamPoll);
-  return hostOwner && clientOwner;
+  return playbackOwner && hostOwner && clientOwner && captureOwner;
+}
+
+static bool refreshCaptureBinding(LGMPAudio * audio, bool granted)
+{
+  lockCaptureWriteGate(audio);
+  if (!granted)
+  {
+    audio->captureWriteActive = false;
+    audio->captureWriteBound  = false;
+    unlockCaptureWriteGate(audio);
+    return true;
+  }
+
+  LGMP_STATUS status = audio->captureStream ?
+    LGMP_OK : LGMP_ERR_STREAM_UNBOUND;
+  if (status == LGMP_OK)
+  {
+    uint32_t epoch = 0;
+    status = lgmpClientStreamActivate(audio->captureStream, &epoch);
+  }
+  bool owner = status == LGMP_OK;
+  if (owner)
+  {
+    uint32_t clientID = 0;
+    uint32_t epoch = 0;
+    status = lgmpClientStreamGetBinding(audio->captureStream,
+        &clientID, &epoch);
+    owner = status == LGMP_OK && clientID == audio->clientID && epoch;
+    if (status == LGMP_OK && !owner)
+      status = LGMP_ERR_STREAM_STALE;
+  }
+  const bool wasBound = audio->captureWriteBound;
+  audio->captureWriteActive = owner;
+  audio->captureWriteBound  = owner;
+  if (owner && !wasBound)
+    audio->captureSequence = 0;
+  unlockCaptureWriteGate(audio);
+
+  if (!owner)
+    DEBUG_WARN("Failed to activate granted capture audio stream: %s",
+        lgmpStatusString(status));
+  return owner;
+}
+
+static bool parseRecord(const void * data, uint32_t size, uint32_t capacity,
+    KVMFRAudioMessage * message, const uint8_t ** payload)
+{
+  if (!data || size < sizeof(*message) || size > capacity)
+    return false;
+  memcpy(message, data, sizeof(*message));
+  if (message->version != KVMFR_AUDIO_MESSAGE_VERSION ||
+      message->size != sizeof(*message) || message->reserved0 ||
+      message->length > KVMFR_AUDIO_PCM_BYTES ||
+      size != sizeof(*message) + message->length)
+    return false;
+  *payload = (const uint8_t *)data + sizeof(*message);
+  return true;
 }
 
 static bool parseMessage(const LGMPStreamBuffer * buffer,
     KVMFRAudioMessage * message, const uint8_t ** payload)
 {
-  if (!buffer->data || buffer->size < sizeof(*message) ||
-      buffer->size > buffer->capacity)
-    return false;
-  memcpy(message, buffer->data, sizeof(*message));
-  if (message->version != KVMFR_AUDIO_MESSAGE_VERSION ||
-      message->size != sizeof(*message) || message->reserved0 ||
-      message->length > KVMFR_AUDIO_PCM_BYTES ||
-      buffer->size != sizeof(*message) + message->length)
-    return false;
-  *payload = (const uint8_t *)buffer->data + sizeof(*message);
-  return true;
+  return parseRecord(buffer->data, buffer->size, buffer->capacity,
+      message, payload);
 }
 
 static void requestRelease(LGMPAudio * audio, const char * reason)
 {
   bool log = false;
-  lockWriteGate(audio);
+  lockWriteGates(audio);
   LG_LOCK(audio->lock);
   closePublicDataLocked(audio);
   if (!audio->releaseRequested)
@@ -811,12 +1068,16 @@ static void requestRelease(LGMPAudio * audio, const char * reason)
     markStatusNL(audio, false, 0);
     log = true;
   }
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
+  audio->stateAckPending = false;
+  audio->subscriptionPending = false;
   if (audio->phase == AUDIO_PHASE_BOUND)
     audio->phase = AUDIO_PHASE_RELEASING;
   LG_UNLOCK(audio->lock);
-  unlockWriteGate(audio);
+  unlockWriteGates(audio);
   if (log)
-    DEBUG_INFO("LGMP audio ownership releasing: %s", reason);
+    DEBUG_INFO("LGMP audio binding releasing: %s", reason);
   signalWorker(audio);
 }
 
@@ -828,14 +1089,15 @@ static bool validEmptyMessage(const KVMFRAudioMessage * message,
     !message->frames && !message->length;
 }
 
-static bool validVolume(const KVMFRAudioVolume * volume,
-    uint8_t channels)
+static bool validVolumePayload(const KVMFRAudioVolume * volume)
 {
   if (volume->version != KVMFR_AUDIO_VOLUME_VERSION ||
       volume->size != sizeof(*volume) || volume->reserved ||
-      volume->channelCount != channels)
+      !volume->channelCount ||
+      volume->channelCount > KVMFR_AUDIO_STREAM_MAX_CHANNELS)
     return false;
-  for (unsigned i = channels; i < KVMFR_AUDIO_MAX_CHANNELS; ++i)
+  for (unsigned i = volume->channelCount;
+      i < KVMFR_AUDIO_MAX_CHANNELS; ++i)
     if (volume->values[i])
       return false;
   return true;
@@ -850,12 +1112,42 @@ static bool validStatus(const LGMPAudio * audio,
       status->protocolVersion != KVMFR_AUDIO_PROTOCOL_MAX ||
       status->requestGeneration != audio->requestGeneration ||
       (status->capabilities & ~AUDIO_CAPABILITIES) ||
-      status->ownerClientID != audio->clientID ||
-      status->ownerGeneration != audio->requestGeneration ||
-      !(status->flags & KVMFR_AUDIO_STATUS_HAS_OWNER) ||
-      status->reserved0 || !status->endpointGeneration ||
+      (status->grantedCapabilities & ~status->capabilities) ||
+      (status->grantedCapabilities & ~audio->claim.clientCapabilities) ||
+      status->bindingEpoch != audio->bindingEpoch ||
+      !status->roleEpoch ||
+      status->boundClientID != audio->clientID ||
+      !(status->flags & KVMFR_AUDIO_STATUS_BOUND) ||
+      status->reserved0 || status->reserved1 ||
+      !status->endpointGeneration ||
       status->playbackState > KVMFR_AUDIO_STREAM_RUNNING ||
       status->captureState > KVMFR_AUDIO_STREAM_RUNNING)
+    return false;
+
+  if (audio->roleEpoch &&
+      (int32_t)(status->roleEpoch - audio->roleEpoch) < 0)
+    return false;
+
+  const bool playbackGranted =
+    (status->grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) != 0;
+  const bool captureGranted =
+    (status->grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) != 0;
+  const bool feedbackGranted =
+    (status->grantedCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) != 0;
+  if ((feedbackGranted && !playbackGranted) ||
+      (!(status->capabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+        (status->feedbackAuthorityClientID ||
+          status->feedbackAuthorityEpoch)) ||
+      (!(status->capabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+        status->captureOwnerClientID) ||
+      (!!status->feedbackAuthorityClientID !=
+        !!status->feedbackAuthorityEpoch) ||
+      (feedbackGranted !=
+        (status->feedbackAuthorityClientID == audio->clientID)) ||
+      (status->feedbackAuthorityClientID == audio->clientID &&
+        status->feedbackAuthorityEpoch != status->roleEpoch) ||
+      (captureGranted !=
+        (status->captureOwnerClientID == audio->clientID)))
     return false;
 
   const bool playbackAvailable =
@@ -876,12 +1168,14 @@ static bool validStatus(const LGMPAudio * audio,
     (status->flags & KVMFR_AUDIO_STATUS_AVAILABLE) != 0;
   LG_AudioFormat ignored;
   if (playbackActive &&
-      (!available || !playbackAvailable || !status->playbackGeneration ||
+      (!available || !playbackAvailable || !playbackGranted ||
+       !status->playbackGeneration ||
        status->playbackState == KVMFR_AUDIO_STREAM_STOPPED ||
        !validFormat(&status->playbackFormat, &ignored)))
     return false;
   if (captureActive &&
-      (!available || !captureAvailable || !status->captureGeneration ||
+      (!available || !captureAvailable || !captureGranted ||
+       !status->captureGeneration ||
        status->captureState == KVMFR_AUDIO_STREAM_STOPPED ||
        !validFormat(&status->captureFormat, &ignored)))
     return false;
@@ -891,6 +1185,35 @@ static bool validStatus(const LGMPAudio * audio,
         !validFormat(&status->captureFormat, &ignored)))
     return false;
   return true;
+}
+
+static bool statusRequiresBarrier(const KVMFRAudioStatus * current,
+    const KVMFRAudioStatus * next)
+{
+  if (current->version != KVMFR_AUDIO_STATUS_VERSION ||
+      current->flags != next->flags ||
+      current->protocolVersion != next->protocolVersion ||
+      current->requestGeneration != next->requestGeneration ||
+      current->capabilities != next->capabilities ||
+      current->grantedCapabilities != next->grantedCapabilities ||
+      current->bindingEpoch != next->bindingEpoch ||
+      current->roleEpoch != next->roleEpoch ||
+      current->endpointGeneration != next->endpointGeneration ||
+      current->playbackGeneration != next->playbackGeneration ||
+      current->captureGeneration != next->captureGeneration ||
+      current->playbackState != next->playbackState ||
+      current->captureState != next->captureState ||
+      !sameFormat(&current->playbackFormat, &next->playbackFormat) ||
+      !sameFormat(&current->captureFormat, &next->captureFormat))
+    return true;
+
+  if ((next->grantedCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+      (current->feedbackAuthorityClientID !=
+          next->feedbackAuthorityClientID ||
+        current->feedbackAuthorityEpoch != next->feedbackAuthorityEpoch))
+    return true;
+
+  return false;
 }
 
 static bool currentPlaybackNL(const LGMPAudio * audio,
@@ -905,6 +1228,34 @@ static bool currentCaptureNL(const LGMPAudio * audio,
 {
   return audio->capture.active && wireGeneration &&
     audio->capture.generation.wire == wireGeneration;
+}
+
+static bool startMatchesStatus(LGMPAudio * audio,
+    KVMFRAudioMessageType type, uint64_t generation,
+    const KVMFRAudioFormat * format)
+{
+  LG_LOCK(audio->lock);
+  const bool playback = type == KVMFR_AUDIO_MESSAGE_PLAYBACK_START;
+  const KVMFRAudioCapabilities capability = playback ?
+    KVMFR_AUDIO_CAP_PLAYBACK : KVMFR_AUDIO_CAP_CAPTURE;
+  const KVMFRAudioStatusFlags activeFlag = playback ?
+    KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE :
+    KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
+  const uint64_t statusGeneration = playback ?
+    audio->remoteStatus.playbackGeneration :
+    audio->remoteStatus.captureGeneration;
+  const KVMFRAudioFormat * statusFormat = playback ?
+    &audio->remoteStatus.playbackFormat :
+    &audio->remoteStatus.captureFormat;
+  const bool result =
+    audio->remoteStatus.version == KVMFR_AUDIO_STATUS_VERSION &&
+    audio->remoteStatus.bindingEpoch == audio->bindingEpoch &&
+    audio->remoteStatus.roleEpoch == audio->roleEpoch &&
+    (audio->remoteStatus.grantedCapabilities & capability) &&
+    (audio->remoteStatus.flags & activeFlag) &&
+    generation == statusGeneration && sameFormat(format, statusFormat);
+  LG_UNLOCK(audio->lock);
+  return result;
 }
 
 static void dispatchPlaybackStop(LGMPAudio * audio,
@@ -1187,44 +1538,158 @@ static bool processStatus(LGMPAudio * audio,
 
   KVMFRAudioStatus status;
   memcpy(&status, payload, sizeof(status));
+  lockWriteGates(audio);
   LG_LOCK(audio->lock);
   const bool valid = validStatus(audio, &status);
   if (valid)
   {
-    const bool playbackActive =
-      (status.flags & KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE) != 0;
-    const bool captureActive =
-      (status.flags & KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE) != 0;
-    if (playbackActive &&
-        (!currentPlaybackNL(audio, status.playbackGeneration) ||
-         !sameFormat(&audio->playback.wireFormat,
-           &status.playbackFormat)))
-    {
-      LG_UNLOCK(audio->lock);
-      return false;
-    }
-    if (captureActive &&
-        (!currentCaptureNL(audio, status.captureGeneration) ||
-         !sameFormat(&audio->capture.wireFormat,
-           &status.captureFormat)))
-    {
-      LG_UNLOCK(audio->lock);
-      return false;
-    }
-    if ((!playbackActive && audio->playback.active) ||
-        (!captureActive && audio->capture.active))
-    {
-      LG_UNLOCK(audio->lock);
-      return false;
-    }
-
+    const bool stateUpdate =
+      statusRequiresBarrier(&audio->remoteStatus, &status);
     audio->remoteStatus = status;
+    audio->roleEpoch = status.roleEpoch;
+    if (audio->subscriptionPending)
+    {
+      audio->subscription.bindingEpoch = status.bindingEpoch;
+      audio->subscription.roleEpoch = status.roleEpoch;
+    }
+    if (stateUpdate)
+    {
+      audio->playbackReadActive = false;
+      audio->stateAcknowledged = false;
+      audio->stateAckPending = false;
+      audio->writePlaybackGeneration = 0;
+      audio->writePlaybackLocalGeneration = 0;
+      if (!audio->writeCaptureGeneration)
+        audio->publicDataAllowed = false;
+    }
     const bool available =
       (status.flags & KVMFR_AUDIO_STATUS_AVAILABLE) != 0;
     markStatusNL(audio, available, status.endpointGeneration);
+    audio->writeGrantedCapabilities =
+      available ? status.grantedCapabilities : 0;
+    audio->writeBindingEpoch = available ? status.bindingEpoch : 0;
+    audio->writeRoleEpoch = available ? status.roleEpoch : 0;
+    if (!(status.grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE))
+    {
+      audio->captureWriteActive = false;
+      audio->captureWriteBound = false;
+      audio->writeCaptureGeneration = 0;
+      audio->writeCaptureLocalGeneration = 0;
+    }
+    if (!(status.grantedCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK))
+    {
+      audio->writePlaybackGeneration = 0;
+      audio->writePlaybackLocalGeneration = 0;
+    }
   }
   LG_UNLOCK(audio->lock);
-  return valid;
+  unlockWriteGates(audio);
+  if (!valid)
+    return false;
+
+  const bool captureGranted =
+    (status.grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) != 0;
+  if (!refreshCaptureBinding(audio, captureGranted))
+    return false;
+  updateWriteStreamState(audio);
+  return true;
+}
+
+static bool processStateBarrier(LGMPAudio * audio,
+    const KVMFRAudioMessage * message, const uint8_t * payload)
+{
+  if (message->flags || message->position || message->timeNs ||
+      message->rateQ32 || message->frames ||
+      message->length != sizeof(KVMFRAudioStateBarrier))
+    return false;
+
+  KVMFRAudioStateBarrier barrier;
+  memcpy(&barrier, payload, sizeof(barrier));
+  if (!barrier.bindingEpoch || !barrier.roleEpoch || !barrier.stateSerial)
+    return false;
+
+  lockControlWriteGate(audio);
+  LG_LOCK(audio->lock);
+  const bool statusPlaybackActive =
+    (audio->remoteStatus.flags &
+      KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE) != 0;
+  const bool statusCaptureActive =
+    (audio->remoteStatus.flags &
+      KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE) != 0;
+  const bool stateInstalled =
+    (statusPlaybackActive ?
+      currentPlaybackNL(audio,
+        audio->remoteStatus.playbackGeneration) &&
+      sameFormat(&audio->playback.wireFormat,
+        &audio->remoteStatus.playbackFormat) :
+      !audio->playback.active) &&
+    (statusCaptureActive ?
+      currentCaptureNL(audio, audio->remoteStatus.captureGeneration) &&
+      sameFormat(&audio->capture.wireFormat,
+        &audio->remoteStatus.captureFormat) :
+      !audio->capture.active);
+  const bool sameBarrier =
+    barrier.bindingEpoch == audio->stateAck.bindingEpoch &&
+    barrier.roleEpoch == audio->stateAck.roleEpoch &&
+    barrier.stateSerial == audio->stateAck.stateSerial &&
+    message->streamGeneration == audio->stateAckGeneration;
+  const bool current = audio->phase == AUDIO_PHASE_BOUND &&
+    audio->remoteStatus.version == KVMFR_AUDIO_STATUS_VERSION &&
+    barrier.bindingEpoch == audio->bindingEpoch &&
+    barrier.roleEpoch == audio->roleEpoch &&
+    stateInstalled &&
+    ((statusPlaybackActive && message->streamGeneration ==
+        audio->remoteStatus.playbackGeneration) ||
+      (!statusPlaybackActive && !message->streamGeneration)) &&
+    audio->playbackStream && audio->playbackReaderEpoch &&
+    (sameBarrier || !audio->stateAck.stateSerial ||
+      barrier.stateSerial > audio->stateAck.stateSerial);
+  if (current && sameBarrier)
+    audio->stateAckPending = true;
+  else if (current)
+  {
+    audio->playbackReadActive = false;
+    audio->stateAcknowledged = false;
+  }
+  LG_UNLOCK(audio->lock);
+  if (!current)
+  {
+    unlockControlWriteGate(audio);
+    return false;
+  }
+  if (sameBarrier)
+  {
+    unlockControlWriteGate(audio);
+    return true;
+  }
+
+  uint64_t skipped = 0;
+  const LGMP_STATUS status =
+    lgmpClientSPMCSync(audio->playbackStream, &skipped);
+  if (status != LGMP_OK)
+  {
+    DEBUG_WARN("Failed to synchronize playback audio stream: %s",
+        lgmpStatusString(status));
+    unlockControlWriteGate(audio);
+    return false;
+  }
+
+  LG_LOCK(audio->lock);
+  const bool stillCurrent = audio->phase == AUDIO_PHASE_BOUND &&
+    barrier.bindingEpoch == audio->bindingEpoch &&
+    barrier.roleEpoch == audio->roleEpoch;
+  if (stillCurrent)
+  {
+    audio->stateAck = barrier;
+    audio->stateAckGeneration = message->streamGeneration;
+    audio->stateAckPending = true;
+    audio->playbackSequenceKnown = false;
+    audio->expectedPlaybackSequence = 0;
+    audio->playbackDiscontinuity = skipped != 0 || audio->playback.active;
+  }
+  LG_UNLOCK(audio->lock);
+  unlockControlWriteGate(audio);
+  return stillCurrent;
 }
 
 static bool processInboundMessage(LGMPAudio * audio,
@@ -1235,6 +1700,9 @@ static bool processInboundMessage(LGMPAudio * audio,
   {
     case KVMFR_AUDIO_MESSAGE_STATUS:
       return processStatus(audio, message, payload);
+
+    case KVMFR_AUDIO_MESSAGE_STATE_BARRIER:
+      return processStateBarrier(audio, message, payload);
 
     case KVMFR_AUDIO_MESSAGE_PLAYBACK_START:
     case KVMFR_AUDIO_MESSAGE_CAPTURE_START:
@@ -1249,6 +1717,9 @@ static bool processInboundMessage(LGMPAudio * audio,
       LG_AudioFormat format;
       memcpy(&wire, payload, sizeof(wire));
       if (!validFormat(&wire, &format))
+        return false;
+      if (!startMatchesStatus(
+            audio, message->type, message->streamGeneration, &wire))
         return false;
       if (message->type == KVMFR_AUDIO_MESSAGE_PLAYBACK_START)
         dispatchPlaybackStart(
@@ -1279,6 +1750,8 @@ static bool processInboundMessage(LGMPAudio * audio,
         return false;
       KVMFRAudioVolume volume;
       memcpy(&volume, payload, sizeof(volume));
+      if (!validVolumePayload(&volume))
+        return false;
       LG_LOCK(audio->lock);
       const bool current =
         message->type == KVMFR_AUDIO_MESSAGE_PLAYBACK_VOLUME ?
@@ -1291,7 +1764,7 @@ static bool processInboundMessage(LGMPAudio * audio,
       LG_UNLOCK(audio->lock);
       if (!current)
         return true;
-      if (!validVolume(&volume, channels))
+      if (volume.channelCount != channels)
         return false;
       if (message->type == KVMFR_AUDIO_MESSAGE_PLAYBACK_VOLUME)
         dispatchPlaybackVolume(
@@ -1315,20 +1788,25 @@ static bool processInboundMessage(LGMPAudio * audio,
             (message->flags & KVMFR_AUDIO_MESSAGE_MUTED) != 0);
       return true;
 
-    case KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA:
-      if (!message->streamGeneration || !message->frames ||
-          message->frames > KVMFR_AUDIO_MAX_FRAMES_PER_PACKET ||
-          (message->flags & ~AUDIO_DATA_FLAGS) ||
-          !validClockFlags(message->flags & AUDIO_CLOCK_FLAGS) ||
-          (!(message->flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) &&
-            (message->position || message->timeNs || message->rateQ32)))
-        return false;
-      dispatchPlaybackData(audio, message, payload, sequenceGap);
-      return true;
-
     default:
       return false;
   }
+}
+
+static bool processPlaybackMessage(LGMPAudio * audio,
+    const KVMFRAudioMessage * message, const uint8_t * payload,
+    bool discontinuity)
+{
+  if (message->type != KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA ||
+      !message->streamGeneration || !message->frames ||
+      message->frames > KVMFR_AUDIO_MAX_FRAMES_PER_PACKET ||
+      (message->flags & ~AUDIO_DATA_FLAGS) ||
+      !validClockFlags(message->flags & AUDIO_CLOCK_FLAGS) ||
+      (!(message->flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) &&
+        (message->position || message->timeNs || message->rateQ32)))
+    return false;
+  dispatchPlaybackData(audio, message, payload, discontinuity);
+  return true;
 }
 
 enum WriteResult
@@ -1339,17 +1817,18 @@ enum WriteResult
 };
 
 static enum WriteResult writeMessageLocked(LGMPAudio * audio,
+    PLGMPClientStream stream, uint64_t * sequence,
     KVMFRAudioMessageType type, uint64_t streamGeneration,
     KVMFRAudioMessageFlags flags, uint64_t position, int64_t timeNs,
     uint64_t rateQ32, uint32_t frames, const void * payload,
     uint32_t length)
 {
-  if (!audio->writeBound || !audio->clientToHostStream)
+  if (!stream || !sequence)
     return WRITE_LOST;
 
   LGMPStreamBuffer buffer = { 0 };
   LGMP_STATUS status = lgmpClientStreamWriteAcquire(
-      audio->clientToHostStream, &buffer);
+      stream, &buffer);
   if (status == LGMP_ERR_STREAM_FULL)
     return WRITE_FULL;
   if (status != LGMP_OK)
@@ -1363,7 +1842,7 @@ static enum WriteResult writeMessageLocked(LGMPAudio * audio,
   if (!buffer.data || buffer.capacity < bytes)
   {
     (void)lgmpClientStreamWriteCancel(
-        audio->clientToHostStream, &buffer);
+        stream, &buffer);
     atomic_store_explicit(
         &audio->dataPlaneLost, true, memory_order_release);
     return WRITE_LOST;
@@ -1376,7 +1855,7 @@ static enum WriteResult writeMessageLocked(LGMPAudio * audio,
     .type             = type,
     .streamGeneration = streamGeneration,
     .flags            = flags,
-    .sequence         = audio->clientSequence,
+    .sequence         = *sequence,
     .position         = position,
     .timeNs           = timeNs,
     .rateQ32          = rateQ32,
@@ -1388,10 +1867,10 @@ static enum WriteResult writeMessageLocked(LGMPAudio * audio,
     memcpy((uint8_t *)buffer.data + sizeof(message), payload, length);
 
   status = lgmpClientStreamWriteCommit(
-      audio->clientToHostStream, &buffer, bytes);
+      stream, &buffer, bytes);
   if (status == LGMP_OK)
   {
-    ++audio->clientSequence;
+    ++*sequence;
     return WRITE_OK;
   }
   atomic_store_explicit(
@@ -1418,15 +1897,34 @@ static bool validResponse(const LGMPAudio * audio,
   if (response->result == KVMFR_AUDIO_RESPONSE_BOUND)
     return response->protocolVersion == KVMFR_AUDIO_PROTOCOL_MAX &&
       response->endpointGeneration &&
-      validDescriptor(&response->hostToClient,
-        LGMP_STREAM_HOST_TO_CLIENT) &&
-      validDescriptor(&response->clientToHost,
-        LGMP_STREAM_CLIENT_TO_HOST);
+      response->bindingEpoch && response->roleEpoch &&
+      response->playbackReaderID < KVMFR_AUDIO_MAX_PLAYBACK_READERS &&
+      !(response->grantedCapabilities & ~AUDIO_CAPABILITIES) &&
+      !(response->grantedCapabilities &
+        ~audio->claim.clientCapabilities) &&
+      (response->grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
+      (!(response->grantedCapabilities &
+          KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) ||
+        (response->grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK)) &&
+      validSPMCDescriptor(&response->playback) &&
+      validDescriptor(&response->hostControl,
+        LGMP_STREAM_HOST_TO_CLIENT,
+        KVMFR_AUDIO_HOST_CONTROL_SLOT_BYTES) &&
+      validDescriptor(&response->clientControl,
+        LGMP_STREAM_CLIENT_TO_HOST,
+        KVMFR_AUDIO_CLIENT_CONTROL_SLOT_BYTES) &&
+      validDescriptor(&response->capture,
+        LGMP_STREAM_CLIENT_TO_HOST, KVMFR_AUDIO_CAPTURE_SLOT_BYTES);
 
   const KVMFRStreamDescriptor empty = { 0 };
+  const KVMFRSPMCDescriptor emptySPMC = { 0 };
   return !response->protocolVersion &&
-    !memcmp(&response->hostToClient, &empty, sizeof(empty)) &&
-    !memcmp(&response->clientToHost, &empty, sizeof(empty));
+    !response->grantedCapabilities && !response->bindingEpoch &&
+    !response->roleEpoch && !response->playbackReaderID &&
+    !memcmp(&response->playback, &emptySPMC, sizeof(emptySPMC)) &&
+    !memcmp(&response->hostControl, &empty, sizeof(empty)) &&
+    !memcmp(&response->clientControl, &empty, sizeof(empty)) &&
+    !memcmp(&response->capture, &empty, sizeof(empty));
 }
 
 static void processResponse(LGMPAudio * audio)
@@ -1505,11 +2003,27 @@ static void processResponse(LGMPAudio * audio)
   {
     mapGeneration(audio, &audio->endpointGeneration,
         response.endpointGeneration);
+    audio->bindingEpoch = response.bindingEpoch;
+    audio->roleEpoch = response.roleEpoch;
+    audio->subscription = (KVMFRAudioSubscription)
+    {
+      .bindingEpoch  = response.bindingEpoch,
+      .roleEpoch     = response.roleEpoch,
+      .subscriptions = audio->claim.subscriptions,
+    };
+    audio->subscriptionPending = true;
     audio->phase = audio->releaseRequested || !audio->discover ?
       AUDIO_PHASE_RELEASING : AUDIO_PHASE_BOUND;
   }
-  audio->sequenceKnown     = false;
-  audio->expectedSequence  = 0;
+  audio->controlSequenceKnown = false;
+  audio->playbackSequenceKnown = false;
+  audio->expectedControlSequence = 0;
+  audio->expectedPlaybackSequence = 0;
+  audio->stateAckPending = false;
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
+  memset(&audio->stateAck, 0, sizeof(audio->stateAck));
+  audio->stateAckGeneration = 0;
   audio->releaseSent       = false;
   audio->nextKeepalive     = microtime();
   LG_UNLOCK(audio->lock);
@@ -1517,15 +2031,15 @@ static void processResponse(LGMPAudio * audio)
       response.requestGeneration);
 }
 
-static unsigned drainInbound(LGMPAudio * audio)
+static unsigned drainControl(LGMPAudio * audio)
 {
   unsigned drained = 0;
-  while (audio->hostToClientStream && audio->hostReadActive &&
+  while (audio->hostControlStream && audio->hostControlActive &&
       drained < AUDIO_DRAIN_MAX)
   {
     LGMPStreamBuffer buffer = { 0 };
     LGMP_STATUS status = lgmpClientStreamReadPeek(
-        audio->hostToClientStream, &buffer);
+        audio->hostControlStream, &buffer);
     if (status == LGMP_ERR_STREAM_EMPTY)
       break;
     if (status == LGMP_ERR_STREAM_UNBOUND ||
@@ -1554,23 +2068,22 @@ static unsigned drainInbound(LGMPAudio * audio)
       KVMFRAudioMessage message;
       const uint8_t * payload;
       valid = parseMessage(&buffer, &message, &payload);
-      bool sequenceGap = false;
       if (valid)
       {
         LG_LOCK(audio->lock);
-        sequenceGap = audio->sequenceKnown ?
-          message.sequence != audio->expectedSequence :
+        const bool sequenceGap = audio->controlSequenceKnown ?
+          message.sequence != audio->expectedControlSequence :
           message.sequence != 0;
-        audio->sequenceKnown    = true;
-        audio->expectedSequence = message.sequence + 1;
+        audio->controlSequenceKnown = true;
+        audio->expectedControlSequence = message.sequence + 1;
         LG_UNLOCK(audio->lock);
-        valid = processInboundMessage(
-            audio, &message, payload, sequenceGap);
+        valid = !sequenceGap && processInboundMessage(
+            audio, &message, payload, false);
       }
     }
 
     status = lgmpClientStreamReadRelease(
-        audio->hostToClientStream, &buffer);
+        audio->hostControlStream, &buffer);
     if (status != LGMP_OK)
     {
       if (status != LGMP_ERR_STREAM_UNBOUND &&
@@ -1590,13 +2103,77 @@ static unsigned drainInbound(LGMPAudio * audio)
   return drained;
 }
 
+static unsigned drainPlayback(LGMPAudio * audio)
+{
+  unsigned drained = 0;
+  while (audio->playbackStream && audio->playbackReadActive &&
+      drained < AUDIO_DRAIN_MAX)
+  {
+    struct LGMPSPMCRecord record = { 0 };
+    const LGMP_STATUS status = lgmpClientSPMCRead(audio->playbackStream,
+        audio->playbackRecord,
+        (uint32_t)sizeof(audio->playbackRecord), &record);
+    if (status == LGMP_ERR_STREAM_EMPTY)
+      break;
+    if (status == LGMP_ERR_STREAM_BUSY)
+    {
+      LG_LOCK(audio->lock);
+      audio->playbackDiscontinuity = true;
+      LG_UNLOCK(audio->lock);
+      break;
+    }
+    if (status == LGMP_ERR_STREAM_UNBOUND ||
+        status == LGMP_ERR_STREAM_STALE)
+    {
+      atomic_store_explicit(
+          &audio->dataPlaneLost, true, memory_order_release);
+      break;
+    }
+    if (status != LGMP_OK)
+    {
+      DEBUG_WARN("Failed to read LGMP playback audio stream: %s",
+          lgmpStatusString(status));
+      atomic_store_explicit(
+          &audio->dataPlaneLost, true, memory_order_release);
+      break;
+    }
+
+    ++drained;
+    KVMFRAudioMessage message;
+    const uint8_t * payload;
+    bool valid = !record.reserved && record.size &&
+      parseRecord(audio->playbackRecord, record.size,
+        (uint32_t)sizeof(audio->playbackRecord), &message, &payload) &&
+      message.sequence == record.sequence;
+    bool discontinuity = record.skipped != 0;
+    if (valid)
+    {
+      LG_LOCK(audio->lock);
+      if (audio->playbackSequenceKnown &&
+          record.sequence != audio->expectedPlaybackSequence)
+        discontinuity = true;
+      audio->playbackSequenceKnown = true;
+      audio->expectedPlaybackSequence = record.sequence + 1;
+      LG_UNLOCK(audio->lock);
+      valid = processPlaybackMessage(
+          audio, &message, payload, discontinuity);
+    }
+    if (!valid)
+    {
+      requestRelease(audio, "malformed playback SPMC record");
+      break;
+    }
+  }
+  return drained;
+}
+
 static bool bindingGone(LGMPAudio * audio)
 {
   bool any = false;
   const PLGMPClientStream streams[2] =
   {
-    audio->hostToClientStream,
-    audio->clientToHostStream,
+    audio->hostControlStream,
+    audio->clientControlStream,
   };
   for (unsigned i = 0; i < 2; ++i)
   {
@@ -1606,17 +2183,35 @@ static bool bindingGone(LGMPAudio * audio)
     uint32_t clientID = 0;
     uint32_t epoch = 0;
     if (i == 1)
-      lockWriteGate(audio);
+      lockControlWriteGate(audio);
     const LGMP_STATUS status = lgmpClientStreamGetBinding(
         streams[i], &clientID, &epoch);
     if (i == 1)
-      unlockWriteGate(audio);
+      unlockControlWriteGate(audio);
     if (status == LGMP_OK && clientID == audio->clientID && epoch)
       return false;
     if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND &&
         status != LGMP_ERR_STREAM_STALE)
     {
       DEBUG_WARN("Failed to query LGMP audio binding: %s",
+          lgmpStatusString(status));
+      return false;
+    }
+  }
+
+  if (audio->playbackStream)
+  {
+    any = true;
+    uint32_t clientID = 0;
+    uint32_t epoch = 0;
+    const LGMP_STATUS status = lgmpClientSPMCGetBinding(
+        audio->playbackStream, &clientID, &epoch);
+    if (status == LGMP_OK && clientID == audio->clientID && epoch)
+      return false;
+    if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND &&
+        status != LGMP_ERR_STREAM_STALE)
+    {
+      DEBUG_WARN("Failed to query LGMP playback binding: %s",
           lgmpStatusString(status));
       return false;
     }
@@ -1637,6 +2232,8 @@ static void maintainBinding(LGMPAudio * audio)
   const enum AudioPhase phase = audio->phase;
   const bool releaseRequested = audio->releaseRequested;
   const bool releaseSent      = audio->releaseSent;
+  const bool subscriptionPending = audio->subscriptionPending;
+  const bool stateAckPending  = audio->stateAckPending;
   const uint64_t deadline     = audio->releaseDeadline;
   const uint64_t nextAttachAt = audio->nextAttachAt;
   const bool keepalive = phase == AUDIO_PHASE_BOUND &&
@@ -1690,7 +2287,8 @@ static void maintainBinding(LGMPAudio * audio)
     return;
 
   if (phase == AUDIO_PHASE_RELEASING &&
-      (!audio->hostReadActive || !audio->clientWriteActive) &&
+      (!audio->hostControlActive || !audio->clientControlActive ||
+       !audio->playbackStream) &&
       now >= nextAttachAt)
   {
     LG_LOCK(audio->lock);
@@ -1701,12 +2299,13 @@ static void maintainBinding(LGMPAudio * audio)
   }
 
   if (phase == AUDIO_PHASE_RELEASING && !releaseSent &&
-      audio->clientWriteActive)
+      audio->clientControlActive)
   {
-    lockWriteGate(audio);
+    lockControlWriteGate(audio);
     const enum WriteResult result = writeMessageLocked(audio,
+        audio->clientControlStream, &audio->clientControlSequence,
         KVMFR_AUDIO_MESSAGE_RELEASE, 0, 0, 0, 0, 0, 0, NULL, 0);
-    unlockWriteGate(audio);
+    unlockControlWriteGate(audio);
     if (result == WRITE_OK)
     {
       LG_LOCK(audio->lock);
@@ -1715,12 +2314,72 @@ static void maintainBinding(LGMPAudio * audio)
       LG_UNLOCK(audio->lock);
     }
   }
+  else if (phase == AUDIO_PHASE_BOUND && !releaseRequested &&
+      subscriptionPending && audio->clientControlActive)
+  {
+    LG_LOCK(audio->lock);
+    const KVMFRAudioSubscription subscription = audio->subscription;
+    LG_UNLOCK(audio->lock);
+    lockControlWriteGate(audio);
+    const enum WriteResult result = writeMessageLocked(audio,
+        audio->clientControlStream, &audio->clientControlSequence,
+        KVMFR_AUDIO_MESSAGE_PLAYBACK_SUBSCRIBE, 0, 0, 0, 0, 0, 0,
+        &subscription, sizeof(subscription));
+    unlockControlWriteGate(audio);
+    if (result == WRITE_OK)
+    {
+      LG_LOCK(audio->lock);
+      if (!memcmp(&audio->subscription, &subscription,
+            sizeof(subscription)))
+        audio->subscriptionPending = false;
+      LG_UNLOCK(audio->lock);
+    }
+  }
+  else if (phase == AUDIO_PHASE_BOUND && !releaseRequested &&
+      stateAckPending && audio->clientControlActive)
+  {
+    LG_LOCK(audio->lock);
+    const KVMFRAudioStateBarrier ack = audio->stateAck;
+    const uint64_t generation = audio->stateAckGeneration;
+    LG_UNLOCK(audio->lock);
+    lockControlWriteGate(audio);
+    const enum WriteResult result = writeMessageLocked(audio,
+        audio->clientControlStream, &audio->clientControlSequence,
+        KVMFR_AUDIO_MESSAGE_STATE_ACK, generation, 0, 0, 0, 0, 0,
+        &ack, sizeof(ack));
+    unlockControlWriteGate(audio);
+    if (result == WRITE_OK)
+    {
+      bool acknowledged = false;
+      LG_LOCK(audio->lock);
+      if (!memcmp(&audio->stateAck, &ack, sizeof(ack)) &&
+          audio->stateAckGeneration == generation)
+      {
+        audio->stateAckPending = false;
+        acknowledged = audio->phase == AUDIO_PHASE_BOUND &&
+          !audio->releaseRequested &&
+          ack.bindingEpoch == audio->bindingEpoch &&
+          ack.roleEpoch == audio->roleEpoch;
+        audio->stateAcknowledged = acknowledged;
+        audio->playbackReadActive = acknowledged &&
+          audio->statusAvailable &&
+          (audio->remoteStatus.grantedCapabilities &
+            KVMFR_AUDIO_CAP_PLAYBACK) &&
+          (audio->subscription.subscriptions &
+            KVMFR_AUDIO_SUBSCRIBE_PLAYBACK);
+      }
+      LG_UNLOCK(audio->lock);
+      if (acknowledged)
+        updateWriteStreamState(audio);
+    }
+  }
   else if (keepalive)
   {
-    lockWriteGate(audio);
+    lockControlWriteGate(audio);
     const enum WriteResult result = writeMessageLocked(audio,
+        audio->clientControlStream, &audio->clientControlSequence,
         KVMFR_AUDIO_MESSAGE_KEEPALIVE, 0, 0, 0, 0, 0, 0, NULL, 0);
-    unlockWriteGate(audio);
+    unlockControlWriteGate(audio);
     if (result == WRITE_OK)
     {
       LG_LOCK(audio->lock);
@@ -1737,9 +2396,17 @@ static void maintainBinding(LGMPAudio * audio)
 
 static void stopWorkerBinding(LGMPAudio * audio)
 {
+  const uint64_t now = microtime();
   LG_LOCK(audio->lock);
   const bool active = bindingPhaseActiveNL(audio);
   audio->phase = active ? AUDIO_PHASE_RELEASING : audio->phase;
+  if (active && !audio->releaseDeadline)
+    audio->releaseDeadline = now + AUDIO_OWNER_RETRY_US;
+  const uint64_t releaseDeadline = audio->releaseDeadline;
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
+  audio->stateAckPending = false;
+  audio->subscriptionPending = false;
   LG_UNLOCK(audio->lock);
   if (!active)
   {
@@ -1750,7 +2417,8 @@ static void stopWorkerBinding(LGMPAudio * audio)
 
   for (;;)
   {
-    drainInbound(audio);
+    drainControl(audio);
+    drainPlayback(audio);
     maintainBinding(audio);
 
     LG_LOCK(audio->lock);
@@ -1758,6 +2426,11 @@ static void stopWorkerBinding(LGMPAudio * audio)
     LG_UNLOCK(audio->lock);
     if (!bindingActive || !lgmpClientSessionValid(audio->client))
       break;
+    if (microtime() >= releaseDeadline)
+    {
+      DEBUG_WARN("Timed out waiting for LGMP audio binding release");
+      break;
+    }
     lgWaitEvent(audio->event, 1);
   }
   stopActiveStreams(audio);
@@ -1779,7 +2452,9 @@ static int audioThread(void * opaque)
   while (!atomic_load_explicit(&audio->stop, memory_order_acquire))
   {
     processResponse(audio);
-    const unsigned drained = drainInbound(audio);
+    const unsigned controlDrained = drainControl(audio);
+    const unsigned playbackDrained = drainPlayback(audio);
+    const unsigned drained = controlDrained + playbackDrained;
     if (drained)
       lgmpStreamPollActivity(&audio->streamPoll);
     maintainBinding(audio);
@@ -1799,7 +2474,8 @@ static int audioThread(void * opaque)
     LG_UNLOCK(audio->lock);
     if (active)
     {
-      if (drained == AUDIO_DRAIN_MAX)
+      if (controlDrained == AUDIO_DRAIN_MAX ||
+          playbackDrained == AUDIO_DRAIN_MAX)
       {
         lgmpStreamPollActivity(&audio->streamPoll);
         continue;
@@ -1848,7 +2524,8 @@ bool lgmpAudio_create(PLGMPClient client, LGEvent * pointerWake,
   LG_LOCK_INIT(audio->lock);
   LG_LOCK_INIT(audio->eventLock);
   LG_LOCK_INIT(audio->statusWait.lock);
-  atomic_flag_clear(&audio->writeGate);
+  atomic_flag_clear(&audio->controlWriteGate);
+  atomic_flag_clear(&audio->captureWriteGate);
   atomic_init(&audio->stop, false);
   atomic_init(&audio->dataPlaneLost, false);
   atomic_init(&audio->captureDiscontinuity, false);
@@ -1897,6 +2574,13 @@ bool lgmpAudio_connect(LGMPAudio * audio, uint32_t clientID)
   audio->nextClaimAt        = 0;
   audio->releaseRequested   = false;
   audio->releaseSent        = false;
+  audio->bindingEpoch       = 0;
+  audio->roleEpoch          = 0;
+  audio->playbackReaderEpoch = 0;
+  audio->stateAckPending    = false;
+  audio->subscriptionPending = false;
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
   memset(&audio->endpointGeneration, 0,
       sizeof(audio->endpointGeneration));
   atomic_store_explicit(&audio->stop, false, memory_order_release);
@@ -1922,7 +2606,7 @@ void lgmpAudio_disconnect(LGMPAudio * audio)
     return;
 
   LG_LOCK(audio->eventLock);
-  lockWriteGate(audio);
+  lockWriteGates(audio);
   LG_LOCK(audio->lock);
   closePublicDataLocked(audio);
   audio->events      = NULL;
@@ -1930,6 +2614,10 @@ void lgmpAudio_disconnect(LGMPAudio * audio)
   audio->attached    = false;
   audio->discover    = false;
   audio->releaseRequested = true;
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
+  audio->stateAckPending = false;
+  audio->subscriptionPending = false;
   audio->releaseDeadline =
     microtime() + AUDIO_OWNER_RETRY_US;
   if (audio->phase == AUDIO_PHASE_BOUND)
@@ -1940,7 +2628,7 @@ void lgmpAudio_disconnect(LGMPAudio * audio)
   LGEvent * event   = audio->event;
   atomic_store_explicit(&audio->stop, true, memory_order_release);
   LG_UNLOCK(audio->lock);
-  unlockWriteGate(audio);
+  unlockWriteGates(audio);
   LG_UNLOCK(audio->eventLock);
 
   if (event)
@@ -1959,11 +2647,20 @@ void lgmpAudio_disconnect(LGMPAudio * audio)
   audio->claimSends         = 0;
   audio->releaseRequested   = false;
   audio->releaseSent        = false;
+  audio->bindingEpoch       = 0;
+  audio->roleEpoch          = 0;
+  audio->playbackReaderEpoch = 0;
+  audio->stateAckPending    = false;
+  audio->subscriptionPending = false;
+  audio->playbackReadActive = false;
+  audio->stateAcknowledged = false;
   audio->statusCallback     = NULL;
   audio->statusOpaque       = NULL;
   memset(&audio->claim, 0, sizeof(audio->claim));
   memset(&audio->response, 0, sizeof(audio->response));
   memset(&audio->remoteStatus, 0, sizeof(audio->remoteStatus));
+  memset(&audio->stateAck, 0, sizeof(audio->stateAck));
+  memset(&audio->subscription, 0, sizeof(audio->subscription));
   LG_UNLOCK(audio->lock);
   waitStatusCallbacks(audio);
 }
@@ -1992,6 +2689,7 @@ static bool newClaimNL(LGMPAudio * audio)
     .protocolMin        = KVMFR_AUDIO_PROTOCOL_MIN,
     .protocolMax        = KVMFR_AUDIO_PROTOCOL_MAX,
     .clientCapabilities = AUDIO_CAPABILITIES,
+    .subscriptions      = AUDIO_SUBSCRIPTIONS,
   };
   audio->claimSends  = 0;
   audio->claimPosting = false;
@@ -2093,7 +2791,7 @@ static void setStatusListener(void * opaque,
 {
   LGMPAudio * audio = opaque;
   if (!callback)
-    lockWriteGate(audio);
+    lockWriteGates(audio);
   LG_LOCK(audio->lock);
   if (!callback)
     closePublicDataLocked(audio);
@@ -2110,6 +2808,10 @@ static void setStatusListener(void * opaque,
     const bool ownsOrMayOwn =
       audio->phase != AUDIO_PHASE_IDLE;
     audio->releaseRequested = ownsOrMayOwn;
+    audio->playbackReadActive = false;
+    audio->stateAcknowledged = false;
+    audio->stateAckPending = false;
+    audio->subscriptionPending = false;
     if (ownsOrMayOwn)
     {
       audio->releaseDeadline =
@@ -2130,7 +2832,7 @@ static void setStatusListener(void * opaque,
   audio->statusDirty = false;
   LG_UNLOCK(audio->lock);
   if (!callback)
-    unlockWriteGate(audio);
+    unlockWriteGates(audio);
   if (callback)
   {
     callback(callbackOpaque, &status);
@@ -2228,20 +2930,22 @@ static bool recordData(void * opaque, uint32_t generation,
   if (!generation || !data || !frames ||
       frames > KVMFR_AUDIO_MAX_FRAMES_PER_PACKET)
     return false;
-  lockWriteGate(audio);
+  lockCaptureWriteGate(audio);
 
-  if (!audio->publicDataAllowed || !audio->writeBound ||
+  if (!audio->publicDataAllowed || !audio->captureWriteBound ||
+      !(audio->writeGrantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) ||
+      !audio->writeBindingEpoch || !audio->writeRoleEpoch ||
       generation != audio->writeCaptureLocalGeneration ||
       !audio->writeCaptureGeneration)
   {
-    unlockWriteGate(audio);
+    unlockCaptureWriteGate(audio);
     return false;
   }
   const size_t bytes = frames * audio->writeCaptureFormat.blockAlign;
   if (!audio->writeCaptureFormat.blockAlign ||
       bytes > KVMFR_AUDIO_PCM_BYTES)
   {
-    unlockWriteGate(audio);
+    unlockCaptureWriteGate(audio);
     return false;
   }
 
@@ -2253,7 +2957,7 @@ static bool recordData(void * opaque, uint32_t generation,
   {
     if (!rateToQ32(sourceClock->rate, true, &rateQ32))
     {
-      unlockWriteGate(audio);
+      unlockCaptureWriteGate(audio);
       return false;
     }
     flags    |= KVMFR_AUDIO_MESSAGE_CLOCK_VALID;
@@ -2269,6 +2973,7 @@ static bool recordData(void * opaque, uint32_t generation,
     flags |= KVMFR_AUDIO_MESSAGE_DISCONTINUITY;
 
   enum WriteResult result = writeMessageLocked(audio,
+      audio->captureStream, &audio->captureSequence,
       KVMFR_AUDIO_MESSAGE_CAPTURE_DATA,
       audio->writeCaptureGeneration, flags, position, timeNs, rateQ32,
       (uint32_t)frames, data, (uint32_t)bytes);
@@ -2300,6 +3005,7 @@ static bool recordData(void * opaque, uint32_t generation,
         nsleep((uint64_t)waitUs * 1000U);
 
       result = writeMessageLocked(audio,
+          audio->captureStream, &audio->captureSequence,
           KVMFR_AUDIO_MESSAGE_CAPTURE_DATA,
           audio->writeCaptureGeneration, flags, position, timeNs, rateQ32,
           (uint32_t)frames, data, (uint32_t)bytes);
@@ -2308,11 +3014,11 @@ static bool recordData(void * opaque, uint32_t generation,
   if (result != WRITE_OK)
   {
     if (result == WRITE_FULL)
-      ++audio->clientSequence;
+      ++audio->captureSequence;
     atomic_store_explicit(
         &audio->captureDiscontinuity, true, memory_order_release);
   }
-  unlockWriteGate(audio);
+  unlockCaptureWriteGate(audio);
   return result == WRITE_OK;
 }
 
@@ -2327,26 +3033,39 @@ static bool clockFeedback(void * opaque, uint32_t generation,
       !rateToQ32(playbackClock->rate, true, &rateQ32))
     return false;
 
-  if (!tryWriteGate(audio))
+  if (!tryControlWriteGate(audio))
     return false;
   LG_LOCK(audio->lock);
   const bool supported = audio->phase == AUDIO_PHASE_BOUND &&
     !audio->releaseRequested && audio->statusAvailable &&
-    (audio->remoteStatus.capabilities &
+    audio->stateAcknowledged &&
+    audio->stateAck.bindingEpoch == audio->bindingEpoch &&
+    audio->stateAck.roleEpoch == audio->roleEpoch &&
+    audio->stateAckGeneration ==
+      audio->remoteStatus.playbackGeneration &&
+    (audio->remoteStatus.grantedCapabilities &
       KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) != 0 &&
+    audio->remoteStatus.feedbackAuthorityClientID == audio->clientID &&
+    audio->remoteStatus.feedbackAuthorityEpoch &&
+    audio->remoteStatus.bindingEpoch == audio->bindingEpoch &&
+    audio->remoteStatus.roleEpoch == audio->roleEpoch &&
     audio->playback.active &&
     audio->playback.generation.local == generation;
   LG_UNLOCK(audio->lock);
   if (!supported)
   {
-    unlockWriteGate(audio);
+    unlockControlWriteGate(audio);
     return false;
   }
-  if (!audio->publicDataAllowed || !audio->writeBound ||
+  if (!audio->publicDataAllowed || !audio->controlWriteBound ||
+      !(audio->writeGrantedCapabilities &
+        KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) ||
+      audio->writeBindingEpoch != audio->bindingEpoch ||
+      audio->writeRoleEpoch != audio->roleEpoch ||
       generation != audio->writePlaybackLocalGeneration ||
       !audio->writePlaybackGeneration)
   {
-    unlockWriteGate(audio);
+    unlockControlWriteGate(audio);
     return false;
   }
 
@@ -2358,13 +3077,16 @@ static bool clockFeedback(void * opaque, uint32_t generation,
   const KVMFRAudioClockFeedback feedback =
   {
     .targetRateQ32 = targetRateQ32,
+    .bindingEpoch  = audio->writeBindingEpoch,
+    .roleEpoch     = audio->writeRoleEpoch,
   };
   const enum WriteResult result = writeMessageLocked(audio,
+      audio->clientControlStream, &audio->clientControlSequence,
       KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK,
       audio->writePlaybackGeneration, flags,
       playbackClock->position, playbackClock->time, rateQ32, 0,
       &feedback, sizeof(feedback));
-  unlockWriteGate(audio);
+  unlockControlWriteGate(audio);
   return result == WRITE_OK;
 }
 

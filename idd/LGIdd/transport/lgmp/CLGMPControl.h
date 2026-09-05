@@ -34,13 +34,13 @@
 #include <memory>
 
 class CLGMPTransport;
-class CLGMPAudioTransport;
+class CLGMPAudio;
 
 class CLGMPControl final : public IControlSink
 {
 private:
   friend class CLGMPTransport;
-  friend class CLGMPAudioTransport;
+  friend class CLGMPAudio;
 
   static constexpr int POINTER_SHAPE_BUFFERS   = 3;
   static constexpr int COLOR_TRANSFORM_BUFFERS = 3;

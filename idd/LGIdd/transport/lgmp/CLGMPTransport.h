@@ -40,7 +40,7 @@ private:
   CIVSHMEM                 m_ivshmem;
   CLGMPHost                m_host;
   CLGMPControl             m_control;
-  CLGMPAudioTransport      m_audio;
+  CLGMPAudio      m_audio;
   CLGMPFrameTransport      m_frames;
   CLGMPInputTransport      m_input;
   CLGMPClipboardTransport  m_clipboard;

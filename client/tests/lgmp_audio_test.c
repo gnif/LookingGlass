@@ -28,6 +28,7 @@
 
 #include <lgmp/client.h>
 #include <lgmp/host.h>
+#include <lgmp/spmc.h>
 #include <lgmp/stream.h>
 
 #include <pthread.h>
@@ -136,6 +137,18 @@ static void playbackStop(void * opaque, uint32_t generation)
       memory_order_release);
 }
 
+static unsigned audioSampleBytes(LG_AudioSampleFormat format)
+{
+  switch (format)
+  {
+    case LG_AUDIO_FMT_S16_LE: return 2;
+    case LG_AUDIO_FMT_S24_LE: return 3;
+    case LG_AUDIO_FMT_S32_LE:
+    case LG_AUDIO_FMT_F32_LE: return 4;
+    default: return 0;
+  }
+}
+
 static void playbackData(void * opaque, uint32_t generation,
     const void * data, size_t frames, const LG_AudioClock * clock)
 {
@@ -143,7 +156,8 @@ static void playbackData(void * opaque, uint32_t generation,
   pthread_mutex_lock(&trace->mutex);
   trace->playGeneration = generation;
   trace->playFrames = frames;
-  const size_t bytes = frames * trace->playFormat.channelCount * 3U;
+  const size_t bytes = frames * trace->playFormat.channelCount *
+    audioSampleBytes(trace->playFormat.sampleFormat);
   const size_t copy = bytes < sizeof(trace->playData) ?
     bytes : sizeof(trace->playData);
   memset(trace->playData, 0, sizeof(trace->playData));
@@ -198,13 +212,26 @@ struct Fixture
   LGEvent * pointerWake;
   LGMPAudio * audio;
   const LG_AudioOps * ops;
-  PLGMPHostStream h2c;
-  PLGMPHostStream c2h;
+  PLGMPHostSPMC playback;
+  PLGMPHostStream hostControl;
+  PLGMPHostStream clientControl;
+  PLGMPHostStream capture;
+  uint32_t playbackReaderID;
+  uint32_t bindingEpoch;
+  uint32_t roleEpoch;
   PLGMPMemory memories[MAX_MEMORIES];
   unsigned memoryCount;
   KVMFRAudioClaim claim;
-  uint64_t hostSequence;
+  uint64_t hostControlSequence;
+  uint64_t stateSerial;
   uint64_t endpointGeneration;
+  bool available;
+  KVMFRAudioCapabilities capabilities;
+  KVMFRAudioCapabilities grantedCapabilities;
+  uint64_t playbackGeneration;
+  uint64_t captureGeneration;
+  KVMFRAudioFormat playbackFormat;
+  KVMFRAudioFormat captureFormat;
   struct Trace trace;
 };
 
@@ -355,10 +382,14 @@ static void fixtureCleanup(struct Fixture * fixture)
     lgmpClientUnsubscribe(&fixture->pointerClient);
   if (fixture->client)
     lgmpClientFree(&fixture->client);
-  if (fixture->h2c)
-    lgmpHostStreamFree(&fixture->h2c);
-  if (fixture->c2h)
-    lgmpHostStreamFree(&fixture->c2h);
+  if (fixture->playback)
+    lgmpHostSPMCFree(&fixture->playback);
+  if (fixture->hostControl)
+    lgmpHostStreamFree(&fixture->hostControl);
+  if (fixture->clientControl)
+    lgmpHostStreamFree(&fixture->clientControl);
+  if (fixture->capture)
+    lgmpHostStreamFree(&fixture->capture);
   for (unsigned i = 0; i < fixture->memoryCount; ++i)
     lgmpHostMemFree(&fixture->memories[i]);
   if (fixture->host)
@@ -404,28 +435,45 @@ static bool readClaim(struct Fixture * fixture, KVMFRAudioClaim * claim,
 
 static bool createStreams(struct Fixture * fixture)
 {
-  const struct LGMPStreamConfig h2cConfig =
+  const struct LGMPSPMCConfig playbackConfig =
+  {
+    .slotCount = KVMFR_AUDIO_STREAM_SLOT_COUNT,
+    .slotSize = KVMFR_AUDIO_PLAYBACK_SLOT_BYTES,
+    .maxReaders = KVMFR_AUDIO_MAX_PLAYBACK_READERS,
+  };
+  const struct LGMPStreamConfig hostControlConfig =
   {
     .direction = LGMP_STREAM_HOST_TO_CLIENT,
     .policy = LGMP_STREAM_RELIABLE_FIFO,
     .slotCount = KVMFR_AUDIO_STREAM_SLOT_COUNT,
-    .slotSize = KVMFR_AUDIO_STREAM_SLOT_BYTES,
+    .slotSize = KVMFR_AUDIO_HOST_CONTROL_SLOT_BYTES,
   };
-  const struct LGMPStreamConfig c2hConfig =
+  const struct LGMPStreamConfig clientControlConfig =
   {
     .direction = LGMP_STREAM_CLIENT_TO_HOST,
     .policy = LGMP_STREAM_RELIABLE_FIFO,
     .slotCount = KVMFR_AUDIO_STREAM_SLOT_COUNT,
-    .slotSize = KVMFR_AUDIO_STREAM_SLOT_BYTES,
+    .slotSize = KVMFR_AUDIO_CLIENT_CONTROL_SLOT_BYTES,
   };
-  CHECK(lgmpHostStreamNew(fixture->host, h2cConfig,
-        &fixture->h2c) == LGMP_OK);
-  CHECK(lgmpHostStreamNew(fixture->host, c2hConfig,
-        &fixture->c2h) == LGMP_OK);
+  const struct LGMPStreamConfig captureConfig =
+  {
+    .direction = LGMP_STREAM_CLIENT_TO_HOST,
+    .policy = LGMP_STREAM_RELIABLE_FIFO,
+    .slotCount = KVMFR_AUDIO_STREAM_SLOT_COUNT,
+    .slotSize = KVMFR_AUDIO_CAPTURE_SLOT_BYTES,
+  };
+  CHECK(lgmpHostSPMCNew(fixture->host, playbackConfig,
+        &fixture->playback) == LGMP_OK);
+  CHECK(lgmpHostStreamNew(fixture->host, hostControlConfig,
+        &fixture->hostControl) == LGMP_OK);
+  CHECK(lgmpHostStreamNew(fixture->host, clientControlConfig,
+        &fixture->clientControl) == LGMP_OK);
+  CHECK(lgmpHostStreamNew(fixture->host, captureConfig,
+        &fixture->capture) == LGMP_OK);
   return true;
 }
 
-static void copyDescriptor(KVMFRStreamDescriptor * output,
+static void copyStreamDescriptor(KVMFRStreamDescriptor * output,
     PLGMPHostStream stream)
 {
   struct LGMPStreamDescriptor descriptor;
@@ -433,15 +481,43 @@ static void copyDescriptor(KVMFRStreamDescriptor * output,
   memcpy(output, &descriptor, sizeof(*output));
 }
 
+static void copySPMCDescriptor(KVMFRSPMCDescriptor * output,
+    PLGMPHostSPMC stream)
+{
+  struct LGMPSPMCDescriptor descriptor;
+  lgmpHostSPMCGetDescriptor(stream, &descriptor);
+  memcpy(output, &descriptor, sizeof(*output));
+}
+
 static bool bindStreams(struct Fixture * fixture)
 {
   uint32_t epoch = 0;
-  CHECK(lgmpHostStreamBind(fixture->h2c,
+  CHECK(lgmpHostSPMCReaderBind(fixture->playback,
+        fixture->clientID, &fixture->playbackReaderID,
+        &epoch) == LGMP_OK);
+  CHECK(epoch != 0);
+  CHECK(lgmpHostStreamBind(fixture->hostControl,
         fixture->clientID, &epoch) == LGMP_OK);
   CHECK(epoch != 0);
-  CHECK(lgmpHostStreamBind(fixture->c2h,
+  CHECK(lgmpHostStreamBind(fixture->clientControl,
         fixture->clientID, &epoch) == LGMP_OK);
   CHECK(epoch != 0);
+  CHECK(lgmpHostStreamBind(fixture->capture,
+        fixture->clientID, &epoch) == LGMP_OK);
+  CHECK(epoch != 0);
+  if (++fixture->bindingEpoch == 0)
+    ++fixture->bindingEpoch;
+  if (++fixture->roleEpoch == 0)
+    ++fixture->roleEpoch;
+  fixture->hostControlSequence = 0;
+  fixture->stateSerial = 0;
+  fixture->grantedCapabilities =
+    KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
+    KVMFR_AUDIO_CAP_CLOCK_FEEDBACK;
+  fixture->playbackGeneration = 0;
+  fixture->captureGeneration = 0;
+  memset(&fixture->playbackFormat, 0, sizeof(fixture->playbackFormat));
+  memset(&fixture->captureFormat, 0, sizeof(fixture->captureFormat));
   return true;
 }
 
@@ -483,9 +559,17 @@ static bool deliverBoundResponse(struct Fixture * fixture,
     .protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX,
     .endpointGeneration = fixture->endpointGeneration,
     .claimToken = correct ? claim->claimToken : claim->claimToken + 1,
+    .grantedCapabilities =
+      KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
+      KVMFR_AUDIO_CAP_CLOCK_FEEDBACK,
+    .bindingEpoch = fixture->bindingEpoch,
+    .roleEpoch = fixture->roleEpoch,
+    .playbackReaderID = fixture->playbackReaderID,
   };
-  copyDescriptor(&response.hostToClient, fixture->h2c);
-  copyDescriptor(&response.clientToHost, fixture->c2h);
+  copySPMCDescriptor(&response.playback, fixture->playback);
+  copyStreamDescriptor(&response.hostControl, fixture->hostControl);
+  copyStreamDescriptor(&response.clientControl, fixture->clientControl);
+  copyStreamDescriptor(&response.capture, fixture->capture);
 
   LGMPMessage message;
   CHECK(postTagged(fixture, KVMFR_AUDIO_CONTROL_UDATA,
@@ -506,8 +590,15 @@ static KVMFRAudioFormat makeFormat(uint32_t channelMask,
   unsigned channels = 0;
   for (uint32_t mask = channelMask; mask; mask >>= 1)
     channels += mask & 1U;
-  const unsigned bytes =
-    sampleFormat == KVMFR_AUDIO_SAMPLE_S24_LE ? 3U : 2U;
+  unsigned bytes = 0;
+  switch (sampleFormat)
+  {
+    case KVMFR_AUDIO_SAMPLE_S16_LE: bytes = 2; break;
+    case KVMFR_AUDIO_SAMPLE_S24_LE: bytes = 3; break;
+    case KVMFR_AUDIO_SAMPLE_S32_LE:
+    case KVMFR_AUDIO_SAMPLE_F32_LE: bytes = 4; break;
+    default: break;
+  }
   return (KVMFRAudioFormat)
   {
     .version = KVMFR_AUDIO_FORMAT_VERSION,
@@ -522,13 +613,14 @@ static KVMFRAudioFormat makeFormat(uint32_t channelMask,
   };
 }
 
-static bool writeH2C(struct Fixture * fixture, uint32_t type,
+static bool writeHostControl(struct Fixture * fixture, uint32_t type,
     uint64_t generation, uint32_t flags, uint64_t position,
     int64_t timeNs, uint64_t rateQ32, uint32_t frames,
-    const void * payload, uint32_t length, uint64_t sequence)
+    const void * payload, uint32_t length)
 {
   LGMPStreamBuffer buffer = { 0 };
-  CHECK(lgmpHostStreamWriteAcquire(fixture->h2c, &buffer) == LGMP_OK);
+  CHECK(lgmpHostStreamWriteAcquire(
+        fixture->hostControl, &buffer) == LGMP_OK);
   CHECK(buffer.capacity >= sizeof(KVMFRAudioMessage) + length);
   const KVMFRAudioMessage message =
   {
@@ -537,7 +629,7 @@ static bool writeH2C(struct Fixture * fixture, uint32_t type,
     .type = type,
     .streamGeneration = generation,
     .flags = flags,
-    .sequence = sequence,
+    .sequence = fixture->hostControlSequence,
     .position = position,
     .timeNs = timeNs,
     .rateQ32 = rateQ32,
@@ -547,92 +639,98 @@ static bool writeH2C(struct Fixture * fixture, uint32_t type,
   memcpy(buffer.data, &message, sizeof(message));
   if (length)
     memcpy((uint8_t *)buffer.data + sizeof(message), payload, length);
-  CHECK(lgmpHostStreamWriteCommit(fixture->h2c, &buffer,
+  CHECK(lgmpHostStreamWriteCommit(fixture->hostControl, &buffer,
+        (uint32_t)sizeof(message) + length) == LGMP_OK);
+  ++fixture->hostControlSequence;
+  return true;
+}
+
+static bool publishPlayback(struct Fixture * fixture, uint64_t generation,
+    uint32_t flags, uint64_t position, int64_t timeNs, uint64_t rateQ32,
+    uint32_t frames, const void * payload, uint32_t length)
+{
+  LGMPSPMCBuffer buffer = { 0 };
+  CHECK(lgmpHostSPMCWriteAcquire(fixture->playback, &buffer) == LGMP_OK);
+  CHECK(buffer.capacity >= sizeof(KVMFRAudioMessage) + length);
+  const KVMFRAudioMessage message =
+  {
+    .version = KVMFR_AUDIO_MESSAGE_VERSION,
+    .size = sizeof(KVMFRAudioMessage),
+    .type = KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
+    .streamGeneration = generation,
+    .flags = flags,
+    .sequence = buffer.sequence,
+    .position = position,
+    .timeNs = timeNs,
+    .rateQ32 = rateQ32,
+    .frames = frames,
+    .length = length,
+  };
+  memcpy(buffer.data, &message, sizeof(message));
+  if (length)
+    memcpy((uint8_t *)buffer.data + sizeof(message), payload, length);
+  CHECK(lgmpHostSPMCWriteCommit(fixture->playback, &buffer,
         (uint32_t)sizeof(message) + length) == LGMP_OK);
   return true;
 }
 
-static bool sendH2C(struct Fixture * fixture, uint32_t type,
-    uint64_t generation, uint32_t flags, uint64_t position,
-    int64_t timeNs, uint64_t rateQ32, uint32_t frames,
-    const void * payload, uint32_t length)
+static bool skipPlaybackRecord(struct Fixture * fixture)
 {
-  return writeH2C(fixture, type, generation, flags, position, timeNs,
-      rateQ32, frames, payload, length, fixture->hostSequence++);
+  LGMPSPMCBuffer buffer = { 0 };
+  CHECK(lgmpHostSPMCWriteAcquire(fixture->playback, &buffer) == LGMP_OK);
+  CHECK(lgmpHostSPMCWriteCancel(fixture->playback, &buffer) == LGMP_OK);
+  return true;
 }
 
-static bool sendStatus(struct Fixture * fixture, bool available,
-    uint32_t capabilities,
-    uint64_t playGeneration, const KVMFRAudioFormat * playFormat,
-    uint64_t captureGeneration, const KVMFRAudioFormat * captureFormat)
-{
-  uint32_t flags = KVMFR_AUDIO_STATUS_HAS_OWNER;
-  if (capabilities & KVMFR_AUDIO_CAP_PLAYBACK)
-    flags |= KVMFR_AUDIO_STATUS_PLAYBACK_AVAILABLE;
-  if (capabilities & KVMFR_AUDIO_CAP_CAPTURE)
-    flags |= KVMFR_AUDIO_STATUS_CAPTURE_AVAILABLE;
-  if (available)
-    flags |= KVMFR_AUDIO_STATUS_AVAILABLE;
-  if (playGeneration)
-    flags |= KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE;
-  if (captureGeneration)
-    flags |= KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
-  KVMFRAudioStatus status =
-  {
-    .version = KVMFR_AUDIO_STATUS_VERSION,
-    .size = sizeof(KVMFRAudioStatus),
-    .flags = flags,
-    .protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX,
-    .requestGeneration = fixture->claim.requestGeneration,
-    .capabilities = capabilities,
-    .ownerClientID = fixture->clientID,
-    .ownerGeneration = fixture->claim.requestGeneration,
-    .endpointGeneration = fixture->endpointGeneration,
-    .playbackGeneration = playGeneration,
-    .captureGeneration = captureGeneration,
-    .playbackState = playGeneration ?
-      KVMFR_AUDIO_STREAM_RUNNING : KVMFR_AUDIO_STREAM_STOPPED,
-    .captureState = captureGeneration ?
-      KVMFR_AUDIO_STREAM_RUNNING : KVMFR_AUDIO_STREAM_STOPPED,
-  };
-  if (playFormat)
-    status.playbackFormat = *playFormat;
-  if (captureFormat)
-    status.captureFormat = *captureFormat;
-  return sendH2C(fixture, KVMFR_AUDIO_MESSAGE_STATUS, 0, 0, 0, 0, 0,
-      0, &status, sizeof(status));
-}
-
-static bool readC2H(struct Fixture * fixture, KVMFRAudioMessage * message,
+static bool readStream(struct Fixture * fixture, PLGMPHostStream stream,
+    KVMFRAudioMessage * message,
     uint8_t payload[KVMFR_AUDIO_PCM_BYTES], unsigned timeoutMs)
 {
   const uint64_t deadline = microtime() + (uint64_t)timeoutMs * 1000U;
   while (microtime() < deadline)
   {
     LGMPStreamBuffer buffer = { 0 };
-    const LGMP_STATUS status =
-      lgmpHostStreamReadPeek(fixture->c2h, &buffer);
+    const LGMP_STATUS status = lgmpHostStreamReadPeek(stream, &buffer);
     if (status == LGMP_OK)
     {
       CHECK(buffer.size >= sizeof(*message));
       memcpy(message, buffer.data, sizeof(*message));
+      CHECK(message->version == KVMFR_AUDIO_MESSAGE_VERSION);
+      CHECK(message->size == sizeof(*message));
+      CHECK(!message->reserved0);
       CHECK(message->length <= KVMFR_AUDIO_PCM_BYTES);
       CHECK(buffer.size == sizeof(*message) + message->length);
       if (message->length)
         memcpy(payload, (uint8_t *)buffer.data + sizeof(*message),
             message->length);
-      CHECK(lgmpHostStreamReadRelease(fixture->c2h, &buffer) == LGMP_OK);
+      CHECK(lgmpHostStreamReadRelease(stream, &buffer) == LGMP_OK);
       return true;
     }
     CHECK(status == LGMP_ERR_STREAM_EMPTY);
     lgmpHostProcess(fixture->host);
-    struct timespec delay = { .tv_nsec = 1000000L };
+    const struct timespec delay = { .tv_nsec = 1000000L };
     nanosleep(&delay, NULL);
   }
   return false;
 }
 
-static bool readC2HType(struct Fixture * fixture, uint32_t type,
+static bool readClientControl(struct Fixture * fixture,
+    KVMFRAudioMessage * message, uint8_t payload[KVMFR_AUDIO_PCM_BYTES],
+    unsigned timeoutMs)
+{
+  return readStream(fixture, fixture->clientControl,
+      message, payload, timeoutMs);
+}
+
+static bool readCapture(struct Fixture * fixture,
+    KVMFRAudioMessage * message, uint8_t payload[KVMFR_AUDIO_PCM_BYTES],
+    unsigned timeoutMs)
+{
+  return readStream(fixture, fixture->capture,
+      message, payload, timeoutMs);
+}
+
+static bool readClientControlType(struct Fixture * fixture, uint32_t type,
     KVMFRAudioMessage * message, uint8_t payload[KVMFR_AUDIO_PCM_BYTES],
     unsigned timeoutMs)
 {
@@ -640,47 +738,285 @@ static bool readC2HType(struct Fixture * fixture, uint32_t type,
   while (microtime() < deadline)
   {
     const unsigned left = (unsigned)((deadline - microtime()) / 1000U + 1);
-    CHECK(readC2H(fixture, message, payload, left));
+    CHECK(readClientControl(fixture, message, payload, left));
     if (message->type == type)
       return true;
   }
   return false;
 }
 
-static bool unbindBoth(struct Fixture * fixture)
+static KVMFRAudioStatus makeStatus(const struct Fixture * fixture)
+{
+  uint32_t flags = KVMFR_AUDIO_STATUS_BOUND;
+  if (fixture->capabilities & KVMFR_AUDIO_CAP_PLAYBACK)
+    flags |= KVMFR_AUDIO_STATUS_PLAYBACK_AVAILABLE;
+  if (fixture->capabilities & KVMFR_AUDIO_CAP_CAPTURE)
+    flags |= KVMFR_AUDIO_STATUS_CAPTURE_AVAILABLE;
+  if (fixture->available)
+    flags |= KVMFR_AUDIO_STATUS_AVAILABLE;
+  if (fixture->available && fixture->playbackGeneration &&
+      (fixture->grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK))
+    flags |= KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE;
+  if (fixture->available && fixture->captureGeneration &&
+      (fixture->grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE))
+    flags |= KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
+
+  KVMFRAudioStatus status =
+  {
+    .version = KVMFR_AUDIO_STATUS_VERSION,
+    .size = sizeof(KVMFRAudioStatus),
+    .flags = flags,
+    .protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX,
+    .requestGeneration = fixture->claim.requestGeneration,
+    .capabilities = fixture->capabilities,
+    .grantedCapabilities = fixture->grantedCapabilities,
+    .bindingEpoch = fixture->bindingEpoch,
+    .roleEpoch = fixture->roleEpoch,
+    .boundClientID = fixture->clientID,
+    .feedbackAuthorityClientID =
+      fixture->grantedCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK ?
+        fixture->clientID : 0,
+    .feedbackAuthorityEpoch =
+      fixture->grantedCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK ?
+        fixture->roleEpoch : 0,
+    .captureOwnerClientID =
+      fixture->grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE ?
+        fixture->clientID : 0,
+    .endpointGeneration = fixture->endpointGeneration,
+    .playbackGeneration = fixture->playbackGeneration,
+    .captureGeneration = fixture->captureGeneration,
+    .playbackState = fixture->playbackGeneration ?
+      KVMFR_AUDIO_STREAM_RUNNING : KVMFR_AUDIO_STREAM_STOPPED,
+    .captureState = fixture->captureGeneration ?
+      KVMFR_AUDIO_STREAM_RUNNING : KVMFR_AUDIO_STREAM_STOPPED,
+    .playbackFormat = fixture->playbackFormat,
+    .captureFormat = fixture->captureFormat,
+  };
+  return status;
+}
+
+static bool sendCurrentStatus(struct Fixture * fixture)
+{
+  const KVMFRAudioStatus status = makeStatus(fixture);
+  return writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_STATUS,
+      0, 0, 0, 0, 0, 0, &status, sizeof(status));
+}
+
+static bool readInitialSubscription(struct Fixture * fixture)
+{
+  KVMFRAudioMessage message;
+  uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
+  CHECK(readClientControl(fixture, &message, payload, WAIT_MS));
+  CHECK(message.type == KVMFR_AUDIO_MESSAGE_PLAYBACK_SUBSCRIBE);
+  CHECK(message.sequence == 0);
+  CHECK(!message.streamGeneration && !message.flags &&
+      !message.position && !message.timeNs && !message.rateQ32 &&
+      !message.frames &&
+      message.length == sizeof(KVMFRAudioSubscription));
+  KVMFRAudioSubscription subscription;
+  memcpy(&subscription, payload, sizeof(subscription));
+  CHECK(subscription.bindingEpoch == fixture->bindingEpoch);
+  CHECK(subscription.roleEpoch == fixture->roleEpoch);
+  CHECK(subscription.subscriptions ==
+      (KVMFR_AUDIO_SUBSCRIBE_PLAYBACK |
+       KVMFR_AUDIO_SUBSCRIBE_CAPTURE));
+  CHECK(!subscription.reserved);
+  return true;
+}
+
+struct PlaybackStartClock
+{
+  uint64_t position;
+  int64_t timeNs;
+  uint64_t rateQ32;
+  bool stable;
+};
+
+static bool sendStateSnapshotWithPlaybackClock(
+    struct Fixture * fixture, bool available,
+    KVMFRAudioCapabilities capabilities,
+    KVMFRAudioCapabilities grantedCapabilities,
+    uint64_t playbackGeneration, const KVMFRAudioFormat * playbackFormat,
+    uint64_t captureGeneration, const KVMFRAudioFormat * captureFormat,
+    const struct PlaybackStartClock * playbackClock)
+{
+  CHECK(!(grantedCapabilities & ~capabilities));
+  CHECK(!playbackGeneration || playbackFormat);
+  CHECK(!captureGeneration || captureFormat);
+  CHECK(!playbackGeneration ||
+      (available &&
+       (grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK)));
+  CHECK(!captureGeneration ||
+      (available &&
+       (grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE)));
+
+  const uint64_t oldPlaybackGeneration = fixture->playbackGeneration;
+  const uint64_t oldCaptureGeneration = fixture->captureGeneration;
+  const bool playbackChanged =
+    oldPlaybackGeneration != playbackGeneration ||
+    (playbackGeneration &&
+      memcmp(&fixture->playbackFormat, playbackFormat,
+        sizeof(*playbackFormat)));
+  const bool captureChanged =
+    oldCaptureGeneration != captureGeneration ||
+    (captureGeneration &&
+      memcmp(&fixture->captureFormat, captureFormat,
+        sizeof(*captureFormat)));
+  CHECK(!playbackClock || (playbackChanged && playbackGeneration));
+  CHECK(!playbackClock || playbackClock->rateQ32);
+
+  if (fixture->grantedCapabilities != grantedCapabilities)
+  {
+    if (++fixture->roleEpoch == 0)
+      ++fixture->roleEpoch;
+  }
+  fixture->available = available;
+  fixture->capabilities = capabilities;
+  fixture->grantedCapabilities = grantedCapabilities;
+  fixture->playbackGeneration = playbackGeneration;
+  fixture->captureGeneration = captureGeneration;
+  if (playbackFormat)
+    fixture->playbackFormat = *playbackFormat;
+  else
+    memset(&fixture->playbackFormat, 0, sizeof(fixture->playbackFormat));
+  if (captureFormat)
+    fixture->captureFormat = *captureFormat;
+  else
+    memset(&fixture->captureFormat, 0, sizeof(fixture->captureFormat));
+
+  CHECK(sendCurrentStatus(fixture));
+  if (oldPlaybackGeneration && playbackChanged)
+    CHECK(writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
+          oldPlaybackGeneration, 0, 0, 0, 0, 0, NULL, 0));
+  if (oldCaptureGeneration && captureChanged)
+    CHECK(writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
+          oldCaptureGeneration, 0, 0, 0, 0, 0, NULL, 0));
+  if (playbackGeneration && playbackChanged)
+  {
+    const uint32_t flags = playbackClock ?
+      KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
+        (playbackClock->stable ?
+          KVMFR_AUDIO_MESSAGE_CLOCK_STABLE : 0) : 0;
+    CHECK(writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
+          playbackGeneration, flags,
+          playbackClock ? playbackClock->position : 0,
+          playbackClock ? playbackClock->timeNs : 0,
+          playbackClock ? playbackClock->rateQ32 : 0, 0,
+          playbackFormat, sizeof(*playbackFormat)));
+  }
+  if (captureGeneration && captureChanged)
+    CHECK(writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_START,
+          captureGeneration, 0, 0, 0, 0, 0,
+          captureFormat, sizeof(*captureFormat)));
+
+  if (++fixture->stateSerial == 0)
+    ++fixture->stateSerial;
+  const KVMFRAudioStateBarrier barrier =
+  {
+    .bindingEpoch = fixture->bindingEpoch,
+    .roleEpoch = fixture->roleEpoch,
+    .stateSerial = fixture->stateSerial,
+  };
+  CHECK(writeHostControl(fixture, KVMFR_AUDIO_MESSAGE_STATE_BARRIER,
+        playbackGeneration, 0, 0, 0, 0, 0,
+        &barrier, sizeof(barrier)));
+
+  KVMFRAudioMessage message;
+  uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
+  CHECK(readClientControlType(fixture, KVMFR_AUDIO_MESSAGE_STATE_ACK,
+        &message, payload, WAIT_MS));
+  CHECK(message.streamGeneration == playbackGeneration);
+  CHECK(!message.flags && !message.position && !message.timeNs &&
+      !message.rateQ32 && !message.frames &&
+      message.length == sizeof(KVMFRAudioStateBarrier));
+  KVMFRAudioStateBarrier ack;
+  memcpy(&ack, payload, sizeof(ack));
+  CHECK(!memcmp(&ack, &barrier, sizeof(ack)));
+  return true;
+}
+
+static bool sendStateSnapshot(struct Fixture * fixture, bool available,
+    KVMFRAudioCapabilities capabilities,
+    KVMFRAudioCapabilities grantedCapabilities,
+    uint64_t playbackGeneration, const KVMFRAudioFormat * playbackFormat,
+    uint64_t captureGeneration, const KVMFRAudioFormat * captureFormat)
+{
+  return sendStateSnapshotWithPlaybackClock(fixture, available,
+      capabilities, grantedCapabilities,
+      playbackGeneration, playbackFormat,
+      captureGeneration, captureFormat, NULL);
+}
+
+static bool sendHostControl(struct Fixture * fixture, uint32_t type,
+    uint64_t generation, uint32_t flags, uint64_t position,
+    int64_t timeNs, uint64_t rateQ32, uint32_t frames,
+    const void * payload, uint32_t length)
+{
+  return writeHostControl(fixture, type, generation, flags, position,
+      timeNs, rateQ32, frames, payload, length);
+}
+
+static bool drainHostStream(PLGMPHostStream stream)
+{
+  LGMPStreamBuffer buffer = { 0 };
+  LGMP_STATUS status;
+  while ((status = lgmpHostStreamReadPeek(stream, &buffer)) == LGMP_OK)
+  {
+    CHECK(lgmpHostStreamReadRelease(stream, &buffer) == LGMP_OK);
+    memset(&buffer, 0, sizeof(buffer));
+  }
+  CHECK(status == LGMP_ERR_STREAM_EMPTY ||
+      status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE);
+  return true;
+}
+
+static bool unbindStreams(struct Fixture * fixture)
 {
   const uint64_t deadline = microtime() + WAIT_MS * 1000U;
-  bool h2cDone = false;
-  bool c2hDone = false;
-  while (microtime() < deadline && (!h2cDone || !c2hDone))
+  bool playbackDone = false;
+  bool hostControlDone = false;
+  bool clientControlDone = false;
+  bool captureDone = false;
+  while (microtime() < deadline &&
+      (!playbackDone || !hostControlDone ||
+       !clientControlDone || !captureDone))
   {
-    if (!h2cDone)
+    if (!playbackDone)
     {
-      const LGMP_STATUS status = lgmpHostStreamUnbind(fixture->h2c);
+      const LGMP_STATUS status = lgmpHostSPMCReaderUnbind(
+          fixture->playback, fixture->playbackReaderID);
       CHECK(status == LGMP_OK || status == LGMP_ERR_STREAM_BUSY);
-      h2cDone = status == LGMP_OK;
+      playbackDone = status == LGMP_OK;
     }
-    if (!c2hDone)
+    if (!hostControlDone)
     {
-      LGMPStreamBuffer buffer = { 0 };
-      LGMP_STATUS status;
-      while ((status = lgmpHostStreamReadPeek(fixture->c2h,
-              &buffer)) == LGMP_OK)
-      {
-        CHECK(lgmpHostStreamReadRelease(fixture->c2h, &buffer) == LGMP_OK);
-        memset(&buffer, 0, sizeof(buffer));
-      }
-      CHECK(status == LGMP_ERR_STREAM_EMPTY ||
-          status == LGMP_ERR_STREAM_UNBOUND ||
-          status == LGMP_ERR_STREAM_STALE);
-      status = lgmpHostStreamUnbind(fixture->c2h);
+      const LGMP_STATUS status =
+        lgmpHostStreamUnbind(fixture->hostControl);
       CHECK(status == LGMP_OK || status == LGMP_ERR_STREAM_BUSY);
-      c2hDone = status == LGMP_OK;
+      hostControlDone = status == LGMP_OK;
     }
+    if (!clientControlDone)
+    {
+      CHECK(drainHostStream(fixture->clientControl));
+      const LGMP_STATUS status =
+        lgmpHostStreamUnbind(fixture->clientControl);
+      CHECK(status == LGMP_OK || status == LGMP_ERR_STREAM_BUSY);
+      clientControlDone = status == LGMP_OK;
+    }
+    if (!captureDone)
+    {
+      CHECK(drainHostStream(fixture->capture));
+      const LGMP_STATUS status = lgmpHostStreamUnbind(fixture->capture);
+      CHECK(status == LGMP_OK || status == LGMP_ERR_STREAM_BUSY);
+      captureDone = status == LGMP_OK;
+    }
+    lgmpHostProcess(fixture->host);
     struct timespec delay = { .tv_nsec = 1000000L };
     nanosleep(&delay, NULL);
   }
-  return h2cDone && c2hDone;
+  return playbackDone && hostControlDone &&
+    clientControlDone && captureDone;
 }
 
 static bool beginClaim(struct Fixture * fixture, bool retry)
@@ -696,10 +1032,21 @@ static bool beginClaim(struct Fixture * fixture, bool retry)
   lgmpAudio_pumpClaim(fixture->audio, fixture->pointerClient);
   CHECK(readClaim(fixture, &fixture->claim, WAIT_MS));
   CHECK(fixture->claim.messageType == KVMFR_MESSAGE_AUDIO_CLAIM);
+  CHECK(fixture->claim.version == KVMFR_AUDIO_CONTROL_VERSION);
+  CHECK(fixture->claim.size == sizeof(fixture->claim));
   CHECK(fixture->claim.flags == KVMFR_AUDIO_CLAIM_BIND);
+  CHECK(fixture->claim.protocolMin == KVMFR_AUDIO_PROTOCOL_MIN);
+  CHECK(fixture->claim.protocolMax == KVMFR_AUDIO_PROTOCOL_MAX);
   CHECK(fixture->claim.clientCapabilities ==
       (KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
        KVMFR_AUDIO_CAP_CLOCK_FEEDBACK));
+  CHECK(fixture->claim.subscriptions ==
+      (KVMFR_AUDIO_SUBSCRIBE_PLAYBACK |
+       KVMFR_AUDIO_SUBSCRIBE_CAPTURE));
+  for (unsigned i = 0;
+      i < sizeof(fixture->claim.reserved) /
+        sizeof(fixture->claim.reserved[0]); ++i)
+    CHECK(!fixture->claim.reserved[i]);
 
   if (retry)
   {
@@ -730,10 +1077,10 @@ static bool testLateBoundRelease(void)
   CHECK(deliverBoundResponse(&fixture, &fixture.claim, true));
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2H(&fixture, &message, payload, WAIT_MS));
+  CHECK(readClientControl(&fixture, &message, payload, WAIT_MS));
   CHECK(message.type == KVMFR_AUDIO_MESSAGE_RELEASE);
   CHECK(message.sequence == 0);
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   const struct timespec settle = { .tv_nsec = 30000000L };
   nanosleep(&settle, NULL);
 
@@ -791,19 +1138,20 @@ static bool testRetiredClaim(void)
   CHECK(deliverBoundResponse(&fixture, &retired, true));
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(!readC2H(&fixture, &message, payload, 30));
-  CHECK(unbindBoth(&fixture));
+  CHECK(!readClientControl(&fixture, &message, payload, 30));
+  CHECK(unbindStreams(&fixture));
 
   CHECK(bindStreams(&fixture));
   CHECK(deliverBoundResponse(&fixture, &fixture.claim, true));
-  CHECK(readC2H(&fixture, &message, payload, WAIT_MS));
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControl(&fixture, &message, payload, WAIT_MS));
   CHECK(message.type == KVMFR_AUDIO_MESSAGE_KEEPALIVE);
-  CHECK(message.sequence == 0);
+  CHECK(message.sequence == 1);
 
   fixture.ops->setStatusListener(fixture.audio, NULL, NULL);
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
         &message, payload, WAIT_MS));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   const struct timespec settle = { .tv_nsec = 30000000L };
   nanosleep(&settle, NULL);
 
@@ -822,16 +1170,15 @@ static bool testPlaybackRestartSameGeneration(void)
 
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
         &message, payload, WAIT_MS));
 
   const uint64_t wireGeneration = UINT64_C(0x300000001);
   const KVMFRAudioFormat format = makeFormat(
       KVMFR_AUDIO_CHANNEL_FRONT_LEFT, KVMFR_AUDIO_SAMPLE_S24_LE);
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
-        wireGeneration, 0, 0, 0, 0, 0,
-        &format, sizeof(format)));
-  CHECK(sendStatus(&fixture, true, KVMFR_AUDIO_CAP_PLAYBACK,
+  CHECK(sendStateSnapshot(&fixture, true,
+        KVMFR_AUDIO_CAP_PLAYBACK, KVMFR_AUDIO_CAP_PLAYBACK,
         wireGeneration, &format, 0, NULL));
   CHECK(waitCount(&fixture, &fixture.trace.statusCount, 2, WAIT_MS));
   CHECK(fixture.ops->attach(fixture.audio, &eventOps, &fixture.trace));
@@ -847,13 +1194,13 @@ static bool testPlaybackRestartSameGeneration(void)
   for (unsigned i = 0; i < sizeof(pcm); ++i)
     pcm[i] = (uint8_t)(0xa0U + i);
 
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
+  CHECK(sendHostControl(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
         wireGeneration, 0, 0, 0, 0, 0, NULL, 0));
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
+  CHECK(sendHostControl(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
         wireGeneration, 0, 0, 0, 0, 0,
         &format, sizeof(format)));
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
-        wireGeneration, 0, 0, 0, 0, 4, pcm, sizeof(pcm)));
+  CHECK(publishPlayback(&fixture, wireGeneration,
+        0, 0, 0, 0, 4, pcm, sizeof(pcm)));
 
   CHECK(waitCount(&fixture, &fixture.trace.playStopCount, 1, WAIT_MS));
   CHECK(waitCount(&fixture, &fixture.trace.playStartCount, 2, WAIT_MS));
@@ -884,9 +1231,9 @@ static bool testPlaybackRestartSameGeneration(void)
 
   fixture.ops->detach(fixture.audio);
   fixture.ops->setStatusListener(fixture.audio, NULL, NULL);
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
         &message, payload, WAIT_MS));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   const struct timespec settle = { .tv_nsec = 30000000L };
   nanosleep(&settle, NULL);
 
@@ -931,9 +1278,10 @@ static bool testDataPlane(void)
   CHECK(deliverBoundResponse(&fixture, &fixture.claim, true));
   KVMFRAudioMessage c2hMessage;
   uint8_t c2hPayload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2H(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControl(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
   CHECK(c2hMessage.type == KVMFR_AUDIO_MESSAGE_KEEPALIVE);
-  CHECK(c2hMessage.sequence == 0);
+  CHECK(c2hMessage.sequence == 1);
 
   KVMFRAudioFormat playFormat = makeFormat(
       KVMFR_AUDIO_CHANNEL_FRONT_LEFT, KVMFR_AUDIO_SAMPLE_S24_LE);
@@ -941,18 +1289,18 @@ static bool testDataPlane(void)
       KVMFR_AUDIO_CHANNEL_TOP_BACK_RIGHT, KVMFR_AUDIO_SAMPLE_S24_LE);
   const uint64_t playWire = UINT64_C(0x100000002);
   const uint64_t captureWire = UINT64_C(0x200000003);
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
-        playWire, KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
-          KVMFR_AUDIO_MESSAGE_CLOCK_STABLE,
-        99, 123456, UINT64_C(192000) << 32, 0,
-        &playFormat, sizeof(playFormat)));
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_START,
-        captureWire, 0, 0, 0, 0, 0,
-        &captureFormat, sizeof(captureFormat)));
-  CHECK(sendStatus(&fixture, true,
+  const struct PlaybackStartClock startClock =
+  {
+    .position = 99,
+    .timeNs = 123456,
+    .rateQ32 = UINT64_C(192000) << 32,
+    .stable = true,
+  };
+  CHECK(sendStateSnapshotWithPlaybackClock(&fixture, true,
+        KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
         KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
         playWire, &playFormat,
-        captureWire, &captureFormat));
+        captureWire, &captureFormat, &startClock));
   CHECK(waitCount(&fixture, &fixture.trace.statusCount, 2, WAIT_MS));
   pthread_mutex_lock(&fixture.trace.mutex);
   const bool available = fixture.trace.status.available;
@@ -962,6 +1310,13 @@ static bool testDataPlane(void)
   CHECK(fixture.ops->attach(fixture.audio, &eventOps, &fixture.trace));
   CHECK(waitCount(&fixture, &fixture.trace.playStartCount, 1, WAIT_MS));
   CHECK(waitCount(&fixture, &fixture.trace.recStartCount, 1, WAIT_MS));
+  pthread_mutex_lock(&fixture.trace.mutex);
+  CHECK(fixture.trace.playClockValid);
+  CHECK(fixture.trace.playClock.stable);
+  CHECK(fixture.trace.playClock.position == startClock.position);
+  CHECK(fixture.trace.playClock.time == startClock.timeNs);
+  CHECK(fixture.trace.playClock.rate == 192000.0);
+  pthread_mutex_unlock(&fixture.trace.mutex);
 
   uint32_t previousPlayGeneration = 0;
   for (unsigned bit = 0; bit < KVMFR_AUDIO_MAX_CHANNELS; ++bit)
@@ -972,8 +1327,10 @@ static bool testDataPlane(void)
     KVMFRAudioFormat format = makeFormat(UINT32_C(1) << bit,
         KVMFR_AUDIO_SAMPLE_S24_LE);
     const uint64_t wire = UINT64_C(0x300000000) + bit;
-    CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
-          wire, 0, 0, 0, 0, 0, &format, sizeof(format)));
+    CHECK(sendStateSnapshot(&fixture, true,
+          KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
+          KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
+          wire, &format, captureWire, &captureFormat));
     CHECK(waitCount(&fixture, &fixture.trace.playStartCount,
           startCount + 1, WAIT_MS));
     pthread_mutex_lock(&fixture.trace.mutex);
@@ -992,8 +1349,8 @@ static bool testDataPlane(void)
   uint8_t pcm[12];
   for (unsigned i = 0; i < sizeof(pcm); ++i)
     pcm[i] = (uint8_t)(0x40U + i);
-  ++fixture.hostSequence;
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
+  CHECK(skipPlaybackRecord(&fixture));
+  CHECK(publishPlayback(&fixture,
         UINT64_C(0x300000000) + KVMFR_AUDIO_MAX_CHANNELS - 1,
         KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
           KVMFR_AUDIO_MESSAGE_CLOCK_STABLE,
@@ -1025,8 +1382,8 @@ static bool testDataPlane(void)
   memset(capturePcm, 0x5a, sizeof(capturePcm));
   CHECK(fixture.ops->recordData(fixture.audio, captureLocal,
         capturePcm, 6, &captureClock));
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_DATA,
-        &c2hMessage, c2hPayload, WAIT_MS));
+  CHECK(readCapture(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
+  CHECK(c2hMessage.type == KVMFR_AUDIO_MESSAGE_CAPTURE_DATA);
   CHECK(c2hMessage.streamGeneration == captureWire);
   CHECK(c2hMessage.frames == 6);
   CHECK(c2hMessage.length == sizeof(capturePcm));
@@ -1056,7 +1413,9 @@ static bool testDataPlane(void)
   ++fixture.endpointGeneration;
   const unsigned clockStatusBefore = atomic_load_explicit(
       &fixture.trace.statusCount, memory_order_acquire);
-  CHECK(sendStatus(&fixture, true,
+  CHECK(sendStateSnapshot(&fixture, true,
+        KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
+          KVMFR_AUDIO_CAP_CLOCK_FEEDBACK,
         KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
           KVMFR_AUDIO_CAP_CLOCK_FEEDBACK,
         currentPlayWire, &currentPlayFormat,
@@ -1066,7 +1425,8 @@ static bool testDataPlane(void)
   CHECK(fixture.ops->clockFeedbackAvailable(fixture.audio));
   CHECK(fixture.ops->clockFeedback(fixture.audio, playbackLocal,
         &playbackClock, 192000.0));
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK,
+  CHECK(readClientControlType(&fixture,
+        KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK,
         &c2hMessage, c2hPayload, WAIT_MS));
   CHECK(c2hMessage.streamGeneration ==
       UINT64_C(0x300000000) + KVMFR_AUDIO_MAX_CHANNELS - 1);
@@ -1075,8 +1435,10 @@ static bool testDataPlane(void)
   KVMFRAudioClockFeedback feedback;
   memcpy(&feedback, c2hPayload, sizeof(feedback));
   CHECK(feedback.targetRateQ32 == (UINT64_C(192000) << 32));
+  CHECK(feedback.bindingEpoch == fixture.bindingEpoch);
+  CHECK(feedback.roleEpoch == fixture.roleEpoch);
 
-  while (readC2H(&fixture, &c2hMessage, c2hPayload, 2))
+  while (readCapture(&fixture, &c2hMessage, c2hPayload, 2))
   {
   }
   unsigned successful = 0;
@@ -1105,7 +1467,7 @@ static bool testDataPlane(void)
   }
   CHECK(maxFullCall < 20000U);
 
-  CHECK(readC2H(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
+  CHECK(readCapture(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
   uint8_t resumedPcm[18];
   memset(resumedPcm, 0xef, sizeof(resumedPcm));
   CHECK(fixture.ops->recordData(fixture.audio, captureLocal,
@@ -1114,7 +1476,7 @@ static bool testDataPlane(void)
   uint64_t previousSequence = c2hMessage.sequence;
   while (!foundResumed)
   {
-    CHECK(readC2H(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
+    CHECK(readCapture(&fixture, &c2hMessage, c2hPayload, WAIT_MS));
     if (c2hMessage.type == KVMFR_AUDIO_MESSAGE_CAPTURE_DATA &&
         c2hMessage.length == sizeof(resumedPcm) &&
         !memcmp(c2hPayload, resumedPcm, sizeof(resumedPcm)))
@@ -1126,19 +1488,16 @@ static bool testDataPlane(void)
     previousSequence = c2hMessage.sequence;
   }
 
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
-        currentPlayWire, 0, 0, 0, 0, 0, NULL, 0));
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
-        captureWire, 0, 0, 0, 0, 0, NULL, 0));
   const unsigned statusBefore = atomic_load_explicit(
       &fixture.trace.statusCount, memory_order_acquire);
-  CHECK(sendStatus(&fixture, false, 0, 0, NULL, 0, NULL));
+  CHECK(sendStateSnapshot(&fixture, false, 0, 0,
+        0, NULL, 0, NULL));
   CHECK(waitCount(&fixture, &fixture.trace.statusCount,
         statusBefore + 1, WAIT_MS));
   pthread_mutex_lock(&fixture.trace.mutex);
   CHECK(!fixture.trace.status.available);
   pthread_mutex_unlock(&fixture.trace.mutex);
-  CHECK(readC2H(&fixture, &c2hMessage, c2hPayload, 350));
+  CHECK(readClientControl(&fixture, &c2hMessage, c2hPayload, 350));
   CHECK(c2hMessage.type == KVMFR_AUDIO_MESSAGE_KEEPALIVE);
 
   const KVMFRAudioClaim originalClaim = fixture.claim;
@@ -1147,10 +1506,8 @@ static bool testDataPlane(void)
       KVMFR_AUDIO_SAMPLE_S16_LE);
   const unsigned availableBefore = atomic_load_explicit(
       &fixture.trace.statusCount, memory_order_acquire);
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
-        UINT64_C(0x500000001), 0, 0, 0, 0, 0,
-        &playFormat, sizeof(playFormat)));
-  CHECK(sendStatus(&fixture, true,
+  CHECK(sendStateSnapshot(&fixture, true,
+        KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
         KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE,
         UINT64_C(0x500000001),
         &playFormat, 0, NULL));
@@ -1169,25 +1526,23 @@ static bool testDataPlane(void)
       &fixture.trace.playDataCount, memory_order_acquire);
   for (unsigned i = 0; i < KVMFR_AUDIO_STREAM_SLOT_COUNT; ++i)
   {
-    LGMPStreamBuffer buffer = { 0 };
-    LGMP_STATUS status = lgmpHostStreamWriteAcquire(fixture.h2c, &buffer);
-    if (status == LGMP_ERR_STREAM_FULL)
-      break;
-    CHECK(status == LGMP_OK);
+    LGMPSPMCBuffer buffer = { 0 };
+    CHECK(lgmpHostSPMCWriteAcquire(
+          fixture.playback, &buffer) == LGMP_OK);
     const KVMFRAudioMessage message =
     {
       .version = KVMFR_AUDIO_MESSAGE_VERSION,
       .size = sizeof(KVMFRAudioMessage),
       .type = KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
       .streamGeneration = UINT64_C(0x500000001),
-      .sequence = fixture.hostSequence++,
+      .sequence = buffer.sequence,
       .frames = 1,
       .length = playFormat.blockAlign,
     };
     memcpy(buffer.data, &message, sizeof(message));
     memset((uint8_t *)buffer.data + sizeof(message), 0x77,
         message.length);
-    CHECK(lgmpHostStreamWriteCommit(fixture.h2c, &buffer,
+    CHECK(lgmpHostSPMCWriteCommit(fixture.playback, &buffer,
           sizeof(message) + message.length) == LGMP_OK);
   }
   fixture.ops->detach(fixture.audio);
@@ -1195,11 +1550,11 @@ static bool testDataPlane(void)
       &fixture.trace.playDataCount, memory_order_acquire);
   CHECK(afterDetach >= playBeforeDetach);
   fixture.ops->setStatusListener(fixture.audio, NULL, NULL);
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
         &c2hMessage, c2hPayload, WAIT_MS));
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
+  CHECK(sendHostControl(&fixture, KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
         1, 0, 0, 0, 0, 0, NULL, 0));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   struct timespec after = { .tv_nsec = 30000000L };
   nanosleep(&after, NULL);
   CHECK(atomic_load_explicit(&fixture.trace.playDataCount,
@@ -1222,16 +1577,15 @@ static bool testReleaseIsFinal(void)
 
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2H(&fixture, &message, payload, WAIT_MS));
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControl(&fixture, &message, payload, WAIT_MS));
   CHECK(message.type == KVMFR_AUDIO_MESSAGE_KEEPALIVE);
 
   const uint64_t captureWire = UINT64_C(0x700000001);
   const KVMFRAudioFormat captureFormat = makeFormat(
       KVMFR_AUDIO_CHANNEL_TOP_BACK_RIGHT, KVMFR_AUDIO_SAMPLE_S24_LE);
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_START,
-        captureWire, 0, 0, 0, 0, 0,
-        &captureFormat, sizeof(captureFormat)));
-  CHECK(sendStatus(&fixture, true, KVMFR_AUDIO_CAP_CAPTURE,
+  CHECK(sendStateSnapshot(&fixture, true,
+        KVMFR_AUDIO_CAP_CAPTURE, KVMFR_AUDIO_CAP_CAPTURE,
         0, NULL, captureWire, &captureFormat));
   CHECK(waitCount(&fixture, &fixture.trace.statusCount, 2, WAIT_MS));
   CHECK(fixture.ops->attach(fixture.audio, &eventOps, &fixture.trace));
@@ -1250,38 +1604,27 @@ static bool testReleaseIsFinal(void)
   pthread_t stressThread;
   CHECK(!pthread_create(&stressThread, NULL, recordStress, &stress));
 
-  CHECK(sendStatus(&fixture, true, KVMFR_AUDIO_CAP_CAPTURE,
-        0, NULL, captureWire, &captureFormat));
+  CHECK(sendCurrentStatus(&fixture));
   pthread_t listenerThread;
   CHECK(!pthread_create(&listenerThread, NULL,
         removeStatusListener, &stress));
   CHECK(!pthread_join(listenerThread, NULL));
-  bool released = false;
-  const uint64_t releaseDeadline = microtime() + WAIT_MS * 1000U;
-  while (microtime() < releaseDeadline && !released)
-  {
-    CHECK(readC2H(&fixture, &message, payload, WAIT_MS));
-    released = message.type == KVMFR_AUDIO_MESSAGE_RELEASE;
-  }
-  CHECK(released);
-
-  const uint64_t trailingDeadline = microtime() + 30000U;
-  while (microtime() < trailingDeadline)
-  {
-    if (!readC2H(&fixture, &message, payload, 2))
-      continue;
-    CHECK(message.type != KVMFR_AUDIO_MESSAGE_CAPTURE_DATA);
-  }
-  CHECK(!fixture.ops->recordData(fixture.audio,
-        captureLocal, payload, 6, NULL));
   atomic_store_explicit(&stress.stop, true, memory_order_release);
   CHECK(!pthread_join(stressThread, NULL));
   CHECK(atomic_load_explicit(
         &stress.successes, memory_order_acquire) > 0);
 
-  CHECK(sendH2C(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+        &message, payload, WAIT_MS));
+  while (readCapture(&fixture, &message, payload, 2))
+    CHECK(message.type == KVMFR_AUDIO_MESSAGE_CAPTURE_DATA);
+  CHECK(!fixture.ops->recordData(fixture.audio,
+        captureLocal, payload, 6, NULL));
+  CHECK(!readCapture(&fixture, &message, payload, 30));
+
+  CHECK(sendHostControl(&fixture, KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
         captureWire, 0, 0, 0, 0, 0, NULL, 0));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   lgmpAudio_disconnect(fixture.audio);
 
   fixtureCleanup(&fixture);
@@ -1299,15 +1642,16 @@ static bool testFaultReleaseReclaim(void)
 
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2H(&fixture, &message, payload, WAIT_MS));
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControl(&fixture, &message, payload, WAIT_MS));
   CHECK(message.type == KVMFR_AUDIO_MESSAGE_KEEPALIVE);
-  CHECK(message.sequence == 0);
+  CHECK(message.sequence == 1);
 
-  CHECK(sendH2C(&fixture, UINT32_C(0xffffffff),
+  CHECK(sendHostControl(&fixture, UINT32_C(0xffffffff),
         0, 0, 0, 0, 0, 0, NULL, 0));
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
         &message, payload, WAIT_MS));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
 
   const KVMFRAudioClaim first = fixture.claim;
   struct timespec retryDelay = { .tv_nsec = 250000000L };
@@ -1333,17 +1677,18 @@ static bool testBoundDisconnect(void)
 
   KVMFRAudioMessage message;
   uint8_t payload[KVMFR_AUDIO_PCM_BYTES];
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
+  CHECK(readInitialSubscription(&fixture));
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_KEEPALIVE,
         &message, payload, WAIT_MS));
 
   struct DisconnectTask task = { .audio = fixture.audio };
   atomic_init(&task.done, false);
   pthread_t thread;
   CHECK(!pthread_create(&thread, NULL, disconnectAudio, &task));
-  CHECK(readC2HType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
+  CHECK(readClientControlType(&fixture, KVMFR_AUDIO_MESSAGE_RELEASE,
         &message, payload, WAIT_MS));
   CHECK(!atomic_load_explicit(&task.done, memory_order_acquire));
-  CHECK(unbindBoth(&fixture));
+  CHECK(unbindStreams(&fixture));
   CHECK(waitDone(&fixture, &task.done, WAIT_MS));
   CHECK(!pthread_join(thread, NULL));
 

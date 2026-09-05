@@ -2419,7 +2419,8 @@ static LG_TransportStatus lgmp_nextPointer(LG_Transport * this,
 #ifdef ENABLE_AUDIO
       KVMFRAudioStreamResponse audioResponse;
       const bool audioResponseValid =
-        tag == KVMFR_AUDIO_CONTROL_TAG && this->audio &&
+        tag == KVMFR_AUDIO_CONTROL_TAG &&
+        message.udata == KVMFR_AUDIO_CONTROL_UDATA && this->audio &&
         message.size == sizeof(audioResponse);
       if (audioResponseValid)
         memcpy(&audioResponse, message.mem, sizeof(audioResponse));

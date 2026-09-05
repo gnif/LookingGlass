@@ -22,7 +22,7 @@
 
 #include <LGProtocol/KVMFR.h>
 #ifdef ENABLE_AUDIO
-#include "common/KVMFRAudio.h"
+#include <LGProtocol/KVMFRAudio.h>
 #endif
 #include <LGProtocol/KVMFRRecovery.h>
 #include <LGProtocol/LGMPConfig.h>

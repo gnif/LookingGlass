@@ -23,7 +23,7 @@
 
 #include "interface/audio.h"
 
-#include "common/KVMFRAudio.h"
+#include <LGProtocol/KVMFRAudio.h>
 #include "common/event.h"
 
 #include <lgmp/client.h>

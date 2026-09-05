@@ -29,6 +29,7 @@
 
 extern "C" {
   #include "lgmp/host.h"
+  #include "lgmp/spmc.h"
   #include "lgmp/stream.h"
 }
 
@@ -57,6 +58,8 @@ public:
     PLGMPHostQueue * queue);
   LGMP_STATUS CreateStream(const struct LGMPStreamConfig& config,
     PLGMPHostStream * stream);
+  LGMP_STATUS CreateSPMC(const struct LGMPSPMCConfig& config,
+    PLGMPHostSPMC * stream);
   LGMP_STATUS Allocate(uint32_t size, PLGMPMemory * memory);
   LGMP_STATUS AllocateAligned(uint32_t size, uint32_t alignment,
     PLGMPMemory * memory);

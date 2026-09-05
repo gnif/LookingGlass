@@ -29,6 +29,8 @@
 #include "transport/lgmp/CLGMPControl.h"
 #include "transport/lgmp/CLGMPHost.h"
 
+#include <LGProtocol/KVMFR.h>
+
 #include <avrt.h>
 #include <initializer_list>
 #include <limits>
@@ -40,6 +42,8 @@
 
 namespace
 {
+  static_assert(sizeof(KVMFRCursor) == KVMFR_AUDIO_CURSOR_COMPAT_BYTES,
+    "KVMFR cursor compatibility layout changed");
   static_assert(AUDIO_MAX_CHANNELS == KVMFR_AUDIO_MAX_CHANNELS,
     "audio channel limits differ");
   static_assert(AUDIO_STREAM_MAX_CHANNELS ==
@@ -70,12 +74,18 @@ namespace
   static_assert(sizeof(LGMPStreamDescriptor) ==
       sizeof(KVMFRStreamDescriptor),
     "LGMP and KVMFR stream descriptor sizes differ");
+  static_assert(sizeof(LGMPSPMCDescriptor) ==
+      sizeof(KVMFRSPMCDescriptor),
+    "LGMP and KVMFR SPMC descriptor sizes differ");
+  static_assert(LGMP_MAX_CLIENTS ==
+      KVMFR_AUDIO_MAX_PLAYBACK_READERS,
+    "audio reader and LGMP client limits differ");
 
   constexpr uint32_t AUDIO_CAPABILITY_MASK =
     KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE |
     KVMFR_AUDIO_CAP_CLOCK_FEEDBACK;
-  constexpr uint32_t AUDIO_DIRECTION_MASK =
-    KVMFR_AUDIO_CAP_PLAYBACK | KVMFR_AUDIO_CAP_CAPTURE;
+  constexpr uint32_t AUDIO_SUBSCRIPTION_MASK =
+    KVMFR_AUDIO_SUBSCRIBE_PLAYBACK | KVMFR_AUDIO_SUBSCRIBE_CAPTURE;
   constexpr uint32_t AUDIO_PACKET_FLAG_MASK =
     AUDIO_PACKET_DISCONTINUITY | AUDIO_PACKET_SILENT |
     AUDIO_PACKET_CLOCK_VALID | AUDIO_PACKET_CLOCK_STABLE;
@@ -111,17 +121,29 @@ namespace
     return serial ? serial : 1;
   }
 
+  uint32_t NextEpoch(uint32_t epoch)
+  {
+    ++epoch;
+    return epoch ? epoch : 1;
+  }
+
   bool RequestNewer(uint32_t candidate, uint32_t previous)
   {
     return candidate != previous &&
       static_cast<int32_t>(candidate - previous) > 0;
   }
+
+  bool EmptyControl(const KVMFRAudioMessage& message)
+  {
+    return !message.streamGeneration && !message.flags &&
+      !message.position && !message.timeNs && !message.rateQ32 &&
+      !message.frames && !message.length;
+  }
 }
 
-CLGMPAudioTransport::~CLGMPAudioTransport()
+CLGMPAudio::~CLGMPAudio()
 {
   TransportStop();
-
   CSRWExclusiveLock lock(m_lock);
   for (ResponseMemory& response : m_responseMemory)
     lgmpHostMemFree(&response.memory);
@@ -129,7 +151,7 @@ CLGMPAudioTransport::~CLGMPAudioTransport()
   m_initialized = false;
 }
 
-bool CLGMPAudioTransport::SameFormat(
+bool CLGMPAudio::SameFormat(
   const AudioFormat& left, const AudioFormat& right)
 {
   return left.sampleFormat == right.sampleFormat &&
@@ -141,18 +163,17 @@ bool CLGMPAudioTransport::SameFormat(
     left.blockAlign == right.blockAlign;
 }
 
-bool CLGMPAudioTransport::SamePacket(
+bool CLGMPAudio::SamePacket(
   const AudioPacket& left, const AudioPacket& right)
 {
   return left.endpointGeneration == right.endpointGeneration &&
     left.streamGeneration == right.streamGeneration &&
     left.flags == right.flags && left.frames == right.frames &&
     left.position == right.position && left.timeNs == right.timeNs &&
-    left.rateQ32 == right.rateQ32 &&
-    SameFormat(left.format, right.format);
+    left.rateQ32 == right.rateQ32 && SameFormat(left.format, right.format);
 }
 
-bool CLGMPAudioTransport::ValidFormat(const AudioFormat& format)
+bool CLGMPAudio::ValidFormat(const AudioFormat& format)
 {
   if (!format.sampleRate ||
       format.sampleRate > KVMFR_AUDIO_MAX_SAMPLE_RATE ||
@@ -188,14 +209,13 @@ bool CLGMPAudioTransport::ValidFormat(const AudioFormat& format)
   return validSampleFormat && format.blockAlign == bytes;
 }
 
-KVMFRAudioFormat CLGMPAudioTransport::WireFormat(
+KVMFRAudioFormat CLGMPAudio::WireFormat(
   const AudioFormat& format)
 {
   KVMFRAudioFormat result = {};
   result.version       = KVMFR_AUDIO_FORMAT_VERSION;
   result.size          = sizeof(result);
-  result.sampleFormat  =
-    static_cast<uint32_t>(format.sampleFormat);
+  result.sampleFormat  = static_cast<uint32_t>(format.sampleFormat);
   result.sampleRate    = format.sampleRate;
   result.channelMask   = format.channelMask;
   result.channelCount  = format.channels;
@@ -205,7 +225,7 @@ KVMFRAudioFormat CLGMPAudioTransport::WireFormat(
   return result;
 }
 
-KVMFRAudioStreamState CLGMPAudioTransport::WireState(
+KVMFRAudioStreamState CLGMPAudio::WireState(
   AudioStreamState state)
 {
   switch (state)
@@ -221,7 +241,7 @@ KVMFRAudioStreamState CLGMPAudioTransport::WireState(
   }
 }
 
-KVMFRStreamDescriptor CLGMPAudioTransport::WireDescriptor(
+KVMFRStreamDescriptor CLGMPAudio::WireDescriptor(
   const LGMPStreamDescriptor& descriptor)
 {
   KVMFRStreamDescriptor wire = {};
@@ -237,63 +257,120 @@ KVMFRStreamDescriptor CLGMPAudioTransport::WireDescriptor(
   return wire;
 }
 
-bool CLGMPAudioTransport::InitializeStreams()
+KVMFRSPMCDescriptor CLGMPAudio::WireDescriptor(
+  const LGMPSPMCDescriptor& descriptor)
 {
-  const LGMPStreamConfig hostToClient =
+  KVMFRSPMCDescriptor wire = {};
+  wire.magic      = descriptor.magic;
+  wire.version    = descriptor.version;
+  wire.size       = descriptor.size;
+  wire.offset     = descriptor.offset;
+  wire.regionSize = descriptor.regionSize;
+  wire.slotCount  = descriptor.slotCount;
+  wire.slotSize   = descriptor.slotSize;
+  wire.maxReaders = descriptor.maxReaders;
+  wire.reserved   = descriptor.reserved;
+  return wire;
+}
+
+bool CLGMPAudio::InitializeStreams()
+{
+  const LGMPSPMCConfig playback =
   {
-    LGMP_STREAM_HOST_TO_CLIENT,
-    LGMP_STREAM_RELIABLE_FIFO,
     KVMFR_AUDIO_STREAM_SLOT_COUNT,
-    static_cast<uint32_t>(KVMFR_AUDIO_STREAM_SLOT_BYTES),
+    static_cast<uint32_t>(KVMFR_AUDIO_PLAYBACK_SLOT_BYTES),
+    KVMFR_AUDIO_MAX_PLAYBACK_READERS,
   };
-  LGMP_STATUS status = m_host.CreateStream(
-    hostToClient, &m_hostToClientStream);
+  LGMP_STATUS status = m_host.CreateSPMC(playback, &m_playbackStream);
   if (status != LGMP_OK)
   {
-    DEBUG_ERROR("Failed to create host-to-client audio stream: %s",
+    DEBUG_ERROR("Failed to create playback audio stream: %s",
       lgmpStatusString(status));
     return false;
   }
 
-  const LGMPStreamConfig clientToHost =
+  const LGMPStreamConfig capture =
   {
     LGMP_STREAM_CLIENT_TO_HOST,
     LGMP_STREAM_RELIABLE_FIFO,
     KVMFR_AUDIO_STREAM_SLOT_COUNT,
-    static_cast<uint32_t>(KVMFR_AUDIO_STREAM_SLOT_BYTES),
+    static_cast<uint32_t>(KVMFR_AUDIO_CAPTURE_SLOT_BYTES),
   };
-  status = m_host.CreateStream(clientToHost, &m_clientToHostStream);
+  status = m_host.CreateStream(capture, &m_captureStream);
   if (status != LGMP_OK)
   {
-    DEBUG_ERROR("Failed to create client-to-host audio stream: %s",
+    DEBUG_ERROR("Failed to create capture audio stream: %s",
       lgmpStatusString(status));
-    lgmpHostStreamFree(&m_hostToClientStream);
+    FreeStreams();
     return false;
   }
 
-  LGMPStreamDescriptor descriptor = {};
-  lgmpHostStreamGetDescriptor(m_hostToClientStream, &descriptor);
-  m_hostToClientDescriptor = WireDescriptor(descriptor);
-  lgmpHostStreamGetDescriptor(m_clientToHostStream, &descriptor);
-  m_clientToHostDescriptor = WireDescriptor(descriptor);
+  const LGMPStreamConfig hostControl =
+  {
+    LGMP_STREAM_HOST_TO_CLIENT,
+    LGMP_STREAM_RELIABLE_FIFO,
+    KVMFR_AUDIO_STREAM_SLOT_COUNT,
+    static_cast<uint32_t>(KVMFR_AUDIO_HOST_CONTROL_SLOT_BYTES),
+  };
+  const LGMPStreamConfig clientControl =
+  {
+    LGMP_STREAM_CLIENT_TO_HOST,
+    LGMP_STREAM_RELIABLE_FIFO,
+    KVMFR_AUDIO_STREAM_SLOT_COUNT,
+    static_cast<uint32_t>(KVMFR_AUDIO_CLIENT_CONTROL_SLOT_BYTES),
+  };
+  for (Subscriber& subscriber : m_subscribers)
+  {
+    status = m_host.CreateStream(hostControl, &subscriber.hostControl);
+    if (status == LGMP_OK)
+      status = m_host.CreateStream(
+        clientControl, &subscriber.clientControl);
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("Failed to create audio control stream: %s",
+        lgmpStatusString(status));
+      FreeStreams();
+      return false;
+    }
+
+    LGMPStreamDescriptor descriptor = {};
+    lgmpHostStreamGetDescriptor(subscriber.hostControl, &descriptor);
+    subscriber.hostControlDescriptor = WireDescriptor(descriptor);
+    lgmpHostStreamGetDescriptor(subscriber.clientControl, &descriptor);
+    subscriber.clientControlDescriptor = WireDescriptor(descriptor);
+  }
+
+  LGMPSPMCDescriptor playbackDescriptor = {};
+  lgmpHostSPMCGetDescriptor(m_playbackStream, &playbackDescriptor);
+  m_playbackDescriptor = WireDescriptor(playbackDescriptor);
+  LGMPStreamDescriptor captureDescriptor = {};
+  lgmpHostStreamGetDescriptor(m_captureStream, &captureDescriptor);
+  m_captureDescriptor = WireDescriptor(captureDescriptor);
   return true;
 }
 
-void CLGMPAudioTransport::FreeStreams()
+void CLGMPAudio::FreeStreams()
 {
-  lgmpHostStreamFree(&m_clientToHostStream);
-  lgmpHostStreamFree(&m_hostToClientStream);
-  m_clientToHostDescriptor = {};
-  m_hostToClientDescriptor = {};
+  for (Subscriber& subscriber : m_subscribers)
+  {
+    lgmpHostStreamFree(&subscriber.clientControl);
+    lgmpHostStreamFree(&subscriber.hostControl);
+    subscriber.clientControlDescriptor = {};
+    subscriber.hostControlDescriptor = {};
+  }
+  lgmpHostStreamFree(&m_captureStream);
+  lgmpHostSPMCFree(&m_playbackStream);
+  m_captureDescriptor = {};
+  m_playbackDescriptor = {};
 }
 
-DWORD CALLBACK CLGMPAudioTransport::InboundThreadProc(void * context)
+DWORD CALLBACK CLGMPAudio::InboundThreadProc(void * context)
 {
-  static_cast<CLGMPAudioTransport *>(context)->InboundThread();
+  static_cast<CLGMPAudio *>(context)->InboundThread();
   return 0;
 }
 
-bool CLGMPAudioTransport::StartInboundWorker()
+bool CLGMPAudio::StartInboundWorker()
 {
   m_inboundStopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   m_inboundWakeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -337,7 +414,7 @@ bool CLGMPAudioTransport::StartInboundWorker()
   return true;
 }
 
-void CLGMPAudioTransport::StopInboundWorker()
+void CLGMPAudio::StopInboundWorker()
 {
   HANDLE thread = nullptr;
   {
@@ -365,7 +442,7 @@ void CLGMPAudioTransport::StopInboundWorker()
   m_inboundStopEvent = nullptr;
 }
 
-void CLGMPAudioTransport::InboundThread()
+void CLGMPAudio::InboundThread()
 {
   DWORD avTask = 0;
   HANDLE avTaskHandle =
@@ -386,6 +463,11 @@ void CLGMPAudioTransport::InboundThread()
   {
     DEBUG_ERROR("Failed to initialize LGMP audio polling: %s",
       lgmpStatusString(pollStatus));
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (!m_inboundStopping)
+        Fail("lgmpStreamPollInit(audio)", pollStatus);
+    }
     if (avTaskHandle)
       AvRevertMmThreadCharacteristics(avTaskHandle);
     return;
@@ -395,20 +477,31 @@ void CLGMPAudioTransport::InboundThread()
     { m_inboundStopEvent, m_inboundWakeEvent };
   const HANDLE activeWaits[] =
     { m_inboundStopEvent, m_inboundWakeEvent, m_inboundPollTimer };
+  bool workerFailed = false;
   for (;;)
   {
-    if (WaitForSingleObject(m_inboundStopEvent, 0) == WAIT_OBJECT_0)
+    const DWORD stopped = WaitForSingleObject(m_inboundStopEvent, 0);
+    if (stopped == WAIT_OBJECT_0)
       break;
+    if (stopped == WAIT_FAILED)
+    {
+      DEBUG_ERROR_HR(GetLastError(),
+        "LGMP audio stop-event poll failed");
+      workerFailed = true;
+      break;
+    }
 
     uint64_t before = 0;
-    uint64_t hostBefore = 0;
     bool active = false;
-    bool playbackCreditAcquired = false;
     {
       CSRWSharedLock lock(m_lock);
       before = m_inboundActivitySerial;
-      hostBefore = m_hostSequence;
-      active = m_ownerState != OwnerState::NONE;
+      for (const Subscriber& subscriber : m_subscribers)
+        if (subscriber.state != SubscriberState::NONE)
+        {
+          active = true;
+          break;
+        }
     }
 
     if (active)
@@ -416,21 +509,23 @@ void CLGMPAudioTransport::InboundThread()
       DrainInbound();
       {
         CSRWExclusiveLock lock(m_lock);
-        const bool hadPlaybackCredit = m_playbackCreditValid;
         PumpState();
-        CheckPlaybackCredit();
-        playbackCreditAcquired = !hadPlaybackCredit &&
-          m_playbackCreditValid;
+        CheckPlaybackBackpressure(GetTickCount64());
       }
       NotifyPlaybackReady();
     }
 
     {
       CSRWSharedLock lock(m_lock);
-      if (before != m_inboundActivitySerial ||
-          hostBefore != m_hostSequence || playbackCreditAcquired)
+      if (before != m_inboundActivitySerial)
         lgmpStreamPollActivity(&streamPoll);
-      active = m_ownerState != OwnerState::NONE;
+      active = false;
+      for (const Subscriber& subscriber : m_subscribers)
+        if (subscriber.state != SubscriberState::NONE)
+        {
+          active = true;
+          break;
+        }
     }
 
     if (!active)
@@ -443,6 +538,7 @@ void CLGMPAudioTransport::InboundThread()
       {
         DEBUG_ERROR_HR(GetLastError(),
           "LGMP audio worker wait failed");
+        workerFailed = true;
         break;
       }
       lgmpStreamPollActivity(&streamPoll);
@@ -456,6 +552,7 @@ void CLGMPAudioTransport::InboundThread()
     {
       DEBUG_ERROR_HR(GetLastError(),
         "Failed to arm LGMP audio timer");
+      workerFailed = true;
       break;
     }
 
@@ -472,25 +569,54 @@ void CLGMPAudioTransport::InboundThread()
     {
       DEBUG_ERROR_HR(GetLastError(),
         "LGMP audio worker wait failed");
+      workerFailed = true;
       break;
     }
   }
 
+  if (workerFailed)
+  {
+    CSRWExclusiveLock lock(m_lock);
+    if (!m_inboundStopping)
+      Fail("audio ingress worker", LGMP_ERR_CLOCK_FAILURE);
+  }
   if (avTaskHandle)
     AvRevertMmThreadCharacteristics(avTaskHandle);
 }
 
-bool CLGMPAudioTransport::Initialize()
+bool CLGMPAudio::Initialize()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
   CSRWExclusiveLock lock(m_lock);
   if (m_initialized)
     return true;
 
+  if (!m_claimResponderReady)
+  {
+    LGMP_STATUS status = LGMP_OK;
+    for (ResponseMemory& response : m_responseMemory)
+    {
+      status = m_host.Allocate(sizeof(KVMFRAudioStreamResponse),
+        &response.memory);
+      if (status != LGMP_OK)
+        break;
+      memset(lgmpHostMemPtr(response.memory), 0,
+        sizeof(KVMFRAudioStreamResponse));
+    }
+    if (status != LGMP_OK)
+    {
+      DEBUG_ERROR("Failed to allocate audio response memory: %s",
+        lgmpStatusString(status));
+      for (ResponseMemory& response : m_responseMemory)
+        lgmpHostMemFree(&response.memory);
+      return false;
+    }
+    m_claimResponderReady = true;
+  }
+
   // LGMP shared allocations are monotonic. Reserve conservatively before
-  // the first one so ordinary shared-memory exhaustion cannot strand a
-  // partial optional layout. A later local handle allocation can still fail
-  // with LGMP_ERR_NO_MEM, but that is independent of shared capacity.
+  // the first data-plane allocation; the small response pool above remains
+  // available when the optional layout cannot be created.
   if (m_host.Available() < AUDIO_SHARED_MEMORY_PREFLIGHT)
   {
     DEBUG_WARN("LGMP audio requires at least %zu bytes of available "
@@ -500,100 +626,212 @@ bool CLGMPAudioTransport::Initialize()
   if (!InitializeStreams())
     return false;
 
-  LGMP_STATUS status = LGMP_OK;
-  for (ResponseMemory& response : m_responseMemory)
-  {
-    status = m_host.Allocate(sizeof(KVMFRAudioStreamResponse),
-      &response.memory);
-    if (status != LGMP_OK)
-      break;
-    memset(lgmpHostMemPtr(response.memory), 0,
-      sizeof(KVMFRAudioStreamResponse));
-  }
-  if (status != LGMP_OK)
-  {
-    DEBUG_ERROR("Failed to allocate audio response memory: %s",
-      lgmpStatusString(status));
-    for (ResponseMemory& response : m_responseMemory)
-      lgmpHostMemFree(&response.memory);
-    FreeStreams();
-    return false;
-  }
-
   m_state.generation = 1;
   m_initialized = true;
   m_inboundStopping = false;
   if (!StartInboundWorker())
   {
     m_initialized = false;
-    for (ResponseMemory& response : m_responseMemory)
-      lgmpHostMemFree(&response.memory);
     FreeStreams();
     return false;
   }
   return true;
 }
 
-bool CLGMPAudioTransport::BindStreams(uint32_t clientID)
+bool CLGMPAudio::BindSubscriber(uint32_t index,
+  uint32_t clientID, const KVMFRAudioClaim& claim)
 {
+  if (index >= LGMP_MAX_CLIENTS ||
+      m_subscribers[index].state != SubscriberState::NONE)
+    return false;
+
+  Subscriber& subscriber = m_subscribers[index];
   LGMP_STATUS status = lgmpHostStreamBind(
-    m_hostToClientStream, clientID, nullptr);
+    subscriber.hostControl, clientID, &subscriber.hostControlEpoch);
   if (status != LGMP_OK)
   {
-    DEBUG_WARN("Failed to bind host-to-client audio stream for client "
-      "%u: %s", clientID, lgmpStatusString(status));
+    DEBUG_WARN("Failed to bind host audio control for client %u: %s",
+      clientID, lgmpStatusString(status));
     return false;
   }
 
-  status = lgmpHostStreamBind(m_clientToHostStream, clientID, nullptr);
-  if (status == LGMP_OK)
-    return true;
+  status = lgmpHostStreamBind(
+    subscriber.clientControl, clientID, &subscriber.clientControlEpoch);
+  if (status != LGMP_OK)
+  {
+    DEBUG_WARN("Failed to bind client audio control for client %u: %s",
+      clientID, lgmpStatusString(status));
+    (void)lgmpHostStreamUnbind(subscriber.hostControl);
+    return false;
+  }
 
-  DEBUG_WARN("Failed to bind client-to-host audio stream for client "
-    "%u: %s", clientID, lgmpStatusString(status));
-  const LGMP_STATUS rollback =
-    lgmpHostStreamUnbind(m_hostToClientStream);
-  if (rollback != LGMP_OK && rollback != LGMP_ERR_STREAM_UNBOUND)
-    DEBUG_WARN("Failed to roll back the audio stream binding: %s",
-      lgmpStatusString(rollback));
-  return false;
+  status = lgmpHostSPMCReaderBind(m_playbackStream, clientID,
+    &subscriber.playbackReaderID, &subscriber.playbackReaderEpoch);
+  if (status != LGMP_OK)
+  {
+    DEBUG_WARN("Failed to bind playback reader for client %u: %s",
+      clientID, lgmpStatusString(status));
+    (void)lgmpHostStreamUnbind(subscriber.clientControl);
+    (void)lgmpHostStreamUnbind(subscriber.hostControl);
+    return false;
+  }
+
+  subscriber.state = SubscriberState::BOUND;
+  subscriber.clientID = clientID;
+  subscriber.requestGeneration = claim.requestGeneration;
+  subscriber.clientCapabilities = claim.clientCapabilities;
+  subscriber.subscriptions = claim.subscriptions;
+  subscriber.bindingEpoch =
+    m_nextBindingEpoch = NextEpoch(m_nextBindingEpoch);
+  subscriber.roleEpoch = m_nextRoleEpoch = NextEpoch(m_nextRoleEpoch);
+  subscriber.claimToken = claim.claimToken;
+  subscriber.serial =
+    m_nextSubscriberSerial = NextSerial(m_nextSubscriberSerial);
+  subscriber.stateRevision = 1;
+  RenewLease(subscriber);
+  RefreshGranted(index, false);
+  return true;
 }
 
-bool CLGMPAudioTransport::TryUnbindStreams()
+bool CLGMPAudio::TryUnbindSubscriber(uint32_t index)
 {
+  if (index >= LGMP_MAX_CLIENTS)
+    return true;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state == SubscriberState::NONE)
+    return true;
+  if (m_captureCallbackInFlight && m_captureBinding == index)
+    return false;
+
+  if (m_pendingCapture.valid &&
+      m_pendingCapture.subscriber == index)
+    ReleasePendingCapture();
+
   bool complete = true;
-  for (PLGMPHostStream stream :
-      { m_clientToHostStream, m_hostToClientStream })
+  if (m_captureBinding == index)
   {
-    if (!stream)
-      continue;
+    const LGMP_STATUS status = lgmpHostStreamUnbind(m_captureStream);
+    if (status == LGMP_ERR_STREAM_BUSY)
+      complete = false;
+    else if (status == LGMP_OK || status == LGMP_ERR_STREAM_UNBOUND)
+    {
+      m_captureBinding = INVALID_SLOT;
+      if (m_captureOwner == index)
+        m_captureOwner = INVALID_SLOT;
+      subscriber.captureEpoch = 0;
+      subscriber.captureRevoking = false;
+      subscriber.captureRevokeDeadline = 0;
+      AssignCaptureOwner();
+    }
+    else
+    {
+      Fail("lgmpHostStreamUnbind(audio capture)", status);
+      complete = false;
+    }
+  }
+
+  for (PLGMPHostStream stream :
+      { subscriber.clientControl, subscriber.hostControl })
+  {
     const LGMP_STATUS status = lgmpHostStreamUnbind(stream);
     if (status == LGMP_ERR_STREAM_BUSY)
       complete = false;
     else if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
     {
-      Fail("lgmpHostStreamUnbind", status);
+      Fail("lgmpHostStreamUnbind(audio control)", status);
       complete = false;
     }
+  }
+
+  const LGMP_STATUS readerStatus = lgmpHostSPMCReaderUnbind(
+    m_playbackStream, subscriber.playbackReaderID);
+  if (readerStatus == LGMP_ERR_STREAM_BUSY)
+    complete = false;
+  else if (readerStatus != LGMP_OK &&
+      readerStatus != LGMP_ERR_STREAM_UNBOUND)
+  {
+    Fail("lgmpHostSPMCReaderUnbind(audio)", readerStatus);
+    complete = false;
   }
   return complete;
 }
 
-void CLGMPAudioTransport::ForceUnbindStreams()
+void CLGMPAudio::ForceUnbindSubscriber(uint32_t index)
 {
-  for (PLGMPHostStream stream :
-      { m_clientToHostStream, m_hostToClientStream })
+  if (index >= LGMP_MAX_CLIENTS)
+    return;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state == SubscriberState::NONE)
+    return;
+
+  if (m_pendingCapture.valid &&
+      m_pendingCapture.subscriber == index)
+    ReleasePendingCapture();
+  if (m_captureBinding == index)
   {
-    if (!stream)
-      continue;
-    const LGMP_STATUS status = lgmpHostStreamForceUnbind(stream);
+    const LGMP_STATUS status =
+      lgmpHostStreamForceUnbind(m_captureStream);
     if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
-      DEBUG_WARN("Failed to force-unbind an audio stream: %s",
+      DEBUG_WARN("Failed to force-unbind audio capture: %s",
         lgmpStatusString(status));
   }
+
+  for (PLGMPHostStream stream :
+      { subscriber.clientControl, subscriber.hostControl })
+  {
+    const LGMP_STATUS status = lgmpHostStreamForceUnbind(stream);
+    if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
+      DEBUG_WARN("Failed to force-unbind audio control: %s",
+        lgmpStatusString(status));
+  }
+
+  const LGMP_STATUS status = lgmpHostSPMCReaderForceUnbind(
+    m_playbackStream, subscriber.playbackReaderID);
+  if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
+    DEBUG_WARN("Failed to force-unbind audio reader: %s",
+      lgmpStatusString(status));
 }
 
-bool CLGMPAudioTransport::ValidateClaim(
+void CLGMPAudio::ResetSubscriber(uint32_t index)
+{
+  if (index >= LGMP_MAX_CLIENTS)
+    return;
+  Subscriber& subscriber = m_subscribers[index];
+  const uint32_t clientID = subscriber.clientID;
+  const uint32_t requestGeneration = subscriber.requestGeneration;
+  const uint64_t claimToken = subscriber.claimToken;
+  PLGMPHostStream hostControl = subscriber.hostControl;
+  PLGMPHostStream clientControl = subscriber.clientControl;
+  const KVMFRStreamDescriptor hostDescriptor =
+    subscriber.hostControlDescriptor;
+  const KVMFRStreamDescriptor clientDescriptor =
+    subscriber.clientControlDescriptor;
+
+  for (ClaimRecord& record : m_claimRecord)
+    if (record.valid && record.clientID == clientID &&
+        record.requestGeneration == requestGeneration &&
+        record.claimToken == claimToken)
+    {
+      record.closed = true;
+      break;
+    }
+
+  if (m_feedbackAuthority == index)
+    m_feedbackAuthority = INVALID_SLOT;
+  if (m_captureOwner == index)
+    m_captureOwner = INVALID_SLOT;
+  if (m_captureBinding == index)
+    m_captureBinding = INVALID_SLOT;
+
+  subscriber = {};
+  subscriber.hostControl = hostControl;
+  subscriber.clientControl = clientControl;
+  subscriber.hostControlDescriptor = hostDescriptor;
+  subscriber.clientControlDescriptor = clientDescriptor;
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
+}
+
+bool CLGMPAudio::ValidateClaim(
   const KVMFRAudioClaim& claim) const
 {
   if (claim.messageType != KVMFR_MESSAGE_AUDIO_CLAIM ||
@@ -604,8 +842,12 @@ bool CLGMPAudioTransport::ValidateClaim(
       claim.protocolMin > KVMFR_AUDIO_PROTOCOL_MAX ||
       claim.protocolMax < KVMFR_AUDIO_PROTOCOL_MIN ||
       (claim.clientCapabilities & ~AUDIO_CAPABILITY_MASK) ||
-      !(claim.clientCapabilities & AUDIO_DIRECTION_MASK) ||
-      claim.reserved0)
+      !(claim.clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) ||
+      ((claim.clientCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+        !(claim.clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK)) ||
+      (claim.subscriptions & ~AUDIO_SUBSCRIPTION_MASK) ||
+      ((claim.subscriptions & KVMFR_AUDIO_SUBSCRIBE_CAPTURE) &&
+        !(claim.clientCapabilities & KVMFR_AUDIO_CAP_CAPTURE)))
     return false;
 
   for (uint64_t reserved : claim.reserved)
@@ -614,7 +856,7 @@ bool CLGMPAudioTransport::ValidateClaim(
   return true;
 }
 
-bool CLGMPAudioTransport::ResponsePending(uint32_t clientID,
+bool CLGMPAudio::ResponsePending(uint32_t clientID,
   const KVMFRAudioStreamResponse& candidate) const
 {
   for (const PendingResponse& pending : m_pendingResponse)
@@ -634,7 +876,7 @@ bool CLGMPAudioTransport::ResponsePending(uint32_t clientID,
   return false;
 }
 
-bool CLGMPAudioTransport::QueueResponse(uint32_t clientID,
+bool CLGMPAudio::QueueResponse(uint32_t clientID,
   const KVMFRAudioStreamResponse& response)
 {
   if (ResponsePending(clientID, response))
@@ -660,28 +902,27 @@ bool CLGMPAudioTransport::QueueResponse(uint32_t clientID,
   if (!available)
     return false;
 
-  available->valid    = true;
+  available->valid = true;
   available->clientID = clientID;
   available->response = response;
   return true;
 }
 
-void CLGMPAudioTransport::CleanupResponseMemory()
+void CLGMPAudio::CleanupResponseMemory()
 {
   for (ResponseMemory& response : m_responseMemory)
   {
-    if (!response.valid ||
-        m_control.PayloadPending(response.memory))
+    if (!response.valid || m_control.PayloadPending(response.memory))
       continue;
-    response.valid             = false;
-    response.clientID          = 0;
+    response.valid = false;
+    response.clientID = 0;
     response.requestGeneration = 0;
-    response.claimToken        = 0;
-    response.result            = 0;
+    response.claimToken = 0;
+    response.result = 0;
   }
 }
 
-void CLGMPAudioTransport::PumpResponses()
+void CLGMPAudio::PumpResponses()
 {
   CleanupResponseMemory();
   for (PendingResponse& pending : m_pendingResponse)
@@ -716,248 +957,442 @@ void CLGMPAudioTransport::PumpResponses()
 
     const bool bound =
       pending.response.result == KVMFR_AUDIO_RESPONSE_BOUND;
+    const uint32_t index = bound ?
+      FindSubscriber(pending.clientID) : INVALID_SLOT;
     if (recipients)
     {
-      available->valid             = true;
-      available->clientID          = pending.clientID;
+      available->valid = true;
+      available->clientID = pending.clientID;
       available->requestGeneration =
         pending.response.requestGeneration;
-      available->claimToken        = pending.response.claimToken;
-      available->result            = pending.response.result;
-      if (bound && m_ownerState == OwnerState::BOUND &&
-          m_ownerClientID == pending.clientID &&
-          m_ownerGeneration == pending.response.requestGeneration &&
-          m_ownerToken == pending.response.claimToken)
+      available->claimToken = pending.response.claimToken;
+      available->result = pending.response.result;
+      if (index != INVALID_SLOT)
       {
-        m_responseAdmitted = true;
-        m_statusDirty      = true;
+        Subscriber& subscriber = m_subscribers[index];
+        if (subscriber.requestGeneration ==
+              pending.response.requestGeneration &&
+            subscriber.claimToken == pending.response.claimToken)
+        {
+          subscriber.responseAdmitted = true;
+          RenewLease(subscriber);
+          MarkStateDirty(index);
+        }
       }
     }
-    else if (bound && m_ownerState == OwnerState::BOUND &&
-        m_ownerClientID == pending.clientID &&
-        m_ownerGeneration == pending.response.requestGeneration &&
-        m_ownerToken == pending.response.claimToken)
-      BeginRelease("audio claimant disappeared");
+    else if (index != INVALID_SLOT)
+      BeginRelease(index, "audio claimant disappeared");
 
     pending = {};
   }
 }
 
-bool CLGMPAudioTransport::OwnerSubscribed() const
+uint32_t CLGMPAudio::FindSubscriber(uint32_t clientID) const
 {
-  if (!m_ownerClientID)
-    return false;
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    if (m_subscribers[index].state != SubscriberState::NONE &&
+        m_subscribers[index].clientID == clientID)
+      return index;
+  return INVALID_SLOT;
+}
 
-  uint32_t clients[LGMP_MAX_CLIENTS] = {};
-  unsigned count = 0;
-  const LGMP_STATUS status = m_control.GetClientIDs(clients, count);
-  if (status != LGMP_OK)
-  {
-    DEBUG_WARN("Failed to query audio owner subscription: %s",
-      lgmpStatusString(status));
-    return true;
-  }
+uint32_t CLGMPAudio::FindFreeSubscriber() const
+{
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    if (m_subscribers[index].state == SubscriberState::NONE)
+      return index;
+  return INVALID_SLOT;
+}
+
+bool CLGMPAudio::SubscriberPresent(uint32_t clientID,
+  const uint32_t clients[LGMP_MAX_CLIENTS], unsigned count) const
+{
   for (unsigned index = 0; index < count; ++index)
-    if (clients[index] == m_ownerClientID)
+    if (clients[index] == clientID)
       return true;
   return false;
 }
 
-void CLGMPAudioTransport::RenewLease()
+void CLGMPAudio::RenewLease(Subscriber& subscriber)
 {
-  m_ownerDeadline = GetTickCount64() + KVMFR_AUDIO_OWNER_LEASE_MS;
+  subscriber.deadline =
+    GetTickCount64() + KVMFR_AUDIO_OWNER_LEASE_MS;
 }
 
-void CLGMPAudioTransport::ReleasePendingCapture()
+void CLGMPAudio::ReleasePendingCapture()
 {
   if (!m_pendingCapture.valid)
     return;
   const LGMP_STATUS status = lgmpHostStreamReadRelease(
-    m_clientToHostStream, &m_pendingCapture.buffer);
+    m_captureStream, &m_pendingCapture.buffer);
   if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND &&
       status != LGMP_ERR_STREAM_STALE)
-    Fail("lgmpHostStreamReadRelease(audio)", status);
+    Fail("lgmpHostStreamReadRelease(audio capture)", status);
   m_pendingCapture = {};
   m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
 }
 
-void CLGMPAudioTransport::CancelPlaybackCredit()
-{
-  if (!m_playbackCreditValid)
-    return;
-
-  const LGMP_STATUS status = lgmpHostStreamWriteCancel(
-    m_hostToClientStream, &m_playbackCredit);
-  if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND &&
-      status != LGMP_ERR_STREAM_STALE)
-  {
-    DEBUG_WARN("Failed to cancel an audio playback reservation: %s",
-      lgmpStatusString(status));
-    m_failed = true;
-  }
-  m_playbackCredit = {};
-  m_playbackCreditValid = false;
-}
-
-void CLGMPAudioTransport::ClearBlockedPlayback(bool notify)
+void CLGMPAudio::ClearBlockedPlayback(bool notify)
 {
   const bool blocked = m_playbackBlocked;
-  CancelPlaybackCredit();
   m_playbackBlocked = false;
   m_blockedPlayback = {};
   m_blockedPlaybackSize = 0;
+  m_authorityBlockedSince = 0;
   if (notify && blocked)
     m_playbackReadyPending = true;
 }
 
-bool CLGMPAudioTransport::RememberBlockedPlayback(
+bool CLGMPAudio::RememberBlockedPlayback(
   const AudioPacket& packet, size_t size)
 {
   if (m_playbackBlocked)
     return size == m_blockedPlaybackSize &&
       SamePacket(packet, m_blockedPlayback);
-
   m_playbackBlocked = true;
   m_blockedPlayback = packet;
   m_blockedPlaybackSize = size;
   return true;
 }
 
-void CLGMPAudioTransport::BeginRelease(const char * reason)
+bool CLGMPAudio::HasBoundSubscribers() const
 {
-  if (m_ownerState == OwnerState::NONE)
-    return;
-  if (m_ownerState != OwnerState::RELEASING)
-  {
-    DEBUG_INFO("Audio owner %u generation %u releasing: %s",
-      m_ownerClientID, m_ownerGeneration, reason);
-    m_ownerState          = OwnerState::RELEASING;
-    m_releaseGeneration   = m_state.generation;
-    m_deactivationIssued  = false;
-    m_statusDirty         = false;
-    m_announcedPlayback   = 0;
-    m_announcedCapture    = 0;
-    ClearBlockedPlayback(true);
-    if (!m_captureCallbackInFlight)
-      ReleasePendingCapture();
-    if (!m_inboundStopping && m_inboundWakeEvent)
-      SetEvent(m_inboundWakeEvent);
-
-    for (PendingResponse& pending : m_pendingResponse)
-      if (pending.valid && pending.clientID == m_ownerClientID &&
-          pending.response.result == KVMFR_AUDIO_RESPONSE_BOUND)
-        pending = {};
-  }
+  for (const Subscriber& subscriber : m_subscribers)
+    if (subscriber.state == SubscriberState::BOUND &&
+        subscriber.responseAdmitted &&
+        subscriber.subscriptionReceived &&
+        (((subscriber.subscriptions &
+            KVMFR_AUDIO_SUBSCRIBE_PLAYBACK) &&
+          (subscriber.clientCapabilities &
+            KVMFR_AUDIO_CAP_PLAYBACK)) ||
+         ((subscriber.subscriptions &
+            KVMFR_AUDIO_SUBSCRIBE_CAPTURE) &&
+          (subscriber.clientCapabilities &
+            KVMFR_AUDIO_CAP_CAPTURE))))
+      return true;
+  return false;
 }
 
-void CLGMPAudioTransport::ResetOwner()
+bool CLGMPAudio::PlaybackEligible(
+  const Subscriber& subscriber) const
 {
-  ClearBlockedPlayback(false);
-  for (ClaimRecord& record : m_claimRecord)
-    if (record.valid && record.clientID == m_ownerClientID &&
-        record.requestGeneration == m_ownerGeneration &&
-        record.claimToken == m_ownerToken)
-    {
-      record.closed = true;
-      break;
-    }
-
-  m_ownerState              = OwnerState::NONE;
-  m_ownerClientID           = 0;
-  m_ownerGeneration         = 0;
-  m_clientCapabilities      = 0;
-  m_ownerToken              = 0;
-  m_ownerDeadline           = 0;
-  m_releaseGeneration       = 0;
-  m_responseAdmitted        = false;
-  m_clientReady             = false;
-  m_activationIssued        = false;
-  m_deactivationIssued      = false;
-  m_ownerResponse           = {};
-  m_statusDirty             = false;
-  m_announcedPlayback       = 0;
-  m_announcedCapture        = 0;
-  m_hostSequence            = 0;
-  m_nextClientSequence      = 0;
-  m_clientSequenceKnown     = false;
-  m_captureDiscontinuity    = false;
-  m_captureCallbackInFlight = false;
-  m_pendingCapture          = {};
-  m_ownerSerial             = NextSerial(m_ownerSerial);
+  return subscriber.state == SubscriberState::BOUND &&
+    (subscriber.clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
+    (subscriber.subscriptions & KVMFR_AUDIO_SUBSCRIBE_PLAYBACK);
 }
 
-void CLGMPAudioTransport::MaintainOwner(uint64_t now)
+bool CLGMPAudio::FeedbackEligible(
+  const Subscriber& subscriber) const
 {
-  if (m_ownerState == OwnerState::NONE)
-    return;
-  if (m_ownerState != OwnerState::RELEASING)
-  {
-    if (!OwnerSubscribed())
-      BeginRelease("audio pointer subscriber disappeared");
-    else if (m_pendingCapture.valid)
-      RenewLease();
-    else if (now >= m_ownerDeadline)
-      BeginRelease("audio owner lease expired");
-  }
-
-  if (m_ownerState != OwnerState::RELEASING)
-    return;
-
-  const bool streamsUnbound = TryUnbindStreams();
-
-  const bool inactive = !m_started || !m_activationIssued ||
-    (m_stateKnown && !m_state.active &&
-      m_state.generation != m_releaseGeneration);
-  if (streamsUnbound && inactive)
-  {
-    DEBUG_INFO("Audio owner %u generation %u released",
-      m_ownerClientID, m_ownerGeneration);
-    ResetOwner();
-  }
+  return PlaybackEligible(subscriber) &&
+    (subscriber.clientCapabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK);
 }
 
-void CLGMPAudioTransport::InitializeOwner(uint32_t clientID,
-  const KVMFRAudioClaim& claim)
+bool CLGMPAudio::CaptureEligible(
+  const Subscriber& subscriber) const
 {
-  m_ownerState             = OwnerState::BOUND;
-  m_ownerClientID          = clientID;
-  m_ownerGeneration        = claim.requestGeneration;
-  m_clientCapabilities     = claim.clientCapabilities;
-  m_ownerToken             = claim.claimToken;
-  m_responseAdmitted       = false;
-  m_clientReady            = false;
-  m_activationIssued       = false;
-  m_deactivationIssued     = false;
-  m_statusDirty            = true;
-  m_announcedPlayback      = 0;
-  m_announcedCapture       = 0;
-  m_hostSequence           = 0;
-  m_nextClientSequence     = 0;
-  m_clientSequenceKnown    = false;
-  m_captureDiscontinuity   = false;
-  ClearBlockedPlayback(false);
-  m_pendingCapture         = {};
-  m_ownerSerial            = NextSerial(m_ownerSerial);
-  RenewLease();
+  return subscriber.state == SubscriberState::BOUND &&
+    (subscriber.clientCapabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+    (subscriber.subscriptions & KVMFR_AUDIO_SUBSCRIBE_CAPTURE);
+}
+
+bool CLGMPAudio::HasReadyPlayback() const
+{
+  for (const Subscriber& subscriber : m_subscribers)
+    if (PlaybackEligible(subscriber) && subscriber.ready &&
+        subscriber.announcedPlayback ==
+          m_state.playback.generation)
+      return true;
+  return false;
+}
+
+void CLGMPAudio::MarkStateDirty(uint32_t index)
+{
+  if (index >= LGMP_MAX_CLIENTS ||
+      m_subscribers[index].state != SubscriberState::BOUND)
+    return;
+  Subscriber& subscriber = m_subscribers[index];
+  subscriber.stateRevision = NextSerial(subscriber.stateRevision);
+  subscriber.pumpStage = PumpStage::IDLE;
+  subscriber.ready = false;
+  subscriber.awaitingAck = false;
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
   if (!m_inboundStopping && m_inboundWakeEvent)
     SetEvent(m_inboundWakeEvent);
 }
 
-void CLGMPAudioTransport::HandleClaim(
-  uint32_t clientID, const KVMFRAudioClaim& claim)
+void CLGMPAudio::MarkAllStateDirty()
+{
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    MarkStateDirty(index);
+}
+
+void CLGMPAudio::RefreshGranted(uint32_t index, bool bumpRole)
+{
+  if (index >= LGMP_MAX_CLIENTS)
+    return;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state != SubscriberState::BOUND)
+    return;
+
+  KVMFRAudioCapabilities granted = 0;
+  if (m_stateKnown &&
+      (m_state.capabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
+      (subscriber.clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK))
+    granted |= KVMFR_AUDIO_CAP_PLAYBACK;
+  if (m_captureOwner == index && CaptureEligible(subscriber) &&
+      (m_state.capabilities & KVMFR_AUDIO_CAP_CAPTURE))
+    granted |= KVMFR_AUDIO_CAP_CAPTURE;
+  if (m_feedbackAuthority == index && FeedbackEligible(subscriber) &&
+      (m_state.capabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK))
+    granted |= KVMFR_AUDIO_CAP_CLOCK_FEEDBACK;
+  if (granted == subscriber.grantedCapabilities)
+    return;
+
+  subscriber.grantedCapabilities = granted;
+  if (bumpRole && subscriber.subscriptionReceived)
+    subscriber.roleEpoch =
+      m_nextRoleEpoch = NextEpoch(m_nextRoleEpoch);
+  subscriber.response.grantedCapabilities =
+    granted | KVMFR_AUDIO_CAP_PLAYBACK;
+  subscriber.response.roleEpoch = subscriber.roleEpoch;
+  MarkStateDirty(index);
+}
+
+void CLGMPAudio::AssignFeedbackAuthority(uint32_t index)
+{
+  if (m_feedbackAuthority != INVALID_SLOT ||
+      index >= LGMP_MAX_CLIENTS ||
+      !FeedbackEligible(m_subscribers[index]))
+    return;
+  m_feedbackAuthority = index;
+  RefreshGranted(index, true);
+  DEBUG_INFO("Audio feedback authority assigned to client %u",
+    m_subscribers[index].clientID);
+}
+
+void CLGMPAudio::RevokeFeedbackAuthority(const char * reason)
+{
+  if (m_feedbackAuthority == INVALID_SLOT)
+    return;
+  const uint32_t index = m_feedbackAuthority;
+  m_feedbackAuthority = INVALID_SLOT;
+  m_subscribers[index].feedbackRevoked = true;
+  DEBUG_INFO("Audio feedback authority client %u revoked: %s",
+    m_subscribers[index].clientID, reason);
+  RefreshGranted(index, true);
+  m_authorityBlockedSince = 0;
+  if (m_playbackBlocked)
+    ClearBlockedPlayback(true);
+}
+
+void CLGMPAudio::PromoteFeedbackAuthority(
+  uint64_t playbackGeneration)
+{
+  if (!playbackGeneration || m_feedbackAuthority != INVALID_SLOT)
+    return;
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    if (FeedbackEligible(m_subscribers[index]) &&
+        !m_subscribers[index].feedbackRevoked)
+    {
+      AssignFeedbackAuthority(index);
+      return;
+    }
+}
+
+void CLGMPAudio::AssignCaptureOwner()
+{
+  if (m_captureOwner != INVALID_SLOT ||
+      m_captureBinding != INVALID_SLOT)
+    return;
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+  {
+    Subscriber& subscriber = m_subscribers[index];
+    if (!CaptureEligible(subscriber))
+      continue;
+    uint32_t epoch = 0;
+    const LGMP_STATUS status = lgmpHostStreamBind(
+      m_captureStream, subscriber.clientID, &epoch);
+    if (status == LGMP_ERR_STREAM_BUSY)
+      return;
+    if (status != LGMP_OK)
+    {
+      Fail("lgmpHostStreamBind(audio capture)", status);
+      return;
+    }
+    m_captureOwner = index;
+    m_captureBinding = index;
+    subscriber.captureEpoch = epoch;
+    subscriber.nextCaptureSequence = 0;
+    subscriber.captureSequenceKnown = false;
+    subscriber.captureDiscontinuity = true;
+    subscriber.captureRevokeDeadline = 0;
+    RefreshGranted(index, true);
+    DEBUG_INFO("Audio capture assigned to client %u",
+      subscriber.clientID);
+    return;
+  }
+}
+
+void CLGMPAudio::MaintainCaptureBinding()
+{
+  if (m_captureBinding == INVALID_SLOT)
+  {
+    AssignCaptureOwner();
+    return;
+  }
+
+  const uint32_t index = m_captureBinding;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state != SubscriberState::BOUND ||
+      !subscriber.captureRevoking || m_captureCallbackInFlight)
+    return;
+
+  const bool acknowledged =
+    subscriber.pumpRevision >= subscriber.captureRevokeRevision &&
+    !subscriber.awaitingAck && subscriber.ready;
+  const uint64_t now = GetTickCount64();
+  const bool timedOut = subscriber.captureRevokeDeadline &&
+    now >= subscriber.captureRevokeDeadline;
+  if (!acknowledged && !timedOut)
+    return;
+  if (!acknowledged && subscriber.captureRevokeDeadline != 1)
+  {
+    DEBUG_WARN("Audio capture revoke acknowledgement timed out for "
+      "client %u", subscriber.clientID);
+    subscriber.captureRevokeDeadline = 1;
+  }
+
+  if (m_pendingCapture.valid &&
+      m_pendingCapture.subscriber == index)
+    ReleasePendingCapture();
+  const LGMP_STATUS status = lgmpHostStreamUnbind(m_captureStream);
+  if (status == LGMP_ERR_STREAM_BUSY)
+    return;
+  if (status != LGMP_OK && status != LGMP_ERR_STREAM_UNBOUND)
+  {
+    Fail("lgmpHostStreamUnbind(audio capture role)", status);
+    return;
+  }
+
+  m_captureBinding = INVALID_SLOT;
+  subscriber.captureEpoch = 0;
+  subscriber.captureRevoking = false;
+  subscriber.captureRevokeDeadline = 0;
+  AssignCaptureOwner();
+}
+
+void CLGMPAudio::BeginRelease(uint32_t index,
+  const char * reason, bool force)
+{
+  if (index >= LGMP_MAX_CLIENTS)
+    return;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state == SubscriberState::NONE)
+    return;
+  subscriber.forceUnbind = subscriber.forceUnbind || force;
+  if (subscriber.state == SubscriberState::RELEASING)
+    return;
+
+  DEBUG_INFO("Audio client %u generation %u releasing: %s",
+    subscriber.clientID, subscriber.requestGeneration, reason);
+  subscriber.state = SubscriberState::RELEASING;
+  subscriber.ready = false;
+  subscriber.awaitingAck = false;
+  subscriber.pumpStage = PumpStage::IDLE;
+  if (m_feedbackAuthority == index)
+    RevokeFeedbackAuthority(reason);
+  if (m_captureOwner == index)
+    m_captureOwner = INVALID_SLOT;
+  if (m_pendingCapture.valid &&
+      m_pendingCapture.subscriber == index &&
+      !m_captureCallbackInFlight)
+    ReleasePendingCapture();
+
+  for (PendingResponse& pending : m_pendingResponse)
+    if (pending.valid && pending.clientID == subscriber.clientID &&
+        pending.response.result == KVMFR_AUDIO_RESPONSE_BOUND)
+      pending = {};
+  if (!HasReadyPlayback())
+    ClearBlockedPlayback(true);
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
+  if (!m_inboundStopping && m_inboundWakeEvent)
+    SetEvent(m_inboundWakeEvent);
+}
+
+void CLGMPAudio::MaintainSubscribers(uint64_t now)
+{
+  MaintainCaptureBinding();
+  uint32_t clients[LGMP_MAX_CLIENTS] = {};
+  unsigned count = 0;
+  const LGMP_STATUS query = m_control.GetClientIDs(clients, count);
+  const bool clientsKnown = query == LGMP_OK;
+  if (!clientsKnown)
+    DEBUG_WARN("Failed to query audio pointer subscribers: %s",
+      lgmpStatusString(query));
+
+  bool assignCapture = false;
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+  {
+    Subscriber& subscriber = m_subscribers[index];
+    if (subscriber.state == SubscriberState::NONE)
+      continue;
+    if (clientsKnown && !SubscriberPresent(
+        subscriber.clientID, clients, count))
+      subscriber.forceUnbind = true;
+    if (subscriber.state == SubscriberState::BOUND)
+    {
+      if (subscriber.forceUnbind)
+        BeginRelease(index,
+          "audio pointer subscriber disappeared", true);
+      else if (m_pendingCapture.valid &&
+          m_pendingCapture.subscriber == index)
+        RenewLease(subscriber);
+      else if (now >= subscriber.deadline)
+        BeginRelease(index, "audio client lease expired");
+    }
+
+    if (subscriber.state != SubscriberState::RELEASING)
+      continue;
+    if (m_captureCallbackInFlight && m_captureBinding == index)
+      continue;
+    if (subscriber.forceUnbind)
+    {
+      ForceUnbindSubscriber(index);
+      const bool wasCapture = m_captureOwner == index;
+      ResetSubscriber(index);
+      assignCapture = assignCapture || wasCapture;
+      continue;
+    }
+    if (TryUnbindSubscriber(index))
+    {
+      DEBUG_INFO("Audio client %u generation %u released",
+        subscriber.clientID, subscriber.requestGeneration);
+      const bool wasCapture = m_captureOwner == index;
+      ResetSubscriber(index);
+      assignCapture = assignCapture || wasCapture;
+    }
+  }
+  if (assignCapture || (m_captureOwner == INVALID_SLOT &&
+      m_captureBinding == INVALID_SLOT))
+    AssignCaptureOwner();
+}
+
+void CLGMPAudio::HandleClaim(uint32_t clientID,
+  const KVMFRAudioClaim& claim)
 {
   CSRWExclusiveLock lock(m_lock);
-  if (!m_initialized)
+  if (!m_claimResponderReady)
     return;
 
   KVMFRAudioStreamResponse response = {};
-  response.magic             = KVMFR_AUDIO_RESPONSE_MAGIC;
-  response.version           = KVMFR_AUDIO_CONTROL_VERSION;
-  response.size              = sizeof(response);
+  response.magic = KVMFR_AUDIO_RESPONSE_MAGIC;
+  response.version = KVMFR_AUDIO_CONTROL_VERSION;
+  response.size = sizeof(response);
   response.requestGeneration = claim.requestGeneration;
-  response.boundClientID     = clientID;
+  response.boundClientID = clientID;
   response.endpointGeneration = m_state.generation;
-  response.claimToken        = claim.claimToken;
+  response.claimToken = claim.claimToken;
 
   ClaimRecord * claimRecord = nullptr;
   ClaimRecord * claimSlot = nullptr;
@@ -972,19 +1407,20 @@ void CLGMPAudioTransport::HandleClaim(
     claimSlot = claimRecord;
 
   const bool claimValid = ValidateClaim(claim);
+  const uint32_t existing = FindSubscriber(clientID);
   if (!claimValid)
     response.result = KVMFR_AUDIO_RESPONSE_INCOMPATIBLE;
-  else if (m_failed || !m_started || !m_stateKnown)
+  else if (!m_initialized || m_failed)
     response.result = KVMFR_AUDIO_RESPONSE_ERROR;
-  else if (m_ownerState != OwnerState::NONE)
+  else if (existing != INVALID_SLOT)
   {
-    if (m_ownerState != OwnerState::RELEASING &&
-        m_ownerClientID == clientID &&
-        m_ownerGeneration == claim.requestGeneration &&
-        m_ownerToken == claim.claimToken)
+    Subscriber& subscriber = m_subscribers[existing];
+    if (subscriber.state == SubscriberState::BOUND &&
+        subscriber.requestGeneration == claim.requestGeneration &&
+        subscriber.claimToken == claim.claimToken)
     {
-      RenewLease();
-      response = m_ownerResponse;
+      RenewLease(subscriber);
+      response = subscriber.response;
     }
     else
       response.result = KVMFR_AUDIO_RESPONSE_BUSY;
@@ -1006,65 +1442,117 @@ void CLGMPAudioTransport::HandleClaim(
     DEBUG_WARN("Audio claim history is full for client %u", clientID);
     response.result = KVMFR_AUDIO_RESPONSE_ERROR;
   }
-  else if (BindStreams(clientID))
-  {
-    InitializeOwner(clientID, claim);
-    response.result          = KVMFR_AUDIO_RESPONSE_BOUND;
-    response.protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX;
-    response.hostToClient    = m_hostToClientDescriptor;
-    response.clientToHost    = m_clientToHostDescriptor;
-    m_ownerResponse          = response;
-    claimSlot->valid             = true;
-    claimSlot->closed            = false;
-    claimSlot->clientID          = clientID;
-    claimSlot->requestGeneration = claim.requestGeneration;
-    claimSlot->claimToken        = claim.claimToken;
-    claimSlot->response          = response;
-    DEBUG_INFO("Audio owner %u generation %u admitted",
-      m_ownerClientID, m_ownerGeneration);
-  }
   else
-    response.result = KVMFR_AUDIO_RESPONSE_ERROR;
+  {
+    const uint32_t index = FindFreeSubscriber();
+    if (index == INVALID_SLOT)
+      response.result = KVMFR_AUDIO_RESPONSE_BUSY;
+    else if (!BindSubscriber(index, clientID, claim))
+      response.result = KVMFR_AUDIO_RESPONSE_ERROR;
+    else
+    {
+      Subscriber& subscriber = m_subscribers[index];
+      // Admission grants playback independently from the live subscription.
+      // The subscription controls whether this reader consumes PCM.
+      if (m_feedbackAuthority == INVALID_SLOT &&
+          (claim.subscriptions & KVMFR_AUDIO_SUBSCRIBE_PLAYBACK) &&
+          (claim.clientCapabilities &
+            KVMFR_AUDIO_CAP_CLOCK_FEEDBACK))
+        AssignFeedbackAuthority(index);
+      AssignCaptureOwner();
+      RefreshGranted(index, false);
+
+      response.result = KVMFR_AUDIO_RESPONSE_BOUND;
+      response.protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX;
+      response.grantedCapabilities =
+        subscriber.grantedCapabilities | KVMFR_AUDIO_CAP_PLAYBACK;
+      response.bindingEpoch = subscriber.bindingEpoch;
+      response.roleEpoch = subscriber.roleEpoch;
+      response.playbackReaderID = subscriber.playbackReaderID;
+      response.playback = m_playbackDescriptor;
+      response.hostControl = subscriber.hostControlDescriptor;
+      response.clientControl = subscriber.clientControlDescriptor;
+      response.capture = m_captureDescriptor;
+      subscriber.response = response;
+
+      claimSlot->valid = true;
+      claimSlot->closed = false;
+      claimSlot->clientID = clientID;
+      claimSlot->requestGeneration = claim.requestGeneration;
+      claimSlot->claimToken = claim.claimToken;
+      claimSlot->response = response;
+      DEBUG_INFO("Audio client %u generation %u admitted in slot %u",
+        clientID, claim.requestGeneration, index);
+    }
+  }
 
   if (claimValid && claimSlot &&
       response.result == KVMFR_AUDIO_RESPONSE_ERROR &&
       (!claimRecord || RequestNewer(claim.requestGeneration,
         claimRecord->requestGeneration)))
   {
-    claimSlot->valid             = true;
-    claimSlot->closed            = true;
-    claimSlot->clientID          = clientID;
+    claimSlot->valid = true;
+    claimSlot->closed = true;
+    claimSlot->clientID = clientID;
     claimSlot->requestGeneration = claim.requestGeneration;
-    claimSlot->claimToken        = claim.claimToken;
-    claimSlot->response          = response;
+    claimSlot->claimToken = claim.claimToken;
+    claimSlot->response = response;
   }
 
   if (!QueueResponse(clientID, response))
   {
     DEBUG_WARN("Audio response queue is full for client %u", clientID);
-    if (response.result == KVMFR_AUDIO_RESPONSE_BOUND &&
-        m_ownerClientID == clientID)
-      BeginRelease("audio response queue exhausted");
+    if (response.result == KVMFR_AUDIO_RESPONSE_BOUND)
+    {
+      const uint32_t index = FindSubscriber(clientID);
+      if (index != INVALID_SLOT)
+        BeginRelease(index, "audio response queue exhausted");
+    }
   }
   PumpResponses();
 }
 
-KVMFRAudioStatus CLGMPAudioTransport::WireStatus() const
+KVMFRAudioStatus CLGMPAudio::WireStatus(uint32_t index) const
 {
   KVMFRAudioStatus status = {};
-  status.version           = KVMFR_AUDIO_STATUS_VERSION;
-  status.size              = sizeof(status);
-  status.protocolVersion   = KVMFR_AUDIO_PROTOCOL_MAX;
-  status.requestGeneration = m_ownerGeneration;
-  status.capabilities      =
-    m_state.capabilities & m_clientCapabilities;
-  status.ownerClientID     = m_ownerClientID;
-  status.ownerGeneration   = m_ownerGeneration;
+  if (index >= LGMP_MAX_CLIENTS)
+    return status;
+  const Subscriber& subscriber = m_subscribers[index];
+
+  status.version = KVMFR_AUDIO_STATUS_VERSION;
+  status.size = sizeof(status);
+  status.protocolVersion = KVMFR_AUDIO_PROTOCOL_MAX;
+  status.requestGeneration = subscriber.requestGeneration;
+  status.capabilities =
+    m_state.capabilities & subscriber.clientCapabilities;
+  status.grantedCapabilities =
+    subscriber.grantedCapabilities & status.capabilities;
+  status.bindingEpoch = subscriber.bindingEpoch;
+  status.roleEpoch = subscriber.roleEpoch;
+  status.boundClientID = subscriber.clientID;
   status.endpointGeneration = m_state.generation;
   status.playbackGeneration = m_state.playback.generation;
-  status.captureGeneration  = m_state.capture.generation;
-  status.playbackState      = WireState(m_state.playback.state);
-  status.captureState       = WireState(m_state.capture.state);
+  status.captureGeneration = m_state.capture.generation;
+  status.playbackState = WireState(m_state.playback.state);
+  status.captureState = WireState(m_state.capture.state);
+
+  if ((status.capabilities & KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+      m_feedbackAuthority != INVALID_SLOT)
+  {
+    const Subscriber& authority =
+      m_subscribers[m_feedbackAuthority];
+    if (authority.state == SubscriberState::BOUND)
+    {
+      status.feedbackAuthorityClientID = authority.clientID;
+      status.feedbackAuthorityEpoch = authority.roleEpoch;
+    }
+  }
+  if ((status.capabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+      m_captureOwner != INVALID_SLOT &&
+      m_subscribers[m_captureOwner].state == SubscriberState::BOUND)
+    status.captureOwnerClientID =
+      m_subscribers[m_captureOwner].clientID;
+
   if (m_state.playback.formatValid &&
       ValidFormat(m_state.playback.format))
     status.playbackFormat = WireFormat(m_state.playback.format);
@@ -1074,252 +1562,396 @@ KVMFRAudioStatus CLGMPAudioTransport::WireStatus() const
 
   if (m_state.available)
     status.flags |= KVMFR_AUDIO_STATUS_AVAILABLE;
-  if (m_ownerState != OwnerState::NONE)
-    status.flags |= KVMFR_AUDIO_STATUS_HAS_OWNER;
+  if (subscriber.state == SubscriberState::BOUND)
+    status.flags |= KVMFR_AUDIO_STATUS_BOUND;
   if (status.capabilities & KVMFR_AUDIO_CAP_PLAYBACK)
     status.flags |= KVMFR_AUDIO_STATUS_PLAYBACK_AVAILABLE;
   if (status.capabilities & KVMFR_AUDIO_CAP_CAPTURE)
     status.flags |= KVMFR_AUDIO_STATUS_CAPTURE_AVAILABLE;
-  if (m_announcedPlayback)
-    status.flags |= KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE;
-  if (m_announcedCapture)
-    status.flags |= KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
-  return status;
-}
-
-bool CLGMPAudioTransport::CommitMessage(LGMPStreamBuffer& buffer,
-  KVMFRAudioMessageType type, uint64_t streamGeneration,
-  KVMFRAudioMessageFlags flags, uint64_t position, int64_t timeNs,
-  uint64_t rateQ32, uint32_t frames, const void * payload,
-  uint32_t length)
-{
-  const uint32_t bytes = static_cast<uint32_t>(
-    sizeof(KVMFRAudioMessage) + length);
-  if (!buffer.data || buffer.capacity < bytes)
-  {
-    const LGMP_STATUS cancel = lgmpHostStreamWriteCancel(
-      m_hostToClientStream, &buffer);
-    if (cancel != LGMP_OK)
-      DEBUG_WARN("Failed to cancel an undersized audio stream "
-        "reservation: %s", lgmpStatusString(cancel));
-    Fail("undersized host-to-client audio stream slot",
-      LGMP_ERR_INVALID_SIZE);
-    return false;
-  }
-
-  KVMFRAudioMessage message = {};
-  message.version          = KVMFR_AUDIO_MESSAGE_VERSION;
-  message.size             = sizeof(message);
-  message.type             = type;
-  message.streamGeneration = streamGeneration;
-  message.flags            = flags;
-  message.sequence         = m_hostSequence;
-  message.position         = position;
-  message.timeNs           = timeNs;
-  message.rateQ32          = rateQ32;
-  message.frames           = frames;
-  message.length           = length;
-  memcpy(buffer.data, &message, sizeof(message));
-  if (length)
-    WCWrite::Copy(static_cast<uint8_t *>(buffer.data) + sizeof(message),
-      payload, length);
-
-  const LGMP_STATUS status = lgmpHostStreamWriteCommit(
-    m_hostToClientStream, &buffer, bytes);
-  if (status == LGMP_OK)
-  {
-    ++m_hostSequence;
-    return true;
-  }
-  if (status == LGMP_ERR_STREAM_UNBOUND ||
-      status == LGMP_ERR_STREAM_STALE)
-  {
-    BeginRelease("host-to-client audio stream binding lost");
-    return false;
-  }
-  Fail("lgmpHostStreamWriteCommit(audio)", status);
-  return false;
-}
-
-bool CLGMPAudioTransport::WriteMessage(KVMFRAudioMessageType type,
-  uint64_t streamGeneration, KVMFRAudioMessageFlags flags,
-  uint64_t position, int64_t timeNs, uint64_t rateQ32,
-  uint32_t frames, const void * payload, uint32_t length)
-{
-  if (m_playbackCreditValid)
-    return false;
-
-  LGMPStreamBuffer buffer = {};
-  const LGMP_STATUS status = lgmpHostStreamWriteAcquire(
-    m_hostToClientStream, &buffer);
-  if (status == LGMP_ERR_STREAM_FULL)
-    return false;
-  if (status == LGMP_ERR_STREAM_UNBOUND ||
-      status == LGMP_ERR_STREAM_STALE)
-  {
-    BeginRelease("host-to-client audio stream binding lost");
-    return false;
-  }
-  if (status != LGMP_OK)
-  {
-    Fail("lgmpHostStreamWriteAcquire(audio)", status);
-    return false;
-  }
-
-  return CommitMessage(buffer, type, streamGeneration, flags,
-    position, timeNs, rateQ32, frames, payload, length);
-}
-
-void CLGMPAudioTransport::PumpState()
-{
-  if (m_ownerState != OwnerState::BOUND || !m_responseAdmitted ||
-      !m_clientReady || !m_stateKnown || m_failed ||
-      m_playbackCreditValid)
-    return;
-
-  if (m_state.playback.state == AudioStreamState::RUNNING)
-    m_playbackRunGeneration = m_state.playback.generation;
 
   const bool playbackPrewarm =
     (m_state.playback.state == AudioStreamState::ACQUIRED ||
       m_state.playback.state == AudioStreamState::PAUSED) &&
     m_playbackRunGeneration != m_state.playback.generation;
-  const bool playbackCurrent = m_state.available && m_state.active &&
-    (m_clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
-    (m_state.capabilities & AUDIO_CAP_PLAYBACK) &&
-    m_state.playback.formatValid &&
-    ValidFormat(m_state.playback.format) &&
-    (m_state.playback.state == AudioStreamState::RUNNING ||
-      playbackPrewarm);
-  if (m_announcedPlayback &&
-      (!playbackCurrent ||
-        m_announcedPlayback != m_state.playback.generation))
-  {
-    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
-        m_announcedPlayback, 0, 0, 0, 0, 0, nullptr, 0))
-      return;
-    m_announcedPlayback = 0;
-  }
+  if (m_state.available && m_state.active &&
+      PlaybackEligible(subscriber) &&
+      (status.grantedCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
+      m_state.playback.generation &&
+      m_state.playback.formatValid &&
+      ValidFormat(m_state.playback.format) &&
+      (m_state.playback.state == AudioStreamState::RUNNING ||
+        playbackPrewarm))
+    status.flags |= KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE;
 
-  const bool captureCurrent = m_state.available && m_state.active &&
-    (m_clientCapabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
-    (m_state.capabilities & AUDIO_CAP_CAPTURE) &&
-    m_state.capture.formatValid &&
-    ValidFormat(m_state.capture.format) &&
-    m_state.capture.state == AudioStreamState::RUNNING;
-  if (m_announcedCapture &&
-      (!captureCurrent ||
-        m_announcedCapture != m_state.capture.generation))
-  {
-    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
-        m_announcedCapture, 0, 0, 0, 0, 0, nullptr, 0))
-      return;
-    m_announcedCapture = 0;
-  }
-
-  const bool startPlayback = playbackCurrent &&
-    m_announcedPlayback != m_state.playback.generation;
-  const bool startCapture = captureCurrent &&
-    m_announcedCapture != m_state.capture.generation;
-
-  // Publish capabilities before starts so the client selects the correct
-  // rate-control path. A second status below records the announced streams.
-  if (m_statusDirty && (startPlayback || startCapture))
-  {
-    const KVMFRAudioStatus status = WireStatus();
-    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_STATUS,
-        0, 0, 0, 0, 0, 0, &status, sizeof(status)))
-      return;
-    m_statusDirty = false;
-  }
-
-  if (startPlayback)
-  {
-    const KVMFRAudioFormat format = WireFormat(m_state.playback.format);
-    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
-        m_state.playback.generation, 0, 0, 0, 0, 0,
-        &format, sizeof(format)))
-      return;
-    m_announcedPlayback = m_state.playback.generation;
-    m_statusDirty       = true;
-  }
-
-  if (startCapture)
-  {
-    const KVMFRAudioFormat format = WireFormat(m_state.capture.format);
-    if (!WriteMessage(KVMFR_AUDIO_MESSAGE_CAPTURE_START,
-        m_state.capture.generation, 0, 0, 0, 0, 0,
-        &format, sizeof(format)))
-      return;
-    m_announcedCapture = m_state.capture.generation;
-    m_statusDirty      = true;
-  }
-
-  if (!m_statusDirty)
-    return;
-  const KVMFRAudioStatus status = WireStatus();
-  if (WriteMessage(KVMFR_AUDIO_MESSAGE_STATUS,
-      0, 0, 0, 0, 0, 0, &status, sizeof(status)))
-    m_statusDirty = false;
+  if (m_state.available && m_state.active &&
+      CaptureEligible(subscriber) &&
+      (status.grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+      m_state.capture.generation &&
+      m_state.capture.formatValid &&
+      ValidFormat(m_state.capture.format) &&
+      m_state.capture.state == AudioStreamState::RUNNING)
+    status.flags |= KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE;
+  return status;
 }
 
-void CLGMPAudioTransport::CheckPlaybackCredit()
+bool CLGMPAudio::WriteControlMessage(uint32_t index,
+  KVMFRAudioMessageType type, uint64_t streamGeneration,
+  KVMFRAudioMessageFlags flags, uint64_t position, int64_t timeNs,
+  uint64_t rateQ32, uint32_t frames, const void * payload,
+  uint32_t length)
 {
-  if (!m_playbackBlocked || m_playbackCreditValid ||
-      m_playbackReadyPending || m_statusDirty ||
-      m_ownerState != OwnerState::BOUND || !m_responseAdmitted ||
-      !m_clientReady || !m_stateKnown || !m_state.available ||
-      !m_state.active ||
-      !(m_clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) ||
-      !(m_state.capabilities & AUDIO_CAP_PLAYBACK) ||
+  if (index >= LGMP_MAX_CLIENTS)
+    return false;
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state != SubscriberState::BOUND)
+    return false;
+
+  LGMPStreamBuffer buffer = {};
+  LGMP_STATUS status = lgmpHostStreamWriteAcquire(
+    subscriber.hostControl, &buffer);
+  if (status == LGMP_ERR_STREAM_FULL)
+    return false;
+  if (status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE)
+  {
+    BeginRelease(index, "host audio control binding lost");
+    return false;
+  }
+  if (status != LGMP_OK)
+  {
+    Fail("lgmpHostStreamWriteAcquire(audio control)", status);
+    return false;
+  }
+
+  const uint32_t bytes =
+    static_cast<uint32_t>(sizeof(KVMFRAudioMessage) + length);
+  if (!buffer.data || buffer.capacity < bytes || (length && !payload))
+  {
+    const LGMP_STATUS cancel = lgmpHostStreamWriteCancel(
+      subscriber.hostControl, &buffer);
+    if (cancel != LGMP_OK)
+      DEBUG_WARN("Failed to cancel audio control reservation: %s",
+        lgmpStatusString(cancel));
+    Fail("undersized host audio control slot", LGMP_ERR_INVALID_SIZE);
+    return false;
+  }
+
+  KVMFRAudioMessage message = {};
+  message.version = KVMFR_AUDIO_MESSAGE_VERSION;
+  message.size = sizeof(message);
+  message.type = type;
+  message.streamGeneration = streamGeneration;
+  message.flags = flags;
+  message.sequence = subscriber.hostSequence;
+  message.position = position;
+  message.timeNs = timeNs;
+  message.rateQ32 = rateQ32;
+  message.frames = frames;
+  message.length = length;
+  WCWrite::Copy(buffer.data, &message, sizeof(message));
+  if (length)
+    WCWrite::Copy(static_cast<uint8_t *>(buffer.data) +
+      sizeof(message), payload, length);
+  WCWrite::Flush();
+
+  status = lgmpHostStreamWriteCommit(
+    subscriber.hostControl, &buffer, bytes);
+  if (status == LGMP_OK)
+  {
+    ++subscriber.hostSequence;
+    m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
+    return true;
+  }
+  if (status == LGMP_ERR_STREAM_UNBOUND ||
+      status == LGMP_ERR_STREAM_STALE)
+    BeginRelease(index, "host audio control binding lost");
+  else
+    Fail("lgmpHostStreamWriteCommit(audio control)", status);
+  return false;
+}
+
+bool CLGMPAudio::PlaybackCurrent(
+  const KVMFRAudioStatus& status) const
+{
+  return (status.flags & KVMFR_AUDIO_STATUS_PLAYBACK_ACTIVE) != 0;
+}
+
+bool CLGMPAudio::CaptureCurrent(
+  const KVMFRAudioStatus& status) const
+{
+  return (status.flags & KVMFR_AUDIO_STATUS_CAPTURE_ACTIVE) != 0;
+}
+
+void CLGMPAudio::BeginStatePump(uint32_t index)
+{
+  Subscriber& subscriber = m_subscribers[index];
+  subscriber.pendingStatus = WireStatus(index);
+  subscriber.pumpRevision = subscriber.stateRevision;
+  subscriber.pumpStage = PumpStage::STATUS;
+  subscriber.ready = false;
+  subscriber.awaitingAck = false;
+}
+
+void CLGMPAudio::PumpSubscriberState(uint32_t index)
+{
+  Subscriber& subscriber = m_subscribers[index];
+  if (subscriber.state != SubscriberState::BOUND ||
+      !subscriber.responseAdmitted ||
+      !subscriber.subscriptionReceived || !m_stateKnown || m_failed)
+    return;
+  if (subscriber.pumpRevision != subscriber.stateRevision)
+    BeginStatePump(index);
+  else if (subscriber.pumpStage == PumpStage::IDLE)
+    return;
+
+  for (unsigned step = 0; step < 12U; ++step)
+  {
+    if (subscriber.state != SubscriberState::BOUND ||
+        subscriber.pumpRevision != subscriber.stateRevision)
+      return;
+    const KVMFRAudioStatus& status = subscriber.pendingStatus;
+    switch (subscriber.pumpStage)
+    {
+      case PumpStage::STATUS:
+        if (!WriteControlMessage(index, KVMFR_AUDIO_MESSAGE_STATUS,
+            0, 0, 0, 0, 0, 0, &status, sizeof(status)))
+          return;
+        subscriber.pumpStage = PumpStage::PLAYBACK_STOP;
+        break;
+
+      case PumpStage::PLAYBACK_STOP:
+        if (subscriber.announcedPlayback &&
+            (!PlaybackCurrent(status) ||
+              subscriber.announcedPlayback !=
+                status.playbackGeneration))
+        {
+          if (!WriteControlMessage(index,
+              KVMFR_AUDIO_MESSAGE_PLAYBACK_STOP,
+              subscriber.announcedPlayback, 0, 0, 0, 0, 0,
+              nullptr, 0))
+            return;
+          subscriber.announcedPlayback = 0;
+        }
+        subscriber.pumpStage = PumpStage::CAPTURE_STOP;
+        break;
+
+      case PumpStage::CAPTURE_STOP:
+        if (subscriber.announcedCapture &&
+            (!CaptureCurrent(status) ||
+              subscriber.announcedCapture != status.captureGeneration))
+        {
+          if (!WriteControlMessage(index,
+              KVMFR_AUDIO_MESSAGE_CAPTURE_STOP,
+              subscriber.announcedCapture, 0, 0, 0, 0, 0,
+              nullptr, 0))
+            return;
+          subscriber.announcedCapture = 0;
+        }
+        subscriber.pumpStage = PumpStage::PLAYBACK_START;
+        break;
+
+      case PumpStage::PLAYBACK_START:
+        if (PlaybackCurrent(status) &&
+            subscriber.announcedPlayback != status.playbackGeneration)
+        {
+          if (!WriteControlMessage(index,
+              KVMFR_AUDIO_MESSAGE_PLAYBACK_START,
+              status.playbackGeneration, 0, 0, 0, 0, 0,
+              &status.playbackFormat, sizeof(status.playbackFormat)))
+            return;
+          subscriber.announcedPlayback = status.playbackGeneration;
+          subscriber.pumpStage = PumpStage::PLAYBACK_VOLUME;
+        }
+        else
+          subscriber.pumpStage = PumpStage::CAPTURE_START;
+        break;
+
+      case PumpStage::PLAYBACK_VOLUME:
+      {
+        KVMFRAudioVolume volume = {};
+        volume.version = KVMFR_AUDIO_VOLUME_VERSION;
+        volume.size = sizeof(volume);
+        volume.channelCount = status.playbackFormat.channelCount;
+        for (unsigned channel = 0;
+            channel < volume.channelCount; ++channel)
+          volume.values[channel] = UINT16_MAX;
+        if (!WriteControlMessage(index,
+            KVMFR_AUDIO_MESSAGE_PLAYBACK_VOLUME,
+            status.playbackGeneration, 0, 0, 0, 0, 0,
+            &volume, sizeof(volume)))
+          return;
+        subscriber.pumpStage = PumpStage::PLAYBACK_MUTE;
+        break;
+      }
+
+      case PumpStage::PLAYBACK_MUTE:
+        if (!WriteControlMessage(index,
+            KVMFR_AUDIO_MESSAGE_PLAYBACK_MUTE,
+            status.playbackGeneration, 0, 0, 0, 0, 0,
+            nullptr, 0))
+          return;
+        subscriber.pumpStage = PumpStage::CAPTURE_START;
+        break;
+
+      case PumpStage::CAPTURE_START:
+        if (CaptureCurrent(status) &&
+            subscriber.announcedCapture != status.captureGeneration)
+        {
+          if (!WriteControlMessage(index,
+              KVMFR_AUDIO_MESSAGE_CAPTURE_START,
+              status.captureGeneration, 0, 0, 0, 0, 0,
+              &status.captureFormat, sizeof(status.captureFormat)))
+            return;
+          subscriber.announcedCapture = status.captureGeneration;
+          subscriber.pumpStage = PumpStage::CAPTURE_VOLUME;
+        }
+        else
+          subscriber.pumpStage = PumpStage::BARRIER;
+        break;
+
+      case PumpStage::CAPTURE_VOLUME:
+      {
+        KVMFRAudioVolume volume = {};
+        volume.version = KVMFR_AUDIO_VOLUME_VERSION;
+        volume.size = sizeof(volume);
+        volume.channelCount = status.captureFormat.channelCount;
+        for (unsigned channel = 0;
+            channel < volume.channelCount; ++channel)
+          volume.values[channel] = UINT16_MAX;
+        if (!WriteControlMessage(index,
+            KVMFR_AUDIO_MESSAGE_CAPTURE_VOLUME,
+            status.captureGeneration, 0, 0, 0, 0, 0,
+            &volume, sizeof(volume)))
+          return;
+        subscriber.pumpStage = PumpStage::CAPTURE_MUTE;
+        break;
+      }
+
+      case PumpStage::CAPTURE_MUTE:
+        if (!WriteControlMessage(index,
+            KVMFR_AUDIO_MESSAGE_CAPTURE_MUTE,
+            status.captureGeneration, 0, 0, 0, 0, 0,
+            nullptr, 0))
+          return;
+        subscriber.pumpStage = PumpStage::BARRIER;
+        break;
+
+      case PumpStage::BARRIER:
+      {
+        KVMFRAudioStateBarrier barrier = {};
+        barrier.bindingEpoch = subscriber.bindingEpoch;
+        barrier.roleEpoch = subscriber.roleEpoch;
+        barrier.stateSerial = NextSerial(subscriber.barrier.stateSerial);
+        const uint64_t generation = PlaybackCurrent(status) ?
+          status.playbackGeneration : 0;
+        if (!WriteControlMessage(index,
+            KVMFR_AUDIO_MESSAGE_STATE_BARRIER, generation,
+            0, 0, 0, 0, 0, &barrier, sizeof(barrier)))
+          return;
+        subscriber.barrier = barrier;
+        subscriber.barrierGeneration = generation;
+        subscriber.awaitingAck = true;
+        subscriber.pumpStage = PumpStage::IDLE;
+        break;
+      }
+
+      case PumpStage::IDLE:
+        return;
+    }
+  }
+}
+
+void CLGMPAudio::PumpState()
+{
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    PumpSubscriberState(index);
+}
+
+void CLGMPAudio::CheckPlaybackBackpressure(uint64_t now)
+{
+  if (!m_playbackBlocked)
+    return;
+  if (!m_started || m_failed || !m_stateKnown ||
+      !m_state.available || !m_state.active ||
       m_blockedPlayback.endpointGeneration != m_state.generation ||
       m_blockedPlayback.streamGeneration !=
         m_state.playback.generation ||
       !m_state.playback.formatValid ||
       m_state.playback.state != AudioStreamState::RUNNING ||
       !SameFormat(m_blockedPlayback.format,
-        m_state.playback.format) ||
-      m_announcedPlayback != m_blockedPlayback.streamGeneration)
-    return;
-
-  m_playbackCredit = {};
-  const LGMP_STATUS status = lgmpHostStreamWriteAcquire(
-    m_hostToClientStream, &m_playbackCredit);
-  if (status == LGMP_ERR_STREAM_FULL)
-    return;
-  if (status == LGMP_ERR_STREAM_UNBOUND ||
-      status == LGMP_ERR_STREAM_STALE)
+        m_state.playback.format))
   {
-    BeginRelease("host-to-client audio credit binding lost");
-    return;
-  }
-  if (status != LGMP_OK)
-  {
-    Fail("lgmpHostStreamWriteAcquire(audio credit)", status);
+    ClearBlockedPlayback(true);
     return;
   }
 
-  const size_t required = sizeof(KVMFRAudioMessage) +
-    m_blockedPlaybackSize;
-  if (!m_playbackCredit.data ||
-      m_playbackCredit.capacity < required)
+  bool eligible = false;
+  for (const Subscriber& subscriber : m_subscribers)
+    if (subscriber.responseAdmitted &&
+        subscriber.subscriptionReceived &&
+        PlaybackEligible(subscriber))
+    {
+      eligible = true;
+      break;
+    }
+  if (!eligible)
   {
-    const LGMP_STATUS cancel = lgmpHostStreamWriteCancel(
-      m_hostToClientStream, &m_playbackCredit);
-    m_playbackCredit = {};
-    if (cancel != LGMP_OK)
-      DEBUG_WARN("Failed to cancel an undersized audio credit: %s",
-        lgmpStatusString(cancel));
-    Fail("undersized host-to-client audio stream slot",
-      LGMP_ERR_INVALID_SIZE);
+    ClearBlockedPlayback(true);
+    return;
+  }
+  if (!HasReadyPlayback())
+    return;
+
+  if (m_feedbackAuthority == INVALID_SLOT)
+  {
+    ClearBlockedPlayback(true);
+    return;
+  }
+  Subscriber& authority = m_subscribers[m_feedbackAuthority];
+  if (!authority.ready || !PlaybackEligible(authority) ||
+      !(authority.grantedCapabilities &
+        KVMFR_AUDIO_CAP_CLOCK_FEEDBACK))
+  {
+    ClearBlockedPlayback(true);
     return;
   }
 
-  m_playbackCreditValid  = true;
-  m_playbackReadyPending = true;
+  LGMPSPMCReaderState reader = {};
+  const LGMP_STATUS status = lgmpHostSPMCReaderGetState(
+    m_playbackStream, authority.playbackReaderID, &reader);
+  if (status == LGMP_ERR_STREAM_BUSY)
+    return;
+  bool stalled = false;
+  if (status == LGMP_OK)
+  {
+    if (reader.state != LGMP_SPMC_READER_READY ||
+        reader.clientID != authority.clientID ||
+        reader.epoch != authority.playbackReaderEpoch)
+    {
+      RevokeFeedbackAuthority("playback reader binding lost");
+      return;
+    }
+    stalled = reader.producerSequence - reader.consumerSequence >=
+      KVMFR_AUDIO_STREAM_SLOT_COUNT;
+  }
+  else
+  {
+    Fail("lgmpHostSPMCReaderGetState(audio)", status);
+    return;
+  }
+
+  if (!stalled)
+  {
+    ClearBlockedPlayback(true);
+    return;
+  }
+  if (!m_authorityBlockedSince)
+    m_authorityBlockedSince = now;
+  else if (now - m_authorityBlockedSince >= AUTHORITY_STALL_MS)
+    RevokeFeedbackAuthority("playback reader stalled");
 }
 
-bool CLGMPAudioTransport::ParseInbound(
+bool CLGMPAudio::ParseInbound(
   const LGMPStreamBuffer& buffer, KVMFRAudioMessage& message) const
 {
   if (!buffer.data || buffer.size < sizeof(message) ||
@@ -1335,15 +1967,21 @@ bool CLGMPAudioTransport::ParseInbound(
   return buffer.size == sizeof(message) + message.length;
 }
 
-bool CLGMPAudioTransport::PendingCaptureCurrent() const
+bool CLGMPAudio::PendingCaptureCurrent(uint32_t index) const
 {
-  if (!m_pendingCapture.valid)
+  if (!m_pendingCapture.valid || index >= LGMP_MAX_CLIENTS ||
+      m_pendingCapture.subscriber != index)
     return false;
-
+  const Subscriber& subscriber = m_subscribers[index];
   const AudioPacket& packet = m_pendingCapture.packet;
-  return m_stateKnown && m_state.available && m_state.active &&
-    (m_clientCapabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
-    (m_state.capabilities & AUDIO_CAP_CAPTURE) &&
+  return subscriber.state == SubscriberState::BOUND &&
+    subscriber.serial == m_pendingCapture.subscriberSerial &&
+    m_captureOwner == index && m_captureBinding == index &&
+    CaptureEligible(subscriber) &&
+    (subscriber.grantedCapabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+    subscriber.announcedCapture == packet.streamGeneration &&
+    m_stateKnown && m_state.available && m_state.active &&
+    (m_state.capabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
     m_state.capture.formatValid &&
     ValidFormat(m_state.capture.format) &&
     m_state.capture.state == AudioStreamState::RUNNING &&
@@ -1352,17 +1990,23 @@ bool CLGMPAudioTransport::PendingCaptureCurrent() const
     SameFormat(packet.format, m_state.capture.format);
 }
 
-bool CLGMPAudioTransport::PrepareCapture(
-  const KVMFRAudioMessage& message, const LGMPStreamBuffer& buffer)
+bool CLGMPAudio::PrepareCapture(
+  const KVMFRAudioMessage& message, const LGMPStreamBuffer& buffer,
+  uint32_t index)
 {
-  if (!m_stateKnown || !m_state.available || !m_state.active ||
-      !(m_state.capabilities & AUDIO_CAP_CAPTURE) ||
+  if (index >= LGMP_MAX_CLIENTS ||
+      m_subscribers[index].state != SubscriberState::BOUND ||
+      m_captureOwner != index || m_captureBinding != index ||
+      !m_stateKnown ||
+      !m_state.available || !m_state.active ||
+      !(m_state.capabilities & KVMFR_AUDIO_CAP_CAPTURE) ||
       !m_state.capture.formatValid ||
       !ValidFormat(m_state.capture.format) ||
       m_state.capture.state != AudioStreamState::RUNNING ||
       message.streamGeneration != m_state.capture.generation)
     return false;
 
+  Subscriber& subscriber = m_subscribers[index];
   const bool silent =
     (message.flags & KVMFR_AUDIO_MESSAGE_SILENT) != 0;
   const uint32_t bytes =
@@ -1371,9 +2015,9 @@ bool CLGMPAudioTransport::PrepareCapture(
       (silent ? message.length != 0 : message.length != bytes))
     return false;
 
-  AudioPacket packet;
+  AudioPacket packet = {};
   packet.endpointGeneration = m_state.generation;
-  packet.streamGeneration   = message.streamGeneration;
+  packet.streamGeneration = message.streamGeneration;
   if (message.flags & KVMFR_AUDIO_MESSAGE_DISCONTINUITY)
     packet.flags |= AUDIO_PACKET_DISCONTINUITY;
   if (message.flags & KVMFR_AUDIO_MESSAGE_SILENT)
@@ -1382,345 +2026,526 @@ bool CLGMPAudioTransport::PrepareCapture(
     packet.flags |= AUDIO_PACKET_CLOCK_VALID;
   if (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE)
     packet.flags |= AUDIO_PACKET_CLOCK_STABLE;
-  if (m_captureDiscontinuity ||
-      (m_clientSequenceKnown &&
-        message.sequence != m_nextClientSequence) ||
-      (!m_clientSequenceKnown && message.sequence != 0))
+  if (subscriber.captureDiscontinuity)
     packet.flags |= AUDIO_PACKET_DISCONTINUITY;
-  packet.frames   = message.frames;
+  packet.frames = message.frames;
   packet.position = message.position;
-  packet.timeNs   = message.timeNs;
-  packet.rateQ32  = message.rateQ32;
-  packet.format   = m_state.capture.format;
+  packet.timeNs = message.timeNs;
+  packet.rateQ32 = message.rateQ32;
+  packet.format = m_state.capture.format;
 
-  m_pendingCapture.valid       = true;
-  m_pendingCapture.buffer      = buffer;
-  m_pendingCapture.packet      = packet;
+  m_pendingCapture.valid = true;
+  m_pendingCapture.subscriber = index;
+  m_pendingCapture.subscriberSerial = subscriber.serial;
+  m_pendingCapture.buffer = buffer;
+  m_pendingCapture.packet = packet;
   m_pendingCapture.data = silent ? nullptr :
     static_cast<const uint8_t *>(buffer.data) +
       sizeof(KVMFRAudioMessage);
-  m_pendingCapture.size        = message.length;
+  m_pendingCapture.size = message.length;
   m_pendingCapture.readySerial = m_captureReadySerial;
-  m_nextClientSequence = message.sequence + 1;
-  m_clientSequenceKnown = true;
   m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
   return true;
 }
 
-void CLGMPAudioTransport::DrainInbound()
+void CLGMPAudio::DrainControl(uint32_t index)
 {
   for (unsigned count = 0; count < INBOUND_DRAIN_MAX; ++count)
   {
     CSRWSharedLock callbackLock(m_callbackLock);
     IAudioTarget * target = nullptr;
-    AudioClockFeedback feedback;
-    bool callCapture = false;
+    AudioClockFeedback feedback = {};
     bool callClock = false;
-    uint64_t ownerSerial = 0;
+    uint64_t subscriberSerial = 0;
+    uint32_t feedbackRoleEpoch = 0;
     {
       CSRWExclusiveLock lock(m_lock);
-      if (m_ownerState == OwnerState::RELEASING)
-      {
-        ReleasePendingCapture();
-        LGMPStreamBuffer buffer = {};
-        const LGMP_STATUS status = lgmpHostStreamReadPeek(
-          m_clientToHostStream, &buffer);
-        if (status == LGMP_ERR_STREAM_EMPTY ||
-            status == LGMP_ERR_STREAM_UNBOUND ||
-            status == LGMP_ERR_STREAM_STALE)
-          return;
-        if (status != LGMP_OK)
-        {
-          Fail("lgmpHostStreamReadPeek(audio release)", status);
-          return;
-        }
-        const LGMP_STATUS release = lgmpHostStreamReadRelease(
-          m_clientToHostStream, &buffer);
-        if (release != LGMP_OK)
-        {
-          Fail("lgmpHostStreamReadRelease(audio release)", release);
-          return;
-        }
-        m_inboundActivitySerial =
-          NextSerial(m_inboundActivitySerial);
-        continue;
-      }
-      if (m_ownerState != OwnerState::BOUND ||
-          !m_responseAdmitted || m_failed)
+      if (index >= LGMP_MAX_CLIENTS)
+        return;
+      Subscriber& subscriber = m_subscribers[index];
+      if (subscriber.state == SubscriberState::NONE)
         return;
 
-      target = m_started ? m_target : nullptr;
-      ownerSerial = m_ownerSerial;
+      LGMPStreamBuffer buffer = {};
+      const LGMP_STATUS peek = lgmpHostStreamReadPeek(
+        subscriber.clientControl, &buffer);
+      if (peek == LGMP_ERR_STREAM_EMPTY)
+        return;
+      if (peek == LGMP_ERR_STREAM_UNBOUND ||
+          peek == LGMP_ERR_STREAM_STALE)
+      {
+        if (subscriber.state == SubscriberState::BOUND)
+          BeginRelease(index, "client audio control binding lost");
+        return;
+      }
+      if (peek != LGMP_OK)
+      {
+        Fail("lgmpHostStreamReadPeek(audio control)", peek);
+        return;
+      }
+
+      const auto release = [&]() -> bool
+      {
+        const LGMP_STATUS status = lgmpHostStreamReadRelease(
+          subscriber.clientControl, &buffer);
+        if (status != LGMP_OK)
+        {
+          Fail("lgmpHostStreamReadRelease(audio control)", status);
+          return false;
+        }
+        m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
+        return true;
+      };
+
+      if (subscriber.state == SubscriberState::RELEASING)
+      {
+        if (!release())
+          return;
+        continue;
+      }
+
+      KVMFRAudioMessage message = {};
+      if (!ParseInbound(buffer, message))
+      {
+        (void)release();
+        BeginRelease(index, "malformed client audio control record");
+        return;
+      }
+
+      const bool sequenceValid = subscriber.controlSequenceKnown ?
+        message.sequence == subscriber.nextControlSequence :
+        message.sequence == 0;
+      if (!sequenceValid)
+      {
+        (void)release();
+        BeginRelease(index, "client audio control sequence gap");
+        return;
+      }
+      subscriber.nextControlSequence = message.sequence + 1;
+      subscriber.controlSequenceKnown = true;
+
+      const uint8_t * payload =
+        static_cast<const uint8_t *>(buffer.data) + sizeof(message);
+      switch (message.type)
+      {
+        case KVMFR_AUDIO_MESSAGE_PLAYBACK_SUBSCRIBE:
+        {
+          KVMFRAudioSubscription subscription = {};
+          if (message.length == sizeof(subscription))
+            memcpy(&subscription, payload, sizeof(subscription));
+          const bool valid = !message.streamGeneration &&
+            !message.flags && !message.position && !message.timeNs &&
+            !message.rateQ32 && !message.frames &&
+            message.length == sizeof(subscription) &&
+            subscription.bindingEpoch == subscriber.bindingEpoch &&
+            subscription.roleEpoch &&
+            !(subscription.subscriptions &
+              ~AUDIO_SUBSCRIPTION_MASK) && !subscription.reserved &&
+            (!(subscription.subscriptions &
+                KVMFR_AUDIO_SUBSCRIBE_CAPTURE) ||
+              (subscriber.clientCapabilities &
+                KVMFR_AUDIO_CAP_CAPTURE));
+          const bool initial = !subscriber.subscriptionReceived;
+          if (!valid || (initial &&
+              subscription.subscriptions !=
+                subscriber.subscriptions))
+          {
+            (void)release();
+            BeginRelease(index, "invalid audio subscription");
+            return;
+          }
+
+          if (!release())
+            return;
+          RenewLease(subscriber);
+          if (subscription.roleEpoch != subscriber.roleEpoch)
+          {
+            if (static_cast<int32_t>(subscription.roleEpoch -
+                subscriber.roleEpoch) > 0)
+            {
+              BeginRelease(index,
+                "invalid future audio subscription");
+              return;
+            }
+            if (initial)
+            {
+              subscriber.subscriptionReceived = true;
+              MarkStateDirty(index);
+              if (m_captureOwner == INVALID_SLOT)
+                AssignCaptureOwner();
+            }
+            continue;
+          }
+
+          const KVMFRAudioSubscriptionFlags previous =
+            subscriber.subscriptions;
+          subscriber.subscriptions = subscription.subscriptions;
+          subscriber.subscriptionReceived = true;
+
+          if (m_feedbackAuthority == index &&
+              !FeedbackEligible(subscriber))
+            RevokeFeedbackAuthority("playback subscription removed");
+          if (m_captureOwner == index &&
+              !CaptureEligible(subscriber))
+          {
+            m_captureOwner = INVALID_SLOT;
+            subscriber.captureRevoking = true;
+            subscriber.captureRevokeDeadline =
+              GetTickCount64() + CAPTURE_REVOKE_ACK_MS;
+            RefreshGranted(index, true);
+          }
+          if (previous != subscriber.subscriptions ||
+              !subscriber.pumpRevision)
+            MarkStateDirty(index);
+          if (subscriber.captureRevoking)
+            subscriber.captureRevokeRevision =
+              subscriber.stateRevision;
+          if (m_captureOwner == INVALID_SLOT &&
+              m_captureBinding == INVALID_SLOT)
+            AssignCaptureOwner();
+          continue;
+        }
+
+        case KVMFR_AUDIO_MESSAGE_STATE_ACK:
+        {
+          KVMFRAudioStateBarrier barrier = {};
+          if (message.length == sizeof(barrier))
+            memcpy(&barrier, payload, sizeof(barrier));
+          const bool valid = !message.flags && !message.position &&
+            !message.timeNs && !message.rateQ32 && !message.frames &&
+            message.length == sizeof(barrier) &&
+            barrier.bindingEpoch == subscriber.bindingEpoch &&
+            barrier.stateSerial;
+          if (!valid)
+          {
+            (void)release();
+            BeginRelease(index, "invalid audio state acknowledgement");
+            return;
+          }
+          if (!release())
+            return;
+          RenewLease(subscriber);
+          if (barrier.roleEpoch != subscriber.roleEpoch)
+          {
+            if (static_cast<int32_t>(barrier.roleEpoch -
+                subscriber.roleEpoch) < 0)
+              continue;
+            BeginRelease(index,
+              "invalid future audio state acknowledgement");
+            return;
+          }
+          if (subscriber.awaitingAck &&
+              message.streamGeneration ==
+                subscriber.barrierGeneration &&
+              !memcmp(&barrier, &subscriber.barrier,
+                sizeof(barrier)))
+          {
+            subscriber.awaitingAck = false;
+            subscriber.ready = true;
+            DEBUG_INFO("Audio client %u generation %u is ready",
+              subscriber.clientID,
+              subscriber.requestGeneration);
+          }
+          continue;
+        }
+
+        case KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK:
+        {
+          KVMFRAudioClockFeedback wire = {};
+          if (message.length == sizeof(wire))
+            memcpy(&wire, payload, sizeof(wire));
+          const uint32_t validFlags =
+            KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
+            KVMFR_AUDIO_MESSAGE_CLOCK_STABLE |
+            KVMFR_AUDIO_MESSAGE_DISCONTINUITY;
+          const bool valid = !(message.flags & ~validFlags) &&
+            (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) &&
+            (!(message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE) ||
+              (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID)) &&
+            message.streamGeneration && !message.frames &&
+            message.length == sizeof(wire) && wire.targetRateQ32 &&
+            wire.bindingEpoch == subscriber.bindingEpoch &&
+            wire.roleEpoch;
+          if (!valid)
+          {
+            (void)release();
+            BeginRelease(index, "invalid audio clock feedback");
+            return;
+          }
+
+          if (!release())
+            return;
+          RenewLease(subscriber);
+          if (wire.roleEpoch != subscriber.roleEpoch)
+          {
+            if (static_cast<int32_t>(wire.roleEpoch -
+                subscriber.roleEpoch) < 0)
+              continue;
+            BeginRelease(index,
+              "invalid future audio clock feedback");
+            return;
+          }
+          const bool current = m_feedbackAuthority == index &&
+            subscriber.ready &&
+            (subscriber.grantedCapabilities &
+              KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+            m_stateKnown && m_state.available && m_state.active &&
+            (m_state.capabilities &
+              KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
+            message.streamGeneration ==
+              m_state.playback.generation;
+          if (!current)
+            continue;
+
+          feedback.endpointGeneration = m_state.generation;
+          feedback.playbackGeneration = message.streamGeneration;
+          feedback.position = message.position;
+          feedback.timeNs = message.timeNs;
+          feedback.rateQ32 = message.rateQ32;
+          feedback.targetRateQ32 = wire.targetRateQ32;
+          feedback.flags = AUDIO_CLOCK_VALID;
+          if (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE)
+            feedback.flags |= AUDIO_CLOCK_STABLE;
+          if (message.flags & KVMFR_AUDIO_MESSAGE_DISCONTINUITY)
+            feedback.flags |= AUDIO_CLOCK_DISCONTINUITY;
+          target = m_started ? m_target : nullptr;
+          subscriberSerial = subscriber.serial;
+          feedbackRoleEpoch = subscriber.roleEpoch;
+          callClock = target != nullptr;
+          break;
+        }
+
+        case KVMFR_AUDIO_MESSAGE_KEEPALIVE:
+        case KVMFR_AUDIO_MESSAGE_RELEASE:
+          if (!EmptyControl(message))
+          {
+            (void)release();
+            BeginRelease(index, "invalid audio client control");
+            return;
+          }
+          if (!release())
+            return;
+          if (message.type == KVMFR_AUDIO_MESSAGE_RELEASE)
+          {
+            BeginRelease(index, "client audio release");
+            return;
+          }
+          RenewLease(subscriber);
+          continue;
+
+        default:
+          (void)release();
+          BeginRelease(index, "unsupported client audio control");
+          return;
+      }
+    }
+
+    if (!callClock)
+      continue;
+    const AudioResult result = target->SetClockFeedback(feedback);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (index >= LGMP_MAX_CLIENTS ||
+          m_subscribers[index].state != SubscriberState::BOUND ||
+          m_subscribers[index].serial != subscriberSerial)
+        return;
+      if (result == AudioResult::FAILED ||
+          result == AudioResult::REJECTED)
+      {
+        Subscriber& subscriber = m_subscribers[index];
+        if (m_feedbackAuthority != index || !subscriber.ready ||
+            subscriber.roleEpoch != feedbackRoleEpoch ||
+            !(subscriber.grantedCapabilities &
+              KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) ||
+            !m_stateKnown || m_state.playback.generation !=
+              feedback.playbackGeneration)
+          continue;
+        RevokeFeedbackAuthority("audio clock target failed");
+      }
+    }
+  }
+}
+
+void CLGMPAudio::DrainCapture()
+{
+  for (unsigned count = 0; count < INBOUND_DRAIN_MAX; ++count)
+  {
+    CSRWSharedLock callbackLock(m_callbackLock);
+    IAudioTarget * target = nullptr;
+    bool callCapture = false;
+    uint32_t index = INVALID_SLOT;
+    uint64_t subscriberSerial = 0;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_captureBinding == INVALID_SLOT)
+        return;
+      index = m_captureBinding;
+      Subscriber& subscriber = m_subscribers[index];
+
       if (m_pendingCapture.valid)
       {
-        if (!PendingCaptureCurrent())
+        if (!PendingCaptureCurrent(index))
         {
           ReleasePendingCapture();
-          m_captureDiscontinuity = true;
+          subscriber.captureDiscontinuity = true;
           continue;
         }
         if (m_pendingCapture.readySerial == m_captureReadySerial)
           return;
         m_pendingCapture.readySerial = m_captureReadySerial;
-        callCapture = true;
+        target = m_started ? m_target : nullptr;
+        subscriberSerial = subscriber.serial;
+        callCapture = target != nullptr;
       }
       else
       {
         LGMPStreamBuffer buffer = {};
-        const LGMP_STATUS status = lgmpHostStreamReadPeek(
-          m_clientToHostStream, &buffer);
-        if (status == LGMP_ERR_STREAM_EMPTY)
+        const LGMP_STATUS peek = lgmpHostStreamReadPeek(
+          m_captureStream, &buffer);
+        if (peek == LGMP_ERR_STREAM_EMPTY)
           return;
-        if (status == LGMP_ERR_STREAM_UNBOUND ||
-            status == LGMP_ERR_STREAM_STALE)
+        if (peek == LGMP_ERR_STREAM_UNBOUND ||
+            peek == LGMP_ERR_STREAM_STALE)
         {
-          BeginRelease("client-to-host audio stream binding lost");
-          return;
-        }
-        if (status != LGMP_OK)
-        {
-          Fail("lgmpHostStreamReadPeek(audio)", status);
+          if (subscriber.state == SubscriberState::BOUND)
+            BeginRelease(index, "capture audio binding lost");
           return;
         }
-
-        KVMFRAudioMessage message = {};
-        if (!ParseInbound(buffer, message))
+        if (peek != LGMP_OK)
         {
-          const LGMP_STATUS release = lgmpHostStreamReadRelease(
-            m_clientToHostStream, &buffer);
-          if (release != LGMP_OK)
-            Fail("lgmpHostStreamReadRelease(audio invalid)", release);
-          BeginRelease("malformed client-to-host audio record");
+          Fail("lgmpHostStreamReadPeek(audio capture)", peek);
           return;
         }
 
-        const bool sequenceGap =
-          (m_clientSequenceKnown &&
-            message.sequence != m_nextClientSequence) ||
-          (!m_clientSequenceKnown && message.sequence != 0);
-        const auto consume = [&]() -> bool
+        const auto release = [&]() -> bool
         {
-          const LGMP_STATUS release = lgmpHostStreamReadRelease(
-            m_clientToHostStream, &buffer);
-          if (release != LGMP_OK)
+          const LGMP_STATUS status = lgmpHostStreamReadRelease(
+            m_captureStream, &buffer);
+          if (status != LGMP_OK)
           {
-            Fail("lgmpHostStreamReadRelease(audio)", release);
+            Fail("lgmpHostStreamReadRelease(audio capture)", status);
             return false;
           }
-          m_nextClientSequence = message.sequence + 1;
-          m_clientSequenceKnown = true;
           m_inboundActivitySerial =
             NextSerial(m_inboundActivitySerial);
           return true;
         };
 
-        if (!m_clientReady &&
-            message.type != KVMFR_AUDIO_MESSAGE_KEEPALIVE &&
-            message.type != KVMFR_AUDIO_MESSAGE_RELEASE)
+        if (subscriber.state == SubscriberState::RELEASING ||
+            subscriber.captureRevoking)
         {
-          if (!consume())
+          if (!release())
             return;
-          BeginRelease("audio data received before client readiness");
+          continue;
+        }
+
+        KVMFRAudioMessage message = {};
+        if (!ParseInbound(buffer, message))
+        {
+          (void)release();
+          BeginRelease(index, "malformed capture audio record");
           return;
         }
+        const bool sequenceGap =
+          (subscriber.captureSequenceKnown &&
+            message.sequence != subscriber.nextCaptureSequence) ||
+          (!subscriber.captureSequenceKnown && message.sequence != 0);
+        subscriber.nextCaptureSequence = message.sequence + 1;
+        subscriber.captureSequenceKnown = true;
+        if (sequenceGap)
+          subscriber.captureDiscontinuity = true;
 
-        switch (message.type)
+        const bool clockStable =
+          (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE) != 0;
+        const bool clockValid =
+          (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) != 0;
+        const bool structurallyValid =
+          message.type == KVMFR_AUDIO_MESSAGE_CAPTURE_DATA &&
+          !(message.flags & ~WIRE_PACKET_FLAG_MASK) &&
+          (!clockStable || clockValid) &&
+          (clockValid || (!message.position && !message.timeNs &&
+            !message.rateQ32)) && message.streamGeneration &&
+          message.frames &&
+          message.frames <= KVMFR_AUDIO_MAX_FRAMES_PER_PACKET;
+        if (!structurallyValid)
         {
-          case KVMFR_AUDIO_MESSAGE_CAPTURE_DATA:
-          {
-            const bool clockStable =
-              (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE) != 0;
-            const bool clockValid =
-              (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) != 0;
-            if (!(m_clientCapabilities & KVMFR_AUDIO_CAP_CAPTURE) ||
-                (message.flags & ~WIRE_PACKET_FLAG_MASK) ||
-                (clockStable && !clockValid) ||
-                (!clockValid && (message.position || message.timeNs ||
-                  message.rateQ32)) || !message.streamGeneration ||
-                !message.frames ||
-                message.frames > KVMFR_AUDIO_MAX_FRAMES_PER_PACKET)
-            {
-              consume();
-              BeginRelease("invalid capture audio record");
-              return;
-            }
-            RenewLease();
-
-            const bool captureCurrent = m_stateKnown &&
-              m_state.available && m_state.active &&
-              (m_state.capabilities & AUDIO_CAP_CAPTURE) &&
-              m_state.capture.formatValid &&
-              ValidFormat(m_state.capture.format) &&
-              m_state.capture.state == AudioStreamState::RUNNING &&
-              message.streamGeneration ==
-                m_state.capture.generation;
-            if (captureCurrent)
-            {
-              const bool silent = (message.flags &
-                KVMFR_AUDIO_MESSAGE_SILENT) != 0;
-              const uint32_t bytes = message.frames *
-                m_state.capture.format.blockAlign;
-              if (bytes > KVMFR_AUDIO_PCM_BYTES ||
-                  (silent ? message.length != 0 :
-                    message.length != bytes))
-              {
-                consume();
-                BeginRelease("invalid capture audio payload");
-                return;
-              }
-            }
-
-            if (!PrepareCapture(message, buffer))
-            {
-              consume();
-              m_captureDiscontinuity = true;
-              continue;
-            }
-            if (sequenceGap)
-              m_pendingCapture.packet.flags |=
-                AUDIO_PACKET_DISCONTINUITY;
-            callCapture = true;
-            break;
-          }
-
-          case KVMFR_AUDIO_MESSAGE_CLOCK_FEEDBACK:
-          {
-            const uint32_t validFlags =
-              KVMFR_AUDIO_MESSAGE_CLOCK_VALID |
-              KVMFR_AUDIO_MESSAGE_CLOCK_STABLE |
-              KVMFR_AUDIO_MESSAGE_DISCONTINUITY;
-            KVMFRAudioClockFeedback wire = {};
-            if (message.length == sizeof(wire))
-              memcpy(&wire, static_cast<const uint8_t *>(buffer.data) +
-                sizeof(message), sizeof(wire));
-            const bool valid =
-              (m_clientCapabilities &
-                KVMFR_AUDIO_CAP_CLOCK_FEEDBACK) &&
-              message.flags && !(message.flags & ~validFlags) &&
-              (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) &&
-              (!(message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE) ||
-                (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID)) &&
-              message.streamGeneration && !message.frames &&
-              message.length == sizeof(wire) && !wire.reserved &&
-              wire.targetRateQ32;
-            if (!valid)
-            {
-              consume();
-              BeginRelease("invalid audio clock feedback");
-              return;
-            }
-
-            const bool current = m_stateKnown && m_state.available &&
-              m_state.active && (m_state.capabilities &
-                AUDIO_CAP_CLOCK_FEEDBACK) &&
-              message.streamGeneration ==
-                m_state.playback.generation;
-            if (!consume())
-              return;
-            RenewLease();
-            if (sequenceGap)
-              m_captureDiscontinuity = true;
-            if (!current)
-              continue;
-            feedback.endpointGeneration = m_state.generation;
-            feedback.playbackGeneration = message.streamGeneration;
-            feedback.position      = message.position;
-            feedback.timeNs        = message.timeNs;
-            feedback.rateQ32       = message.rateQ32;
-            feedback.targetRateQ32 = wire.targetRateQ32;
-            feedback.flags         = AUDIO_CLOCK_VALID;
-            if (message.flags & KVMFR_AUDIO_MESSAGE_CLOCK_STABLE)
-              feedback.flags |= AUDIO_CLOCK_STABLE;
-            if (sequenceGap ||
-                (message.flags &
-                  KVMFR_AUDIO_MESSAGE_DISCONTINUITY))
-              feedback.flags |= AUDIO_CLOCK_DISCONTINUITY;
-            callClock = true;
-            break;
-          }
-
-          case KVMFR_AUDIO_MESSAGE_KEEPALIVE:
-          case KVMFR_AUDIO_MESSAGE_RELEASE:
-          {
-            const bool empty = !message.streamGeneration &&
-              !message.flags && !message.position && !message.timeNs &&
-              !message.rateQ32 && !message.frames && !message.length;
-            if (!consume())
-              return;
-            if (!empty)
-            {
-              BeginRelease("invalid audio owner control record");
-              return;
-            }
-            if (message.type == KVMFR_AUDIO_MESSAGE_RELEASE)
-            {
-              BeginRelease("client audio release");
-              return;
-            }
-            if (!m_clientReady)
-            {
-              if (sequenceGap)
-              {
-                BeginRelease("invalid initial audio keepalive sequence");
-                return;
-              }
-              m_clientReady = true;
-              DEBUG_INFO("Audio owner %u generation %u is ready",
-                m_ownerClientID, m_ownerGeneration);
-            }
-            if (sequenceGap)
-              m_captureDiscontinuity = true;
-            RenewLease();
-            continue;
-          }
-
-          default:
-            consume();
-            BeginRelease("unsupported client-to-host audio record");
-            return;
+          (void)release();
+          BeginRelease(index, "invalid capture audio record");
+          return;
         }
+        RenewLease(subscriber);
+        const bool current = m_captureOwner == index &&
+          (subscriber.grantedCapabilities &
+            KVMFR_AUDIO_CAP_CAPTURE) &&
+          subscriber.announcedCapture == message.streamGeneration &&
+          m_stateKnown && m_state.available && m_state.active &&
+          (m_state.capabilities & KVMFR_AUDIO_CAP_CAPTURE) &&
+          m_state.capture.formatValid &&
+          ValidFormat(m_state.capture.format) &&
+          m_state.capture.state == AudioStreamState::RUNNING &&
+          message.streamGeneration == m_state.capture.generation;
+        if (!current)
+        {
+          if (!release())
+            return;
+          subscriber.captureDiscontinuity = true;
+          continue;
+        }
+
+        const bool silent = (message.flags &
+          KVMFR_AUDIO_MESSAGE_SILENT) != 0;
+        const uint32_t bytes = message.frames *
+          m_state.capture.format.blockAlign;
+        if (bytes > KVMFR_AUDIO_PCM_BYTES ||
+            (silent ? message.length != 0 :
+              message.length != bytes))
+        {
+          (void)release();
+          BeginRelease(index, "invalid capture audio payload");
+          return;
+        }
+        if (!PrepareCapture(message, buffer, index))
+        {
+          if (!release())
+            return;
+          subscriber.captureDiscontinuity = true;
+          continue;
+        }
+        target = m_started ? m_target : nullptr;
+        subscriberSerial = subscriber.serial;
+        callCapture = target != nullptr;
       }
-      m_captureCallbackInFlight = target && callCapture;
+      m_captureCallbackInFlight = callCapture;
     }
 
     AudioResult result = AudioResult::UNAVAILABLE;
-    if (target && callCapture)
+    if (callCapture)
       result = target->SendCapture(m_pendingCapture.packet,
         m_pendingCapture.data, m_pendingCapture.size);
-    else if (target && callClock)
-      result = target->SetClockFeedback(feedback);
 
     {
       CSRWExclusiveLock lock(m_lock);
-      if (callCapture)
-        m_captureCallbackInFlight = false;
-      if (ownerSerial != m_ownerSerial ||
-          m_ownerState != OwnerState::BOUND)
+      m_captureCallbackInFlight = false;
+      if (index >= LGMP_MAX_CLIENTS ||
+          m_subscribers[index].serial != subscriberSerial ||
+          !m_pendingCapture.valid)
       {
         if (m_pendingCapture.valid)
           ReleasePendingCapture();
         return;
       }
-      if (callClock)
-      {
-        if (result == AudioResult::FAILED ||
-            result == AudioResult::REJECTED)
-          BeginRelease("audio clock target failed");
-        continue;
-      }
-      if (!callCapture || !m_pendingCapture.valid)
-        continue;
-      if (!PendingCaptureCurrent())
+      Subscriber& subscriber = m_subscribers[index];
+      if (!PendingCaptureCurrent(index))
       {
         ReleasePendingCapture();
-        m_captureDiscontinuity = true;
+        subscriber.captureDiscontinuity = true;
         continue;
       }
       if (result == AudioResult::BUSY)
         return;
 
       const LGMP_STATUS release = lgmpHostStreamReadRelease(
-        m_clientToHostStream, &m_pendingCapture.buffer);
+        m_captureStream, &m_pendingCapture.buffer);
       if (release != LGMP_OK)
       {
         m_pendingCapture = {};
@@ -1728,64 +2553,55 @@ void CLGMPAudioTransport::DrainInbound()
         return;
       }
       m_pendingCapture = {};
-      m_inboundActivitySerial =
-        NextSerial(m_inboundActivitySerial);
-      m_captureDiscontinuity = result != AudioResult::ACCEPTED;
+      m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
+      subscriber.captureDiscontinuity =
+        result != AudioResult::ACCEPTED;
       if (result == AudioResult::FAILED ||
           result == AudioResult::REJECTED)
       {
-        BeginRelease("audio capture target failed");
+        BeginRelease(index, "audio capture target failed");
         return;
       }
     }
   }
 }
 
-void CLGMPAudioTransport::ProcessActivation()
+void CLGMPAudio::DrainInbound()
+{
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    DrainControl(index);
+  DrainCapture();
+}
+
+void CLGMPAudio::ProcessActivation()
 {
   CSRWSharedLock callbackLock(m_callbackLock);
   IAudioTarget * target = nullptr;
   bool activate = false;
-  uint64_t ownerSerial = 0;
   {
     CSRWSharedLock lock(m_lock);
-    if (!m_started || !m_target || m_failed ||
-        m_ownerState == OwnerState::NONE)
+    if (!m_started || !m_target || m_failed || !m_stateKnown)
       return;
-    if (m_ownerState == OwnerState::BOUND &&
-        m_responseAdmitted && m_clientReady &&
-        !m_activationIssued)
-      activate = true;
-    else if (m_ownerState != OwnerState::RELEASING ||
-        !m_activationIssued || m_deactivationIssued)
+    activate = HasBoundSubscribers();
+    if (activate == m_activationCommanded)
       return;
-    target      = m_target;
-    ownerSerial = m_ownerSerial;
+    target = m_target;
   }
 
   const AudioResult result = target->SetAudioActive(activate);
   CSRWExclusiveLock lock(m_lock);
-  if (ownerSerial != m_ownerSerial ||
-      m_ownerState == OwnerState::NONE)
+  if (!m_started || m_target != target)
     return;
-  if (activate)
-  {
-    if (m_ownerState != OwnerState::BOUND || m_activationIssued)
-      return;
-    if (result == AudioResult::ACCEPTED)
-      m_activationIssued = true;
-    else if (result == AudioResult::FAILED ||
-        result == AudioResult::REJECTED)
-      BeginRelease("audio endpoint activation failed");
-  }
-  else if (m_ownerState == OwnerState::RELEASING &&
-      (result == AudioResult::ACCEPTED ||
-        result == AudioResult::UNAVAILABLE ||
-        result == AudioResult::STALE))
-    m_deactivationIssued = true;
+  if (result == AudioResult::ACCEPTED ||
+      (!activate && (result == AudioResult::UNAVAILABLE ||
+        result == AudioResult::STALE)))
+    m_activationCommanded = activate;
+  else if (result == AudioResult::FAILED ||
+      result == AudioResult::REJECTED)
+    Fail("audio endpoint activation", LGMP_ERR_CORRUPTED);
 }
 
-void CLGMPAudioTransport::NotifyPlaybackReady()
+void CLGMPAudio::NotifyPlaybackReady()
 {
   CSRWSharedLock callbackLock(m_callbackLock);
   IAudioTarget * target = nullptr;
@@ -1801,7 +2617,7 @@ void CLGMPAudioTransport::NotifyPlaybackReady()
     target->PlaybackReceiveReady();
 }
 
-void CLGMPAudioTransport::NotifyFailure()
+void CLGMPAudio::NotifyFailure()
 {
   CSRWSharedLock callbackLock(m_callbackLock);
   IAudioTarget * target = nullptr;
@@ -1817,7 +2633,7 @@ void CLGMPAudioTransport::NotifyFailure()
     target->AudioFailed();
 }
 
-void CLGMPAudioTransport::Fail(
+void CLGMPAudio::Fail(
   const char * operation, LGMP_STATUS status)
 {
   if (!m_failed)
@@ -1827,28 +2643,32 @@ void CLGMPAudioTransport::Fail(
   m_failed = true;
 }
 
-void CLGMPAudioTransport::Process()
+void CLGMPAudio::Process()
 {
   {
     CSRWExclusiveLock lock(m_lock);
-    if (!m_initialized)
+    if (!m_claimResponderReady)
       return;
     PumpResponses();
-  }
-
-  {
-    CSRWExclusiveLock lock(m_lock);
-    MaintainOwner(GetTickCount64());
+    if (!m_initialized)
+      return;
+    MaintainSubscribers(GetTickCount64());
     PumpResponses();
     PumpState();
-    CheckPlaybackCredit();
+    CheckPlaybackBackpressure(GetTickCount64());
   }
   ProcessActivation();
   NotifyPlaybackReady();
   NotifyFailure();
 }
 
-bool CLGMPAudioTransport::Start(IAudioTarget& target)
+bool CLGMPAudio::CanRespondToClaims()
+{
+  CSRWSharedLock lock(m_lock);
+  return m_claimResponderReady;
+}
+
+bool CLGMPAudio::Start(IAudioTarget& target)
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
   CSRWExclusiveLock callbackLock(m_callbackLock);
@@ -1861,58 +2681,68 @@ bool CLGMPAudioTransport::Start(IAudioTarget& target)
   m_started = true;
   m_stateKnown = false;
   m_failureNotified = false;
+  m_activationCommanded = false;
   return true;
 }
 
-void CLGMPAudioTransport::Stop()
+void CLGMPAudio::Stop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
   CSRWExclusiveLock callbackLock(m_callbackLock);
   CSRWExclusiveLock lock(m_lock);
   if (!m_started && !m_target)
     return;
-  if (m_ownerState != OwnerState::NONE)
-    BeginRelease("audio source stopped");
-  else
-    ClearBlockedPlayback(false);
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    BeginRelease(index, "audio source stopped");
+  ClearBlockedPlayback(false);
   m_started = false;
-  m_target  = nullptr;
+  m_target = nullptr;
   m_playbackReadyPending = false;
+  m_activationCommanded = false;
 }
 
-void CLGMPAudioTransport::TransportStop()
+void CLGMPAudio::TransportStop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
   StopInboundWorker();
   CSRWExclusiveLock callbackLock(m_callbackLock);
   CSRWExclusiveLock lock(m_lock);
   m_started = false;
-  m_target  = nullptr;
+  m_target = nullptr;
   m_playbackReadyPending = false;
   ClearBlockedPlayback(false);
   ReleasePendingCapture();
-  ForceUnbindStreams();
-  ResetOwner();
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+  {
+    if (m_subscribers[index].state == SubscriberState::NONE)
+      continue;
+    ForceUnbindSubscriber(index);
+    ResetSubscriber(index);
+  }
+  m_feedbackAuthority = INVALID_SLOT;
+  m_captureOwner = INVALID_SLOT;
+  m_captureBinding = INVALID_SLOT;
+  m_activationCommanded = false;
   for (PendingResponse& response : m_pendingResponse)
     response = {};
   for (ClaimRecord& record : m_claimRecord)
     record = {};
 }
 
-void CLGMPAudioTransport::AudioState(
+void CLGMPAudio::AudioState(
   const AudioEndpointStatus& state)
 {
   CSRWExclusiveLock lock(m_lock);
   if (!m_started)
     return;
 
+  const uint64_t previousPlayback = m_previousPlaybackGeneration;
   if (state.playback.state == AudioStreamState::RUNNING)
     m_playbackRunGeneration = state.playback.generation;
 
   if (m_playbackBlocked)
   {
     const bool playbackCurrent = state.available && state.active &&
-      (m_clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK) &&
       (state.capabilities & AUDIO_CAP_PLAYBACK) &&
       state.playback.formatValid &&
       ValidFormat(state.playback.format) &&
@@ -1925,20 +2755,34 @@ void CLGMPAudioTransport::AudioState(
       ClearBlockedPlayback(true);
   }
 
-  m_state      = state;
+  m_state = state;
   m_stateKnown = true;
-  if (m_ownerState == OwnerState::BOUND && m_responseAdmitted)
-    m_statusDirty = true;
+  m_previousPlaybackGeneration = state.playback.generation;
+  for (uint32_t index = 0; index < LGMP_MAX_CLIENTS; ++index)
+    RefreshGranted(index, true);
+  MarkAllStateDirty();
+  if (state.playback.generation &&
+      state.playback.generation != previousPlayback)
+  {
+    for (Subscriber& subscriber : m_subscribers)
+      if (subscriber.state == SubscriberState::BOUND)
+        subscriber.feedbackRevoked = false;
+    PromoteFeedbackAuthority(state.playback.generation);
+  }
+  if (m_captureOwner == INVALID_SLOT)
+    AssignCaptureOwner();
   if (!m_inboundStopping && m_inboundWakeEvent)
     SetEvent(m_inboundWakeEvent);
 }
 
-AudioResult CLGMPAudioTransport::SendPlayback(
+AudioResult CLGMPAudio::SendPlayback(
   const AudioPacket& packet, const uint8_t * data, size_t size)
 {
   if ((packet.flags & ~AUDIO_PACKET_FLAG_MASK) ||
       ((packet.flags & AUDIO_PACKET_CLOCK_STABLE) &&
         !(packet.flags & AUDIO_PACKET_CLOCK_VALID)) ||
+      (!(packet.flags & AUDIO_PACKET_CLOCK_VALID) &&
+        (packet.position || packet.timeNs || packet.rateQ32)) ||
       !packet.frames ||
       packet.frames > AUDIO_MAX_FRAMES_PER_PACKET ||
       !ValidFormat(packet.format))
@@ -1956,10 +2800,11 @@ AudioResult CLGMPAudioTransport::SendPlayback(
       (size != m_blockedPlaybackSize ||
         !SamePacket(packet, m_blockedPlayback)))
   {
-    DEBUG_WARN("Audio playback retry did not match the retained packet");
+    DEBUG_WARN("Audio playback retry did not match retained packet");
     ClearBlockedPlayback(false);
     return AudioResult::REJECTED;
   }
+  const bool retainedRetry = m_playbackBlocked;
   if (!m_started)
   {
     ClearBlockedPlayback(false);
@@ -1970,13 +2815,23 @@ AudioResult CLGMPAudioTransport::SendPlayback(
     ClearBlockedPlayback(false);
     return AudioResult::FAILED;
   }
-  if (m_ownerState != OwnerState::BOUND ||
-      !(m_clientCapabilities & KVMFR_AUDIO_CAP_PLAYBACK))
+
+  bool hasPlaybackSubscriber = false;
+  for (const Subscriber& subscriber : m_subscribers)
+    if (subscriber.responseAdmitted &&
+        subscriber.subscriptionReceived &&
+        PlaybackEligible(subscriber))
+    {
+      hasPlaybackSubscriber = true;
+      break;
+    }
+  if (!hasPlaybackSubscriber)
   {
     ClearBlockedPlayback(false);
     return AudioResult::ACCEPTED;
   }
-  if (!m_responseAdmitted || !m_clientReady || !m_stateKnown)
+
+  if (!m_stateKnown)
   {
     if (!RememberBlockedPlayback(packet, size))
       return AudioResult::REJECTED;
@@ -2002,6 +2857,101 @@ AudioResult CLGMPAudioTransport::SendPlayback(
     return AudioResult::UNAVAILABLE;
   }
 
+  PumpState();
+  if (m_failed)
+    return AudioResult::FAILED;
+  if (!HasReadyPlayback())
+  {
+    if (!RememberBlockedPlayback(packet, size))
+      return AudioResult::REJECTED;
+    if (!m_inboundStopping && m_inboundWakeEvent)
+      SetEvent(m_inboundWakeEvent);
+    return AudioResult::BUSY;
+  }
+
+  if (m_feedbackAuthority != INVALID_SLOT)
+  {
+    Subscriber& authority = m_subscribers[m_feedbackAuthority];
+    if (authority.ready && PlaybackEligible(authority) &&
+        (authority.grantedCapabilities &
+          KVMFR_AUDIO_CAP_CLOCK_FEEDBACK))
+    {
+      LGMPSPMCReaderState reader = {};
+      const LGMP_STATUS query = lgmpHostSPMCReaderGetState(
+        m_playbackStream, authority.playbackReaderID, &reader);
+      if (query == LGMP_ERR_STREAM_BUSY)
+      {
+        if (!RememberBlockedPlayback(packet, size))
+          return AudioResult::REJECTED;
+        if (!m_inboundStopping && m_inboundWakeEvent)
+          SetEvent(m_inboundWakeEvent);
+        return AudioResult::BUSY;
+      }
+      bool stalled = false;
+      if (query == LGMP_OK)
+      {
+        if (reader.state != LGMP_SPMC_READER_READY ||
+            reader.clientID != authority.clientID ||
+            reader.epoch != authority.playbackReaderEpoch)
+          RevokeFeedbackAuthority("playback reader binding lost");
+        else
+          stalled = reader.producerSequence -
+            reader.consumerSequence >= KVMFR_AUDIO_STREAM_SLOT_COUNT;
+      }
+      else
+      {
+        Fail("lgmpHostSPMCReaderGetState(audio)", query);
+        return AudioResult::FAILED;
+      }
+
+      if (stalled && m_feedbackAuthority != INVALID_SLOT)
+      {
+        const uint64_t now = GetTickCount64();
+        if (!m_authorityBlockedSince)
+          m_authorityBlockedSince = now;
+        if (now - m_authorityBlockedSince >= AUTHORITY_STALL_MS)
+          RevokeFeedbackAuthority("playback reader stalled");
+        else
+        {
+          if (!RememberBlockedPlayback(packet, size))
+            return AudioResult::REJECTED;
+          if (!m_inboundStopping && m_inboundWakeEvent)
+            SetEvent(m_inboundWakeEvent);
+          return AudioResult::BUSY;
+        }
+      }
+      else
+        m_authorityBlockedSince = 0;
+    }
+  }
+
+  LGMPSPMCBuffer buffer = {};
+  LGMP_STATUS status = lgmpHostSPMCWriteAcquire(
+    m_playbackStream, &buffer);
+  if (status == LGMP_ERR_STREAM_BUSY)
+  {
+    if (!RememberBlockedPlayback(packet, size))
+      return AudioResult::REJECTED;
+    return AudioResult::BUSY;
+  }
+  if (status != LGMP_OK)
+  {
+    Fail("lgmpHostSPMCWriteAcquire(audio)", status);
+    return AudioResult::FAILED;
+  }
+
+  const size_t required = sizeof(KVMFRAudioMessage) + size;
+  if (!buffer.data || buffer.capacity < required)
+  {
+    const LGMP_STATUS cancel =
+      lgmpHostSPMCWriteCancel(m_playbackStream, &buffer);
+    if (cancel != LGMP_OK)
+      DEBUG_WARN("Failed to cancel audio playback reservation: %s",
+        lgmpStatusString(cancel));
+    Fail("undersized playback audio slot", LGMP_ERR_INVALID_SIZE);
+    return AudioResult::FAILED;
+  }
+
   KVMFRAudioMessageFlags flags = 0;
   if (packet.flags & AUDIO_PACKET_DISCONTINUITY)
     flags |= KVMFR_AUDIO_MESSAGE_DISCONTINUITY;
@@ -2012,54 +2962,40 @@ AudioResult CLGMPAudioTransport::SendPlayback(
   if (packet.flags & AUDIO_PACKET_CLOCK_STABLE)
     flags |= KVMFR_AUDIO_MESSAGE_CLOCK_STABLE;
 
-  if (m_playbackCreditValid)
-  {
-    LGMPStreamBuffer buffer = m_playbackCredit;
-    m_playbackCredit = {};
-    m_playbackCreditValid = false;
-    const bool committed = CommitMessage(buffer,
-      KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA, packet.streamGeneration,
-      flags, packet.position, packet.timeNs, packet.rateQ32,
-      packet.frames, data, static_cast<uint32_t>(size));
-    ClearBlockedPlayback(false);
-    if (committed)
-      return AudioResult::ACCEPTED;
-    if (m_failed)
-      return AudioResult::FAILED;
-    return m_ownerState == OwnerState::BOUND ?
-      AudioResult::BUSY : AudioResult::ACCEPTED;
-  }
+  KVMFRAudioMessage message = {};
+  message.version = KVMFR_AUDIO_MESSAGE_VERSION;
+  message.size = sizeof(message);
+  message.type = KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA;
+  message.streamGeneration = packet.streamGeneration;
+  message.flags = flags;
+  message.sequence = buffer.sequence;
+  message.position = packet.position;
+  message.timeNs = packet.timeNs;
+  message.rateQ32 = packet.rateQ32;
+  message.frames = packet.frames;
+  message.length = static_cast<uint32_t>(size);
+  WCWrite::Copy(buffer.data, &message, sizeof(message));
+  if (size)
+    WCWrite::Copy(static_cast<uint8_t *>(buffer.data) +
+      sizeof(message), data, size);
+  WCWrite::Flush();
 
-  PumpState();
-  if (m_failed)
+  status = lgmpHostSPMCWriteCommit(m_playbackStream, &buffer,
+    static_cast<uint32_t>(required));
+  if (status != LGMP_OK)
+  {
+    Fail("lgmpHostSPMCWriteCommit(audio)", status);
     return AudioResult::FAILED;
-  if (m_ownerState != OwnerState::BOUND)
-    return AudioResult::ACCEPTED;
-  if (m_statusDirty ||
-      m_announcedPlayback != packet.streamGeneration)
-  {
-    if (!RememberBlockedPlayback(packet, size))
-      return AudioResult::REJECTED;
-    return AudioResult::BUSY;
   }
 
-  if (!WriteMessage(KVMFR_AUDIO_MESSAGE_PLAYBACK_DATA,
-      packet.streamGeneration, flags, packet.position, packet.timeNs,
-      packet.rateQ32, packet.frames, data, static_cast<uint32_t>(size)))
-  {
-    if (m_failed)
-      return AudioResult::FAILED;
-    if (m_ownerState != OwnerState::BOUND)
-      return AudioResult::ACCEPTED;
-    if (!RememberBlockedPlayback(packet, size))
-      return AudioResult::REJECTED;
-    return AudioResult::BUSY;
-  }
   ClearBlockedPlayback(false);
+  if (retainedRetry)
+    m_playbackReadyPending = false;
+  m_inboundActivitySerial = NextSerial(m_inboundActivitySerial);
   return AudioResult::ACCEPTED;
 }
 
-void CLGMPAudioTransport::CaptureReceiveReady()
+void CLGMPAudio::CaptureReceiveReady()
 {
   CSRWExclusiveLock lock(m_lock);
   if (m_started)
