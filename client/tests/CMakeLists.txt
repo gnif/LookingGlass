@@ -14,6 +14,19 @@ set_tests_properties(common-platform-tests PROPERTIES
   TIMEOUT 10
 )
 
+if(LG_CLIENT_PLATFORM_WINDOWS)
+  add_executable(common-windows-tests
+    common_windows_test.c
+  )
+  target_link_libraries(common-windows-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  add_test(NAME common-windows-tests
+    COMMAND common-windows-tests
+  )
+endif()
+
 add_executable(font-tests
   font_test.c
   ../src/font.c

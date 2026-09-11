@@ -23,11 +23,12 @@
 
 bool display_getPathInfo(HMONITOR monitor, DISPLAYCONFIG_PATH_INFO * info)
 {
-  bool result = false;
-  UINT32 numPath, numMode;
+  bool   result = false;
+  UINT32 numPath;
+  UINT32 numMode;
 
   MONITORINFOEXW viewInfo = { .cbSize = sizeof(viewInfo) };
-    if (!GetMonitorInfoW(monitor, (MONITORINFO*)&viewInfo))
+  if (!GetMonitorInfoW(monitor, (MONITORINFO*)&viewInfo))
   {
     DEBUG_ERROR("Failed to get the monitor info");
     goto err;
@@ -37,11 +38,11 @@ err_retry:
   if (FAILED(GetDisplayConfigBufferSizes(QDC_ONLY_ACTIVE_PATHS, &numPath, &numMode)))
     goto err;
 
-  DISPLAYCONFIG_PATH_INFO * pathInfo = calloc(sizeof(*pathInfo), numPath);
+  DISPLAYCONFIG_PATH_INFO * pathInfo = calloc(numPath, sizeof(*pathInfo));
   if (!pathInfo)
     goto err_mem_pathInfo;
 
-  DISPLAYCONFIG_MODE_INFO * modeInfo = calloc(sizeof(*modeInfo), numMode);
+  DISPLAYCONFIG_MODE_INFO * modeInfo = calloc(numMode, sizeof(*modeInfo));
   if (!modeInfo)
     goto err_mem_modeInfo;
 

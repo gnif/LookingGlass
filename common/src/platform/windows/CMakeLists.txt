@@ -40,6 +40,9 @@ add_library(lg_common_platform_code STATIC
   windebug.c
   ivshmem.c
   time.c
+  win32.c
+  paths.c
+  open.c
   cpuinfo.c
   display.c
   proctitle.c
@@ -50,6 +53,9 @@ target_link_libraries(lg_common_platform_code
   setupapi
   bcrypt
   ntdll
+  ole32
+  shell32
+  uuid
 )
 
 if (ENABLE_BACKTRACE)

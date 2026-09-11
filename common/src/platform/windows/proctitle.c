@@ -22,6 +22,9 @@
 
 void lgInitProcessTitle(int argc, char **pargv[])
 {
+  (void)argc;
+  (void)pargv;
+
   // not implemented on Windows
 }
 
@@ -32,5 +35,7 @@ bool lgCanSetProcessTitle(void)
 
 void lgSetProcessTitle(const char * title)
 {
+  (void)title;
+
   // not implemented on Windows
 }
