@@ -24,6 +24,7 @@
 #include "app.h"
 
 #include "common/debug.h"
+#include "common/filesystem.h"
 #include "common/option.h"
 #include "common/paths.h"
 #include "common/stringlist.h"
@@ -35,7 +36,6 @@
 #include "basic.vert.h"
 
 #include <ctype.h>
-#include <dirent.h>
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
@@ -46,7 +46,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
-#include <sys/stat.h>
 
 #define GLSL_MAX_TEXTURES 16
 #define GLSL_EXPR_STACK   128
@@ -1133,27 +1132,24 @@ static bool scanDirectory(const char * root, const char * relative,
   if (!path)
     return false;
 
-  DIR * directory = opendir(path);
-  if (!directory)
+  StringList entries = lgListDirectory(path);
+  if (!entries)
   {
-    DEBUG_ERROR("Unable to open GLSL shader directory '%s': %s",
-        path, strerror(errno));
+    DEBUG_ERROR("Unable to open GLSL shader directory '%s'", path);
     free(path);
     return false;
   }
 
   bool result = true;
-  struct dirent * entry;
-  while ((entry = readdir(directory)))
+  for (unsigned int i = 0; i < stringlist_count(entries); ++i)
   {
-    if (!strcmp(entry->d_name, ".") || !strcmp(entry->d_name, ".."))
-      continue;
+    const char * entry = stringlist_at(entries, i);
 
     char * childRelative;
     if (relative && *relative)
-      alloc_sprintf(&childRelative, "%s/%s", relative, entry->d_name);
+      alloc_sprintf(&childRelative, "%s/%s", relative, entry);
     else
-      childRelative = lg_strdup(entry->d_name);
+      childRelative = lg_strdup(entry);
     if (!childRelative)
     {
       result = false;
@@ -1169,23 +1165,18 @@ static bool scanDirectory(const char * root, const char * relative,
       break;
     }
 
-    struct stat statbuf;
-    if (lstat(childPath, &statbuf) == 0)
+    const LGFileType type = lgPathTypeNoFollow(childPath);
+    if (type == LG_FILE_TYPE_DIRECTORY)
     {
-      if (S_ISDIR(statbuf.st_mode))
-      {
-        result = scanDirectory(root, childRelative, files);
-        free(childRelative);
-      }
-      else if (S_ISREG(statbuf.st_mode) && hasGLSLExtension(entry->d_name))
-      {
-        const unsigned int count = stringlist_count(files);
-        stringlist_push(files, childRelative);
-        result = stringlist_count(files) == count + 1;
-        if (!result)
-          free(childRelative);
-      }
-      else
+      result = scanDirectory(root, childRelative, files);
+      free(childRelative);
+    }
+    else if (type == LG_FILE_TYPE_REGULAR && hasGLSLExtension(entry))
+    {
+      const unsigned int count = stringlist_count(files);
+      stringlist_push(files, childRelative);
+      result = stringlist_count(files) == count + 1;
+      if (!result)
         free(childRelative);
     }
     else
@@ -1196,7 +1187,7 @@ static bool scanDirectory(const char * root, const char * relative,
       break;
   }
 
-  closedir(directory);
+  stringlist_free(&entries);
   free(path);
   return result;
 }
@@ -1219,13 +1210,13 @@ static bool glslCreate(EGL_FilterAddFn add, void * opaque)
     return false;
   DEBUG_INFO("Scanning runtime GLSL filters in: %s", g_shaderPath);
 
-  struct stat statbuf;
-  if (stat(g_shaderPath, &statbuf) < 0 && (!configured || !*configured))
+  if (lgPathType(g_shaderPath) == LG_FILE_TYPE_MISSING &&
+      (!configured || !*configured))
   {
-    if (mkdir(g_shaderPath, S_IRWXU) < 0 && errno != EEXIST)
+    if (!lgCreateDirectory(g_shaderPath))
     {
-      DEBUG_ERROR("Unable to create GLSL shader directory '%s': %s",
-          g_shaderPath, strerror(errno));
+      DEBUG_ERROR("Unable to create GLSL shader directory '%s'",
+          g_shaderPath);
       return false;
     }
   }

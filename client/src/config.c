@@ -20,19 +20,17 @@
 
 #include "main.h"
 #include "config.h"
+#include "config_platform.h"
 #include "kb.h"
 
-#include "common/option.h"
 #include "common/debug.h"
-#include "common/paths.h"
+#include "common/filesystem.h"
+#include "common/option.h"
 #include "common/stringutils.h"
 
 #include <errno.h>
 #include <limits.h>
-#include <pwd.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 // forwards
 static bool       optRendererParse     (struct Option * opt, const char * str);
@@ -565,62 +563,21 @@ void config_init(void)
   option_register(options);
 }
 
+static bool loadDefaultConfig(const char * path, void * opaque)
+{
+  (void)opaque;
+
+  if (lgPathType(path) != LG_FILE_TYPE_REGULAR)
+    return true;
+
+  DEBUG_INFO("Loading config from: %s", path);
+  return option_load(path);
+}
+
 bool config_load(int argc, char * argv[])
 {
-  // load any global options first
-  struct stat st;
-  if (stat("/etc/looking-glass-client.ini", &st) >= 0 && S_ISREG(st.st_mode))
-  {
-    DEBUG_INFO("Loading config from: /etc/looking-glass-client.ini");
-    if (!option_load("/etc/looking-glass-client.ini"))
-      return false;
-  }
-
-  // load config from user's home directory
-  struct passwd * pw = getpwuid(getuid());
-  if (!pw)
-    DEBUG_WARN("getpwuid failed, unable to load user configuration");
-  else
-  {
-    char * localFile;
-    alloc_sprintf(&localFile, "%s/.looking-glass-client.ini", pw->pw_dir);
-    if (!localFile)
-    {
-      DEBUG_ERROR("out of memory");
-      return false;
-    }
-
-    if (stat(localFile, &st) >= 0 && S_ISREG(st.st_mode))
-    {
-      DEBUG_INFO("Loading config from: %s", localFile);
-      if (!option_load(localFile))
-      {
-        free(localFile);
-        return false;
-      }
-    }
-    free(localFile);
-  }
-
-  // load config from XDG_CONFIG_HOME
-  char * xdgFile;
-  alloc_sprintf(&xdgFile, "%s/client.ini", lgConfigDir());
-  if (!xdgFile)
-  {
-    DEBUG_ERROR("out of memory");
+  if (!config_platformVisitDefaultFiles(loadDefaultConfig, NULL))
     return false;
-  }
-
-  if (xdgFile && stat(xdgFile, &st) >= 0 && S_ISREG(st.st_mode))
-  {
-    DEBUG_INFO("Loading config from: %s", xdgFile);
-    if (!option_load(xdgFile))
-    {
-      free(xdgFile);
-      return false;
-    }
-  }
-  free(xdgFile);
 
   // parse the command line arguments
   if (!option_parse(argc, argv))
@@ -630,7 +587,7 @@ bool config_load(int argc, char * argv[])
   const char * configFile = option_get_string("app", "configFile");
   if (configFile)
   {
-    if (stat(configFile, &st) < 0 || !S_ISREG(st.st_mode))
+    if (lgPathType(configFile) != LG_FILE_TYPE_REGULAR)
     {
       DEBUG_ERROR("app:configFile set to invalid file: %s", configFile);
       return false;

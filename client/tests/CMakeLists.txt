@@ -7,12 +7,35 @@ target_link_libraries(common-platform-tests
   ${EXE_FLAGS}
   lg_common
 )
+target_compile_definitions(common-platform-tests PRIVATE
+  LG_TEST_TMP_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+)
 add_test(NAME common-platform-tests
   COMMAND common-platform-tests
 )
 set_tests_properties(common-platform-tests PROPERTIES
   TIMEOUT 10
 )
+
+if(LG_CLIENT_PLATFORM_LINUX)
+  add_executable(config-platform-tests
+    config_platform_test.c
+    ../platform/Linux/config.c
+  )
+  target_include_directories(config-platform-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  )
+  target_link_libraries(config-platform-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  add_test(NAME config-platform-tests
+    COMMAND config-platform-tests
+  )
+  set_tests_properties(config-platform-tests PROPERTIES
+    TIMEOUT 10
+  )
+endif()
 
 if(LG_CLIENT_PLATFORM_WINDOWS)
   add_executable(common-windows-tests
@@ -822,6 +845,7 @@ add_executable(config-message-tests
   ../src/message.c
   ../src/core.c
   ../src/config.c
+  ../platform/${LG_CLIENT_PLATFORM}/config.c
 )
 target_compile_definitions(config-message-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1

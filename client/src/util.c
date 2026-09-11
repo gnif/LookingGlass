@@ -23,6 +23,7 @@
 #include "font.h"
 
 #include "common/debug.h"
+#include "common/filesystem.h"
 #include "common/stringutils.h"
 
 #include <stdlib.h>
@@ -279,7 +280,7 @@ static ImFont * uiFontAddSize(ImFontAtlas * atlas, float size)
 
 bool util_fileGetContents(const char * filename, char ** buffer, size_t * length)
 {
-  FILE * fh = fopen(filename, "r");
+  FILE * fh = lgOpenFile(filename, "r");
   if (!fh)
   {
     DEBUG_ERROR("Failed to open the file: %s", filename);

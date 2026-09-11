@@ -20,6 +20,7 @@
 
 #include "common/option.h"
 #include "common/debug.h"
+#include "common/filesystem.h"
 #include "common/stringutils.h"
 
 #include <ctype.h>
@@ -506,7 +507,7 @@ static bool process_option_line(const char * module, const char * name,
 
 bool option_load(const char * filename)
 {
-  FILE * fp = fopen(filename, "r");
+  FILE * fp = lgOpenFile(filename, "r");
   if (!fp)
     return false;
 

@@ -18,6 +18,7 @@ add_library(lg_common_platform_code STATIC
   time.c
   paths.c
   open.c
+  filesystem.c
   cpuinfo.c
   proctitle.c
 )

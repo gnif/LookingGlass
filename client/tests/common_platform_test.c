@@ -21,13 +21,17 @@
 #include "test.h"
 
 #include "common/event.h"
+#include "common/filesystem.h"
 #include "common/random.h"
 #include "common/semaphore.h"
+#include "common/stringutils.h"
 #include "common/thread.h"
 #include "common/time.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define TEST_WAIT_NS UINT64_C(1000000000)
@@ -161,6 +165,42 @@ static void testRandom(void)
   CHECK(memcmp(first, second, sizeof(first)) != 0);
 }
 
+static void testFilesystem(void)
+{
+  char * directory;
+  char * file;
+  CHECK(alloc_sprintf(&directory, "%s/filesystem-test", LG_TEST_TMP_DIR) > 0);
+  CHECK(alloc_sprintf(&file, "%s/entry.txt", directory) > 0);
+
+  lgDeleteFile(file);
+  lgDeleteDirectory(directory);
+  CHECK(lgPathType(directory) == LG_FILE_TYPE_MISSING);
+  CHECK(lgCreateDirectory(directory));
+  CHECK(lgCreateDirectory(directory));
+  CHECK(lgPathType(directory) == LG_FILE_TYPE_DIRECTORY);
+
+  FILE * stream = lgOpenFile(file, "wb");
+  CHECK(stream);
+  CHECK(fputs("Looking Glass", stream) >= 0);
+  CHECK(fclose(stream) == 0);
+  CHECK(lgPathType(file) == LG_FILE_TYPE_REGULAR);
+
+  StringList entries = lgListDirectory(directory);
+  bool       found   = false;
+  CHECK(entries);
+  for (unsigned int i = 0; i < stringlist_count(entries); ++i)
+    if (!strcmp(stringlist_at(entries, i), "entry.txt"))
+      found = true;
+  CHECK(found);
+  stringlist_free(&entries);
+
+  CHECK(lgDeleteFile(file));
+  CHECK(lgDeleteDirectory(directory));
+  CHECK(lgPathType(directory) == LG_FILE_TYPE_MISSING);
+  free(file);
+  free(directory);
+}
+
 int main(void)
 {
   lgTimeInit();
@@ -169,5 +209,6 @@ int main(void)
   testTimer();
   testSemaphore();
   testRandom();
+  testFilesystem();
   return 0;
 }

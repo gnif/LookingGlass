@@ -24,15 +24,13 @@
 #include "app.h"
 #include "cimgui.h"
 
-#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
-#include <unistd.h>
 #include <stdatomic.h>
-#include <sys/stat.h>
 
 #include "common/debug.h"
 #include "common/array.h"
+#include "common/filesystem.h"
 #include "common/option.h"
 #include "common/paths.h"
 #include "common/stringlist.h"
@@ -113,8 +111,6 @@ static void loadPreset(struct EGL_PostProcess * this, const char * name);
 
 static void loadPresetList(struct EGL_PostProcess * this)
 {
-  DIR * dir = NULL;
-
   alloc_sprintf(&this->presetDir, "%s/presets", lgConfigDir());
   if (!this->presetDir)
   {
@@ -122,14 +118,14 @@ static void loadPresetList(struct EGL_PostProcess * this)
     return;
   }
 
-  if (mkdir(this->presetDir, S_IRWXU) < 0 && errno != EEXIST)
+  if (!lgCreateDirectory(this->presetDir))
   {
     DEBUG_ERROR("Failed to create presets directory: %s", this->presetDir);
     goto fail;
   }
 
-  dir = opendir(this->presetDir);
-  if (!dir)
+  StringList entries = lgListDirectory(this->presetDir);
+  if (!entries)
   {
     DEBUG_ERROR("Failed to open presets directory: %s", this->presetDir);
     goto fail;
@@ -139,33 +135,45 @@ static void loadPresetList(struct EGL_PostProcess * this)
   if (!this->presets)
   {
     DEBUG_ERROR("Failed to allocate memory for preset list");
-    goto fail;
+    goto fail_entries;
   }
 
-  struct dirent * entry;
   const char * preset = option_get_string("egl", "preset");
   this->activePreset = -1;
 
-  while ((entry = readdir(dir)) != NULL)
+  for (unsigned int i = 0; i < stringlist_count(entries); ++i)
   {
-    if (entry->d_type != DT_REG)
+    const char * entry = stringlist_at(entries, i);
+    char       * path;
+    alloc_sprintf(&path, "%s/%s", this->presetDir, entry);
+    if (!path)
+      goto fail_entries;
+
+    const LGFileType type = lgPathTypeNoFollow(path);
+    free(path);
+    if (type != LG_FILE_TYPE_REGULAR)
       continue;
 
-    DEBUG_INFO("Found preset: %s", entry->d_name);
-    char * name = strdup(entry->d_name);
+    DEBUG_INFO("Found preset: %s", entry);
+    char * name = strdup(entry);
     if (!name)
     {
       DEBUG_ERROR("Failed to allocate memory");
-      goto fail;
+      goto fail_entries;
     }
+    const unsigned int count = stringlist_count(this->presets);
     stringlist_push(this->presets, name);
+    if (stringlist_count(this->presets) != count + 1)
+    {
+      free(name);
+      goto fail_entries;
+    }
     app_registerImGuiText(name);
 
     if (preset && strcmp(preset, name) == 0)
       this->activePreset = stringlist_count(this->presets) - 1;
   }
-  closedir(dir);
-
+  stringlist_free(&entries);
 
   if (preset)
   {
@@ -177,11 +185,12 @@ static void loadPresetList(struct EGL_PostProcess * this)
 
   return;
 
+fail_entries:
+  stringlist_free(&entries);
+
 fail:
   free(this->presetDir);
   this->presetDir = NULL;
-  if (dir)
-    closedir(dir);
   if (this->presets)
     stringlist_free(&this->presets);
 }
@@ -222,7 +231,7 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
     return false;
   }
 
-  FILE * file = fopen(path, "w");
+  FILE * file = lgOpenFile(path, "w");
   if (!file)
   {
     const char * strError = strerror(errno);
@@ -362,7 +371,7 @@ static void deletePreset(struct EGL_PostProcess * this)
     return;
   }
 
-  unlink(path);
+  lgDeleteFile(path);
   free(path);
   stringlist_remove(this->presets, this->activePreset);
   if (this->activePreset >= stringlist_count(this->presets))

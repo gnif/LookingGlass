@@ -46,6 +46,7 @@
 #include "common/thread.h"
 #include "common/locking.h"
 #include "common/event.h"
+#include "common/filesystem.h"
 #include "common/time.h"
 #include "common/version.h"
 #include "common/paths.h"
@@ -716,8 +717,8 @@ static void preSwapCallback(void * udata)
     .dataSize      = capture.dataSize,
   };
 
-  FILE * file = fopen(l_testCapture.path, "wb");
-  bool written = false;
+  FILE * file    = lgOpenFile(l_testCapture.path, "wb");
+  bool   written = false;
   if (file)
   {
     written =

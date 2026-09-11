@@ -43,6 +43,7 @@ add_library(lg_common_platform_code STATIC
   win32.c
   paths.c
   open.c
+  filesystem.c
   cpuinfo.c
   display.c
   proctitle.c
