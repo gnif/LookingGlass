@@ -640,7 +640,6 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
     this->serial * (1000000000ULL / this->frameRate);
   frame->format      = &this->format;
   frame->framebuffer = buffer->framebuffer;
-  frame->dmaFD       = -1;
 
   if (this->damageMode == TEST_DAMAGE_FULL ||
       this->serial == 1 || formatChanged)

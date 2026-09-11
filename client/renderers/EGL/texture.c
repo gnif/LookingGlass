@@ -185,23 +185,24 @@ bool egl_textureUpdateFromFrame(EGL_Texture * this,
 
 bool egl_textureUpdateFromDMA(EGL_Texture * this,
     const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
-    void * releaseOpaque, uint64_t releaseHandle)
+    LG_ExternalFrame * externalFrame, uint64_t * waitTimeNs,
+    LG_FrameReleaseFn releaseFn, void * releaseOpaque,
+    uint64_t releaseHandle)
 {
   const struct EGL_TexUpdate update =
   {
     .type          = EGL_TEXTYPE_DMABUF,
     .frameToken    = frameToken,
+    .externalFrame = externalFrame,
+    .releaseFn     = releaseFn,
+    .releaseOpaque = releaseOpaque,
+    .releaseHandle = releaseHandle,
     .x             = 0,
     .y             = 0,
     .width         = this->format.width,
     .height        = this->format.height,
     .pitch         = this->format.pitch,
     .stride        = this->format.stride,
-    .dmaFD         = dmaFd,
-    .releaseFn     = releaseFn,
-    .releaseOpaque = releaseOpaque,
-    .releaseHandle = releaseHandle,
   };
 
   /* wait for completion */

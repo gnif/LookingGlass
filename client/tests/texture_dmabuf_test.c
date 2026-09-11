@@ -53,13 +53,65 @@ struct Trace
   unsigned int    failFence;
 };
 
+struct FakeExternalFrame
+{
+  LG_ExternalFrame base;
+  unsigned int     refs;
+  int              fd;
+};
+
 struct Releases
 {
-  unsigned int count;
-  uint64_t     handle[MAX_REL];
+  struct FakeExternalFrame externalFrame;
+  unsigned int             count;
+  uint64_t                 handle[MAX_REL];
 };
 
 static struct Trace t;
+
+static void externalFrameRetain(LG_ExternalFrame * frame)
+{
+  struct FakeExternalFrame * external = (struct FakeExternalFrame *)frame;
+  CHECK(external->refs > 0);
+  ++external->refs;
+}
+
+static void externalFrameRelease(LG_ExternalFrame * frame)
+{
+  struct FakeExternalFrame * external = (struct FakeExternalFrame *)frame;
+  CHECK(external->refs > 0);
+  --external->refs;
+}
+
+static bool externalFrameQuery(const LG_ExternalFrame * frame,
+    void * result, size_t resultSize)
+{
+  if (!result || resultSize != sizeof(int))
+    return false;
+
+  const struct FakeExternalFrame * external =
+    (const struct FakeExternalFrame *)frame;
+  *(int *)result = external->fd;
+  return true;
+}
+
+static const LG_ExternalFrameOps externalFrameOps =
+{
+  .type    = LG_EXTERNAL_FRAME_DMABUF,
+  .retain  = externalFrameRetain,
+  .release = externalFrameRelease,
+  .query   = externalFrameQuery,
+};
+
+static void externalFrameInit(struct FakeExternalFrame * external)
+{
+  if (external->base.ops)
+    return;
+
+  external->base.ops = &externalFrameOps;
+  external->refs     = 1;
+  external->fd       = 7;
+}
 
 struct EGLDynProcs g_egl_dynProcs;
 _Thread_local EGL_StateCache g_eglState;
@@ -380,10 +432,7 @@ static TexDMABUF * newTex(void)
   LG_LOCK_INIT(texture->base.copyLock);
 
   for (int i = 0; i < ARRAY_LENGTH(texture->images); ++i)
-  {
-    texture->images[i].fd    = -1;
     texture->images[i].image = EGL_NO_IMAGE;
-  }
   for (int i = 0; i < ARRAY_LENGTH(texture->snapshots); ++i)
   {
     texture->snapshots[i].texture     = 200 + i;
@@ -400,16 +449,21 @@ static TexDMABUF * newTex(void)
 static bool update(TexDMABUF * texture, LG_RendererFrameToken token,
     struct Releases * releases, uint64_t handle)
 {
+  externalFrameInit(&releases->externalFrame);
+  LG_ExternalFrame * externalFrame =
+    lgExternalFrameRetain(&releases->externalFrame.base);
   const EGL_TexUpdate value =
   {
     .type          = EGL_TEXTYPE_DMABUF,
     .frameToken    = token,
+    .externalFrame = externalFrame,
     .releaseFn     = onRelease,
     .releaseOpaque = releases,
     .releaseHandle = handle,
-    .dmaFD         = 7,
   };
-  return egl_texDMABUFUpdate(&texture->base.base, &value);
+  const bool result = egl_texDMABUFUpdate(&texture->base.base, &value);
+  lgExternalFrameRelease(externalFrame);
+  return result;
 }
 
 static void setSlot(TexDMABUF * texture, int index,
@@ -500,6 +554,7 @@ static void testPoll(void)
   CHECK(releases.count == 2);
   egl_texDMABUFFree(&texture->base.base);
   CHECK(releases.count == 2);
+  CHECK(releases.externalFrame.refs == 1);
 }
 
 static void testSaturation(void)
@@ -533,6 +588,7 @@ static void testSaturation(void)
 
   egl_texDMABUFFree(&texture->base.base);
   CHECK(releases.count == 6);
+  CHECK(releases.externalFrame.refs == 1);
   for (uint64_t handle = 10; handle <= 60; handle += 10)
     CHECK(relCount(&releases, handle) == 1);
 }
@@ -554,6 +610,24 @@ static void testRelease(void)
   egl_texDMABUFFree(&second->base.base);
   CHECK(relCount(&releases, 202) == 1);
   CHECK(releases.count == 2);
+  CHECK(releases.externalFrame.refs == 1);
+}
+
+static void testIdentity(void)
+{
+  struct Releases first   = { 0 };
+  struct Releases second  = { 0 };
+  TexDMABUF     * texture = newTex();
+
+  CHECK(update(texture, 1, &first, 1));
+  CHECK(update(texture, 2, &second, 2));
+  CHECK(t.imageNew == 2);
+
+  egl_texDMABUFFree(&texture->base.base);
+  CHECK(first.count == 1);
+  CHECK(second.count == 1);
+  CHECK(first.externalFrame.refs == 1);
+  CHECK(second.externalFrame.refs == 1);
 }
 
 struct Test
@@ -568,6 +642,7 @@ static const struct Test tests[] =
   { "poll"      , testPoll       },
   { "saturation", testSaturation },
   { "release"   , testRelease    },
+  { "identity"  , testIdentity   },
 };
 
 int main(int argc, char ** argv)

@@ -833,7 +833,7 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
 }
 
 static bool egl_onFrame(LG_Renderer * renderer,
-    const KVMFRFrameBuffer * frame, int dmaFd,
+    const KVMFRFrameBuffer * frame, LG_ExternalFrame * externalFrame,
     const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
@@ -844,7 +844,7 @@ static bool egl_onFrame(LG_Renderer * renderer,
   const uint64_t start      = nanotime();
   uint64_t       waitTimeNs = 0;
   if (unlikely(!egl_desktopUpdate(
-          this->desktop, frame, frameToken, dmaFd,
+          this->desktop, frame, frameToken, externalFrame,
           damageRects, damageRectsCount, &waitTimeNs,
           releaseFn, releaseOpaque, releaseHandle)))
   {

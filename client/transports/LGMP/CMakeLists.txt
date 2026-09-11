@@ -7,6 +7,14 @@ set(TRANSPORT_LGMP_SOURCES
   lgmp.c
 )
 
+if(WIN32)
+  list(APPEND TRANSPORT_LGMP_SOURCES platform/windows.c)
+elseif(UNIX)
+  list(APPEND TRANSPORT_LGMP_SOURCES platform/linux.c)
+else()
+  message(FATAL_ERROR "Unsupported LGMP transport platform")
+endif()
+
 if(ENABLE_AUDIO)
   list(APPEND TRANSPORT_LGMP_SOURCES audio.c)
 endif()

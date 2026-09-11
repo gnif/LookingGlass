@@ -36,11 +36,11 @@
 
 #define EGL_DMABUF_SNAPSHOT_COUNT (LGMP_Q_FRAME_BUFFER_LEN + 1)
 
-struct FdImage
+struct ExternalImage
 {
-  int      fd;
-  EGLImage image;
-  GLuint   texture;
+  LG_ExternalFrame * externalFrame;
+  EGLImage           image;
+  GLuint             texture;
 };
 
 struct Snapshot
@@ -50,6 +50,7 @@ struct Snapshot
   GLsync                 copySync;
   GLsync                 useSync;
   LG_RendererFrameToken  frameToken;
+  LG_ExternalFrame     * externalFrame;
   LG_FrameReleaseFn      releaseFn;
   void                 * releaseOpaque;
   uint64_t               releaseHandle;
@@ -61,9 +62,9 @@ typedef struct TexDMABUF
 
   EGLDisplay display;
 
-  struct FdImage  images[EGL_TEX_BUFFER_MAX];
-  struct Snapshot snapshots[EGL_DMABUF_SNAPSHOT_COUNT];
-  int             renderIndex;
+  struct ExternalImage images[EGL_TEX_BUFFER_MAX];
+  struct Snapshot      snapshots[EGL_DMABUF_SNAPSHOT_COUNT];
+  int                  renderIndex;
 
   EGL_Shader * copyShader;
   EGL_Model  * copyModel;
@@ -79,9 +80,10 @@ TexDMABUF;
 
 struct SnapshotRelease
 {
-  LG_FrameReleaseFn fn;
-  void            * opaque;
-  uint64_t          handle;
+  LG_ExternalFrame * externalFrame;
+  LG_FrameReleaseFn  fn;
+  void             * opaque;
+  uint64_t           handle;
 };
 
 EGL_TextureOps EGL_TextureDMABUF;
@@ -98,10 +100,12 @@ static void egl_texDMABUFPoll(EGL_Texture * texture);
 static void snapshotRelease(struct Snapshot * snapshot,
     struct SnapshotRelease * release)
 {
-  release->fn     = snapshot->releaseFn;
-  release->opaque = snapshot->releaseOpaque;
-  release->handle = snapshot->releaseHandle;
+  release->externalFrame = snapshot->externalFrame;
+  release->fn            = snapshot->releaseFn;
+  release->opaque        = snapshot->releaseOpaque;
+  release->handle        = snapshot->releaseHandle;
 
+  snapshot->externalFrame = NULL;
   snapshot->releaseFn     = NULL;
   snapshot->releaseOpaque = NULL;
   snapshot->releaseHandle = 0;
@@ -111,7 +115,11 @@ static void snapshotInvokeReleases(struct SnapshotRelease * releases,
     int count)
 {
   for (int i = 0; i < count; ++i)
-    releases[i].fn(releases[i].opaque, releases[i].handle);
+  {
+    lgExternalFrameRelease(releases[i].externalFrame);
+    if (releases[i].fn)
+      releases[i].fn(releases[i].opaque, releases[i].handle);
+  }
 }
 
 static void waitSync(GLsync * sync)
@@ -132,7 +140,7 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   struct SnapshotRelease releases[EGL_DMABUF_SNAPSHOT_COUNT];
-  int releaseCount = 0;
+  int                    releaseCount = 0;
 
   LG_LOCK(parent->copyLock);
 
@@ -141,7 +149,7 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
     struct Snapshot * snapshot = &this->snapshots[i];
     waitSync(&snapshot->copySync);
     waitSync(&snapshot->useSync);
-    if (snapshot->releaseFn)
+    if (snapshot->externalFrame || snapshot->releaseFn)
       snapshotRelease(snapshot, &releases[releaseCount++]);
 
     if (snapshot->framebuffer)
@@ -151,7 +159,7 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
     memset(snapshot, 0, sizeof(*snapshot));
   }
 
-  for(int i = 0; i < ARRAY_LENGTH(this->images); ++i)
+  for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
   {
     if (this->images[i].image != EGL_NO_IMAGE)
     {
@@ -160,8 +168,9 @@ static void egl_texDMABUFCleanup(EGL_Texture * texture)
     }
     if (this->images[i].texture)
       glDeleteTextures(1, &this->images[i].texture);
-    this->images[i].fd      = -1;
-    this->images[i].texture = 0;
+    lgExternalFrameRelease(this->images[i].externalFrame);
+    this->images[i].externalFrame = NULL;
+    this->images[i].texture       = 0;
   }
 
   this->renderIndex   = -1;
@@ -179,13 +188,10 @@ static bool egl_texDMABUFInit(EGL_Texture ** texture, EGL_TexType type,
     EGLDisplay * display)
 {
   TexDMABUF * this = calloc(1, sizeof(*this));
-  *texture = &this->base.base;
+  *texture          = &this->base.base;
 
-  for(int i = 0; i < ARRAY_LENGTH(this->images); ++i)
-  {
-    this->images[i].fd    = -1;
+  for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
     this->images[i].image = EGL_NO_IMAGE;
-  }
   this->renderIndex = -1;
 
   EGL_Texture * parent = &this->base.base;
@@ -338,10 +344,19 @@ static bool egl_texDMABUFSetup(EGL_Texture * texture, const EGL_TexSetup * setup
   return texDMABUFSetup(texture);
 }
 
-static EGLImage createImage(EGL_Texture * texture, int fd)
+static EGLImage createImage(EGL_Texture * texture,
+    const LG_ExternalFrame * externalFrame)
 {
   TextureBuffer * parent = UPCAST(TextureBuffer, texture);
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
+
+  int fd;
+  if (!lgExternalFrameQuery(externalFrame, LG_EXTERNAL_FRAME_DMABUF,
+        &fd, sizeof(fd)))
+  {
+    DEBUG_ERROR("Failed to query the DMABUF file descriptor");
+    return EGL_NO_IMAGE;
+  }
 
   const uint64_t modifier = DRM_FORMAT_MOD_LINEAR;
   EGLAttrib attribs[] =
@@ -376,40 +391,41 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   DEBUG_ASSERT(update->type == EGL_TEXTYPE_DMABUF);
+  DEBUG_ASSERT(update->externalFrame);
 
   /* Retire completed copies before deciding whether a snapshot slot must be
    * waited on and coalesced. */
   egl_texDMABUFPoll(texture);
 
-  struct FdImage *fdImage = NULL;
+  struct ExternalImage * externalImage = NULL;
   for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
-    if (this->images[i].fd == update->dmaFD)
+    if (this->images[i].externalFrame == update->externalFrame)
     {
-      fdImage = &this->images[i];
+      externalImage = &this->images[i];
       break;
     }
 
-  if (!fdImage)
+  if (!externalImage)
     for (int i = 0; i < ARRAY_LENGTH(this->images); ++i)
-      if (this->images[i].fd == -1)
+      if (!this->images[i].externalFrame)
       {
-        fdImage = &this->images[i];
+        externalImage = &this->images[i];
         break;
       }
 
-  if (!fdImage)
+  if (!externalImage)
   {
     DEBUG_ERROR("No free DMABUF image slot");
     return false;
   }
 
-  if (unlikely(fdImage->image == EGL_NO_IMAGE))
+  if (unlikely(externalImage->image == EGL_NO_IMAGE))
   {
     bool setup = false;
     if (texture->format.pixFmt == EGL_PF_RGB_24 && has24BitSupport)
     {
-      fdImage->image = createImage(texture, update->dmaFD);
-      if (fdImage->image == EGL_NO_IMAGE)
+      externalImage->image = createImage(texture, update->externalFrame);
+      if (externalImage->image == EGL_NO_IMAGE)
       {
         DEBUG_INFO("Using 24-bit in 32-bit for DMA");
         has24BitSupport = false;
@@ -421,21 +437,22 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     {
       if (!texDMABUFSetup(texture))
         return false;
-      fdImage = &this->images[0];
+      externalImage = &this->images[0];
     }
 
-    if (fdImage->image == EGL_NO_IMAGE)
-      fdImage->image = createImage(texture, update->dmaFD);
+    if (externalImage->image == EGL_NO_IMAGE)
+      externalImage->image = createImage(texture, update->externalFrame);
 
-    if (unlikely(fdImage->image == EGL_NO_IMAGE))
+    if (unlikely(externalImage->image == EGL_NO_IMAGE))
     {
       DEBUG_EGL_ERROR("Failed to create EGLImage for DMA transfer");
       return false;
     }
 
-    fdImage->fd    = update->dmaFD;
-    glGenTextures(1, &fdImage->texture);
-    egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, fdImage->texture);
+    externalImage->externalFrame =
+      lgExternalFrameRetain(update->externalFrame);
+    glGenTextures(1, &externalImage->texture);
+    egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, externalImage->texture);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES,
         GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES,
@@ -445,11 +462,11 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     glTexParameteri(GL_TEXTURE_EXTERNAL_OES,
         GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     g_egl_dynProcs.glEGLImageTargetTexture2DOES(
-        GL_TEXTURE_EXTERNAL_OES, fdImage->image);
+        GL_TEXTURE_EXTERNAL_OES, externalImage->image);
   }
 
   struct SnapshotRelease releases[2];
-  int releaseCount = 0;
+  int                    releaseCount = 0;
   LG_LOCK(parent->copyLock);
 
   int index = -1;
@@ -480,7 +497,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     struct Snapshot * old = &this->snapshots[index];
     waitSync(&old->copySync);
     waitSync(&old->useSync);
-    if (old->releaseFn)
+    if (old->externalFrame || old->releaseFn)
       snapshotRelease(old, &releases[releaseCount++]);
     old->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
   }
@@ -493,7 +510,7 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
   glDisable(GL_DITHER);
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   egl_stateBindSampler(0, this->copySampler);
-  egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, fdImage->texture);
+  egl_stateBindTexture(0, GL_TEXTURE_EXTERNAL_OES, externalImage->texture);
   egl_shaderUse(this->copyShader);
   egl_modelRender(this->copyModel);
 
@@ -504,11 +521,13 @@ static bool egl_texDMABUFUpdate(EGL_Texture * texture,
     glFinish();
   }
   snapshot->frameToken    = update->frameToken;
+  snapshot->externalFrame = lgExternalFrameRetain(update->externalFrame);
   snapshot->releaseFn     = update->releaseFn;
   snapshot->releaseOpaque = update->releaseOpaque;
   snapshot->releaseHandle = update->releaseHandle;
 
-  if (!snapshot->copySync && snapshot->releaseFn)
+  if (!snapshot->copySync &&
+      (snapshot->externalFrame || snapshot->releaseFn))
     snapshotRelease(snapshot, &releases[releaseCount++]);
 
   glFlush();
@@ -525,7 +544,7 @@ static void egl_texDMABUFPoll(EGL_Texture * texture)
   TexDMABUF     * this   = UPCAST(TexDMABUF    , parent);
 
   struct SnapshotRelease releases[EGL_DMABUF_SNAPSHOT_COUNT];
-  int releaseCount = 0;
+  int                    releaseCount = 0;
 
   LG_LOCK(parent->copyLock);
   for (int i = 0; i < ARRAY_LENGTH(this->snapshots); ++i)
@@ -539,7 +558,7 @@ static void egl_texDMABUFPoll(EGL_Texture * texture)
       {
         glDeleteSync(snapshot->copySync);
         snapshot->copySync = 0;
-        if (snapshot->releaseFn)
+        if (snapshot->externalFrame || snapshot->releaseFn)
           snapshotRelease(snapshot, &releases[releaseCount++]);
       }
       else if (result == GL_WAIT_FAILED)

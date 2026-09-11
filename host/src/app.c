@@ -834,12 +834,18 @@ static bool newKVMFRData(KVMFRUserData * dst)
 
 static bool lgmpSetup(struct IVSHMEM * shmDev)
 {
+  if (shmDev->size > UINT32_MAX)
+  {
+    DEBUG_ERROR("IVSHMEM size exceeds LGMP's 32-bit host limit");
+    return false;
+  }
+
   KVMFRUserData udata = { 0 };
   if (!newKVMFRData(&udata))
     goto fail_init;
 
   LGMP_STATUS status;
-  if ((status = lgmpHostInit(shmDev->mem, shmDev->size, &app.lgmp,
+  if ((status = lgmpHostInit(shmDev->mem, (uint32_t)shmDev->size, &app.lgmp,
           udata.used, udata.data)) != LGMP_OK)
   {
     DEBUG_ERROR("lgmpHostInit Failed: %s", lgmpStatusString(status));
@@ -1011,15 +1017,17 @@ int app_main(int argc, char * argv[])
     return LG_HOST_EXIT_FATAL;
   }
 
-  if (!ivshmemOpen(&shmDev))
+  if (!ivshmemOpen(&shmDev, IVSHMEM_CACHE_MODE_WRITECOMBINED))
   {
     DEBUG_ERROR("Failed to open the IVSHMEM device");
+    ivshmemFree(&shmDev);
     return LG_HOST_EXIT_FATAL;
   }
   app.ivshmemBase = shmDev.mem;
 
   int exitcode  = 0;
-  DEBUG_INFO("IVSHMEM Size     : %u MiB", shmDev.size / 1048576);
+  DEBUG_INFO("IVSHMEM Size     : %" PRIu64 " MiB",
+      (uint64_t)shmDev.size / 1048576);
   DEBUG_INFO("IVSHMEM Address  : 0x%" PRIXPTR, (uintptr_t)shmDev.mem);
   DEBUG_INFO("Max Pointer Size : %u KiB", (unsigned int)MAX_POINTER_SIZE / 1024);
   DEBUG_INFO("KVMFR Version    : %u", KVMFR_VERSION);

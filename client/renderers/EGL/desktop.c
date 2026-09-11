@@ -382,7 +382,7 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
 
 bool egl_desktopUpdate(EGL_Desktop * desktop,
     const KVMFRFrameBuffer * frame,
-    LG_RendererFrameToken frameToken, int dmaFd,
+    LG_RendererFrameToken frameToken, LG_ExternalFrame * externalFrame,
     const KVMFRFrameDamageRect * damageRects, int damageRectsCount,
     uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
@@ -396,17 +396,19 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
   if (unlikely(!framebuffer_wait_timed(
           frame, desktop->texture->format.dataSize, waitTimeNs)))
   {
+    lgExternalFrameRelease(externalFrame);
     if (releaseFn)
       releaseFn(releaseOpaque, releaseHandle);
     return true;
   }
 
-  if (likely(desktop->useDMA && dmaFd >= 0))
+  if (likely(desktop->useDMA && externalFrame))
   {
     if (likely(egl_textureUpdateFromDMA(
-            desktop->texture, frame, frameToken, dmaFd, waitTimeNs,
+            desktop->texture, frame, frameToken, externalFrame, waitTimeNs,
             releaseFn, releaseOpaque, releaseHandle)))
     {
+      lgExternalFrameRelease(externalFrame);
       atomic_store(&desktop->processFrame, true);
       return true;
     }
@@ -449,6 +451,7 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
   if (likely(egl_textureUpdateFromFrame(desktop->texture, frame, frameToken,
         damageRects, damageRectsCount, waitTimeNs)))
   {
+    lgExternalFrameRelease(externalFrame);
     if (releaseFn)
       releaseFn(releaseOpaque, releaseHandle);
     return true;

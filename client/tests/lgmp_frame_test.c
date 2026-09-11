@@ -527,7 +527,7 @@ static bool testDMAUnavailable(TestState * state)
   CHECK(postShared(state, &frame));
   CHECK(state->frameOps->nextFrame(state->transport, false, &result) ==
       LG_TRANSPORT_OK);
-  CHECK(result.dmaFD == -1);
+  CHECK(result.externalFrame == NULL);
   CHECK(releaseFrame(state, &result));
   return true;
 }

@@ -483,14 +483,15 @@ bool opengl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat format
 }
 
 bool opengl_onFrame(LG_Renderer * renderer, const KVMFRFrameBuffer * frame,
-    int dmaFd, const KVMFRFrameDamageRect * damage, int damageCount,
+    LG_ExternalFrame * externalFrame, const KVMFRFrameDamageRect * damage,
+    int damageCount,
     LG_RendererFrameToken frameToken, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {
   struct Inst * this = UPCAST(struct Inst, renderer);
 
   /* The legacy renderer supports only deferred CPU reads. */
-  if (!frame || dmaFd >= 0)
+  if (!frame || externalFrame)
     return false;
 
   LG_LOCK(this->frameLock);

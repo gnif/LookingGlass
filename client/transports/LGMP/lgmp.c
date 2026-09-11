@@ -22,6 +22,7 @@
 
 #include "clipboard.h"
 #include "input.h"
+#include "platform.h"
 #ifdef ENABLE_AUDIO
 #include "audio.h"
 #endif
@@ -39,11 +40,8 @@
 
 #include <lgmp/client.h>
 
-#include <dirent.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #define LGMP_TIMING_SPIN_COUNT 4096
 #define LGMP_RECOVERY_PROBE_INTERVAL_US 10000U
@@ -64,7 +62,7 @@ struct DMAFrameInfo
   const KVMFRFrame * frame;
   size_t             offset;
   size_t             dataSize;
-  int                fd;
+  LG_ExternalFrame * externalFrame;
 };
 
 #define LGMP_FRAME_LEASE_COUNT (LGMP_Q_FRAME_LEN + 1)
@@ -420,65 +418,10 @@ static LG_VideoStatus lgmp_publishVideoStatus(LG_Transport * this,
   return published;
 }
 
-static bool lgmp_deviceValidator(struct Option * opt, const char ** error)
-{
-  const char * transport = option_get_string("app", "transport");
-  if (!transport || strcmp(transport, "lgmp") != 0)
-    return true;
-
-  if (strlen(opt->value.x_string) > 3 &&
-      memcmp(opt->value.x_string, "kvmfr", 5) != 0)
-  {
-    struct stat st;
-    if (stat(opt->value.x_string, &st) != 0)
-    {
-      *error = "Invalid path to the shared memory file";
-      return false;
-    }
-  }
-  return true;
-}
-
-static StringList lgmp_deviceValues(struct Option * option)
-{
-  StringList values = stringlist_new(true);
-  DIR * dir = opendir("/sys/class/kvmfr");
-  if (!dir)
-    return values;
-
-  struct dirent * entry;
-  while ((entry = readdir(dir)))
-  {
-    if (entry->d_name[0] == '.')
-      continue;
-    char * name;
-    alloc_sprintf(&name, "/dev/%s", entry->d_name);
-    stringlist_push(values, name);
-  }
-  closedir(dir);
-  return values;
-}
-
 static void lgmp_setup(void)
 {
-  struct stat st;
-  const char * defaultDevice = stat("/dev/kvmfr0", &st) == 0 ?
-    "/dev/kvmfr0" : "/dev/shm/looking-glass";
-
   static struct Option options[] =
   {
-    {
-      .module         = "lgmp",
-      .name           = "shmDevice",
-      .old_module     = "app",
-      .old_name       = "shmFile",
-      .shortopt       = 'f',
-      .description    = "Shared memory file or KVMFR device path",
-      .type           = OPTION_TYPE_STRING,
-      .value.x_string = NULL,
-      .validator      = lgmp_deviceValidator,
-      .getValues      = lgmp_deviceValues,
-    },
     {
       .module       = "lgmp",
       .name         = "allowDMA",
@@ -509,7 +452,7 @@ static void lgmp_setup(void)
     {0}
   };
 
-  options[0].value.x_string = (char *)defaultDevice;
+  lgmpPlatformOptionsInit();
   option_register(options);
 }
 
@@ -601,7 +544,7 @@ static bool lgmp_refreshRecoveryLockedCancellable(
 
     if (!wait || now >= deadline)
       break;
-    usleep(LGMP_RECOVERY_PROBE_INTERVAL_US);
+    nsleep((uint64_t)LGMP_RECOVERY_PROBE_INTERVAL_US * 1000U);
   }
   while (true);
 
@@ -697,9 +640,6 @@ static bool lgmp_create(LG_Transport ** result)
     return false;
   }
 
-  for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
-    this->dma[i].fd = -1;
-
   LG_LOCK_INIT(this->frameLock);
   LG_LOCK_INIT(this->pointerLock);
   LG_RWLOCK_INIT(this->videoStatusLock);
@@ -711,8 +651,7 @@ static bool lgmp_create(LG_Transport ** result)
   for (unsigned i = 0; i < LGMP_Q_FRAME_LEN; ++i)
     this->frameLease[i + 1].subscription = &this->ownerFrameQueue[i];
 
-  if (!ivshmemOpenDev(&this->shm,
-        option_get_string("lgmp", "shmDevice")))
+  if (!lgmpPlatformOpenIVSHMEM(&this->shm))
   {
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
@@ -753,6 +692,7 @@ static bool lgmp_create(LG_Transport ** result)
 
     DEBUG_ERROR("lgmpClientInit failed: %s", lgmpStatusString(status));
     ivshmemClose(&this->shm);
+    ivshmemFree(&this->shm);
     LG_LOCK_FREE(this->frameLock);
     LG_LOCK_FREE(this->pointerLock);
     LG_RWLOCK_FREE(this->videoStatusLock);
@@ -883,12 +823,11 @@ static void lgmp_closeDMA(struct LG_Transport * this)
 {
   for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
   {
-    if (this->dma[i].fd >= 0)
-      close(this->dma[i].fd);
-    this->dma[i].fd       = -1;
-    this->dma[i].frame    = NULL;
-    this->dma[i].offset   = 0;
-    this->dma[i].dataSize = 0;
+    lgExternalFrameRelease(this->dma[i].externalFrame);
+    this->dma[i].externalFrame = NULL;
+    this->dma[i].frame         = NULL;
+    this->dma[i].offset        = 0;
+    this->dma[i].dataSize      = 0;
   }
 }
 
@@ -908,6 +847,7 @@ static void lgmp_destroyNow(LG_Transport * this)
   lgmp_closeDMA(this);
   free(this->pointerData);
   ivshmemClose(&this->shm);
+  ivshmemFree(&this->shm);
   LG_LOCK_FREE(this->frameLock);
   LG_LOCK_FREE(this->pointerLock);
   LG_RWLOCK_FREE(this->videoStatusLock);
@@ -1570,7 +1510,8 @@ static LG_TransportStatus lgmp_requestRecovery(LG_Transport * this,
 
 static bool lgmp_supportsDMA(LG_Transport * this)
 {
-  return this->client && this->allowDMA && ivshmemHasDMA(&this->shm);
+  return this->client && this->allowDMA &&
+    lgmpPlatformSupportsExternalFrame(&this->shm);
 }
 
 static bool lgmp_attachRenderer(LG_Transport * this,
@@ -1909,33 +1850,34 @@ static void lgmp_selectNewestFrameMessage(
     *selected = candidate;
 }
 
-static int lgmp_getDMA(struct LG_Transport * this,
+static LG_ExternalFrame * lgmp_getDMA(struct LG_Transport * this,
     const KVMFRFrame * sharedFrame, size_t frameOffset, size_t dataSize)
 {
   const uintptr_t base    = (uintptr_t)this->shm.mem;
   const uintptr_t address = (uintptr_t)sharedFrame;
   if (address < base)
-    return -1;
+    return NULL;
 
   const size_t position = address - base;
   if (position > this->lgmpSize ||
       frameOffset > this->lgmpSize - position ||
       sizeof(KVMFRFrameBuffer) > this->lgmpSize - position - frameOffset)
-    return -1;
+    return NULL;
 
   const size_t offset = position + frameOffset + sizeof(KVMFRFrameBuffer);
   if (dataSize > this->lgmpSize - offset)
-    return -1;
+    return NULL;
 
   struct DMAFrameInfo * dma = NULL;
   for (unsigned i = 0; i < LGMP_Q_FRAME_BUFFER_LEN; ++i)
     if (this->dma[i].frame == sharedFrame)
     {
       dma = &this->dma[i];
-      if ((dma->offset != offset || dma->dataSize < dataSize) && dma->fd >= 0)
+      if ((dma->offset != offset || dma->dataSize < dataSize) &&
+          dma->externalFrame)
       {
-        close(dma->fd);
-        dma->fd = -1;
+        lgExternalFrameRelease(dma->externalFrame);
+        dma->externalFrame = NULL;
       }
       break;
     }
@@ -1950,14 +1892,15 @@ static int lgmp_getDMA(struct LG_Transport * this,
       }
 
   if (!dma)
-    return -1;
-  if (dma->fd >= 0)
-    return dma->fd;
+    return NULL;
+  if (dma->externalFrame)
+    return dma->externalFrame;
 
-  dma->offset   = offset;
-  dma->dataSize = dataSize;
-  dma->fd       = ivshmemGetDMABuf(&this->shm, offset, dataSize);
-  return dma->fd;
+  dma->offset        = offset;
+  dma->dataSize      = dataSize;
+  dma->externalFrame = lgmpPlatformCreateExternalFrame(
+      &this->shm, offset, dataSize);
+  return dma->externalFrame;
 }
 
 static void lgmp_releaseFrameLease(void * opaque, uint64_t handle);
@@ -2128,18 +2071,18 @@ static LG_TransportStatus lgmp_nextFrameLocked(LG_Transport * this,
 
   result->framebuffer = (const KVMFRFrameBuffer *)
     ((const uint8_t *)selected->sharedFrame + frame->offset);
-  result->dmaFD       = -1;
   if (useDMA)
   {
-    result->dmaFD = lgmp_getDMA(this, selected->sharedFrame,
+    LG_ExternalFrame * externalFrame = lgmp_getDMA(this, selected->sharedFrame,
         frame->offset, selected->dataSize);
-    if (result->dmaFD < 0)
+    if (!externalFrame)
     {
       const LG_TransportStatus done = lgmp_doneFrameMessage(selected);
-      DEBUG_ERROR("Failed to obtain a DMA buffer for the frame");
+      DEBUG_ERROR("Failed to obtain an external frame handle");
       return done == LG_TRANSPORT_DISCONNECTED ?
         done : LG_TRANSPORT_ERROR;
     }
+    result->externalFrame = lgExternalFrameRetain(externalFrame);
   }
 
   if (!fullDamage && frame->damageRectsCount <= KVMFR_MAX_DAMAGE_RECTS)
@@ -2308,6 +2251,9 @@ static void lgmp_releaseFrameLease(void * opaque, uint64_t handle)
 
 static void lgmp_releaseFrame(LG_Transport * this, LG_TransportFrame * frame)
 {
+  lgExternalFrameRelease(frame->externalFrame);
+  frame->externalFrame = NULL;
+
   if (frame->releaseFn)
   {
     LG_LOCK(this->frameLock);

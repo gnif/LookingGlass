@@ -229,7 +229,7 @@ int main(int argc, char * argv[])
   state.running = true;
 
   int ret = -1;
-  if (ivshmemOpen(&state.shmDev))
+  if (ivshmemOpen(&state.shmDev, IVSHMEM_CACHE_MODE_CACHED))
     ret = run();
 
   ivshmemClose(&state.shmDev);

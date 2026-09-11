@@ -44,6 +44,7 @@ typedef struct EGL_TexUpdate
   EGL_TexType            type;
   LG_RendererFrameToken  frameToken;
   uint64_t             * waitTimeNs;
+  LG_ExternalFrame     * externalFrame;
   LG_FrameReleaseFn      releaseFn;
   void                 * releaseOpaque;
   uint64_t               releaseHandle;
@@ -72,8 +73,6 @@ typedef struct EGL_TexUpdate
       int                          rectCount;
     };
 
-    /* EGL_TEXTYPE_DMABUF */
-    int dmaFD;
   };
 }
 EGL_TexUpdate;
@@ -147,8 +146,9 @@ bool egl_textureUpdateFromFrame(EGL_Texture * texture,
 
 bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     const KVMFRFrameBuffer * frame, LG_RendererFrameToken frameToken,
-    const int dmaFd, uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
-    void * releaseOpaque, uint64_t releaseHandle);
+    LG_ExternalFrame * externalFrame, uint64_t * waitTimeNs,
+    LG_FrameReleaseFn releaseFn, void * releaseOpaque,
+    uint64_t releaseHandle);
 
 void egl_textureReset(EGL_Texture * texture);
 void egl_texturePoll(EGL_Texture * texture);

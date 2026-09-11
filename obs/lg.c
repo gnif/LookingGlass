@@ -29,6 +29,7 @@
 
 #include <common/array.h>
 #include <common/ivshmem.h>
+#include <common/ivshmem_dmabuf.h>
 #include <LGProtocol/KVMFR.h>
 #include <LGProtocol/LGMPConfig.h>
 #include <common/framebuffer.h>
@@ -970,7 +971,8 @@ static void lgUpdate(void * data, obs_data_t * settings)
   lgObsAudioSetEnabled(this->audio,
       obs_data_get_bool(settings, "captureAudio"));
   this->shmFile = bstrdup(obs_data_get_string(settings, "shmFile"));
-  if (!ivshmemOpenDev(&this->shmDev, this->shmFile))
+  if (!ivshmemOpenDev(&this->shmDev, this->shmFile,
+        IVSHMEM_CACHE_MODE_CACHED))
     return;
 
   this->hideMouse = obs_data_get_bool(settings, "hideMouse") ? 1 : 0;

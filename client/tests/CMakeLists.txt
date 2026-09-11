@@ -35,6 +35,20 @@ if(LG_CLIENT_PLATFORM_LINUX)
   set_tests_properties(config-platform-tests PROPERTIES
     TIMEOUT 10
   )
+
+  add_executable(lgmp-platform-tests
+    lgmp_platform_test.c
+  )
+  target_link_libraries(lgmp-platform-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  add_test(NAME lgmp-platform-tests
+    COMMAND lgmp-platform-tests
+  )
+  set_tests_properties(lgmp-platform-tests PROPERTIES
+    TIMEOUT 10
+  )
 endif()
 
 if(LG_CLIENT_PLATFORM_WINDOWS)
@@ -999,6 +1013,7 @@ if(ENABLE_EGL)
     poll
     saturation
     release
+    identity
   )
   foreach(name IN LISTS TEXTURE_DMABUF_CASES)
     add_test(NAME texture-dmabuf-${name}

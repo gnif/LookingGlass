@@ -30,6 +30,7 @@
 #include "common/types.h"
 #include "interface/audio.h"
 #include "interface/clipboard.h"
+#include "interface/external_frame.h"
 #include "interface/input.h"
 
 #define LG_TRANSPORT_MAX_DAMAGE_RECTS LG_MAX_FRAME_DAMAGE_RECTS
@@ -343,7 +344,7 @@ typedef struct LG_TransportFrame
   const LG_TransportFrameFormat * format;
 
   const KVMFRFrameBuffer     * framebuffer;
-  int                          dmaFD;
+  LG_ExternalFrame           * externalFrame;
   const KVMFRFrameDamageRect * damageRects;
   uint32_t                     damageRectsCount;
 

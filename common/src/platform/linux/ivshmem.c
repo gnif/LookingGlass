@@ -18,7 +18,7 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#include "common/ivshmem.h"
+#include "common/ivshmem_dmabuf.h"
 
 #include <dirent.h>
 #include <fcntl.h>
@@ -39,9 +39,9 @@
 
 struct IVSHMEMInfo
 {
-  int  devFd;
-  int  size;
-  bool hasDMA;
+  int    devFd;
+  size_t size;
+  bool   hasDMA;
 };
 
 static bool ivshmemDeviceValidator(struct Option * opt, const char ** error)
@@ -115,23 +115,34 @@ void ivshmemOptionsInit(void)
 
 bool ivshmemInit(struct IVSHMEM * dev)
 {
-  // FIXME: split code from ivshmemOpen
+  DEBUG_ASSERT(dev && !dev->opaque);
+
+  dev->size   = 0;
+  dev->mem    = NULL;
+  dev->opaque = NULL;
   return true;
 }
 
-bool ivshmemOpen(struct IVSHMEM * dev)
+bool ivshmemOpen(struct IVSHMEM * dev, IVSHMEMCacheMode cacheMode)
 {
-  return ivshmemOpenDev(dev, option_get_string("app", "shmFile"));
+  return ivshmemOpenDev(dev, option_get_string("app", "shmFile"),
+      cacheMode);
 }
 
-bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
+bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice,
+    IVSHMEMCacheMode cacheMode)
 {
-  DEBUG_ASSERT(dev);
+  DEBUG_ASSERT(dev && !dev->opaque && !dev->mem);
 
-  int devSize;
-  int devFd;
-  bool hasDMA;
+  size_t devSize;
+  int    devFd;
+  bool   hasDMA;
 
+  /* POSIX mmap does not expose the Windows IVSHMEM driver's cache modes. */
+  (void)cacheMode;
+
+  dev->size   = 0;
+  dev->mem    = NULL;
   dev->opaque = NULL;
 
   DEBUG_INFO("KVMFR Device     : %s", shmDevice);
@@ -147,14 +158,15 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
     }
 
     // get the device size
-    devSize = ioctl(devFd, KVMFR_DMABUF_GETSIZE, 0);
-    if (devSize < 0)
+    const int size = ioctl(devFd, KVMFR_DMABUF_GETSIZE, 0);
+    if (size <= 0)
     {
       DEBUG_ERROR("Failed to get the device size");
       close(devFd);
       return false;
     }
-    hasDMA = true;
+    devSize = (size_t)size;
+    hasDMA  = true;
   }
   else
   {
@@ -175,7 +187,14 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
       return false;
     }
 
-    devSize = st.st_size;
+    if (st.st_size <= 0 || (uintmax_t)st.st_size > SIZE_MAX)
+    {
+      DEBUG_ERROR("Invalid shared memory size: %s", shmDevice);
+      close(devFd);
+      return false;
+    }
+
+    devSize = (size_t)st.st_size;
     hasDMA  = false;
   }
 
@@ -189,6 +208,14 @@ bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDevice)
   }
 
   struct IVSHMEMInfo * info = malloc(sizeof(*info));
+  if (!info)
+  {
+    DEBUG_ERROR("Failed to allocate IVSHMEM device state");
+    munmap(map, devSize);
+    close(devFd);
+    return false;
+  }
+
   info->size   = devSize;
   info->devFd  = devFd;
   info->hasDMA = hasDMA;
@@ -220,7 +247,10 @@ void ivshmemClose(struct IVSHMEM * dev)
 
 void ivshmemFree(struct IVSHMEM * dev)
 {
-  // FIXME: split code from ivshmemClose
+  DEBUG_ASSERT(dev);
+
+  if (dev->opaque)
+    ivshmemClose(dev);
 }
 
 bool ivshmemHasDMA(struct IVSHMEM * dev)
@@ -237,7 +267,7 @@ int ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size)
 {
   DEBUG_ASSERT(ivshmemHasDMA(dev));
   DEBUG_ASSERT(dev && dev->opaque);
-  DEBUG_ASSERT(offset + size <= dev->size);
+  DEBUG_ASSERT(offset <= dev->size && size <= dev->size - offset);
 
   static long pageSize = 0;
 

@@ -26,6 +26,7 @@
 #include "app.h"
 #include "common/types.h"
 #include "common/framebuffer.h"
+#include "interface/external_frame.h"
 
 #define IS_LG_RENDERER_VALID(x) \
   ((x)->getName             && \
@@ -304,11 +305,13 @@ typedef struct LG_RendererOps
 
   /* called when there is a new frame. frameToken must remain attached to the
    * update if the renderer coalesces it, and must be reported by render only
-   * when that update is consumed. A non-NULL releaseFn transfers ownership to
-   * the renderer on success and must be called exactly once when the imported
-   * frame can no longer be sampled. Context: frameThread */
+   * when that update is consumed. On success, ownership of externalFrame and
+   * a non-NULL releaseFn transfers to the renderer. The external frame must be
+   * released and releaseFn called exactly once when the imported frame can no
+   * longer be sampled. Context: frameThread */
   bool (*onFrame)(LG_Renderer * renderer, const KVMFRFrameBuffer * frame,
-      int dmaFD, const KVMFRFrameDamageRect * damage, int damageCount,
+      LG_ExternalFrame * externalFrame, const KVMFRFrameDamageRect * damage,
+      int damageCount,
       LG_RendererFrameToken frameToken,
       LG_FrameReleaseFn releaseFn,
       void * releaseOpaque, uint64_t releaseHandle);

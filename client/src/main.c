@@ -1619,7 +1619,7 @@ int main_frameThread(void * unused)
     g_state.frameImportWaitTime = 0;
 
     const bool rendererOwnsFrame = frame.releaseFn != NULL;
-    if (!RENDERER(onFrame, frame.framebuffer, frame.dmaFD,
+    if (!RENDERER(onFrame, frame.framebuffer, frame.externalFrame,
           frame.damageRects, damageCount, frameToken,
           rendererOwnsFrame ? frame.releaseFn     : NULL,
           rendererOwnsFrame ? frame.releaseOpaque : NULL,
@@ -1634,6 +1634,7 @@ int main_frameThread(void * unused)
       primaryWorkerFailed();
       break;
     }
+    frame.externalFrame = NULL;
     /* A leased frame can complete on the render thread immediately after it
      * is signalled below, so sample producer timing while this lease is still
      * unambiguously owned by the frame thread. */

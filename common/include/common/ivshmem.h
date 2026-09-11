@@ -22,26 +22,34 @@
 #define _H_LG_COMMON_IVSHMEM_
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
+
+typedef enum IVSHMEMCacheMode
+{
+  /* Producers normally use write-combined mappings; consumers use cached.
+   * Platforms without selectable cache modes ignore this policy. */
+  IVSHMEM_CACHE_MODE_NONCACHED     = 0,
+  IVSHMEM_CACHE_MODE_CACHED        = 1,
+  IVSHMEM_CACHE_MODE_WRITECOMBINED = 2,
+}
+IVSHMEMCacheMode;
 
 struct IVSHMEM
 {
-  unsigned int   size;
-  void         * mem;
+  size_t   size;
+  void   * mem;
 
   // internal use
-  void * opaque;
+  void   * opaque;
 };
 
 void ivshmemOptionsInit(void);
 bool ivshmemInit(struct IVSHMEM * dev);
-bool ivshmemOpen(struct IVSHMEM * dev);
-bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDev);
+bool ivshmemOpen(struct IVSHMEM * dev, IVSHMEMCacheMode cacheMode);
+bool ivshmemOpenDev(struct IVSHMEM * dev, const char * shmDev,
+    IVSHMEMCacheMode cacheMode);
 void ivshmemClose(struct IVSHMEM * dev);
 void ivshmemFree(struct IVSHMEM * dev);
-
-/* Linux KVMFR support only for now (VM->VM) */
-bool ivshmemHasDMA   (struct IVSHMEM * dev);
-int  ivshmemGetDMABuf(struct IVSHMEM * dev, uint64_t offset, uint64_t size);
 
 #endif
