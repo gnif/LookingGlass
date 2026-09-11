@@ -27,6 +27,7 @@
 
 #include "common/debug.h"
 #include "common/time.h"
+#include "common/util.h"
 
 #define PULSEAUDIO_ERROR_REPORT_INTERVAL_NS INT64_C(1000000000)
 #define PULSEAUDIO_OPERATION_TIMEOUT_US      UINT64_C(250000)

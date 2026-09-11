@@ -893,10 +893,7 @@ static int cursorRepaintThread(void * unused)
       if (!waitTime)
         break;
 
-      struct timespec deadlineTime;
-      clock_gettime(CLOCK_MONOTONIC, &deadlineTime);
-      tsAdd(&deadlineTime, waitTime);
-      lgWaitEventAbs(e_cursorRepaint, &deadlineTime);
+      lgWaitEventDeadline(e_cursorRepaint, deadline);
     }
   }
 
@@ -941,8 +938,7 @@ static int renderThread(void * unused)
   /* signal to other threads that the renderer is ready */
   lgSignalEvent(e_startup);
 
-  struct timespec time;
-  clock_gettime(CLOCK_MONOTONIC, &time);
+  uint64_t renderDeadline = nanotime();
 
   while(likely(app_getState() != APP_STATE_SHUTDOWN))
   {
@@ -994,7 +990,7 @@ static int renderThread(void * unused)
     else if (g_params.fpsMin != 0)
     {
       app_handleRenderEvent(microtime());
-      lgWaitEventAbs(g_state.frameEvent, &time);
+      lgWaitEventDeadline(g_state.frameEvent, renderDeadline);
     }
 
     bool           cursorWake;
@@ -1112,8 +1108,7 @@ static int renderThread(void * unused)
     if (!g_state.jitRender && g_params.fpsMin != 0)
     {
       /* A frame-driven swap also satisfies the minimum render rate. */
-      clock_gettime(CLOCK_MONOTONIC, &time);
-      tsAdd(&time, app_overlayNeedsRender() ?
+      renderDeadline = nanotime() + (app_overlayNeedsRender() ?
           g_state.overlayFrameTime : g_state.frameTime);
     }
 

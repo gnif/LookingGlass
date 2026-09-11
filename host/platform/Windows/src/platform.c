@@ -615,7 +615,7 @@ bool app_init(void)
   if (ods && !ods_start())
     DEBUG_WARN("Failed to setup capture of debug messages");
 
-  windowsSetTimerResolution();
+  lgTimeInit();
 
   // get the performance frequency for spinlocks
   QueryPerformanceFrequency(&app.perfFreq);

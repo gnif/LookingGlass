@@ -27,6 +27,8 @@
 
 LGEvent * lgCreateEvent(bool autoReset, unsigned int msSpinTime)
 {
+  (void)msSpinTime;
+
   HANDLE handle = CreateEvent(NULL, autoReset ? FALSE : TRUE, FALSE, NULL);
   if (!handle)
   {
@@ -75,6 +77,30 @@ bool lgWaitEvent(LGEvent * event, unsigned int timeout)
     }
   }
   while(true);
+}
+
+bool lgWaitEventNS(LGEvent * event, uint64_t timeoutNs)
+{
+  if (timeoutNs == TIMEOUT_INFINITE_NS)
+    return lgWaitEvent(event, TIMEOUT_INFINITE);
+
+  const uint64_t timeoutMs = timeoutNs / UINT64_C(1000000) +
+    (timeoutNs % UINT64_C(1000000) != 0);
+  return lgWaitEvent(event,
+      timeoutMs >= TIMEOUT_INFINITE ? TIMEOUT_INFINITE - 1U :
+      (unsigned int)timeoutMs);
+}
+
+bool lgWaitEventDeadline(LGEvent * event, uint64_t deadlineNs)
+{
+  if (deadlineNs == TIMEOUT_INFINITE_NS)
+    return lgWaitEvent(event, TIMEOUT_INFINITE);
+
+  const uint64_t now = nanotime();
+  if (deadlineNs <= now)
+    return lgWaitEvent(event, 0);
+
+  return lgWaitEventNS(event, deadlineNs - now);
 }
 
 bool lgSignalEvent(LGEvent * event)

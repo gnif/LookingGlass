@@ -21,6 +21,7 @@
 #include "common/event.h"
 
 #include "common/debug.h"
+#include "common/time.h"
 
 #include <stdlib.h>
 #include <pthread.h>
@@ -87,7 +88,7 @@ void lgFreeEvent(LGEvent * handle)
   free(handle);
 }
 
-bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
+static bool waitEventAbs(LGEvent * handle, const struct timespec * ts)
 {
   DEBUG_ASSERT(handle);
 
@@ -143,32 +144,38 @@ bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts)
   return ret;
 }
 
-static bool waitEventNS(LGEvent * handle, uint64_t timeout)
+bool lgWaitEventDeadline(LGEvent * handle, uint64_t deadlineNs)
 {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
+  if (deadlineNs == TIMEOUT_INFINITE_NS)
+    return waitEventAbs(handle, NULL);
 
-  const uint64_t nsec = (uint64_t)ts.tv_nsec + timeout;
-  ts.tv_sec += nsec / 1000000000ULL;
-  ts.tv_nsec = nsec % 1000000000ULL;
-
-  return lgWaitEventAbs(handle, &ts);
+  const struct timespec ts =
+  {
+    .tv_sec  = deadlineNs / UINT64_C(1000000000),
+    .tv_nsec = deadlineNs % UINT64_C(1000000000),
+  };
+  return waitEventAbs(handle, &ts);
 }
 
-bool lgWaitEventNS(LGEvent * handle, unsigned int timeout)
+bool lgWaitEventNS(LGEvent * handle, uint64_t timeoutNs)
 {
-  if (timeout == TIMEOUT_INFINITE)
-    return lgWaitEventAbs(handle, NULL);
+  if (timeoutNs == TIMEOUT_INFINITE_NS)
+    return waitEventAbs(handle, NULL);
 
-  return waitEventNS(handle, timeout);
+  const uint64_t now = nanotime();
+  if (UINT64_MAX - now < timeoutNs)
+    return waitEventAbs(handle, NULL);
+
+  return lgWaitEventDeadline(handle, now + timeoutNs);
 }
 
 bool lgWaitEvent(LGEvent * handle, unsigned int timeout)
 {
   if (timeout == TIMEOUT_INFINITE)
-    return lgWaitEventAbs(handle, NULL);
+    return waitEventAbs(handle, NULL);
 
-  return waitEventNS(handle, (uint64_t)timeout * 1000000ULL);
+  return lgWaitEventNS(handle,
+      (uint64_t)timeout * UINT64_C(1000000));
 }
 
 bool lgSignalEvent(LGEvent * handle)

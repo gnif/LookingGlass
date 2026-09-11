@@ -20,26 +20,90 @@
 
 #include "common/time.h"
 #include "common/debug.h"
+#include "common/windebug.h"
 
-// decared by the platform
-extern HWND MessageHWND;
+#include <stdatomic.h>
+#include <stdlib.h>
+#include <windows.h>
+
+NTSYSCALLAPI NTSTATUS NTAPI NtDelayExecution(
+  _In_ BOOLEAN Alertable,
+  _In_opt_ PLARGE_INTEGER DelayInterval
+);
 
 struct LGTimer
 {
   LGTimerFn   fn;
   void      * udata;
-  UINT_PTR    handle;
-  bool        running;
+  HANDLE      handle;
+  atomic_bool running;
 };
 
-static void TimerProc(HWND Arg1, UINT Arg2, UINT_PTR Arg3, DWORD Arg4)
+static uint64_t performanceFrequency(void)
 {
-  LGTimer * timer = (LGTimer *)Arg3;
+  static atomic_uint_fast64_t cached;
+
+  uint64_t result = atomic_load_explicit(&cached, memory_order_acquire);
+  if (result)
+    return result;
+
+  LARGE_INTEGER value;
+  if (!QueryPerformanceFrequency(&value) || value.QuadPart <= 0)
+    abort();
+
+  result = value.QuadPart;
+  atomic_store_explicit(&cached, result, memory_order_release);
+  return result;
+}
+
+static VOID CALLBACK timerProc(PVOID opaque, BOOLEAN fired)
+{
+  (void)fired;
+
+  LGTimer * timer = opaque;
+  if (!atomic_load_explicit(&timer->running, memory_order_acquire))
+    return;
+
   if (!timer->fn(timer->udata))
   {
-    KillTimer(Arg1, timer->handle);
-    timer->running = false;
+    atomic_store_explicit(&timer->running, false, memory_order_release);
+    if (!ChangeTimerQueueTimer(NULL, timer->handle, INFINITE, 0))
+      DEBUG_WINERROR("Failed to stop timer", GetLastError());
   }
+}
+
+uint64_t microtime(void)
+{
+  LARGE_INTEGER value;
+  QueryPerformanceCounter(&value);
+  const uint64_t frequency = performanceFrequency();
+  const uint64_t seconds   = (uint64_t)value.QuadPart / frequency;
+  const uint64_t ticks     = (uint64_t)value.QuadPart % frequency;
+  return seconds * UINT64_C(1000000) +
+    ticks * UINT64_C(1000000) / frequency;
+}
+
+uint64_t nanotime(void)
+{
+  LARGE_INTEGER value;
+  QueryPerformanceCounter(&value);
+  const uint64_t frequency = performanceFrequency();
+  const uint64_t seconds   = (uint64_t)value.QuadPart / frequency;
+  const uint64_t ticks     = (uint64_t)value.QuadPart % frequency;
+  return seconds * UINT64_C(1000000000) +
+    ticks * UINT64_C(1000000000) / frequency;
+}
+
+void nsleep(uint64_t ns)
+{
+  if (!ns)
+    return;
+
+  LARGE_INTEGER interval =
+  {
+    .QuadPart = -(int64_t)((ns + UINT64_C(99)) / UINT64_C(100)),
+  };
+  NtDelayExecution(FALSE, &interval);
 }
 
 bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
@@ -52,10 +116,18 @@ bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
     return false;
   }
 
-  ret->fn      = fn;
-  ret->udata   = udata;
-  ret->running = true;
-  ret->handle  = SetTimer(MessageHWND, (UINT_PTR)ret, intervalMS, TimerProc);
+  ret->fn     = fn;
+  ret->udata  = udata;
+  ret->handle = NULL;
+  atomic_init(&ret->running, true);
+
+  if (!CreateTimerQueueTimer(&ret->handle, NULL, timerProc, ret,
+        intervalMS, intervalMS, WT_EXECUTEDEFAULT))
+  {
+    DEBUG_WINERROR("Failed to create timer", GetLastError());
+    free(ret);
+    return false;
+  }
 
   *result = ret;
   return true;
@@ -63,10 +135,13 @@ bool lgCreateTimer(const unsigned int intervalMS, LGTimerFn fn,
 
 void lgTimerDestroy(LGTimer * timer)
 {
-  if (timer->running)
+  atomic_store_explicit(&timer->running, false, memory_order_release);
+  if (timer->handle &&
+      !DeleteTimerQueueTimer(NULL, timer->handle, INVALID_HANDLE_VALUE))
   {
-    if (MessageHWND && !KillTimer(MessageHWND, timer->handle))
-      DEBUG_ERROR("failed to destroy the timer");
+    const DWORD error = GetLastError();
+    if (error != ERROR_IO_PENDING)
+      DEBUG_WINERROR("Failed to destroy timer", error);
   }
 
   free(timer);
@@ -78,7 +153,7 @@ NTSYSCALLAPI NTSTATUS NTAPI NtSetTimerResolution(
   _Out_ PULONG ActualTime
 );
 
-void windowsSetTimerResolution(void)
+void lgTimeInit(void)
 {
   ULONG actualResolution;
   NtSetTimerResolution(1, true, &actualResolution);

@@ -30,6 +30,7 @@
 #include "resources/no-input-cursor/32.xcur.h"
 
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/epoll.h>
 #include <errno.h>

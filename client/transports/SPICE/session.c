@@ -22,6 +22,7 @@
 
 #include "common/debug.h"
 #include "common/time.h"
+#include "common/util.h"
 
 #include <purespice.h>
 

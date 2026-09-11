@@ -29,6 +29,7 @@
 #include "common/debug.h"
 #include "common/stringutils.h"
 #include "common/time.h"
+#include "common/util.h"
 #include "overlay_utils.h"
 
 #include <math.h>

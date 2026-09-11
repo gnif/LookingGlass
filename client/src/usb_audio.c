@@ -24,6 +24,7 @@
 #include "common/event.h"
 #include "common/ringbuffer.h"
 #include "common/time.h"
+#include "common/util.h"
 
 #include <usbredirparser.h>
 

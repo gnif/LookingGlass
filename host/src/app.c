@@ -44,6 +44,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <math.h>
 
 #define CONFIG_FILE "looking-glass-host.ini"

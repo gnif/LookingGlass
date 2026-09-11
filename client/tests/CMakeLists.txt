@@ -1,5 +1,19 @@
 cmake_minimum_required(VERSION 3.10)
 
+add_executable(common-platform-tests
+  common_platform_test.c
+)
+target_link_libraries(common-platform-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+add_test(NAME common-platform-tests
+  COMMAND common-platform-tests
+)
+set_tests_properties(common-platform-tests PROPERTIES
+  TIMEOUT 10
+)
+
 add_executable(font-tests
   font_test.c
   ../src/font.c

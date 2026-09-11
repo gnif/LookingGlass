@@ -22,9 +22,10 @@
 #define _H_LG_COMMON_EVENT_
 
 #include <stdbool.h>
-#include <time.h>
+#include <stdint.h>
 
 #define TIMEOUT_INFINITE ((unsigned int)~0)
+#define TIMEOUT_INFINITE_NS UINT64_MAX
 
 typedef struct LGEvent LGEvent;
 
@@ -38,8 +39,7 @@ bool      lgResetEvent (LGEvent * handle);
 // for windows this is an event HANDLE
 LGEvent * lgWrapEvent(void * handle);
 
-// Posix specific, not implmented/possible in windows
-bool lgWaitEventAbs(LGEvent * handle, struct timespec * ts);
-bool lgWaitEventNS (LGEvent * handle, unsigned int timeout);
+bool lgWaitEventDeadline(LGEvent * handle, uint64_t deadlineNs);
+bool lgWaitEventNS      (LGEvent * handle, uint64_t timeoutNs);
 
 #endif

@@ -28,6 +28,7 @@
 
 #include "common/debug.h"
 #include "common/locking.h"
+#include "common/util.h"
 #include "main.h"
 
 typedef struct RenderCommand

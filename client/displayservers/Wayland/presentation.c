@@ -22,8 +22,9 @@
 #include "wayland.h"
 
 #include <stdbool.h>
-#include <string.h>
 #include <errno.h>
+#include <string.h>
+#include <time.h>
 
 #include <wayland-client.h>
 
@@ -68,11 +69,26 @@ static bool presentationOrdered(const struct timespec * left,
     (left->tv_sec == right->tv_sec && left->tv_nsec >= right->tv_nsec);
 }
 
+static struct timespec presentationTimespecDiff(
+    const struct timespec * left, const struct timespec * right)
+{
+  struct timespec result =
+  {
+    .tv_sec  = left->tv_sec  - right->tv_sec,
+    .tv_nsec = left->tv_nsec - right->tv_nsec,
+  };
+  if (result.tv_nsec < 0)
+  {
+    --result.tv_sec;
+    result.tv_nsec += 1000000000;
+  }
+  return result;
+}
+
 static uint64_t presentationDelta(const struct timespec * left,
     const struct timespec * right)
 {
-  struct timespec delta;
-  tsDiff(&delta, left, right);
+  const struct timespec delta = presentationTimespecDiff(left, right);
   return (uint64_t)delta.tv_sec * 1000000000ULL + delta.tv_nsec;
 }
 
@@ -132,8 +148,8 @@ static void presentationFeedbackPresented(void * opaque,
 
   if (tvNsec < 1000000000)
   {
-    struct timespec delta;
-    tsDiff(&delta, &present, &frame->sent);
+    const struct timespec delta =
+      presentationTimespecDiff(&present, &frame->sent);
     ringbuffer_push(wlWm.photonTimings,
         &(float){ delta.tv_sec * 1e3f + delta.tv_nsec * 1e-6f });
   }

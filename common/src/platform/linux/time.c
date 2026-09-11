@@ -46,6 +46,44 @@ struct LGTimer
 
 static struct LGTimerState l_ts = { 0 };
 
+void lgTimeInit(void)
+{
+}
+
+uint64_t microtime(void)
+{
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  return (uint64_t)time.tv_sec * UINT64_C(1000000) +
+    (uint64_t)time.tv_nsec / UINT64_C(1000);
+}
+
+uint64_t nanotime(void)
+{
+  struct timespec time;
+  clock_gettime(CLOCK_MONOTONIC, &time);
+  return (uint64_t)time.tv_sec * UINT64_C(1000000000) +
+    (uint64_t)time.tv_nsec;
+}
+
+void nsleep(uint64_t ns)
+{
+  struct timespec remaining =
+  {
+    .tv_sec  = ns / UINT64_C(1000000000),
+    .tv_nsec = ns % UINT64_C(1000000000),
+  };
+
+  while (nanosleep(&remaining, &remaining) != 0 && errno == EINTR) {}
+}
+
+static void timespecAdd(struct timespec * time, uint64_t ns)
+{
+  const uint64_t nsec = (uint64_t)time->tv_nsec + ns;
+  time->tv_sec  += nsec / UINT64_C(1000000000);
+  time->tv_nsec  = nsec % UINT64_C(1000000000);
+}
+
 static int timerFn(void * fn)
 {
   struct LGTimer * timer;
@@ -67,7 +105,7 @@ static int timerFn(void * fn)
     }
     ll_unlock(l_ts.timers);
 
-    tsAdd(&time, 1000000);
+    timespecAdd(&time, UINT64_C(1000000));
     while(clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &time, NULL) != 0) {}
   }
 
