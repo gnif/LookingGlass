@@ -23,19 +23,18 @@
 #include <LGProtocol/KVMFR.h>
 #include "common/debug.h"
 #include "common/locking.h"
+#include "common/random.h"
 #include "common/thread.h"
 #include "common/time.h"
 
 #include <lgmp/stream.h>
 #include <lgmp/spmc.h>
 
-#include <errno.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/random.h>
 
 #define AUDIO_IDLE_POLL_MS        20U
 #define AUDIO_ACTIVE_POLL_US      25U
@@ -240,22 +239,6 @@ static uint32_t nextNonzero(uint32_t * value)
   if (++*value == 0)
     ++*value;
   return *value;
-}
-
-static bool randomBytes(void * buffer, size_t size)
-{
-  uint8_t * output = buffer;
-  while (size)
-  {
-    const ssize_t received = getrandom(output, size, 0);
-    if (received < 0 && errno == EINTR)
-      continue;
-    if (received <= 0)
-      return false;
-    output += (size_t)received;
-    size   -= (size_t)received;
-  }
-  return true;
 }
 
 static bool tryControlWriteGate(LGMPAudio * audio)
@@ -2512,7 +2495,7 @@ bool lgmpAudio_create(PLGMPClient client, LGEvent * pointerWake,
     return false;
   }
   audio->generationSerial = 1;
-  if (!randomBytes(&audio->requestSerial,
+  if (!lgRandomBytes(&audio->requestSerial,
         sizeof(audio->requestSerial)))
   {
     lgFreeEvent(audio->event);
@@ -2668,7 +2651,7 @@ void lgmpAudio_disconnect(LGMPAudio * audio)
 static bool newClaimNL(LGMPAudio * audio)
 {
   uint64_t token = 0;
-  if (!randomBytes(&token, sizeof(token)))
+  if (!lgRandomBytes(&token, sizeof(token)))
   {
     token = microtime() ^ ((uint64_t)audio->clientID << 32) ^
       audio->requestSerial;

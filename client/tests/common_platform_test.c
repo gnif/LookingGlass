@@ -21,11 +21,14 @@
 #include "test.h"
 
 #include "common/event.h"
+#include "common/random.h"
+#include "common/semaphore.h"
 #include "common/thread.h"
 #include "common/time.h"
 
 #include <stdatomic.h>
 #include <stdint.h>
+#include <string.h>
 
 #define TEST_WAIT_NS UINT64_C(1000000000)
 
@@ -38,6 +41,12 @@ struct TimerState
 {
   LGEvent    * event;
   atomic_uint  calls;
+};
+
+struct SemaphoreState
+{
+  LGSemaphore * semaphore;
+  LGEvent     * complete;
 };
 
 static int signalThread(void * opaque)
@@ -58,6 +67,14 @@ static bool timerCallback(void * opaque)
 
   CHECK(lgSignalEvent(state->event));
   return false;
+}
+
+static int semaphoreThread(void * opaque)
+{
+  const struct SemaphoreState * state = opaque;
+  CHECK(lgWaitSemaphore(state->semaphore));
+  CHECK(lgSignalEvent(state->complete));
+  return 0;
 }
 
 static void testEventWaits(void)
@@ -107,11 +124,50 @@ static void testTimer(void)
   lgFreeEvent(event);
 }
 
+static void testSemaphore(void)
+{
+  LGSemaphore * semaphore = lgCreateSemaphore(0);
+  LGEvent     * complete  = lgCreateEvent(true, 0);
+  CHECK(semaphore);
+  CHECK(complete);
+
+  const struct SemaphoreState state =
+  {
+    .semaphore = semaphore,
+    .complete  = complete,
+  };
+  LGThread * thread;
+  CHECK(lgCreateThread(
+        "semaphore", semaphoreThread, (void *)&state, &thread));
+  CHECK(!lgWaitEventNS(complete, UINT64_C(1000000)));
+  CHECK(lgSignalSemaphore(semaphore));
+  CHECK(lgWaitEventNS(complete, TEST_WAIT_NS));
+  CHECK(lgJoinThread(thread, NULL));
+
+  CHECK(lgSignalSemaphore(semaphore));
+  CHECK(lgSignalSemaphore(semaphore));
+  CHECK(lgWaitSemaphore(semaphore));
+  CHECK(lgWaitSemaphore(semaphore));
+  lgFreeEvent(complete);
+  lgFreeSemaphore(semaphore);
+}
+
+static void testRandom(void)
+{
+  uint8_t first [32] = { 0 };
+  uint8_t second[32] = { 0 };
+  CHECK(lgRandomBytes(first, sizeof(first)));
+  CHECK(lgRandomBytes(second, sizeof(second)));
+  CHECK(memcmp(first, second, sizeof(first)) != 0);
+}
+
 int main(void)
 {
   lgTimeInit();
   testEventWaits();
   testManualReset();
   testTimer();
+  testSemaphore();
+  testRandom();
   return 0;
 }

@@ -12,6 +12,8 @@ add_library(lg_common_platform_code STATIC
   sysinfo.c
   thread.c
   event.c
+  semaphore.c
+  random.c
   ivshmem.c
   time.c
   paths.c

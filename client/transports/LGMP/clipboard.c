@@ -25,17 +25,16 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
+#include "common/random.h"
 #include "common/thread.h"
 #include "common/time.h"
 
 #include <lgmp/stream.h>
 
-#include <errno.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/random.h>
 
 #define CLIPBOARD_PENDING_MAX         128U
 #define CLIPBOARD_PENDING_NORMAL_MAX  64U
@@ -364,26 +363,6 @@ static uint64_t nextClientGeneration(LGMPClipboard * clipboard)
         clipboard->localGenerationSerial))
     clipboard->localGenerationSerial = 1;
   return clipboard->localGenerationSerial;
-}
-
-static bool randomBytes(void * buffer, size_t size)
-{
-  uint8_t * output = buffer;
-  while (size)
-  {
-    const ssize_t received = getrandom(output, size, 0);
-    if (received < 0 && errno == EINTR)
-      continue;
-    if (received <= 0)
-    {
-      if (!received)
-        errno = EIO;
-      return false;
-    }
-    output += (size_t)received;
-    size   -= (size_t)received;
-  }
-  return true;
 }
 
 static LG_ClipboardFileError fromWireFileError(uint32_t error)
@@ -2365,7 +2344,7 @@ bool lgmpClipboard_create(PLGMPClient client, LGMPClipboard ** result)
     return false;
   clipboard->client = client;
   uint64_t nonce = 0;
-  if (!randomBytes(&nonce, sizeof(nonce)))
+  if (!lgRandomBytes(&nonce, sizeof(nonce)))
   {
     free(clipboard);
     return false;

@@ -26,18 +26,17 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
+#include "common/semaphore.h"
 #include "common/thread.h"
 #include "common/util.h"
 #include "common/ringbuffer.h"
 
 #include "dynamic/audiodev.h"
 
-#include <errno.h>
 #include <float.h>
 #include <limits.h>
 #include <math.h>
 #include <samplerate.h>
-#include <semaphore.h>
 #include <stdalign.h>
 #include <stdatomic.h>
 #include <string.h>
@@ -303,16 +302,16 @@ typedef struct
     LG_Lock              deviceLock;
     struct
     {
-      sem_t       wake;
-      bool        wakeInitialized;
-      atomic_bool wakePending;
-      LGThread  * thread;
-      atomic_bool stop;
+      LGSemaphore * wake;
+      bool          wakeInitialized;
+      atomic_bool   wakePending;
+      LGThread    * thread;
+      atomic_bool   stop;
     }
     worker;
     _Atomic(StreamState) state;
     atomic_uint          callbackState;
-    sem_t                callbackIdle;
+    LGSemaphore         * callbackIdle;
     bool                 callbackIdleInitialized;
     atomic_uint          streamGeneration;
     uint64_t             requestSerial;
@@ -410,13 +409,13 @@ typedef struct
 
   struct
   {
-    LG_Lock     lock;
-    sem_t       wake;
-    bool        wakeInitialized;
-    atomic_bool wakePending;
-    LGThread  * thread;
-    atomic_bool stop;
-    bool        pending;
+    LG_Lock       lock;
+    LGSemaphore * wake;
+    bool          wakeInitialized;
+    atomic_bool   wakePending;
+    LGThread    * thread;
+    atomic_bool   stop;
+    bool          pending;
 
     const LG_AudioOps * ops;
     void              * opaque;
@@ -1087,7 +1086,7 @@ static void playbackCallbackExit(void)
   if ((previous & PLAYBACK_CALLBACK_DISABLED) &&
       (previous & PLAYBACK_CALLBACK_COUNT_MASK) == 1 &&
       audio.playback.callbackIdleInitialized)
-    sem_post(&audio.playback.callbackIdle);
+    lgSignalSemaphore(audio.playback.callbackIdle);
 }
 
 static void playbackDisableCallbacks(void)
@@ -1103,12 +1102,7 @@ static void playbackWaitForCallbacks(void)
           &audio.playback.callbackState, memory_order_acquire) &
         PLAYBACK_CALLBACK_COUNT_MASK) != 0)
   {
-    int result;
-    do
-      result = sem_wait(&audio.playback.callbackIdle);
-    while (result < 0 && errno == EINTR);
-
-    if (result < 0)
+    if (!lgWaitSemaphore(audio.playback.callbackIdle))
       break;
   }
 }
@@ -1121,7 +1115,7 @@ static void playbackWorkerWake(void)
         &audio.playback.worker.wakePending, true, memory_order_acq_rel))
     return;
 
-  if (sem_post(&audio.playback.worker.wake) < 0 && errno != EOVERFLOW)
+  if (!lgSignalSemaphore(audio.playback.worker.wake))
     atomic_store_explicit(
         &audio.playback.worker.wakePending, false, memory_order_release);
 }
@@ -1133,7 +1127,7 @@ static void feedbackWorkerWake(void)
         &audio.feedback.wakePending, true, memory_order_acq_rel))
     return;
 
-  if (sem_post(&audio.feedback.wake) < 0 && errno != EOVERFLOW)
+  if (!lgSignalSemaphore(audio.feedback.wake))
     atomic_store_explicit(
         &audio.feedback.wakePending, false, memory_order_release);
 }
@@ -4395,11 +4389,7 @@ static int playbackThread(void * opaque)
 {
   for (;;)
   {
-    int result;
-    do
-      result = sem_wait(&audio.playback.worker.wake);
-    while (result < 0 && errno == EINTR);
-    if (result < 0)
+    if (!lgWaitSemaphore(audio.playback.worker.wake))
       break;
 
     atomic_store_explicit(
@@ -4453,11 +4443,7 @@ static int feedbackThread(void * opaque)
 
   for (;;)
   {
-    int result;
-    do
-      result = sem_wait(&audio.feedback.wake);
-    while (result < 0 && errno == EINTR);
-    if (result < 0)
+    if (!lgWaitSemaphore(audio.feedback.wake))
       break;
 
     atomic_store_explicit(
@@ -4577,7 +4563,8 @@ void lgAudio_init(void)
       &audio.playback.callbackState, PLAYBACK_CALLBACK_DISABLED,
       memory_order_release);
 
-  if (sem_init(&audio.playback.callbackIdle, 0, 0) != 0)
+  audio.playback.callbackIdle = lgCreateSemaphore(0);
+  if (!audio.playback.callbackIdle)
   {
     DEBUG_ERROR("Failed to create the audio callback semaphore");
     return;
@@ -4591,7 +4578,8 @@ void lgAudio_init(void)
     goto err_callback;
   }
 
-  if (sem_init(&audio.playback.worker.wake, 0, 0) != 0)
+  audio.playback.worker.wake = lgCreateSemaphore(0);
+  if (!audio.playback.worker.wake)
   {
     DEBUG_ERROR("Failed to create the audio playback semaphore");
     goto err_active;
@@ -4604,7 +4592,8 @@ void lgAudio_init(void)
     goto err_playbackWake;
   }
 
-  if (sem_init(&audio.feedback.wake, 0, 0) != 0)
+  audio.feedback.wake = lgCreateSemaphore(0);
+  if (!audio.feedback.wake)
   {
     DEBUG_ERROR("Failed to create the audio feedback semaphore");
     goto err_playbackThread;
@@ -4648,7 +4637,8 @@ void lgAudio_init(void)
   return;
 
 err_feedbackWake:
-  sem_destroy(&audio.feedback.wake);
+  lgFreeSemaphore(audio.feedback.wake);
+  audio.feedback.wake            = NULL;
   audio.feedback.wakeInitialized = false;
 
 err_playbackThread:
@@ -4659,7 +4649,8 @@ err_playbackThread:
   audio.playback.worker.thread = NULL;
 
 err_playbackWake:
-  sem_destroy(&audio.playback.worker.wake);
+  lgFreeSemaphore(audio.playback.worker.wake);
+  audio.playback.worker.wake            = NULL;
   audio.playback.worker.wakeInitialized = false;
 
 err_active:
@@ -4667,7 +4658,8 @@ err_active:
   audio.activeIdle = NULL;
 
 err_callback:
-  sem_destroy(&audio.playback.callbackIdle);
+  lgFreeSemaphore(audio.playback.callbackIdle);
+  audio.playback.callbackIdle            = NULL;
   audio.playback.callbackIdleInitialized = false;
 }
 
@@ -4696,7 +4688,8 @@ void lgAudio_free(void)
   }
   if (audio.playback.worker.wakeInitialized)
   {
-    sem_destroy(&audio.playback.worker.wake);
+    lgFreeSemaphore(audio.playback.worker.wake);
+    audio.playback.worker.wake            = NULL;
     audio.playback.worker.wakeInitialized = false;
   }
 
@@ -4710,7 +4703,8 @@ void lgAudio_free(void)
   }
   if (audio.feedback.wakeInitialized)
   {
-    sem_destroy(&audio.feedback.wake);
+    lgFreeSemaphore(audio.feedback.wake);
+    audio.feedback.wake            = NULL;
     audio.feedback.wakeInitialized = false;
   }
 
@@ -4740,7 +4734,8 @@ void lgAudio_free(void)
 
   if (audio.playback.callbackIdleInitialized)
   {
-    sem_destroy(&audio.playback.callbackIdle);
+    lgFreeSemaphore(audio.playback.callbackIdle);
+    audio.playback.callbackIdle            = NULL;
     audio.playback.callbackIdleInitialized = false;
   }
   if (audio.activeIdle)

@@ -27,6 +27,7 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
+#include "common/random.h"
 #include "common/thread.h"
 #include "common/time.h"
 
@@ -44,7 +45,6 @@
 #include <string.h>
 #include <strings.h>
 #include <sys/eventfd.h>
-#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/statvfs.h>
 #include <sys/types.h>
@@ -227,26 +227,6 @@ static bool filesLockInitialized;
 #ifdef ENABLE_TESTS
 static atomic_bool forceLocalEof;
 #endif
-
-static bool randomBytes(void * buffer, size_t size)
-{
-  uint8_t * bytes = buffer;
-  size_t offset = 0;
-  while (offset < size)
-  {
-    const ssize_t result = getrandom(bytes + offset, size - offset, 0);
-    if (result < 0 && errno == EINTR)
-      continue;
-    if (result <= 0)
-    {
-      if (!result)
-        errno = EIO;
-      return false;
-    }
-    offset += (size_t)result;
-  }
-  return true;
-}
 
 static uint64_t nsFromTimespec(struct timespec value)
 {
@@ -3446,7 +3426,7 @@ bool clipboardFiles_init(void)
   LG_LOCK_INIT(files.lock);
   filesLockInitialized = true;
   uint64_t nonce = 0;
-  if (!randomBytes(&nonce, sizeof(nonce)))
+  if (!lgRandomBytes(&nonce, sizeof(nonce)))
   {
     DEBUG_ERROR("Failed to seed clipboard file transfer identifiers: %s",
         strerror(errno));

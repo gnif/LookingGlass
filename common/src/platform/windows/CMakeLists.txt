@@ -35,6 +35,8 @@ add_library(lg_common_platform_code STATIC
   sysinfo.c
   thread.c
   event.c
+  semaphore.c
+  random.c
   windebug.c
   ivshmem.c
   time.c
@@ -46,6 +48,7 @@ add_library(lg_common_platform_code STATIC
 target_link_libraries(lg_common_platform_code
   lg_common
   setupapi
+  bcrypt
   ntdll
 )
 
