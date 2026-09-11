@@ -21,19 +21,40 @@ include(CheckCCompilerFlag)
 include(CMakeDependentOption)
 include(FeatureSummary)
 
+if(WIN32)
+  set(LG_CLIENT_PLATFORM         Windows)
+  set(LG_CLIENT_PLATFORM_LINUX   OFF)
+  set(LG_CLIENT_PLATFORM_WINDOWS ON)
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  set(LG_CLIENT_PLATFORM         Linux)
+  set(LG_CLIENT_PLATFORM_LINUX   ON)
+  set(LG_CLIENT_PLATFORM_WINDOWS OFF)
+else()
+  message(FATAL_ERROR
+    "The Looking Glass client does not support ${CMAKE_SYSTEM_NAME}")
+endif()
+
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 include(UninstallTarget)
 
-find_package(PkgConfig)
-pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
-pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
+if(LG_CLIENT_PLATFORM_LINUX)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FONTCONFIG REQUIRED IMPORTED_TARGET fontconfig)
+  pkg_check_modules(FUSE3 REQUIRED IMPORTED_TARGET fuse3>=3.10)
+endif()
 
-option(ENABLE_OPENGL "Enable the OpenGL renderer"       ON)
+option(ENABLE_OPENGL "Enable the OpenGL renderer"
+  ${LG_CLIENT_PLATFORM_LINUX})
 add_feature_info(ENABLE_OPENGL ENABLE_OPENGL "Legacy OpenGL renderer.")
 
-option(ENABLE_EGL    "Enable the EGL renderer"          ON)
+option(ENABLE_EGL "Enable the EGL renderer" ON)
 add_feature_info(ENABLE_EGL ENABLE_EGL "EGL renderer.")
+
+if(LG_CLIENT_PLATFORM_WINDOWS AND ENABLE_OPENGL)
+  message(FATAL_ERROR
+    "The legacy OpenGL renderer is not available on Windows; use EGL")
+endif()
 
 option(ENABLE_TESTS "Build all client tests and test support" OFF)
 add_feature_info(ENABLE_TESTS ENABLE_TESTS
@@ -59,8 +80,8 @@ option(ENABLE_AUDIO "Build with audio support" ON)
 cmake_dependent_option(
   ENABLE_PIPEWIRE
   "Build with PipeWire audio output support"
-  ON
-  "ENABLE_AUDIO"
+  ${LG_CLIENT_PLATFORM_LINUX}
+  "ENABLE_AUDIO;LG_CLIENT_PLATFORM_LINUX"
   OFF
 )
 add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
@@ -68,23 +89,37 @@ add_feature_info(ENABLE_PIPEWIRE ENABLE_PIPEWIRE "PipeWire audio support.")
 cmake_dependent_option(
   ENABLE_PULSEAUDIO
   "Build with PulseAudio audio output support"
-  ON
-  "ENABLE_AUDIO"
+  ${LG_CLIENT_PLATFORM_LINUX}
+  "ENABLE_AUDIO;LG_CLIENT_PLATFORM_LINUX"
   OFF
 )
 add_feature_info(ENABLE_PULSEAUDIO ENABLE_PULSEAUDIO "PulseAudio audio support.")
 
-if(ENABLE_AUDIO AND NOT (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO))
+cmake_dependent_option(
+  ENABLE_WASAPI
+  "Build with WASAPI audio support"
+  ${LG_CLIENT_PLATFORM_WINDOWS}
+  "ENABLE_AUDIO;LG_CLIENT_PLATFORM_WINDOWS"
+  OFF
+)
+add_feature_info(ENABLE_WASAPI ENABLE_WASAPI "WASAPI audio support.")
+
+if(ENABLE_AUDIO AND NOT
+    (ENABLE_PIPEWIRE OR ENABLE_PULSEAUDIO OR ENABLE_WASAPI))
   message(STATUS "No audio backends enabled, disabling audio support")
   set(ENABLE_AUDIO OFF)
 endif()
 add_feature_info(ENABLE_AUDIO ENABLE_AUDIO "Audio support.")
 
+option(ENABLE_SPICE "Build with SPICE transport support"
+  ${LG_CLIENT_PLATFORM_LINUX})
+add_feature_info(ENABLE_SPICE ENABLE_SPICE "SPICE transport support.")
+
 cmake_dependent_option(
   ENABLE_USB_AUDIO
   "Build with USB audio support"
-  ON
-  "ENABLE_AUDIO"
+  ${LG_CLIENT_PLATFORM_LINUX}
+  "ENABLE_AUDIO;ENABLE_SPICE;LG_CLIENT_PLATFORM_LINUX"
   OFF
 )
 
@@ -125,6 +160,12 @@ endif()
 set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
 set(CMAKE_C_STANDARD 11)
 
+if(LG_CLIENT_PLATFORM_WINDOWS)
+  set(EXE_FLAGS "-Wl,--gc-sections -Wl,--nxcompat")
+  add_compile_options("-fdebug-prefix-map=${PROJECT_TOP}/=")
+  add_compile_definitions(__USE_MINGW_ANSI_STDIO=0)
+endif()
+
 if (ENABLE_OPENGL)
   add_definitions(-D ENABLE_OPENGL)
 endif()
@@ -148,6 +189,7 @@ add_definitions(-D GL_GLEXT_PROTOTYPES)
 
 add_custom_command(
   OUTPUT  ${CMAKE_BINARY_DIR}/version.c
+    ${CMAKE_BINARY_DIR}/include/version.h
     ${CMAKE_BINARY_DIR}/_version.c
   COMMAND ${CMAKE_COMMAND} -D PROJECT_TOP=${PROJECT_TOP} -P
     ${PROJECT_TOP}/version.cmake
@@ -163,9 +205,14 @@ include_directories(
 
 link_libraries(
   ${CMAKE_DL_LIBS}
-  rt
-  m
 )
+
+if(LG_CLIENT_PLATFORM_LINUX)
+  link_libraries(
+    rt
+    m
+  )
+endif()
 
 set(SOURCES
   ${CMAKE_BINARY_DIR}/version.c
@@ -178,16 +225,12 @@ set(SOURCES
   src/font.c
   src/util.c
   src/clipboard.c
-  src/clipboard_files.c
   src/kb.c
   src/kb_hid.c
-  src/gl_dynprocs.c
-  src/egl_dynprocs.c
   src/eglutil.c
   src/frame_scheduler.c
   src/overlay_utils.c
   src/render_queue.c
-  src/evdev.c
   src/transport.c
   src/fallback.c
   src/sw_surface.c
@@ -202,6 +245,14 @@ set(SOURCES
   src/overlay/msg.c
   src/overlay/status.c
 )
+
+if(ENABLE_OPENGL)
+  list(APPEND SOURCES src/gl_dynprocs.c)
+endif()
+
+if(ENABLE_EGL)
+  list(APPEND SOURCES src/egl_dynprocs.c)
+endif()
 
 if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
   set_source_files_properties(src/overlay/graphs.c PROPERTIES
@@ -220,49 +271,71 @@ add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"  
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
 add_subdirectory("${PROJECT_TOP}/repos/gui"       "${CMAKE_BINARY_DIR}/gui"      EXCLUDE_FROM_ALL)
 
+if(LG_CLIENT_PLATFORM_WINDOWS AND ENABLE_EGL AND
+    NOT LG_EGL_PROVIDER_TARGET)
+  find_package(ANGLE REQUIRED)
+endif()
+
+add_subdirectory(platform)
 add_subdirectory(displayservers)
 add_subdirectory(renderers)
 add_subdirectory(transports)
 add_subdirectory(audiodevs)
 
-configure_file("${PROJECT_TOP}/resources/looking-glass-client.desktop.in" "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop" @ONLY)
-add_executable(looking-glass-client ${SOURCES})
+if(LG_CLIENT_PLATFORM_WINDOWS)
+  set(CLIENT_RESOURCE "platform/Windows/resource.rc")
+  set_source_files_properties(${CLIENT_RESOURCE} PROPERTIES
+    OBJECT_DEPENDS
+      "${PROJECT_SOURCE_DIR}/platform/Windows/app.manifest;${PROJECT_TOP}/resources/icon.ico;${CMAKE_BINARY_DIR}/include/version.h"
+  )
+  add_executable(looking-glass-client WIN32 ${CLIENT_RESOURCE} ${SOURCES})
+else()
+  configure_file(
+    "${PROJECT_TOP}/resources/looking-glass-client.desktop.in"
+    "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop"
+    @ONLY
+  )
+  add_executable(looking-glass-client ${SOURCES})
+endif()
 
 target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
-if(NOT CMAKE_OBJCOPY)
-  message(FATAL_ERROR "objcopy is required to generate the client debug file")
+if(LG_CLIENT_PLATFORM_LINUX)
+  if(NOT CMAKE_OBJCOPY)
+    message(FATAL_ERROR "objcopy is required to generate the client debug file")
+  endif()
+
+  if(NOT CMAKE_STRIP)
+    message(FATAL_ERROR "strip is required to generate the client debug file")
+  endif()
+
+  set(CLIENT_DEBUG_FILE
+    "${CMAKE_CURRENT_BINARY_DIR}/looking-glass-client.debug")
+
+  add_custom_command(TARGET looking-glass-client POST_BUILD
+    COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
+      "$<TARGET_FILE:looking-glass-client>" "${CLIENT_DEBUG_FILE}"
+    COMMAND "${CMAKE_STRIP}" --strip-debug
+      "$<TARGET_FILE:looking-glass-client>"
+    COMMAND "${CMAKE_OBJCOPY}" "--add-gnu-debuglink=${CLIENT_DEBUG_FILE}"
+      "$<TARGET_FILE:looking-glass-client>"
+    COMMENT "Extracting Looking Glass client debug information"
+    VERBATIM
+  )
 endif()
-
-if(NOT CMAKE_STRIP)
-  message(FATAL_ERROR "strip is required to generate the client debug file")
-endif()
-
-set(CLIENT_DEBUG_FILE
-  "${CMAKE_CURRENT_BINARY_DIR}/looking-glass-client.debug")
-
-add_custom_command(TARGET looking-glass-client POST_BUILD
-  COMMAND "${CMAKE_OBJCOPY}" --only-keep-debug
-    "$<TARGET_FILE:looking-glass-client>" "${CLIENT_DEBUG_FILE}"
-  COMMAND "${CMAKE_STRIP}" --strip-debug "$<TARGET_FILE:looking-glass-client>"
-  COMMAND "${CMAKE_OBJCOPY}" "--add-gnu-debuglink=${CLIENT_DEBUG_FILE}"
-    "$<TARGET_FILE:looking-glass-client>"
-  COMMENT "Extracting Looking Glass client debug information"
-  VERBATIM
-)
 
 target_link_libraries(looking-glass-client
-  ${EXE_FLAGS}
-  PkgConfig::FONTCONFIG
-  PkgConfig::FUSE3
   lg_resources
   lg_common
+  client_platform
   displayservers
   renderers
   transports
   audiodevs
   lg_gui
 )
+
+set_target_properties(looking-glass-client PROPERTIES LINK_FLAGS "${EXE_FLAGS}")
 
 if(ENABLE_TESTS)
   include(CTest)
@@ -272,9 +345,15 @@ endif()
 
 if(ENABLE_AUDIO)
   target_compile_definitions(looking-glass-client PRIVATE ENABLE_AUDIO)
-  pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+  if(LG_CLIENT_PLATFORM_WINDOWS)
+    find_package(SampleRate REQUIRED)
+    set(SAMPLERATE_TARGET SampleRate::samplerate)
+  else()
+    pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+    set(SAMPLERATE_TARGET PkgConfig::SAMPLERATE)
+  endif()
   target_link_libraries(looking-glass-client
-    PkgConfig::SAMPLERATE
+    ${SAMPLERATE_TARGET}
   )
 endif()
 
@@ -282,14 +361,16 @@ install(TARGETS looking-glass-client
   RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
   COMPONENT binary)
 
-install(FILES "${CLIENT_DEBUG_FILE}"
-  DESTINATION "${CMAKE_INSTALL_BINDIR}/.debug"
-  COMPONENT binary)
+if(LG_CLIENT_PLATFORM_LINUX)
+  install(FILES "${CLIENT_DEBUG_FILE}"
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/.debug"
+    COMPONENT binary)
 
-install(FILES "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop"
+  install(FILES "${CMAKE_BINARY_DIR}/resources/looking-glass-client.desktop"
     DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/applications")
-install(FILES "${PROJECT_TOP}/resources/lg-logo.svg"
-        DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps"
-        RENAME "looking-glass.svg")
+  install(FILES "${PROJECT_TOP}/resources/lg-logo.svg"
+    DESTINATION "${CMAKE_INSTALL_DATAROOTDIR}/icons/hicolor/scalable/apps"
+    RENAME "looking-glass.svg")
+endif()
 
 feature_summary(WHAT ENABLED_FEATURES DISABLED_FEATURES)

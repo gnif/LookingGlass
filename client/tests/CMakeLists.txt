@@ -576,34 +576,36 @@ set_tests_properties(clipboard-files-mount PROPERTIES
   SKIP_RETURN_CODE 77
 )
 
-add_executable(spice-clipboard-tests
-  spice_clipboard_test.c
-  clipboard_files_stub.c
-  ../src/clipboard.c
-  ../transports/SPICE/clipboard.c
-)
-target_compile_definitions(spice-clipboard-tests PRIVATE
-  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
-)
-target_include_directories(spice-clipboard-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
-  "${PROJECT_TOP}/repos/PureSpice/include"
-  "${PROJECT_TOP}/repos/gui/cimgui"
-  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
-)
-target_link_libraries(spice-clipboard-tests
-  ${EXE_FLAGS}
-  lg_common
-)
-foreach(name IN ITEMS outbound inbound)
-  add_test(NAME spice-clipboard-${name}
-    COMMAND spice-clipboard-tests ${name}
+if(ENABLE_SPICE)
+  add_executable(spice-clipboard-tests
+    spice_clipboard_test.c
+    clipboard_files_stub.c
+    ../src/clipboard.c
+    ../transports/SPICE/clipboard.c
   )
-  set_tests_properties(spice-clipboard-${name} PROPERTIES
-    TIMEOUT 10
+  target_compile_definitions(spice-clipboard-tests PRIVATE
+    CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
   )
-endforeach()
+  target_include_directories(spice-clipboard-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+    "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
+    "${PROJECT_TOP}/repos/PureSpice/include"
+    "${PROJECT_TOP}/repos/gui/cimgui"
+    "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+  )
+  target_link_libraries(spice-clipboard-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  foreach(name IN ITEMS outbound inbound)
+    add_test(NAME spice-clipboard-${name}
+      COMMAND spice-clipboard-tests ${name}
+    )
+    set_tests_properties(spice-clipboard-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
 
 add_executable(transport-fallback-tests
   transport_fallback_test.c
@@ -648,67 +650,69 @@ foreach(name IN LISTS TRANSPORT_FALLBACK_CASES)
   )
 endforeach()
 
-add_executable(spice-tests
-  spice_test.c
-  ../transports/SPICE/session.c
-  ../transports/SPICE/spice.c
-  ../transports/SPICE/surface.c
-)
-target_compile_definitions(spice-tests PRIVATE
-  ENABLE_AUDIO=0
-  ENABLE_USB_AUDIO=0
-)
-target_include_directories(spice-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
-  "${PROJECT_TOP}/repos/PureSpice/include"
-)
-target_link_libraries(spice-tests
-  ${EXE_FLAGS}
-  lg_common
-)
-set(SPICE_CASES
-  connect-fail
-  pre-ready-drop
-  cancel
-  ready-drop
-  session-order
-  surface-active
-  surface-cancel
-  surface-events
-  surface-detach
-)
-foreach(name IN LISTS SPICE_CASES)
-  add_test(NAME spice-${name}
-    COMMAND spice-tests ${name}
+if(ENABLE_SPICE)
+  add_executable(spice-tests
+    spice_test.c
+    ../transports/SPICE/session.c
+    ../transports/SPICE/spice.c
+    ../transports/SPICE/surface.c
   )
-  set_tests_properties(spice-${name} PROPERTIES
-    TIMEOUT 10
+  target_compile_definitions(spice-tests PRIVATE
+    ENABLE_AUDIO=0
+    ENABLE_USB_AUDIO=0
   )
-endforeach()
+  target_include_directories(spice-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../transports/SPICE"
+    "${PROJECT_TOP}/repos/PureSpice/include"
+  )
+  target_link_libraries(spice-tests
+    ${EXE_FLAGS}
+    lg_common
+  )
+  set(SPICE_CASES
+    connect-fail
+    pre-ready-drop
+    cancel
+    ready-drop
+    session-order
+    surface-active
+    surface-cancel
+    surface-events
+    surface-detach
+  )
+  foreach(name IN LISTS SPICE_CASES)
+    add_test(NAME spice-${name}
+      COMMAND spice-tests ${name}
+    )
+    set_tests_properties(spice-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
 
-add_executable(purespice-connect-cancel-tests
-  purespice_connect_cancel_test.c
-)
-target_compile_definitions(purespice PRIVATE PURESPICE_TESTING)
-target_compile_definitions(purespice-connect-cancel-tests PRIVATE
-  PURESPICE_TESTING
-)
-target_include_directories(purespice-connect-cancel-tests PRIVATE
-  "${PROJECT_TOP}/repos/PureSpice/include"
-  "${PROJECT_TOP}/repos/PureSpice/src"
-  "$<TARGET_PROPERTY:purespice,INCLUDE_DIRECTORIES>"
-)
-target_link_libraries(purespice-connect-cancel-tests
-  ${EXE_FLAGS}
-  purespice
-  pthread
-)
-add_test(NAME purespice-connect-cancel
-  COMMAND purespice-connect-cancel-tests
-)
-set_tests_properties(purespice-connect-cancel PROPERTIES
-  TIMEOUT 5
-)
+  add_executable(purespice-connect-cancel-tests
+    purespice_connect_cancel_test.c
+  )
+  target_compile_definitions(purespice PRIVATE PURESPICE_TESTING)
+  target_compile_definitions(purespice-connect-cancel-tests PRIVATE
+    PURESPICE_TESTING
+  )
+  target_include_directories(purespice-connect-cancel-tests PRIVATE
+    "${PROJECT_TOP}/repos/PureSpice/include"
+    "${PROJECT_TOP}/repos/PureSpice/src"
+    "$<TARGET_PROPERTY:purespice,INCLUDE_DIRECTORIES>"
+  )
+  target_link_libraries(purespice-connect-cancel-tests
+    ${EXE_FLAGS}
+    purespice
+    pthread
+  )
+  add_test(NAME purespice-connect-cancel
+    COMMAND purespice-connect-cancel-tests
+  )
+  set_tests_properties(purespice-connect-cancel PROPERTIES
+    TIMEOUT 5
+  )
+endif()
 
 add_executable(frame-scheduler-tests
   frame_scheduler_test.c
