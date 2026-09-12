@@ -125,6 +125,9 @@ struct EGL_Texture
   EGL_TexFormat         format;
 };
 
+extern const EGL_TextureOps EGL_TextureDMABUF;
+bool egl_texDMABUFSupported(EGLDisplay display, EGLint major, EGLint minor);
+
 bool egl_textureInit(EGL_Texture ** texture, EGLDisplay * display,
     EGL_TexType type);
 void egl_textureFree(EGL_Texture ** tex);

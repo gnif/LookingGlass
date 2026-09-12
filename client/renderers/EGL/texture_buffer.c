@@ -454,14 +454,17 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
     this->bufIndex = 0;
   buffer->updated = false;
 
-  /* With more than one slot the producer can fill the next PBO while this
-   * upload is queued. A single-slot texture must remain locked until its
-   * fence exists so the mapped buffer cannot be overwritten concurrently. */
+  /* With more than one slot the producer can fill the next upload buffer
+   * while this one is submitted. Keep a single-slot texture locked until the
+   * upload is issued and, for persistent storage, its fence exists. */
   const bool keepLocked = this->texCount == 1;
   if (!keepLocked)
     LG_UNLOCK(this->copyLock);
 
-  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
+  const bool persistent =
+    buffer->mode == EGL_TEX_BUFFER_MODE_PERSISTENT;
+  egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER,
+      persistent ? buffer->pbo : 0);
   egl_stateBindTexture(0, GL_TEXTURE_2D, tex);
 
   glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
@@ -475,7 +478,7 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
         texture->format.height,
         texture->format.format,
         texture->format.dataType,
-        (const void *)0);
+        persistent ? (const void *)0 : buffer->map);
   else
     for (int i = 0; i < damage->count; ++i)
     {
@@ -491,11 +494,19 @@ EGL_TexStatus egl_texBufferStreamProcess(EGL_Texture * texture,
           rect->height,
           texture->format.format,
           texture->format.dataType,
-          (const void *)offset);
+          persistent ? (const void *)offset :
+            (const uint8_t *)buffer->map + offset);
     }
 
   /* Keep damage intact until all of its upload commands have been issued. */
   egl_texBufferDamageReset(damage);
+  if (!persistent)
+  {
+    if (keepLocked)
+      LG_UNLOCK(this->copyLock);
+    return EGL_TEX_STATUS_UPDATED;
+  }
+
   this->sync[index] = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   if (unlikely(!this->sync[index]))
   {

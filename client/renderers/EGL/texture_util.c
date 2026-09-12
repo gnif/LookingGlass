@@ -29,6 +29,11 @@
 #include "egldebug.h"
 #include "egl_dynprocs.h"
 
+#include <inttypes.h>
+#include <stdlib.h>
+
+static EGL_TexBufferMode bufferMode = EGL_TEX_BUFFER_MODE_DIRECT;
+
 bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
 {
   fmt->pixFmt = setup->pixFmt;
@@ -37,7 +42,7 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   fmt->stride = setup->stride;
   fmt->pitch  = setup->pitch;
 
-  switch(setup->pixFmt)
+  switch (setup->pixFmt)
   {
     case EGL_PF_BGRA:
       fmt->bpp        = 4;
@@ -104,14 +109,33 @@ bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt)
   return true;
 }
 
-bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
-    int count)
+void egl_texUtilSetBufferMode(EGL_TexBufferMode mode)
 {
-  for(int i = 0; i < count; ++i)
+  bufferMode = mode;
+}
+
+static bool egl_texUtilGenBuffersMode(const EGL_TexFormat * fmt,
+    EGL_TexBuffer * buffers, int count, EGL_TexBufferMode mode)
+{
+  for (int i = 0; i < count; ++i)
   {
-    EGL_TexBuffer *buffer = &buffers[i];
+    EGL_TexBuffer * buffer = &buffers[i];
 
     buffer->size = fmt->dataSize;
+    buffer->mode = mode;
+    if (mode == EGL_TEX_BUFFER_MODE_DIRECT)
+    {
+      buffer->map = malloc(buffer->size);
+      if (!buffer->map)
+      {
+        DEBUG_ERROR("Failed to allocate %" PRIu64
+            "-byte texture upload buffer", (uint64_t)buffer->size);
+        return false;
+      }
+
+      continue;
+    }
+
     glGenBuffers(1, &buffer->pbo);
     egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
     g_egl_dynProcs.glBufferStorageEXT(
@@ -130,12 +154,47 @@ bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
   return true;
 }
 
+bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
+    int count)
+{
+  EGL_TexBufferMode mode = bufferMode;
+  if (mode == EGL_TEX_BUFFER_MODE_PERSISTENT &&
+      !g_egl_dynProcs.glBufferStorageEXT)
+  {
+    DEBUG_WARN("Persistent texture uploads unavailable, using direct uploads");
+    mode = EGL_TEX_BUFFER_MODE_DIRECT;
+  }
+
+  if (egl_texUtilGenBuffersMode(fmt, buffers, count, mode))
+    return true;
+
+  egl_texUtilFreeBuffers(buffers, count);
+  if (mode != EGL_TEX_BUFFER_MODE_PERSISTENT)
+    return false;
+
+  DEBUG_WARN("Persistent texture upload buffers failed, using direct uploads");
+  mode = EGL_TEX_BUFFER_MODE_DIRECT;
+  if (egl_texUtilGenBuffersMode(fmt, buffers, count, mode))
+    return true;
+
+  egl_texUtilFreeBuffers(buffers, count);
+  return false;
+}
+
 void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 {
   bool deleted = false;
-  for(int i = 0; i < count; ++i)
+  for (int i = 0; i < count; ++i)
   {
-    EGL_TexBuffer *buffer = &buffers[i];
+    EGL_TexBuffer * buffer = &buffers[i];
+
+    if (buffer->mode == EGL_TEX_BUFFER_MODE_DIRECT)
+    {
+      free(buffer->map);
+      buffer->map  = NULL;
+      buffer->size = 0;
+      continue;
+    }
 
     if (!buffer->pbo)
       continue;
@@ -143,7 +202,8 @@ void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
     egl_texUtilUnmapBuffer(buffer);
     glDeleteBuffers(1, &buffer->pbo);
     deleted = true;
-    buffer->pbo = 0;
+    buffer->pbo  = 0;
+    buffer->size = 0;
   }
 
   if (deleted)
@@ -152,6 +212,7 @@ void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count)
 
 bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer)
 {
+  DEBUG_ASSERT(buffer->mode == EGL_TEX_BUFFER_MODE_PERSISTENT);
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   buffer->map = glMapBufferRange(
       GL_PIXEL_UNPACK_BUFFER,
@@ -164,7 +225,8 @@ bool egl_texUtilMapBuffer(EGL_TexBuffer * buffer)
       GL_MAP_COHERENT_BIT_EXT);
 
   if (!buffer->map)
-    DEBUG_GL_ERROR("glMapBufferRange failed of %lu bytes", buffer->size);
+    DEBUG_GL_ERROR("glMapBufferRange failed of %" PRIu64 " bytes",
+        (uint64_t)buffer->size);
 
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
   return buffer->map;
@@ -175,6 +237,7 @@ void egl_texUtilUnmapBuffer(EGL_TexBuffer * buffer)
   if (!buffer->map)
     return;
 
+  DEBUG_ASSERT(buffer->mode == EGL_TEX_BUFFER_MODE_PERSISTENT);
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer->pbo);
   glUnmapBuffer(GL_PIXEL_UNPACK_BUFFER);
   egl_stateBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);

@@ -40,16 +40,25 @@ typedef struct EGL_TexFormat
 }
 EGL_TexFormat;
 
+typedef enum EGL_TexBufferMode
+{
+  EGL_TEX_BUFFER_MODE_DIRECT,
+  EGL_TEX_BUFFER_MODE_PERSISTENT
+}
+EGL_TexBufferMode;
+
 typedef struct EGL_TexBuffer
 {
-  size_t size;
-  GLuint pbo;
-  void * map;
-  bool   updated;
+  size_t            size;
+  GLuint            pbo;
+  void            * map;
+  bool              updated;
+  EGL_TexBufferMode mode;
 }
 EGL_TexBuffer;
 
 bool egl_texUtilGetFormat(const EGL_TexSetup * setup, EGL_TexFormat * fmt);
+void egl_texUtilSetBufferMode(EGL_TexBufferMode mode);
 bool egl_texUtilGenBuffers(const EGL_TexFormat * fmt, EGL_TexBuffer * buffers,
     int count);
 void egl_texUtilFreeBuffers(EGL_TexBuffer * buffers, int count);

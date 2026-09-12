@@ -86,11 +86,31 @@ struct SnapshotRelease
   uint64_t           handle;
 };
 
-EGL_TextureOps EGL_TextureDMABUF;
+const EGL_TextureOps EGL_TextureDMABUF;
 
 static bool initDone           = false;
 static bool has24BitSupport    = true;
 static bool hasImportModifiers = true;
+
+bool egl_texDMABUFSupported(EGLDisplay display, EGLint major, EGLint minor)
+{
+  const char * extensions = eglQueryString(display, EGL_EXTENSIONS);
+
+  if (!g_egl_dynProcs.glEGLImageTargetTexture2DOES)
+    DEBUG_INFO("glEGLImageTargetTexture2DOES unavailable, DMA support disabled");
+  else if (!g_egl_dynProcs.eglCreateImage || !g_egl_dynProcs.eglDestroyImage)
+    DEBUG_INFO("eglCreateImage or eglDestroyImage unavailable, DMA support disabled");
+  else if (!extensions ||
+      !util_hasGLExt(extensions, "EGL_EXT_image_dma_buf_import"))
+    DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
+  else if ((major < 1 || (major == 1 && minor < 5)) &&
+      !util_hasGLExt(extensions, "EGL_KHR_image_base"))
+    DEBUG_INFO("Need EGL 1.5+ or EGL_KHR_image_base for eglCreateImage(KHR)");
+  else
+    return true;
+
+  return false;
+}
 
 // internal functions
 
@@ -695,7 +715,7 @@ static void egl_texDMABUFMarkUsed(EGL_Texture * texture)
   LG_UNLOCK(parent->copyLock);
 }
 
-EGL_TextureOps EGL_TextureDMABUF =
+const EGL_TextureOps EGL_TextureDMABUF =
 {
   .init        = egl_texDMABUFInit,
   .free        = egl_texDMABUFFree,

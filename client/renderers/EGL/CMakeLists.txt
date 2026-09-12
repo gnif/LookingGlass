@@ -1,16 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 project(renderer_EGL LANGUAGES C CXX)
 
-find_package(PkgConfig)
-pkg_check_modules(RENDERER_EGL REQUIRED IMPORTED_TARGET
-  egl
-  gl
-)
-
-pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
-  wayland-egl
-)
-
 find_program(AWK NAMES gawk mawk original-awk awk)
 
 if(AWK MATCHES ".+-NOTFOUND")
@@ -75,7 +65,7 @@ make_defines(
   "${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 )
 
-add_library(renderer_EGL STATIC
+set(RENDERER_EGL_SOURCES
   egl.c
   egldebug.c
   state.c
@@ -84,7 +74,6 @@ add_library(renderer_EGL STATIC
   texture.c
   texture_buffer.c
   texture_framebuffer.c
-  texture_dmabuf.c
   model.c
   desktop.c
   desktop_rects.c
@@ -95,6 +84,7 @@ add_library(renderer_EGL STATIC
   framebuffer.c
   effect.c
   postprocess.c
+  postprocess_order.c
   ffx.c
   filter_glsl.c
   filter_24bit.c
@@ -106,19 +96,22 @@ add_library(renderer_EGL STATIC
   "${CMAKE_CURRENT_BINARY_DIR}/shader/desktop_rgb.def.h"
 )
 
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  list(APPEND RENDERER_EGL_SOURCES texture_dmabuf.c)
+else()
+  list(APPEND RENDERER_EGL_SOURCES texture_dmabuf_stub.c)
+endif()
+
+add_library(renderer_EGL STATIC ${RENDERER_EGL_SOURCES})
+
 target_compile_definitions(renderer_EGL PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1 IMGUI_IMPL_OPENGL_ES3)
 
 target_link_libraries(renderer_EGL
-  PkgConfig::RENDERER_EGL
+  lg_egl_provider
   lg_common
 
   lg_gui
 )
-if(RENDERER_EGL_OPT_FOUND)
-  target_link_libraries(renderer_EGL
-    PkgConfig::RENDERER_EGL_OPT
-  )
-endif()
 
 target_include_directories(renderer_EGL
   PRIVATE

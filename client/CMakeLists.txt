@@ -269,11 +269,61 @@ endif()
 add_subdirectory("${PROJECT_TOP}/resources"       "${CMAKE_BINARY_DIR}/resources")
 add_subdirectory("${PROJECT_TOP}/common"          "${CMAKE_BINARY_DIR}/common"   )
 add_subdirectory("${PROJECT_TOP}/repos/LGMP/lgmp" "${CMAKE_BINARY_DIR}/LGMP"     )
-add_subdirectory("${PROJECT_TOP}/repos/gui"       "${CMAKE_BINARY_DIR}/gui"      EXCLUDE_FROM_ALL)
 
-if(LG_CLIENT_PLATFORM_WINDOWS AND ENABLE_EGL AND
-    NOT LG_EGL_PROVIDER_TARGET)
-  find_package(ANGLE REQUIRED)
+set(LG_EGL_PROVIDER_TARGET "" CACHE STRING
+  "CMake target that provides EGL and OpenGL ES")
+
+if(ENABLE_EGL)
+  set(LG_EGL_PROVIDER_LIBRARIES)
+  if(LG_EGL_PROVIDER_TARGET)
+    if(NOT TARGET ${LG_EGL_PROVIDER_TARGET})
+      message(FATAL_ERROR
+        "LG_EGL_PROVIDER_TARGET does not name an existing CMake target: "
+        "${LG_EGL_PROVIDER_TARGET}")
+    endif()
+
+    list(APPEND LG_EGL_PROVIDER_LIBRARIES ${LG_EGL_PROVIDER_TARGET})
+  elseif(LG_CLIENT_PLATFORM_WINDOWS)
+    find_package(ANGLE REQUIRED)
+    list(APPEND LG_EGL_PROVIDER_LIBRARIES
+      ANGLE::EGL
+      ANGLE::GLESv2
+    )
+  else()
+    pkg_check_modules(RENDERER_EGL REQUIRED IMPORTED_TARGET
+      egl
+      gl
+    )
+    pkg_check_modules(RENDERER_EGL_OPT IMPORTED_TARGET
+      wayland-egl
+    )
+
+    list(APPEND LG_EGL_PROVIDER_LIBRARIES PkgConfig::RENDERER_EGL)
+    if(RENDERER_EGL_OPT_FOUND)
+      list(APPEND LG_EGL_PROVIDER_LIBRARIES PkgConfig::RENDERER_EGL_OPT)
+    endif()
+  endif()
+
+  add_library(lg_egl_provider INTERFACE)
+  target_link_libraries(lg_egl_provider INTERFACE
+    ${LG_EGL_PROVIDER_LIBRARIES}
+  )
+endif()
+
+add_subdirectory("${PROJECT_TOP}/repos/gui" "${CMAKE_BINARY_DIR}/gui"
+  EXCLUDE_FROM_ALL)
+
+target_sources(lg_gui PRIVATE
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui/imgui_demo.cpp"
+  "${PROJECT_TOP}/repos/gui/cimplot/implot/implot_demo.cpp"
+)
+target_compile_definitions(lg_gui PRIVATE IMGUI_DISABLE_DEMO_WINDOWS)
+
+if(ENABLE_EGL)
+  # CMake 3.10 does not allow target_link_libraries to update a target from
+  # another directory. LINK_LIBRARIES provides the equivalent dependency.
+  set_property(TARGET lg_gui APPEND PROPERTY
+    LINK_LIBRARIES lg_egl_provider)
 endif()
 
 add_subdirectory(platform)

@@ -36,7 +36,6 @@
 extern const EGL_TextureOps EGL_TextureBuffer;
 extern const EGL_TextureOps EGL_TextureBufferStream;
 extern const EGL_TextureOps EGL_TextureFrameBuffer;
-extern const EGL_TextureOps EGL_TextureDMABUF;
 
 bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
     EGL_TexType type)

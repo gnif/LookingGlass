@@ -1007,29 +1007,81 @@ if(ENABLE_EGL)
     )
   endforeach()
 
-  add_executable(texture-dmabuf-tests
-    texture_dmabuf_test.c
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(texture-dmabuf-tests
+      texture_dmabuf_test.c
+    )
+    add_dependencies(texture-dmabuf-tests renderer_EGL)
+    target_include_directories(texture-dmabuf-tests PRIVATE
+      "${CMAKE_BINARY_DIR}/renderers/EGL/shader"
+    )
+    target_link_libraries(texture-dmabuf-tests
+      ${EXE_FLAGS}
+      lg_common
+    )
+    set(TEXTURE_DMABUF_CASES
+      select
+      poll
+      saturation
+      release
+      identity
+    )
+    foreach(name IN LISTS TEXTURE_DMABUF_CASES)
+      add_test(NAME texture-dmabuf-${name}
+        COMMAND texture-dmabuf-tests ${name}
+      )
+      set_tests_properties(texture-dmabuf-${name} PROPERTIES
+        TIMEOUT 10
+      )
+    endforeach()
+  endif()
+
+  add_executable(postprocess-order-tests
+    postprocess_order_test.c
+    ../renderers/EGL/postprocess_order.c
   )
-  add_dependencies(texture-dmabuf-tests renderer_EGL)
-  target_include_directories(texture-dmabuf-tests PRIVATE
-    "${CMAKE_BINARY_DIR}/renderers/EGL/shader"
+  target_include_directories(postprocess-order-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
   )
-  target_link_libraries(texture-dmabuf-tests
+  target_link_libraries(postprocess-order-tests
     ${EXE_FLAGS}
     lg_common
+    lg_egl_provider
   )
-  set(TEXTURE_DMABUF_CASES
-    select
-    poll
-    saturation
-    release
-    identity
+  add_test(NAME postprocess-order-tests
+    COMMAND postprocess-order-tests
   )
-  foreach(name IN LISTS TEXTURE_DMABUF_CASES)
-    add_test(NAME texture-dmabuf-${name}
-      COMMAND texture-dmabuf-tests ${name}
+  set_tests_properties(postprocess-order-tests PROPERTIES
+    TIMEOUT 10
+  )
+
+  add_executable(texture-upload-tests
+    texture_upload_test.c
+    ../renderers/EGL/texture_buffer.c
+  )
+  target_include_directories(texture-upload-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
+    "${PROJECT_TOP}/common/include"
+  )
+  target_link_libraries(texture-upload-tests
+    ${EXE_FLAGS}
+    LGProtocol::LGProtocol
+    lg_egl_provider
+  )
+  set(TEXTURE_UPLOAD_CASES
+    direct
+    direct-full
+    direct-rect
+    persistent
+    persistent-full
+    persistent-rect
+    fallback
+  )
+  foreach(name IN LISTS TEXTURE_UPLOAD_CASES)
+    add_test(NAME texture-upload-${name}
+      COMMAND texture-upload-tests ${name}
     )
-    set_tests_properties(texture-dmabuf-${name} PROPERTIES
+    set_tests_properties(texture-upload-${name} PROPERTIES
       TIMEOUT 10
     )
   endforeach()

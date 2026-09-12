@@ -38,14 +38,18 @@
 #include "cimgui.h"
 #include "cimgui_impl.h"
 
+#include <inttypes.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "egl_dynprocs.h"
+#include "egldebug.h"
 #include "model.h"
 #include "shader.h"
 #include "state.h"
+#include "texture.h"
+#include "texture_util.h"
 #include "damage.h"
 #include "desktop.h"
 #include "cursor.h"
@@ -267,7 +271,8 @@ static bool egl_create(LG_Renderer ** renderer, const LG_RendererParams params,
   struct Inst * this = calloc(1, sizeof(*this));
   if (!this)
   {
-    DEBUG_INFO("Failed to allocate %lu bytes", sizeof(*this));
+    DEBUG_INFO("Failed to allocate %" PRIu64 " bytes",
+        (uint64_t)sizeof(*this));
     return false;
   }
   *renderer = &this->base;
@@ -776,8 +781,14 @@ static bool egl_onFrameFormat(LG_Renderer * renderer, const LG_RendererFormat fo
   /* this event runs in a second thread so we need to init it here */
   if (unlikely(!this->frameContext))
   {
+    if (!eglBindAPI(EGL_OPENGL_ES_API))
+    {
+      DEBUG_EGL_ERROR("Failed to select the OpenGL ES API for frame uploads");
+      return false;
+    }
+
     static EGLint attrs[] = {
-      EGL_CONTEXT_CLIENT_VERSION, 2,
+      EGL_CONTEXT_CLIENT_VERSION, 3,
       EGL_NONE
     };
 
@@ -1005,6 +1016,12 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
+  if (!eglBindAPI(EGL_OPENGL_ES_API))
+  {
+    DEBUG_EGL_ERROR("Failed to select the OpenGL ES API");
+    return false;
+  }
+
   int maxSamples = 1;
   if (option_get_bool("egl", "multisample"))
   {
@@ -1063,7 +1080,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     EGL_CONFIG_ATTR(EGL_BUFFER_SIZE    , configs[i].depth);
     if (hasFloatConfigs)
       EGL_CONFIG_ATTR(EGL_COLOR_COMPONENT_TYPE_EXT, configs[i].componentType);
-    EGL_CONFIG_ATTR(EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT);
+    EGL_CONFIG_ATTR(EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT);
     EGL_CONFIG_ATTR(EGL_SAMPLE_BUFFERS , maxSamples > 0 ? 1 : 0);
     EGL_CONFIG_ATTR(EGL_SAMPLES        , maxSamples);
     attr[ai] = EGL_NONE;
@@ -1125,7 +1142,7 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
   int ctxidx = 0;
 
   ctxattr[ctxidx++] = EGL_CONTEXT_CLIENT_VERSION;
-  ctxattr[ctxidx++] = 2;
+  ctxattr[ctxidx++] = 3;
 
   if (maj > 1 || (maj == 1 && min >= 5))
   {
@@ -1166,8 +1183,27 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
       break;
   }
 
-  eglMakeCurrent(this->display, this->surface, this->surface, this->context);
+  if (!eglMakeCurrent(this->display, this->surface, this->surface,
+        this->context))
+  {
+    DEBUG_EGL_ERROR("Failed to make the EGL context current");
+    return false;
+  }
+
   egl_stateInvalidate();
+  egl_dynProcsInit();
+
+  GLint esMaj = 0;
+  GLint esMin = 0;
+  glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
+  glGetIntegerv(GL_MINOR_VERSION, &esMin);
+  if (esMaj < 3)
+  {
+    DEBUG_ERROR("OpenGL ES 3.0 or newer is required, got %d.%d",
+        esMaj, esMin);
+    return false;
+  }
+
   const char * gl_exts = (const char *)glGetString(GL_EXTENSIONS);
   if (!gl_exts)
   {
@@ -1193,10 +1229,6 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     DEBUG_INFO("EGL Exts: %s", client_exts);
     DEBUG_INFO("GL Exts : %s", gl_exts);
   }
-
-  GLint esMaj, esMin;
-  glGetIntegerv(GL_MAJOR_VERSION, &esMaj);
-  glGetIntegerv(GL_MINOR_VERSION, &esMin);
 
   if (!util_hasGLExt(gl_exts, "GL_EXT_texture_format_BGRA8888"))
   {
@@ -1229,26 +1261,17 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
 
   this->scalePointer = option_get_bool("egl", "scalePointer");
 
-  if (!g_egl_dynProcs.glEGLImageTargetTexture2DOES)
-    DEBUG_INFO("glEGLImageTargetTexture2DOES unavilable, DMA support disabled");
-  else if (!g_egl_dynProcs.eglCreateImage || !g_egl_dynProcs.eglDestroyImage)
-    DEBUG_INFO("eglCreateImage or eglDestroyImage unavailable, DMA support disabled");
-  else if (!util_hasGLExt(client_exts, "EGL_EXT_image_dma_buf_import"))
-    DEBUG_INFO("EGL_EXT_image_dma_buf_import unavailable, DMA support disabled");
-  else if ((maj < 1 || (maj == 1 && min < 5)) && !util_hasGLExt(client_exts, "EGL_KHR_image_base"))
-    DEBUG_INFO("Need EGL 1.5+ or EGL_KHR_image_base for eglCreateImage(KHR)");
-  else
-    this->dmaSupport = true;
-
+  this->dmaSupport = egl_texDMABUFSupported(this->display, maj, min);
   if (!this->dmaSupport)
-  {
     useDMA = false;
-    if (!util_hasGLExt(gl_exts, "GL_EXT_buffer_storage"))
-    {
-      DEBUG_ERROR("GL_EXT_buffer_storage is needed to use EGL backend");
-      return false;
-    }
-  }
+
+  const bool persistentUploads =
+    util_hasGLExt(gl_exts, "GL_EXT_buffer_storage") &&
+    g_egl_dynProcs.glBufferStorageEXT;
+  egl_texUtilSetBufferMode(persistentUploads ?
+      EGL_TEX_BUFFER_MODE_PERSISTENT : EGL_TEX_BUFFER_MODE_DIRECT);
+  DEBUG_INFO("Texture upload method: %s",
+      persistentUploads ? "persistent PBO" : "direct");
 
   if (debug)
   {

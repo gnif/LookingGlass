@@ -18,14 +18,13 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#define _GNU_SOURCE
 #include "postprocess.h"
+#include "postprocess_order.h"
 #include "filters.h"
 #include "app.h"
 #include "cimgui.h"
 
 #include <errno.h>
-#include <limits.h>
 #include <stdatomic.h>
 
 #include "common/debug.h"
@@ -252,24 +251,6 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   return true;
 }
 
-static int stringListIndex(StringList list, const char * str)
-{
-  unsigned int count = stringlist_count(list);
-  for (unsigned int i = 0; i < count; ++i)
-    if (strcmp(stringlist_at(list, i), str) == 0)
-      return i;
-  return INT_MAX;
-}
-
-static int compareFilterOrder(const void * a_, const void * b_, void * opaque)
-{
-  const EGL_Filter * a = *(const EGL_Filter **)a_;
-  const EGL_Filter * b = *(const EGL_Filter **)b_;
-  StringList order = opaque;
-
-  return stringListIndex(order, a->ops.id) - stringListIndex(order, b->ops.id);
-}
-
 static void reorderFilters(struct EGL_PostProcess * this)
 {
   StringList order = stringlist_new(false);
@@ -305,8 +286,9 @@ static void reorderFilters(struct EGL_PostProcess * this)
     p = end + 1;
   }
 
-  qsort_r(vector_data(&this->filters), vector_size(&this->filters),
-    sizeof(EGL_Filter *), compareFilterOrder, order);
+  EGL_Filter ** filters = vector_data(&this->filters);
+  const size_t  count   = vector_size(&this->filters);
+  egl_postProcessOrderFilters(filters, count, order);
 
   stringlist_free(&order);
   free(orderStr);
