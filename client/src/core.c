@@ -25,7 +25,7 @@
 #include "kb.h"
 #include "message.h"
 #include "input.h"
-#include "evdev.h"
+#include "platform/input.h"
 
 #include "common/time.h"
 #include "common/debug.h"
@@ -147,7 +147,7 @@ bool core_inputEnabled(void)
 void core_updateKeyboardLEDsSync(void)
 {
   lgInput_setKeyboardLEDsSync(
-      inputPolicyEnabled() && !evdev_isExclusive());
+      inputPolicyEnabled() && !inputPlatformIsKeyboardExclusive());
 }
 
 void core_updateKeyboardGrab(void)
@@ -165,7 +165,7 @@ void core_updateKeyboardGrab(void)
   const bool active       = g_state.focused && !app_isOverlayMode() &&
     (capture || (inputEnabled && (view || automatic)));
 
-  evdev_setGrab(active, localActive && g_cursor.grab);
+  inputPlatformSetGrab(active, localActive && g_cursor.grab);
   core_updateKeyboardLEDsSync();
   if (active)
     g_state.ds->grabKeyboard();

@@ -37,3 +37,13 @@ void platform_debugInit(void)
 
   debug_lookup = plainLookup;
 }
+
+void debug_lock(void)
+{
+  _lock_file(stderr);
+}
+
+void debug_unlock(void)
+{
+  _unlock_file(stderr);
+}

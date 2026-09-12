@@ -216,6 +216,7 @@ endif()
 
 set(SOURCES
   ${CMAKE_BINARY_DIR}/version.c
+  platform/${LG_CLIENT_PLATFORM}/entry.c
   src/main.c
   src/core.c
   src/app.c
@@ -397,6 +398,22 @@ target_link_libraries(looking-glass-client
 
 set_target_properties(looking-glass-client PROPERTIES LINK_FLAGS "${EXE_FLAGS}")
 
+if(ENABLE_TESTS AND LG_CLIENT_PLATFORM_WINDOWS)
+  add_library(client_test_version OBJECT
+    "${CMAKE_BINARY_DIR}/version.c"
+  )
+endif()
+
+if(ENABLE_AUDIO)
+  if(LG_CLIENT_PLATFORM_WINDOWS)
+    find_package(SampleRate REQUIRED)
+    set(SAMPLERATE_TARGET SampleRate::samplerate)
+  else()
+    pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
+    set(SAMPLERATE_TARGET PkgConfig::SAMPLERATE)
+  endif()
+endif()
+
 if(ENABLE_TESTS)
   include(CTest)
   enable_testing()
@@ -405,13 +422,6 @@ endif()
 
 if(ENABLE_AUDIO)
   target_compile_definitions(looking-glass-client PRIVATE ENABLE_AUDIO)
-  if(LG_CLIENT_PLATFORM_WINDOWS)
-    find_package(SampleRate REQUIRED)
-    set(SAMPLERATE_TARGET SampleRate::samplerate)
-  else()
-    pkg_check_modules(SAMPLERATE REQUIRED IMPORTED_TARGET samplerate)
-    set(SAMPLERATE_TARGET PkgConfig::SAMPLERATE)
-  endif()
   target_link_libraries(looking-glass-client
     ${SAMPLERATE_TARGET}
   )

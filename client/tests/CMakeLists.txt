@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.10)
 
+if(LG_CLIENT_PLATFORM_WINDOWS)
+  link_libraries(
+    $<TARGET_OBJECTS:client_test_version>
+    lg_egl_provider
+  )
+endif()
+
 add_executable(common-platform-tests
   common_platform_test.c
 )
@@ -14,6 +21,38 @@ add_test(NAME common-platform-tests
   COMMAND common-platform-tests
 )
 set_tests_properties(common-platform-tests PROPERTIES
+  TIMEOUT 10
+)
+
+add_executable(event-source-tests
+  event_source_test.c
+  ../src/event_source.c
+)
+target_include_directories(event-source-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(event-source-tests
+  ${EXE_FLAGS}
+  lg_common
+)
+add_test(NAME event-source-tests
+  COMMAND event-source-tests
+)
+set_tests_properties(event-source-tests PROPERTIES
+  TIMEOUT 10
+)
+
+add_executable(windows-clipboard-files-tests
+  clipboard_files_windows_test.c
+  ../platform/Windows/clipboard_files.c
+)
+target_link_libraries(windows-clipboard-files-tests
+  ${EXE_FLAGS}
+)
+add_test(NAME windows-clipboard-files-tests
+  COMMAND windows-clipboard-files-tests
+)
+set_tests_properties(windows-clipboard-files-tests PROPERTIES
   TIMEOUT 10
 )
 
@@ -59,6 +98,20 @@ if(LG_CLIENT_PLATFORM_LINUX)
   set_tests_properties(keycode-tests PROPERTIES
     TIMEOUT 10
   )
+
+  add_executable(process-tests
+    process_test.c
+    ../platform/Linux/process.c
+  )
+  target_link_libraries(process-tests
+    ${EXE_FLAGS}
+  )
+  add_test(NAME process-tests
+    COMMAND process-tests
+  )
+  set_tests_properties(process-tests PROPERTIES
+    TIMEOUT 10
+  )
 endif()
 
 if(LG_CLIENT_PLATFORM_WINDOWS)
@@ -76,6 +129,7 @@ endif()
 
 add_executable(font-tests
   font_test.c
+  font_platform_stub.c
   ../src/font.c
 )
 
@@ -93,10 +147,17 @@ target_link_libraries(sw-surface-tests
 add_test(NAME sw-surface-tests COMMAND sw-surface-tests)
 set_tests_properties(sw-surface-tests PROPERTIES TIMEOUT 10)
 target_compile_definitions(font-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
   FONT_TEST_FILE="${PROJECT_TOP}/repos/gui/cimgui/imgui/misc/fonts/DroidSans.ttf"
 )
 target_include_directories(font-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+)
+target_link_libraries(font-tests
+  ${EXE_FLAGS}
+  lg_common
+  lg_gui
 )
 add_test(NAME font-tests
   COMMAND font-tests
@@ -105,160 +166,164 @@ set_tests_properties(font-tests PROPERTIES
   TIMEOUT 10
 )
 
-add_executable(lgmp-transport-tests
-  lgmp_transport_test.c
-  ../src/kb_hid.c
-)
-target_link_libraries(lgmp-transport-tests
-  ${EXE_FLAGS}
-  transport_LGMP
-  lg_common
-  lgmp
-)
-if(ENABLE_AUDIO)
-  target_compile_definitions(lgmp-transport-tests PRIVATE
-    ENABLE_AUDIO
-  )
-endif()
-add_test(NAME lgmp-transport-tests
-  COMMAND lgmp-transport-tests
-)
-set_tests_properties(lgmp-transport-tests PROPERTIES
-  TIMEOUT 10
-)
-
-add_executable(lgmp-frame-tests
-  lgmp_frame_test.c
-  ../src/kb_hid.c
-)
-target_link_libraries(lgmp-frame-tests
-  ${EXE_FLAGS}
-  transport_LGMP
-  lg_common
-  lgmp
-)
-set(LGMP_FRAME_CASES
-  malformed
-  serial-damage
-  lanes
-  leases
-  dma
-)
-foreach(name IN LISTS LGMP_FRAME_CASES)
-  add_test(NAME lgmp-frame-${name}
-    COMMAND lgmp-frame-tests ${name}
-  )
-  set_tests_properties(lgmp-frame-${name} PROPERTIES
-    TIMEOUT 10
-  )
-endforeach()
-
-add_executable(lgmp-input-tests
-  lgmp_input_test.c
-  ../transports/LGMP/input.c
-  ../src/kb_hid.c
-)
-target_include_directories(lgmp-input-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-)
-target_link_libraries(lgmp-input-tests
-  ${EXE_FLAGS}
-  lg_common
-  lgmp
-)
-set(LGMP_INPUT_CASES
-  claim
-  blocked
-  restart
-  pressure
-  idle
-)
-foreach(name IN LISTS LGMP_INPUT_CASES)
-  add_test(NAME lgmp-input-${name}
-    COMMAND lgmp-input-tests ${name}
-  )
-  set_tests_properties(lgmp-input-${name} PROPERTIES
-    TIMEOUT 10
-  )
-endforeach()
-
-add_executable(lgmp-clipboard-tests
-  lgmp_clipboard_test.c
-  ../transports/LGMP/clipboard.c
-)
-target_include_directories(lgmp-clipboard-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
-)
-target_link_libraries(lgmp-clipboard-tests
-  ${EXE_FLAGS}
-  lg_common
-  lgmp
-)
-set(LGMP_CLIPBOARD_CASES
-  claim
-  offer-request
-  inbound-stream
-  outbound-stream
-  blocked
-  cancel
-  restart
-  process-restart
-  file-stream
-  file-limits
-  file-owner-loss
-  file-malformed
-  disconnect
-  malformed
-  file-format
-)
-foreach(name IN LISTS LGMP_CLIPBOARD_CASES)
-  add_test(NAME lgmp-clipboard-${name}
-    COMMAND lgmp-clipboard-tests ${name}
-  )
-  set_tests_properties(lgmp-clipboard-${name} PROPERTIES
-    TIMEOUT 10
-  )
-endforeach()
-
-if(ENABLE_AUDIO)
-  add_executable(lgmp-audio-tests
-    lgmp_audio_test.c
+if(LG_CLIENT_PLATFORM_LINUX)
+  add_executable(lgmp-transport-tests
+    lgmp_transport_test.c
     ../src/kb_hid.c
   )
-  target_compile_definitions(lgmp-audio-tests PRIVATE
-    ENABLE_AUDIO
-  )
-  target_include_directories(lgmp-audio-tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
-  )
-  target_link_libraries(lgmp-audio-tests
+  target_link_libraries(lgmp-transport-tests
     ${EXE_FLAGS}
     transport_LGMP
     lg_common
     lgmp
   )
-  add_test(NAME lgmp-audio
-    COMMAND lgmp-audio-tests
+  if(ENABLE_AUDIO)
+    target_compile_definitions(lgmp-transport-tests PRIVATE
+      ENABLE_AUDIO
+    )
+  endif()
+  add_test(NAME lgmp-transport-tests
+    COMMAND lgmp-transport-tests
   )
-  set_tests_properties(lgmp-audio PROPERTIES
-    TIMEOUT 20
+  set_tests_properties(lgmp-transport-tests PROPERTIES
+    TIMEOUT 10
+  )
+
+  add_executable(lgmp-frame-tests
+    lgmp_frame_test.c
+    ../src/kb_hid.c
+  )
+  target_link_libraries(lgmp-frame-tests
+    ${EXE_FLAGS}
+    transport_LGMP
+    lg_common
+    lgmp
+  )
+  set(LGMP_FRAME_CASES
+    malformed
+    serial-damage
+    lanes
+    leases
+    dma
+  )
+  foreach(name IN LISTS LGMP_FRAME_CASES)
+    add_test(NAME lgmp-frame-${name}
+      COMMAND lgmp-frame-tests ${name}
+    )
+    set_tests_properties(lgmp-frame-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+
+  add_executable(lgmp-input-tests
+    lgmp_input_test.c
+    ../transports/LGMP/input.c
+    ../src/kb_hid.c
+  )
+  target_include_directories(lgmp-input-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  )
+  target_link_libraries(lgmp-input-tests
+    ${EXE_FLAGS}
+    lg_common
+    lgmp
+  )
+  set(LGMP_INPUT_CASES
+    claim
+    blocked
+    restart
+    pressure
+    idle
+  )
+  foreach(name IN LISTS LGMP_INPUT_CASES)
+    add_test(NAME lgmp-input-${name}
+      COMMAND lgmp-input-tests ${name}
+    )
+    set_tests_properties(lgmp-input-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+
+  add_executable(lgmp-clipboard-tests
+    lgmp_clipboard_test.c
+    ../transports/LGMP/clipboard.c
+  )
+  target_include_directories(lgmp-clipboard-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
+  )
+  target_link_libraries(lgmp-clipboard-tests
+    ${EXE_FLAGS}
+    lg_common
+    lgmp
+  )
+  set(LGMP_CLIPBOARD_CASES
+    claim
+    offer-request
+    inbound-stream
+    outbound-stream
+    blocked
+    cancel
+    restart
+    process-restart
+    file-stream
+    file-limits
+    file-owner-loss
+    file-malformed
+    disconnect
+    malformed
+    file-format
+  )
+  foreach(name IN LISTS LGMP_CLIPBOARD_CASES)
+    add_test(NAME lgmp-clipboard-${name}
+      COMMAND lgmp-clipboard-tests ${name}
+    )
+    set_tests_properties(lgmp-clipboard-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+
+  if(ENABLE_AUDIO)
+    add_executable(lgmp-audio-tests
+      lgmp_audio_test.c
+      ../src/kb_hid.c
+    )
+    target_compile_definitions(lgmp-audio-tests PRIVATE
+      ENABLE_AUDIO
+    )
+    target_include_directories(lgmp-audio-tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
+    )
+    target_link_libraries(lgmp-audio-tests
+      ${EXE_FLAGS}
+      transport_LGMP
+      lg_common
+      lgmp
+    )
+    add_test(NAME lgmp-audio
+      COMMAND lgmp-audio-tests
+    )
+    set_tests_properties(lgmp-audio PROPERTIES
+      TIMEOUT 20
+    )
+  endif()
+endif()
+
+if(LG_CLIENT_PLATFORM_LINUX)
+  add_executable(wayland-motion-tests
+    motion_test.c
+  )
+  target_include_directories(wayland-motion-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/Wayland"
+  )
+  add_test(NAME wayland-motion-tests
+    COMMAND wayland-motion-tests
+  )
+  set_tests_properties(wayland-motion-tests PROPERTIES
+    TIMEOUT 10
   )
 endif()
 
-add_executable(wayland-motion-tests
-  motion_test.c
-)
-target_include_directories(wayland-motion-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/Wayland"
-)
-add_test(NAME wayland-motion-tests
-  COMMAND wayland-motion-tests
-)
-set_tests_properties(wayland-motion-tests PROPERTIES
-  TIMEOUT 10
-)
-
-if(ENABLE_WAYLAND)
+if(LG_CLIENT_PLATFORM_LINUX AND ENABLE_WAYLAND)
   add_executable(wayland-presentation-tests
     wayland_presentation_test.c
     ../displayservers/Wayland/presentation.c
@@ -339,7 +404,7 @@ if(ENABLE_WAYLAND)
   endforeach()
 endif()
 
-if(ENABLE_X11)
+if(LG_CLIENT_PLATFORM_LINUX AND ENABLE_X11)
   add_executable(x11-clipboard-tests
     x11_clipboard_test.c
     ../displayservers/X11/clipboard.c
@@ -380,54 +445,56 @@ if(ENABLE_X11)
   endforeach()
 endif()
 
-add_executable(displayserver-input-tests
-  displayserver_input_test.c
-  ../displayservers/Wayland/input_event.c
-  ../displayservers/X11/input_event.c
-)
-target_include_directories(displayserver-input-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers"
-)
+if(LG_CLIENT_PLATFORM_LINUX)
+  add_executable(displayserver-input-tests
+    displayserver_input_test.c
+    ../displayservers/Wayland/input_event.c
+    ../displayservers/X11/input_event.c
+  )
+  target_include_directories(displayserver-input-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers"
+  )
 
-set(DISPLAYSERVER_INPUT_CASES
-  pointer-events
-  pointer-buttons
-  pointer-release
-  wheel-steps
-  relative-motion
-  keyboard-focus
-  keyboard-keys
-  keyboard-state
-)
+  set(DISPLAYSERVER_INPUT_CASES
+    pointer-events
+    pointer-buttons
+    pointer-release
+    wheel-steps
+    relative-motion
+    keyboard-focus
+    keyboard-keys
+    keyboard-state
+  )
 
-foreach(backend IN ITEMS wayland x11)
-  foreach(name IN LISTS DISPLAYSERVER_INPUT_CASES)
-    add_test(NAME display-input-${backend}-${name}
-      COMMAND displayserver-input-tests ${backend} ${name}
+  foreach(backend IN ITEMS wayland x11)
+    foreach(name IN LISTS DISPLAYSERVER_INPUT_CASES)
+      add_test(NAME display-input-${backend}-${name}
+        COMMAND displayserver-input-tests ${backend} ${name}
+      )
+      set_tests_properties(display-input-${backend}-${name} PROPERTIES
+        TIMEOUT 10
+      )
+    endforeach()
+  endforeach()
+
+  foreach(name IN ITEMS wheel-residual wheel-multiple)
+    add_test(NAME display-input-wayland-${name}
+      COMMAND displayserver-input-tests wayland ${name}
     )
-    set_tests_properties(display-input-${backend}-${name} PROPERTIES
+    set_tests_properties(display-input-wayland-${name} PROPERTIES
       TIMEOUT 10
     )
   endforeach()
-endforeach()
 
-foreach(name IN ITEMS wheel-residual wheel-multiple)
-  add_test(NAME display-input-wayland-${name}
-    COMMAND displayserver-input-tests wayland ${name}
-  )
-  set_tests_properties(display-input-wayland-${name} PROPERTIES
-    TIMEOUT 10
-  )
-endforeach()
-
-foreach(name IN ITEMS pointer-routing keyboard-routing held-keys)
-  add_test(NAME display-input-x11-${name}
-    COMMAND displayserver-input-tests x11 ${name}
-  )
-  set_tests_properties(display-input-x11-${name} PROPERTIES
-    TIMEOUT 10
-  )
-endforeach()
+  foreach(name IN ITEMS pointer-routing keyboard-routing held-keys)
+    add_test(NAME display-input-x11-${name}
+      COMMAND displayserver-input-tests x11 ${name}
+    )
+    set_tests_properties(display-input-x11-${name} PROPERTIES
+      TIMEOUT 10
+    )
+  endforeach()
+endif()
 
 add_executable(windows-input-tests
   windows_input_test.c
@@ -575,6 +642,7 @@ target_include_directories(app-keybind-tests PRIVATE
 target_link_libraries(app-keybind-tests
   ${EXE_FLAGS}
   lg_common
+  lg_gui
 )
 set(APP_KEYBIND_CASES
   invalid
@@ -641,37 +709,39 @@ foreach(name IN LISTS CLIPBOARD_CASES)
   )
 endforeach()
 
-add_executable(clipboard-files-tests
-  clipboard_files_test.c
-  ../src/clipboard_files.c
-)
-target_include_directories(clipboard-files-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
-)
-target_link_libraries(clipboard-files-tests
-  ${EXE_FLAGS}
-  lg_common
-  PkgConfig::FUSE3
-)
-add_test(NAME clipboard-files-lifecycle
-  COMMAND clipboard-files-tests
-)
-set_tests_properties(clipboard-files-lifecycle PROPERTIES
-  TIMEOUT 10
-)
-add_test(NAME clipboard-files-failures
-  COMMAND clipboard-files-tests failures
-)
-set_tests_properties(clipboard-files-failures PROPERTIES
-  TIMEOUT 10
-)
-add_test(NAME clipboard-files-mount
-  COMMAND clipboard-files-tests mount
-)
-set_tests_properties(clipboard-files-mount PROPERTIES
-  TIMEOUT 10
-  SKIP_RETURN_CODE 77
-)
+if(LG_CLIENT_PLATFORM_LINUX)
+  add_executable(clipboard-files-tests
+    clipboard_files_test.c
+    ../src/clipboard_files.c
+  )
+  target_include_directories(clipboard-files-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  )
+  target_link_libraries(clipboard-files-tests
+    ${EXE_FLAGS}
+    lg_common
+    PkgConfig::FUSE3
+  )
+  add_test(NAME clipboard-files-lifecycle
+    COMMAND clipboard-files-tests
+  )
+  set_tests_properties(clipboard-files-lifecycle PROPERTIES
+    TIMEOUT 10
+  )
+  add_test(NAME clipboard-files-failures
+    COMMAND clipboard-files-tests failures
+  )
+  set_tests_properties(clipboard-files-failures PROPERTIES
+    TIMEOUT 10
+  )
+  add_test(NAME clipboard-files-mount
+    COMMAND clipboard-files-tests mount
+  )
+  set_tests_properties(clipboard-files-mount PROPERTIES
+    TIMEOUT 10
+    SKIP_RETURN_CODE 77
+  )
+endif()
 
 if(ENABLE_SPICE)
   add_executable(spice-clipboard-tests
@@ -817,6 +887,7 @@ add_executable(frame-scheduler-tests
 )
 target_compile_definitions(frame-scheduler-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+  nanotime=testNanotime
 )
 target_include_directories(frame-scheduler-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
@@ -890,12 +961,12 @@ endforeach()
 add_executable(config-message-tests
   config_message_test.c
   ../src/message.c
-  ../src/core.c
   ../src/config.c
   ../platform/${LG_CLIENT_PLATFORM}/config.c
 )
 target_compile_definitions(config-message-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+  microtime=testMicrotime
 )
 target_include_directories(config-message-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
@@ -927,8 +998,6 @@ foreach(name IN LISTS CONFIG_MESSAGE_CASES)
 endforeach()
 
 if(ENABLE_AUDIO)
-  pkg_check_modules(AUDIO_TEST_SAMPLERATE REQUIRED IMPORTED_TARGET
-    samplerate)
   add_executable(audio-tests
     audio_test.c
   )
@@ -944,7 +1013,7 @@ if(ENABLE_AUDIO)
   target_link_libraries(audio-tests
     ${EXE_FLAGS}
     lg_common
-    PkgConfig::AUDIO_TEST_SAMPLERATE
+    ${SAMPLERATE_TARGET}
   )
   set(AUDIO_CASES
     format
@@ -1078,109 +1147,114 @@ if(ENABLE_EGL)
     TIMEOUT 10
   )
 
-  add_executable(texture-upload-tests
-    texture_upload_test.c
-    ../renderers/EGL/texture_buffer.c
-  )
-  target_include_directories(texture-upload-tests PRIVATE
-    "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
-    "${PROJECT_TOP}/common/include"
-  )
-  target_link_libraries(texture-upload-tests
-    ${EXE_FLAGS}
-    LGProtocol::LGProtocol
-    lg_egl_provider
-  )
-  set(TEXTURE_UPLOAD_CASES
-    direct
-    direct-full
-    direct-rect
-    persistent
-    persistent-full
-    persistent-rect
-    fallback
-  )
-  foreach(name IN LISTS TEXTURE_UPLOAD_CASES)
-    add_test(NAME texture-upload-${name}
-      COMMAND texture-upload-tests ${name}
+  if(LG_CLIENT_PLATFORM_LINUX)
+    add_executable(texture-upload-tests
+      texture_upload_test.c
+      ../renderers/EGL/texture_buffer.c
     )
-    set_tests_properties(texture-upload-${name} PROPERTIES
-      TIMEOUT 10
+    target_include_directories(texture-upload-tests PRIVATE
+      "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
+      "${PROJECT_TOP}/common/include"
     )
-  endforeach()
-endif()
-
-find_package(GTest REQUIRED)
-find_program(WESTON_EXECUTABLE NAMES weston)
-if(NOT WESTON_EXECUTABLE)
-  message(FATAL_ERROR "weston is required to run framebuffer rendering tests")
-endif()
-if(ENABLE_X11)
-  find_program(XVFB_RUN_EXECUTABLE NAMES xvfb-run)
-  if(NOT XVFB_RUN_EXECUTABLE)
-    message(FATAL_ERROR "xvfb-run is required to run X11 rendering tests")
+    target_link_libraries(texture-upload-tests
+      ${EXE_FLAGS}
+      LGProtocol::LGProtocol
+      lg_egl_provider
+    )
+    set(TEXTURE_UPLOAD_CASES
+      direct
+      direct-full
+      direct-rect
+      persistent
+      persistent-full
+      persistent-rect
+      fallback
+    )
+    foreach(name IN LISTS TEXTURE_UPLOAD_CASES)
+      add_test(NAME texture-upload-${name}
+        COMMAND texture-upload-tests ${name}
+      )
+      set_tests_properties(texture-upload-${name} PROPERTIES
+        TIMEOUT 10
+      )
+    endforeach()
   endif()
 endif()
 
-add_executable(render-tests
-  render_test.cpp
-)
-add_dependencies(render-tests looking-glass-client)
+if(LG_CLIENT_PLATFORM_LINUX)
+  find_package(GTest REQUIRED)
+  find_program(WESTON_EXECUTABLE NAMES weston)
+  if(NOT WESTON_EXECUTABLE)
+    message(FATAL_ERROR
+      "weston is required to run framebuffer rendering tests")
+  endif()
+  if(ENABLE_X11)
+    find_program(XVFB_RUN_EXECUTABLE NAMES xvfb-run)
+    if(NOT XVFB_RUN_EXECUTABLE)
+      message(FATAL_ERROR "xvfb-run is required to run X11 rendering tests")
+    endif()
+  endif()
 
-set_target_properties(render-tests PROPERTIES
-  CXX_STANDARD 17
-  CXX_STANDARD_REQUIRED ON
-)
+  add_executable(render-tests
+    render_test.cpp
+  )
+  add_dependencies(render-tests looking-glass-client)
 
-target_compile_options(render-tests PRIVATE
-  -fno-fast-math
-)
-
-target_compile_definitions(render-tests PRIVATE
-  LG_CLIENT_PATH="$<TARGET_FILE:looking-glass-client>"
-)
-
-target_include_directories(render-tests PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/../include"
-  "${PROJECT_TOP}/common/include"
-)
-
-target_link_libraries(render-tests
-  LGProtocol::LGProtocol
-)
-
-if(TARGET GTest::gtest_main)
-  target_link_libraries(render-tests GTest::gtest_main)
-else()
-  target_link_libraries(render-tests GTest::Main)
-endif()
-
-add_test(NAME render-tests
-  COMMAND /bin/bash
-    "${CMAKE_CURRENT_SOURCE_DIR}/run-with-weston.sh"
-    "${WESTON_EXECUTABLE}"
-    "$<TARGET_FILE:render-tests>"
-    "--gtest_filter=-X11*"
-)
-
-set_tests_properties(render-tests PROPERTIES
-  TIMEOUT 120
-)
-
-if(ENABLE_X11)
-  add_test(NAME render-x11-tests
-    COMMAND "${CMAKE_COMMAND}" -E env
-      --unset=WAYLAND_DISPLAY
-      LIBGL_ALWAYS_SOFTWARE=1
-      "${XVFB_RUN_EXECUTABLE}"
-      -a
-      -e /dev/stderr
-      -s "-screen 0 1024x768x24 +extension GLX"
-      "$<TARGET_FILE:render-tests>"
-      "--gtest_filter=X11*"
+  set_target_properties(render-tests PROPERTIES
+    CXX_STANDARD 17
+    CXX_STANDARD_REQUIRED ON
   )
 
-  set_tests_properties(render-x11-tests PROPERTIES
+  target_compile_options(render-tests PRIVATE
+    -fno-fast-math
+  )
+
+  target_compile_definitions(render-tests PRIVATE
+    LG_CLIENT_PATH="$<TARGET_FILE:looking-glass-client>"
+  )
+
+  target_include_directories(render-tests PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../include"
+    "${PROJECT_TOP}/common/include"
+  )
+
+  target_link_libraries(render-tests
+    LGProtocol::LGProtocol
+  )
+
+  if(TARGET GTest::gtest_main)
+    target_link_libraries(render-tests GTest::gtest_main)
+  else()
+    target_link_libraries(render-tests GTest::Main)
+  endif()
+
+  add_test(NAME render-tests
+    COMMAND /bin/bash
+      "${CMAKE_CURRENT_SOURCE_DIR}/run-with-weston.sh"
+      "${WESTON_EXECUTABLE}"
+      "$<TARGET_FILE:render-tests>"
+      "--gtest_filter=-X11*"
+  )
+
+  set_tests_properties(render-tests PROPERTIES
     TIMEOUT 120
   )
+
+  if(ENABLE_X11)
+    add_test(NAME render-x11-tests
+      COMMAND "${CMAKE_COMMAND}" -E env
+        --unset=WAYLAND_DISPLAY
+        LIBGL_ALWAYS_SOFTWARE=1
+        "${XVFB_RUN_EXECUTABLE}"
+        -a
+        -e /dev/stderr
+        -s "-screen 0 1024x768x24 +extension GLX"
+        "$<TARGET_FILE:render-tests>"
+        "--gtest_filter=X11*"
+    )
+
+    set_tests_properties(render-x11-tests PROPERTIES
+      TIMEOUT 120
+    )
+  endif()
 endif()

@@ -21,21 +21,13 @@
 #include "main.h"
 #include "config.h"
 
-#include <getopt.h>
-#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/mman.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <unistd.h>
-#include <errno.h>
 #include <inttypes.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <math.h>
-#include <stdlib.h>
 #include <stdatomic.h>
 
 #include "common/array.h"
@@ -67,9 +59,10 @@
 #include "overlay_utils.h"
 #include "util.h"
 #include "render_queue.h"
-#include "evdev.h"
 #include "frame_scheduler.h"
 #include "input.h"
+#include "platform/input.h"
+#include "platform/process.h"
 #include "sw_surface.h"
 
 #ifdef ENABLE_TESTS
@@ -731,7 +724,7 @@ static void preSwapCallback(void * udata)
   if (!written)
     DEBUG_ERROR("Failed to write test capture to: %s", l_testCapture.path);
   else
-    DEBUG_INFO("Wrote test capture for frame %lu to: %s",
+    DEBUG_INFO("Wrote test capture for frame %" PRIu64 " to: %s",
         serial, l_testCapture.path);
   app_setState(APP_STATE_SHUTDOWN);
 #endif
@@ -2734,26 +2727,20 @@ static void fallbackHandleEvents(void)
       "SPICE fallback services will not function until this is corrected.");
 }
 
-void intHandler(int sig)
+static bool processStopHandler(void * opaque)
 {
-  switch(sig)
+  (void)opaque;
+
+  if (app_getState() != APP_STATE_SHUTDOWN)
   {
-    case SIGINT:
-    case SIGTERM:
-      if (app_getState() != APP_STATE_SHUTDOWN)
-      {
-        DEBUG_INFO("Caught signal, shutting down...");
-        app_setState(APP_STATE_SHUTDOWN);
-      }
-      else
-      {
-        DEBUG_INFO("Caught second signal, force quitting...");
-        printAllThreadBacktraces();
-        signal(sig, SIG_DFL);
-        raise(sig);
-      }
-      break;
+    DEBUG_INFO("Caught stop request, shutting down...");
+    app_setState(APP_STATE_SHUTDOWN);
+    return true;
   }
+
+  DEBUG_INFO("Caught second stop request, force quitting...");
+  printAllThreadBacktraces();
+  return false;
 }
 
 static bool tryRenderer(const int index, const LG_RendererParams lgrParams,
@@ -3625,13 +3612,11 @@ static int lg_run(void)
     return -1;
   }
 
-  if (evdev_start())
-    DEBUG_INFO("Using evdev for input capture");
+  if (inputPlatformStart())
+    DEBUG_INFO("Using platform input capture");
 
-  // override the SIGINIT handler so that we can tell the difference between
-  // SIGINT and the user sending a close event, such as ALT+F4
-  signal(SIGINT , intHandler);
-  signal(SIGTERM, intHandler);
+  if (!lgProcessInstallStopHandler(processStopHandler, NULL))
+    DEBUG_WARN("Failed to install the process stop handler");
 
   if (!lgTransport_create(g_params.transport, &g_state.transport))
   {
@@ -3763,12 +3748,7 @@ static int lg_run(void)
     .allowNoInput        = strcmp(g_params.transport, "test") == 0,
     .opengl              = needsOpenGL,
     .jitRender           = g_params.jitRender,
-    .eventSource         =
-    {
-      .fd       = evdev_getEventFD(),
-      .callback = evdev_dispatch,
-      .opaque   = NULL,
-    },
+    .eventSource         = inputPlatformGetEventSource(),
   };
 
   g_state.dsInitialized = g_state.ds->init(params);
@@ -4183,7 +4163,7 @@ static void lg_shutdown(void)
   }
 
   // Stop external input callbacks before tearing down shared client state
-  evdev_stop();
+  inputPlatformStop();
   if (g_state.ds && g_state.dsInitialized)
     g_state.ds->shutdown();
 
@@ -4229,8 +4209,12 @@ static void lg_shutdown(void)
     e_startup = NULL;
   }
 
-  app_releaseAllKeybinds();
-  ll_free(g_state.bindings);
+  if (g_state.bindings)
+  {
+    app_releaseAllKeybinds();
+    ll_free(g_state.bindings);
+    g_state.bindings = NULL;
+  }
 
   if (g_state.ds && g_state.dsInitialized)
   {
@@ -4242,8 +4226,8 @@ static void lg_shutdown(void)
    * display server before the filesystem is unmounted. */
   clipboard_free();
 
-  // Input callbacks have stopped; the evdev state and overlays can go
-  evdev_free();
+  // Input callbacks have stopped; the platform input state and overlays can go
+  inputPlatformFree();
 
   if (g_state.overlays)
   {
@@ -4276,21 +4260,25 @@ static void lg_shutdown(void)
   free(g_state.imGuiIni);
 }
 
-int main(int argc, char * argv[])
+int lgClientMain(int argc, char * argv[])
 {
   // initialize for DEBUG_* macros
   debug_init();
 
-  if (getuid() == 0)
-  {
-    DEBUG_ERROR("Do not run looking glass as root!");
-    return -1;
-  }
+  int result = -1;
 
-  if (getuid() != geteuid())
+  switch (lgProcessGetPrivilege())
   {
-    DEBUG_ERROR("Do not run looking glass as setuid!");
-    return -1;
+    case LG_PROCESS_PRIVILEGE_ROOT:
+      DEBUG_ERROR("Do not run looking glass as root!");
+      return -1;
+
+    case LG_PROCESS_PRIVILEGE_SETUID:
+      DEBUG_ERROR("Do not run looking glass as setuid!");
+      return -1;
+
+    case LG_PROCESS_PRIVILEGE_NORMAL:
+      break;
   }
 
   lgInitProcessTitle(argc, &argv);
@@ -4300,8 +4288,11 @@ int main(int argc, char * argv[])
   DEBUG_INFO("Locking Method: " LG_LOCK_MODE);
   cpuInfo_log();
 
-  if (!installCrashHandler("/proc/self/exe", argv[0]))
+  char       * executable      = lgProcessGetExecutablePath(argv[0]);
+  const char * crashExecutable = executable ? executable : argv[0];
+  if (!installCrashHandler(crashExecutable, argv[0]))
     DEBUG_WARN("Failed to install the crash handler");
+  free(executable);
 
   lgPathsInit("looking-glass");
   config_init();
@@ -4310,11 +4301,16 @@ int main(int argc, char * argv[])
   gl_dynProcsInit();
 
   if (!lgMessage_init())
-    return -1;
+    goto cleanup;
 
   g_state.bindings = ll_new();
-
   g_state.overlays = ll_new();
+  if (!g_state.bindings || !g_state.overlays)
+  {
+    DEBUG_ERROR("Failed to create the application lists");
+    goto cleanup;
+  }
+
   app_registerOverlay(&LGOverlaySplash, NULL);
   app_registerOverlay(&LGOverlayConfig, NULL);
   app_registerOverlay(&LGOverlayAlert , NULL);
@@ -4335,18 +4331,34 @@ int main(int argc, char * argv[])
     if (LG_AudioDevs[i]->earlyInit)
       LG_AudioDevs[i]->earlyInit();
 
-  evdev_earlyInit();
+  inputPlatformEarlyInit();
 
   if (!config_load(argc, argv))
-    return -1;
+    goto cleanup;
 
-  const int ret = lg_run();
+  result = lg_run();
   lg_shutdown();
+
+cleanup:
+  lgProcessRemoveStopHandler();
+
+  if (g_state.overlays)
+  {
+    app_freeOverlays();
+    ll_free(g_state.overlays);
+    g_state.overlays = NULL;
+  }
+
+  if (g_state.bindings)
+  {
+    app_releaseAllKeybinds();
+    ll_free(g_state.bindings);
+    g_state.bindings = NULL;
+  }
+
   lgMessage_deinit();
-
   config_free();
-
   util_freeUIFonts();
   cleanupCrashHandler();
-  return ret;
+  return result;
 }

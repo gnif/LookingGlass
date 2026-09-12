@@ -26,8 +26,8 @@
 
 #include <math.h>
 #include <pthread.h>
+#include <unistd.h>
 
-#define TEST_ALARM_S 5U
 
 struct Feedback
 {
@@ -307,7 +307,7 @@ static OverlayFrameTiming take(void)
   return out;
 }
 
-static bool near(float value, float expected)
+static bool isNear(float value, float expected)
 {
   return fabsf(value - expected) < 0.000001f;
 }
@@ -360,13 +360,13 @@ static void testOrder(void)
   CHECK(ringbuffer_getCount(g_state.frameLatency) == 1);
   const OverlayFrameTiming out = take();
   CHECK(out.validMask == OVERLAY_FRAME_TIMING_VALID_ALL);
-  CHECK(near(out.capture, 0.000011f));
-  CHECK(near(out.transport, 0.000010f));
-  CHECK(near(out.receive, 0.000002f));
-  CHECK(near(out.providerPrepare, 0.000003f));
-  CHECK(near(out.dispatch, 0.000035f));
-  CHECK(near(out.queue, 0.000050f));
-  CHECK(near(out.present, 0.000500f));
+  CHECK(isNear(out.capture, 0.000011f));
+  CHECK(isNear(out.transport, 0.000010f));
+  CHECK(isNear(out.receive, 0.000002f));
+  CHECK(isNear(out.providerPrepare, 0.000003f));
+  CHECK(isNear(out.dispatch, 0.000035f));
+  CHECK(isNear(out.queue, 0.000050f));
+  CHECK(isNear(out.present, 0.000500f));
 
   frameTimingFinishFrame(token, &timing);
   main_framePresented(token, 600, true);
@@ -394,8 +394,8 @@ static void testUntracked(void)
   CHECK((out.validMask & OVERLAY_FRAME_TIMING_VALID_PROVIDER) ==
       OVERLAY_FRAME_TIMING_VALID_PROVIDER);
   CHECK(!(out.validMask & OVERLAY_FRAME_TIMING_VALID_PRESENT));
-  CHECK(near(out.receive, 0.000002f));
-  CHECK(near(out.providerPrepare, 0.000003f));
+  CHECK(isNear(out.receive, 0.000002f));
+  CHECK(isNear(out.providerPrepare, 0.000003f));
   CHECK(out.present == 0.0f);
   finish();
 }
@@ -440,7 +440,7 @@ static void testProviderUnavailable(void)
   CHECK(out.validMask & OVERLAY_FRAME_TIMING_VALID_PRODUCER);
   CHECK(out.validMask & OVERLAY_FRAME_TIMING_VALID_TRANSPORT);
   CHECK(!(out.validMask & OVERLAY_FRAME_TIMING_VALID_PROVIDER));
-  CHECK(near(out.transport, 0.000015f));
+  CHECK(isNear(out.transport, 0.000015f));
   finish();
 }
 
@@ -491,8 +491,8 @@ static void testFifo(void)
   CHECK(ringbuffer_getCount(g_state.frameLatency) == 2);
   const OverlayFrameTiming out1 = take();
   const OverlayFrameTiming out2 = take();
-  CHECK(near(out1.capture, 0.000081f));
-  CHECK(near(out2.capture, 0.000082f));
+  CHECK(isNear(out1.capture, 0.000081f));
+  CHECK(isNear(out2.capture, 0.000082f));
   finish();
 }
 
@@ -786,7 +786,6 @@ int main(int argc, char ** argv)
     return EXIT_FAILURE;
   }
 
-  alarm(TEST_ALARM_S);
   debug_init();
   for (size_t i = 0; i < ARRAY_LENGTH(tests); ++i)
     if (strcmp(argv[1], tests[i].name) == 0)

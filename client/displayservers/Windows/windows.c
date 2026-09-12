@@ -70,6 +70,7 @@ enum WindowsMessage
   WM_LG_ACTIVATE,
   WM_LG_INHIBIT_IDLE,
   WM_LG_SET_HANDLER,
+  WM_LG_EVENT_SOURCE,
 };
 
 struct WindowsPointMessage
@@ -104,6 +105,8 @@ struct WindowsDSState
 
   WindowsInput input;
 
+  LG_DSEventSource      eventSource;
+  bool                  eventSourceSubscribed;
   WindowsMessageHandler messageHandler;
   void                * messageOpaque;
 
@@ -820,12 +823,33 @@ static void setCursorShape(LG_DSPointer pointer)
     SetCursor(windows.cursors[pointer]);
 }
 
+static bool eventSourceWake(void * opaque)
+{
+  const HWND window = (HWND)opaque;
+  if (PostMessageW(window, WM_LG_EVENT_SOURCE, 0, 0))
+    return true;
+
+  DEBUG_WINERROR("Failed to signal the display event source",
+      GetLastError());
+  return false;
+}
+
+static void eventSourceFree(void)
+{
+  if (!windows.eventSourceSubscribed)
+    return;
+
+  windows.eventSource.unsubscribe(windows.eventSource.opaque);
+  windows.eventSourceSubscribed = false;
+}
+
 static LRESULT handleCustomMessage(UINT message, WPARAM wParam,
     LPARAM lParam)
 {
   switch (message)
   {
     case WM_LG_SHUTDOWN:
+      eventSourceFree();
       setKeyboardGrab(false);
       setPointerGrab(false, false);
       if (windows.idleInhibited)
@@ -894,6 +918,10 @@ static LRESULT handleCustomMessage(UINT message, WPARAM wParam,
       windows.messageOpaque  = handler->opaque;
       return 0;
     }
+
+    case WM_LG_EVENT_SOURCE:
+      windows.eventSource.dispatch(windows.eventSource.opaque);
+      return 0;
   }
 
   return 0;
@@ -902,7 +930,7 @@ static LRESULT handleCustomMessage(UINT message, WPARAM wParam,
 static LRESULT CALLBACK windowProc(HWND window, UINT message,
     WPARAM wParam, LPARAM lParam)
 {
-  if (message >= WM_LG_SHUTDOWN && message <= WM_LG_SET_HANDLER)
+  if (message >= WM_LG_SHUTDOWN && message <= WM_LG_EVENT_SOURCE)
     return handleCustomMessage(message, wParam, lParam);
 
   if (windows.dispatchReady && windows.messageHandler)
@@ -1309,6 +1337,19 @@ static int eventThread(void * opaque)
     return 0;
   }
 
+  if (lgEventSourceValid(&windows.eventSource) &&
+      !windows.eventSource.subscribe(windows.eventSource.opaque,
+        eventSourceWake, windows.window))
+  {
+    DEBUG_ERROR("Failed to subscribe to the display event source");
+    DestroyWindow(windows.window);
+    windows.window = NULL;
+    UnregisterClassW(LG_WINDOW_CLASS, windows.instance);
+    lgSignalEvent(windows.initEvent);
+    return 0;
+  }
+  windows.eventSourceSubscribed = lgEventSourceValid(&windows.eventSource);
+
   windows.dispatchReady = true;
   windows.initOK        = true;
   updateWindowGeometry();
@@ -1325,6 +1366,7 @@ static int eventThread(void * opaque)
     DispatchMessageW(&message);
   }
 
+  eventSourceFree();
   windows.dispatchReady = false;
   windows.window        = NULL;
   removeKeyboardHook();
@@ -1446,6 +1488,7 @@ static bool windowsInit(const LG_DSInitParams params)
   windowsInputInit(&windows.input, &inputSink, NULL);
 
   windows.instance          = GetModuleHandleW(NULL);
+  windows.eventSource       = params.eventSource;
   windows.title             = lgUtf8ToWide(params.title);
   windows.x                 = params.x;
   windows.y                 = params.y;

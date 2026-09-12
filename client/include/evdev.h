@@ -20,6 +20,8 @@
 
 #include <stdbool.h>
 
+#include "interface/event_source.h"
+
 /**
  * initialize configuration options
  */
@@ -46,14 +48,9 @@ void evdev_free(void);
 void evdev_setGrab(bool keyboard, bool pointer);
 
 /**
- * return the event fd used to dispatch captured input
+ * return the event source used to dispatch captured input
  */
-int evdev_getEventFD(void);
-
-/**
- * dispatch captured input on the display server's event thread
- */
-void evdev_dispatch(void * opaque);
+LG_DSEventSource evdev_getEventSource(void);
 
 /**
  * return true if keyboard input should only be processed by evdev

@@ -30,6 +30,14 @@
 #include <windows.h>
 #include <dbghelp.h>
 
+struct CrashHandlerState
+{
+  LPTOP_LEVEL_EXCEPTION_FILTER previous;
+  bool                         installed;
+};
+
+static struct CrashHandlerState crashHandler;
+
 static const char * exception_name(DWORD code)
 {
   switch (code)
@@ -124,8 +132,8 @@ static LONG CALLBACK exception_filter(EXCEPTION_POINTERS * exc)
 
       if (SymFromAddr(hProcess, frame.AddrPC.Offset, &disp, symbol))
       {
-        IMAGEHLP_LINE line = { sizeof(IMAGEHLP_LINE), 0 };
-        DWORD lineDisp;
+        IMAGEHLP_LINE line     = { .SizeOfStruct = sizeof(line) };
+        DWORD         lineDisp;
 
         if (SymGetLineFromAddr64(hProcess, frame.AddrPC.Offset, &lineDisp, &line))
           DEBUG_ERROR("[trace]: %2d: %s:%s+0x%" PRIx64 " (%s:%" PRIx64 "+0x%" PRIx64 ")",
@@ -152,8 +160,23 @@ bool installCrashHandler(const char * exe, char * argv0)
 {
   (void)exe;
   (void)argv0;
-  SetUnhandledExceptionFilter(exception_filter);
+
+  if (!crashHandler.installed)
+  {
+    crashHandler.previous  = SetUnhandledExceptionFilter(exception_filter);
+    crashHandler.installed = true;
+  }
   return true;
+}
+
+void cleanupCrashHandler(void)
+{
+  if (!crashHandler.installed)
+    return;
+
+  SetUnhandledExceptionFilter(crashHandler.previous);
+  crashHandler.previous  = NULL;
+  crashHandler.installed = false;
 }
 
 void printBacktrace(void)
@@ -170,6 +193,10 @@ bool installCrashHandler(const char * exe, char * argv0)
   (void)exe;
   (void)argv0;
   return true;
+}
+
+void cleanupCrashHandler(void)
+{
 }
 
 void printBacktrace(void)

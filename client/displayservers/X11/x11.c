@@ -33,6 +33,7 @@
 #include <time.h>
 #include <unistd.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <errno.h>
 
 #include <X11/extensions/XInput2.h>
@@ -1063,12 +1064,27 @@ static bool x11GetProp(LG_DSProperty prop, void *ret)
   }
 }
 
+static bool x11EventSourceWake(void * opaque)
+{
+  const int fd = *(const int *)opaque;
+  int result;
+  do
+    result = eventfd_write(fd, 1);
+  while (result < 0 && errno == EINTR);
+  if (result == 0 || errno == EAGAIN)
+    return true;
+
+  DEBUG_WARN("Failed to signal the display event wake fd: %s",
+      strerror(errno));
+  return false;
+}
+
 static int x11EventThread(void * unused)
 {
   enum
   {
     EPOLL_SOURCE_X11,
-    EPOLL_SOURCE_EXTERNAL,
+    EPOLL_SOURCE_EVENT,
   };
 
   int epollfd = epoll_create1(0);
@@ -1091,15 +1107,35 @@ static int x11EventThread(void * unused)
     return 0;
   }
 
+  int  eventFd         = -1;
+  bool eventSubscribed = false;
   bool pollEventSource = false;
-  if (x11.eventSource.fd >= 0 && x11.eventSource.callback)
+  if (lgEventSourceValid(&x11.eventSource))
   {
-    ev.data.u32 = EPOLL_SOURCE_EXTERNAL;
-    if (epoll_ctl(epollfd, EPOLL_CTL_ADD,
-          x11.eventSource.fd, &ev) == -1)
+    eventFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (eventFd < 0)
     {
-      DEBUG_WARN("Failed to register the external event source; polling");
+      DEBUG_WARN("Failed to create the display event wake fd: %s",
+          strerror(errno));
       pollEventSource = true;
+    }
+    else
+    {
+      ev.data.u32 = EPOLL_SOURCE_EVENT;
+      if (epoll_ctl(epollfd, EPOLL_CTL_ADD, eventFd, &ev) == -1)
+      {
+        DEBUG_WARN("Failed to register the display event wake fd: %s",
+            strerror(errno));
+        pollEventSource = true;
+      }
+      else if (!x11.eventSource.subscribe(x11.eventSource.opaque,
+            x11EventSourceWake, &eventFd))
+      {
+        DEBUG_WARN("Failed to subscribe to the display event source");
+        pollEventSource = true;
+      }
+      else
+        eventSubscribed = true;
     }
   }
 
@@ -1121,17 +1157,28 @@ static int x11EventThread(void * unused)
       if (errno == EINTR)
         continue;
 
-      close(epollfd);
       DEBUG_ERROR("epoll_wait failure");
-      return 0;
+      break;
     }
 
     for (int i = 0; i < nfds; ++i)
-      if (events[i].data.u32 == EPOLL_SOURCE_EXTERNAL)
-        x11.eventSource.callback(x11.eventSource.opaque);
+      if (events[i].data.u32 == EPOLL_SOURCE_EVENT)
+      {
+        eventfd_t value;
+        for (;;)
+        {
+          if (eventfd_read(eventFd, &value) == 0 || errno == EINTR)
+            continue;
+          if (errno != EAGAIN)
+            DEBUG_WARN("Failed to drain the display event wake fd: %s",
+                strerror(errno));
+          break;
+        }
+        x11.eventSource.dispatch(x11.eventSource.opaque);
+      }
 
     if (pollEventSource)
-      x11.eventSource.callback(x11.eventSource.opaque);
+      x11.eventSource.dispatch(x11.eventSource.opaque);
 
     if (!XPending(x11.display))
     {
@@ -1310,6 +1357,10 @@ static int x11EventThread(void * unused)
     }
   }
 
+  if (eventSubscribed)
+    x11.eventSource.unsubscribe(x11.eventSource.opaque);
+  if (eventFd >= 0)
+    close(eventFd);
   close(epollfd);
   return 0;
 }

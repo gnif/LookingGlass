@@ -20,8 +20,16 @@
 
 #include "app.h"
 #include "app_internal.h"
+#include "core.h"
+#include "input.h"
 #include "main.h"
+#include "overlay/msg.h"
+#include "overlays.h"
+#include "render_queue.h"
+#include "sw_surface.h"
 #include "test.h"
+#include "transport_fallback.h"
+#include "util.h"
 
 #include "common/array.h"
 #include "common/ll.h"
@@ -194,9 +202,14 @@ void core_updateOverlayState(void)
 {
 }
 
-bool evdev_isExclusive(void)
+bool inputPlatformIsKeyboardExclusive(void)
 {
   return t.exclusive;
+}
+
+bool inputPlatformIsPointerExclusive(void)
+{
+  return false;
 }
 
 bool lgInput_available(void)
@@ -219,8 +232,235 @@ void lgInput_releaseKeys(void)
   ++t.releaseN;
 }
 
-void ImGuiIO_AddKeyEvent(ImGuiIO * self, ImGuiKey key, bool down)
+void core_handleMousePosition(double x, double y)
 {
+  (void)x;
+  (void)y;
+}
+
+void core_handleMouseAbsolute(void)
+{
+}
+
+void core_handleMouseGrabbed(double x, double y)
+{
+  (void)x;
+  (void)y;
+}
+
+void core_handleMouseNormal(double x, double y)
+{
+  (void)x;
+  (void)y;
+}
+
+void core_handleGrabEvent(bool active)
+{
+  (void)active;
+}
+
+void core_handleCaptureLost(void)
+{
+}
+
+void core_updatePositionInfo(void)
+{
+}
+
+void core_alignToGuest(void)
+{
+}
+
+bool core_startVideoThreads(void)
+{
+  return true;
+}
+
+void core_stopVideoThreads(void)
+{
+}
+
+bool lgInput_mousePress(unsigned int button)
+{
+  (void)button;
+  return true;
+}
+
+bool lgInput_mouseRelease(unsigned int button)
+{
+  (void)button;
+  return true;
+}
+
+void lgInput_releaseAll(void)
+{
+}
+
+void lgInput_releaseButtons(void)
+{
+}
+
+bool lgInput_keyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
+{
+  (void)numLock;
+  (void)capsLock;
+  (void)scrollLock;
+  return true;
+}
+
+void main_framePresented(uint64_t frameToken, uint64_t presentTime,
+    bool valid)
+{
+  (void)frameToken;
+  (void)presentTime;
+  (void)valid;
+}
+
+void main_videoStreamEnabled(void)
+{
+}
+
+struct LG_OverlayOps LGOverlayMsg;
+
+void overlayAlert_show(LG_MsgAlert type, const char * format, va_list args)
+{
+  (void)type;
+  (void)format;
+  (void)args;
+}
+
+MsgBoxHandle overlayMsg_show(const char * caption,
+    MsgBoxConfirmCallback confirm, void * confirmOpaque,
+    MsgBoxCloseCallback close, void * closeOpaque,
+    const char * format, va_list args)
+{
+  (void)caption;
+  (void)confirm;
+  (void)confirmOpaque;
+  (void)close;
+  (void)closeOpaque;
+  (void)format;
+  (void)args;
+  return NULL;
+}
+
+void overlayMsg_close(MsgBoxHandle handle)
+{
+  (void)handle;
+}
+
+bool overlayMsg_modal(void)
+{
+  return false;
+}
+
+void overlayStatus_set(LGUserStatus status, bool value)
+{
+  (void)status;
+  (void)value;
+}
+
+GraphHandle overlayGraph_register(const char * name, RingBuffer buffer,
+    float min, float max, GraphFormatFn formatFn)
+{
+  (void)name;
+  (void)buffer;
+  (void)min;
+  (void)max;
+  (void)formatFn;
+  return NULL;
+}
+
+void overlayGraph_unregister(GraphHandle handle)
+{
+  (void)handle;
+}
+
+void overlayGraph_invalidate(GraphHandle handle)
+{
+  (void)handle;
+}
+
+void overlayGraph_setCompact(GraphHandle handle, bool compact)
+{
+  (void)handle;
+  (void)compact;
+}
+
+void overlayConfig_register(const char * title,
+    void (*callback)(void * udata, int * id), void * udata)
+{
+  (void)title;
+  (void)callback;
+  (void)udata;
+}
+
+void overlayConfig_registerTab(const char * title,
+    void (*callback)(void * udata, int * id), void * udata)
+{
+  (void)title;
+  (void)callback;
+  (void)udata;
+}
+
+bool util_uiFontAddText(const char * text)
+{
+  (void)text;
+  return true;
+}
+
+void lgTransportFallback_requestVideoActive(
+    LG_TransportFallback * fallback, bool active)
+{
+  (void)fallback;
+  (void)active;
+}
+
+bool lgSwSurface_setActive(const LG_SwSurfaceOps * ops,
+    LG_Transport * transport, bool active,
+    LG_TransportCancelledFn cancelled, void * opaque)
+{
+  (void)ops;
+  (void)transport;
+  (void)active;
+  (void)cancelled;
+  (void)opaque;
+  return true;
+}
+
+uint64_t renderQueue_sourceTransition(RenderQueueSource source,
+    uint64_t generation, bool swSurface,
+    atomic_uint_least64_t * publishedSerial)
+{
+  (void)source;
+  (void)generation;
+  (void)swSurface;
+  (void)publishedSerial;
+  return 0;
+}
+
+uint64_t renderQueue_sourceSwSurfaceConfigureTransition(
+    RenderQueueSource source, uint64_t generation, int width, int height,
+    atomic_uint_least64_t * publishedSerial)
+{
+  (void)source;
+  (void)generation;
+  (void)width;
+  (void)height;
+  (void)publishedSerial;
+  return 0;
+}
+
+void renderQueue_sourceCursorState(RenderQueueSource source,
+    uint64_t generation, bool visible, int x, int y, int hx, int hy)
+{
+  (void)source;
+  (void)generation;
+  (void)visible;
+  (void)x;
+  (void)y;
+  (void)hx;
+  (void)hy;
 }
 
 static void count(int key, void * opaque)

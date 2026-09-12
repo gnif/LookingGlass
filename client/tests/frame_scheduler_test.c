@@ -66,11 +66,9 @@ static struct LG_Transport tr;
 
 struct AppState g_state;
 
-int clock_gettime(clockid_t id, struct timespec * ts)
+uint64_t testNanotime(void)
 {
-  ts->tv_sec  = t.now / UINT64_C(1000000000);
-  ts->tv_nsec = t.now % UINT64_C(1000000000);
-  return 0;
+  return t.now;
 }
 
 static bool getPeriod(uint64_t * period)

@@ -48,6 +48,8 @@ void debug_enableTracing(void);
 
 // platform specific debug initialization
 void platform_debugInit(void);
+void debug_lock(void);
+void debug_unlock(void);
 
 #ifdef ENABLE_BACKTRACE
 void printBacktrace(void);

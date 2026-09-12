@@ -27,6 +27,7 @@
 #include "common/types.h"
 #include "common/debug.h"
 #include "interface/clipboard.h"
+#include "interface/event_source.h"
 
 typedef enum LG_DSProperty
 {
@@ -102,18 +103,6 @@ typedef enum LG_DSWaitFrameResult
 LG_DSWaitFrameResult;
 
 #define LG_POINTER_COUNT (LG_POINTER_NOT_ALLOWED + 1)
-
-typedef void (*LG_DSEventCallback)(void * opaque);
-
-typedef struct LG_DSEventSource
-{
-  /* The callback must be nonblocking and tolerate spurious calls. The caller
-   * retains ownership of fd and opaque until display-server shutdown. */
-  int                fd;
-  LG_DSEventCallback callback;
-  void             * opaque;
-}
-LG_DSEventSource;
 
 typedef struct LG_DSInitParams
 {

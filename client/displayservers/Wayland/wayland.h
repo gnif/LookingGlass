@@ -283,6 +283,8 @@ struct WaylandDSState
   unsigned int     pollWaiters;
   int              epollFd;
   int              displayFd;
+  int              eventSourceFd;
+  bool             eventSourceSubscribed;
   LG_DSEventSource eventSource;
 };
 

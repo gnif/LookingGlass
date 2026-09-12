@@ -19,10 +19,16 @@
  */
 
 #include "font.h"
+#include "font_platform_stub.h"
 #include "test.h"
+
+#include "common/debug.h"
+
+#include "cimgui.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void testInvalidFontData(void)
 {
@@ -59,9 +65,59 @@ static void testValidFontData(void)
   free(data);
 }
 
+static void testFontLifecycle(void)
+{
+  const FontPlatformStubStats * stats = font_platformStubStats();
+
+  CHECK(!font_addText("before init"));
+  CHECK(font_init());
+  CHECK(font_init());
+  CHECK(stats->initCount == 1);
+
+  char * path = font_get("test font");
+  CHECK(path);
+  CHECK(strcmp(path, FONT_TEST_FILE) == 0);
+  free(path);
+  CHECK(stats->selectCount == 1);
+
+  const char text[] = "fallback \xE4\xB8\xAD";
+  CHECK(font_addText(text));
+  CHECK(!font_addText(text));
+
+  ImFontAtlas * atlas = ImFontAtlas_ImFontAtlas();
+  CHECK(atlas);
+
+  ImFont * large = NULL;
+  CHECK(font_buildAtlas(atlas, 14.0f, &large));
+  CHECK(large);
+  CHECK(stats->resolveCount == 1);
+  CHECK(stats->incompatibleSkipCount == 1);
+  CHECK(stats->fallbackAcceptCount == 1);
+
+  large = NULL;
+  CHECK(font_buildAtlas(atlas, 18.0f, &large));
+  CHECK(large);
+  CHECK(stats->resolveCount == 2);
+  CHECK(stats->incompatibleSkipCount == 2);
+  CHECK(stats->fallbackAcceptCount == 2);
+
+  ImFontAtlas_destroy(atlas);
+  font_free();
+  font_free();
+  CHECK(stats->freeCount == 1);
+  CHECK(!font_addText("after free"));
+
+  CHECK(font_init());
+  CHECK(stats->initCount == 2);
+  font_free();
+  CHECK(stats->freeCount == 2);
+}
+
 int main(void)
 {
+  debug_init();
   testInvalidFontData();
   testValidFontData();
+  testFontLifecycle();
   return 0;
 }

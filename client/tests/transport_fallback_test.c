@@ -31,7 +31,6 @@
 #include <unistd.h>
 
 #define TEST_WAIT_MS 3000U
-#define TEST_ALARM_S    5U
 
 struct LG_Transport
 {
@@ -874,7 +873,6 @@ int main(int argc, char ** argv)
     return EXIT_FAILURE;
   }
 
-  alarm(TEST_ALARM_S);
   debug_init();
   for (unsigned int i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
     if (strcmp(argv[1], tests[i].name) == 0)

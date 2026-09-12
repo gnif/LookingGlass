@@ -36,7 +36,6 @@
 
 #define MAX_CTL 16U
 #define DEBOUNCE_US UINT64_C(500000)
-#define TEST_ALARM_S 5U
 
 struct LG_Transport
 {
@@ -98,12 +97,27 @@ bool lgTransport_isValid(const char * name)
     (strcmp(name, "lgmp") == 0 || strcmp(name, "spice") == 0);
 }
 
-int clock_gettime(clockid_t id, struct timespec * ts)
+uint64_t testMicrotime(void)
 {
-  const uint64_t ns = t.now * UINT64_C(1000);
-  ts->tv_sec         = ns / UINT64_C(1000000000);
-  ts->tv_nsec        = ns % UINT64_C(1000000000);
-  return 0;
+  return t.now;
+}
+
+void core_onWindowSizeChanged(unsigned int width, unsigned int height)
+{
+  if (!g_state.transport.handle ||
+      !(g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE) ||
+      (g_state.srcSize.x == width && g_state.srcSize.y == height))
+    return;
+
+  const LG_TransportControl control =
+  {
+    .type       = LG_TRANSPORT_CONTROL_WINDOW_SIZE,
+    .windowSize = { .width = width, .height = height },
+  };
+
+  LG_TransportControlToken token;
+  g_state.transport.ops->sendControl(
+      g_state.transport.handle, &control, &token);
 }
 
 static LG_TransportStatus sendCtl(LG_Transport * transport,
@@ -459,7 +473,6 @@ int main(int argc, char ** argv)
     return EXIT_FAILURE;
   }
 
-  alarm(TEST_ALARM_S);
   debug_init();
   for (unsigned int i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
     if (strcmp(argv[1], tests[i].name) == 0)

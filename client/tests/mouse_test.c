@@ -20,8 +20,11 @@
 
 #include "app.h"
 #include "core.h"
+#include "font.h"
 #include "input.h"
+#include "kb.h"
 #include "main.h"
+#include "message.h"
 #include "test.h"
 #include "util.h"
 
@@ -79,6 +82,81 @@ m;
 struct AppState    g_state;
 struct CursorState g_cursor;
 struct AppParams   g_params;
+
+const int lg_keycode_to_imgui[LG_KEY_MAX] = { 0 };
+
+void app_alert(LG_MsgAlert type, const char * format, ...)
+{
+  (void)type;
+  (void)format;
+}
+
+void app_handleMouseRelative(double normx, double normy,
+    double rawx, double rawy)
+{
+  (void)normx;
+  (void)normy;
+  (void)rawx;
+  (void)rawy;
+}
+
+void app_updateMouseState(void)
+{
+}
+
+void lgMessage_post(const LGMsg * msg)
+{
+  (void)msg;
+}
+
+void ImGuiIO_AddKeyEvent(ImGuiIO * self, ImGuiKey key, bool down)
+{
+  (void)self;
+  (void)key;
+  (void)down;
+}
+
+int main_cursorThread(void * unused)
+{
+  (void)unused;
+  return 0;
+}
+
+int main_frameThread(void * unused)
+{
+  (void)unused;
+  return 0;
+}
+
+bool font_init(void)
+{
+  return true;
+}
+
+void font_free(void)
+{
+}
+
+char * font_get(const char * fontName)
+{
+  (void)fontName;
+  return NULL;
+}
+
+bool font_addText(const char * text)
+{
+  (void)text;
+  return true;
+}
+
+bool font_buildAtlas(struct ImFontAtlas * atlas, float size,
+    struct ImFont ** large)
+{
+  (void)atlas;
+  (void)size;
+  (void)large;
+  return true;
+}
 
 static void push(enum EvType type, double x, double y, bool leaving)
 {
@@ -282,13 +360,13 @@ void app_mouseTrace(const char * file, unsigned int line,
   (void)format;
 }
 
-void evdev_setGrab(bool keyboard, bool pointer)
+void inputPlatformSetGrab(bool keyboard, bool pointer)
 {
   (void)keyboard;
   (void)pointer;
 }
 
-bool evdev_isExclusive(void)
+bool inputPlatformIsKeyboardExclusive(void)
 {
   return false;
 }
@@ -390,7 +468,7 @@ static void setLocal(double x, double y)
   g_cursor.guest.y = lround(guest.y);
 }
 
-static bool near(double a, double b)
+static bool isNear(double a, double b)
 {
   return fabs(a - b) < 0.000001;
 }
@@ -405,8 +483,8 @@ static void testInsetExit(void)
 
   CHECK(count(EV_UNGRAB) == 0);
   CHECK(count(EV_WARP) == 0);
-  CHECK(near(g_cursor.exitPos.x, 9.75));
-  CHECK(near(g_cursor.exitPos.y, 19.75));
+  CHECK(isNear(g_cursor.exitPos.x, 9.75));
+  CHECK(isNear(g_cursor.exitPos.y, 19.75));
   CHECK(g_cursor.exit);
   CHECK(!g_cursor.inView);
   CHECK(!g_cursor.viewReq);
@@ -511,8 +589,8 @@ static void testExitImmediate(void)
   startExit();
   CHECK(count(EV_UNGRAB) == 0);
   CHECK(count(EV_WARP) == 0);
-  CHECK(near(g_cursor.exitPos.x, 111));
-  CHECK(near(g_cursor.exitPos.y, 50));
+  CHECK(isNear(g_cursor.exitPos.x, 111));
+  CHECK(isNear(g_cursor.exitPos.y, 50));
   CHECK(!g_cursor.inView);
   CHECK(!g_cursor.viewReq);
   CHECK(g_cursor.exit);
@@ -903,8 +981,8 @@ static void testRotateScale(void)
 
     struct DoublePoint guest;
     util_localCurToGuest(&guest);
-    CHECK(near(guest.x, 40));
-    CHECK(near(guest.y, 20));
+    CHECK(isNear(guest.x, 40));
+    CHECK(isNear(guest.y, 20));
   }
 }
 
@@ -941,13 +1019,13 @@ static void testGeometry(void)
 
     struct DoublePoint local;
     CHECK(util_guestCurToLocal(&local));
-    CHECK(near(local.x, expected[rot].x));
-    CHECK(near(local.y, expected[rot].y));
+    CHECK(isNear(local.x, expected[rot].x));
+    CHECK(isNear(local.y, expected[rot].y));
 
     struct DoublePoint delta = { 1, 2 };
     util_rotatePoint(&delta);
-    CHECK(near(delta.x, rotated[rot].x));
-    CHECK(near(delta.y, rotated[rot].y));
+    CHECK(isNear(delta.x, rotated[rot].x));
+    CHECK(isNear(delta.y, rotated[rot].y));
   }
 
   static const double scales[] = { 0.5, 1.0, 2.0 };
@@ -966,15 +1044,15 @@ static void testGeometry(void)
 
       struct DoublePoint round;
       util_localCurToGuest(&round);
-      CHECK(near(round.x, 40));
-      CHECK(near(round.y, 20));
+      CHECK(isNear(round.x, 40));
+      CHECK(isNear(round.y, 20));
     }
 
   g_cursor.guest.valid = false;
   struct DoublePoint local = { -1, -2 };
   CHECK(!util_guestCurToLocal(&local));
-  CHECK(near(local.x, -1));
-  CHECK(near(local.y, -2));
+  CHECK(isNear(local.x, -1));
+  CHECK(isNear(local.y, -2));
 }
 
 static struct DoublePoint inputFor(int rot, double x, double y)
@@ -1030,8 +1108,8 @@ static void testEdges(void)
       CHECK(g_cursor.exit);
       CHECK(!g_cursor.inView);
       CHECK(!g_cursor.viewReq);
-      CHECK(near(g_cursor.exitPos.x, cases[i].target.x));
-      CHECK(near(g_cursor.exitPos.y, cases[i].target.y));
+      CHECK(isNear(g_cursor.exitPos.x, cases[i].target.x));
+      CHECK(isNear(g_cursor.exitPos.y, cases[i].target.y));
     }
 }
 
@@ -1065,8 +1143,8 @@ static void testScales(void)
     CHECK(g_cursor.exit);
     CHECK(!g_cursor.inView);
     CHECK(!g_cursor.viewReq);
-    CHECK(near(g_cursor.exitPos.x, cases[i].target));
-    CHECK(near(g_cursor.exitPos.y, 50));
+    CHECK(isNear(g_cursor.exitPos.x, cases[i].target));
+    CHECK(isNear(g_cursor.exitPos.y, 50));
   }
 }
 
@@ -1101,8 +1179,8 @@ static void testBorderExit(void)
     CHECK(g_cursor.exit);
     CHECK(!g_cursor.inView);
     CHECK(!g_cursor.viewReq);
-    CHECK(near(g_cursor.exitPos.x, 111));
-    CHECK(near(g_cursor.exitPos.y, 50));
+    CHECK(isNear(g_cursor.exitPos.x, 111));
+    CHECK(isNear(g_cursor.exitPos.y, 50));
   }
 }
 

@@ -19,6 +19,7 @@
  */
 
 #include "evdev.h"
+#include "event_source.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -181,7 +182,9 @@ struct EvdevState
 
   int                       epoll;
   int                       commandEvent;
-  int                       outputEvent;
+  LGEventSourceState        eventSource;
+  bool                      eventSourceInitialized;
+  bool                      started;
   LGThread                * thread;
   uint64_t                  observedState;
   uint64_t                  nextBarrier;
@@ -217,7 +220,6 @@ static struct EvdevState state =
 {
   .epoll        = -1,
   .commandEvent = -1,
-  .outputEvent  = -1,
 };
 
 static struct Option options[] =
@@ -521,7 +523,7 @@ static void evdev_availabilityChanged(
   (void)available;
   atomic_store_explicit(&state.availabilityDirty, true,
       memory_order_release);
-  evdev_signal(state.outputEvent, "output");
+  lgEventSourceNotify(&state.eventSource);
 }
 
 static void evdev_signal(int fd, const char * name)
@@ -593,7 +595,7 @@ static bool evdev_queueOutput(const EvdevOutput * output)
       last->motion.y = evdev_addLimited(last->motion.y,
           output->motion.y, EVDEV_MOTION_LIMIT);
       LG_UNLOCK(state.outputLock);
-      evdev_signal(state.outputEvent, "output");
+      lgEventSourceNotify(&state.eventSource);
       return true;
     }
 
@@ -606,7 +608,7 @@ static bool evdev_queueOutput(const EvdevOutput * output)
       last->wheel.horizontal = evdev_addLimited(last->wheel.horizontal,
           output->wheel.horizontal, EVDEV_WHEEL_LIMIT);
       LG_UNLOCK(state.outputLock);
-      evdev_signal(state.outputEvent, "output");
+      lgEventSourceNotify(&state.eventSource);
       return true;
     }
   }
@@ -654,7 +656,7 @@ static bool evdev_queueOutput(const EvdevOutput * output)
     DEBUG_WARN("evdev output queue overflowed; input state was reset");
   }
 
-  evdev_signal(state.outputEvent, "output");
+  lgEventSourceNotify(&state.eventSource);
   return !overflow;
 }
 
@@ -712,7 +714,7 @@ static void evdev_cancelOutput(void)
   LG_UNLOCK(state.outputLock);
 
   evdev_clearForwarded();
-  evdev_signal(state.outputEvent, "output");
+  lgEventSourceNotify(&state.eventSource);
 }
 
 static void evdev_updateKey(EvdevDevice * device, unsigned int code,
@@ -2001,18 +2003,17 @@ static bool evdev_outputCurrent(
     output->generation == evdev_generation(desiredState, lane);
 }
 
-int evdev_getEventFD(void)
+LG_DSEventSource evdev_getEventSource(void)
 {
-  return state.outputEvent;
+  if (!state.started)
+    return (LG_DSEventSource) { 0 };
+
+  return lgEventSourceGet(&state.eventSource);
 }
 
-void evdev_dispatch(void * opaque)
+static void evdev_dispatch(void * opaque)
 {
   (void)opaque;
-  if (state.outputEvent < 0)
-    return;
-
-  evdev_drainEvent(state.outputEvent);
 
   if (!atomic_load_explicit(&state.stop, memory_order_acquire) &&
       atomic_exchange_explicit(&state.availabilityDirty, false,
@@ -2129,6 +2130,9 @@ bool evdev_start(void)
 
   LG_LOCK_INIT(state.outputLock);
   state.outputLockInitialized = true;
+  if (!lgEventSourceInit(&state.eventSource, evdev_dispatch, NULL))
+    return false;
+  state.eventSourceInitialized = true;
 
   state.deviceList = strdup(deviceList);
   if (!state.deviceList)
@@ -2192,13 +2196,6 @@ bool evdev_start(void)
     return false;
   }
 
-  state.outputEvent = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-  if (state.outputEvent < 0)
-  {
-    DEBUG_ERROR("Failed to create evdev output event: %s", strerror(errno));
-    return false;
-  }
-
   struct epoll_event commandEvent =
   {
     .events   = EPOLLIN,
@@ -2219,9 +2216,10 @@ bool evdev_start(void)
   }
 
   lgInput_setKeyboardLEDsListener(evdev_keyboardLEDs, NULL);
-  state.ledsListenerRegistered = true;
+  state.ledsListenerRegistered         = true;
   lgInput_setAvailabilityListener(evdev_availabilityChanged, NULL);
   state.availabilityListenerRegistered = true;
+  state.started                        = true;
   return true;
 }
 
@@ -2241,6 +2239,8 @@ void evdev_stop(void)
     state.ledsListenerRegistered = false;
   }
 
+  state.started = false;
+
   if (!state.thread)
     return;
 
@@ -2254,10 +2254,10 @@ void evdev_free(void)
 {
   evdev_stop();
 
-  if (state.outputEvent >= 0)
+  if (state.eventSourceInitialized)
   {
-    close(state.outputEvent);
-    state.outputEvent = -1;
+    lgEventSourceFree(&state.eventSource);
+    state.eventSourceInitialized = false;
   }
 
   if (state.commandEvent >= 0)

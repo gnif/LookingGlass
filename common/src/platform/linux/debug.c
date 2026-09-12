@@ -57,3 +57,13 @@ void platform_debugInit(void)
 
   debug_lookup = (isatty(STDERR_FILENO) == 1) ? colorLookup : plainLookup;
 }
+
+void debug_lock(void)
+{
+  flockfile(stderr);
+}
+
+void debug_unlock(void)
+{
+  funlockfile(stderr);
+}

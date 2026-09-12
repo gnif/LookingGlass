@@ -24,7 +24,17 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+struct ImFont;
+struct ImFontAtlas;
+
 bool font_isStbTruetypeCompatible(
     const void * data, size_t size, int fontIndex);
+
+bool font_init(void);
+void font_free(void);
+char * font_get(const char * fontName);
+bool font_addText(const char * text);
+bool font_buildAtlas(struct ImFontAtlas * atlas, float size,
+    struct ImFont ** large);
 
 #endif

@@ -21,11 +21,14 @@
 #define _GNU_SOURCE
 #include "wayland.h"
 
+#include <errno.h>
 #include <signal.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/eventfd.h>
 #include <wayland-client.h>
 #include <sys/socket.h>
+#include <unistd.h>
 
 #include "common/debug.h"
 #include "common/option.h"
@@ -106,12 +109,53 @@ static bool getCompositor(char * dst, size_t size)
   return true;
 }
 
+static bool eventSourceWake(void * opaque)
+{
+  const int fd = *(const int *)opaque;
+  int result;
+  do
+    result = eventfd_write(fd, 1);
+  while (result < 0 && errno == EINTR);
+  if (result == 0 || errno == EAGAIN)
+    return true;
+
+  DEBUG_WARN("Failed to signal the display event wake fd: %s",
+      strerror(errno));
+  return false;
+}
+
 static void eventSourceCallback(uint32_t events, void * opaque)
 {
   (void)events;
+  (void)opaque;
 
-  const LG_DSEventSource * source = (const LG_DSEventSource *)opaque;
-  source->callback(source->opaque);
+  eventfd_t value;
+  for (;;)
+  {
+    if (eventfd_read(wlWm.eventSourceFd, &value) == 0 || errno == EINTR)
+      continue;
+    if (errno != EAGAIN)
+      DEBUG_WARN("Failed to drain the display event wake fd: %s",
+          strerror(errno));
+    break;
+  }
+  wlWm.eventSource.dispatch(wlWm.eventSource.opaque);
+}
+
+static void eventSourceFree(void)
+{
+  if (wlWm.eventSourceSubscribed)
+  {
+    wlWm.eventSource.unsubscribe(wlWm.eventSource.opaque);
+    wlWm.eventSourceSubscribed = false;
+  }
+
+  if (wlWm.eventSourceFd >= 0)
+  {
+    waylandPollUnregister(wlWm.eventSourceFd);
+    close(wlWm.eventSourceFd);
+    wlWm.eventSourceFd = -1;
+  }
 }
 
 static bool waylandInit(const LG_DSInitParams params)
@@ -130,6 +174,7 @@ static bool waylandInit(const LG_DSInitParams params)
   atomic_init(&wlWm.hdrScRGBWhiteLevel, 80);
   atomic_init(&wlWm.pendingResize, 0);
   wlWm.resizeEventFd = -1;
+  wlWm.eventSourceFd = -1;
   wlWm.eventSource   = params.eventSource;
 
   wlWm.display = wl_display_connect(NULL);
@@ -162,42 +207,90 @@ static bool waylandInit(const LG_DSInitParams params)
   if (!waylandPollInit())
     return false;
 
-  if (wlWm.eventSource.fd >= 0 && wlWm.eventSource.callback &&
-      !waylandPollRegister(wlWm.eventSource.fd, eventSourceCallback,
-        &wlWm.eventSource, EPOLLIN))
+  if (lgEventSourceValid(&wlWm.eventSource))
   {
-    DEBUG_ERROR("Failed to register the external event source");
-    return false;
+    wlWm.eventSourceFd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+    if (wlWm.eventSourceFd < 0)
+    {
+      DEBUG_ERROR("Failed to create the display event wake fd: %s",
+          strerror(errno));
+      return false;
+    }
+
+    if (!waylandPollRegister(wlWm.eventSourceFd, eventSourceCallback,
+          NULL, EPOLLIN))
+    {
+      DEBUG_ERROR("Failed to register the display event wake fd");
+      close(wlWm.eventSourceFd);
+      wlWm.eventSourceFd = -1;
+      return false;
+    }
+
+    if (!wlWm.eventSource.subscribe(wlWm.eventSource.opaque,
+          eventSourceWake, &wlWm.eventSourceFd))
+    {
+      DEBUG_ERROR("Failed to subscribe to the display event source");
+      eventSourceFree();
+      return false;
+    }
+    wlWm.eventSourceSubscribed = true;
   }
 
   if (!waylandOutputInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandRegistryInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandColorMgmtInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandActivationInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandIdleInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandPresentationInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandCursorInit())
+  {
+    eventSourceFree();
     return false;
+  }
 
   if (!waylandInputInit(params.allowNoInput))
+  {
+    eventSourceFree();
     return false;
+  }
 
   wlWm.desktop->setSize(params.w, params.h);
   if (!waylandWindowInit(params.title, params.appId, params.fullscreen, params.maximize,
         params.borderless, params.resizable))
+  {
+    eventSourceFree();
     return false;
+  }
 
   int width, height;
   wlWm.desktop->getSize(&width, &height);
@@ -206,6 +299,7 @@ static bool waylandInit(const LG_DSInitParams params)
         waylandScaleMulInt(wlWm.scale, height)))
   {
     waylandWindowFree();
+    eventSourceFree();
     return false;
   }
 
@@ -218,6 +312,7 @@ static bool waylandInit(const LG_DSInitParams params)
   if (params.opengl && !waylandOpenGLInit())
   {
     waylandWindowFree();
+    eventSourceFree();
     return false;
   }
 #endif
@@ -235,6 +330,7 @@ static void waylandShutdown(void)
 
 static void waylandFree(void)
 {
+  eventSourceFree();
   waylandCBFree();
   waylandIdleFree();
   waylandPresentationFree();

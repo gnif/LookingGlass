@@ -24,7 +24,7 @@
 #include "core.h"
 #include "util.h"
 #include "render_queue.h"
-#include "evdev.h"
+#include "platform/input.h"
 #include "input.h"
 #include "sw_surface.h"
 
@@ -135,10 +135,10 @@ void app_mouseTrace(const char * file, unsigned int line,
   if (result < 0)
     return;
 
-  flockfile(stderr);
-  debug_info(file, line, function, "Mouse %06lu: %s", seq,
+  debug_lock();
+  debug_info(file, line, function, "Mouse %06" PRIu64 ": %s", seq,
       message);
-  funlockfile(stderr);
+  debug_unlock();
 }
 
 bool app_isCaptureOnlyMode(void)
@@ -174,7 +174,7 @@ bool app_isOverlayMode(void)
 
 void app_updateCursorPos(double x, double y)
 {
-  if (evdev_isPointerExclusive())
+  if (inputPlatformIsPointerExclusive())
     return;
 
   const bool overlay = app_isOverlayMode();
@@ -404,7 +404,7 @@ void app_handleButtonPressInternal(int button)
 
 void app_handleButtonPress(int button)
 {
-  if (!evdev_isPointerExclusive())
+  if (!inputPlatformIsPointerExclusive())
     app_handleButtonPressInternal(button);
 }
 
@@ -433,13 +433,13 @@ void app_handleButtonReleaseInternal(int button)
 
 void app_handleButtonRelease(int button)
 {
-  if (!evdev_isPointerExclusive())
+  if (!inputPlatformIsPointerExclusive())
     app_handleButtonReleaseInternal(button);
 }
 
 void app_handleWheelMotion(double motion)
 {
-  if (evdev_isPointerExclusive())
+  if (inputPlatformIsPointerExclusive())
     return;
 
   if (app_isOverlayMode())
@@ -576,19 +576,19 @@ void app_handleKeyReleaseInternal(int sc)
 
 void app_handleKeyPress(int sc)
 {
-  if (!evdev_isExclusive())
+  if (!inputPlatformIsKeyboardExclusive())
     app_handleKeyPressInternal(sc);
 }
 
 void app_handleKeyRelease(int sc)
 {
-  if (!evdev_isExclusive())
+  if (!inputPlatformIsKeyboardExclusive())
     app_handleKeyReleaseInternal(sc);
 }
 
 void app_handleKeyboardTyped(const char * typed)
 {
-  if (evdev_isExclusive())
+  if (inputPlatformIsKeyboardExclusive())
     return;
 
   app_registerImGuiText(typed);
@@ -606,7 +606,7 @@ void app_handleKeyboardModifiersInternal(
 
 void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super)
 {
-  if (!evdev_isExclusive())
+  if (!inputPlatformIsKeyboardExclusive())
     app_handleKeyboardModifiersInternal(ctrl, shift, alt, super);
 }
 
@@ -652,7 +652,7 @@ void app_handleInputResetInternal(bool keyboard, bool pointer)
 
 void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 {
-  if (evdev_isExclusive())
+  if (inputPlatformIsKeyboardExclusive())
     return;
 
   if (!lgInput_keyboardLEDs(numLock, capsLock, scrollLock))
@@ -662,7 +662,7 @@ void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock)
 void app_handleMouseRelative(double normx, double normy,
     double rawx, double rawy)
 {
-  if (evdev_isPointerExclusive())
+  if (inputPlatformIsPointerExclusive())
     return;
 
   MTRACE("rel delta=%.3f,%.3f raw=%.3f,%.3f inWin=%d inView=%d "

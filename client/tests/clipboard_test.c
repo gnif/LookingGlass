@@ -34,7 +34,6 @@
 
 #define MAX_CALL       16U
 #define MAX_DATA       32U
-#define TEST_ALARM_S    5U
 
 struct Provider
 {
@@ -1412,7 +1411,6 @@ int main(int argc, char ** argv)
     return EXIT_FAILURE;
   }
 
-  alarm(TEST_ALARM_S);
   debug_init();
   for (unsigned int i = 0; i < sizeof(tests) / sizeof(tests[0]); ++i)
     if (strcmp(argv[1], tests[i].name) == 0)
