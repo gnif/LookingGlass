@@ -34,6 +34,7 @@
 #include "dynamic/audiodev.h"
 
 #include <float.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <math.h>
 #include <samplerate.h>
@@ -2307,7 +2308,8 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   PlaybackSourceData * sourceData = &audio.playback.sourceData;
   if (!data || frameCount > (size_t)sourceData->maxSourcePacketFrames)
   {
-    DEBUG_ERROR("Invalid playback packet length: %zu frames", frameCount);
+    DEBUG_ERROR("Invalid playback packet length: %" PRIu64 " frames",
+        (uint64_t)frameCount);
     return PLAYBACK_DATA_DROP;
   }
   const int frames = frameCount;

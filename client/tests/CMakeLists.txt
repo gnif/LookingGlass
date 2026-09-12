@@ -114,6 +114,34 @@ if(LG_CLIENT_PLATFORM_LINUX)
   )
 endif()
 
+add_executable(wasapi-format-tests
+  wasapi_format_test.c
+  ../audiodevs/WASAPI/format.c
+)
+target_include_directories(wasapi-format-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../audiodevs/WASAPI"
+)
+add_test(NAME wasapi-format-tests
+  COMMAND wasapi-format-tests
+)
+set_tests_properties(wasapi-format-tests PROPERTIES
+  TIMEOUT 10
+)
+
+add_executable(wasapi-capture-queue-tests
+  wasapi_capture_queue_test.c
+  ../audiodevs/WASAPI/capture_queue.c
+)
+target_include_directories(wasapi-capture-queue-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../audiodevs/WASAPI"
+)
+add_test(NAME wasapi-capture-queue-tests
+  COMMAND wasapi-capture-queue-tests
+)
+set_tests_properties(wasapi-capture-queue-tests PROPERTIES
+  TIMEOUT 10
+)
+
 if(LG_CLIENT_PLATFORM_WINDOWS)
   add_executable(common-windows-tests
     common_windows_test.c
