@@ -1,0 +1,35 @@
+cmake_minimum_required(VERSION 3.10)
+project(displayserver_Windows LANGUAGES C)
+
+add_library(displayserver_Windows STATIC
+  input_event.c
+  window_size.c
+  windows.c
+)
+
+target_compile_definitions(displayserver_Windows PRIVATE
+  WINVER=0x0A00
+  _WIN32_WINNT=0x0A00
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+  UNICODE
+  _UNICODE
+)
+
+target_include_directories(displayserver_Windows
+  PRIVATE
+    .
+    ../../src
+)
+
+target_link_libraries(displayserver_Windows
+  lg_common
+  user32
+  gdi32
+)
+
+if(ENABLE_EGL)
+  target_link_libraries(displayserver_Windows
+    lg_egl_provider
+  )
+endif()

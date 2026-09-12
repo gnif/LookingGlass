@@ -783,6 +783,32 @@ static void testCapRelease(void)
   CHECK(count(EV_MOTION) == 1);
 }
 
+static void testCapLost(void)
+{
+  reset();
+  setLocal(50, 50);
+  g_params.captureInputOnly = true;
+  g_params.grabKeyboard     = true;
+  core_setGrabQuiet(true);
+
+  m.lock.on = true;
+  CHECK(g_cursor.grab);
+  CHECK(m.lock.req);
+  CHECK(m.keyboardGrabbed);
+
+  m.count = 0;
+  core_handleCaptureLost();
+  CHECK(!g_cursor.grab);
+  CHECK(!m.lock.req);
+  CHECK(!m.keyboardGrabbed);
+  CHECK(count(EV_UNCAPTURE)  == 1);
+  CHECK(count(EV_KEY_UNGRAB) == 1);
+
+  core_handleCaptureLost();
+  CHECK(count(EV_UNCAPTURE)  == 1);
+  CHECK(count(EV_KEY_UNGRAB) == 1);
+}
+
 static void testCapAlign(void)
 {
   reset();
@@ -1098,6 +1124,7 @@ static const struct Test tests[] = {
   { "capture-pending" , testCapWait      },
   { "capture-revoked" , testCapRevoke    },
   { "capture-release" , testCapRelease   },
+  { "capture-lost"    , testCapLost      },
   { "capture-align"   , testCapAlign     },
   { "x11-capture-exit", testX11CapExit   },
   { "capture-fallback", testCapFallback  },

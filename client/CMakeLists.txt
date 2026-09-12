@@ -313,6 +313,16 @@ endif()
 add_subdirectory("${PROJECT_TOP}/repos/gui" "${CMAKE_BINARY_DIR}/gui"
   EXCLUDE_FROM_ALL)
 
+get_target_property(LG_GUI_INTERFACE_COMPILE_DEFINITIONS
+  lg_gui INTERFACE_COMPILE_DEFINITIONS)
+if(LG_GUI_INTERFACE_COMPILE_DEFINITIONS)
+  list(FILTER LG_GUI_INTERFACE_COMPILE_DEFINITIONS EXCLUDE
+    REGEX "^IMGUI_IMPL_API=")
+  set_property(TARGET lg_gui PROPERTY INTERFACE_COMPILE_DEFINITIONS
+    ${LG_GUI_INTERFACE_COMPILE_DEFINITIONS})
+endif()
+unset(LG_GUI_INTERFACE_COMPILE_DEFINITIONS)
+
 target_sources(lg_gui PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui/imgui_demo.cpp"
   "${PROJECT_TOP}/repos/gui/cimplot/implot/implot_demo.cpp"

@@ -429,6 +429,28 @@ foreach(name IN ITEMS pointer-routing keyboard-routing held-keys)
   )
 endforeach()
 
+add_executable(windows-input-tests
+  windows_input_test.c
+  ../displayservers/Windows/input_event.c
+  ../displayservers/Windows/window_size.c
+  ../src/kb.c
+)
+target_compile_definitions(windows-input-tests PRIVATE
+  CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
+)
+target_include_directories(windows-input-tests PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../src"
+  "${PROJECT_TOP}/repos/gui/cimgui"
+  "${PROJECT_TOP}/repos/gui/cimgui/imgui"
+)
+add_test(NAME windows-input-tests
+  COMMAND windows-input-tests
+)
+set_tests_properties(windows-input-tests PROPERTIES
+  TIMEOUT 10
+)
+
 add_executable(mouse-tests
   mouse_test.c
   ../src/core.c
@@ -459,6 +481,7 @@ set(MOUSE_CASES
   capture-pending
   capture-revoked
   capture-release
+  capture-lost
   capture-align
   x11-capture-exit
   capture-fallback

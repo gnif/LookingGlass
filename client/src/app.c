@@ -689,6 +689,11 @@ void app_handleGrabEvent(bool active)
   core_handleGrabEvent(active);
 }
 
+void app_handleCaptureLost(void)
+{
+  core_handleCaptureLost();
+}
+
 void app_updateWindowPos(int x, int y)
 {
   g_state.windowPos.x = x;

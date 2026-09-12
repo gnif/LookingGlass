@@ -306,6 +306,12 @@ void core_handleGrabEvent(bool active)
     core_handleMouseAbsolute();
 }
 
+void core_handleCaptureLost(void)
+{
+  if (g_cursor.grab)
+    core_setGrabQuiet(false);
+}
+
 void core_setGrab(bool enable)
 {
   core_setGrabQuiet(enable);

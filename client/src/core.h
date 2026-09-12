@@ -29,6 +29,7 @@ void core_updateKeyboardGrab(void);
 void core_invalidatePointer(bool detectInView);
 void core_setCursorInView(bool enable);
 void core_handleGrabEvent(bool active);
+void core_handleCaptureLost(void);
 void core_setGrab(bool enable);
 void core_setGrabQuiet(bool enable);
 bool core_warpPointer(int x, int y, bool exiting);

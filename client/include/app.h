@@ -93,6 +93,7 @@ void app_handleKeyboardModifiers(bool ctrl, bool shift, bool alt, bool super);
 void app_handleKeyboardLEDs(bool numLock, bool capsLock, bool scrollLock);
 void app_handleEnterEvent(bool entered);
 void app_handleGrabEvent(bool active);
+void app_handleCaptureLost(void);
 void app_handleFocusEvent(bool focused);
 void app_handleCloseEvent(void);
 void app_handleRenderEvent(const uint64_t timeUs);
