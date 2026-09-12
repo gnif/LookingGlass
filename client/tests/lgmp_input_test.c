@@ -28,7 +28,7 @@
 #include <lgmp/host.h>
 #include <lgmp/stream.h>
 
-#include <linux/input.h>
+#include "input/keycodes.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -359,7 +359,7 @@ static bool testClaim(TestState * state)
   CHECK(postAvailable(state, 10));
   CHECK(state->ops->supports(state->input,
         LG_INPUT_SUPPORT_MOUSE_ABSOLUTE));
-  CHECK(state->ops->keyDown(state->input, KEY_A));
+  CHECK(state->ops->keyDown(state->input, LG_KEY_A));
 
   KVMFRInputMessage claim;
   KVMFRInputMessage keyboard;
@@ -371,7 +371,7 @@ static bool testClaim(TestState * state)
   CHECK(keyboardHas(&keyboard, 4));
 
   CHECK(postOwner(state, 10, state->clientID, claim.generation));
-  CHECK(state->ops->keyUp(state->input, KEY_A));
+  CHECK(state->ops->keyUp(state->input, LG_KEY_A));
   CHECK(expectType(state, KVMFR_INPUT_MESSAGE_KEYBOARD, &keyboard));
   CHECK(keyboard.generation == claim.generation);
   CHECK(keyboard.sequence == 3);
@@ -389,7 +389,7 @@ static bool testBlocked(TestState * state)
   CHECK(postStatus(state, 20, otherClient, 77));
   CHECK(waitStatus(state, 2, true, 20));
 
-  CHECK(state->ops->keyDown(state->input, KEY_A));
+  CHECK(state->ops->keyDown(state->input, LG_KEY_A));
   CHECK(state->ops->mousePress(state->input, 1));
   CHECK(expectNoInput(state));
 
@@ -413,7 +413,7 @@ static bool testBlocked(TestState * state)
 static bool testRestart(TestState * state)
 {
   CHECK(postAvailable(state, 30));
-  CHECK(state->ops->keyDown(state->input, KEY_A));
+  CHECK(state->ops->keyDown(state->input, LG_KEY_A));
   CHECK(state->ops->mousePress(state->input, 1));
 
   KVMFRInputMessage oldClaim;
@@ -504,7 +504,7 @@ static bool testPressure(TestState * state)
 static bool testIdle(TestState * state)
 {
   CHECK(postAvailable(state, 50));
-  CHECK(state->ops->keyDown(state->input, KEY_A));
+  CHECK(state->ops->keyDown(state->input, LG_KEY_A));
 
   KVMFRInputMessage claim;
   KVMFRInputMessage message;
@@ -517,7 +517,7 @@ static bool testIdle(TestState * state)
   CHECK(message.generation == claim.generation);
   CHECK(message.sequence > 2);
 
-  CHECK(state->ops->keyUp(state->input, KEY_A));
+  CHECK(state->ops->keyUp(state->input, LG_KEY_A));
   CHECK(readUntilType(state, KVMFR_INPUT_MESSAGE_KEYBOARD, 8,
         &message, &skipped));
   CHECK(keyboardEmpty(&message));

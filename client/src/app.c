@@ -448,10 +448,10 @@ void app_handleWheelMotion(double motion)
 
 void app_handleKeyPressInternal(int sc)
 {
-  if (sc == KEY_LEFTSHIFT)
+  if (sc == LG_KEY_LEFTSHIFT)
     atomic_fetch_or_explicit(&g_state.keyModifiers,
         KEY_MODIFIER_LEFT_SHIFT, memory_order_acq_rel);
-  else if (sc == KEY_RIGHTSHIFT)
+  else if (sc == LG_KEY_RIGHTSHIFT)
     atomic_fetch_or_explicit(&g_state.keyModifiers,
         KEY_MODIFIER_RIGHT_SHIFT, memory_order_acq_rel);
 
@@ -481,9 +481,9 @@ void app_handleKeyPressInternal(int sc)
         {
           unsigned modifiers = atomic_load_explicit(
               &g_state.keyModifiers, memory_order_acquire);
-          if (g_params.escapeKey == KEY_LEFTSHIFT)
+          if (g_params.escapeKey == LG_KEY_LEFTSHIFT)
             modifiers &= ~(unsigned)KEY_MODIFIER_LEFT_SHIFT;
-          else if (g_params.escapeKey == KEY_RIGHTSHIFT)
+          else if (g_params.escapeKey == LG_KEY_RIGHTSHIFT)
             modifiers &= ~(unsigned)KEY_MODIFIER_RIGHT_SHIFT;
           const bool shift = modifiers != 0;
           if (!repeat)
@@ -508,12 +508,12 @@ void app_handleKeyPressInternal(int sc)
 
   if (app_isOverlayMode())
   {
-    if (sc == KEY_ESC)
+    if (sc == LG_KEY_ESC)
       app_setOverlay(false);
     else
     {
-      if (linux_to_imgui[sc])
-        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], true);
+      if (lg_keycode_to_imgui[sc])
+        ImGuiIO_AddKeyEvent(g_state.io, lg_keycode_to_imgui[sc], true);
     }
     return;
   }
@@ -521,7 +521,7 @@ void app_handleKeyPressInternal(int sc)
   if (!core_inputEnabled())
     return;
 
-  if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
+  if (g_params.ignoreWindowsKeys && (sc == LG_KEY_LEFTMETA || sc == LG_KEY_RIGHTMETA))
     return;
 
   if (!lgInput_keyDown(sc))
@@ -530,10 +530,10 @@ void app_handleKeyPressInternal(int sc)
 
 void app_handleKeyReleaseInternal(int sc)
 {
-  if (sc == KEY_LEFTSHIFT)
+  if (sc == LG_KEY_LEFTSHIFT)
     atomic_fetch_and_explicit(&g_state.keyModifiers,
         ~(unsigned)KEY_MODIFIER_LEFT_SHIFT, memory_order_acq_rel);
-  else if (sc == KEY_RIGHTSHIFT)
+  else if (sc == LG_KEY_RIGHTSHIFT)
     atomic_fetch_and_explicit(&g_state.keyModifiers,
         ~(unsigned)KEY_MODIFIER_RIGHT_SHIFT, memory_order_acq_rel);
 
@@ -559,15 +559,15 @@ void app_handleKeyReleaseInternal(int sc)
 
   if (app_isOverlayMode())
   {
-    if (linux_to_imgui[sc])
-      ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], false);
+    if (lg_keycode_to_imgui[sc])
+      ImGuiIO_AddKeyEvent(g_state.io, lg_keycode_to_imgui[sc], false);
     return;
   }
 
   if (!core_inputEnabled())
     return;
 
-  if (g_params.ignoreWindowsKeys && (sc == KEY_LEFTMETA || sc == KEY_RIGHTMETA))
+  if (g_params.ignoreWindowsKeys && (sc == LG_KEY_LEFTMETA || sc == LG_KEY_RIGHTMETA))
     return;
 
   if (!lgInput_keyUp(sc))
@@ -623,9 +623,9 @@ void app_handleInputResetInternal(bool keyboard, bool pointer)
 
   if (keyboard)
   {
-    for(int key = 0; key < KEY_MAX; ++key)
-      if (linux_to_imgui[key])
-        ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[key], false);
+    for(int key = 0; key < LG_KEY_MAX; ++key)
+      if (lg_keycode_to_imgui[key])
+        ImGuiIO_AddKeyEvent(g_state.io, lg_keycode_to_imgui[key], false);
 
     g_state.modCtrl      = false;
     g_state.modShift     = false;
@@ -909,7 +909,7 @@ KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
     return NULL;
   }
 
-  if (sc <= KEY_RESERVED || sc >= KEY_MAX || !linux_to_display[sc])
+  if (sc <= LG_KEY_RESERVED || sc >= LG_KEY_MAX || !lg_keycode_to_display[sc])
   {
     DEBUG_ERROR("invalid keybind keycode: %d", sc);
     return NULL;

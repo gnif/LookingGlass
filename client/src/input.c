@@ -22,8 +22,8 @@
 
 #include "common/debug.h"
 #include "common/locking.h"
+#include "input/keycodes.h"
 
-#include <linux/input.h>
 #include <stdatomic.h>
 
 struct InputBinding
@@ -60,7 +60,7 @@ static struct
   bool                desiredKeyboardLEDsValid;
   uint8_t             desiredKeyboardLEDs;
 
-  _Atomic(bool)     keys[KEY_MAX];
+  _Atomic(bool)     keys[LG_KEY_MAX];
   _Atomic(uint32_t) buttons;
 }
 l_input;
@@ -160,7 +160,7 @@ static void dispatchAvailability(void)
 
 static void releaseKeysNL(void)
 {
-  for (int key = 0; key < KEY_MAX; ++key)
+  for (int key = 0; key < LG_KEY_MAX; ++key)
     if (atomic_exchange_explicit(&l_input.keys[key], false,
           memory_order_relaxed) && l_input.active.ops)
       l_input.active.ops->keyUp(l_input.active.opaque, key);
@@ -189,7 +189,7 @@ static void resetActiveNL(void)
 
 static void clearStateNL(void)
 {
-  for (int key = 0; key < KEY_MAX; ++key)
+  for (int key = 0; key < LG_KEY_MAX; ++key)
     atomic_store_explicit(&l_input.keys[key], false, memory_order_relaxed);
 
   atomic_store_explicit(&l_input.buttons, 0, memory_order_relaxed);
@@ -337,7 +337,7 @@ void lgInput_init(void)
   l_input.desiredKeyboardLEDsValid  = false;
   l_input.desiredKeyboardLEDs       = 0;
 
-  for (int key = 0; key < KEY_MAX; ++key)
+  for (int key = 0; key < LG_KEY_MAX; ++key)
     atomic_init(&l_input.keys[key], false);
   atomic_init(&l_input.buttons, 0);
 
@@ -531,7 +531,7 @@ void lgInput_setAvailabilityListener(
 
 bool lgInput_keyDown(int key)
 {
-  if (key < 0 || key >= KEY_MAX)
+  if (key < 0 || key >= LG_KEY_MAX)
     return false;
 
   LG_LOCK_SHARED(l_input.activeLock);
@@ -552,7 +552,7 @@ bool lgInput_keyDown(int key)
 
 bool lgInput_keyUp(int key)
 {
-  if (key < 0 || key >= KEY_MAX)
+  if (key < 0 || key >= LG_KEY_MAX)
     return false;
 
   LG_LOCK_SHARED(l_input.activeLock);

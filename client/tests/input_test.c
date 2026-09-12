@@ -22,7 +22,7 @@
 
 #include "common/debug.h"
 
-#include <linux/input.h>
+#include "input/keycodes.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -70,7 +70,7 @@ typedef struct FakeInput
   RetiredListener  retired[TEST_RETIRED_LISTENERS];
   unsigned         retiredCount;
   FakeCalls        calls;
-  bool             remoteKeys[KEY_MAX];
+  bool             remoteKeys[LG_KEY_MAX];
   uint32_t         remoteButtons;
   int              lastKeyDown;
   int              lastKeyUp;
@@ -167,7 +167,7 @@ static bool fakeKeyDown(void * opaque, int key)
   FakeInput * input = opaque;
   if (!fakeAlive(input))
     return false;
-  if (key < 0 || key >= KEY_MAX)
+  if (key < 0 || key >= LG_KEY_MAX)
   {
     ++input->calls.fault;
     return false;
@@ -186,7 +186,7 @@ static bool fakeKeyUp(void * opaque, int key)
   FakeInput * input = opaque;
   if (!fakeAlive(input))
     return false;
-  if (key < 0 || key >= KEY_MAX)
+  if (key < 0 || key >= LG_KEY_MAX)
   {
     ++input->calls.fault;
     return false;
@@ -410,9 +410,9 @@ static bool testHandoff(TestState * state)
 {
   CHECK(bindBoth(state));
 
-  CHECK(lgInput_keyDown(KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
   CHECK(lgInput_mousePress(1));
-  CHECK(state->transport.remoteKeys[KEY_A]);
+  CHECK(state->transport.remoteKeys[LG_KEY_A]);
   CHECK(state->transport.remoteButtons & (UINT32_C(1) << 1));
 
   const unsigned transportKeyUp   = state->transport.calls.keyUp;
@@ -421,42 +421,42 @@ static bool testHandoff(TestState * state)
   const unsigned fallbackReset    = state->fallback.calls.reset;
   CHECK(setAvailable(&state->transport, false));
   CHECK(state->transport.calls.keyUp == transportKeyUp + 1);
-  CHECK(state->transport.lastKeyUp == KEY_A);
+  CHECK(state->transport.lastKeyUp == LG_KEY_A);
   CHECK(state->transport.calls.release == transportRelease + 1);
   CHECK(state->transport.lastRelease == 1);
   CHECK(state->transport.calls.reset == transportReset + 1);
   CHECK(state->fallback.calls.reset == fallbackReset + 1);
-  CHECK(!state->transport.remoteKeys[KEY_A]);
+  CHECK(!state->transport.remoteKeys[LG_KEY_A]);
   CHECK(state->transport.remoteButtons == 0);
 
   const unsigned fallbackKeyUp   = state->fallback.calls.keyUp;
   const unsigned fallbackRelease = state->fallback.calls.release;
-  CHECK(lgInput_keyUp(KEY_A));
+  CHECK(lgInput_keyUp(LG_KEY_A));
   CHECK(lgInput_mouseRelease(1));
   CHECK(state->fallback.calls.keyUp == fallbackKeyUp);
   CHECK(state->fallback.calls.release == fallbackRelease);
 
-  CHECK(lgInput_keyDown(KEY_B));
+  CHECK(lgInput_keyDown(LG_KEY_B));
   CHECK(lgInput_mousePress(2));
-  CHECK(state->fallback.remoteKeys[KEY_B]);
+  CHECK(state->fallback.remoteKeys[LG_KEY_B]);
   CHECK(setAvailable(&state->transport, true));
   CHECK(state->fallback.calls.keyUp == fallbackKeyUp + 1);
-  CHECK(state->fallback.lastKeyUp == KEY_B);
+  CHECK(state->fallback.lastKeyUp == LG_KEY_B);
   CHECK(state->fallback.calls.release == fallbackRelease + 1);
   CHECK(state->fallback.lastRelease == 2);
-  CHECK(!state->fallback.remoteKeys[KEY_B]);
+  CHECK(!state->fallback.remoteKeys[LG_KEY_B]);
   CHECK(state->fallback.remoteButtons == 0);
 
-  CHECK(lgInput_keyDown(KEY_C));
+  CHECK(lgInput_keyDown(LG_KEY_C));
   CHECK(lgInput_mousePress(3));
   const unsigned secondTransportKeyUp   = state->transport.calls.keyUp;
   const unsigned secondTransportRelease = state->transport.calls.release;
   lgInput_useTransport(false);
   CHECK(state->transport.calls.keyUp == secondTransportKeyUp + 1);
-  CHECK(state->transport.lastKeyUp == KEY_C);
+  CHECK(state->transport.lastKeyUp == LG_KEY_C);
   CHECK(state->transport.calls.release == secondTransportRelease + 1);
   CHECK(state->transport.lastRelease == 3);
-  CHECK(!state->transport.remoteKeys[KEY_C]);
+  CHECK(!state->transport.remoteKeys[LG_KEY_C]);
   CHECK(state->transport.remoteButtons == 0);
   return true;
 }
@@ -492,7 +492,7 @@ static bool testStale(TestState * state)
 static bool testDeadDrop(TestState * state)
 {
   CHECK(bindBoth(state));
-  CHECK(lgInput_keyDown(KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
   CHECK(lgInput_mousePress(1));
 
   LG_InputStatusFn stale         = state->transport.listener;
@@ -509,13 +509,13 @@ static bool testDeadDrop(TestState * state)
   CHECK(state->transport.calls.reset == reset);
   CHECK(state->transport.calls.listenerClear == listenerClear);
   CHECK(state->transport.calls.dead == 0);
-  CHECK(state->transport.remoteKeys[KEY_A]);
+  CHECK(state->transport.remoteKeys[LG_KEY_A]);
   CHECK(state->transport.remoteButtons & (UINT32_C(1) << 1));
   CHECK(lgInput_available());
 
   const unsigned fallbackKeyUp   = state->fallback.calls.keyUp;
   const unsigned fallbackRelease = state->fallback.calls.release;
-  CHECK(lgInput_keyUp(KEY_A));
+  CHECK(lgInput_keyUp(LG_KEY_A));
   CHECK(lgInput_mouseRelease(1));
   CHECK(state->fallback.calls.keyUp == fallbackKeyUp);
   CHECK(state->fallback.calls.release == fallbackRelease);
@@ -541,23 +541,23 @@ static bool testRollback(TestState * state)
   CHECK(lgInput_available());
 
   state->transport.keyDownResult = false;
-  CHECK(!lgInput_keyDown(KEY_A));
+  CHECK(!lgInput_keyDown(LG_KEY_A));
   CHECK(state->transport.calls.keyDown == 1);
   state->transport.keyDownResult = true;
-  CHECK(lgInput_keyDown(KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
   CHECK(state->transport.calls.keyDown == 2);
-  CHECK(lgInput_keyDown(KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
   CHECK(state->transport.calls.keyDown == 2);
 
   state->transport.keyUpResult = false;
-  CHECK(!lgInput_keyUp(KEY_A));
+  CHECK(!lgInput_keyUp(LG_KEY_A));
   CHECK(state->transport.calls.keyUp == 1);
-  CHECK(state->transport.remoteKeys[KEY_A]);
+  CHECK(state->transport.remoteKeys[LG_KEY_A]);
   state->transport.keyUpResult = true;
-  CHECK(lgInput_keyUp(KEY_A));
+  CHECK(lgInput_keyUp(LG_KEY_A));
   CHECK(state->transport.calls.keyUp == 2);
-  CHECK(!state->transport.remoteKeys[KEY_A]);
-  CHECK(lgInput_keyUp(KEY_A));
+  CHECK(!state->transport.remoteKeys[LG_KEY_A]);
+  CHECK(lgInput_keyUp(LG_KEY_A));
   CHECK(state->transport.calls.keyUp == 2);
 
   state->transport.pressResult = false;
@@ -588,9 +588,9 @@ static bool testDuplicate(TestState * state)
   CHECK(lgInput_available());
 
   CHECK(!lgInput_keyDown(-1));
-  CHECK(!lgInput_keyDown(KEY_MAX));
+  CHECK(!lgInput_keyDown(LG_KEY_MAX));
   CHECK(!lgInput_keyUp(-1));
-  CHECK(!lgInput_keyUp(KEY_MAX));
+  CHECK(!lgInput_keyUp(LG_KEY_MAX));
   CHECK(!lgInput_mousePress(0));
   CHECK(!lgInput_mousePress(32));
   CHECK(!lgInput_mouseRelease(0));
@@ -600,11 +600,11 @@ static bool testDuplicate(TestState * state)
   CHECK(state->transport.calls.press == 0);
   CHECK(state->transport.calls.release == 0);
 
-  CHECK(lgInput_keyDown(KEY_A));
-  CHECK(lgInput_keyDown(KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
+  CHECK(lgInput_keyDown(LG_KEY_A));
   CHECK(state->transport.calls.keyDown == 1);
-  CHECK(lgInput_keyUp(KEY_A));
-  CHECK(lgInput_keyUp(KEY_A));
+  CHECK(lgInput_keyUp(LG_KEY_A));
+  CHECK(lgInput_keyUp(LG_KEY_A));
   CHECK(state->transport.calls.keyUp == 1);
 
   CHECK(lgInput_mousePress(1));
@@ -614,13 +614,13 @@ static bool testDuplicate(TestState * state)
   CHECK(lgInput_mouseRelease(1));
   CHECK(state->transport.calls.release == 1);
 
-  CHECK(lgInput_keyDown(KEY_B));
-  CHECK(lgInput_keyDown(KEY_C));
+  CHECK(lgInput_keyDown(LG_KEY_B));
+  CHECK(lgInput_keyDown(LG_KEY_C));
   const unsigned keyUp = state->transport.calls.keyUp;
   lgInput_releaseKeys();
   CHECK(state->transport.calls.keyUp == keyUp + 2);
-  CHECK(!state->transport.remoteKeys[KEY_B]);
-  CHECK(!state->transport.remoteKeys[KEY_C]);
+  CHECK(!state->transport.remoteKeys[LG_KEY_B]);
+  CHECK(!state->transport.remoteKeys[LG_KEY_C]);
   lgInput_releaseKeys();
   CHECK(state->transport.calls.keyUp == keyUp + 2);
   return true;

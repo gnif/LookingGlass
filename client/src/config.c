@@ -353,7 +353,7 @@ static struct Option options[] =
     .description    = "Specify the escape/menu key to use (use \"help\" to see valid values)",
     .shortopt       = 'm',
     .type           = OPTION_TYPE_INT,
-    .value.x_int    = KEY_SCROLLLOCK,
+    .value.x_int    = LG_KEY_SCROLLLOCK,
     .parser         = optScancodeParse,
     .getValues      = optScancodeValues,
     .validator      = optScancodeValidate,
@@ -896,16 +896,16 @@ static StringList optScancodeValues(struct Option * opt)
     return NULL;
 
   // this typecast is safe as the stringlist doesn't own the values
-  for(unsigned int i = 0; i < KEY_MAX; ++i)
-    if (linux_to_str[i])
-      stringlist_push(sl, (char *)linux_to_str[i]);
+  for(unsigned int i = 0; i < LG_KEY_MAX; ++i)
+    if (lg_keycode_to_name[i])
+      stringlist_push(sl, (char *)lg_keycode_to_name[i]);
 
   return sl;
 }
 
 static bool optScancodeValidate(struct Option * opt, const char ** error)
 {
-  if (opt->value.x_int >= 0 && opt->value.x_int < KEY_MAX)
+  if (opt->value.x_int >= 0 && opt->value.x_int < LG_KEY_MAX)
     return true;
 
   *error = "Out of range";
@@ -914,12 +914,12 @@ static bool optScancodeValidate(struct Option * opt, const char ** error)
 
 static bool optScancodeParse(struct Option * opt, const char * str)
 {
-  for(unsigned int i = 0; i < KEY_MAX; ++i)
+  for(unsigned int i = 0; i < LG_KEY_MAX; ++i)
   {
-    if (!linux_to_str[i])
+    if (!lg_keycode_to_name[i])
       continue;
 
-    if (strcasecmp(linux_to_str[i], str) == 0)
+    if (strcasecmp(lg_keycode_to_name[i], str) == 0)
     {
       opt->value.x_int = i;
       return true;
@@ -939,7 +939,7 @@ static char * optScancodeToString(struct Option * opt)
 {
   char * str;
   alloc_sprintf(&str, "%d = %s", opt->value.x_int,
-      linux_to_str[opt->value.x_int]);
+      lg_keycode_to_name[opt->value.x_int]);
   return str;
 }
 

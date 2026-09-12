@@ -81,15 +81,15 @@ struct CursorState g_cursor;
 struct AppParams   g_params;
 _Atomic(enum RunState) p_appState;
 
-const char * linux_to_display[KEY_MAX] =
+const char * lg_keycode_to_display[LG_KEY_MAX] =
 {
-  [KEY_ESC] = "Esc",
-  [KEY_A]   = "A",
-  [KEY_B]   = "B",
-  [KEY_C]   = "C",
+  [LG_KEY_ESC] = "Esc",
+  [LG_KEY_A]   = "A",
+  [LG_KEY_B]   = "B",
+  [LG_KEY_C]   = "C",
 };
 
-const int linux_to_imgui[KEY_MAX] = { 0 };
+const int lg_keycode_to_imgui[LG_KEY_MAX] = { 0 };
 
 static bool getFullscreen(void)
 {
@@ -136,7 +136,7 @@ static void init(void)
   g_state.ds        = &ds;
   g_state.focused   = true;
 
-  g_params.escapeKey = KEY_ESC;
+  g_params.escapeKey = LG_KEY_ESC;
   atomic_store(&p_appState, APP_STATE_RUNNING);
 
   CHECK(g_state.bindings);
@@ -256,12 +256,12 @@ static void checkKey(unsigned int index, bool down, int key)
 static void testInvalid(void)
 {
   init();
-  CHECK(!app_registerKeybind(KEY_RESERVED, count, &t, "reserved"));
-  CHECK(!app_registerKeybind(KEY_MAX, count, &t, "past-end"));
-  CHECK(!app_registerKeybind(KEY_MAX - 1, count, &t, "unmapped"));
+  CHECK(!app_registerKeybind(LG_KEY_RESERVED, count, &t, "reserved"));
+  CHECK(!app_registerKeybind(LG_KEY_MAX, count, &t, "past-end"));
+  CHECK(!app_registerKeybind(LG_KEY_MAX - 1, count, &t, "unmapped"));
   CHECK(ll_count(g_state.bindings) == 0);
 
-  KeybindHandle handle = app_registerKeybind(KEY_A, count, &t, "valid");
+  KeybindHandle handle = app_registerKeybind(LG_KEY_A, count, &t, "valid");
   CHECK(handle);
   CHECK(ll_count(g_state.bindings) == 1);
   fini();
@@ -270,7 +270,7 @@ static void testInvalid(void)
 static void testNullCallback(void)
 {
   init();
-  CHECK(!app_registerKeybind(KEY_A, NULL, NULL, "null callback"));
+  CHECK(!app_registerKeybind(LG_KEY_A, NULL, NULL, "null callback"));
   CHECK(ll_count(g_state.bindings) == 0);
   fini();
 }
@@ -278,9 +278,9 @@ static void testNullCallback(void)
 static void testDuplicate(void)
 {
   init();
-  KeybindHandle first = app_registerKeybind(KEY_A, count, &t, "first");
+  KeybindHandle first = app_registerKeybind(LG_KEY_A, count, &t, "first");
   CHECK(first);
-  CHECK(!app_registerKeybind(KEY_A, count, &t, "duplicate"));
+  CHECK(!app_registerKeybind(LG_KEY_A, count, &t, "duplicate"));
   CHECK(ll_count(g_state.bindings) == 1);
 
   app_releaseKeybind(&first);
@@ -289,7 +289,7 @@ static void testDuplicate(void)
   app_releaseKeybind(&first);
   CHECK(!first);
 
-  first = app_registerKeybind(KEY_A, count, &t, "replacement");
+  first = app_registerKeybind(LG_KEY_A, count, &t, "replacement");
   CHECK(first);
   CHECK(ll_count(g_state.bindings) == 1);
   fini();
@@ -298,23 +298,23 @@ static void testDuplicate(void)
 static void testNormal(void)
 {
   init();
-  app_handleKeyPress(KEY_A);
-  app_handleKeyPress(KEY_A);
-  app_handleKeyRelease(KEY_A);
+  app_handleKeyPress(LG_KEY_A);
+  app_handleKeyPress(LG_KEY_A);
+  app_handleKeyRelease(LG_KEY_A);
   CHECK(t.keyN == 3);
-  checkKey(0, true , KEY_A);
-  checkKey(1, true , KEY_A);
-  checkKey(2, false, KEY_A);
+  checkKey(0, true , LG_KEY_A);
+  checkKey(1, true , LG_KEY_A);
+  checkKey(2, false, LG_KEY_A);
 
   t.exclusive = true;
-  app_handleKeyPress(KEY_B);
-  app_handleKeyRelease(KEY_B);
+  app_handleKeyPress(LG_KEY_B);
+  app_handleKeyRelease(LG_KEY_B);
   CHECK(t.keyN == 3);
 
   t.exclusive = false;
   g_params.ignoreWindowsKeys = true;
-  app_handleKeyPress(KEY_LEFTMETA);
-  app_handleKeyRelease(KEY_LEFTMETA);
+  app_handleKeyPress(LG_KEY_LEFTMETA);
+  app_handleKeyRelease(LG_KEY_LEFTMETA);
   CHECK(t.keyN == 3);
   fini();
 }
@@ -322,21 +322,21 @@ static void testNormal(void)
 static void testDispatch(void)
 {
   init();
-  CHECK(app_registerKeybind(KEY_A, count, &t, "action"));
-  app_handleKeyPress(KEY_ESC);
+  CHECK(app_registerKeybind(LG_KEY_A, count, &t, "action"));
+  app_handleKeyPress(LG_KEY_ESC);
   CHECK(g_state.escapeActive);
   CHECK(g_state.escapeAction == -1);
   CHECK(t.keyN == 0);
 
-  app_handleKeyPress(KEY_A);
-  app_handleKeyPress(KEY_A);
+  app_handleKeyPress(LG_KEY_A);
+  app_handleKeyPress(LG_KEY_A);
   CHECK(t.cbN == 2);
-  CHECK(t.cbKey == KEY_A);
-  CHECK(g_state.escapeAction == KEY_A);
+  CHECK(t.cbKey == LG_KEY_A);
+  CHECK(g_state.escapeAction == LG_KEY_A);
   CHECK(t.keyN == 0);
 
-  app_handleKeyRelease(KEY_A);
-  app_handleKeyRelease(KEY_ESC);
+  app_handleKeyRelease(LG_KEY_A);
+  app_handleKeyRelease(LG_KEY_ESC);
   CHECK(!g_state.escapeActive);
   CHECK(t.cbN == 2);
   CHECK(t.keyN == 0);
@@ -346,16 +346,16 @@ static void testDispatch(void)
 static void testReleaseAll(void)
 {
   init();
-  CHECK(app_registerKeybind(KEY_A, count, &t, "a"));
-  CHECK(app_registerKeybind(KEY_B, count, &t, "b"));
-  CHECK(app_registerKeybind(KEY_C, count, &t, "c"));
+  CHECK(app_registerKeybind(LG_KEY_A, count, &t, "a"));
+  CHECK(app_registerKeybind(LG_KEY_B, count, &t, "b"));
+  CHECK(app_registerKeybind(LG_KEY_C, count, &t, "c"));
   CHECK(ll_count(g_state.bindings) == 3);
 
   app_releaseAllKeybinds();
   CHECK(ll_count(g_state.bindings) == 0);
   app_releaseAllKeybinds();
   CHECK(ll_count(g_state.bindings) == 0);
-  CHECK(app_registerKeybind(KEY_A, count, &t, "again"));
+  CHECK(app_registerKeybind(LG_KEY_A, count, &t, "again"));
   CHECK(ll_count(g_state.bindings) == 1);
   fini();
 }
@@ -405,16 +405,16 @@ static void testFocus(void)
 static void testReentrant(void)
 {
   init();
-  re.handle = app_registerKeybind(KEY_A, replace, &re, "old");
+  re.handle = app_registerKeybind(LG_KEY_A, replace, &re, "old");
   CHECK(re.handle);
-  app_handleKeyPress(KEY_ESC);
-  app_handleKeyPress(KEY_A);
+  app_handleKeyPress(LG_KEY_ESC);
+  app_handleKeyPress(LG_KEY_A);
   CHECK(re.oldN == 1);
   CHECK(re.newN == 0);
   CHECK(re.handle);
   CHECK(ll_count(g_state.bindings) == 1);
 
-  app_handleKeyPress(KEY_A);
+  app_handleKeyPress(LG_KEY_A);
   CHECK(re.oldN == 1);
   CHECK(re.newN == 1);
   CHECK(ll_count(g_state.bindings) == 1);

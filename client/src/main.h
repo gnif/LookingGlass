@@ -20,7 +20,8 @@
 
 #include <stdbool.h>
 #include <stdatomic.h>
-#include <linux/input.h>
+
+#include "input/keycodes.h"
 
 #include "dynamic/displayservers.h"
 #include "dynamic/renderers.h"
@@ -130,8 +131,8 @@ struct AppState
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;
-  bool                 escapeKeys[KEY_MAX];
-  bool                 escapeShiftKeys[KEY_MAX];
+  bool                 escapeKeys[LG_KEY_MAX];
+  bool                 escapeShiftKeys[LG_KEY_MAX];
   atomic_uint          keyModifiers;
   bool                 escapeHelp;
   struct ll          * bindings;

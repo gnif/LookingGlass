@@ -162,7 +162,7 @@ static bool graphs_init(void ** udata, const void * params)
   }
 
   app_overlayConfigRegister("Performance Metrics", configCallback, NULL);
-  app_registerKeybind(KEY_T, showTimingKeybind, NULL,
+  app_registerKeybind(LG_KEY_T, showTimingKeybind, NULL,
       "Show frame timing information");
   return true;
 }

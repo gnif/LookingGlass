@@ -37,7 +37,6 @@
 #include <math.h>
 #include <stdlib.h>
 #include <stdatomic.h>
-#include <linux/input.h>
 
 #include "common/array.h"
 #include "common/debug.h"

@@ -21,17 +21,18 @@
 #ifndef _H_LG_KB_
 #define _H_LG_KB_
 
-#include <linux/input.h>
 #include <stdint.h>
+
+#include "input/keycodes.h"
 
 #define PS2_MUTE        0xE020
 #define PS2_VOLUME_UP   0xE030
 #define PS2_VOLUME_DOWN 0xE02E
 
-extern const uint32_t linux_to_ps2[KEY_MAX];
-extern const uint8_t  linux_to_hid[KEY_MAX];
-extern const char *   linux_to_str[KEY_MAX];
-extern const char *   linux_to_display[KEY_MAX];
-extern const int      linux_to_imgui[KEY_MAX];
+extern const uint32_t lg_keycode_to_ps2    [LG_KEY_MAX];
+extern const uint8_t  lg_keycode_to_hid    [LG_KEY_MAX];
+extern const char *   lg_keycode_to_name   [LG_KEY_MAX];
+extern const char *   lg_keycode_to_display[LG_KEY_MAX];
+extern const int      lg_keycode_to_imgui  [LG_KEY_MAX];
 
 #endif

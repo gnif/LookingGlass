@@ -55,6 +55,11 @@
 #define EVDEV_WHEEL_LIMIT      64
 #define EVDEV_GUEST_LEDS_VALID UINT8_C(0x80)
 
+_Static_assert((int)LG_KEY_RESERVED == KEY_RESERVED,
+    "Looking Glass and evdev reserved keycodes differ");
+_Static_assert((int)LG_KEY_MAX == KEY_MAX,
+    "Looking Glass and evdev maximum keycodes differ");
+
 enum EvdevGrabReason
 {
   EVDEV_GRAB_KEYBOARD = 1 << 0,

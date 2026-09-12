@@ -81,7 +81,7 @@ static void spiceSetStatusListener(void * opaque,
 static bool spiceKeyDown(void * opaque, int key)
 {
   SpiceInput * input = opaque;
-  const uint32_t ps2 = linux_to_ps2[key];
+  const uint32_t ps2 = lg_keycode_to_ps2[key];
 
   LG_LOCK(input->stateLock);
   const bool result = input->available &&
@@ -93,7 +93,7 @@ static bool spiceKeyDown(void * opaque, int key)
 static bool spiceKeyUp(void * opaque, int key)
 {
   SpiceInput * input = opaque;
-  const uint32_t ps2 = linux_to_ps2[key];
+  const uint32_t ps2 = lg_keycode_to_ps2[key];
 
   LG_LOCK(input->stateLock);
   const bool result = !ps2 || purespice_keyUp(ps2);

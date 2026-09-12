@@ -93,9 +93,9 @@ void app_setState(enum RunState state)
 
 static const int fKeys[] =
 {
-  KEY_F1 , KEY_F2 , KEY_F3 , KEY_F4,
-  KEY_F5 , KEY_F6 , KEY_F7 , KEY_F8,
-  KEY_F9 , KEY_F10, KEY_F11, KEY_F12,
+  LG_KEY_F1 , LG_KEY_F2 , LG_KEY_F3 , LG_KEY_F4,
+  LG_KEY_F5 , LG_KEY_F6 , LG_KEY_F7 , LG_KEY_F8,
+  LG_KEY_F9 , LG_KEY_F10, LG_KEY_F11, LG_KEY_F12,
 };
 
 static void realign(void)
@@ -134,7 +134,7 @@ static void call(int sc)
 KeybindHandle app_registerKeybind(int sc, KeybindFn callback, void * opaque,
     const char * description)
 {
-  CHECK(sc > KEY_RESERVED && sc < KEY_MAX);
+  CHECK(sc > LG_KEY_RESERVED && sc < LG_KEY_MAX);
   CHECK(callback);
   CHECK(description);
   ++t.tryN;
@@ -286,12 +286,12 @@ static void testCommon(void)
   CHECK(t.tryN == 6);
   CHECK(t.activeN == 6);
   CHECK(t.collisionN == 0);
-  checkBind(0, KEY_F, "Full screen toggle");
-  checkBind(1, KEY_V, "Video stream toggle");
-  checkBind(2, KEY_R, "Rotate the output clockwise by 90° increments");
-  checkBind(3, KEY_Q, "Quit");
-  checkBind(4, KEY_O, "Toggle overlay");
-  checkBind(5, KEY_EQUAL,
+  checkBind(0, LG_KEY_F, "Full screen toggle");
+  checkBind(1, LG_KEY_V, "Video stream toggle");
+  checkBind(2, LG_KEY_R, "Rotate the output clockwise by 90° increments");
+  checkBind(3, LG_KEY_Q, "Quit");
+  checkBind(4, LG_KEY_O, "Toggle overlay");
+  checkBind(5, LG_KEY_EQUAL,
       "Set guest resolution to match window size");
 
   keybind_commonRegister();
@@ -303,28 +303,28 @@ static void testCommon(void)
 static void testOS(void)
 {
   reset();
-  CHECK(app_registerKeybind(KEY_F1, nop, NULL, "external"));
+  CHECK(app_registerKeybind(LG_KEY_F1, nop, NULL, "external"));
   t.isLinux = true;
   keybind_inputRegister();
 
   CHECK(t.tryN == 21);
   CHECK(t.activeN == 20);
   CHECK(t.collisionN == 1);
-  CHECK(find(KEY_I));
-  CHECK(find(KEY_LEFTMETA));
-  CHECK(find(KEY_RIGHTMETA));
+  CHECK(find(LG_KEY_I));
+  CHECK(find(LG_KEY_LEFTMETA));
+  CHECK(find(LG_KEY_RIGHTMETA));
   for (unsigned int i = 0; i < ARRAY_LENGTH(fKeys); ++i)
     CHECK(find(fKeys[i]));
 
-  struct Bind * fixed = find(KEY_I);
-  struct Bind * oldF2 = find(KEY_F2);
+  struct Bind * fixed = find(LG_KEY_I);
+  struct Bind * oldF2 = find(LG_KEY_F2);
   const unsigned int op = t.opN;
   keybind_inputRegister();
   CHECK(t.activeN == 20);
   CHECK(t.releaseN == 11);
   CHECK(t.collisionN == 2);
-  CHECK(find(KEY_I) == fixed);
-  CHECK(find(KEY_F2) != oldF2);
+  CHECK(find(LG_KEY_I) == fixed);
+  CHECK(find(LG_KEY_F2) != oldF2);
   CHECK(!oldF2->active);
   CHECK(t.opN == op + 22);
   for (unsigned int i = 0; i < 11; ++i)
@@ -337,8 +337,8 @@ static void testOS(void)
   keybind_inputRegister();
   CHECK(t.activeN == 9);
   CHECK(t.releaseN == 22);
-  CHECK(find(KEY_I) == fixed);
-  CHECK(strcmp(find(KEY_F1)->handle.description, "external") == 0);
+  CHECK(find(LG_KEY_I) == fixed);
+  CHECK(strcmp(find(LG_KEY_F1)->handle.description, "external") == 0);
   for (unsigned int i = 1; i < ARRAY_LENGTH(fKeys); ++i)
     CHECK(!find(fKeys[i]));
 
@@ -353,35 +353,35 @@ static void testOrder(void)
   reset();
   t.isLinux = true;
   keybind_inputRegister();
-  call(KEY_F5);
+  call(LG_KEY_F5);
 
   CHECK(t.keyN == 6);
-  checkKey(0, true , KEY_LEFTCTRL);
-  checkKey(1, true , KEY_LEFTALT );
-  checkKey(2, true , KEY_F5      );
-  checkKey(3, false, KEY_F5      );
-  checkKey(4, false, KEY_LEFTALT );
-  checkKey(5, false, KEY_LEFTCTRL);
+  checkKey(0, true , LG_KEY_LEFTCTRL);
+  checkKey(1, true , LG_KEY_LEFTALT );
+  checkKey(2, true , LG_KEY_F5      );
+  checkKey(3, false, LG_KEY_F5      );
+  checkKey(4, false, LG_KEY_LEFTALT );
+  checkKey(5, false, LG_KEY_LEFTCTRL);
 }
 
 static void testRepeat(void)
 {
   reset();
   keybind_inputRegister();
-  call(KEY_LEFTMETA);
-  call(KEY_LEFTMETA);
-  call(KEY_UP);
-  call(KEY_UP);
+  call(LG_KEY_LEFTMETA);
+  call(LG_KEY_LEFTMETA);
+  call(LG_KEY_UP);
+  call(LG_KEY_UP);
 
   CHECK(t.keyN == 8);
-  checkKey(0, true , KEY_LEFTMETA);
-  checkKey(1, false, KEY_LEFTMETA);
-  checkKey(2, true , KEY_LEFTMETA);
-  checkKey(3, false, KEY_LEFTMETA);
-  checkKey(4, true , KEY_VOLUMEUP);
-  checkKey(5, false, KEY_VOLUMEUP);
-  checkKey(6, true , KEY_VOLUMEUP);
-  checkKey(7, false, KEY_VOLUMEUP);
+  checkKey(0, true , LG_KEY_LEFTMETA);
+  checkKey(1, false, LG_KEY_LEFTMETA);
+  checkKey(2, true , LG_KEY_LEFTMETA);
+  checkKey(3, false, LG_KEY_LEFTMETA);
+  checkKey(4, true , LG_KEY_VOLUMEUP);
+  checkKey(5, false, LG_KEY_VOLUMEUP);
+  checkKey(6, true , LG_KEY_VOLUMEUP);
+  checkKey(7, false, LG_KEY_VOLUMEUP);
 }
 
 static void testActions(void)
@@ -390,66 +390,66 @@ static void testActions(void)
   keybind_commonRegister();
   keybind_inputRegister();
 
-  call(KEY_F);
+  call(LG_KEY_F);
   CHECK(t.fullscreen);
-  call(KEY_F);
+  call(LG_KEY_F);
   CHECK(!t.fullscreen);
 
-  call(KEY_V);
+  call(LG_KEY_V);
   CHECK(g_state.stopVideo);
-  call(KEY_V);
+  call(LG_KEY_V);
   CHECK(!g_state.stopVideo);
   CHECK(t.videoN == 2);
 
   g_params.winRotate = LG_ROTATE_MAX - 1;
-  call(KEY_R);
+  call(LG_KEY_R);
   CHECK(g_params.winRotate == 0);
-  call(KEY_R);
+  call(LG_KEY_R);
   CHECK(g_params.winRotate == 1);
   CHECK(t.posN == 2);
 
-  call(KEY_O);
+  call(LG_KEY_O);
   CHECK(g_state.overlayInput);
-  call(KEY_O);
+  call(LG_KEY_O);
   CHECK(!g_state.overlayInput);
   CHECK(t.overlayN == 2);
 
   g_state.ignoreInput = false;
-  call(KEY_I);
+  call(LG_KEY_I);
   CHECK(g_state.ignoreInput);
   CHECK(t.cursorN == 1);
   CHECK(!t.cursorInView);
   CHECK(strcmp(t.alert, "Input Disabled") == 0);
-  call(KEY_I);
+  call(LG_KEY_I);
   CHECK(!g_state.ignoreInput);
   CHECK(t.realignN == 1);
   CHECK(strcmp(t.alert, "Input Enabled") == 0);
 
   g_cursor.sens = 8;
-  call(KEY_INSERT);
-  call(KEY_INSERT);
+  call(LG_KEY_INSERT);
+  call(LG_KEY_INSERT);
   CHECK(g_cursor.sens == 9);
   CHECK(strcmp(t.alert, "Sensitivity: +9") == 0);
   g_cursor.sens = -8;
-  call(KEY_DELETE);
-  call(KEY_DELETE);
+  call(LG_KEY_DELETE);
+  call(LG_KEY_DELETE);
   CHECK(g_cursor.sens == -9);
   CHECK(strcmp(t.alert, "Sensitivity: -9") == 0);
 
   g_state.windowW = 1920;
   g_state.windowH = 1080;
-  call(KEY_EQUAL);
+  call(LG_KEY_EQUAL);
   CHECK(t.msgN == 0);
   CHECK(strcmp(t.alert,
         "The guest doesn't support this feature") == 0);
   g_state.transportFeatures = LG_TRANSPORT_FEATURE_WINDOW_SIZE;
-  call(KEY_EQUAL);
+  call(LG_KEY_EQUAL);
   CHECK(t.msgN == 1);
   CHECK(t.msg.type == LG_MSG_WINDOWSIZE);
   CHECK(t.msg.windowSize.width == 1920);
   CHECK(t.msg.windowSize.height == 1080);
 
-  call(KEY_Q);
+  call(LG_KEY_Q);
   CHECK(app_getState() == APP_STATE_SHUTDOWN);
 }
 

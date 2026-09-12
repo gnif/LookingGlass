@@ -195,7 +195,7 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
     return false;
   }
 
-  app_registerKeybind(KEY_N, toggleNV, desktop,
+  app_registerKeybind(LG_KEY_N, toggleNV, desktop,
       "Toggle night vision mode");
 
   desktop->nvMax     = option_get_int("egl", "nvGainMax");

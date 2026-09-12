@@ -23,7 +23,8 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <linux/input.h>
+
+#include "input/keycodes.h"
 
 #include "common/ringbuffer.h"
 #include "common/types.h"

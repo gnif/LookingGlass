@@ -49,6 +49,16 @@ if(LG_CLIENT_PLATFORM_LINUX)
   set_tests_properties(lgmp-platform-tests PROPERTIES
     TIMEOUT 10
   )
+
+  add_executable(keycode-tests
+    keycode_test.c
+  )
+  add_test(NAME keycode-tests
+    COMMAND keycode-tests
+  )
+  set_tests_properties(keycode-tests PROPERTIES
+    TIMEOUT 10
+  )
 endif()
 
 if(LG_CLIENT_PLATFORM_WINDOWS)

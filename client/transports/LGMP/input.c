@@ -83,9 +83,9 @@ struct LGMPInputLockKey
 
 static const struct LGMPInputLockKey LOCK_KEYS[] =
 {
-  { KEY_NUMLOCK,    LG_KEYBOARD_LED_NUM_LOCK    },
-  { KEY_CAPSLOCK,   LG_KEYBOARD_LED_CAPS_LOCK   },
-  { KEY_SCROLLLOCK, LG_KEYBOARD_LED_SCROLL_LOCK },
+  { LG_KEY_NUMLOCK,    LG_KEYBOARD_LED_NUM_LOCK    },
+  { LG_KEY_CAPSLOCK,   LG_KEYBOARD_LED_CAPS_LOCK   },
+  { LG_KEY_SCROLLLOCK, LG_KEYBOARD_LED_SCROLL_LOCK },
 };
 
 static const uint8_t LOCK_LED_MASK =
@@ -715,7 +715,7 @@ static void recordKeyboardToggle(LGMPInput * input, int key)
 static bool queueKeyboardTap(LGMPInput * input,
     const struct LGMPInputLockKey * lockKey, bool * wake)
 {
-  const uint8_t usage = linux_to_hid[lockKey->key];
+  const uint8_t usage = lg_keycode_to_hid[lockKey->key];
   if (!usage || input->keyState[usage] || !claim(input, wake))
     return false;
 
@@ -858,7 +858,7 @@ static bool restoreInputState(LGMPInput * input, bool * wake)
   if (keyboardHeld)
     for (size_t i = 0; i < sizeof(LOCK_KEYS) / sizeof(*LOCK_KEYS); ++i)
     {
-      const uint8_t usage = linux_to_hid[LOCK_KEYS[i].key];
+      const uint8_t usage = lg_keycode_to_hid[LOCK_KEYS[i].key];
       if (usage && input->keyState[usage])
         recordKeyboardToggle(input, LOCK_KEYS[i].key);
     }
@@ -1723,10 +1723,10 @@ static bool buildKeyboardPayload(const LGMPInput * input,
 
 static bool updateKey(void * opaque, int key, bool pressed)
 {
-  if (key < 0 || key >= KEY_MAX)
+  if (key < 0 || key >= LG_KEY_MAX)
     return false;
 
-  const uint8_t usage = linux_to_hid[key];
+  const uint8_t usage = lg_keycode_to_hid[key];
   if (!usage)
     return true;
 

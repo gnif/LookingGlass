@@ -59,10 +59,10 @@ struct AppState    g_state;
 struct CursorState g_cursor;
 struct AppParams   g_params;
 
-const char * linux_to_str[KEY_MAX] =
+const char * lg_keycode_to_name[LG_KEY_MAX] =
 {
-  [KEY_A]         = "KEY_A",
-  [KEY_RIGHTCTRL] = "KEY_RIGHTCTRL",
+  [LG_KEY_A]         = "KEY_A",
+  [LG_KEY_RIGHTCTRL] = "KEY_RIGHTCTRL",
 };
 
 static const char * renAName(void)
@@ -352,7 +352,7 @@ static void testCfgValues(void)
 
   struct Option * key = opt("input", "escapeKey");
   CHECK(key->parser(key, "KEY_A"));
-  CHECK(key->value.x_int == KEY_A);
+  CHECK(key->value.x_int == LG_KEY_A);
   char * keyName = key->toString(key);
   CHECK(keyName);
   CHECK(strstr(keyName, "KEY_A"));
