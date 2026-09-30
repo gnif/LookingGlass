@@ -1108,7 +1108,7 @@ static bool networkClipboardQueueLocalOfferNL(
     NetworkClipboard * clipboard)
 {
   if (!clipboard->localOffer.offerID || !clipboard->localOffer.count ||
-      (!clipboard->claimPending && !clipboard->claimed))
+      !clipboard->claimed)
     return false;
 
   struct NetworkClipboardBatch batch = { 0 };
@@ -2982,11 +2982,21 @@ static bool networkClipboardRelease(void * opaque)
   NetworkClipboard * clipboard = opaque;
 
   LG_LOCK(clipboard->stateLock);
-  if ((!clipboard->claimPending && !clipboard->claimed) ||
-      !clipboard->localOffer.offerID)
+  if (!clipboard->claimPending && !clipboard->claimed)
   {
     LG_UNLOCK(clipboard->stateLock);
     return false;
+  }
+  if (!clipboard->localOffer.offerID)
+  {
+    LG_UNLOCK(clipboard->stateLock);
+    return true;
+  }
+  if (clipboard->claimPending)
+  {
+    clipboard->localOffer = (struct NetworkLocalOffer) { 0 };
+    LG_UNLOCK(clipboard->stateLock);
+    return true;
   }
 
   const uint64_t offerID = clipboard->localOffer.offerID;
@@ -3044,14 +3054,16 @@ static bool networkClipboardNotifyTypes(void * opaque,
     clipboard->localOffer.indices[types[index]] = index;
   }
 
-  const bool queued = networkClipboardQueueLocalOfferNL(clipboard);
-  if (!queued)
+  const bool deferred = clipboard->claimPending;
+  const bool accepted = deferred ||
+    networkClipboardQueueLocalOfferNL(clipboard);
+  if (!accepted)
     clipboard->localOffer = previous;
   LG_UNLOCK(clipboard->stateLock);
 
-  if (queued)
+  if (accepted && !deferred)
     networkClipboardFlushQueued(clipboard);
-  return queued;
+  return accepted;
 }
 
 static bool networkClipboardOfferFiles(void * opaque, uint64_t dataset)
@@ -3082,14 +3094,16 @@ static bool networkClipboardOfferFiles(void * opaque, uint64_t dataset)
   clipboard->localOffer.indices[LG_CLIPBOARD_DATA_FILES] = 0;
   clipboard->localOffer.files                            = true;
 
-  const bool queued = networkClipboardQueueLocalOfferNL(clipboard);
-  if (!queued)
+  const bool deferred = clipboard->claimPending;
+  const bool accepted = deferred ||
+    networkClipboardQueueLocalOfferNL(clipboard);
+  if (!accepted)
     clipboard->localOffer = previous;
   LG_UNLOCK(clipboard->stateLock);
 
-  if (queued)
+  if (accepted && !deferred)
     networkClipboardFlushQueued(clipboard);
-  return queued;
+  return accepted;
 }
 
 static LG_ClipboardResult networkClipboardDataBegin(void * opaque,
