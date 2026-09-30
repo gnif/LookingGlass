@@ -20,6 +20,7 @@
 
 #include "capture/CFrameExec.h"
 
+#include "CDebug.h"
 #include "d3d/CD3D11Device.h"
 #include "d3d/CD3D12Device.h"
 #include "d3d/CInteropPool.h"
@@ -262,6 +263,7 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
   unsigned                      leafCount                       = 0;
   unsigned                      nextLane                        = 0;
   bool                          live                            = false;
+  bool                          failureLogged                   = false;
   std::atomic<bool>             forceFull { true };
 
   ~Core()
@@ -424,6 +426,17 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
     return Atomic::Load(forceFull, std::memory_order_acquire);
   }
 
+  TexResult Failed(const char * stage)
+  {
+    if (!failureLogged)
+    {
+      DEBUG_ERROR("Frame graph execution failed during %s", stage);
+      failureLogged = true;
+    }
+    Atomic::Store(forceFull, true, std::memory_order_release);
+    return TexResult::FAILED;
+  }
+
   FrameContentRef Content(uint64_t serial, const D12FrameFormat& format,
     uint64_t captureTime, bool full, FrameDamage damage,
     const RECT * rects, unsigned count)
@@ -536,8 +549,7 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
       for (unsigned node = 1; node < nodeCount; ++node)
         writes[node].Cancel();
       slot->Cancel();
-      Atomic::Store(forceFull, true, std::memory_order_release);
-      return TexResult::FAILED;
+      return Failed("source synchronization");
     }
 
     ComPtr<ID3D12GraphicsCommandList> list = slot->GetGfxList();
@@ -559,8 +571,7 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
       for (unsigned node = 1; node < nodeCount; ++node)
         writes[node].Cancel();
       slot->Cancel();
-      Atomic::Store(forceFull, true, std::memory_order_release);
-      return TexResult::FAILED;
+      return Failed("command recording");
     }
 
     D12Sync sync;
@@ -572,8 +583,7 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
           writes[node].Fail(sync);
         else
           writes[node].Cancel();
-      Atomic::Store(forceFull, true, std::memory_order_release);
-      return TexResult::FAILED;
+      return Failed("command submission");
     }
 
     const FrameTime time = { postStart, 0, 0, 0, false, false };
@@ -599,8 +609,7 @@ struct CFrameExec::Core : std::enable_shared_from_this<CFrameExec::Core>
           writes[node].Fail(sync);
         leases[node].Reset();
       }
-      Atomic::Store(forceFull, true, std::memory_order_release);
-      return TexResult::FAILED;
+      return Failed("texture publication");
     }
 
     bool dropped = false;

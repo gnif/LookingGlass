@@ -194,7 +194,8 @@ bool D12::Same(const D3D12_RESOURCE_DESC& left,
   const D3D12_RESOURCE_DESC& right, DescCmp cmp)
 {
   const bool alignment = cmp != DescCmp::CREATE &&
-    cmp != DescCmp::COPY && cmp != DescCmp::VIEW;
+    cmp != DescCmp::COPY && cmp != DescCmp::NO_FLAGS &&
+    cmp != DescCmp::VIEW;
   const bool layout    = cmp != DescCmp::COPY;
   const bool flags     = cmp != DescCmp::COPY &&
     cmp != DescCmp::NO_FLAGS && cmp != DescCmp::VIEW;
