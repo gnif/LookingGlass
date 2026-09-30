@@ -22,6 +22,7 @@
 
 #include "CSRWLock.h"
 #include "transport/ITransport.h"
+#include "transport/network/CNetworkAudio.h"
 #include "transport/network/CNetworkSession.h"
 #include "transport/network/NetworkSettings.h"
 
@@ -49,6 +50,7 @@ private:
 
   TransportInstance               m_config;
   NetworkSettings                 m_settings;
+  CNetworkAudio                   m_audio;
   std::unique_ptr<CNetworkServer> m_server;
 
   mutable CSRWLock  m_lifecycleLock;
@@ -89,6 +91,7 @@ public:
 
   std::shared_ptr<const FrameCaps> GetFrameCaps() const override;
   DirectFrameBufferMemory GetDirectMemory() const override;
+  IAudioSource * Audio() override;
   IControlSink * Control() override;
   IInputSource * Input() override;
 

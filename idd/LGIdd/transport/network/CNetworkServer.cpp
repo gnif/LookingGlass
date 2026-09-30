@@ -394,8 +394,11 @@ struct CNetworkServer::Impl
     Impl& owner;
   };
 
-  Impl(CNetworkTransport& transport, const NetworkSettings& settings) :
-    transport(transport), settings(settings)
+  Impl(CNetworkTransport& transport, CNetworkAudio& audio,
+      const NetworkSettings& settings) :
+    transport(transport),
+    audio(audio),
+    settings(settings)
   {
   }
 
@@ -413,6 +416,7 @@ struct CNetworkServer::Impl
   }
 
   CNetworkTransport&        transport;
+  CNetworkAudio&            audio;
   NetworkSettings           settings;
   const QUIC_API_TABLE    * api             = nullptr;
   HQUIC                     registration    = nullptr;
@@ -466,6 +470,80 @@ struct CNetworkServer::Impl
         return candidate;
     }
     return 0;
+  }
+
+  static NetworkAudioPeer AudioPeer(const Connection& connection)
+  {
+    return
+    {
+      connection.client,
+      connection.generation,
+    };
+  }
+
+  bool AudioPeerInfo(const NetworkAudioPeer& peer,
+    NetworkAudioPeerInfo& info)
+  {
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      CSRWSharedLock connectionGuard(connection->lock);
+      const uint16_t serviceMask =
+        UINT16_C(1) << LG_NET_SERVICE_AUDIO;
+      if (connection->closing ||
+          connection->handshake != HandshakeState::READY ||
+          !(connection->selectedServices & serviceMask))
+        return false;
+
+      const LGNetCapability& capability =
+        connection->selectedCapabilities[LG_NET_SERVICE_AUDIO];
+      info.serviceVersion      = capability.versionMin;
+      info.capabilityFlags     = capability.flags;
+      info.maxReliablePayload  = capability.maxPayloadLength;
+      info.maxDatagramPayload  = capability.maxDatagramPayload;
+      return true;
+    }
+    return false;
+  }
+
+  NetworkAudioSendResult SendAudio(
+    const NetworkAudioPeer& peer, bool datagram, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+  {
+    if (service != LG_NET_SERVICE_AUDIO)
+      return NetworkAudioSendResult::FAILED;
+
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      const SendResult result = datagram ?
+        TrySendDatagram(*connection, service, messageType, flags,
+          componentEpoch, requestID, payload, payloadLength, true) :
+        TrySendPacket(*connection, service, messageType, flags,
+          componentEpoch, requestID, payload, payloadLength);
+      switch (result)
+      {
+        case SendResult::SENT:
+          return NetworkAudioSendResult::ACCEPTED;
+
+        case SendResult::BLOCKED:
+          return NetworkAudioSendResult::BLOCKED;
+
+        case SendResult::FAILED:
+          return NetworkAudioSendResult::FAILED;
+      }
+    }
+    return NetworkAudioSendResult::FAILED;
   }
 
   void Shutdown(Connection& connection, QUIC_UINT62 error)
@@ -706,6 +784,14 @@ struct CNetworkServer::Impl
       (accounting.writableServices & serviceMask) != 0;
     accounting.writableServices &= ~serviceMask;
     return ready;
+  }
+
+  void NotifyAudioSendReady(Connection& connection, bool datagram)
+  {
+    if (ConsumeSendReady(
+          connection, LG_NET_SERVICE_AUDIO, datagram))
+      audio.SendReady(
+        AudioPeer(connection), LG_NET_SERVICE_AUDIO, datagram);
   }
 
   SendResult TrySendPacket(Connection& connection, LGNetService service,
@@ -1081,6 +1167,11 @@ struct CNetworkServer::Impl
         minimumPayload = LG_NET_INPUT_ABSOLUTE_WIRE_SIZE;
         break;
 
+      case LG_NET_SERVICE_AUDIO:
+        minimumPayload = LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE +
+          AUDIO_MAX_PCM_BYTES;
+        break;
+
       case LG_NET_SERVICE_CONTROL:
         minimumPayload = LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE;
         break;
@@ -1094,6 +1185,9 @@ struct CNetworkServer::Impl
         !(offered.flags & LG_NET_CAPABILITY_RELIABLE) ||
         offered.versionMin > version->current ||
         offered.versionMax < version->minimum ||
+        (offered.service == LG_NET_SERVICE_AUDIO &&
+          offered.versionMax <
+            LG_NET_AUDIO_OWNERSHIP_INTRODUCED_SERVICE_VERSION) ||
         offered.maxPayloadLength < minimumPayload ||
         connection.maxPayload < minimumPayload)
       return false;
@@ -1109,6 +1203,9 @@ struct CNetworkServer::Impl
     selected.versionMax               = selectedVersion;
     selected.flags                    = LG_NET_CAPABILITY_SELECTED |
       LG_NET_CAPABILITY_RELIABLE;
+    if (offered.service == LG_NET_SERVICE_AUDIO &&
+        (offered.flags & LG_NET_CAPABILITY_MULTI_CLIENT))
+      selected.flags |= LG_NET_CAPABILITY_MULTI_CLIENT;
     selected.features                 = 0;
     selected.maxPayloadLength         = offered.maxPayloadLength <
       connection.maxPayload ? offered.maxPayloadLength :
@@ -1119,7 +1216,9 @@ struct CNetworkServer::Impl
     const uint32_t minimumDatagram = offered.service ==
         LG_NET_SERVICE_INPUT ? LG_NET_INPUT_ABSOLUTE_WIRE_SIZE :
       offered.service == LG_NET_SERVICE_CURSOR ?
-        LG_NET_CURSOR_POSITION_WIRE_SIZE : 0;
+        LG_NET_CURSOR_POSITION_WIRE_SIZE :
+      offered.service == LG_NET_SERVICE_AUDIO ?
+        LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE + 2U : 0;
     if (minimumDatagram &&
         (offered.flags & LG_NET_CAPABILITY_DATAGRAM) &&
         offered.maxDatagramPayload >= minimumDatagram &&
@@ -1259,7 +1358,8 @@ struct CNetworkServer::Impl
     if (!session)
       return false;
 
-    bool activated;
+    bool activated     = false;
+    bool audioSelected = false;
     {
       CSRWExclusiveLock guard(connection.lock);
       activated = !connection.closing &&
@@ -1276,6 +1376,8 @@ struct CNetworkServer::Impl
         NetworkAuthCrypto::SecureZero(
           connection.serverNonce, sizeof(connection.serverNonce));
         connection.handshake = HandshakeState::READY;
+        audioSelected         = (connection.selectedServices &
+          (UINT16_C(1) << LG_NET_SERVICE_AUDIO)) != 0;
       }
     }
     if (!activated)
@@ -1283,6 +1385,8 @@ struct CNetworkServer::Impl
       transport.RemoveSession(connection.client, connection.generation);
       return false;
     }
+    if (audioSelected && !audio.PeerConnected(AudioPeer(connection)))
+      return false;
     DEBUG_INFO("Network client %u completed the control handshake",
       connection.client);
     return true;
@@ -2757,18 +2861,24 @@ struct CNetworkServer::Impl
 
   bool HandlePacket(Connection& connection, const LGNetPacketView& packet)
   {
-    const bool cursorStatus =
+    const bool         cursorStatus   =
       packet.envelope.service == LG_NET_SERVICE_CURSOR &&
       packet.envelope.messageType == LG_NET_CURSOR_MESSAGE_STATUS;
+    const bool         audioSubscribe =
+      packet.envelope.service == LG_NET_SERVICE_AUDIO &&
+      packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_SUBSCRIBE;
+    const bool         audioResponse  =
+      packet.envelope.service == LG_NET_SERVICE_AUDIO &&
+      packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_STATE_ACK;
+    LGNetEnvelopeFlags expectedFlags  =
+      LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
+    if (audioSubscribe)
+      expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
+    if (cursorStatus || audioResponse)
+      expectedFlags |= LG_NET_ENVELOPE_RESPONSE;
     if (packet.envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
         packet.envelope.payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
-        packet.envelope.flags & (LG_NET_ENVELOPE_DATAGRAM |
-          LG_NET_ENVELOPE_ERROR | LG_NET_ENVELOPE_EARLY_DATA) ||
-        !!(packet.envelope.flags & LG_NET_ENVELOPE_RESPONSE) !=
-          cursorStatus ||
-        (packet.envelope.flags &
-          (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL)) !=
-            (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL) ||
+        packet.envelope.flags != expectedFlags ||
         !lgNetEnvelopeRouteValid(&packet.envelope, LG_NET_ROLE_CLIENT,
           LG_NET_ROUTE_DELIVERY_RELIABLE))
       return false;
@@ -2866,6 +2976,10 @@ struct CNetworkServer::Impl
       case LG_NET_SERVICE_INPUT:
         return HandleInput(connection, packet, false);
 
+      case LG_NET_SERVICE_AUDIO:
+        return audio.HandlePacket(AudioPeer(connection), packet, false) !=
+          NetworkAudioPacketResult::INVALID;
+
       case LG_NET_SERVICE_CONTROL:
         return HandleControl(connection, packet);
 
@@ -2932,8 +3046,12 @@ struct CNetworkServer::Impl
           0, packet.envelope.requestID, packet.payload,
           static_cast<uint32_t>(packet.payloadLength), true);
 
-    return packet.envelope.service == LG_NET_SERVICE_INPUT &&
-      HandleInput(connection, packet, true);
+    if (packet.envelope.service == LG_NET_SERVICE_INPUT)
+      return HandleInput(connection, packet, true);
+    if (packet.envelope.service == LG_NET_SERVICE_AUDIO)
+      return audio.HandlePacket(AudioPeer(connection), packet, true) !=
+        NetworkAudioPacketResult::INVALID;
+    return false;
   }
 
   bool DrainReceive(Connection& connection)
@@ -3037,6 +3155,7 @@ struct CNetworkServer::Impl
           connection.client);
       session = std::move(connection.session);
     }
+    audio.PeerDisconnected(AudioPeer(connection));
     if (session)
       transport.RemoveSession(client, generation);
     session.reset();
@@ -3171,13 +3290,16 @@ struct CNetworkServer::Impl
 
       case QUIC_CONNECTION_EVENT_DATAGRAM_STATE_CHANGED:
       {
-        CSRWExclusiveLock guard(connection.lock);
-        connection.datagramSendEnabled            =
-          event->DATAGRAM_STATE_CHANGED.SendEnabled != FALSE;
-        connection.maxDatagramSendLength          =
-          event->DATAGRAM_STATE_CHANGED.MaxSendLength;
-        connection.datagramSend.writableServices |=
-          ReadyServicesLocked(connection, true);
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          connection.datagramSendEnabled            =
+            event->DATAGRAM_STATE_CHANGED.SendEnabled != FALSE;
+          connection.maxDatagramSendLength          =
+            event->DATAGRAM_STATE_CHANGED.MaxSendLength;
+          connection.datagramSend.writableServices |=
+            ReadyServicesLocked(connection, true);
+        }
+        owner.NotifyAudioSendReady(connection, true);
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -3187,8 +3309,11 @@ struct CNetworkServer::Impl
         {
           std::unique_ptr<Send> send(static_cast<Send *>(
             event->DATAGRAM_SEND_STATE_CHANGED.ClientContext));
-          CSRWExclusiveLock    guard(connection.lock);
-          ReleaseSendLocked(connection, *send);
+          {
+            CSRWExclusiveLock guard(connection.lock);
+            ReleaseSendLocked(connection, *send);
+          }
+          owner.NotifyAudioSendReady(connection, true);
         }
         return QUIC_STATUS_SUCCESS;
 
@@ -3229,8 +3354,11 @@ struct CNetworkServer::Impl
       {
         std::unique_ptr<Send> send(
           static_cast<Send *>(event->SEND_COMPLETE.ClientContext));
-        CSRWExclusiveLock guard(connection.lock);
-        ReleaseSendLocked(connection, *send);
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          ReleaseSendLocked(connection, *send);
+        }
+        owner.NotifyAudioSendReady(connection, false);
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -3269,6 +3397,7 @@ struct CNetworkServer::Impl
   void Process()
   {
     const uint64_t now = GetTickCount64();
+    audio.Process(now);
     CSRWSharedLock guard(lock);
     if (stopping || !api)
       return;
@@ -3495,8 +3624,8 @@ struct CNetworkServer::Impl
 };
 
 CNetworkServer::CNetworkServer(CNetworkTransport& transport,
-  const NetworkSettings& settings) :
-  m_impl(new Impl(transport, settings))
+  CNetworkAudio& audio, const NetworkSettings& settings) :
+  m_impl(new Impl(transport, audio, settings))
 {
 }
 
@@ -3517,4 +3646,22 @@ void CNetworkServer::Process()
 {
   if (m_impl)
     m_impl->Process();
+}
+
+bool CNetworkServer::AudioPeerInfo(const NetworkAudioPeer& peer,
+  NetworkAudioPeerInfo& info)
+{
+  return m_impl && m_impl->AudioPeerInfo(peer, info);
+}
+
+NetworkAudioSendResult CNetworkServer::SendAudio(
+  const NetworkAudioPeer& peer, bool datagram, LGNetService service,
+  uint16_t messageType, LGNetEnvelopeFlags flags,
+  uint64_t componentEpoch, uint64_t requestID,
+  const void * payload, uint32_t payloadLength)
+{
+  return m_impl ?
+    m_impl->SendAudio(peer, datagram, service, messageType, flags,
+      componentEpoch, requestID, payload, payloadLength) :
+    NetworkAudioSendResult::FAILED;
 }

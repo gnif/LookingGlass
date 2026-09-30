@@ -6,6 +6,7 @@ if(NOT TARGET msquic::msquic)
 endif()
 
 set(TRANSPORT_NETWORK_SOURCES
+  audio.c
   connection.c
   control.c
   cursor.c

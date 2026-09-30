@@ -76,11 +76,17 @@ bool CNetworkTransport::Initialize()
 
   try
   {
-    m_server.reset(new CNetworkServer(*this, m_settings));
+    m_server.reset(new CNetworkServer(*this, m_audio, m_settings));
   }
   catch (...)
   {
     DEBUG_ERROR("Failed to allocate the network server");
+    return false;
+  }
+  if (!m_audio.AttachSender(*m_server))
+  {
+    DEBUG_ERROR("Failed to attach the network audio sender");
+    m_server.reset();
     return false;
   }
 
@@ -157,6 +163,7 @@ void CNetworkTransport::Stop()
 
   if (server)
     server->Stop();
+  m_audio.DetachSender();
 
   std::vector<SessionPtr> sessions;
   {
@@ -167,6 +174,7 @@ void CNetworkTransport::Stop()
     session->Close();
 
   m_input.Stop();
+  m_audio.Stop();
   m_control.SetControlEvents(nullptr, {});
   m_events.Reset();
 }
@@ -222,6 +230,11 @@ std::shared_ptr<const FrameCaps> CNetworkTransport::GetFrameCaps() const
 DirectFrameBufferMemory CNetworkTransport::GetDirectMemory() const
 {
   return DirectFrameBufferMemory {};
+}
+
+IAudioSource * CNetworkTransport::Audio()
+{
+  return (m_config.services & TRANSPORT_SERVICE_AUDIO) ? &m_audio : nullptr;
 }
 
 IControlSink * CNetworkTransport::Control()

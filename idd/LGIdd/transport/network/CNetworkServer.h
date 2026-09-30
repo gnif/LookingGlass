@@ -20,19 +20,21 @@
 
 #pragma once
 
+#include "transport/network/CNetworkAudio.h"
+
 #include <memory>
 
 class CNetworkTransport;
 struct NetworkSettings;
 
-class CNetworkServer final
+class CNetworkServer final : public INetworkAudioSender
 {
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
 
 public:
-  CNetworkServer(CNetworkTransport& transport,
+  CNetworkServer(CNetworkTransport& transport, CNetworkAudio& audio,
     const NetworkSettings& settings);
   ~CNetworkServer();
 
@@ -42,4 +44,12 @@ public:
   bool Start();
   void Stop();
   void Process();
+
+  bool AudioPeerInfo(const NetworkAudioPeer& peer,
+    NetworkAudioPeerInfo& info) override;
+  NetworkAudioSendResult SendAudio(
+    const NetworkAudioPeer& peer, bool datagram, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength) override;
 };
