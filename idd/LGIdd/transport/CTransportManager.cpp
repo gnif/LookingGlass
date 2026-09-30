@@ -983,8 +983,6 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
 
   {
     CSRWExclusiveLock entryLock(entry.lock);
-    const bool frameService =
-      (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
     entry.transport.reset();
     entry.directMemory      = DirectFrameBufferMemory {};
     entry.directMemoryValid = false;
@@ -1000,8 +998,6 @@ void CTransportManager::RetryEntry(Entry& entry, uint64_t now,
     entry.frameAbsent       = false;
     entry.serviceRetryAt    = 0;
     Seq::Inc(entry.epoch);
-    if (frameService)
-      BumpFrameRev();
   }
 
   if (OpenEntry(entry) != OpenResult::SUCCESS)
