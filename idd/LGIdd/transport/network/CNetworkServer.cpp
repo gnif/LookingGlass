@@ -27,6 +27,7 @@
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "platform/CPlatformInfo.h"
 #include "VersionInfo.h"
 #include <LGProtocol/NetworkAuth.h>
 #include <LGProtocol/NetworkIdentity.h>
@@ -172,6 +173,35 @@ namespace
     NetworkAuthCrypto::SecureZero(password.data(), password.size());
     password.clear();
     return false;
+  }
+
+  size_t UTF8PrefixLength(const uint8_t * value, size_t length,
+    size_t maximum)
+  {
+    size_t prefix = (std::min)(length, maximum);
+    while (prefix && prefix < length &&
+        (value[prefix] & UINT8_C(0xC0)) == UINT8_C(0x80))
+      --prefix;
+
+    return prefix;
+  }
+
+  size_t ConsumeUTF8Field(const uint8_t * value, size_t length,
+    size_t fieldMaximum, size_t& remaining)
+  {
+    const size_t maximum = (std::min)(fieldMaximum, remaining);
+    const size_t result  = UTF8PrefixLength(value, length, maximum);
+    remaining -= result;
+    return result;
+  }
+
+  uint8_t TopologyCount(int count)
+  {
+    if (count <= 0)
+      return 0;
+
+    return static_cast<uint8_t>((std::min)(count,
+      static_cast<int>(UINT8_MAX)));
   }
 
   bool MakeAddress(const std::wstring& source, uint16_t port,
@@ -2059,6 +2089,71 @@ retry:
     return sent;
   }
 
+  bool SendGuestInformation(Connection& connection, uint64_t requestID)
+  {
+    static const char CAPTURE[] = "Looking Glass IDD Driver";
+
+    uint32_t maxPayload;
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (connection.closing)
+        return false;
+      maxPayload = connection.maxPayload;
+    }
+    if (maxPayload < LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE)
+      return false;
+
+    const std::string& osName   = CPlatformInfo::GetProductName();
+    const std::string& cpuModel = CPlatformInfo::GetCPUModel();
+    LGNetCoreGuestInfo info     = {};
+    memcpy(info.uuid, CPlatformInfo::GetUUID(), sizeof(info.uuid));
+    info.os         = LG_NET_CORE_GUEST_OS_WINDOWS;
+    info.processors = TopologyCount(CPlatformInfo::GetProcCount());
+    info.cores      = TopologyCount(CPlatformInfo::GetCoreCount());
+    info.sockets    = TopologyCount(CPlatformInfo::GetSocketCount());
+    info.version    = reinterpret_cast<const uint8_t *>(LG_VERSION_STR);
+    info.osName     = reinterpret_cast<const uint8_t *>(osName.data());
+    info.capture    = reinterpret_cast<const uint8_t *>(CAPTURE);
+    info.cpuModel   = reinterpret_cast<const uint8_t *>(cpuModel.data());
+
+    size_t remaining      = maxPayload -
+      LG_NET_CORE_GUEST_INFO_HEADER_WIRE_SIZE;
+    info.versionLength    = static_cast<uint16_t>(ConsumeUTF8Field(
+      info.version, strlen(LG_VERSION_STR),
+      LG_NET_CORE_GUEST_MAX_VERSION_LENGTH, remaining));
+    info.osNameLength     = static_cast<uint16_t>(ConsumeUTF8Field(
+      info.osName, osName.size(), LG_NET_CORE_GUEST_MAX_OS_NAME_LENGTH,
+      remaining));
+    info.captureLength    = static_cast<uint16_t>(ConsumeUTF8Field(
+      info.capture, strlen(CAPTURE), LG_NET_CORE_GUEST_MAX_CAPTURE_LENGTH,
+      remaining));
+    info.cpuModelLength   = static_cast<uint16_t>(ConsumeUTF8Field(
+      info.cpuModel, cpuModel.size(),
+      LG_NET_CORE_GUEST_MAX_CPU_MODEL_LENGTH, remaining));
+
+    const size_t payloadSize = lgNetCoreGuestInfoSize(&info);
+    if (!payloadSize || payloadSize > maxPayload)
+      return false;
+
+    std::vector<uint8_t> payload;
+    try
+    {
+      payload.resize(payloadSize);
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    return lgNetCoreGuestInfoEncode(
+        payload.data(), payload.size(), &info) &&
+      SendPacket(connection, LG_NET_SERVICE_CORE,
+        LG_NET_CORE_MESSAGE_GUEST_INFO,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, requestID, payload.data(),
+        static_cast<uint32_t>(payload.size()));
+  }
+
   bool PublishCapabilities(Connection& connection)
   {
     LGNetCapability selected[NETWORK_SERVICE_COUNT] = {};
@@ -2147,6 +2242,8 @@ retry:
         !clipboard.PeerConnected(ClipboardPeer(connection)))
       return false;
     if (videoSelected && !video.PeerConnected(VideoPeer(connection)))
+      return false;
+    if (!SendGuestInformation(connection, requestID))
       return false;
     if (!SendPacket(connection, LG_NET_SERVICE_CORE,
           LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,

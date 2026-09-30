@@ -191,6 +191,7 @@ struct NetworkConnection
   bool                 authResultReceived;
   bool                 authKeyValid;
   bool                 capabilitiesComplete;
+  bool                 guestInfoReceived;
   bool                 connectFailed;
   uint32_t             expectedCapabilities;
   uint32_t             receivedCapabilities;
@@ -261,6 +262,50 @@ static char * networkEndpoint(const char * address, uint16_t port)
 
   snprintf(endpoint, length, "[%s]:%u", address, port);
   return endpoint;
+}
+
+static bool networkGuestText(char * destination, size_t capacity,
+    const uint8_t * source, uint16_t length)
+{
+  if (!destination || !capacity || length >= capacity ||
+      (length && (!source || memchr(source, 0, length))))
+    return false;
+
+  if (length)
+    memcpy(destination, source, length);
+  destination[length] = 0;
+  return true;
+}
+
+static bool networkGuestOS(LGNetCoreGuestOS source,
+    LG_TransportGuestOS * destination)
+{
+  if (!destination)
+    return false;
+
+  switch (source)
+  {
+    case LG_NET_CORE_GUEST_OS_LINUX:
+      *destination = LG_TRANSPORT_OS_LINUX;
+      return true;
+
+    case LG_NET_CORE_GUEST_OS_BSD:
+      *destination = LG_TRANSPORT_OS_BSD;
+      return true;
+
+    case LG_NET_CORE_GUEST_OS_OSX:
+      *destination = LG_TRANSPORT_OS_OSX;
+      return true;
+
+    case LG_NET_CORE_GUEST_OS_WINDOWS:
+      *destination = LG_TRANSPORT_OS_WINDOWS;
+      return true;
+
+    case LG_NET_CORE_GUEST_OS_OTHER:
+      *destination = LG_TRANSPORT_OS_OTHER;
+      return true;
+  }
+  return false;
 }
 
 static bool networkCapabilityOfferValid(
@@ -1086,6 +1131,7 @@ static bool networkConnectionReadyToActivateNL(
   return this->helloAcknowledged &&
     this->authenticationComplete &&
     this->capabilitiesComplete &&
+    this->guestInfoReceived &&
     this->receivedCapabilities == this->expectedCapabilities &&
     networkConnectionRequiredCapabilitiesSelected(this);
 }
@@ -1438,9 +1484,67 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
       if (packet->envelope.flags != responseFlags ||
           packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
           packet->envelope.componentEpoch != 0 ||
-          packet->envelope.sessionEpoch != sessionEpoch)
+          packet->envelope.sessionEpoch != sessionEpoch ||
+          packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT)
         return false;
       return networkConnectionHandleCapability(this, packet);
+
+    case LG_NET_CORE_MESSAGE_GUEST_INFO:
+    {
+      LGNetCoreGuestInfo info;
+      if (packet->envelope.flags != responseFlags ||
+          packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
+          packet->envelope.componentEpoch != 0 ||
+          packet->envelope.sessionEpoch != sessionEpoch ||
+          packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT ||
+          lgNetCoreGuestInfoDecode(&info,
+            packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
+        return false;
+
+      LG_TransportSession guest = { 0 };
+      if (!networkGuestOS(info.os, &guest.os) ||
+          !networkGuestText(guest.version, sizeof(guest.version),
+            info.version, info.versionLength) ||
+          !networkGuestText(guest.osName, sizeof(guest.osName),
+            info.osName, info.osNameLength) ||
+          !networkGuestText(guest.capture, sizeof(guest.capture),
+            info.capture, info.captureLength) ||
+          !networkGuestText(guest.cpuModel, sizeof(guest.cpuModel),
+            info.cpuModel, info.cpuModelLength))
+        return false;
+      memcpy(guest.uuid, info.uuid, sizeof(guest.uuid));
+      guest.uuidValid = networkBytesNonzero(guest.uuid, sizeof(guest.uuid));
+      guest.cpus      = info.processors;
+      guest.cores     = info.cores;
+      guest.sockets   = info.sockets;
+
+      LG_LOCK(this->lock);
+      const bool valid = this->helloAcknowledged &&
+        this->authenticationComplete && !this->capabilitiesComplete &&
+        !this->guestInfoReceived &&
+        this->receivedCapabilities == this->expectedCapabilities &&
+        networkConnectionRequiredCapabilitiesSelected(this);
+      if (valid)
+      {
+        memcpy(this->session.version, guest.version,
+            sizeof(this->session.version));
+        memcpy(this->session.uuid, guest.uuid, sizeof(this->session.uuid));
+        memcpy(this->session.osName, guest.osName,
+            sizeof(this->session.osName));
+        memcpy(this->session.capture, guest.capture,
+            sizeof(this->session.capture));
+        memcpy(this->session.cpuModel, guest.cpuModel,
+            sizeof(this->session.cpuModel));
+        this->session.uuidValid = guest.uuidValid;
+        this->session.os        = guest.os;
+        this->session.cpus      = guest.cpus;
+        this->session.cores     = guest.cores;
+        this->session.sockets   = guest.sockets;
+        this->guestInfoReceived = true;
+      }
+      LG_UNLOCK(this->lock);
+      return valid;
+    }
 
     case LG_NET_CORE_MESSAGE_CAPABILITIES_DONE:
     {
@@ -1448,6 +1552,7 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
           packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
           packet->envelope.componentEpoch != 0 ||
           packet->envelope.sessionEpoch != sessionEpoch ||
+          packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT ||
           packet->payloadLength)
         return false;
 
@@ -1455,6 +1560,7 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
       LG_LOCK(this->lock);
       const bool valid = !this->capabilitiesComplete &&
         this->helloAcknowledged &&
+        this->guestInfoReceived &&
         this->receivedCapabilities == this->expectedCapabilities &&
         networkConnectionRequiredCapabilitiesSelected(this);
       this->capabilitiesComplete = valid;
@@ -2689,6 +2795,7 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->helloAcknowledged      = false;
   this->authenticationComplete = false;
   this->capabilitiesComplete   = false;
+  this->guestInfoReceived      = false;
   this->connectFailed          = false;
   this->expectedCapabilities   = 0;
   this->receivedCapabilities   = 0;
@@ -2713,8 +2820,6 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   memset(this->serviceMaxDatagram, 0, sizeof(this->serviceMaxDatagram));
   lgNetStreamParserReset(&this->receiveParser);
   memset(&this->session, 0, sizeof(this->session));
-  snprintf(this->session.version, sizeof(this->session.version),
-      "LG network protocol %u", LG_NET_PROTOCOL_VERSION_CURRENT);
   snprintf(this->session.name, sizeof(this->session.name),
       "%s", this->endpoint);
   this->session.os = LG_TRANSPORT_OS_OTHER;
