@@ -30,6 +30,7 @@
 #include <LGProtocol/NetworkPacket.h>
 #include <LGProtocol/NetworkRoute.h>
 #include <LGProtocol/NetworkSequence.h>
+#include <LGProtocol/NetworkServices.h>
 #include <LGProtocol/NetworkStream.h>
 
 #include <msquic.h>
@@ -49,7 +50,8 @@
 #define NETWORK_KEEPALIVE_INTERVAL_MS         1000U
 #define NETWORK_INITIAL_RTT_MS                1U
 #define NETWORK_MAX_PEER_STREAMS              16U
-#define NETWORK_MAX_CONTROL_PAYLOAD           (1024U * 1024U)
+#define NETWORK_MAX_CONTROL_PAYLOAD           \
+  (LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + LG_NET_CURSOR_MAX_SHAPE_LENGTH)
 #define NETWORK_MAX_CONTROL_BUFFER            \
   (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
 #define NETWORK_MAX_DATAGRAM_PAYLOAD          1136U
@@ -98,7 +100,7 @@ struct NetworkConnection
   NetworkConnectionStateFn   state;
   void                     * opaque;
 
-  LGNetCapability  offeredCapabilities[LG_NET_SERVICE_USB + 1U];
+  LGNetCapability  offeredCapabilities[LG_NET_SERVICE_CONTROL + 1U];
   uint32_t         offeredCapabilityCount;
   uint16_t         offeredServices;
 
@@ -128,13 +130,13 @@ struct NetworkConnection
   uint16_t             receivedServices;
   uint16_t             reliableServices;
   uint16_t             datagramServices;
-  uint16_t             serviceVersions[LG_NET_SERVICE_USB + 1U];
+  uint16_t             serviceVersions[LG_NET_SERVICE_CONTROL + 1U];
   uint32_t             maxPayloadLength;
   uint32_t             maxDatagramPayload;
   uint16_t             maxDatagramSendLength;
   bool                 datagramSendEnabled;
-  uint32_t             serviceMaxPayload[LG_NET_SERVICE_USB + 1U];
-  uint32_t             serviceMaxDatagram[LG_NET_SERVICE_USB + 1U];
+  uint32_t             serviceMaxPayload[LG_NET_SERVICE_CONTROL + 1U];
+  uint32_t             serviceMaxDatagram[LG_NET_SERVICE_CONTROL + 1U];
 
   uint8_t                clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
   uint8_t                serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
@@ -185,7 +187,8 @@ static bool networkCapabilityOfferValid(
   if (!lgNetCapabilityValid(capability) ||
       !version ||
       capability->service <= LG_NET_SERVICE_CORE ||
-      capability->service >= LG_NET_SERVICE_USB ||
+      capability->service > LG_NET_SERVICE_CONTROL ||
+      capability->service == LG_NET_SERVICE_USB ||
       capability->flags & LG_NET_CAPABILITY_SELECTED ||
       capability->versionMin < version->minimum ||
       capability->versionMax > version->maximum ||
@@ -194,6 +197,12 @@ static bool networkCapabilityOfferValid(
     return false;
 
   return true;
+}
+
+static bool networkConnectionServiceValid(LGNetService service)
+{
+  return service > LG_NET_SERVICE_CORE &&
+    service <= LG_NET_SERVICE_CONTROL && service != LG_NET_SERVICE_USB;
 }
 
 static bool networkBytesNonzero(const uint8_t * data, size_t size)
@@ -265,6 +274,8 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
       LG_NET_MESSAGE_VERSION_CURRENT);
   if (payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
       (payloadLength && !payload) ||
+      (service != LG_NET_SERVICE_CORE &&
+        !networkConnectionServiceValid(service)) ||
       (flags &
         (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_EARLY_DATA)) ||
       !lgNetEnvelopeRouteValid(&routeEnvelope, LG_NET_ROLE_CLIENT,
@@ -364,8 +375,10 @@ static bool networkConnectionSendHello(NetworkConnection * this)
     goto cleanup;
 
   for (LGNetService service = LG_NET_SERVICE_RECOVERY;
-       service < LG_NET_SERVICE_USB; ++service)
+       service <= LG_NET_SERVICE_CONTROL; ++service)
   {
+    if (service == LG_NET_SERVICE_USB)
+      continue;
     if (!(this->offeredServices & (UINT16_C(1) << service)))
       continue;
 
@@ -426,8 +439,7 @@ static bool networkConnectionHandleCapability(NetworkConnection * this,
         packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
     return false;
 
-  if (capability.service <= LG_NET_SERVICE_CORE ||
-      capability.service >= LG_NET_SERVICE_USB)
+  if (!networkConnectionServiceValid(capability.service))
     return false;
 
   LG_LOCK(this->lock);
@@ -486,8 +498,10 @@ static bool networkConnectionRequiredCapabilitiesSelected(
     const NetworkConnection * this)
 {
   for (LGNetService service = LG_NET_SERVICE_RECOVERY;
-       service < LG_NET_SERVICE_USB; ++service)
+       service <= LG_NET_SERVICE_CONTROL; ++service)
   {
+    if (service == LG_NET_SERVICE_USB)
+      continue;
     const uint16_t serviceMask = UINT16_C(1) << service;
     if ((this->offeredServices & serviceMask) &&
         (this->offeredCapabilities[service].flags &
@@ -518,6 +532,11 @@ static void networkConnectionSetSessionFeatures(NetworkConnection * this)
     this->session.features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
   if (services & (UINT16_C(1) << LG_NET_SERVICE_AUDIO))
     this->session.features |= LG_TRANSPORT_FEATURE_AUDIO;
+  if (services & (UINT16_C(1) << LG_NET_SERVICE_CONTROL))
+    this->session.features |=
+      LG_TRANSPORT_FEATURE_SET_CURSOR_POS |
+      LG_TRANSPORT_FEATURE_WINDOW_SIZE    |
+      LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
 }
 
 static bool networkConnectionHandleAuthChallenge(NetworkConnection * this,
@@ -899,7 +918,8 @@ static bool networkConnectionHandlePacket(NetworkConnection * this,
   if (packet->envelope.service == LG_NET_SERVICE_CORE)
     return networkConnectionHandleCore(this, packet);
 
-  if (!atomic_load_explicit(&this->sessionValid, memory_order_acquire))
+  if (!networkConnectionServiceValid(packet->envelope.service) ||
+      !atomic_load_explicit(&this->sessionValid, memory_order_acquire))
     return false;
 
   LG_LOCK(this->lock);
@@ -930,12 +950,16 @@ static bool networkConnectionValidateControl(NetworkConnection * this,
   maxPayloadLength = this->maxPayloadLength;
   LG_UNLOCK(this->lock);
 
+  const bool intermediate =
+    (packet->envelope.service == LG_NET_SERVICE_RECOVERY &&
+      packet->envelope.messageType == LG_NET_RECOVERY_MESSAGE_STATUS) ||
+    (packet->envelope.service == LG_NET_SERVICE_CONTROL &&
+      packet->envelope.messageType == LG_NET_CONTROL_MESSAGE_STATUS);
   return packet->envelope.headerSize == LG_NET_ENVELOPE_WIRE_SIZE &&
     packet->payloadLength <= maxPayloadLength &&
     packet->envelope.messageVersion == LG_NET_MESSAGE_VERSION_CURRENT &&
-    (packet->envelope.flags &
-      (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL)) ==
-        (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL) &&
+    (packet->envelope.flags & LG_NET_ENVELOPE_RELIABLE) &&
+    (intermediate || (packet->envelope.flags & LG_NET_ENVELOPE_FINAL)) &&
     !(packet->envelope.flags &
       (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_EARLY_DATA)) &&
     lgNetEnvelopeRouteValid(&packet->envelope, LG_NET_ROLE_SERVER,
@@ -956,6 +980,8 @@ static bool networkConnectionDecodeDatagram(NetworkConnection * this,
 
   if (!atomic_load_explicit(
         &this->sessionValid, memory_order_acquire) ||
+      (packet->envelope.service != LG_NET_SERVICE_CORE &&
+        !networkConnectionServiceValid(packet->envelope.service)) ||
       packet->envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
       !packet->envelope.sequence ||
       packet->envelope.messageVersion != LG_NET_MESSAGE_VERSION_CURRENT ||
@@ -1645,7 +1671,7 @@ bool networkConnectionServiceAvailable(NetworkConnection * this,
     LGNetService service, LGNetCapabilityFlags required)
 {
   if (!networkConnectionValid(this) ||
-      service <= LG_NET_SERVICE_CORE || service > LG_NET_SERVICE_USB ||
+      !networkConnectionServiceValid(service) ||
       required & ~(LG_NET_CAPABILITY_RELIABLE |
         LG_NET_CAPABILITY_DATAGRAM))
     return false;
@@ -1666,7 +1692,7 @@ bool networkConnectionServiceVersion(NetworkConnection * this,
     LGNetService service, uint16_t * version)
 {
   if (!version || !networkConnectionValid(this) ||
-      service <= LG_NET_SERVICE_CORE || service >= LG_NET_SERVICE_USB)
+      !networkConnectionServiceValid(service))
     return false;
 
   LG_LOCK(this->lock);
@@ -1703,7 +1729,8 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
   LGNetEnvelope routeEnvelope;
   lgNetEnvelopeInit(&routeEnvelope, service, messageType, serviceVersion,
       LG_NET_MESSAGE_VERSION_CURRENT);
-  if ((payloadLength && !payload) || service == LG_NET_SERVICE_CORE ||
+  if ((payloadLength && !payload) ||
+      !networkConnectionServiceValid(service) ||
       flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
         LG_NET_ENVELOPE_EARLY_DATA) ||
       !lgNetEnvelopeRouteValid(&routeEnvelope, LG_NET_ROLE_CLIENT,

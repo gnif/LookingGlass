@@ -7,9 +7,12 @@ endif()
 
 set(TRANSPORT_NETWORK_SOURCES
   connection.c
+  control.c
+  cursor.c
   input.c
   known_hosts.c
   network.c
+  recovery.c
 )
 
 if(WIN32)

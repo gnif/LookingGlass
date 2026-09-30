@@ -27,6 +27,7 @@
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "VersionInfo.h"
 #include <LGProtocol/NetworkAuth.h>
 #include <LGProtocol/NetworkIdentity.h>
 #include <LGProtocol/NetworkPacket.h>
@@ -54,7 +55,9 @@ namespace
   static constexpr uint32_t NETWORK_INITIAL_RTT_MS          = 1;
   static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS       = 16;
   static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS      = 16;
-  static constexpr size_t   NETWORK_MAX_CONTROL_PAYLOAD     = 1024 * 1024;
+  static constexpr uint32_t NETWORK_MAX_CONTROL_PAYLOAD     =
+    LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE +
+      LG_NET_CURSOR_MAX_SHAPE_LENGTH;
   static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER      =
     LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD;
   static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD    = 1136;
@@ -63,7 +66,8 @@ namespace
   static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE     = 0x07;
   static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT      = 6;
   static constexpr size_t   NETWORK_SERVICE_COUNT           =
-    LG_NET_SERVICE_USB + 1U;
+    LG_NET_SERVICE_CONTROL + 1U;
+  static constexpr size_t   NETWORK_RECOVERY_REQUESTS       = 16;
   static constexpr uint64_t NETWORK_SEQUENCE_COMPONENT      = UINT64_C(1);
   static constexpr uint8_t  NETWORK_DATAGRAM_WINDOW         = 64;
   static constexpr uint32_t NETWORK_PASSWORD_ROUNDS         = 100000;
@@ -87,6 +91,14 @@ namespace
 
   static_assert(NetworkAuthCrypto::SHA256_SIZE ==
     LG_NET_PASSWORD_SHA256_LENGTH, "password proof size mismatch");
+  static_assert(NETWORK_MAX_CONTROL_PAYLOAD <= LG_NET_MAX_PAYLOAD_LENGTH,
+    "control payload limit exceeds the protocol maximum");
+
+  uint64_t NetworkTimeNs()
+  {
+    const uint64_t timestamp = GetTickCount64() * UINT64_C(1000000);
+    return timestamp ? timestamp : 1;
+  }
 
   bool RandomNonzero(void * data, size_t size)
   {
@@ -224,6 +236,17 @@ struct CNetworkServer::Impl
 
   struct Connection
   {
+    struct RecoveryRequest
+    {
+      uint64_t requestID  = 0;
+      uint64_t sessionID  = 0;
+      uint64_t deadline   = 0;
+      uint64_t sequence   = 0;
+      uint32_t serial     = 0;
+      bool     active     = false;
+      bool     dispatched = false;
+    };
+
     explicit Connection(Impl& owner) : owner(owner) {}
 
     ~Connection()
@@ -259,6 +282,7 @@ struct CNetworkServer::Impl
     uint16_t                         datagramServices             = 0;
     LGNetCapability                  offeredCapabilities [NETWORK_SERVICE_COUNT] = {};
     LGNetCapability                  selectedCapabilities[NETWORK_SERVICE_COUNT] = {};
+
     bool                             datagramSendEnabled          = false;
     bool                             closing                      = false;
     HandshakeState                   handshake                    =
@@ -274,6 +298,28 @@ struct CNetworkServer::Impl
     uint8_t                          keyboardModifiers            = 0;
     bool                             inputLEDStateKnown           = false;
     bool                             keyboardKeys[256]            = {};
+
+    RecoveryRequest                  recoveryRequests[NETWORK_RECOVERY_REQUESTS] = {};
+
+    uint64_t                         recoveryStatusSequence       = 1;
+    uint64_t                         recoveryNextRequestSequence  = 1;
+    uint32_t                         recoveryNextSerial           = 1;
+    LGNetRecoveryState               recoveryState                =
+      LG_NET_RECOVERY_STATE_UNKNOWN;
+    LGNetRecoveryError               recoveryError                =
+      LG_NET_RECOVERY_ERROR_NONE;
+    LGNetRecoveryFlags               recoveryFlags                =
+      LG_NET_RECOVERY_SUPPORTED;
+
+    uint64_t                         cursorSnapshotRevision       = 0;
+    uint64_t                         cursorShapeRevision          = 0;
+    uint64_t                         cursorPositionRevision       = 0;
+    uint64_t                         cursorColorRevision          = 0;
+    uint64_t                         cursorStateSequence          = 0;
+    uint64_t                         cursorAppliedStateSequence   = 0;
+    uint64_t                         cursorAppliedShapeID         = 0;
+    uint64_t                         cursorAppliedPositionID      = 0;
+    uint64_t                         cursorAppliedTransformID     = 0;
 
     uint8_t                          clientNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
     uint8_t                          serverNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
@@ -638,7 +684,8 @@ struct CNetworkServer::Impl
     if (lgNetCapabilityDecode(&capability, packet.payload,
           packet.payloadLength) != LG_NET_PARSE_OK ||
         capability.service <= LG_NET_SERVICE_CORE ||
-        capability.service >= LG_NET_SERVICE_USB ||
+        capability.service > LG_NET_SERVICE_CONTROL ||
+        capability.service == LG_NET_SERVICE_USB ||
         capability.flags & LG_NET_CAPABILITY_SELECTED)
       return false;
 
@@ -671,20 +718,47 @@ struct CNetworkServer::Impl
   {
     const LGNetServiceVersionInfo * version =
       lgNetServiceVersionInfo(offered.service);
-    if (offered.service != LG_NET_SERVICE_INPUT ||
-        !version ||
+    uint32_t minimumPayload;
+    switch (offered.service)
+    {
+      case LG_NET_SERVICE_RECOVERY:
+        minimumPayload = LG_NET_RECOVERY_REQUEST_WIRE_SIZE;
+        break;
+
+      case LG_NET_SERVICE_CURSOR:
+        minimumPayload = LG_NET_CURSOR_POSITION_WIRE_SIZE;
+        break;
+
+      case LG_NET_SERVICE_INPUT:
+        minimumPayload = LG_NET_INPUT_ABSOLUTE_WIRE_SIZE;
+        break;
+
+      case LG_NET_SERVICE_CONTROL:
+        minimumPayload = LG_NET_CONTROL_FRAME_SCHEDULE_WIRE_SIZE;
+        break;
+
+      default:
+        return false;
+    }
+
+    if (!version ||
         !transport.ServiceEnabled(offered.service) ||
         !(offered.flags & LG_NET_CAPABILITY_RELIABLE) ||
         offered.versionMin > version->current ||
-        offered.versionMax < version->current ||
-        offered.maxPayloadLength < LG_NET_INPUT_ABSOLUTE_WIRE_SIZE ||
-        connection.maxPayload < LG_NET_INPUT_ABSOLUTE_WIRE_SIZE)
+        offered.versionMax < version->minimum ||
+        offered.maxPayloadLength < minimumPayload ||
+        connection.maxPayload < minimumPayload)
+      return false;
+
+    const uint16_t selectedVersion = offered.versionMax < version->current ?
+      offered.versionMax : version->current;
+    if (selectedVersion < offered.versionMin)
       return false;
 
     selected                          = {};
     selected.service                  = offered.service;
-    selected.versionMin               = version->current;
-    selected.versionMax               = version->current;
+    selected.versionMin               = selectedVersion;
+    selected.versionMax               = selectedVersion;
     selected.flags                    = LG_NET_CAPABILITY_SELECTED |
       LG_NET_CAPABILITY_RELIABLE;
     selected.features                 = 0;
@@ -694,9 +768,14 @@ struct CNetworkServer::Impl
     selected.maxDatagramPayload       = 0;
     selected.maxBidirectionalStreams  = 0;
     selected.maxUnidirectionalStreams = 0;
-    if ((offered.flags & LG_NET_CAPABILITY_DATAGRAM) &&
-        offered.maxDatagramPayload >= LG_NET_INPUT_ABSOLUTE_WIRE_SIZE &&
-        connection.maxDatagramPayload >= LG_NET_INPUT_ABSOLUTE_WIRE_SIZE)
+    const uint32_t minimumDatagram = offered.service ==
+        LG_NET_SERVICE_INPUT ? LG_NET_INPUT_ABSOLUTE_WIRE_SIZE :
+      offered.service == LG_NET_SERVICE_CURSOR ?
+        LG_NET_CURSOR_POSITION_WIRE_SIZE : 0;
+    if (minimumDatagram &&
+        (offered.flags & LG_NET_CAPABILITY_DATAGRAM) &&
+        offered.maxDatagramPayload >= minimumDatagram &&
+        connection.maxDatagramPayload >= minimumDatagram)
     {
       selected.flags               |= LG_NET_CAPABILITY_DATAGRAM;
       selected.maxDatagramPayload   = offered.maxDatagramPayload <
@@ -795,8 +874,10 @@ struct CNetworkServer::Impl
     }
 
     for (LGNetService service = LG_NET_SERVICE_RECOVERY;
-         service < LG_NET_SERVICE_USB; ++service)
+         service <= LG_NET_SERVICE_CONTROL; ++service)
     {
+      if (service == LG_NET_SERVICE_USB)
+        continue;
       if (!selected[service].service)
         continue;
 
@@ -874,8 +955,10 @@ struct CNetworkServer::Impl
         return false;
 
       for (LGNetService service = LG_NET_SERVICE_RECOVERY;
-           service < LG_NET_SERVICE_USB; ++service)
+           service <= LG_NET_SERVICE_CONTROL; ++service)
       {
+        if (service == LG_NET_SERVICE_USB)
+          continue;
         const uint16_t serviceMask = UINT16_C(1) << service;
         if (!(connection.offeredServices & serviceMask))
           continue;
@@ -1125,6 +1208,324 @@ struct CNetworkServer::Impl
     }
 
     return PublishCapabilities(connection);
+  }
+
+  static LGNetRecoveryState RecoveryStateCode(RecoveryState state)
+  {
+    switch (state)
+    {
+      case RecoveryState::NORMAL:
+        return LG_NET_RECOVERY_STATE_NORMAL;
+
+      case RecoveryState::ACTIVE:
+        return LG_NET_RECOVERY_STATE_ACTIVE;
+
+      case RecoveryState::FAILED:
+        return LG_NET_RECOVERY_STATE_FAILED;
+    }
+
+    return LG_NET_RECOVERY_STATE_FAILED;
+  }
+
+  static LGNetRecoveryError RecoveryErrorCode(uint32_t error)
+  {
+    switch (error)
+    {
+      case ERROR_SUCCESS:
+        return LG_NET_RECOVERY_ERROR_NONE;
+
+      case ERROR_BUSY:
+        return LG_NET_RECOVERY_ERROR_BUSY;
+
+      case ERROR_NOT_ENOUGH_QUOTA:
+      case ERROR_OUTOFMEMORY:
+        return LG_NET_RECOVERY_ERROR_CAPACITY;
+
+      case ERROR_TIMEOUT:
+        return LG_NET_RECOVERY_ERROR_TIMEOUT;
+
+      case RPC_S_SERVER_UNAVAILABLE:
+        return LG_NET_RECOVERY_ERROR_HELPER_UNAVAILABLE;
+
+      default:
+        return LG_NET_RECOVERY_ERROR_TOPOLOGY_FAILED;
+    }
+  }
+
+  static LGNetRecoveryFlags RecoveryFlags(
+    LGNetRecoveryState state, bool active)
+  {
+    LGNetRecoveryFlags flags = LG_NET_RECOVERY_SUPPORTED;
+    if (state == LG_NET_RECOVERY_STATE_ACTIVE ||
+        (state == LG_NET_RECOVERY_STATE_SWITCHING && active))
+      flags |= LG_NET_RECOVERY_ACTIVE;
+    return flags;
+  }
+
+  bool SendRecoveryStatus(Connection& connection, uint64_t requestID,
+    LGNetRecoveryState state, LGNetRecoveryError error, bool active,
+    uint32_t detail, LGNetEnvelopeFlags envelopeFlags, bool updateState)
+  {
+    LGNetRecoveryStatus status = {};
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      if (connection.closing ||
+          connection.recoveryStatusSequence == UINT64_MAX)
+        return false;
+
+      status.requestID      = requestID;
+      status.sessionID      = connection.sessionEpoch;
+      status.statusSequence = ++connection.recoveryStatusSequence;
+      status.state          = state;
+      status.error          = error;
+      status.flags          = RecoveryFlags(state, active);
+      status.detail         = detail;
+      if (updateState)
+      {
+        connection.recoveryState = state;
+        connection.recoveryError = error;
+        connection.recoveryFlags = status.flags;
+      }
+    }
+
+    uint8_t payload[LG_NET_RECOVERY_STATUS_WIRE_SIZE];
+    return lgNetRecoveryStatusEncode(payload, sizeof(payload), &status) &&
+      SendPacket(connection, LG_NET_SERVICE_RECOVERY,
+        LG_NET_RECOVERY_MESSAGE_STATUS,
+        envelopeFlags,
+        0, requestID, payload, sizeof(payload));
+  }
+
+  bool SendCurrentRecoveryStatus(Connection& connection,
+    uint64_t requestID, uint32_t detail)
+  {
+    LGNetRecoveryStatus status = {};
+    {
+      CSRWSharedLock guard(connection.lock);
+      status.requestID      = requestID;
+      status.sessionID      = connection.sessionEpoch;
+      status.statusSequence = connection.recoveryStatusSequence;
+      status.state          = connection.recoveryState;
+      status.error          = connection.recoveryError;
+      status.flags          = connection.recoveryFlags;
+      status.detail         = detail;
+    }
+
+    uint8_t payload[LG_NET_RECOVERY_STATUS_WIRE_SIZE];
+    return lgNetRecoveryStatusEncode(payload, sizeof(payload), &status) &&
+      SendPacket(connection, LG_NET_SERVICE_RECOVERY,
+        LG_NET_RECOVERY_MESSAGE_STATUS,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, requestID, payload, sizeof(payload));
+  }
+
+  bool SendRecoveryInfo(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    if (packet.payloadLength || packet.envelope.componentEpoch ||
+        !packet.envelope.requestID)
+      return false;
+
+    static const char version[] = LG_VERSION_STR;
+
+    LGNetRecoveryInfo info = {};
+    {
+      CSRWSharedLock guard(connection.lock);
+      info.sessionID        = connection.sessionEpoch;
+      info.statusSequence   = connection.recoveryStatusSequence;
+      info.capabilities     = LG_NET_RECOVERY_CAP_DISPLAY;
+      info.state            = connection.recoveryState;
+      info.error            = connection.recoveryError;
+      info.flags            = connection.recoveryFlags;
+      info.maxTransitionMs  = LG_NET_RECOVERY_MAX_TIMEOUT_MS;
+      info.versionLength    = static_cast<uint16_t>(sizeof(version) - 1U);
+      info.version          = reinterpret_cast<const uint8_t *>(version);
+    }
+
+    const size_t payloadSize = lgNetRecoveryInfoSize(&info);
+    std::vector<uint8_t> payload;
+    try
+    {
+      payload.resize(payloadSize);
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    return payloadSize &&
+      lgNetRecoveryInfoEncode(payload.data(), payload.size(), &info) &&
+      SendPacket(connection, LG_NET_SERVICE_RECOVERY,
+        LG_NET_RECOVERY_MESSAGE_INFO,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, packet.envelope.requestID, payload.data(),
+        static_cast<uint32_t>(payload.size()));
+  }
+
+  uint32_t AllocateRecoverySerialLocked(Connection& connection)
+  {
+    for (uint64_t attempt = 0; attempt < UINT32_MAX; ++attempt)
+    {
+      const uint32_t serial = connection.recoveryNextSerial++;
+      if (!connection.recoveryNextSerial)
+        connection.recoveryNextSerial = 1;
+      if (!serial)
+        continue;
+
+      bool used = false;
+      for (const Connection::RecoveryRequest& request :
+          connection.recoveryRequests)
+        if (request.requestID && request.serial == serial)
+        {
+          used = true;
+          break;
+        }
+      if (!used)
+        return serial;
+    }
+    return 0;
+  }
+
+  Connection::RecoveryRequest * AllocateRecoveryRequestLocked(
+    Connection& connection, uint64_t requestID)
+  {
+    for (const Connection::RecoveryRequest& request :
+        connection.recoveryRequests)
+      if (request.requestID == requestID)
+        return nullptr;
+
+    for (Connection::RecoveryRequest& request :
+        connection.recoveryRequests)
+      if (!request.requestID)
+        return &request;
+    return nullptr;
+  }
+
+  static bool DeadlineReached(uint64_t now, uint64_t deadline)
+  {
+    return static_cast<int64_t>(now - deadline) >= 0;
+  }
+
+  static void RemoveRecoveryRequest(Connection& connection,
+    uint32_t serial)
+  {
+    CSRWExclusiveLock guard(connection.lock);
+    for (Connection::RecoveryRequest& request :
+        connection.recoveryRequests)
+      if (request.requestID && request.serial == serial)
+      {
+        request = {};
+        return;
+      }
+  }
+
+  bool HandleRecoveryRequest(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    LGNetRecoveryRequest request;
+    if (lgNetRecoveryRequestDecode(&request, packet.payload,
+          packet.payloadLength) != LG_NET_PARSE_OK ||
+        packet.envelope.componentEpoch ||
+        packet.envelope.requestID != request.requestID)
+      return false;
+
+    std::shared_ptr<CNetworkSession> session;
+    uint64_t                         statusSequence;
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (request.sessionID != connection.sessionEpoch)
+        return false;
+      session        = connection.session;
+      statusSequence = connection.recoveryStatusSequence;
+    }
+    if (!session)
+      return false;
+
+    if (request.expectedStatusSequence != statusSequence &&
+        !(request.flags & LG_NET_RECOVERY_REQUEST_FORCE))
+      return SendCurrentRecoveryStatus(
+        connection, request.requestID, ERROR_REVISION_MISMATCH);
+
+    const bool active =
+      (request.flags & LG_NET_RECOVERY_REQUEST_ACTIVE) != 0;
+    uint32_t serial      = 0;
+    bool     dispatchNow = true;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      Connection::RecoveryRequest * correlation =
+        AllocateRecoveryRequestLocked(connection, request.requestID);
+      if (correlation)
+      {
+        for (const Connection::RecoveryRequest& pending :
+            connection.recoveryRequests)
+          if (pending.requestID && pending.active != active)
+          {
+            correlation = nullptr;
+            break;
+          }
+      }
+      if (correlation)
+      {
+        serial = AllocateRecoverySerialLocked(connection);
+        if (serial)
+        {
+          for (const Connection::RecoveryRequest& pending :
+              connection.recoveryRequests)
+            if (pending.requestID)
+            {
+              dispatchNow = false;
+              break;
+            }
+
+          correlation->requestID  = request.requestID;
+          correlation->sessionID  = request.sessionID;
+          correlation->deadline   = GetTickCount64() + request.timeoutMs;
+          correlation->sequence   =
+            connection.recoveryNextRequestSequence++;
+          if (!connection.recoveryNextRequestSequence)
+            connection.recoveryNextRequestSequence = 1;
+          correlation->serial     = serial;
+          correlation->active     = active;
+          correlation->dispatched = dispatchNow;
+        }
+      }
+    }
+
+    if (!serial)
+      return SendRecoveryStatus(connection, request.requestID,
+        LG_NET_RECOVERY_STATE_FAILED, LG_NET_RECOVERY_ERROR_BUSY,
+        active, ERROR_BUSY,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL, false);
+
+    if (dispatchNow &&
+        !session->RequestRecovery(request.sessionID, serial, active))
+    {
+      RemoveRecoveryRequest(connection, serial);
+      return SendRecoveryStatus(connection, request.requestID,
+        LG_NET_RECOVERY_STATE_FAILED, LG_NET_RECOVERY_ERROR_CAPACITY,
+        active, ERROR_NOT_ENOUGH_QUOTA,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL, false);
+    }
+
+    return SendRecoveryStatus(connection, request.requestID,
+      LG_NET_RECOVERY_STATE_SWITCHING, LG_NET_RECOVERY_ERROR_NONE,
+      active, ERROR_SUCCESS, LG_NET_ENVELOPE_RESPONSE, true);
+  }
+
+  bool HandleRecovery(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    switch (packet.envelope.messageType)
+    {
+      case LG_NET_RECOVERY_MESSAGE_GET_INFO:
+        return SendRecoveryInfo(connection, packet);
+
+      case LG_NET_RECOVERY_MESSAGE_REQUEST:
+        return HandleRecoveryRequest(connection, packet);
+
+      default:
+        return false;
+    }
   }
 
   static LGNetInputStatusCode InputStatusCode(InputResult result)
@@ -1542,13 +1943,481 @@ struct CNetworkServer::Impl
     }
   }
 
+  bool SendControlStatus(Connection& connection,
+    const NetworkControlStatus& source, LGNetEnvelopeFlags flags)
+  {
+    LGNetControlStatus status = {};
+    status.controlID = source.controlID;
+    status.status    = source.status;
+    status.detail    = source.detail;
+
+    uint8_t payload[LG_NET_CONTROL_STATUS_WIRE_SIZE];
+    return lgNetControlStatusEncode(payload, sizeof(payload), &status) &&
+      SendPacket(connection, LG_NET_SERVICE_CONTROL,
+        LG_NET_CONTROL_MESSAGE_STATUS, flags,
+        0, status.controlID, payload, sizeof(payload));
+  }
+
+  bool HandleControl(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    if (packet.envelope.componentEpoch || !packet.envelope.requestID)
+      return false;
+
+    std::shared_ptr<CNetworkSession> session;
+    uint32_t                         client;
+    {
+      CSRWSharedLock guard(connection.lock);
+      session = connection.session;
+      client  = connection.client;
+    }
+    if (!session)
+      return false;
+
+    uint64_t controlID = 0;
+    bool     queued    = false;
+    switch (packet.envelope.messageType)
+    {
+      case LG_NET_CONTROL_MESSAGE_CURSOR_POSITION:
+      {
+        LGNetControlCursorPosition position;
+        if (lgNetControlCursorPositionDecode(&position, packet.payload,
+              packet.payloadLength) != LG_NET_PARSE_OK ||
+            packet.envelope.requestID != position.controlID)
+          return false;
+        controlID = position.controlID;
+        queued    = session->SetCursorPosition(
+          position.controlID, position.x, position.y);
+        break;
+      }
+
+      case LG_NET_CONTROL_MESSAGE_DISPLAY_SIZE:
+      {
+        LGNetControlDisplaySize display;
+        if (lgNetControlDisplaySizeDecode(&display, packet.payload,
+              packet.payloadLength) != LG_NET_PARSE_OK ||
+            packet.envelope.requestID != display.controlID)
+          return false;
+        controlID = display.controlID;
+        queued    = session->SetResolution(
+          display.controlID, display.width, display.height);
+        break;
+      }
+
+      case LG_NET_CONTROL_MESSAGE_FRAME_SCHEDULE:
+      {
+        LGNetControlFrameSchedule schedule;
+        if (lgNetControlFrameScheduleDecode(&schedule, packet.payload,
+              packet.payloadLength) != LG_NET_PARSE_OK ||
+            packet.envelope.requestID != schedule.controlID)
+          return false;
+
+        FrameScheduleUpdate update = {};
+        update.clientID                 = client;
+        update.generation               = schedule.generation;
+        update.period                   = schedule.periodNs;
+        update.targetSlack              = schedule.targetSlackNs;
+        update.phaseError               = schedule.phaseErrorNs;
+        update.feedbackFrameSerial      = schedule.feedbackFrameSerial;
+        update.feedbackScheduleEpoch    = schedule.feedbackScheduleEpoch;
+        update.feedbackDeadlineSerial   = schedule.feedbackDeadlineSerial;
+        update.lease                    = schedule.leaseMs;
+        if (schedule.flags & LG_NET_CONTROL_FRAME_SCHEDULE_ACTIVE)
+          update.flags |= FRAME_SCHEDULE_ACTIVE;
+        if (schedule.flags & LG_NET_CONTROL_FRAME_SCHEDULE_RELEASE)
+          update.flags |= FRAME_SCHEDULE_RELEASE;
+        if (schedule.flags & LG_NET_CONTROL_FRAME_SCHEDULE_RESET)
+          update.flags |= FRAME_SCHEDULE_RESET;
+        if (schedule.flags & LG_NET_CONTROL_FRAME_SCHEDULE_IMMEDIATE)
+          update.flags |= FRAME_SCHEDULE_IMMEDIATE;
+        controlID = schedule.controlID;
+        queued    = session->SetFrameSchedule(schedule.controlID, update);
+        break;
+      }
+
+      default:
+        return false;
+    }
+
+    NetworkControlStatus status;
+    status.controlID = controlID;
+    status.status    = queued ?
+      LG_NET_CONTROL_STATUS_PENDING : LG_NET_CONTROL_STATUS_BUSY;
+    status.detail    = queued ? ERROR_SUCCESS : ERROR_NOT_ENOUGH_QUOTA;
+    return SendControlStatus(connection, status,
+      LG_NET_ENVELOPE_RESPONSE |
+        (queued ? 0 : LG_NET_ENVELOPE_FINAL));
+  }
+
+  bool HandleCursorStatus(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    LGNetCursorStatus status;
+    if (packet.envelope.messageType != LG_NET_CURSOR_MESSAGE_STATUS ||
+        packet.envelope.componentEpoch ||
+        lgNetCursorStatusDecode(&status, packet.payload,
+          packet.payloadLength) != LG_NET_PARSE_OK ||
+        packet.envelope.requestID != status.stateSequence)
+      return false;
+
+    CSRWExclusiveLock guard(connection.lock);
+    if (!status.stateSequence ||
+        status.stateSequence > connection.cursorStateSequence ||
+        status.appliedShapeID > connection.cursorShapeRevision ||
+        status.appliedPositionID > connection.cursorPositionRevision ||
+        status.appliedTransformID)
+      return false;
+    if (status.stateSequence < connection.cursorAppliedStateSequence)
+      return true;
+
+    connection.cursorAppliedStateSequence = status.stateSequence;
+    connection.cursorAppliedShapeID       = status.appliedShapeID;
+    connection.cursorAppliedPositionID    = status.appliedPositionID;
+    connection.cursorAppliedTransformID   = status.appliedTransformID;
+    if (status.status != LG_NET_CURSOR_STATUS_APPLIED)
+    {
+      connection.cursorSnapshotRevision = 0;
+      connection.cursorShapeRevision    = 0;
+      connection.cursorPositionRevision = 0;
+      connection.cursorColorRevision    = 0;
+    }
+    return true;
+  }
+
+  bool SendCursorShape(Connection& connection,
+    const NetworkControlSnapshot& snapshot)
+  {
+    LGNetCursorShape shape = {};
+    shape.shapeID          = snapshot.shapeRevision;
+    shape.width            = snapshot.cursor.CursorShapeInfo.Width;
+    shape.height           = snapshot.cursor.CursorShapeInfo.Height;
+    shape.pitch            = snapshot.cursor.CursorShapeInfo.Pitch;
+    shape.dataLength       = static_cast<uint32_t>(
+      snapshot.cursorData.size());
+    shape.format           = snapshot.cursor.CursorShapeInfo.CursorType ==
+        IDDCX_CURSOR_SHAPE_TYPE_ALPHA ?
+      LG_NET_CURSOR_FORMAT_BGRA8_PREMULTIPLIED :
+      LG_NET_CURSOR_FORMAT_MASKED_COLOR;
+    shape.hotspotX         = snapshot.cursor.CursorShapeInfo.XHot;
+    shape.hotspotY         = snapshot.cursor.CursorShapeInfo.YHot;
+    shape.data             = snapshot.cursorData.data();
+
+    const size_t payloadSize = lgNetCursorShapeSize(&shape);
+    std::vector<uint8_t> payload;
+    try
+    {
+      payload.resize(payloadSize);
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    return payloadSize &&
+      lgNetCursorShapeEncode(payload.data(), payload.size(), &shape) &&
+      SendPacket(connection, LG_NET_SERVICE_CURSOR,
+        LG_NET_CURSOR_MESSAGE_SHAPE, LG_NET_ENVELOPE_FINAL,
+        0, shape.shapeID, payload.data(),
+        static_cast<uint32_t>(payload.size()));
+  }
+
+  bool SendCursorPosition(Connection& connection,
+    const NetworkControlSnapshot& snapshot)
+  {
+    LGNetCursorPosition position = {};
+    position.updateID      = snapshot.positionRevision;
+    position.timestampNs   = NetworkTimeNs();
+    position.x             = snapshot.cursor.X;
+    position.y             = snapshot.cursor.Y;
+    position.desktopWidth  = LG_NET_CURSOR_MAX_DESKTOP_WIDTH;
+    position.desktopHeight = LG_NET_CURSOR_MAX_DESKTOP_HEIGHT;
+    position.flags         = snapshot.cursor.IsCursorVisible ?
+      LG_NET_CURSOR_POSITION_VISIBLE : 0;
+    position.displayID     = 0;
+
+    uint8_t payload[LG_NET_CURSOR_POSITION_WIRE_SIZE];
+    return lgNetCursorPositionEncode(
+        payload, sizeof(payload), &position) &&
+      SendPacket(connection, LG_NET_SERVICE_CURSOR,
+        LG_NET_CURSOR_MESSAGE_POSITION, LG_NET_ENVELOPE_FINAL,
+        0, position.updateID, payload, sizeof(payload));
+  }
+
+  bool SendCursorColorTransform(Connection& connection,
+    const NetworkControlSnapshot& snapshot)
+  {
+    std::vector<uint8_t>      lut;
+    LGNetCursorColorTransform transform = {};
+    transform.updateID                  = snapshot.colorRevision;
+    transform.sdrWhiteLevel             = snapshot.sdrWhiteLevel ?
+      snapshot.sdrWhiteLevel : LG_SDR_WHITE_LEVEL_DEFAULT;
+    transform.scalar                    = 1.0f;
+    if (snapshot.transform)
+    {
+      if (snapshot.transform->matrixEnabled)
+        transform.flags |= LG_NET_CURSOR_COLOR_TRANSFORM_MATRIX;
+      if (snapshot.transform->lutEnabled)
+        transform.flags |= LG_NET_CURSOR_COLOR_TRANSFORM_LUT;
+      memcpy(transform.matrix, snapshot.transform->matrix,
+        sizeof(transform.matrix));
+      transform.scalar = snapshot.transform->scalar;
+
+      if (snapshot.transform->lutEnabled)
+      {
+        try
+        {
+          lut.resize(LG_NET_CURSOR_COLOR_LUT_BYTES);
+        }
+        catch (...)
+        {
+          return false;
+        }
+        if (!lgNetCursorColorLUTEncode(lut.data(), lut.size(),
+              &snapshot.transform->lut[0][0]))
+          return false;
+        transform.lut = lut.data();
+      }
+    }
+
+    const size_t payloadSize = lgNetCursorColorTransformSize(&transform);
+    std::vector<uint8_t> payload;
+    try
+    {
+      payload.resize(payloadSize);
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    return payloadSize && lgNetCursorColorTransformEncode(
+        payload.data(), payload.size(), &transform) &&
+      SendPacket(connection, LG_NET_SERVICE_CURSOR,
+        LG_NET_CURSOR_MESSAGE_COLOR_TRANSFORM, LG_NET_ENVELOPE_FINAL,
+        0, transform.updateID, payload.data(),
+        static_cast<uint32_t>(payload.size()));
+  }
+
+  bool SendCursorState(Connection& connection,
+    const NetworkControlSnapshot& snapshot, bool shapeAvailable)
+  {
+    LGNetCursorState state = {};
+    state.stateSequence = snapshot.stateRevision;
+    state.flags         = snapshot.cursor.IsCursorVisible ?
+      LG_NET_CURSOR_STATE_VISIBLE : 0;
+    if (shapeAvailable)
+    {
+      state.shapeID = snapshot.shapeRevision;
+      state.flags  |= LG_NET_CURSOR_STATE_SHAPE_VALID;
+    }
+    if (snapshot.cursorValid)
+    {
+      state.positionID = snapshot.positionRevision;
+      state.flags     |= LG_NET_CURSOR_STATE_POSITION_VALID;
+    }
+    state.displayID = 0;
+
+    uint8_t payload[LG_NET_CURSOR_STATE_WIRE_SIZE];
+    return lgNetCursorStateEncode(payload, sizeof(payload), &state) &&
+      SendPacket(connection, LG_NET_SERVICE_CURSOR,
+        LG_NET_CURSOR_MESSAGE_STATE, LG_NET_ENVELOPE_FINAL,
+        0, state.stateSequence, payload, sizeof(payload));
+  }
+
+  bool PublishCursor(Connection& connection)
+  {
+    uint64_t knownRevision;
+    uint64_t shapeRevision;
+    uint64_t positionRevision;
+    uint64_t colorRevision;
+    uint32_t maxPayload;
+    uint16_t serviceVersion;
+    {
+      CSRWSharedLock guard(connection.lock);
+      const uint16_t serviceMask =
+        UINT16_C(1) << LG_NET_SERVICE_CURSOR;
+      if (connection.handshake != HandshakeState::READY ||
+          !(connection.selectedServices & serviceMask))
+        return true;
+      knownRevision    = connection.cursorSnapshotRevision;
+      shapeRevision    = connection.cursorShapeRevision;
+      positionRevision = connection.cursorPositionRevision;
+      colorRevision    = connection.cursorColorRevision;
+      maxPayload       = connection.selectedCapabilities
+        [LG_NET_SERVICE_CURSOR].maxPayloadLength;
+      serviceVersion   = connection.selectedCapabilities
+        [LG_NET_SERVICE_CURSOR].versionMin;
+    }
+
+    NetworkControlSnapshot snapshot;
+    if (!transport.ControlSnapshot(snapshot, knownRevision))
+      return true;
+
+    bool shapeAvailable = snapshot.shapeValid;
+    if (snapshot.shapeValid)
+    {
+      const uint64_t shapeSize =
+        LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + snapshot.cursorData.size();
+      shapeAvailable = shapeSize <= maxPayload;
+      if (snapshot.shapeRevision != shapeRevision && shapeAvailable &&
+          !SendCursorShape(connection, snapshot))
+        return false;
+    }
+    if (snapshot.cursorValid &&
+        snapshot.positionRevision != positionRevision &&
+        !SendCursorPosition(connection, snapshot))
+      return false;
+    const uint32_t colorPayloadSize =
+      LG_NET_CURSOR_COLOR_TRANSFORM_HEADER_WIRE_SIZE +
+        (snapshot.transform && snapshot.transform->lutEnabled ?
+          LG_NET_CURSOR_COLOR_LUT_BYTES : 0);
+    if (snapshot.colorRevision != colorRevision &&
+        serviceVersion >=
+          LG_NET_CURSOR_COLOR_TRANSFORM_INTRODUCED_SERVICE_VERSION &&
+        colorPayloadSize <= maxPayload &&
+        !SendCursorColorTransform(connection, snapshot))
+      return false;
+    if (!SendCursorState(connection, snapshot, shapeAvailable))
+      return false;
+
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      connection.cursorSnapshotRevision = snapshot.stateRevision;
+      connection.cursorShapeRevision    = snapshot.shapeRevision;
+      connection.cursorPositionRevision = snapshot.positionRevision;
+      connection.cursorColorRevision    = snapshot.colorRevision;
+      connection.cursorStateSequence    = snapshot.stateRevision;
+    }
+    return true;
+  }
+
+  bool DispatchQueuedRecovery(Connection& connection,
+    const std::shared_ptr<CNetworkSession>& session)
+  {
+    for (;;)
+    {
+      Connection::RecoveryRequest selected;
+      {
+        CSRWExclusiveLock guard(connection.lock);
+        for (const Connection::RecoveryRequest& request :
+            connection.recoveryRequests)
+          if (request.requestID && request.dispatched)
+            return true;
+
+        Connection::RecoveryRequest * candidate = nullptr;
+        for (Connection::RecoveryRequest& request :
+            connection.recoveryRequests)
+          if (request.requestID &&
+              (!candidate || request.sequence < candidate->sequence))
+            candidate = &request;
+        if (!candidate)
+          return true;
+
+        candidate->dispatched = true;
+        selected              = *candidate;
+      }
+
+      if (session->RequestRecovery(
+            selected.sessionID, selected.serial, selected.active))
+        return true;
+
+      RemoveRecoveryRequest(connection, selected.serial);
+      if (!SendRecoveryStatus(connection, selected.requestID,
+            LG_NET_RECOVERY_STATE_FAILED,
+            LG_NET_RECOVERY_ERROR_CAPACITY, selected.active,
+            ERROR_NOT_ENOUGH_QUOTA,
+            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL, false))
+        return false;
+    }
+  }
+
+  bool PumpSession(Connection& connection, uint64_t now)
+  {
+    std::shared_ptr<CNetworkSession> session;
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (connection.handshake != HandshakeState::READY)
+        return true;
+      session = connection.session;
+    }
+    if (!session)
+      return false;
+
+    NetworkRecoveryStatus recovery;
+    while (session->TakeRecoveryStatus(recovery))
+    {
+      Connection::RecoveryRequest correlation;
+      {
+        CSRWExclusiveLock guard(connection.lock);
+        for (Connection::RecoveryRequest& request :
+            connection.recoveryRequests)
+          if (request.requestID && request.sessionID == recovery.session &&
+              request.serial == recovery.serial &&
+              request.active == recovery.active)
+          {
+            correlation = request;
+            request     = {};
+            break;
+          }
+      }
+      if (!correlation.requestID)
+        continue;
+
+      LGNetRecoveryState state = RecoveryStateCode(recovery.state);
+      LGNetRecoveryError error = RecoveryErrorCode(recovery.error);
+      if (state == LG_NET_RECOVERY_STATE_FAILED &&
+          error == LG_NET_RECOVERY_ERROR_NONE)
+        error = LG_NET_RECOVERY_ERROR_TOPOLOGY_FAILED;
+      if (state != LG_NET_RECOVERY_STATE_FAILED)
+        error = LG_NET_RECOVERY_ERROR_NONE;
+      if (!SendRecoveryStatus(connection, correlation.requestID,
+            state, error, recovery.active, recovery.error,
+            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL, true))
+        return false;
+    }
+
+    Connection::RecoveryRequest expired[NETWORK_RECOVERY_REQUESTS]  = {};
+    size_t                      expiredCount                        = 0;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      for (Connection::RecoveryRequest& request :
+          connection.recoveryRequests)
+        if (request.requestID && DeadlineReached(now, request.deadline))
+        {
+          expired[expiredCount++] = request;
+          request                 = {};
+        }
+    }
+    for (size_t index = 0; index < expiredCount; ++index)
+      if (!SendRecoveryStatus(connection, expired[index].requestID,
+            LG_NET_RECOVERY_STATE_FAILED, LG_NET_RECOVERY_ERROR_TIMEOUT,
+            expired[index].active, ERROR_TIMEOUT,
+            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL, true))
+        return false;
+
+    if (!DispatchQueuedRecovery(connection, session))
+      return false;
+
+    NetworkControlStatus control;
+    while (session->TakeControlStatus(control))
+      if (!SendControlStatus(connection, control,
+            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL))
+        return false;
+
+    return PublishCursor(connection);
+  }
+
   bool HandlePacket(Connection& connection, const LGNetPacketView& packet)
   {
+    const bool cursorStatus =
+      packet.envelope.service == LG_NET_SERVICE_CURSOR &&
+      packet.envelope.messageType == LG_NET_CURSOR_MESSAGE_STATUS;
     if (packet.envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
         packet.envelope.payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
-        packet.envelope.flags & (LG_NET_ENVELOPE_RESPONSE |
-          LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_ERROR |
-          LG_NET_ENVELOPE_EARLY_DATA) ||
+        packet.envelope.flags & (LG_NET_ENVELOPE_DATAGRAM |
+          LG_NET_ENVELOPE_ERROR | LG_NET_ENVELOPE_EARLY_DATA) ||
+        !!(packet.envelope.flags & LG_NET_ENVELOPE_RESPONSE) !=
+          cursorStatus ||
         (packet.envelope.flags &
           (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL)) !=
             (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL) ||
@@ -1638,8 +2507,23 @@ struct CNetworkServer::Impl
         return false;
     }
 
-    return packet.envelope.service == LG_NET_SERVICE_INPUT &&
-      HandleInput(connection, packet, false);
+    switch (packet.envelope.service)
+    {
+      case LG_NET_SERVICE_RECOVERY:
+        return HandleRecovery(connection, packet);
+
+      case LG_NET_SERVICE_CURSOR:
+        return HandleCursorStatus(connection, packet);
+
+      case LG_NET_SERVICE_INPUT:
+        return HandleInput(connection, packet, false);
+
+      case LG_NET_SERVICE_CONTROL:
+        return HandleControl(connection, packet);
+
+      default:
+        return false;
+    }
   }
 
   bool HandleDatagram(Connection& connection, const QUIC_BUFFER * buffer)
@@ -1788,6 +2672,7 @@ struct CNetworkServer::Impl
   {
     const uint32_t client     = connection.client;
     const uint32_t generation = connection.generation;
+    std::shared_ptr<CNetworkSession> session;
     {
       CSRWExclusiveLock guard(lock);
       const auto found = std::find(
@@ -1796,9 +2681,13 @@ struct CNetworkServer::Impl
         connections.erase(found);
     }
 
-    if (connection.session)
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      session = std::move(connection.session);
+    }
+    if (session)
       transport.RemoveSession(client, generation);
-    connection.session.reset();
+    session.reset();
     delete &connection;
     DEBUG_INFO("Network client %u disconnected", client);
   }
@@ -2037,7 +2926,11 @@ struct CNetworkServer::Impl
       }
 
       if (!handle)
+      {
+        if (!PumpSession(*connection, now))
+          Shutdown(*connection, NETWORK_ERROR_PROTOCOL);
         continue;
+      }
 
       DEBUG_WARN("Closing network client %u after an incomplete handshake",
         client);

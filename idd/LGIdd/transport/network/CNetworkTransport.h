@@ -94,7 +94,8 @@ public:
 
   const NetworkSettings& Settings() const { return m_settings; }
   bool ServiceEnabled(LGNetService service) const;
-  bool ControlSnapshot(NetworkControlSnapshot& state) const;
+  bool ControlSnapshot(
+    NetworkControlSnapshot& state, uint64_t knownRevision) const;
 
   // The QUIC provider calls these only after authenticating a peer. Keeping
   // the registry here makes Stop a barrier for session-originated callbacks.

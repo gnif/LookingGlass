@@ -241,6 +241,7 @@ bool CNetworkTransport::ServiceEnabled(LGNetService service) const
   {
     case LG_NET_SERVICE_RECOVERY:
     case LG_NET_SERVICE_CURSOR:
+    case LG_NET_SERVICE_CONTROL:
       return (m_config.services & TRANSPORT_SERVICE_CONTROL) != 0;
 
     case LG_NET_SERVICE_INPUT:
@@ -265,9 +266,9 @@ bool CNetworkTransport::ServiceEnabled(LGNetService service) const
 }
 
 bool CNetworkTransport::ControlSnapshot(
-  NetworkControlSnapshot& state) const
+  NetworkControlSnapshot& state, uint64_t knownRevision) const
 {
-  return m_control.Snapshot(state);
+  return m_control.Snapshot(state, knownRevision);
 }
 
 std::shared_ptr<CNetworkSession> CNetworkTransport::CreateSession(

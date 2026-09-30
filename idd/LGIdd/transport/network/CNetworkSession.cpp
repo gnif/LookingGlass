@@ -20,7 +20,45 @@
 
 #include "transport/network/CNetworkSession.h"
 
+#include <new>
 #include <utility>
+
+namespace
+{
+  uint64_t NextRevision(uint64_t revision)
+  {
+    ++revision;
+    if (!revision)
+      ++revision;
+    return revision;
+  }
+
+  LGNetControlStatusCode ControlStatusCode(InteractionResult result)
+  {
+    switch (result)
+    {
+      case InteractionResult::ACCEPTED:
+        return LG_NET_CONTROL_STATUS_APPLIED;
+
+      case InteractionResult::BUSY:
+        return LG_NET_CONTROL_STATUS_BUSY;
+
+      case InteractionResult::UNAVAILABLE:
+        return LG_NET_CONTROL_STATUS_UNSUPPORTED;
+
+      case InteractionResult::STALE:
+        return LG_NET_CONTROL_STATUS_STALE;
+
+      case InteractionResult::REJECTED:
+        return LG_NET_CONTROL_STATUS_INVALID;
+
+      case InteractionResult::FAILED:
+        return LG_NET_CONTROL_STATUS_ERROR;
+    }
+
+    return LG_NET_CONTROL_STATUS_ERROR;
+  }
+}
 
 bool CNetworkEventQueue::Push(const NetworkEvent& event)
 {
@@ -147,47 +185,87 @@ ControlResult CNetworkControlSink::SendCursor(
 {
   const bool shape = info.CursorShapeInfo.CursorType !=
     IDDCX_CURSOR_SHAPE_TYPE_UNINITIALIZED;
+  if (shape && info.CursorShapeInfo.CursorType !=
+        IDDCX_CURSOR_SHAPE_TYPE_ALPHA &&
+      info.CursorShapeInfo.CursorType !=
+        IDDCX_CURSOR_SHAPE_TYPE_MASKED_COLOR)
+    return ControlResult::FAILED;
   if (shape && info.CursorShapeInfo.Height &&
       info.CursorShapeInfo.Pitch >
         SIZE_MAX / info.CursorShapeInfo.Height)
     return ControlResult::FAILED;
   const size_t shapeSize = shape ? static_cast<size_t>(
     info.CursorShapeInfo.Height) * info.CursorShapeInfo.Pitch : 0;
-  if (size != shapeSize || (size && !data))
+  if (size != shapeSize || (size && !data) ||
+      shapeSize > LG_NET_CURSOR_MAX_SHAPE_LENGTH ||
+      (shape && (!info.CursorShapeInfo.Width ||
+        info.CursorShapeInfo.Width > LG_NET_CURSOR_MAX_WIDTH ||
+        !info.CursorShapeInfo.Height ||
+        info.CursorShapeInfo.Height > LG_NET_CURSOR_MAX_HEIGHT ||
+        info.CursorShapeInfo.XHot >= info.CursorShapeInfo.Width ||
+        info.CursorShapeInfo.YHot >= info.CursorShapeInfo.Height ||
+        info.CursorShapeInfo.Pitch < info.CursorShapeInfo.Width * 4U)))
     return ControlResult::FAILED;
 
   std::vector<BYTE> cursorData;
-  if (shapeSize)
-    cursorData.assign(data, data + size);
+  try
+  {
+    if (shapeSize)
+      cursorData.assign(data, data + size);
+  }
+  catch (...)
+  {
+    return ControlResult::FAILED;
+  }
 
   CSRWExclusiveLock lock(m_lock);
   if (!m_events)
     return ControlResult::RETRY;
+  const UINT whiteLevel = sdrWhiteLevel ?
+    sdrWhiteLevel : LG_SDR_WHITE_LEVEL_DEFAULT;
+  if (m_state.sdrWhiteLevel != whiteLevel)
+  {
+    m_state.sdrWhiteLevel = whiteLevel;
+    m_state.colorRevision = NextRevision(m_state.colorRevision);
+  }
   m_state.cursor.IsCursorVisible = info.IsCursorVisible;
   m_state.cursor.X               = info.X;
   m_state.cursor.Y               = info.Y;
-  m_state.sdrWhiteLevel          = sdrWhiteLevel;
   m_state.cursorValid            = true;
+  m_state.positionRevision       = NextRevision(m_state.positionRevision);
   if (shape)
   {
     m_state.cursor.IsCursorShapeUpdated = info.IsCursorShapeUpdated;
     m_state.cursor.CursorShapeInfo      = info.CursorShapeInfo;
     m_state.cursorData                  = std::move(cursorData);
     m_state.shapeValid                  = true;
+    m_state.shapeRevision               = NextRevision(m_state.shapeRevision);
   }
-  ++m_state.revision;
+  m_state.stateRevision          = NextRevision(m_state.stateRevision);
   return ControlResult::APPLIED;
 }
 
 ControlResult CNetworkControlSink::SetColorTransform(
   std::shared_ptr<const D12ColorTransform> transform)
 {
+  std::shared_ptr<const D12ColorTransform> copy;
+  try
+  {
+    if (transform)
+      copy = std::make_shared<D12ColorTransform>(*transform);
+  }
+  catch (...)
+  {
+    return ControlResult::FAILED;
+  }
+
   CSRWExclusiveLock lock(m_lock);
   if (!m_events)
     return ControlResult::RETRY;
-  m_state.transform      = std::move(transform);
+  m_state.transform      = std::move(copy);
   m_state.transformValid = true;
-  ++m_state.revision;
+  m_state.colorRevision  = NextRevision(m_state.colorRevision);
+  m_state.stateRevision  = NextRevision(m_state.stateRevision);
   return ControlResult::APPLIED;
 }
 
@@ -198,12 +276,21 @@ void CNetworkControlSink::RequestReplay()
     m_events->OnControlReplay(m_token);
 }
 
-bool CNetworkControlSink::Snapshot(NetworkControlSnapshot& state) const
+bool CNetworkControlSink::Snapshot(
+  NetworkControlSnapshot& state, uint64_t knownRevision) const
 {
   CSRWSharedLock lock(m_lock);
-  if (!m_events)
+  if (!m_events || !m_state.stateRevision ||
+      m_state.stateRevision == knownRevision)
     return false;
-  state = m_state;
+  try
+  {
+    state = m_state;
+  }
+  catch (...)
+  {
+    return false;
+  }
   return true;
 }
 
@@ -243,31 +330,50 @@ void CNetworkSession::Close()
   m_input.Release(m_source, true);
 }
 
-bool CNetworkSession::SetCursorPosition(int32_t x, int32_t y)
+bool CNetworkSession::SetCursorPosition(
+  uint64_t controlID, int32_t x, int32_t y)
 {
   CSRWSharedLock lock(m_lifecycleLock);
-  if (!m_open)
+  if (!m_open || !controlID)
     return false;
 
   NetworkEvent event;
-  event.type   = NetworkEventType::SET_CURSOR_POSITION;
-  event.source = EventSource();
-  event.x      = x;
-  event.y      = y;
+  event.type      = NetworkEventType::SET_CURSOR_POSITION;
+  event.source    = EventSource();
+  event.controlID = controlID;
+  event.x         = x;
+  event.y         = y;
   return m_events.Push(event);
 }
 
-bool CNetworkSession::SetResolution(uint32_t width, uint32_t height)
+bool CNetworkSession::SetResolution(
+  uint64_t controlID, uint32_t width, uint32_t height)
 {
   CSRWSharedLock lock(m_lifecycleLock);
-  if (!m_open || !width || !height)
+  if (!m_open || !controlID || !width || !height)
     return false;
 
   NetworkEvent event;
-  event.type   = NetworkEventType::SET_RESOLUTION;
-  event.source = EventSource();
-  event.width  = width;
-  event.height = height;
+  event.type      = NetworkEventType::SET_RESOLUTION;
+  event.source    = EventSource();
+  event.controlID = controlID;
+  event.width     = width;
+  event.height    = height;
+  return m_events.Push(event);
+}
+
+bool CNetworkSession::SetFrameSchedule(
+  uint64_t controlID, const FrameScheduleUpdate& schedule)
+{
+  CSRWSharedLock lock(m_lifecycleLock);
+  if (!m_open || !controlID)
+    return false;
+
+  NetworkEvent event;
+  event.type      = NetworkEventType::SET_FRAME_SCHEDULE;
+  event.source    = EventSource();
+  event.schedule  = schedule;
+  event.controlID = controlID;
   return m_events.Push(event);
 }
 
@@ -298,12 +404,33 @@ void CNetworkSession::ProcessEvent(
   switch (event.type)
   {
     case NetworkEventType::SET_CURSOR_POSITION:
-      events.OnSetCursorPos(event.source, event.x, event.y);
+    {
+      NetworkControlStatus status;
+      status.controlID = event.controlID;
+      status.status    = ControlStatusCode(
+        events.OnSetCursorPos(event.source, event.x, event.y));
+      SetControlStatus(status);
       break;
+    }
 
     case NetworkEventType::SET_RESOLUTION:
-      events.OnSetResolution(event.source, event.width, event.height);
+    {
+      NetworkControlStatus status;
+      status.controlID = event.controlID;
+      status.status    = ControlStatusCode(events.OnSetResolution(
+        event.source, event.width, event.height));
+      SetControlStatus(status);
       break;
+    }
+
+    case NetworkEventType::SET_FRAME_SCHEDULE:
+    {
+      NetworkControlStatus status;
+      status.controlID = event.controlID;
+      status.status    = LG_NET_CONTROL_STATUS_UNSUPPORTED;
+      SetControlStatus(status);
+      break;
+    }
 
     case NetworkEventType::RECOVERY_REQUEST:
     {
@@ -353,6 +480,36 @@ bool CNetworkSession::TakeRecoveryStatus(NetworkRecoveryStatus& status)
   m_recoveryHead             =
     (m_recoveryHead + 1) % RECOVERY_CAPACITY;
   --m_recoveryCount;
+  return true;
+}
+
+void CNetworkSession::SetControlStatus(
+  const NetworkControlStatus& status)
+{
+  CSRWExclusiveLock lock(m_controlLock);
+  if (m_controlCount == CONTROL_CAPACITY)
+  {
+    m_control[m_controlHead] = {};
+    m_controlHead            = (m_controlHead + 1) % CONTROL_CAPACITY;
+    --m_controlCount;
+  }
+
+  const unsigned tail =
+    (m_controlHead + m_controlCount) % CONTROL_CAPACITY;
+  m_control[tail] = status;
+  ++m_controlCount;
+}
+
+bool CNetworkSession::TakeControlStatus(NetworkControlStatus& status)
+{
+  CSRWExclusiveLock lock(m_controlLock);
+  if (!m_controlCount)
+    return false;
+
+  status                   = m_control[m_controlHead];
+  m_control[m_controlHead] = {};
+  m_controlHead            = (m_controlHead + 1) % CONTROL_CAPACITY;
+  --m_controlCount;
   return true;
 }
 

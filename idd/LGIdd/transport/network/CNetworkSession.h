@@ -21,9 +21,12 @@
 #pragma once
 
 #include "CSRWLock.h"
+#include "capture/CFrameScheduler.h"
 #include "transport/IControlSink.h"
 #include "transport/IInputSource.h"
 #include "transport/ITransport.h"
+
+#include <LGProtocol/NetworkServices.h>
 
 #include <stdint.h>
 #include <vector>
@@ -32,20 +35,23 @@ enum class NetworkEventType : uint8_t
 {
   SET_CURSOR_POSITION,
   SET_RESOLUTION,
+  SET_FRAME_SCHEDULE,
   RECOVERY_REQUEST,
 };
 
 struct NetworkEvent
 {
-  NetworkEventType type = NetworkEventType::SET_CURSOR_POSITION;
-  SourceKey        source;
-  int32_t          x        = 0;
-  int32_t          y        = 0;
-  uint32_t         width    = 0;
-  uint32_t         height   = 0;
-  uint64_t         session  = 0;
-  uint32_t         serial   = 0;
-  bool             active   = false;
+  NetworkEventType     type      = NetworkEventType::SET_CURSOR_POSITION;
+  SourceKey            source;
+  FrameScheduleUpdate  schedule  = {};
+  uint64_t             controlID = 0;
+  int32_t              x         = 0;
+  int32_t              y         = 0;
+  uint32_t             width     = 0;
+  uint32_t             height    = 0;
+  uint64_t             session   = 0;
+  uint32_t             serial    = 0;
+  bool                 active    = false;
 };
 
 struct NetworkRecoveryStatus
@@ -57,13 +63,20 @@ struct NetworkRecoveryStatus
   uint32_t      error   = 0;
 };
 
+struct NetworkControlStatus
+{
+  uint64_t               controlID = 0;
+  LGNetControlStatusCode status    = LG_NET_CONTROL_STATUS_ERROR;
+  uint32_t               detail    = 0;
+};
+
 class CNetworkEventQueue
 {
 private:
   static constexpr unsigned CAPACITY = 128;
 
   CSRWLock     m_lock;
-  NetworkEvent m_events[CAPACITY] = {};
+  NetworkEvent m_events[CAPACITY]  = {};
   unsigned     m_head              = 0;
   unsigned     m_count             = 0;
 
@@ -101,11 +114,14 @@ struct NetworkControlSnapshot
   IDARG_OUT_QUERY_HWCURSOR                cursor = {};
   std::vector<BYTE>                       cursorData;
   std::shared_ptr<const D12ColorTransform> transform;
-  UINT                                    sdrWhiteLevel = 0;
-  uint64_t                                revision      = 0;
-  bool                                    cursorValid    = false;
-  bool                                    shapeValid     = false;
-  bool                                    transformValid = false;
+  UINT                                    sdrWhiteLevel    = 0;
+  uint64_t                                stateRevision    = 0;
+  uint64_t                                positionRevision = 0;
+  uint64_t                                shapeRevision    = 0;
+  uint64_t                                colorRevision    = 0;
+  bool                                    cursorValid      = false;
+  bool                                    shapeValid       = false;
+  bool                                    transformValid   = false;
 };
 
 class CNetworkControlSink final : public IControlSink
@@ -125,7 +141,8 @@ public:
     std::shared_ptr<const D12ColorTransform> transform) override;
 
   void RequestReplay();
-  bool Snapshot(NetworkControlSnapshot& state) const;
+  bool Snapshot(
+    NetworkControlSnapshot& state, uint64_t knownRevision) const;
 };
 
 // A session is transport-independent state owned by the eventual QUIC
@@ -135,6 +152,7 @@ class CNetworkSession final
 {
 private:
   static constexpr unsigned RECOVERY_CAPACITY = 16;
+  static constexpr unsigned CONTROL_CAPACITY  = 128;
 
   CNetworkEventQueue&  m_events;
   CNetworkInputSource& m_input;
@@ -143,9 +161,14 @@ private:
   bool                 m_open = true;
 
   CSRWLock              m_recoveryLock;
-  NetworkRecoveryStatus m_recovery[RECOVERY_CAPACITY] = {};
+  NetworkRecoveryStatus m_recovery[RECOVERY_CAPACITY]  = {};
   unsigned              m_recoveryHead                 = 0;
   unsigned              m_recoveryCount                = 0;
+
+  CSRWLock             m_controlLock;
+  NetworkControlStatus m_control[CONTROL_CAPACITY]  = {};
+  unsigned             m_controlHead                = 0;
+  unsigned             m_controlCount               = 0;
 
   SourceKey EventSource() const;
 
@@ -161,12 +184,17 @@ public:
   bool IsOpen() const;
   void Close();
 
-  bool SetCursorPosition(int32_t x, int32_t y);
-  bool SetResolution(uint32_t width, uint32_t height);
+  bool SetCursorPosition(uint64_t controlID, int32_t x, int32_t y);
+  bool SetResolution(
+    uint64_t controlID, uint32_t width, uint32_t height);
+  bool SetFrameSchedule(
+    uint64_t controlID, const FrameScheduleUpdate& schedule);
   bool RequestRecovery(uint64_t session, uint32_t serial, bool active);
   void ProcessEvent(const NetworkEvent& event, ITransportEvents& events);
   void SetRecoveryStatus(const NetworkRecoveryStatus& status);
   bool TakeRecoveryStatus(NetworkRecoveryStatus& status);
+  void SetControlStatus(const NetworkControlStatus& status);
+  bool TakeControlStatus(NetworkControlStatus& status);
 
   InputTargetState InputState() const;
   InputResult ClaimInput();

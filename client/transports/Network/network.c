@@ -20,8 +20,11 @@
 
 #include "network.h"
 #include "connection.h"
+#include "control.h"
+#include "cursor.h"
 #include "input.h"
 #include "known_hosts.h"
+#include "recovery.h"
 
 #include "app.h"
 #include "interface/renderer.h"
@@ -30,6 +33,7 @@
 #include "common/event.h"
 #include "common/locking.h"
 #include <LGProtocol/NetworkProtocol.h>
+#include <LGProtocol/NetworkServices.h>
 #include "common/option.h"
 
 #include <stddef.h>
@@ -40,11 +44,35 @@
 
 #define NETWORK_ADDRESS_MAX        255U
 #define NETWORK_ENDPOINT_TEXT_SIZE (NETWORK_ADDRESS_MAX + 9U)
-#define NETWORK_MAX_PAYLOAD        (1024U * 1024U)
+#define NETWORK_MAX_PAYLOAD        \
+  (LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + LG_NET_CURSOR_MAX_SHAPE_LENGTH)
 #define NETWORK_MAX_DATAGRAM       1136U
 
 static const LGNetCapability NETWORK_CAPABILITIES[] =
 {
+  {
+    .service                  = LG_NET_SERVICE_RECOVERY,
+    .versionMin               = LG_NET_RECOVERY_VERSION_MIN,
+    .versionMax               = LG_NET_RECOVERY_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
+    .maxDatagramPayload       = 0,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 0,
+  },
+  {
+    .service                  = LG_NET_SERVICE_CURSOR,
+    .versionMin               = LG_NET_CURSOR_VERSION_MIN,
+    .versionMax               = LG_NET_CURSOR_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE |
+      LG_NET_CAPABILITY_DATAGRAM,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
+    .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 0,
+  },
   {
     .service                  = LG_NET_SERVICE_INPUT,
     .versionMin               = LG_NET_INPUT_VERSION_MIN,
@@ -54,6 +82,17 @@ static const LGNetCapability NETWORK_CAPABILITIES[] =
     .features                 = 0,
     .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
     .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 0,
+  },
+  {
+    .service                  = LG_NET_SERVICE_CONTROL,
+    .versionMin               = LG_NET_CONTROL_VERSION_MIN,
+    .versionMax               = LG_NET_CONTROL_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
+    .maxDatagramPayload       = 0,
     .maxBidirectionalStreams  = 0,
     .maxUnidirectionalStreams = 0,
   },
@@ -69,7 +108,10 @@ struct NetworkTrustPrompt
 struct LG_Transport
 {
   NetworkConnection * connection;
+  NetworkControl    * control;
+  NetworkCursor     * cursor;
   NetworkInput      * input;
+  NetworkRecovery   * recovery;
   NetworkKnownHosts   knownHosts;
   LGEvent           * frameEvent;
   LGEvent           * promptIdle;
@@ -265,6 +307,14 @@ static void networkSetUnavailable(LG_VideoComponentStatus * status,
   status->reason    = reason;
 }
 
+static void networkSetAvailable(LG_VideoComponentStatus * status)
+{
+  if (!status->available)
+    status->epoch = networkNextEpoch(status->epoch);
+  status->available = true;
+  status->reason    = LG_TRANSPORT_OK;
+}
+
 static void networkConnectionState(void * opaque, bool connected,
     LG_TransportStatus reason)
 {
@@ -273,10 +323,17 @@ static void networkConnectionState(void * opaque, bool connected,
     LG_TRANSPORT_UNAVAILABLE : reason;
 
   networkInputConnectionState(this->input, connected);
+  networkControlConnectionState(this->control, connected);
+  networkRecoveryConnectionState(this->recovery, connected);
+  const bool cursorAvailable =
+    networkCursorConnectionState(this->cursor, connected);
 
   LG_LOCK(this->stateLock);
   networkSetUnavailable(&this->videoStatus.frame, status);
-  networkSetUnavailable(&this->videoStatus.pointer, status);
+  if (cursorAvailable)
+    networkSetAvailable(&this->videoStatus.pointer);
+  else
+    networkSetUnavailable(&this->videoStatus.pointer, status);
   LG_UNLOCK(this->stateLock);
 
   lgSignalEvent(this->frameEvent);
@@ -287,10 +344,31 @@ static void networkPacket(void * opaque, const LGNetPacketView * packet,
     bool datagram)
 {
   LG_Transport * this = opaque;
-  if (packet->envelope.service == LG_NET_SERVICE_INPUT &&
-      !networkInputPacket(this->input, packet, datagram))
+  bool valid;
+  switch (packet->envelope.service)
   {
-    DEBUG_ERROR("Invalid network input message");
+    case LG_NET_SERVICE_RECOVERY:
+      valid = networkRecoveryPacket(this->recovery, packet, datagram);
+      break;
+    case LG_NET_SERVICE_CURSOR:
+      valid = networkCursorPacket(this->cursor, packet, datagram);
+      break;
+    case LG_NET_SERVICE_INPUT:
+      valid = networkInputPacket(this->input, packet, datagram);
+      break;
+    case LG_NET_SERVICE_CONTROL:
+      valid = networkControlPacket(this->control, packet, datagram);
+      break;
+    default:
+      valid = false;
+      break;
+  }
+
+  if (!valid)
+  {
+    DEBUG_ERROR("Invalid network service %u message %u",
+        (unsigned)packet->envelope.service,
+        (unsigned)packet->envelope.messageType);
     networkConnectionCancel(this->connection);
   }
 }
@@ -351,14 +429,20 @@ static bool networkCreate(LG_Transport ** result)
   };
   if (!networkConnectionCreate(&this->connection, &params))
     goto fail;
-  if (!networkInputCreate(&this->input, this->connection))
+  if (!networkControlCreate(&this->control, this->connection) ||
+      !networkCursorCreate(&this->cursor, this->connection) ||
+      !networkInputCreate(&this->input, this->connection) ||
+      !networkRecoveryCreate(&this->recovery, this->connection))
     goto fail;
 
   *result = this;
   return true;
 
 fail:
+  networkRecoveryDestroy(&this->recovery);
   networkInputDestroy(&this->input);
+  networkCursorDestroy(&this->cursor);
+  networkControlDestroy(&this->control);
   networkConnectionDestroy(&this->connection);
   if (this->frameEvent)
     lgFreeEvent(this->frameEvent);
@@ -389,7 +473,10 @@ static void networkDestroy(LG_Transport ** transport)
   LG_UNLOCK(this->stateLock);
   LG_UNLOCK(this->callbackLock);
 
+  networkRecoveryDestroy(&this->recovery);
   networkInputDestroy(&this->input);
+  networkCursorDestroy(&this->cursor);
+  networkControlDestroy(&this->control);
   networkConnectionDestroy(&this->connection);
   lgFreeEvent(this->frameEvent);
   lgFreeEvent(this->promptIdle);
@@ -418,6 +505,9 @@ static LG_TransportStatus networkConnect(LG_Transport * this,
 static void networkDisconnect(LG_Transport * this)
 {
   networkInputConnectionState(this->input, false);
+  networkControlConnectionState(this->control, false);
+  networkRecoveryConnectionState(this->recovery, false);
+  networkCursorConnectionState(this->cursor, false);
   networkConnectionDisconnect(this->connection);
   lgSignalEvent(this->frameEvent);
 }
@@ -516,6 +606,36 @@ static void networkStopFrame(LG_Transport * this)
   lgSignalEvent(this->frameEvent);
 }
 
+static LG_TransportStatus networkNextPointer(LG_Transport * this,
+    LG_TransportPointer * pointer)
+{
+  const LG_TransportStatus status =
+    networkCursorNext(this->cursor, pointer);
+  if (status != LG_TRANSPORT_OK)
+    return status;
+
+  LG_LOCK(this->stateLock);
+  pointer->epoch = this->videoStatus.pointer.epoch;
+  LG_UNLOCK(this->stateLock);
+  return LG_TRANSPORT_OK;
+}
+
+static void networkReleasePointer(LG_Transport * this,
+    LG_TransportPointer * pointer)
+{
+  networkCursorRelease(this->cursor, pointer);
+}
+
+static void networkCancelPointerWait(LG_Transport * this)
+{
+  networkCursorCancel(this->cursor);
+}
+
+static void networkStopPointer(LG_Transport * this)
+{
+  networkCursorStop(this->cursor);
+}
+
 static const LG_FrameOps networkFrameOps =
 {
   .setStatusListener = networkSetStatusListener,
@@ -527,6 +647,10 @@ static const LG_FrameOps networkFrameOps =
   .releaseFrame      = networkReleaseFrame,
   .cancelFrameWait   = networkCancelFrameWait,
   .stopFrame         = networkStopFrame,
+  .nextPointer       = networkNextPointer,
+  .releasePointer    = networkReleasePointer,
+  .cancelPointerWait = networkCancelPointerWait,
+  .stopPointer       = networkStopPointer,
 };
 
 static const LG_VideoOps networkVideoOps =
@@ -545,6 +669,10 @@ static const LG_VideoOps * networkGetVideoOps(LG_Transport * this)
 static const LG_InputOps * networkGetInputOps(LG_Transport * this,
     void ** opaque)
 {
+  *opaque = NULL;
+  if (!networkConnectionServiceAvailable(this->connection,
+        LG_NET_SERVICE_INPUT, LG_NET_CAPABILITY_RELIABLE))
+    return NULL;
   *opaque = this->input;
   return networkInputGetOps();
 }
@@ -568,18 +696,26 @@ static const LG_ClipboardOps * networkGetClipboardOps(LG_Transport * this,
 static LG_TransportStatus networkSendControl(LG_Transport * this,
     const LG_TransportControl * control, LG_TransportControlToken * token)
 {
-  (void)control;
-  (void)token;
-  return networkSessionValid(this) ?
-    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+  return networkControlSend(this->control, control, token);
 }
 
-static LG_TransportStatus networkControlStatus(LG_Transport * this,
+static LG_TransportStatus networkControlStatusOp(LG_Transport * this,
     LG_TransportControlToken token)
 {
-  (void)token;
-  return networkSessionValid(this) ?
-    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+  return networkControlStatus(this->control, token);
+}
+
+static LG_TransportStatus networkGetRecoveryInfo(LG_Transport * this,
+    LG_RecoveryInfo * info)
+{
+  return networkRecoveryGetInfo(this->recovery, info);
+}
+
+static LG_TransportStatus networkRequestRecovery(LG_Transport * this,
+    LG_RecoveryRequest request, uint64_t * instance, uint32_t * serial)
+{
+  return networkRecoveryRequest(
+      this->recovery, request, instance, serial);
 }
 
 const LG_TransportOps LGT_Network =
@@ -596,6 +732,8 @@ const LG_TransportOps LGT_Network =
   .getInputOps        = networkGetInputOps,
   .getAudioOps        = networkGetAudioOps,
   .getClipboardOps    = networkGetClipboardOps,
+  .getRecoveryInfo    = networkGetRecoveryInfo,
+  .requestRecovery    = networkRequestRecovery,
   .sendControl        = networkSendControl,
-  .controlStatus      = networkControlStatus,
+  .controlStatus      = networkControlStatusOp,
 };
