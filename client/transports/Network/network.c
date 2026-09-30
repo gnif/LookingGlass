@@ -1,0 +1,569 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2026 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "network.h"
+#include "connection.h"
+#include "known_hosts.h"
+
+#include "app.h"
+#include "interface/renderer.h"
+
+#include "common/debug.h"
+#include "common/event.h"
+#include "common/locking.h"
+#include "common/network/protocol.h"
+#include "common/option.h"
+
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define NETWORK_ADDRESS_MAX        255U
+#define NETWORK_ENDPOINT_TEXT_SIZE (NETWORK_ADDRESS_MAX + 9U)
+
+struct NetworkTrustPrompt
+{
+  MsgBoxHandle            message;
+  NetworkTrustDecisionFn  decision;
+  void                  * decisionOpaque;
+};
+
+struct LG_Transport
+{
+  NetworkConnection * connection;
+  NetworkKnownHosts   knownHosts;
+  LGEvent           * frameEvent;
+  LGEvent           * promptIdle;
+
+  LG_Lock callbackLock;
+  LG_Lock stateLock;
+  LG_Lock promptLock;
+
+  LG_VideoStatus   videoStatus;
+  LG_VideoStatusFn videoStatusFn;
+  void            * videoStatusOpaque;
+
+  bool                      rendererAttached;
+  bool                      promptCallbackActive;
+  struct NetworkTrustPrompt prompt;
+};
+
+static bool networkAddressValidate(struct Option * option,
+    const char ** error)
+{
+  const char * address = option->value.x_string;
+  if (address && *address && strlen(address) <= NETWORK_ADDRESS_MAX)
+  {
+    for (const unsigned char * c = (const unsigned char *)address; *c; ++c)
+      if (*c < 0x20U || *c == 0x7fU)
+        goto invalid;
+    return true;
+  }
+
+invalid:
+  *error = "The network address must be 1-255 characters without controls";
+  return false;
+}
+
+static bool networkPortValidate(struct Option * option, const char ** error)
+{
+  if (option->value.x_int > 0 && option->value.x_int <= UINT16_MAX)
+    return true;
+
+  *error = "The network port must be between 1 and 65535";
+  return false;
+}
+
+static void networkSetup(void)
+{
+  static struct Option options[] =
+  {
+    {
+      .module         = "network",
+      .name           = "address",
+      .description    = "Network server address",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = "127.0.0.1",
+      .validator      = networkAddressValidate,
+    },
+    {
+      .module      = "network",
+      .name        = "port",
+      .description = "Network server UDP port",
+      .type        = OPTION_TYPE_INT,
+      .value.x_int = LG_NET_DEFAULT_PORT,
+      .validator   = networkPortValidate,
+    },
+    {
+      .module         = "network",
+      .name           = "password",
+      .description    =
+        "Reserved network password (empty uses no authentication)",
+      .type           = OPTION_TYPE_STRING,
+      .value.x_string = NULL,
+    },
+    {
+      .module       = "network",
+      .name         = "forgetCertificate",
+      .description  = "Forget the saved certificate for this server",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false,
+    },
+    {0}
+  };
+
+  option_register(options);
+}
+
+static void networkTrustDecision(bool trusted, void * opaque)
+{
+  LG_Transport * this = opaque;
+  NetworkTrustDecisionFn decision;
+  void                 * decisionOpaque;
+
+  LG_LOCK(this->promptLock);
+  decision                    = this->prompt.decision;
+  decisionOpaque              = this->prompt.decisionOpaque;
+  this->prompt.message        = NULL;
+  this->prompt.decision       = NULL;
+  this->prompt.decisionOpaque = NULL;
+  if (decision)
+  {
+    this->promptCallbackActive = true;
+    lgResetEvent(this->promptIdle);
+  }
+  LG_UNLOCK(this->promptLock);
+
+  if (decision)
+    decision(decisionOpaque, trusted);
+
+  LG_LOCK(this->promptLock);
+  this->promptCallbackActive = false;
+  lgSignalEvent(this->promptIdle);
+  LG_UNLOCK(this->promptLock);
+}
+
+static bool networkTrustPrompt(void * opaque, const char * endpoint,
+    const char * fingerprint, NetworkTrustDecisionFn decision,
+    void * decisionOpaque)
+{
+  LG_Transport * this = opaque;
+
+  LG_LOCK(this->promptLock);
+  if (this->prompt.message || this->prompt.decision ||
+      this->promptCallbackActive)
+  {
+    LG_UNLOCK(this->promptLock);
+    return false;
+  }
+
+  this->prompt.decision       = decision;
+  this->prompt.decisionOpaque = decisionOpaque;
+  this->prompt.message        = app_confirmMsgBox(
+      "Trust network server?", networkTrustDecision, this,
+      "The identity of %s has not been seen before.\n\n"
+      "SHA-256 fingerprint:\n%s\n\n"
+      "Trust and remember this server?", endpoint, fingerprint);
+  const bool queued = this->prompt.message != NULL;
+  if (!queued)
+  {
+    this->prompt.decision       = NULL;
+    this->prompt.decisionOpaque = NULL;
+  }
+  LG_UNLOCK(this->promptLock);
+  return queued;
+}
+
+static void networkCancelTrustPrompt(void * opaque)
+{
+  LG_Transport * this = opaque;
+  MsgBoxHandle  message;
+
+  LG_LOCK(this->promptLock);
+  message                     = this->prompt.message;
+  this->prompt.message        = NULL;
+  this->prompt.decision       = NULL;
+  this->prompt.decisionOpaque = NULL;
+  LG_UNLOCK(this->promptLock);
+
+  if (message)
+    app_msgBoxClose(message);
+  lgWaitEvent(this->promptIdle, TIMEOUT_INFINITE);
+  LG_LOCK(this->promptLock);
+  LG_UNLOCK(this->promptLock);
+}
+
+static void networkNotifyVideoStatus(LG_Transport * this)
+{
+  LG_VideoStatusFn    callback;
+  void              * opaque;
+  LG_VideoStatus      status;
+
+  LG_LOCK(this->callbackLock);
+  LG_LOCK(this->stateLock);
+  callback = this->videoStatusFn;
+  opaque   = this->videoStatusOpaque;
+  status   = this->videoStatus;
+  LG_UNLOCK(this->stateLock);
+
+  if (callback)
+    callback(opaque, &status);
+  LG_UNLOCK(this->callbackLock);
+}
+
+static uint64_t networkNextEpoch(uint64_t epoch)
+{
+  ++epoch;
+  return epoch ? epoch : 1U;
+}
+
+static void networkSetUnavailable(LG_VideoComponentStatus * status,
+    LG_TransportStatus reason)
+{
+  if (status->available)
+    status->epoch = networkNextEpoch(status->epoch);
+  status->available = false;
+  status->reason    = reason;
+}
+
+static void networkConnectionState(void * opaque, bool connected,
+    LG_TransportStatus reason)
+{
+  LG_Transport             * this   = opaque;
+  const LG_TransportStatus   status = connected ?
+    LG_TRANSPORT_UNAVAILABLE : reason;
+
+  LG_LOCK(this->stateLock);
+  networkSetUnavailable(&this->videoStatus.frame, status);
+  networkSetUnavailable(&this->videoStatus.pointer, status);
+  LG_UNLOCK(this->stateLock);
+
+  lgSignalEvent(this->frameEvent);
+  networkNotifyVideoStatus(this);
+}
+
+static void networkPacket(void * opaque, const LGNetPacketView * packet,
+    bool datagram)
+{
+  (void)opaque;
+  (void)packet;
+  (void)datagram;
+  /* Media and service dispatch is added behind this boundary in the next
+   * implementation stage. The connection still validates all wire framing. */
+}
+
+static bool networkCreate(LG_Transport ** result)
+{
+  if (!result)
+    return false;
+
+  LG_Transport * this = calloc(1, sizeof(*this));
+  if (!this)
+    return false;
+
+  LG_LOCK_INIT(this->callbackLock);
+  LG_LOCK_INIT(this->stateLock);
+  LG_LOCK_INIT(this->promptLock);
+
+  this->videoStatus.frame.epoch    = 1;
+  this->videoStatus.frame.reason   = LG_TRANSPORT_DISCONNECTED;
+  this->videoStatus.pointer.epoch  = 1;
+  this->videoStatus.pointer.reason = LG_TRANSPORT_DISCONNECTED;
+  if (!networkKnownHostsInit(&this->knownHosts))
+    goto fail;
+
+  this->frameEvent = lgCreateEvent(true, 0);
+  this->promptIdle = lgCreateEvent(false, 0);
+  if (!this->frameEvent || !this->promptIdle ||
+      !lgSignalEvent(this->promptIdle))
+    goto fail;
+
+  const char    * address = option_get_string("network", "address");
+  const uint16_t  port    = (uint16_t)option_get_int("network", "port");
+  char            endpoint[NETWORK_ENDPOINT_TEXT_SIZE];
+  if (!address)
+    goto fail;
+  snprintf(endpoint, sizeof(endpoint), "[%s]:%u", address, port);
+  if (option_get_bool("network", "forgetCertificate") &&
+      !networkKnownHostsForget(&this->knownHosts, endpoint))
+  {
+    DEBUG_ERROR("Failed to forget the network server certificate");
+    goto fail;
+  }
+
+  const NetworkConnectionParams params =
+  {
+    .address     = address,
+    .port        = port,
+    .password    = option_get_string("network", "password"),
+    .knownHosts  = &this->knownHosts,
+    .trustPrompt = networkTrustPrompt,
+    .trustCancel = networkCancelTrustPrompt,
+    .packet      = networkPacket,
+    .state       = networkConnectionState,
+    .opaque      = this,
+  };
+  if (!networkConnectionCreate(&this->connection, &params))
+    goto fail;
+
+  *result = this;
+  return true;
+
+fail:
+  if (this->frameEvent)
+    lgFreeEvent(this->frameEvent);
+  if (this->promptIdle)
+    lgFreeEvent(this->promptIdle);
+  networkKnownHostsFree(&this->knownHosts);
+  LG_LOCK_FREE(this->promptLock);
+  LG_LOCK_FREE(this->stateLock);
+  LG_LOCK_FREE(this->callbackLock);
+  free(this);
+  return false;
+}
+
+static void networkDisconnect(LG_Transport * this);
+
+static void networkDestroy(LG_Transport ** transport)
+{
+  if (!transport || !*transport)
+    return;
+
+  LG_Transport * this = *transport;
+  networkDisconnect(this);
+
+  LG_LOCK(this->callbackLock);
+  LG_LOCK(this->stateLock);
+  this->videoStatusFn     = NULL;
+  this->videoStatusOpaque = NULL;
+  LG_UNLOCK(this->stateLock);
+  LG_UNLOCK(this->callbackLock);
+
+  networkConnectionDestroy(&this->connection);
+  lgFreeEvent(this->frameEvent);
+  lgFreeEvent(this->promptIdle);
+  networkKnownHostsFree(&this->knownHosts);
+  LG_LOCK_FREE(this->promptLock);
+  LG_LOCK_FREE(this->stateLock);
+  LG_LOCK_FREE(this->callbackLock);
+  free(this);
+  *transport = NULL;
+}
+
+static LG_TransportStatus networkConnectCancellable(LG_Transport * this,
+    LG_TransportSession * session, LG_TransportCancelledFn cancelled,
+    void * opaque)
+{
+  return networkConnectionConnect(
+      this->connection, session, cancelled, opaque);
+}
+
+static LG_TransportStatus networkConnect(LG_Transport * this,
+    LG_TransportSession * session)
+{
+  return networkConnectCancellable(this, session, NULL, NULL);
+}
+
+static void networkDisconnect(LG_Transport * this)
+{
+  networkConnectionDisconnect(this->connection);
+  lgSignalEvent(this->frameEvent);
+}
+
+static bool networkSessionValid(LG_Transport * this)
+{
+  return networkConnectionValid(this->connection);
+}
+
+static void networkSetStatusListener(LG_Transport * this,
+    LG_VideoStatusFn callback, void * opaque)
+{
+  LG_VideoStatus status;
+
+  LG_LOCK(this->callbackLock);
+  LG_LOCK(this->stateLock);
+  this->videoStatusFn     = callback;
+  this->videoStatusOpaque = opaque;
+  status                  = this->videoStatus;
+  LG_UNLOCK(this->stateLock);
+
+  if (callback)
+    callback(opaque, &status);
+  LG_UNLOCK(this->callbackLock);
+}
+
+static bool networkSupportsDMA(LG_Transport * this)
+{
+  (void)this;
+  return false;
+}
+
+static bool networkAttachRenderer(LG_Transport * this,
+    const LG_RendererInterop * interop)
+{
+  const size_t requiredSize = offsetof(LG_RendererInterop,
+      egl.sharedTextureImport) + sizeof(interop->egl.sharedTextureImport);
+  if (!interop ||
+      interop->version < LG_RENDERER_INTEROP_EGL_TEXTURE_VERSION ||
+      interop->size < requiredSize ||
+      interop->type != LG_RENDERER_INTEROP_EGL ||
+      !interop->egl.display || !interop->egl.config ||
+      !interop->egl.shareContext || !interop->egl.sharedTextureImport)
+  {
+    DEBUG_ERROR("The network transport requires EGL shared textures");
+    return false;
+  }
+
+  this->rendererAttached = true;
+  return true;
+}
+
+static void networkDetachRenderer(LG_Transport * this)
+{
+  this->rendererAttached = false;
+}
+
+static LG_TransportStatus networkNextFrame(LG_Transport * this, bool useDMA,
+    LG_TransportFrame * frame)
+{
+  (void)useDMA;
+  (void)frame;
+
+  if (!this->rendererAttached)
+    return LG_TRANSPORT_ERROR;
+  if (!networkSessionValid(this))
+    return LG_TRANSPORT_DISCONNECTED;
+
+  lgWaitEvent(this->frameEvent, 100);
+  return networkSessionValid(this) ?
+    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+}
+
+static void networkGetFrameTiming(LG_Transport * this,
+    const LG_TransportFrame * frame, LG_TransportFrameTiming * timing)
+{
+  (void)this;
+  (void)frame;
+  memset(timing, 0, sizeof(*timing));
+}
+
+static void networkReleaseFrame(LG_Transport * this,
+    LG_TransportFrame * frame)
+{
+  (void)this;
+  (void)frame;
+}
+
+static void networkCancelFrameWait(LG_Transport * this)
+{
+  lgSignalEvent(this->frameEvent);
+}
+
+static void networkStopFrame(LG_Transport * this)
+{
+  lgSignalEvent(this->frameEvent);
+}
+
+static const LG_FrameOps networkFrameOps =
+{
+  .setStatusListener = networkSetStatusListener,
+  .supportsDMA       = networkSupportsDMA,
+  .attachRenderer    = networkAttachRenderer,
+  .detachRenderer    = networkDetachRenderer,
+  .nextFrame         = networkNextFrame,
+  .getFrameTiming    = networkGetFrameTiming,
+  .releaseFrame      = networkReleaseFrame,
+  .cancelFrameWait   = networkCancelFrameWait,
+  .stopFrame         = networkStopFrame,
+};
+
+static const LG_VideoOps networkVideoOps =
+{
+  .name  = "network",
+  .type  = LG_VIDEO_TYPE_FRAME,
+  .frame = &networkFrameOps,
+};
+
+static const LG_VideoOps * networkGetVideoOps(LG_Transport * this)
+{
+  (void)this;
+  return &networkVideoOps;
+}
+
+static const LG_InputOps * networkGetInputOps(LG_Transport * this,
+    void ** opaque)
+{
+  (void)this;
+  *opaque = NULL;
+  return NULL;
+}
+
+static const LG_AudioOps * networkGetAudioOps(LG_Transport * this,
+    void ** opaque)
+{
+  (void)this;
+  *opaque = NULL;
+  return NULL;
+}
+
+static const LG_ClipboardOps * networkGetClipboardOps(LG_Transport * this,
+    void ** opaque)
+{
+  (void)this;
+  *opaque = NULL;
+  return NULL;
+}
+
+static LG_TransportStatus networkSendControl(LG_Transport * this,
+    const LG_TransportControl * control, LG_TransportControlToken * token)
+{
+  (void)control;
+  (void)token;
+  return networkSessionValid(this) ?
+    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+}
+
+static LG_TransportStatus networkControlStatus(LG_Transport * this,
+    LG_TransportControlToken token)
+{
+  (void)token;
+  return networkSessionValid(this) ?
+    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+}
+
+const LG_TransportOps LGT_Network =
+{
+  .name               = "network",
+  .setup              = networkSetup,
+  .create             = networkCreate,
+  .destroy            = networkDestroy,
+  .connect            = networkConnect,
+  .connectCancellable = networkConnectCancellable,
+  .disconnect         = networkDisconnect,
+  .sessionValid       = networkSessionValid,
+  .getVideoOps        = networkGetVideoOps,
+  .getInputOps        = networkGetInputOps,
+  .getAudioOps        = networkGetAudioOps,
+  .getClipboardOps    = networkGetClipboardOps,
+  .sendControl        = networkSendControl,
+  .controlStatus      = networkControlStatus,
+};

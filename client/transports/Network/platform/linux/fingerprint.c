@@ -1,0 +1,40 @@
+/**
+ * Looking Glass
+ * Copyright © 2017-2026 The Looking Glass Authors
+ * https://looking-glass.io
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 2 of the License, or (at your option)
+ * any later version.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along
+ * with this program; if not, write to the Free Software Foundation, Inc., 59
+ * Temple Place, Suite 330, Boston, MA 02111-1307 USA
+ */
+
+#include "../../fingerprint.h"
+
+#include <openssl/evp.h>
+
+bool networkFingerprintSHA256(const uint8_t * data, size_t size,
+    uint8_t fingerprint[NETWORK_FINGERPRINT_SIZE])
+{
+  EVP_MD_CTX * context = EVP_MD_CTX_new();
+  if (!context)
+    return false;
+
+  unsigned int outputSize = 0;
+  const bool   result     =
+    EVP_DigestInit_ex(context, EVP_sha256(), NULL) == 1 &&
+    EVP_DigestUpdate(context, data, size) == 1 &&
+    EVP_DigestFinal_ex(context, fingerprint, &outputSize) == 1 &&
+    outputSize == NETWORK_FINGERPRINT_SIZE;
+  EVP_MD_CTX_free(context);
+  return result;
+}

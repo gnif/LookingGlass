@@ -20,6 +20,9 @@ endfunction()
 
 # Add/remove transports here!
 add_transport(LGMP)
+if(ENABLE_NETWORK)
+  add_transport(Network)
+endif()
 if(ENABLE_SPICE)
   add_transport(SPICE)
 endif()
