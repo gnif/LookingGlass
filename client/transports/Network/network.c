@@ -373,6 +373,15 @@ static void networkPacket(void * opaque, const LGNetPacketView * packet,
   }
 }
 
+static void networkSendReady(void * opaque, LGNetService service,
+    bool datagram)
+{
+  LG_Transport * this = opaque;
+  (void)service;
+  (void)datagram;
+  lgSignalEvent(this->frameEvent);
+}
+
 static bool networkCreate(LG_Transport ** result)
 {
   if (!result)
@@ -422,6 +431,7 @@ static bool networkCreate(LG_Transport ** result)
     .trustCancel     = networkCancelTrustPrompt,
     .packet          = networkPacket,
     .state           = networkConnectionState,
+    .sendReady       = networkSendReady,
     .capabilities    = NETWORK_CAPABILITIES,
     .capabilityCount = sizeof(NETWORK_CAPABILITIES) /
       sizeof(NETWORK_CAPABILITIES[0]),

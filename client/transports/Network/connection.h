@@ -41,6 +41,8 @@ typedef void (*NetworkPacketFn)(void * opaque,
     const LGNetPacketView * packet, bool datagram);
 typedef void (*NetworkConnectionStateFn)(void * opaque, bool connected,
     LG_TransportStatus reason);
+typedef void (*NetworkSendReadyFn)(void * opaque, LGNetService service,
+    bool datagram);
 
 typedef struct NetworkConnectionParams
 {
@@ -52,6 +54,7 @@ typedef struct NetworkConnectionParams
   NetworkTrustCancelFn       trustCancel;
   NetworkPacketFn            packet;
   NetworkConnectionStateFn   state;
+  NetworkSendReadyFn         sendReady;
   const LGNetCapability    * capabilities;
   uint32_t                   capabilityCount;
   void                     * opaque;

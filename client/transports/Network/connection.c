@@ -63,13 +63,49 @@
 #define NETWORK_AUTH_CHALLENGE_LENGTH_MIN     16U
 #define NETWORK_AUTH_RESPONSE_NONCE_LENGTH    32U
 
+#define NETWORK_SEND_SERVICE_COUNT               \
+  (LG_NET_SERVICE_CONTROL + 1U)
+#define NETWORK_SEND_RELIABLE_COUNT_MAX          512U
+#define NETWORK_SEND_RELIABLE_BYTES_MAX          \
+  (UINT64_C(128) * 1024U * 1024U)
+#define NETWORK_SEND_RELIABLE_COUNT_RESERVED     64U
+#define NETWORK_SEND_RELIABLE_BYTES_RESERVED     \
+  (UINT64_C(32) * 1024U * 1024U)
+#define NETWORK_SEND_DATAGRAM_COUNT_MAX          512U
+#define NETWORK_SEND_DATAGRAM_BYTES_MAX          \
+  (UINT64_C(1) * 1024U * 1024U)
+#define NETWORK_SEND_DATAGRAM_COUNT_RESERVED     64U
+#define NETWORK_SEND_DATAGRAM_BYTES_RESERVED     \
+  (UINT64_C(256) * 1024U)
+#define NETWORK_SEND_RESUME_NUMERATOR            3U
+#define NETWORK_SEND_RESUME_DENOMINATOR          4U
+
 _Static_assert(NETWORK_AUTH_SHA256_SIZE == LG_NET_PASSWORD_SHA256_LENGTH,
     "Network authentication SHA-256 sizes differ");
 
 struct NetworkSend
 {
-  QUIC_BUFFER buffer;
-  uint8_t     data[];
+  QUIC_BUFFER  buffer;
+  LGNetService service;
+  uint32_t     length;
+  bool         datagram;
+  uint8_t      data[];
+};
+
+struct NetworkSendLimits
+{
+  uint32_t count;
+  uint64_t bytes;
+};
+
+struct NetworkSendAccounting
+{
+  uint32_t count;
+  uint64_t bytes;
+  uint32_t serviceCount[NETWORK_SEND_SERVICE_COUNT];
+  uint64_t serviceBytes[NETWORK_SEND_SERVICE_COUNT];
+  bool     serviceBlocked[NETWORK_SEND_SERVICE_COUNT];
+  uint64_t serviceBlockedBytes[NETWORK_SEND_SERVICE_COUNT];
 };
 
 struct NetworkConnection
@@ -98,6 +134,7 @@ struct NetworkConnection
   NetworkTrustCancelFn       trustCancel;
   NetworkPacketFn            packet;
   NetworkConnectionStateFn   state;
+  NetworkSendReadyFn         sendReady;
   void                     * opaque;
 
   LGNetCapability  offeredCapabilities[LG_NET_SERVICE_CONTROL + 1U];
@@ -137,6 +174,9 @@ struct NetworkConnection
   bool                 datagramSendEnabled;
   uint32_t             serviceMaxPayload[LG_NET_SERVICE_CONTROL + 1U];
   uint32_t             serviceMaxDatagram[LG_NET_SERVICE_CONTROL + 1U];
+
+  struct NetworkSendAccounting reliableSend;
+  struct NetworkSendAccounting datagramSend;
 
   uint8_t                clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
   uint8_t                serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
@@ -264,7 +304,278 @@ static void networkConnectionFail(NetworkConnection * this,
   lgSignalEvent(this->connectEvent);
 }
 
-static bool networkConnectionSendPacket(NetworkConnection * this,
+static struct NetworkSendLimits networkConnectionSendLimits(
+    LGNetService service, bool datagram)
+{
+  if (datagram)
+  {
+    switch (service)
+    {
+      case LG_NET_SERVICE_VIDEO:
+        return (struct NetworkSendLimits)
+        {
+          .count = 256U,
+          .bytes = 768U * 1024U,
+        };
+
+      case LG_NET_SERVICE_AUDIO:
+        return (struct NetworkSendLimits)
+        {
+          .count = 256U,
+          .bytes = 512U * 1024U,
+        };
+
+      case LG_NET_SERVICE_INPUT:
+        return (struct NetworkSendLimits)
+        {
+          .count = 128U,
+          .bytes = 256U * 1024U,
+        };
+
+      default:
+        return (struct NetworkSendLimits)
+        {
+          .count = 64U,
+          .bytes = 256U * 1024U,
+        };
+    }
+  }
+
+  switch (service)
+  {
+    case LG_NET_SERVICE_CURSOR:
+      return (struct NetworkSendLimits)
+      {
+        .count = 8U,
+        .bytes = UINT64_C(32) * 1024U * 1024U,
+      };
+
+    case LG_NET_SERVICE_VIDEO:
+      return (struct NetworkSendLimits)
+      {
+        .count = 64U,
+        .bytes = UINT64_C(72) * 1024U * 1024U,
+      };
+
+    case LG_NET_SERVICE_AUDIO:
+      return (struct NetworkSendLimits)
+      {
+        .count = 256U,
+        .bytes = UINT64_C(16) * 1024U * 1024U,
+      };
+
+    case LG_NET_SERVICE_CLIPBOARD:
+    case LG_NET_SERVICE_FILE:
+      return (struct NetworkSendLimits)
+      {
+        .count = 64U,
+        .bytes = UINT64_C(32) * 1024U * 1024U,
+      };
+
+    case LG_NET_SERVICE_CORE:
+      return (struct NetworkSendLimits)
+      {
+        .count = 64U,
+        .bytes = UINT64_C(20) * 1024U * 1024U,
+      };
+
+    default:
+      return (struct NetworkSendLimits)
+      {
+        .count = 64U,
+        .bytes = UINT64_C(20) * 1024U * 1024U,
+      };
+  }
+}
+
+static bool networkConnectionSendPriority(LGNetService service)
+{
+  return service == LG_NET_SERVICE_CORE ||
+    service == LG_NET_SERVICE_RECOVERY ||
+    service == LG_NET_SERVICE_CURSOR ||
+    service == LG_NET_SERVICE_INPUT ||
+    service == LG_NET_SERVICE_CONTROL;
+}
+
+static void networkConnectionResetSendAccountingNL(
+    NetworkConnection * this)
+{
+  memset(&this->reliableSend, 0, sizeof(this->reliableSend));
+  memset(&this->datagramSend, 0, sizeof(this->datagramSend));
+}
+
+static LG_TransportStatus networkConnectionReserveSendNL(
+    NetworkConnection * this, LGNetService service, bool datagram,
+    uint64_t packetSize)
+{
+  if (service >= NETWORK_SEND_SERVICE_COUNT)
+    return LG_TRANSPORT_ERROR;
+
+  const struct NetworkSendLimits   limits          =
+    networkConnectionSendLimits(service, datagram);
+  uint32_t                         totalCountLimit = datagram ?
+    NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
+  uint64_t                         totalByteLimit  = datagram ?
+    NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
+  if (!networkConnectionSendPriority(service))
+  {
+    totalCountLimit -= datagram ?
+      NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
+      NETWORK_SEND_RELIABLE_COUNT_RESERVED;
+    totalByteLimit  -= datagram ?
+      NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
+      NETWORK_SEND_RELIABLE_BYTES_RESERVED;
+  }
+  struct NetworkSendAccounting * accounting        = datagram ?
+    &this->datagramSend : &this->reliableSend;
+
+  if (packetSize > limits.bytes || packetSize > totalByteLimit)
+    return LG_TRANSPORT_ERROR;
+
+  if (accounting->count >= totalCountLimit ||
+      accounting->serviceCount[service] >= limits.count ||
+      accounting->bytes > totalByteLimit - packetSize ||
+      accounting->serviceBytes[service] > limits.bytes - packetSize)
+  {
+    accounting->serviceBlocked[service]      = true;
+    accounting->serviceBlockedBytes[service] =
+      accounting->serviceBlockedBytes[service] > packetSize ?
+        accounting->serviceBlockedBytes[service] : packetSize;
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  ++accounting->count;
+  ++accounting->serviceCount[service];
+  accounting->bytes                 += packetSize;
+  accounting->serviceBytes[service] += packetSize;
+  return LG_TRANSPORT_OK;
+}
+
+static bool networkConnectionSendCanResumeNL(
+    const NetworkConnection * this, LGNetService service, bool datagram)
+{
+  const struct NetworkSendLimits         limits          =
+    networkConnectionSendLimits(service, datagram);
+  uint32_t                               totalCountLimit = datagram ?
+    NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
+  uint64_t                               totalByteLimit  = datagram ?
+    NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
+  if (!networkConnectionSendPriority(service))
+  {
+    totalCountLimit -= datagram ?
+      NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
+      NETWORK_SEND_RELIABLE_COUNT_RESERVED;
+    totalByteLimit  -= datagram ?
+      NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
+      NETWORK_SEND_RELIABLE_BYTES_RESERVED;
+  }
+  const struct NetworkSendAccounting * accounting   = datagram ?
+    &this->datagramSend : &this->reliableSend;
+  const uint32_t                       totalCount   = accounting->count;
+  const uint64_t                       totalBytes   = accounting->bytes;
+  const uint32_t                       serviceCount =
+    accounting->serviceCount[service];
+  const uint64_t                       serviceBytes =
+    accounting->serviceBytes[service];
+  const uint64_t                       blockedBytes =
+    accounting->serviceBlockedBytes[service];
+
+  if (atomic_load_explicit(&this->stopping, memory_order_acquire) ||
+      !atomic_load_explicit(&this->sessionValid, memory_order_acquire) ||
+      !this->controlStream ||
+      (datagram && (!this->datagramSendEnabled ||
+        blockedBytes > this->maxDatagramSendLength)))
+    return false;
+
+  const uint32_t totalResumeCount   =
+    totalCountLimit * NETWORK_SEND_RESUME_NUMERATOR /
+      NETWORK_SEND_RESUME_DENOMINATOR;
+  const uint64_t totalResumeBytes   =
+    totalByteLimit * NETWORK_SEND_RESUME_NUMERATOR /
+      NETWORK_SEND_RESUME_DENOMINATOR;
+  const uint32_t serviceResumeCount =
+    limits.count * NETWORK_SEND_RESUME_NUMERATOR /
+      NETWORK_SEND_RESUME_DENOMINATOR;
+  const uint64_t serviceResumeBytes =
+    limits.bytes * NETWORK_SEND_RESUME_NUMERATOR /
+      NETWORK_SEND_RESUME_DENOMINATOR;
+
+  return totalCount <= totalResumeCount &&
+    totalBytes <= totalResumeBytes &&
+    serviceCount <= serviceResumeCount &&
+    serviceBytes <= serviceResumeBytes &&
+    totalCount < totalCountLimit &&
+    serviceCount < limits.count &&
+    blockedBytes <= totalByteLimit - totalBytes &&
+    blockedBytes <= limits.bytes - serviceBytes;
+}
+
+static uint16_t networkConnectionReadyServicesNL(
+    NetworkConnection * this, bool datagram)
+{
+  uint16_t                       ready      = 0;
+  struct NetworkSendAccounting * accounting = datagram ?
+    &this->datagramSend : &this->reliableSend;
+  for (LGNetService service = LG_NET_SERVICE_CORE;
+       service < NETWORK_SEND_SERVICE_COUNT; ++service)
+  {
+    if (!accounting->serviceBlocked[service] ||
+        !networkConnectionSendCanResumeNL(this, service, datagram))
+      continue;
+
+    accounting->serviceBlocked[service]      = false;
+    accounting->serviceBlockedBytes[service] = 0;
+    ready                                   |= UINT16_C(1) << service;
+  }
+  return ready;
+}
+
+static uint16_t networkConnectionReleaseSendNL(
+    NetworkConnection * this, const struct NetworkSend * send)
+{
+  if (send->service >= NETWORK_SEND_SERVICE_COUNT)
+  {
+    DEBUG_ERROR("Network send accounting service out of range");
+    return 0;
+  }
+
+  struct NetworkSendAccounting * accounting = send->datagram ?
+    &this->datagramSend : &this->reliableSend;
+  if (!accounting->count || !accounting->serviceCount[send->service] ||
+      accounting->bytes < send->length ||
+      accounting->serviceBytes[send->service] < send->length)
+  {
+    DEBUG_ERROR("Network send accounting underflow");
+    networkConnectionResetSendAccountingNL(this);
+    return 0;
+  }
+
+  --accounting->count;
+  --accounting->serviceCount[send->service];
+  accounting->bytes                       -= send->length;
+  accounting->serviceBytes[send->service] -= send->length;
+  return networkConnectionReadyServicesNL(this, send->datagram);
+}
+
+static void networkConnectionNotifySendReady(NetworkConnection * this,
+    uint16_t reliable, uint16_t datagram)
+{
+  if (!this->sendReady)
+    return;
+
+  for (LGNetService service = LG_NET_SERVICE_CORE;
+       service < NETWORK_SEND_SERVICE_COUNT; ++service)
+  {
+    const uint16_t serviceMask = UINT16_C(1) << service;
+    if (reliable & serviceMask)
+      this->sendReady(this->opaque, service, false);
+    if (datagram & serviceMask)
+      this->sendReady(this->opaque, service, true);
+  }
+}
+
+static LG_TransportStatus networkConnectionSendPacket(
+    NetworkConnection * this,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength, bool allowConnecting)
@@ -281,13 +592,10 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
       !lgNetEnvelopeRouteValid(&routeEnvelope, LG_NET_ROLE_CLIENT,
         LG_NET_ROUTE_DELIVERY_RELIABLE) ||
       atomic_load_explicit(&this->stopping, memory_order_acquire))
-    return false;
+    return LG_TRANSPORT_ERROR;
 
-  const size_t         packetSize = LG_NET_ENVELOPE_WIRE_SIZE +
+  const size_t packetSize = LG_NET_ENVELOPE_WIRE_SIZE +
     payloadLength;
-  struct NetworkSend * send       = malloc(sizeof(*send) + packetSize);
-  if (!send)
-    return false;
 
   LGNetPacketParameters parameters;
   lgNetPacketParametersInit(&parameters, service, messageType, serviceVersion,
@@ -308,25 +616,60 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
     service == LG_NET_SERVICE_CORE ?
       this->maxPayloadLength : this->serviceMaxPayload[service];
   if (!stream || (!allowConnecting &&
-        !atomic_load_explicit(&this->sessionValid, memory_order_acquire)) ||
-      !serviceReady || payloadLength > maxPayloadLength ||
-      this->sendSequence == UINT64_MAX)
+        !atomic_load_explicit(&this->sessionValid, memory_order_acquire)))
   {
     LG_UNLOCK(this->lock);
-    free(send);
-    return false;
+    return LG_TRANSPORT_DISCONNECTED;
+  }
+  if (!serviceReady || payloadLength > maxPayloadLength)
+  {
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+  if (this->sendSequence == UINT64_MAX)
+  {
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_ERROR;
+  }
+
+  const LG_TransportStatus reserveStatus =
+    networkConnectionReserveSendNL(this, service, false, packetSize);
+  if (reserveStatus != LG_TRANSPORT_OK)
+  {
+    LG_UNLOCK(this->lock);
+    return reserveStatus;
+  }
+
+  struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
+  if (!send)
+  {
+    const struct NetworkSend rollback =
+    {
+      .service  = service,
+      .length   = (uint32_t)packetSize,
+      .datagram = false,
+    };
+    const uint16_t ready = networkConnectionReleaseSendNL(this, &rollback);
+    LG_UNLOCK(this->lock);
+    networkConnectionNotifySendReady(this, ready, 0);
+    return LG_TRANSPORT_ERROR;
   }
 
   parameters.sessionEpoch = this->sessionEpoch;
   parameters.sequence     = ++this->sendSequence;
+  send->service           = service;
+  send->length            = (uint32_t)packetSize;
+  send->datagram          = false;
   size_t wireSize;
   if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
         &parameters, payload, payloadLength) || wireSize != packetSize)
   {
     --this->sendSequence;
+    const uint16_t ready = networkConnectionReleaseSendNL(this, send);
     LG_UNLOCK(this->lock);
     free(send);
-    return false;
+    networkConnectionNotifySendReady(this, ready, 0);
+    return LG_TRANSPORT_ERROR;
   }
 
   send->buffer.Buffer = send->data;
@@ -334,16 +677,21 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
 
   const QUIC_STATUS status = this->api->StreamSend(stream,
       &send->buffer, 1, QUIC_SEND_FLAG_NONE, send);
+  uint16_t          ready  = 0;
   if (QUIC_FAILED(status))
+  {
     --this->sendSequence;
+    ready = networkConnectionReleaseSendNL(this, send);
+  }
   LG_UNLOCK(this->lock);
 
   if (QUIC_FAILED(status))
   {
     free(send);
-    return false;
+    networkConnectionNotifySendReady(this, ready, 0);
+    return LG_TRANSPORT_ERROR;
   }
-  return true;
+  return LG_TRANSPORT_OK;
 }
 
 static bool networkConnectionSendHello(NetworkConnection * this)
@@ -368,10 +716,10 @@ static bool networkConnectionSendHello(NetworkConnection * this)
   memcpy(this->clientHelloNonce, hello.nonce, sizeof(hello.nonce));
   LG_UNLOCK(this->lock);
 
-  if (!networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+  if (networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_HELLO, LG_NET_CORE_VERSION_CURRENT,
       LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
-      payload, sizeof(payload), true))
+      payload, sizeof(payload), true) != LG_TRANSPORT_OK)
     goto cleanup;
 
   for (LGNetService service = LG_NET_SERVICE_RECOVERY;
@@ -385,17 +733,18 @@ static bool networkConnectionSendHello(NetworkConnection * this)
     uint8_t capabilityPayload[LG_NET_CAPABILITY_WIRE_SIZE];
     if (!lgNetCapabilityEncode(capabilityPayload,
           sizeof(capabilityPayload), &this->offeredCapabilities[service]) ||
-        !networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+        networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
           LG_NET_CORE_MESSAGE_CAPABILITY, LG_NET_CORE_VERSION_CURRENT,
           LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
-          capabilityPayload, sizeof(capabilityPayload), true))
+          capabilityPayload, sizeof(capabilityPayload), true) !=
+            LG_TRANSPORT_OK)
       goto cleanup;
   }
 
   result = networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
       LG_NET_CORE_VERSION_CURRENT, LG_NET_ENVELOPE_FINAL,
-      0, NETWORK_HELLO_REQUEST_ID, NULL, 0, true);
+      0, NETWORK_HELLO_REQUEST_ID, NULL, 0, true) == LG_TRANSPORT_OK;
 
 cleanup:
   networkAuthSecureZero(payload, sizeof(payload));
@@ -651,7 +1000,7 @@ static bool networkConnectionHandleAuthChallenge(NetworkConnection * this,
   sent = networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_AUTH_RESPONSE, LG_NET_CORE_VERSION_CURRENT,
       LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
-      payload, (uint32_t)payloadSize, true);
+      payload, (uint32_t)payloadSize, true) == LG_TRANSPORT_OK;
 
 cleanup:
   if (stored && !sent)
@@ -1261,18 +1610,33 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
     }
 
     case QUIC_CONNECTION_EVENT_DATAGRAM_STATE_CHANGED:
+    {
+      uint16_t ready;
       LG_LOCK(this->lock);
       this->datagramSendEnabled   =
         event->DATAGRAM_STATE_CHANGED.SendEnabled != FALSE;
       this->maxDatagramSendLength =
         event->DATAGRAM_STATE_CHANGED.MaxSendLength;
+      ready                        =
+        networkConnectionReadyServicesNL(this, true);
       LG_UNLOCK(this->lock);
+      networkConnectionNotifySendReady(this, 0, ready);
       return QUIC_STATUS_SUCCESS;
+    }
 
     case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
       if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(
             event->DATAGRAM_SEND_STATE_CHANGED.State))
-        free(event->DATAGRAM_SEND_STATE_CHANGED.ClientContext);
+      {
+        struct NetworkSend * send =
+          event->DATAGRAM_SEND_STATE_CHANGED.ClientContext;
+        LG_LOCK(this->lock);
+        const uint16_t ready =
+          networkConnectionReleaseSendNL(this, send);
+        LG_UNLOCK(this->lock);
+        free(send);
+        networkConnectionNotifySendReady(this, 0, ready);
+      }
       return QUIC_STATUS_SUCCESS;
 
     case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
@@ -1311,8 +1675,15 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
       return QUIC_STATUS_SUCCESS;
 
     case QUIC_STREAM_EVENT_SEND_COMPLETE:
-      free(event->SEND_COMPLETE.ClientContext);
+    {
+      struct NetworkSend * send = event->SEND_COMPLETE.ClientContext;
+      LG_LOCK(this->lock);
+      const uint16_t ready = networkConnectionReleaseSendNL(this, send);
+      LG_UNLOCK(this->lock);
+      free(send);
+      networkConnectionNotifySendReady(this, ready, 0);
       return QUIC_STATUS_SUCCESS;
+    }
 
     case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
     case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
@@ -1388,6 +1759,7 @@ bool networkConnectionCreate(NetworkConnection ** result,
   this->trustCancel = params->trustCancel;
   this->packet      = params->packet;
   this->state       = params->state;
+  this->sendReady   = params->sendReady;
   this->opaque      = params->opaque;
 
   this->connectEvent = lgCreateEvent(false, 0);
@@ -1532,6 +1904,7 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->maxDatagramPayload     = 0;
   this->maxDatagramSendLength  = 0;
   this->datagramSendEnabled    = false;
+  networkConnectionResetSendAccountingNL(this);
   networkConnectionClearAuthProofNL(this);
   memset(this->serviceVersions, 0, sizeof(this->serviceVersions));
   memset(this->serviceMaxPayload, 0, sizeof(this->serviceMaxPayload));
@@ -1646,6 +2019,7 @@ void networkConnectionDisconnect(NetworkConnection * this)
     this->connection         = NULL;
     this->controlStream      = NULL;
     this->certificatePending = false;
+    networkConnectionResetSendAccountingNL(this);
     memset(this->pendingFingerprint, 0, sizeof(this->pendingFingerprint));
   }
   LG_UNLOCK(this->lock);
@@ -1715,8 +2089,7 @@ LG_TransportStatus networkConnectionSend(NetworkConnection * this,
 
   return networkConnectionSendPacket(this, service, messageType,
       serviceVersion, flags, componentEpoch, requestID,
-      payload, payloadLength, false) ?
-    LG_TRANSPORT_OK : LG_TRANSPORT_ERROR;
+      payload, payloadLength, false);
 }
 
 LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
@@ -1754,35 +2127,78 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
   const uint16_t serviceMask = UINT16_C(1) << service;
   HQUIC          connection  = this->connection;
   if (!connection ||
-      !atomic_load_explicit(&this->sessionValid, memory_order_acquire) ||
-      !(this->receivedServices & serviceMask) ||
+      !atomic_load_explicit(&this->sessionValid, memory_order_acquire))
+  {
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_DISCONNECTED;
+  }
+  if (!(this->receivedServices & serviceMask) ||
       !(this->datagramServices & serviceMask) ||
       this->serviceVersions[service] != serviceVersion ||
-      !this->datagramSendEnabled ||
-      payloadLength > this->serviceMaxDatagram[service] ||
-      packetSize > this->maxDatagramSendLength ||
-      this->datagramSendSequence == UINT64_MAX)
+      payloadLength > this->serviceMaxDatagram[service])
   {
     LG_UNLOCK(this->lock);
     return LG_TRANSPORT_UNAVAILABLE;
+  }
+  if (this->datagramSendSequence == UINT64_MAX)
+  {
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_ERROR;
+  }
+  if (!this->datagramSendEnabled ||
+      packetSize > this->maxDatagramSendLength)
+  {
+    const struct NetworkSendLimits limits =
+      networkConnectionSendLimits(service, true);
+    if (packetSize <= limits.bytes &&
+        packetSize <= NETWORK_SEND_DATAGRAM_BYTES_MAX)
+    {
+      this->datagramSend.serviceBlocked[service]      = true;
+      this->datagramSend.serviceBlockedBytes[service] =
+        this->datagramSend.serviceBlockedBytes[service] > packetSize ?
+          this->datagramSend.serviceBlockedBytes[service] : packetSize;
+    }
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+
+  const LG_TransportStatus reserveStatus =
+    networkConnectionReserveSendNL(this, service, true, packetSize);
+  if (reserveStatus != LG_TRANSPORT_OK)
+  {
+    LG_UNLOCK(this->lock);
+    return reserveStatus;
   }
 
   struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
   if (!send)
   {
+    const struct NetworkSend rollback =
+    {
+      .service  = service,
+      .length   = (uint32_t)packetSize,
+      .datagram = true,
+    };
+    const uint16_t ready = networkConnectionReleaseSendNL(this, &rollback);
     LG_UNLOCK(this->lock);
+    networkConnectionNotifySendReady(this, 0, ready);
     return LG_TRANSPORT_ERROR;
   }
 
   parameters.sessionEpoch = this->sessionEpoch;
   parameters.sequence     = ++this->datagramSendSequence;
+  send->service           = service;
+  send->length            = (uint32_t)packetSize;
+  send->datagram          = true;
   size_t wireSize;
   if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
         &parameters, payload, payloadLength) || wireSize != packetSize)
   {
     --this->datagramSendSequence;
+    const uint16_t ready = networkConnectionReleaseSendNL(this, send);
     LG_UNLOCK(this->lock);
     free(send);
+    networkConnectionNotifySendReady(this, 0, ready);
     return LG_TRANSPORT_ERROR;
   }
 
@@ -1793,13 +2209,18 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
     sendFlags |= QUIC_SEND_FLAG_CANCEL_ON_BLOCKED;
   const QUIC_STATUS status = this->api->DatagramSend(connection,
       &send->buffer, 1, sendFlags, send);
+  uint16_t          ready  = 0;
   if (QUIC_FAILED(status))
+  {
     --this->datagramSendSequence;
+    ready = networkConnectionReleaseSendNL(this, send);
+  }
   LG_UNLOCK(this->lock);
 
   if (QUIC_FAILED(status))
   {
     free(send);
+    networkConnectionNotifySendReady(this, 0, ready);
     return LG_TRANSPORT_ERROR;
   }
   return LG_TRANSPORT_OK;

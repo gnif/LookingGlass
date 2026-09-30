@@ -75,6 +75,22 @@ namespace
   static constexpr uint16_t NETWORK_PASSWORD_CHALLENGE_SIZE = 32;
   static constexpr uint16_t NETWORK_PASSWORD_NONCE_SIZE     = 32;
   static constexpr uint32_t NETWORK_AUTH_RETRY_AFTER_MS     = 1000;
+
+  static constexpr uint32_t NETWORK_SEND_RELIABLE_COUNT_MAX      = 512;
+  static constexpr uint64_t NETWORK_SEND_RELIABLE_BYTES_MAX      =
+    UINT64_C(128) * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_SEND_RELIABLE_COUNT_RESERVED = 64;
+  static constexpr uint64_t NETWORK_SEND_RELIABLE_BYTES_RESERVED =
+    UINT64_C(32) * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_SEND_DATAGRAM_COUNT_MAX      = 512;
+  static constexpr uint64_t NETWORK_SEND_DATAGRAM_BYTES_MAX      =
+    UINT64_C(1) * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_SEND_DATAGRAM_COUNT_RESERVED = 64;
+  static constexpr uint64_t NETWORK_SEND_DATAGRAM_BYTES_RESERVED =
+    UINT64_C(256) * 1024U;
+  static constexpr uint32_t NETWORK_SEND_RESUME_NUMERATOR        = 3;
+  static constexpr uint32_t NETWORK_SEND_RESUME_DENOMINATOR      = 4;
+
   static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK       =
     LG_NET_KEYBOARD_LED_NUM_LOCK    |
     LG_NET_KEYBOARD_LED_CAPS_LOCK   |
@@ -219,8 +235,35 @@ struct CNetworkServer::Impl
 
   struct Send
   {
-    QUIC_BUFFER          buffer = {};
+    QUIC_BUFFER          buffer   = {};
     std::vector<uint8_t> data;
+    LGNetService         service  = LG_NET_SERVICE_CORE;
+    uint32_t             length   = 0;
+    bool                 datagram = false;
+  };
+
+  struct SendLimits
+  {
+    uint32_t count;
+    uint64_t bytes;
+  };
+
+  struct SendAccounting
+  {
+    uint32_t count;
+    uint64_t bytes;
+    uint32_t serviceCount[NETWORK_SERVICE_COUNT];
+    uint64_t serviceBytes[NETWORK_SERVICE_COUNT];
+    bool     serviceBlocked[NETWORK_SERVICE_COUNT];
+    uint64_t serviceBlockedBytes[NETWORK_SERVICE_COUNT];
+    uint16_t writableServices;
+  };
+
+  enum class SendResult
+  {
+    SENT,
+    BLOCKED,
+    FAILED,
   };
 
   enum class HandshakeState
@@ -282,6 +325,9 @@ struct CNetworkServer::Impl
     uint16_t                         datagramServices             = 0;
     LGNetCapability                  offeredCapabilities [NETWORK_SERVICE_COUNT] = {};
     LGNetCapability                  selectedCapabilities[NETWORK_SERVICE_COUNT] = {};
+
+    SendAccounting                   reliableSend                = {};
+    SendAccounting                   datagramSend                = {};
 
     bool                             datagramSendEnabled          = false;
     bool                             closing                      = false;
@@ -437,7 +483,232 @@ struct CNetworkServer::Impl
         QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, error);
   }
 
-  bool SendPacket(Connection& connection, LGNetService service,
+  static SendLimits GetSendLimits(LGNetService service, bool datagram)
+  {
+    if (datagram)
+    {
+      switch (service)
+      {
+        case LG_NET_SERVICE_VIDEO:
+          return { 256U, 768U * 1024U };
+
+        case LG_NET_SERVICE_AUDIO:
+          return { 256U, 512U * 1024U };
+
+        case LG_NET_SERVICE_INPUT:
+          return { 128U, 256U * 1024U };
+
+        default:
+          return { 64U, 256U * 1024U };
+      }
+    }
+
+    switch (service)
+    {
+      case LG_NET_SERVICE_CURSOR:
+        return { 8U, UINT64_C(32) * 1024U * 1024U };
+
+      case LG_NET_SERVICE_VIDEO:
+        return { 64U, UINT64_C(72) * 1024U * 1024U };
+
+      case LG_NET_SERVICE_AUDIO:
+        return { 256U, UINT64_C(16) * 1024U * 1024U };
+
+      case LG_NET_SERVICE_CLIPBOARD:
+      case LG_NET_SERVICE_FILE:
+        return { 64U, UINT64_C(32) * 1024U * 1024U };
+
+      case LG_NET_SERVICE_CORE:
+        return { 64U, UINT64_C(20) * 1024U * 1024U };
+
+      default:
+        return { 64U, UINT64_C(20) * 1024U * 1024U };
+    }
+  }
+
+  static bool SendPriority(LGNetService service)
+  {
+    return service == LG_NET_SERVICE_CORE ||
+      service == LG_NET_SERVICE_RECOVERY ||
+      service == LG_NET_SERVICE_CURSOR ||
+      service == LG_NET_SERVICE_INPUT ||
+      service == LG_NET_SERVICE_CONTROL;
+  }
+
+  static void BlockSendLocked(Connection& connection,
+    LGNetService service, bool datagram, uint64_t packetSize)
+  {
+    SendAccounting& accounting = datagram ?
+      connection.datagramSend : connection.reliableSend;
+    accounting.serviceBlocked[service]      = true;
+    accounting.serviceBlockedBytes[service] =
+      accounting.serviceBlockedBytes[service] > packetSize ?
+        accounting.serviceBlockedBytes[service] : packetSize;
+    accounting.writableServices            &= ~(UINT16_C(1) << service);
+  }
+
+  static SendResult ReserveSendLocked(Connection& connection,
+    LGNetService service, bool datagram, uint64_t packetSize)
+  {
+    if (service >= NETWORK_SERVICE_COUNT)
+      return SendResult::FAILED;
+
+    const SendLimits limits          = GetSendLimits(service, datagram);
+    uint32_t         totalCountLimit = datagram ?
+      NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
+    uint64_t         totalByteLimit  = datagram ?
+      NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
+    if (!SendPriority(service))
+    {
+      totalCountLimit -= datagram ?
+        NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
+        NETWORK_SEND_RELIABLE_COUNT_RESERVED;
+      totalByteLimit  -= datagram ?
+        NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
+        NETWORK_SEND_RELIABLE_BYTES_RESERVED;
+    }
+    SendAccounting& accounting       = datagram ?
+      connection.datagramSend : connection.reliableSend;
+
+    if (packetSize > limits.bytes || packetSize > totalByteLimit)
+      return SendResult::FAILED;
+
+    if (accounting.count >= totalCountLimit ||
+        accounting.serviceCount[service] >= limits.count ||
+        accounting.bytes > totalByteLimit - packetSize ||
+        accounting.serviceBytes[service] > limits.bytes - packetSize)
+    {
+      BlockSendLocked(connection, service, datagram, packetSize);
+      return SendResult::BLOCKED;
+    }
+
+    ++accounting.count;
+    ++accounting.serviceCount[service];
+    accounting.bytes                 += packetSize;
+    accounting.serviceBytes[service] += packetSize;
+    accounting.writableServices      &= ~(UINT16_C(1) << service);
+    return SendResult::SENT;
+  }
+
+  static bool SendCanResumeLocked(const Connection& connection,
+    LGNetService service, bool datagram)
+  {
+    const SendLimits limits          = GetSendLimits(service, datagram);
+    uint32_t         totalCountLimit = datagram ?
+      NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
+    uint64_t         totalByteLimit  = datagram ?
+      NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
+    if (!SendPriority(service))
+    {
+      totalCountLimit -= datagram ?
+        NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
+        NETWORK_SEND_RELIABLE_COUNT_RESERVED;
+      totalByteLimit  -= datagram ?
+        NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
+        NETWORK_SEND_RELIABLE_BYTES_RESERVED;
+    }
+    const SendAccounting& accounting = datagram ?
+      connection.datagramSend : connection.reliableSend;
+
+    const uint32_t totalCount   = accounting.count;
+    const uint64_t totalBytes   = accounting.bytes;
+    const uint32_t serviceCount = accounting.serviceCount[service];
+    const uint64_t serviceBytes = accounting.serviceBytes[service];
+    const uint64_t blockedBytes = accounting.serviceBlockedBytes[service];
+
+    if (connection.closing || !connection.controlStream ||
+        (datagram && (!connection.datagramSendEnabled ||
+          blockedBytes > connection.maxDatagramSendLength)))
+      return false;
+
+    const uint32_t totalResumeCount   =
+      totalCountLimit * NETWORK_SEND_RESUME_NUMERATOR /
+        NETWORK_SEND_RESUME_DENOMINATOR;
+    const uint64_t totalResumeBytes   =
+      totalByteLimit * NETWORK_SEND_RESUME_NUMERATOR /
+        NETWORK_SEND_RESUME_DENOMINATOR;
+    const uint32_t serviceResumeCount =
+      limits.count * NETWORK_SEND_RESUME_NUMERATOR /
+        NETWORK_SEND_RESUME_DENOMINATOR;
+    const uint64_t serviceResumeBytes =
+      limits.bytes * NETWORK_SEND_RESUME_NUMERATOR /
+        NETWORK_SEND_RESUME_DENOMINATOR;
+
+    return totalCount <= totalResumeCount &&
+      totalBytes <= totalResumeBytes &&
+      serviceCount <= serviceResumeCount &&
+      serviceBytes <= serviceResumeBytes &&
+      totalCount < totalCountLimit &&
+      serviceCount < limits.count &&
+      blockedBytes <= totalByteLimit - totalBytes &&
+      blockedBytes <= limits.bytes - serviceBytes;
+  }
+
+  static uint16_t ReadyServicesLocked(Connection& connection,
+    bool datagram)
+  {
+    uint16_t        ready      = 0;
+    SendAccounting& accounting = datagram ?
+      connection.datagramSend : connection.reliableSend;
+    for (LGNetService service = LG_NET_SERVICE_CORE;
+         service < NETWORK_SERVICE_COUNT; ++service)
+    {
+      if (!accounting.serviceBlocked[service] || !SendCanResumeLocked(
+            connection, service, datagram))
+        continue;
+
+      accounting.serviceBlocked[service]      = false;
+      accounting.serviceBlockedBytes[service] = 0;
+      ready                                  |= UINT16_C(1) << service;
+    }
+    return ready;
+  }
+
+  static void ReleaseSendLocked(Connection& connection, const Send& send)
+  {
+    if (send.service >= NETWORK_SERVICE_COUNT)
+    {
+      DEBUG_ERROR("Network send accounting service out of range for "
+        "client %u", connection.client);
+      return;
+    }
+
+    SendAccounting& accounting = send.datagram ?
+      connection.datagramSend : connection.reliableSend;
+    if (!accounting.count || !accounting.serviceCount[send.service] ||
+        accounting.bytes < send.length ||
+        accounting.serviceBytes[send.service] < send.length)
+    {
+      DEBUG_ERROR("Network send accounting underflow for client %u",
+        connection.client);
+      return;
+    }
+
+    --accounting.count;
+    --accounting.serviceCount[send.service];
+    accounting.bytes                      -= send.length;
+    accounting.serviceBytes[send.service] -= send.length;
+    accounting.writableServices           |=
+      ReadyServicesLocked(connection, send.datagram);
+  }
+
+  static bool ConsumeSendReady(Connection& connection,
+    LGNetService service, bool datagram)
+  {
+    if (service >= NETWORK_SERVICE_COUNT)
+      return false;
+
+    CSRWExclusiveLock guard(connection.lock);
+    SendAccounting& accounting = datagram ?
+      connection.datagramSend : connection.reliableSend;
+    const uint16_t serviceMask = UINT16_C(1) << service;
+    const bool     ready       =
+      (accounting.writableServices & serviceMask) != 0;
+    accounting.writableServices &= ~serviceMask;
+    return ready;
+  }
+
+  SendResult TrySendPacket(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
     uint32_t payloadLength)
@@ -453,23 +724,12 @@ struct CNetworkServer::Impl
         payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
         flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
           LG_NET_ENVELOPE_EARLY_DATA))
-      return false;
+      return SendResult::FAILED;
 
-    std::unique_ptr<Send> send(new (std::nothrow) Send());
-    if (!send)
-      return false;
-
-    const size_t packetSize = LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
-    try
-    {
-      send->data.resize(packetSize);
-    }
-    catch (...)
-    {
-      return false;
-    }
-
-    QUIC_STATUS status;
+    const size_t          packetSize =
+      LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+    std::unique_ptr<Send> send;
+    QUIC_STATUS           status;
     {
       CSRWExclusiveLock guard(connection.lock);
       const uint16_t serviceMask = UINT16_C(1) << service;
@@ -480,7 +740,7 @@ struct CNetworkServer::Impl
                 HandshakeState::PUBLISHING_CAPABILITIES) ||
              !(connection.selectedServices & serviceMask) ||
              !(connection.reliableServices & serviceMask))))
-        return false;
+        return SendResult::FAILED;
       const uint32_t maxPayload     = service == LG_NET_SERVICE_CORE ?
         connection.maxPayload :
         connection.selectedCapabilities[service].maxPayloadLength;
@@ -491,7 +751,38 @@ struct CNetworkServer::Impl
           !lgNetServiceVersionSupported(service, serviceVersion) ||
           serviceVersion < route->serviceVersionMin ||
           connection.sendSequence == UINT64_MAX)
-        return false;
+        return SendResult::FAILED;
+
+      const SendResult reserve =
+        ReserveSendLocked(connection, service, false, packetSize);
+      if (reserve != SendResult::SENT)
+        return reserve;
+
+      send.reset(new (std::nothrow) Send());
+      if (!send)
+      {
+        Send rollback;
+        rollback.service  = service;
+        rollback.length   = static_cast<uint32_t>(packetSize);
+        rollback.datagram = false;
+        ReleaseSendLocked(connection, rollback);
+        return SendResult::FAILED;
+      }
+      try
+      {
+        send->data.resize(packetSize);
+      }
+      catch (...)
+      {
+        send->service  = service;
+        send->length   = static_cast<uint32_t>(packetSize);
+        send->datagram = false;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
+      }
+      send->service  = service;
+      send->length   = static_cast<uint32_t>(packetSize);
+      send->datagram = false;
 
       LGNetPacketParameters parameters;
       lgNetPacketParametersInit(&parameters, service, messageType,
@@ -508,7 +799,8 @@ struct CNetworkServer::Impl
           wireSize > UINT32_MAX)
       {
         --connection.sendSequence;
-        return false;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
       }
 
       send->buffer.Buffer = send->data.data();
@@ -516,15 +808,28 @@ struct CNetworkServer::Impl
       status = api->StreamSend(connection.controlStream, &send->buffer, 1,
         QUIC_SEND_FLAG_NONE, send.get());
       if (QUIC_FAILED(status))
+      {
         --connection.sendSequence;
+        ReleaseSendLocked(connection, *send);
+      }
     }
     if (QUIC_FAILED(status))
-      return false;
+      return SendResult::FAILED;
     send.release();
-    return true;
+    return SendResult::SENT;
   }
 
-  bool SendDatagram(Connection& connection, LGNetService service,
+  bool SendPacket(Connection& connection, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID, const void * payload,
+    uint32_t payloadLength)
+  {
+    return TrySendPacket(connection, service, messageType, flags,
+      componentEpoch, requestID, payload, payloadLength) ==
+        SendResult::SENT;
+  }
+
+  SendResult TrySendDatagram(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
     uint32_t payloadLength, bool discardIfBlocked)
@@ -540,23 +845,12 @@ struct CNetworkServer::Impl
         payloadLength > NETWORK_MAX_DATAGRAM_PAYLOAD ||
         flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
           LG_NET_ENVELOPE_EARLY_DATA))
-      return false;
+      return SendResult::FAILED;
 
-    std::unique_ptr<Send> send(new (std::nothrow) Send());
-    if (!send)
-      return false;
-
-    const size_t packetSize = LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
-    try
-    {
-      send->data.resize(packetSize);
-    }
-    catch (...)
-    {
-      return false;
-    }
-
-    QUIC_STATUS status;
+    const size_t          packetSize =
+      LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+    std::unique_ptr<Send> send;
+    QUIC_STATUS           status;
     {
       CSRWExclusiveLock guard(connection.lock);
       const uint16_t serviceMask    = UINT16_C(1) << service;
@@ -571,13 +865,53 @@ struct CNetworkServer::Impl
         connection.selectedCapabilities[service].versionMin;
       if (connection.closing || !connection.handle ||
           connection.handshake != HandshakeState::READY ||
-          !serviceReady || !connection.datagramSendEnabled ||
+          !serviceReady ||
           !maxPayload || payloadLength > maxPayload ||
-          packetSize > connection.maxDatagramSendLength ||
           !lgNetServiceVersionSupported(service, serviceVersion) ||
-          serviceVersion < route->serviceVersionMin ||
-          connection.datagramSendSequence == UINT64_MAX)
-        return false;
+          serviceVersion < route->serviceVersionMin)
+        return SendResult::FAILED;
+      if (connection.datagramSendSequence == UINT64_MAX)
+        return SendResult::FAILED;
+      if (!connection.datagramSendEnabled ||
+          packetSize > connection.maxDatagramSendLength)
+      {
+        const SendLimits limits = GetSendLimits(service, true);
+        if (packetSize <= limits.bytes &&
+            packetSize <= NETWORK_SEND_DATAGRAM_BYTES_MAX)
+          BlockSendLocked(connection, service, true, packetSize);
+        return SendResult::BLOCKED;
+      }
+
+      const SendResult reserve =
+        ReserveSendLocked(connection, service, true, packetSize);
+      if (reserve != SendResult::SENT)
+        return reserve;
+
+      send.reset(new (std::nothrow) Send());
+      if (!send)
+      {
+        Send rollback;
+        rollback.service  = service;
+        rollback.length   = static_cast<uint32_t>(packetSize);
+        rollback.datagram = true;
+        ReleaseSendLocked(connection, rollback);
+        return SendResult::FAILED;
+      }
+      try
+      {
+        send->data.resize(packetSize);
+      }
+      catch (...)
+      {
+        send->service  = service;
+        send->length   = static_cast<uint32_t>(packetSize);
+        send->datagram = true;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
+      }
+      send->service  = service;
+      send->length   = static_cast<uint32_t>(packetSize);
+      send->datagram = true;
 
       LGNetPacketParameters parameters;
       lgNetPacketParametersInit(&parameters, service, messageType,
@@ -595,7 +929,8 @@ struct CNetworkServer::Impl
           wireSize > UINT32_MAX)
       {
         --connection.datagramSendSequence;
-        return false;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
       }
 
       send->buffer.Buffer = send->data.data();
@@ -606,12 +941,25 @@ struct CNetworkServer::Impl
       status = api->DatagramSend(connection.handle, &send->buffer, 1,
         sendFlags, send.get());
       if (QUIC_FAILED(status))
+      {
         --connection.datagramSendSequence;
+        ReleaseSendLocked(connection, *send);
+      }
     }
     if (QUIC_FAILED(status))
-      return false;
+      return SendResult::FAILED;
     send.release();
-    return true;
+    return SendResult::SENT;
+  }
+
+  bool SendDatagram(Connection& connection, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID, const void * payload,
+    uint32_t payloadLength, bool discardIfBlocked)
+  {
+    return TrySendDatagram(connection, service, messageType, flags,
+      componentEpoch, requestID, payload, payloadLength,
+      discardIfBlocked) == SendResult::SENT;
   }
 
   bool HandleHello(Connection& connection, const LGNetPacketView& packet)
@@ -2683,6 +3031,10 @@ struct CNetworkServer::Impl
 
     {
       CSRWExclusiveLock guard(connection.lock);
+      if (connection.reliableSend.count || connection.reliableSend.bytes ||
+          connection.datagramSend.count || connection.datagramSend.bytes)
+        DEBUG_ERROR("Network client %u closed with sends in flight",
+          connection.client);
       session = std::move(connection.session);
     }
     if (session)
@@ -2820,24 +3172,30 @@ struct CNetworkServer::Impl
       case QUIC_CONNECTION_EVENT_DATAGRAM_STATE_CHANGED:
       {
         CSRWExclusiveLock guard(connection.lock);
-        connection.datagramSendEnabled =
+        connection.datagramSendEnabled            =
           event->DATAGRAM_STATE_CHANGED.SendEnabled != FALSE;
-        connection.maxDatagramSendLength =
+        connection.maxDatagramSendLength          =
           event->DATAGRAM_STATE_CHANGED.MaxSendLength;
+        connection.datagramSend.writableServices |=
+          ReadyServicesLocked(connection, true);
         return QUIC_STATUS_SUCCESS;
       }
 
       case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
         if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(
               event->DATAGRAM_SEND_STATE_CHANGED.State))
-          delete static_cast<Send *>(
-            event->DATAGRAM_SEND_STATE_CHANGED.ClientContext);
+        {
+          std::unique_ptr<Send> send(static_cast<Send *>(
+            event->DATAGRAM_SEND_STATE_CHANGED.ClientContext));
+          CSRWExclusiveLock    guard(connection.lock);
+          ReleaseSendLocked(connection, *send);
+        }
         return QUIC_STATUS_SUCCESS;
 
       case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
       case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
       {
-        CSRWExclusiveLock guard(connection.lock);
+        CSRWExclusiveLock    guard(connection.lock);
         connection.closing = true;
         return QUIC_STATUS_SUCCESS;
       }
@@ -2868,8 +3226,13 @@ struct CNetworkServer::Impl
         return QUIC_STATUS_SUCCESS;
 
       case QUIC_STREAM_EVENT_SEND_COMPLETE:
-        delete static_cast<Send *>(event->SEND_COMPLETE.ClientContext);
+      {
+        std::unique_ptr<Send> send(
+          static_cast<Send *>(event->SEND_COMPLETE.ClientContext));
+        CSRWExclusiveLock guard(connection.lock);
+        ReleaseSendLocked(connection, *send);
         return QUIC_STATUS_SUCCESS;
+      }
 
       case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
       case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
