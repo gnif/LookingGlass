@@ -45,16 +45,13 @@ set(COMMON_SOURCES
   src/cpuinfo.c
   src/debug.c
   src/ll.c
-  src/network/protocol.c
-  src/network/services.c
-  src/network/wire.c
 )
 
 add_library(lg_common STATIC ${COMMON_SOURCES})
 target_link_libraries(lg_common
   PUBLIC
     lg_common_platform
-    LGProtocol::LGProtocol
+    LGProtocol::Network
 )
 
 if(ENABLE_BACKTRACE)

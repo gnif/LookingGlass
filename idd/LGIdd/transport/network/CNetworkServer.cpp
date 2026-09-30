@@ -27,7 +27,7 @@
 #include "CDebug.h"
 #include "CSRWLock.h"
 #include "NetworkIdentity.h"
-#include "common/network/protocol.h"
+#include <LGProtocol/NetworkProtocol.h>
 
 #include <msquic.h>
 #include <bcrypt.h>

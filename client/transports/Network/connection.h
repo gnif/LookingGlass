@@ -24,7 +24,7 @@
 
 #include "interface/transport.h"
 
-#include "common/network/protocol.h"
+#include <LGProtocol/NetworkProtocol.h>
 
 #include <stdbool.h>
 #include <stdint.h>

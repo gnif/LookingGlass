@@ -28,7 +28,7 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
-#include "common/network/protocol.h"
+#include <LGProtocol/NetworkProtocol.h>
 #include "common/option.h"
 
 #include <stddef.h>

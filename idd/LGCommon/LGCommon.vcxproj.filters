@@ -24,7 +24,7 @@
     <ClCompile Include="CPipeEndpoint.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\common\src\network\services.c">
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\services.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RefreshRate.cpp">
@@ -60,9 +60,6 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CPipeEndpoint.h">
-      <Filter>Header Files</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\common\include\common\network\services.h">
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="CSRWLock.h">

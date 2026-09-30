@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "common/network/protocol.h"
+#include <LGProtocol/NetworkProtocol.h>
 
 #include <stdint.h>
 #include <string>

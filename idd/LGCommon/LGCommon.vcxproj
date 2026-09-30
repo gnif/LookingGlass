@@ -69,9 +69,9 @@
     <ClCompile Include="CClipboardRing.cpp" />
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
-    <ClCompile Include="..\..\common\src\network\protocol.c" />
-    <ClCompile Include="..\..\common\src\network\services.c" />
-    <ClCompile Include="..\..\common\src\network\wire.c" />
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\protocol.c" />
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\services.c" />
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\wire.c" />
     <ClCompile Include="RefreshRate.cpp" />
     <ClCompile Include="WCCopy.cpp" />
     <ClCompile Include="WCCopyAVX2.cpp">
@@ -89,9 +89,6 @@
     <ClInclude Include="CDebug.h" />
     <ClInclude Include="ClipboardRing.h" />
     <ClInclude Include="CPipeEndpoint.h" />
-    <ClInclude Include="..\..\common\include\common\network\protocol.h" />
-    <ClInclude Include="..\..\common\include\common\network\services.h" />
-    <ClInclude Include="..\..\common\include\common\network\wire.h" />
     <ClInclude Include="CSRWLock.h" />
     <ClInclude Include="DefaultDisplayModes.h" />
     <ClInclude Include="InputPipeProtocol.h" />
