@@ -195,6 +195,9 @@ public:
   OpenResult Open();
   bool Initialize();
   bool Setup(size_t alignment);
+  // Unlike the legacy frame-size sentinel, this also recognizes a primary
+  // texture route and verifies every required transport completed setup.
+  bool SetupReady() const;
   CfgResult Cfg(const GraphCfg& cfg, uint64_t revision,
     CFrameGraph& graph, ITexStage * activation = nullptr);
   ProcessResult Process(ITransportActions& actions);

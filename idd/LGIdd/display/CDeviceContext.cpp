@@ -649,7 +649,7 @@ bool CDeviceContext::SetupTransport(size_t alignSize)
 {
   // Frame buffers cannot be allocated until the GPU-specific alignment is
   // known. The swap-chain path may call this again after setup completed.
-  if (!m_transport->Frames().GetMaxFrameSize())
+  if (!m_transport->SetupReady())
   {
     if (!InitializeTransport() || !m_transport->Setup(alignSize))
       return false;

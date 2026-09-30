@@ -1256,6 +1256,44 @@ bool CTransportManager::Setup(size_t alignment)
   return success;
 }
 
+bool CTransportManager::SetupReady() const
+{
+  CTransportManager * manager = const_cast<CTransportManager *>(this);
+  if (!manager->BeginPhase(Phase::ACCESS, true))
+    return false;
+
+  Entry  * entries[FRAME_MAX_SINKS] = {};
+  Entry  * primary                  = nullptr;
+  unsigned count                    = 0;
+  bool     setup                    = false;
+  {
+    CSRWSharedLock managerLock(m_lock);
+    primary = m_primary;
+    setup   = m_setup && !m_stopping && !m_stopped;
+    count   = m_entryCount;
+    for (unsigned i = 0; i < count; ++i)
+      entries[i] = m_entries[i].get();
+  }
+  bool primaryReady = false;
+  bool ready        = setup && primary != nullptr;
+  for (unsigned i = 0; ready && i < count; ++i)
+  {
+    Entry& entry = *entries[i];
+    CSRWSharedLock entryLock(entry.lock);
+    if (entry.required &&
+        (entry.state != State::READY || !entry.setupDone))
+    {
+      ready = false;
+      break;
+    }
+    if (&entry == primary)
+      primaryReady = entry.state == State::READY &&
+        entry.setupDone && entry.frameAdded;
+  }
+  manager->EndPhase();
+  return ready && primaryReady;
+}
+
 CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
   uint64_t revision, CFrameGraph& graph, ITexStage * activation)
 {

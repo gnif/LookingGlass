@@ -24,6 +24,7 @@
 #include "config/CSettings.h"
 #include "transport/CTransportManager.h"
 #include "transport/lgmp/CLGMPTransport.h"
+#include "transport/network/CNetworkTransport.h"
 
 #include <new>
 
@@ -41,14 +42,23 @@ namespace
       new (std::nothrow) CLGMPTransport(config));
   }
 
+  std::unique_ptr<ITransport> CreateNetwork(
+    const TransportInstance& config)
+  {
+    return std::unique_ptr<ITransport>(
+      new (std::nothrow) CNetworkTransport(config));
+  }
+
   const TransportKind KINDS[] =
   {
-    { L"LGMP", 1 },
+    { L"LGMP",    1 },
+    { L"NETWORK", 1 },
   };
 
   const Provider PROVIDERS[] =
   {
-    { CreateLGMP },
+    { CreateLGMP    },
+    { CreateNetwork },
   };
 
   static_assert(ARRAYSIZE(KINDS) == ARRAYSIZE(PROVIDERS),

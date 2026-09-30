@@ -35,6 +35,9 @@
     <Filter Include="Transport\LGMP">
       <UniqueIdentifier>{530EE339-4AD6-4AE7-9A74-09420E73D04B}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Transport\Network">
+      <UniqueIdentifier>{9B627995-4F7D-4F7D-AE88-AD0AA785880D}</UniqueIdentifier>
+    </Filter>
     <Filter Include="Configuration">
       <UniqueIdentifier>{82810F1C-E51C-4DBD-86B2-1CDE8C16A2A9}</UniqueIdentifier>
     </Filter>
@@ -283,6 +286,15 @@
     <ClInclude Include="transport\lgmp\CLGMPTransport.h">
       <Filter>Transport\LGMP</Filter>
     </ClInclude>
+    <ClInclude Include="transport\network\CNetworkSession.h">
+      <Filter>Transport\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\network\CNetworkTransport.h">
+      <Filter>Transport\Network</Filter>
+    </ClInclude>
+    <ClInclude Include="transport\network\NetworkSettings.h">
+      <Filter>Transport\Network</Filter>
+    </ClInclude>
     <ClInclude Include="config\CSettings.h">
       <Filter>Configuration</Filter>
     </ClInclude>
@@ -458,6 +470,15 @@
     </ClCompile>
     <ClCompile Include="transport\lgmp\CLGMPTransport.cpp">
       <Filter>Transport\LGMP</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\network\CNetworkSession.cpp">
+      <Filter>Transport\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\network\CNetworkTransport.cpp">
+      <Filter>Transport\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\network\NetworkSettings.cpp">
+      <Filter>Transport\Network</Filter>
     </ClCompile>
     <ClCompile Include="config\CSettings.cpp">
       <Filter>Configuration</Filter>
