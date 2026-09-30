@@ -66,8 +66,15 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * connection,
 void networkConnectionCancel(NetworkConnection * connection);
 void networkConnectionDisconnect(NetworkConnection * connection);
 bool networkConnectionValid(const NetworkConnection * connection);
+bool networkConnectionServiceAvailable(NetworkConnection * connection,
+    LGNetService service, LGNetCapabilityFlags required);
 
 LG_TransportStatus networkConnectionSend(NetworkConnection * connection,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength);
+LG_TransportStatus networkConnectionSendDatagram(
+    NetworkConnection * connection, LGNetService service,
+    uint16_t messageType, uint16_t serviceVersion,
+    LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength, bool discardIfBlocked);
