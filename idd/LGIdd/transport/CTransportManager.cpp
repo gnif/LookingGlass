@@ -1352,18 +1352,20 @@ CfgResult CTransportManager::Cfg(const GraphCfg& cfg,
     bool frameService = false;
     bool required     = false;
     bool primary      = false;
+    bool texture      = false;
     {
       CSRWSharedLock entryLock(entry.lock);
       frameService =
         (entry.config.services & TRANSPORT_SERVICE_FRAME) != 0;
-      required = entry.required;
-      primary  = entry.primary;
+      required     = entry.required;
+      primary      = entry.primary;
+      texture      = entry.texSink != nullptr;
     }
-    // Software capture writes directly into the primary frame target.
-    // Secondary routes add fan-out work and can require staging copies.
+    // Software capture writes legacy frames directly into the primary target.
+    // Texture routes fan out independently through the frame graph executor.
     if (!frameService)
       continue;
-    if (cfg.mode == GpuMode::SOFTWARE && !primary)
+    if (cfg.mode == GpuMode::SOFTWARE && !primary && !texture)
     {
       if (required)
       {

@@ -2421,7 +2421,7 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
   CSRWSharedLock lock(m_impl->m_lock);
   if (m_impl->m_stopped || m_impl->m_failed)
     return CfgResult::FAILED;
-  if (cfg.mode != GpuMode::HARDWARE || !cfg.width || !cfg.height ||
+  if (!Frame::Valid(cfg.mode) || !cfg.width || !cfg.height ||
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
       !SupportedProfile(cfg.profile))
     return CfgResult::NEXT;
