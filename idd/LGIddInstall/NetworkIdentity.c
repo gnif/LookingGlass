@@ -21,7 +21,8 @@
 #define WIN32_LEAN_AND_MEAN
 
 #include "NetworkIdentity.h"
-#include "../LGCommon/NetworkIdentity.h"
+
+#include <LGProtocol/NetworkIdentity.h>
 
 #include <windows.h>
 #include <ncrypt.h>
