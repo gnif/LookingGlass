@@ -713,7 +713,11 @@ bool CTransportManager::AddServices(Entry& entry)
   if (frameBound)
   {
     m_tex.Rebind(id, epoch);
-    BumpFrameRev();
+    CSRWSharedLock entryLock(entry.lock);
+    // A newly initialized entry is published after AddServices returns.
+    // Bumping earlier can let the frame graph permanently omit the route.
+    if (entry.state == State::READY)
+      BumpFrameRev();
   }
 
   const bool servicesReady =
@@ -902,8 +906,14 @@ bool CTransportManager::SetupEntry(Entry& entry, size_t alignment)
     return false;
   }
 
-  CSRWExclusiveLock entryLock(entry.lock);
-  entry.state = State::READY;
+  bool frameReady;
+  {
+    CSRWExclusiveLock entryLock(entry.lock);
+    frameReady  = entry.state != State::READY && entry.frameAdded;
+    entry.state = State::READY;
+  }
+  if (frameReady)
+    BumpFrameRev();
   return true;
 }
 
