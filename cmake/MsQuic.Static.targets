@@ -5,7 +5,10 @@
     <LGMsQuicBuildDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)\$(IntDir)MsQuic'))</LGMsQuicBuildDir>
     <LGMsQuicArchitecture Condition="'$(Platform)'=='Win32'">Win32</LGMsQuicArchitecture>
     <LGMsQuicArchitecture Condition="'$(Platform)'=='x64'">x64</LGMsQuicArchitecture>
-    <LGMsQuicLibrary>$(LGMsQuicBuildDir)bin\$(LGBaseConfiguration)\msquic.lib</LGMsQuicLibrary>
+    <LGMsQuicLibraryDir>$(LGMsQuicBuildDir)obj\$(LGBaseConfiguration)\</LGMsQuicLibraryDir>
+    <LGMsQuicStaticLibrary>$(LGMsQuicLibraryDir)msquic_static.lib</LGMsQuicStaticLibrary>
+    <LGMsQuicCoreLibrary>$(LGMsQuicLibraryDir)core.lib</LGMsQuicCoreLibrary>
+    <LGMsQuicPlatformLibrary>$(LGMsQuicLibraryDir)msquic_platform.lib</LGMsQuicPlatformLibrary>
   </PropertyGroup>
   <ItemDefinitionGroup>
     <ClCompile>
@@ -13,7 +16,7 @@
       <PreprocessorDefinitions>QUIC_BUILD_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>$(LGMsQuicLibrary);ws2_32.lib;schannel.lib;secur32.lib;OneCore.lib;wbemuuid.lib;winmm.lib;ntdll.lib;bcrypt.lib;ncrypt.lib;crypt32.lib;iphlpapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(LGMsQuicStaticLibrary);$(LGMsQuicCoreLibrary);$(LGMsQuicPlatformLibrary);ws2_32.lib;schannel.lib;secur32.lib;OneCore.lib;wbemuuid.lib;winmm.lib;ntdll.lib;bcrypt.lib;ncrypt.lib;crypt32.lib;iphlpapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Target
@@ -38,9 +41,15 @@
     BeforeTargets="Link"
     DependsOnTargets="ConfigureLGMsQuic">
     <Exec
-      Command="cmake --build &quot;$(LGMsQuicBuildDir).&quot; --config &quot;$(LGBaseConfiguration)&quot; --target msquic_lib --parallel" />
+      Command="cmake --build &quot;$(LGMsQuicBuildDir).&quot; --config &quot;$(LGBaseConfiguration)&quot; --target msquic_static --parallel" />
     <Error
-      Condition="!Exists('$(LGMsQuicLibrary)')"
-      Text="The static MsQuic build did not produce $(LGMsQuicLibrary)." />
+      Condition="!Exists('$(LGMsQuicStaticLibrary)')"
+      Text="The static MsQuic build did not produce $(LGMsQuicStaticLibrary)." />
+    <Error
+      Condition="!Exists('$(LGMsQuicCoreLibrary)')"
+      Text="The static MsQuic build did not produce $(LGMsQuicCoreLibrary)." />
+    <Error
+      Condition="!Exists('$(LGMsQuicPlatformLibrary)')"
+      Text="The static MsQuic build did not produce $(LGMsQuicPlatformLibrary)." />
   </Target>
 </Project>
