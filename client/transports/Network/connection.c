@@ -170,6 +170,11 @@ struct NetworkConnection
   char                pendingFingerprint[NETWORK_FINGERPRINT_TEXT_SIZE];
 
   LG_TransportStatus   connectStatus;
+  QUIC_STATUS          lastTransportStatus;
+  QUIC_UINT62          lastTransportError;
+  QUIC_UINT62          lastPeerError;
+  bool                 lastTransportErrorValid;
+  bool                 lastPeerErrorValid;
   bool                 connecting;
   LG_TransportSession  session;
   uint64_t             sessionEpoch;
@@ -345,6 +350,31 @@ static void networkConnectionFail(NetworkConnection * this,
 
   networkConnectionSetState(this, false, reason);
   lgSignalEvent(this->connectEvent);
+}
+
+static bool networkConnectionRecordTransportError(NetworkConnection * this,
+    QUIC_STATUS status, QUIC_UINT62 error)
+{
+  LG_LOCK(this->lock);
+  const bool changed = !this->lastTransportErrorValid ||
+    this->lastTransportStatus != status || this->lastTransportError != error;
+  this->lastTransportStatus     = status;
+  this->lastTransportError      = error;
+  this->lastTransportErrorValid = true;
+  LG_UNLOCK(this->lock);
+  return changed;
+}
+
+static bool networkConnectionRecordPeerError(NetworkConnection * this,
+    QUIC_UINT62 error)
+{
+  LG_LOCK(this->lock);
+  const bool changed = !this->lastPeerErrorValid ||
+    this->lastPeerError != error;
+  this->lastPeerError      = error;
+  this->lastPeerErrorValid = true;
+  LG_UNLOCK(this->lock);
+  return changed;
 }
 
 static struct NetworkSendLimits networkConnectionSendLimits(
@@ -945,7 +975,9 @@ static void networkConnectionReady(NetworkConnection * this)
     return;
   }
 
-  this->connectStatus = LG_TRANSPORT_OK;
+  this->connectStatus           = LG_TRANSPORT_OK;
+  this->lastTransportErrorValid = false;
+  this->lastPeerErrorValid      = false;
   atomic_store_explicit(&this->sessionValid, true, memory_order_release);
   LG_UNLOCK(this->lock);
 
@@ -2161,12 +2193,29 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
     }
 
     case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
+    {
+      const QUIC_STATUS status =
+        event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status;
+      const QUIC_UINT62 error  =
+        event->SHUTDOWN_INITIATED_BY_TRANSPORT.ErrorCode;
+      if (networkConnectionRecordTransportError(this, status, error))
+        DEBUG_WARN("Network transport closed the connection: status 0x%x, "
+            "error 0x%llx", (unsigned)status,
+            (unsigned long long)error);
       networkConnectionFail(this, LG_TRANSPORT_UNAVAILABLE);
       return QUIC_STATUS_SUCCESS;
+    }
 
     case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
+    {
+      const QUIC_UINT62 error =
+        event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode;
+      if (error && networkConnectionRecordPeerError(this, error))
+        DEBUG_WARN("Network server closed the connection: error 0x%llx",
+            (unsigned long long)error);
       networkConnectionFail(this, LG_TRANSPORT_DISCONNECTED);
       return QUIC_STATUS_SUCCESS;
+    }
 
     case QUIC_CONNECTION_EVENT_SHUTDOWN_COMPLETE:
       networkConnectionSetState(
@@ -2687,6 +2736,9 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
       QUIC_ADDRESS_FAMILY_UNSPEC, this->address, this->port);
   if (QUIC_FAILED(status))
   {
+    if (networkConnectionRecordTransportError(this, status, 0))
+      DEBUG_WARN("MsQuic ConnectionStart failed for %s: 0x%x",
+          this->endpoint, (unsigned)status);
     this->api->ConnectionClose(this->connection);
     this->connection = NULL;
     LG_LOCK(this->lock);

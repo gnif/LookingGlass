@@ -4414,9 +4414,25 @@ retry:
         return QUIC_STATUS_SUCCESS;
 
       case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_TRANSPORT:
+      {
+        DEBUG_WARN("Network client %u transport shutdown: status 0x%lx, "
+          "error 0x%llx", connection.client,
+          static_cast<unsigned long>(
+            event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status),
+          static_cast<unsigned long long>(
+            event->SHUTDOWN_INITIATED_BY_TRANSPORT.ErrorCode));
+        CSRWExclusiveLock guard(connection.lock);
+        connection.closing = true;
+        return QUIC_STATUS_SUCCESS;
+      }
+
       case QUIC_CONNECTION_EVENT_SHUTDOWN_INITIATED_BY_PEER:
       {
-        CSRWExclusiveLock    guard(connection.lock);
+        if (event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode)
+          DEBUG_WARN("Network client %u closed the connection: error 0x%llx",
+            connection.client, static_cast<unsigned long long>(
+              event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode));
+        CSRWExclusiveLock guard(connection.lock);
         connection.closing = true;
         return QUIC_STATUS_SUCCESS;
       }
