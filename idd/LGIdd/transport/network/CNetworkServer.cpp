@@ -22,10 +22,12 @@
 
 #include "transport/network/CNetworkSession.h"
 #include "transport/network/CNetworkTransport.h"
+#include "transport/network/NetworkAuthCrypto.h"
 #include "transport/network/NetworkSettings.h"
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include <LGProtocol/NetworkAuth.h>
 #include <LGProtocol/NetworkIdentity.h>
 #include <LGProtocol/NetworkPacket.h>
 #include <LGProtocol/NetworkRoute.h>
@@ -34,7 +36,6 @@
 #include <LGProtocol/NetworkStream.h>
 
 #include <msquic.h>
-#include <bcrypt.h>
 
 #include <algorithm>
 #include <limits.h>
@@ -47,44 +48,96 @@
 
 namespace
 {
-  static constexpr uint64_t NETWORK_HANDSHAKE_TIMEOUT_MS  = 5000;
-  static constexpr uint64_t NETWORK_IDLE_TIMEOUT_MS       = 30000;
-  static constexpr uint32_t NETWORK_KEEPALIVE_INTERVAL_MS = 1000;
-  static constexpr uint32_t NETWORK_INITIAL_RTT_MS        = 1;
-  static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS     = 16;
-  static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS    = 16;
-  static constexpr size_t   NETWORK_MAX_CONTROL_PAYLOAD   = 1024 * 1024;
-  static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER    =
+  static constexpr uint64_t NETWORK_HANDSHAKE_TIMEOUT_MS    = 5000;
+  static constexpr uint64_t NETWORK_IDLE_TIMEOUT_MS         = 30000;
+  static constexpr uint32_t NETWORK_KEEPALIVE_INTERVAL_MS   = 1000;
+  static constexpr uint32_t NETWORK_INITIAL_RTT_MS          = 1;
+  static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS       = 16;
+  static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS      = 16;
+  static constexpr size_t   NETWORK_MAX_CONTROL_PAYLOAD     = 1024 * 1024;
+  static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER      =
     LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD;
-  static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD  = 1136;
-  static constexpr uint32_t NETWORK_INPUT_LEASE_MS        = 500;
-  static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER     = 0x01;
-  static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE   = 0x07;
-  static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT    = 6;
-  static constexpr size_t   NETWORK_SERVICE_COUNT         =
+  static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD    = 1136;
+  static constexpr uint32_t NETWORK_INPUT_LEASE_MS          = 500;
+  static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER       = 0x01;
+  static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE     = 0x07;
+  static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT      = 6;
+  static constexpr size_t   NETWORK_SERVICE_COUNT           =
     LG_NET_SERVICE_USB + 1U;
-  static constexpr uint64_t NETWORK_SEQUENCE_COMPONENT    = UINT64_C(1);
-  static constexpr uint8_t  NETWORK_DATAGRAM_WINDOW       = 64;
-  static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK     =
+  static constexpr uint64_t NETWORK_SEQUENCE_COMPONENT      = UINT64_C(1);
+  static constexpr uint8_t  NETWORK_DATAGRAM_WINDOW         = 64;
+  static constexpr uint32_t NETWORK_PASSWORD_ROUNDS         = 100000;
+  static constexpr uint16_t NETWORK_PASSWORD_SALT_SIZE      = 32;
+  static constexpr uint16_t NETWORK_PASSWORD_CHALLENGE_SIZE = 32;
+  static constexpr uint16_t NETWORK_PASSWORD_NONCE_SIZE     = 32;
+  static constexpr uint32_t NETWORK_AUTH_RETRY_AFTER_MS     = 1000;
+  static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK       =
     LG_NET_KEYBOARD_LED_NUM_LOCK    |
     LG_NET_KEYBOARD_LED_CAPS_LOCK   |
     LG_NET_KEYBOARD_LED_SCROLL_LOCK |
     LG_NET_KEYBOARD_LED_COMPOSE     |
     LG_NET_KEYBOARD_LED_KANA;
 
-  static constexpr QUIC_UINT62 NETWORK_ERROR_PROTOCOL        = 1;
-  static constexpr QUIC_UINT62 NETWORK_ERROR_SERVER_STOPPING = 2;
+  static constexpr QUIC_UINT62 NETWORK_ERROR_PROTOCOL          = 1;
+  static constexpr QUIC_UINT62 NETWORK_ERROR_SERVER_STOPPING   = 2;
+  static constexpr QUIC_UINT62 NETWORK_ERROR_HANDSHAKE_TIMEOUT = 3;
 
   static const wchar_t NETWORK_REGISTRY_KEY[] =
     L"Software\\LookingGlass\\IDD";
 
-  bool FillRandom(void * data, size_t size)
+  static_assert(NetworkAuthCrypto::SHA256_SIZE ==
+    LG_NET_PASSWORD_SHA256_LENGTH, "password proof size mismatch");
+
+  bool RandomNonzero(void * data, size_t size)
   {
-    if (!data || size > ULONG_MAX)
+    if (!data || !size)
       return false;
 
-    return BCryptGenRandom(nullptr, static_cast<PUCHAR>(data),
-      static_cast<ULONG>(size), BCRYPT_USE_SYSTEM_PREFERRED_RNG) >= 0;
+    for (unsigned attempt = 0; attempt < 2; ++attempt)
+    {
+      if (!NetworkAuthCrypto::RandomBytes(data, size))
+        return false;
+
+      const auto * bytes = static_cast<const uint8_t *>(data);
+      for (size_t index = 0; index < size; ++index)
+        if (bytes[index])
+          return true;
+    }
+
+    NetworkAuthCrypto::SecureZero(data, size);
+    return false;
+  }
+
+  bool PasswordUTF8(const std::wstring& source,
+    std::vector<uint8_t>& password)
+  {
+    if (source.empty() || source.size() > INT_MAX)
+      return false;
+
+    const int length = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+      source.data(), static_cast<int>(source.size()), nullptr, 0,
+      nullptr, nullptr);
+    if (length <= 0)
+      return false;
+
+    try
+    {
+      password.resize(static_cast<size_t>(length));
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
+        source.data(), static_cast<int>(source.size()),
+        reinterpret_cast<char *>(password.data()), length,
+        nullptr, nullptr) == length)
+      return true;
+
+    NetworkAuthCrypto::SecureZero(password.data(), password.size());
+    password.clear();
+    return false;
   }
 
   bool MakeAddress(const std::wstring& source, uint16_t port,
@@ -162,12 +215,24 @@ struct CNetworkServer::Impl
   {
     WAITING_HELLO,
     WAITING_CAPABILITIES,
+    WAITING_AUTH_RESPONSE,
+    AUTHENTICATING,
+    PUBLISHING_CAPABILITIES,
+    AUTH_FAILED,
     READY,
   };
 
   struct Connection
   {
     explicit Connection(Impl& owner) : owner(owner) {}
+
+    ~Connection()
+    {
+      NetworkAuthCrypto::SecureZero(clientNonce, sizeof(clientNonce));
+      NetworkAuthCrypto::SecureZero(serverNonce, sizeof(serverNonce));
+      NetworkAuthCrypto::SecureZero(
+        &passwordChallenge, sizeof(passwordChallenge));
+    }
 
     Impl&                            owner;
     CSRWLock                         lock;
@@ -180,12 +245,14 @@ struct CNetworkServer::Impl
     uint64_t                         datagramSendSequence         = 0;
     uint64_t                         receiveSequence              = 0;
     uint64_t                         handshakeRequestID           = 0;
+    uint64_t                         handshakeDeadline            = 0;
     uint32_t                         maxPayload                   =
       static_cast<uint32_t>(NETWORK_MAX_CONTROL_PAYLOAD);
     uint32_t                         maxDatagramPayload           = 0;
     uint16_t                         maxDatagramSendLength        = 0;
     uint32_t                         expectedCapabilities         = 0;
     uint32_t                         receivedCapabilities         = 0;
+    uint32_t                         selectedCapabilityCount      = 0;
     uint16_t                         offeredServices              = 0;
     uint16_t                         selectedServices             = 0;
     uint16_t                         reliableServices             = 0;
@@ -207,8 +274,12 @@ struct CNetworkServer::Impl
     uint8_t                          keyboardModifiers            = 0;
     bool                             inputLEDStateKnown           = false;
     bool                             keyboardKeys[256]            = {};
+
     uint8_t                          clientNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
     uint8_t                          serverNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
+
+    LGNetPasswordChallenge           passwordChallenge = {};
+
     std::shared_ptr<CNetworkSession> session;
     LGNetSequenceTracker             datagramReceive              = {};
     LGNetStreamParser                receiveParser                = {};
@@ -239,6 +310,12 @@ struct CNetworkServer::Impl
   ~Impl()
   {
     Stop();
+    if (!settings.password.empty())
+    {
+      NetworkAuthCrypto::SecureZero(&settings.password[0],
+        settings.password.size() * sizeof(settings.password[0]));
+      settings.password.clear();
+    }
     if (drainedEvent)
       CloseHandle(drainedEvent);
   }
@@ -352,7 +429,10 @@ struct CNetworkServer::Impl
       const uint16_t serviceMask = UINT16_C(1) << service;
       if (connection.closing || !connection.controlStream ||
           (service != LG_NET_SERVICE_CORE &&
-            (!(connection.selectedServices & serviceMask) ||
+            ((connection.handshake != HandshakeState::READY &&
+              connection.handshake !=
+                HandshakeState::PUBLISHING_CAPABILITIES) ||
+             !(connection.selectedServices & serviceMask) ||
              !(connection.reliableServices & serviceMask))))
         return false;
       const uint32_t maxPayload     = service == LG_NET_SERVICE_CORE ?
@@ -502,13 +582,14 @@ struct CNetworkServer::Impl
         hello.protocolMin > LG_NET_PROTOCOL_VERSION_CURRENT ||
         hello.protocolMax < LG_NET_PROTOCOL_VERSION_CURRENT ||
         (hello.authModes & ~LG_NET_AUTH_MODES_KNOWN) != 0 ||
-        !(hello.authModes & LG_NET_AUTH_MODE_FLAG(LG_NET_AUTH_NONE)))
+        !(hello.authModes & LG_NET_AUTH_MODE_FLAG(settings.auth)))
       return false;
 
     uint64_t sessionEpoch = 0;
     uint8_t  serverNonce[LG_NET_HELLO_NONCE_LENGTH];
-    if (!FillRandom(&sessionEpoch, sizeof(sessionEpoch)) ||
-        !FillRandom(serverNonce, sizeof(serverNonce)))
+    if (!NetworkAuthCrypto::RandomBytes(
+          &sessionEpoch, sizeof(sessionEpoch)) ||
+        !RandomNonzero(serverNonce, sizeof(serverNonce)))
       return false;
     if (!sessionEpoch)
       sessionEpoch = GetTickCount64() | 1;
@@ -518,25 +599,17 @@ struct CNetworkServer::Impl
           NETWORK_SEQUENCE_COMPONENT, NETWORK_DATAGRAM_WINDOW, false))
       return false;
 
-    std::shared_ptr<CNetworkSession> session = transport.CreateSession(
-      connection.client, connection.generation);
-    if (!session)
-      return false;
-
     {
       CSRWExclusiveLock guard(connection.lock);
       if (connection.closing ||
           connection.handshake != HandshakeState::WAITING_HELLO)
-      {
-        transport.RemoveSession(connection.client, connection.generation);
         return false;
-      }
-      connection.session                  = std::move(session);
       connection.sessionEpoch             = sessionEpoch;
       connection.datagramReceive          = datagramReceive;
       connection.handshakeRequestID       = packet.envelope.requestID;
       connection.expectedCapabilities     = hello.capabilityCount;
       connection.receivedCapabilities     = 0;
+      connection.selectedCapabilityCount  = 0;
       connection.maxPayload               = hello.maxPayloadLength <
         NETWORK_MAX_CONTROL_PAYLOAD ? hello.maxPayloadLength :
           static_cast<uint32_t>(NETWORK_MAX_CONTROL_PAYLOAD);
@@ -626,22 +699,169 @@ struct CNetworkServer::Impl
         connection.maxDatagramPayload >= LG_NET_INPUT_ABSOLUTE_WIRE_SIZE)
     {
       selected.flags               |= LG_NET_CAPABILITY_DATAGRAM;
-      selected.maxDatagramPayload  = offered.maxDatagramPayload <
+      selected.maxDatagramPayload   = offered.maxDatagramPayload <
         connection.maxDatagramPayload ? offered.maxDatagramPayload :
           connection.maxDatagramPayload;
     }
     return lgNetCapabilityValid(&selected);
   }
 
-  bool FinishCapabilities(Connection& connection,
-    const LGNetPacketView& packet)
+  bool SendHelloAcknowledgement(Connection& connection)
   {
-    LGNetCapability selected[NETWORK_SERVICE_COUNT] = {};
-    uint32_t        selectedCount                   = 0;
     uint64_t        sessionEpoch;
     uint32_t        maxPayload;
     uint32_t        maxDatagramPayload;
+    uint32_t        capabilityCount;
+    uint64_t        requestID;
     uint8_t         serverNonce[LG_NET_HELLO_NONCE_LENGTH];
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (connection.closing)
+        return false;
+      sessionEpoch       = connection.sessionEpoch;
+      maxPayload         = connection.maxPayload;
+      maxDatagramPayload = connection.maxDatagramPayload;
+      capabilityCount    = connection.selectedCapabilityCount;
+      requestID          = connection.handshakeRequestID;
+      memcpy(serverNonce, connection.serverNonce, sizeof(serverNonce));
+    }
+
+    LGNetHelloAck acknowledgement;
+    lgNetHelloAckInit(&acknowledgement, sessionEpoch);
+    acknowledgement.authMode           = settings.auth;
+    acknowledgement.maxPayloadLength   = maxPayload;
+    acknowledgement.maxDatagramPayload = maxDatagramPayload;
+    acknowledgement.capabilityCount    = capabilityCount;
+    memcpy(acknowledgement.nonce, serverNonce, sizeof(serverNonce));
+
+    uint8_t payload[LG_NET_HELLO_ACK_WIRE_SIZE];
+
+    const bool sent = lgNetHelloAckEncode(
+        payload, sizeof(payload), &acknowledgement) &&
+      SendPacket(connection, LG_NET_SERVICE_CORE,
+        LG_NET_CORE_MESSAGE_HELLO_ACK,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, requestID, payload, sizeof(payload));
+    NetworkAuthCrypto::SecureZero(&acknowledgement,
+      sizeof(acknowledgement));
+    NetworkAuthCrypto::SecureZero(payload, sizeof(payload));
+    NetworkAuthCrypto::SecureZero(serverNonce, sizeof(serverNonce));
+    return sent;
+  }
+
+  bool SendPasswordChallenge(Connection& connection)
+  {
+    LGNetPasswordChallenge challenge;
+    uint64_t               requestID;
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (connection.closing ||
+          connection.handshake != HandshakeState::WAITING_AUTH_RESPONSE)
+        return false;
+      challenge = connection.passwordChallenge;
+      requestID = connection.handshakeRequestID;
+    }
+
+    const size_t payloadSize = lgNetPasswordChallengeSize(&challenge);
+    uint8_t payload[LG_NET_PASSWORD_CHALLENGE_HEADER_SIZE +
+      LG_NET_PASSWORD_SALT_MAX_LENGTH +
+      LG_NET_PASSWORD_CHALLENGE_MAX_LENGTH];
+
+    const bool sent = payloadSize &&
+      lgNetPasswordChallengeEncode(payload, payloadSize, &challenge) &&
+      SendPacket(connection, LG_NET_SERVICE_CORE,
+        LG_NET_CORE_MESSAGE_AUTH_CHALLENGE,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, requestID, payload,
+        static_cast<uint32_t>(payloadSize));
+    NetworkAuthCrypto::SecureZero(payload, sizeof(payload));
+    NetworkAuthCrypto::SecureZero(&challenge, sizeof(challenge));
+    return sent;
+  }
+
+  bool PublishCapabilities(Connection& connection)
+  {
+    LGNetCapability selected[NETWORK_SERVICE_COUNT] = {};
+    uint64_t        requestID;
+    {
+      CSRWSharedLock guard(connection.lock);
+      if (connection.closing ||
+          connection.handshake !=
+            HandshakeState::PUBLISHING_CAPABILITIES ||
+          connection.session)
+        return false;
+      memcpy(selected, connection.selectedCapabilities, sizeof(selected));
+      requestID = connection.handshakeRequestID;
+    }
+
+    for (LGNetService service = LG_NET_SERVICE_RECOVERY;
+         service < LG_NET_SERVICE_USB; ++service)
+    {
+      if (!selected[service].service)
+        continue;
+
+      uint8_t capabilityPayload[LG_NET_CAPABILITY_WIRE_SIZE];
+      if (!lgNetCapabilityEncode(capabilityPayload,
+            sizeof(capabilityPayload), &selected[service]) ||
+          !SendPacket(connection, LG_NET_SERVICE_CORE,
+            LG_NET_CORE_MESSAGE_CAPABILITY,
+            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+            0, requestID, capabilityPayload,
+            sizeof(capabilityPayload)))
+        return false;
+    }
+
+    if (!SendPacket(connection, LG_NET_SERVICE_CORE,
+          LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
+          LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+          0, requestID, nullptr, 0))
+      return false;
+
+    std::shared_ptr<CNetworkSession> session;
+    try
+    {
+      session = transport.CreateSession(
+        connection.client, connection.generation);
+    }
+    catch (...)
+    {
+      return false;
+    }
+    if (!session)
+      return false;
+
+    bool activated;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      activated = !connection.closing &&
+        connection.handshake == HandshakeState::PUBLISHING_CAPABILITIES &&
+        !connection.session;
+      if (activated)
+      {
+        connection.session           = std::move(session);
+        connection.handshakeDeadline = 0;
+        NetworkAuthCrypto::SecureZero(&connection.passwordChallenge,
+          sizeof(connection.passwordChallenge));
+        NetworkAuthCrypto::SecureZero(
+          connection.clientNonce, sizeof(connection.clientNonce));
+        NetworkAuthCrypto::SecureZero(
+          connection.serverNonce, sizeof(connection.serverNonce));
+        connection.handshake = HandshakeState::READY;
+      }
+    }
+    if (!activated)
+    {
+      transport.RemoveSession(connection.client, connection.generation);
+      return false;
+    }
+    DEBUG_INFO("Network client %u completed the control handshake",
+      connection.client);
+    return true;
+  }
+
+  bool FinishCapabilities(Connection& connection,
+    const LGNetPacketView& packet)
+  {
     {
       CSRWExclusiveLock guard(connection.lock);
       if (connection.closing ||
@@ -670,70 +890,241 @@ struct CNetworkServer::Impl
           continue;
         }
 
-        selected[service]                            = capability;
-        connection.selectedCapabilities[service]     = capability;
-        connection.selectedServices                  |= serviceMask;
+        connection.selectedCapabilities[service] = capability;
+        connection.selectedServices              |= serviceMask;
         if (capability.flags & LG_NET_CAPABILITY_RELIABLE)
           connection.reliableServices |= serviceMask;
         if (capability.flags & LG_NET_CAPABILITY_DATAGRAM)
           connection.datagramServices |= serviceMask;
-        ++selectedCount;
+        ++connection.selectedCapabilityCount;
       }
-
-      sessionEpoch       = connection.sessionEpoch;
-      maxPayload         = connection.maxPayload;
-      maxDatagramPayload = connection.maxDatagramPayload;
-      memcpy(serverNonce, connection.serverNonce, sizeof(serverNonce));
     }
 
-    LGNetHelloAck acknowledgement;
-    lgNetHelloAckInit(&acknowledgement, sessionEpoch);
-    acknowledgement.authMode           = LG_NET_AUTH_NONE;
-    acknowledgement.maxPayloadLength   = maxPayload;
-    acknowledgement.maxDatagramPayload = maxDatagramPayload;
-    acknowledgement.capabilityCount    = selectedCount;
-    memcpy(acknowledgement.nonce, serverNonce, sizeof(serverNonce));
-
-    uint8_t payload[LG_NET_HELLO_ACK_WIRE_SIZE];
-    if (!lgNetHelloAckEncode(payload, sizeof(payload), &acknowledgement) ||
-        !SendPacket(connection, LG_NET_SERVICE_CORE,
-          LG_NET_CORE_MESSAGE_HELLO_ACK,
-          LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
-          0, packet.envelope.requestID, payload, sizeof(payload)))
-      return false;
-
-    for (LGNetService service = LG_NET_SERVICE_RECOVERY;
-         service < LG_NET_SERVICE_USB; ++service)
+    LGNetPasswordChallenge challenge = {};
+    if (settings.auth == LG_NET_AUTH_PASSWORD)
     {
-      if (!selected[service].service)
-        continue;
-
-      uint8_t capabilityPayload[LG_NET_CAPABILITY_WIRE_SIZE];
-      if (!lgNetCapabilityEncode(capabilityPayload,
-            sizeof(capabilityPayload), &selected[service]) ||
-          !SendPacket(connection, LG_NET_SERVICE_CORE,
-            LG_NET_CORE_MESSAGE_CAPABILITY,
-            LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
-            0, packet.envelope.requestID, capabilityPayload,
-            sizeof(capabilityPayload)))
+      challenge.algorithm       = LG_NET_PASSWORD_PBKDF2_HMAC_SHA256;
+      challenge.rounds          = NETWORK_PASSWORD_ROUNDS;
+      challenge.saltLength      = NETWORK_PASSWORD_SALT_SIZE;
+      challenge.challengeLength = NETWORK_PASSWORD_CHALLENGE_SIZE;
+      if (!NetworkAuthCrypto::RandomBytes(
+            challenge.salt, challenge.saltLength) ||
+          !NetworkAuthCrypto::RandomBytes(
+            challenge.challenge, challenge.challengeLength))
+      {
+        NetworkAuthCrypto::SecureZero(&challenge, sizeof(challenge));
         return false;
+      }
     }
-
-    if (!SendPacket(connection, LG_NET_SERVICE_CORE,
-          LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
-          LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
-          0, packet.envelope.requestID, nullptr, 0))
-      return false;
 
     {
       CSRWExclusiveLock guard(connection.lock);
-      if (connection.closing)
+      if (connection.closing ||
+          connection.handshake != HandshakeState::WAITING_CAPABILITIES)
+      {
+        NetworkAuthCrypto::SecureZero(&challenge, sizeof(challenge));
         return false;
-      connection.handshake = HandshakeState::READY;
+      }
+
+      if (settings.auth == LG_NET_AUTH_PASSWORD)
+      {
+        connection.passwordChallenge = challenge;
+        connection.handshake         = HandshakeState::WAITING_AUTH_RESPONSE;
+      }
+      else
+        connection.handshake = HandshakeState::PUBLISHING_CAPABILITIES;
     }
-    DEBUG_INFO("Network client %u completed the control handshake",
-      connection.client);
-    return true;
+
+    NetworkAuthCrypto::SecureZero(&challenge, sizeof(challenge));
+
+    if (!SendHelloAcknowledgement(connection))
+      return false;
+
+    return settings.auth == LG_NET_AUTH_PASSWORD ?
+      SendPasswordChallenge(connection) : PublishCapabilities(connection);
+  }
+
+  bool SendAuthResult(Connection& connection,
+    const LGNetAuthResult& result, uint64_t requestID)
+  {
+    const size_t payloadSize = lgNetAuthResultSize(&result);
+    uint8_t payload[LG_NET_AUTH_RESULT_HEADER_SIZE +
+      LG_NET_PASSWORD_PROOF_MAX_LENGTH];
+
+    const bool sent = payloadSize &&
+      lgNetAuthResultEncode(payload, payloadSize, &result) &&
+      SendPacket(connection, LG_NET_SERVICE_CORE,
+        LG_NET_CORE_MESSAGE_AUTH_RESULT,
+        LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+        0, requestID, payload, static_cast<uint32_t>(payloadSize));
+    NetworkAuthCrypto::SecureZero(payload, sizeof(payload));
+    return sent;
+  }
+
+  bool HandleAuthResponse(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    LGNetPasswordResponse response = {};
+    if (lgNetPasswordResponseDecode(&response, packet.payload,
+          packet.payloadLength) != LG_NET_PARSE_OK)
+    {
+      NetworkAuthCrypto::SecureZero(&response, sizeof(response));
+      return false;
+    }
+
+    LGNetPasswordChallenge challenge    = {};
+    uint64_t               sessionEpoch = 0;
+
+    uint8_t clientNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
+    uint8_t serverNonce[LG_NET_HELLO_NONCE_LENGTH] = {};
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      if (connection.closing ||
+          connection.handshake != HandshakeState::WAITING_AUTH_RESPONSE ||
+          packet.envelope.requestID != connection.handshakeRequestID ||
+          packet.envelope.sessionEpoch != connection.sessionEpoch ||
+          packet.envelope.componentEpoch != 0)
+      {
+        NetworkAuthCrypto::SecureZero(&response, sizeof(response));
+        return false;
+      }
+
+      connection.handshake = HandshakeState::AUTHENTICATING;
+      challenge            = connection.passwordChallenge;
+      sessionEpoch         = connection.sessionEpoch;
+      memcpy(clientNonce, connection.clientNonce, sizeof(clientNonce));
+      memcpy(serverNonce, connection.serverNonce, sizeof(serverNonce));
+    }
+
+    std::vector<uint8_t> password;
+
+    uint8_t derivedKey      [LG_NET_PASSWORD_SHA256_LENGTH]                    = {};
+    uint8_t expectedProof   [LG_NET_PASSWORD_SHA256_LENGTH]                    = {};
+    uint8_t serverProof     [LG_NET_PASSWORD_SHA256_LENGTH]                    = {};
+    uint8_t clientTranscript[LG_NET_PASSWORD_CLIENT_PROOF_TRANSCRIPT_MAX_SIZE] = {};
+    uint8_t serverTranscript[LG_NET_PASSWORD_SERVER_PROOF_TRANSCRIPT_MAX_SIZE] = {};
+
+    size_t clientTranscriptSize = 0;
+    size_t serverTranscriptSize = 0;
+    bool   cryptoError          = false;
+    bool   accepted             = false;
+
+    LGNetPasswordProofContext context = {};
+    context.protocolVersion = LG_NET_PROTOCOL_VERSION_CURRENT;
+    context.sessionEpoch    = sessionEpoch;
+    context.helloNonce      = clientNonce;
+    context.helloAckNonce   = serverNonce;
+    context.challenge       = &challenge;
+    context.response        = &response;
+
+    const bool responseShapeValid =
+      response.algorithm == LG_NET_PASSWORD_PBKDF2_HMAC_SHA256 &&
+      response.nonceLength == NETWORK_PASSWORD_NONCE_SIZE &&
+      response.proofLength == LG_NET_PASSWORD_SHA256_LENGTH;
+    if (responseShapeValid)
+    {
+      if (!PasswordUTF8(settings.password, password) ||
+          !NetworkAuthCrypto::PBKDF2HMACSHA256(
+            password.data(), password.size(), challenge.salt,
+            challenge.saltLength, challenge.rounds,
+            derivedKey, sizeof(derivedKey)) ||
+          !lgNetPasswordClientProofTranscriptSize(
+            &context, &clientTranscriptSize) ||
+          clientTranscriptSize > sizeof(clientTranscript) ||
+          !lgNetPasswordClientProofTranscriptEncode(
+            clientTranscript, clientTranscriptSize, &context) ||
+          !NetworkAuthCrypto::HMACSHA256(
+            derivedKey, sizeof(derivedKey), clientTranscript,
+            clientTranscriptSize, expectedProof))
+        cryptoError = true;
+      else
+        accepted = NetworkAuthCrypto::ConstantTimeEqual(
+          expectedProof, response.proof, sizeof(expectedProof));
+
+      if (accepted &&
+          (!lgNetPasswordServerProofTranscriptSize(
+             &context, &serverTranscriptSize) ||
+           serverTranscriptSize > sizeof(serverTranscript) ||
+           !lgNetPasswordServerProofTranscriptEncode(
+             serverTranscript, serverTranscriptSize, &context) ||
+           !NetworkAuthCrypto::HMACSHA256(
+             derivedKey, sizeof(derivedKey), serverTranscript,
+             serverTranscriptSize, serverProof)))
+      {
+        accepted    = false;
+        cryptoError = true;
+      }
+    }
+
+    LGNetAuthResult result = {};
+    if (accepted)
+    {
+      result.result      = LG_NET_AUTH_RESULT_ACCEPTED;
+      result.proofLength = LG_NET_PASSWORD_SHA256_LENGTH;
+      memcpy(result.proof, serverProof, result.proofLength);
+    }
+    else
+    {
+      result.result       = cryptoError ?
+        LG_NET_AUTH_RESULT_ERROR : LG_NET_AUTH_RESULT_REJECTED;
+      result.retryAfterMs = NETWORK_AUTH_RETRY_AFTER_MS;
+    }
+
+    bool connectionValid;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      connectionValid = !connection.closing &&
+        connection.handshake == HandshakeState::AUTHENTICATING;
+      if (connectionValid)
+      {
+        if (accepted)
+          connection.handshake = HandshakeState::PUBLISHING_CAPABILITIES;
+        else
+        {
+          connection.handshake         = HandshakeState::AUTH_FAILED;
+          connection.handshakeDeadline =
+            GetTickCount64() + NETWORK_AUTH_RETRY_AFTER_MS;
+        }
+      }
+      NetworkAuthCrypto::SecureZero(
+        &connection.passwordChallenge, sizeof(connection.passwordChallenge));
+      NetworkAuthCrypto::SecureZero(
+        connection.clientNonce, sizeof(connection.clientNonce));
+      NetworkAuthCrypto::SecureZero(
+        connection.serverNonce, sizeof(connection.serverNonce));
+    }
+
+    NetworkAuthCrypto::SecureZero(password.data(), password.size());
+    NetworkAuthCrypto::SecureZero(derivedKey, sizeof(derivedKey));
+    NetworkAuthCrypto::SecureZero(expectedProof, sizeof(expectedProof));
+    NetworkAuthCrypto::SecureZero(serverProof, sizeof(serverProof));
+    NetworkAuthCrypto::SecureZero(
+      clientTranscript, sizeof(clientTranscript));
+    NetworkAuthCrypto::SecureZero(
+      serverTranscript, sizeof(serverTranscript));
+    NetworkAuthCrypto::SecureZero(clientNonce, sizeof(clientNonce));
+    NetworkAuthCrypto::SecureZero(serverNonce, sizeof(serverNonce));
+    NetworkAuthCrypto::SecureZero(&challenge, sizeof(challenge));
+    NetworkAuthCrypto::SecureZero(&response, sizeof(response));
+
+    const bool resultSent = connectionValid &&
+      SendAuthResult(connection, result, packet.envelope.requestID);
+    NetworkAuthCrypto::SecureZero(&result, sizeof(result));
+    if (!resultSent)
+      return false;
+
+    if (!accepted)
+    {
+      if (cryptoError)
+        DEBUG_ERROR("Password authentication failed internally for network "
+          "client %u", connection.client);
+      else
+        DEBUG_WARN("Network client %u failed password authentication",
+          connection.client);
+      return true;
+    }
+
+    return PublishCapabilities(connection);
   }
 
   static LGNetInputStatusCode InputStatusCode(InputResult result)
@@ -1196,6 +1587,19 @@ struct CNetworkServer::Impl
       return false;
     }
 
+    if (handshake == HandshakeState::WAITING_AUTH_RESPONSE)
+    {
+      return packet.envelope.service == LG_NET_SERVICE_CORE &&
+        packet.envelope.messageType == LG_NET_CORE_MESSAGE_AUTH_RESPONSE &&
+        packet.envelope.serviceVersion == LG_NET_CORE_VERSION_CURRENT &&
+        packet.envelope.sessionEpoch == sessionEpoch &&
+        packet.envelope.payloadLength <= maxPayload &&
+        HandleAuthResponse(connection, packet);
+    }
+
+    if (handshake != HandshakeState::READY)
+      return false;
+
     if (packet.envelope.sessionEpoch != sessionEpoch ||
         packet.envelope.payloadLength > maxPayload ||
         (packet.envelope.service == LG_NET_SERVICE_CORE &&
@@ -1434,9 +1838,11 @@ struct CNetworkServer::Impl
         delete connection;
         return QUIC_STATUS_OUT_OF_MEMORY;
       }
-      connection->handle     = event->NEW_CONNECTION.Connection;
-      connection->client     = owner.AllocateClientLocked();
-      connection->generation = 1;
+      connection->handle            = event->NEW_CONNECTION.Connection;
+      connection->client            = owner.AllocateClientLocked();
+      connection->generation        = 1;
+      connection->handshakeDeadline =
+        GetTickCount64() + NETWORK_HANDSHAKE_TIMEOUT_MS;
       if (!connection->client)
       {
         delete connection;
@@ -1608,6 +2014,38 @@ struct CNetworkServer::Impl
     return QUIC_STATUS_SUCCESS;
   }
 
+  void Process()
+  {
+    const uint64_t now = GetTickCount64();
+    CSRWSharedLock guard(lock);
+    if (stopping || !api)
+      return;
+
+    for (Connection * connection : connections)
+    {
+      HQUIC    handle = nullptr;
+      uint32_t client = 0;
+      {
+        CSRWExclusiveLock connectionGuard(connection->lock);
+        if (!connection->closing && connection->handshakeDeadline &&
+            now >= connection->handshakeDeadline)
+        {
+          connection->closing = true;
+          handle              = connection->handle;
+          client              = connection->client;
+        }
+      }
+
+      if (!handle)
+        continue;
+
+      DEBUG_WARN("Closing network client %u after an incomplete handshake",
+        client);
+      api->ConnectionShutdown(handle, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
+        NETWORK_ERROR_HANDSHAKE_TIMEOUT);
+    }
+  }
+
   bool Start()
   {
     {
@@ -1617,12 +2055,29 @@ struct CNetworkServer::Impl
       stopping = false;
     }
 
-    if (settings.auth != LG_NET_AUTH_NONE)
+    if ((settings.auth != LG_NET_AUTH_NONE &&
+          settings.auth != LG_NET_AUTH_PASSWORD) ||
+        (settings.auth == LG_NET_AUTH_PASSWORD &&
+          settings.password.empty()) ||
+        (settings.auth == LG_NET_AUTH_NONE && !settings.password.empty()))
     {
-      DEBUG_ERROR("Network password authentication is configured but the "
-        "password proof provider is not implemented; refusing to listen");
+      DEBUG_ERROR("The network authentication settings are inconsistent");
       Stop();
       return false;
+    }
+
+    if (settings.auth == LG_NET_AUTH_PASSWORD)
+    {
+      std::vector<uint8_t> password;
+
+      const bool valid = PasswordUTF8(settings.password, password);
+      NetworkAuthCrypto::SecureZero(password.data(), password.size());
+      if (!valid)
+      {
+        DEBUG_ERROR("The configured network password is not valid UTF-16");
+        Stop();
+        return false;
+      }
     }
 
     if (!drainedEvent)
@@ -1800,4 +2255,10 @@ void CNetworkServer::Stop()
 {
   if (m_impl)
     m_impl->Stop();
+}
+
+void CNetworkServer::Process()
+{
+  if (m_impl)
+    m_impl->Process();
 }

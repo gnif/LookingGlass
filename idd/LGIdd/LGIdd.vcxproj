@@ -91,6 +91,7 @@
     <ClCompile Include="transport\network\CNetworkServer.cpp" />
     <ClCompile Include="transport\network\CNetworkSession.cpp" />
     <ClCompile Include="transport\network\CNetworkTransport.cpp" />
+    <ClCompile Include="transport\network\NetworkAuthCrypto.cpp" />
     <ClCompile Include="transport\network\NetworkSettings.cpp" />
     <ClCompile Include="config\CSettings.cpp" />
     <ClCompile Include="platform\CPlatformInfo.cpp" />
@@ -175,6 +176,7 @@
     <ClInclude Include="transport\network\CNetworkServer.h" />
     <ClInclude Include="transport\network\CNetworkSession.h" />
     <ClInclude Include="transport\network\CNetworkTransport.h" />
+    <ClInclude Include="transport\network\NetworkAuthCrypto.h" />
     <ClInclude Include="transport\network\NetworkSettings.h" />
     <ClInclude Include="config\CSettings.h" />
     <ClInclude Include="platform\CPlatformInfo.h" />

@@ -24,6 +24,9 @@
     <ClCompile Include="CPipeEndpoint.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\auth.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\repos\LGProtocol\src\network\packet.c">
       <Filter>Source Files</Filter>
     </ClCompile>

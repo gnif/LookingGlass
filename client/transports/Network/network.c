@@ -136,9 +136,9 @@ static void networkSetup(void)
     {
       .module         = "network",
       .name           = "password",
-      .description    =
-        "Reserved network password (empty uses no authentication)",
+      .description    = "Network password (empty uses no authentication)",
       .type           = OPTION_TYPE_STRING,
+      .sensitive      = true,
       .value.x_string = NULL,
     },
     {

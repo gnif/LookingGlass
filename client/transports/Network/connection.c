@@ -19,12 +19,14 @@
  */
 
 #include "connection.h"
+#include "auth_crypto.h"
 #include "fingerprint.h"
 
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
 
+#include <LGProtocol/NetworkAuth.h>
 #include <LGProtocol/NetworkPacket.h>
 #include <LGProtocol/NetworkRoute.h>
 #include <LGProtocol/NetworkSequence.h>
@@ -41,18 +43,26 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NETWORK_CONNECT_POLL_MS              50U
-#define NETWORK_HANDSHAKE_TIMEOUT_MS         5000U
-#define NETWORK_IDLE_TIMEOUT_MS              10000U
-#define NETWORK_KEEPALIVE_INTERVAL_MS        1000U
-#define NETWORK_INITIAL_RTT_MS               1U
-#define NETWORK_MAX_PEER_STREAMS             16U
-#define NETWORK_MAX_CONTROL_PAYLOAD          (1024U * 1024U)
-#define NETWORK_MAX_CONTROL_BUFFER           \
+#define NETWORK_CONNECT_POLL_MS               50U
+#define NETWORK_HANDSHAKE_TIMEOUT_MS          5000U
+#define NETWORK_IDLE_TIMEOUT_MS               10000U
+#define NETWORK_KEEPALIVE_INTERVAL_MS         1000U
+#define NETWORK_INITIAL_RTT_MS                1U
+#define NETWORK_MAX_PEER_STREAMS              16U
+#define NETWORK_MAX_CONTROL_PAYLOAD           (1024U * 1024U)
+#define NETWORK_MAX_CONTROL_BUFFER            \
   (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
-#define NETWORK_MAX_DATAGRAM_PAYLOAD         1136U
-#define NETWORK_HELLO_REQUEST_ID             UINT64_C(1)
-#define NETWORK_SEQUENCE_CONNECTION_EPOCH    UINT64_C(1)
+#define NETWORK_MAX_DATAGRAM_PAYLOAD          1136U
+#define NETWORK_HELLO_REQUEST_ID              UINT64_C(1)
+#define NETWORK_SEQUENCE_CONNECTION_EPOCH     UINT64_C(1)
+#define NETWORK_AUTH_PBKDF2_ROUNDS_MIN        10000U
+#define NETWORK_AUTH_PBKDF2_ROUNDS_MAX        1000000U
+#define NETWORK_AUTH_SALT_LENGTH_MIN          16U
+#define NETWORK_AUTH_CHALLENGE_LENGTH_MIN     16U
+#define NETWORK_AUTH_RESPONSE_NONCE_LENGTH    32U
+
+_Static_assert(NETWORK_AUTH_SHA256_SIZE == LG_NET_PASSWORD_SHA256_LENGTH,
+    "Network authentication SHA-256 sizes differ");
 
 struct NetworkSend
 {
@@ -103,8 +113,14 @@ struct NetworkConnection
   uint64_t             datagramSendSequence;
   uint64_t             receiveSequence;
   LGNetSequenceTracker datagramReceive;
+  uint16_t             protocolVersion;
+  LGNetAuthMode        authMode;
   bool                 helloAcknowledged;
   bool                 authenticationComplete;
+  bool                 authChallengeReceived;
+  bool                 authResponseSent;
+  bool                 authResultReceived;
+  bool                 authKeyValid;
   bool                 capabilitiesComplete;
   bool                 connectFailed;
   uint32_t             expectedCapabilities;
@@ -119,6 +135,12 @@ struct NetworkConnection
   bool                 datagramSendEnabled;
   uint32_t             serviceMaxPayload[LG_NET_SERVICE_USB + 1U];
   uint32_t             serviceMaxDatagram[LG_NET_SERVICE_USB + 1U];
+
+  uint8_t                clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  uint8_t                serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  LGNetPasswordChallenge authChallenge;
+  LGNetPasswordResponse  authResponse;
+  uint8_t                authKey[LG_NET_PASSWORD_SHA256_LENGTH];
 
   LGNetStreamParser   receiveParser;
   uint8_t           * receiveData;
@@ -174,6 +196,32 @@ static bool networkCapabilityOfferValid(
   return true;
 }
 
+static bool networkBytesNonzero(const uint8_t * data, size_t size)
+{
+  if (!data)
+    return false;
+
+  uint8_t value = 0;
+  for (size_t index = 0; index < size; ++index)
+    value |= data[index];
+  return value != 0;
+}
+
+static void networkConnectionClearAuthProofNL(NetworkConnection * this)
+{
+  networkAuthSecureZero(
+      this->clientHelloNonce, sizeof(this->clientHelloNonce));
+  networkAuthSecureZero(
+      this->serverHelloNonce, sizeof(this->serverHelloNonce));
+  networkAuthSecureZero(&this->authChallenge, sizeof(this->authChallenge));
+  networkAuthSecureZero(&this->authResponse, sizeof(this->authResponse));
+  networkAuthSecureZero(this->authKey, sizeof(this->authKey));
+  this->authChallengeReceived  = false;
+  this->authResponseSent       = false;
+  this->authResultReceived     = false;
+  this->authKeyValid           = false;
+}
+
 static void networkConnectionSetState(NetworkConnection * this,
     bool connected, LG_TransportStatus reason)
 {
@@ -200,6 +248,7 @@ static void networkConnectionFail(NetworkConnection * this,
   }
   reason = this->connectStatus == LG_TRANSPORT_OK ?
     status : this->connectStatus;
+  networkConnectionClearAuthProofNL(this);
   LG_UNLOCK(this->lock);
 
   networkConnectionSetState(this, false, reason);
@@ -298,14 +347,21 @@ static bool networkConnectionSendHello(NetworkConnection * this)
     LG_NET_AUTH_MODE_FLAG(LG_NET_AUTH_NONE);
 
   uint8_t payload[LG_NET_HELLO_WIRE_SIZE];
-  if (!lgNetHelloEncode(payload, sizeof(payload), &hello))
-    return false;
+  bool    result = false;
+  if (!networkAuthRandomBytes(hello.nonce, sizeof(hello.nonce)) ||
+      !networkBytesNonzero(hello.nonce, sizeof(hello.nonce)) ||
+      !lgNetHelloEncode(payload, sizeof(payload), &hello))
+    goto cleanup;
+
+  LG_LOCK(this->lock);
+  memcpy(this->clientHelloNonce, hello.nonce, sizeof(hello.nonce));
+  LG_UNLOCK(this->lock);
 
   if (!networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_HELLO, LG_NET_CORE_VERSION_CURRENT,
       LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
       payload, sizeof(payload), true))
-    return false;
+    goto cleanup;
 
   for (LGNetService service = LG_NET_SERVICE_RECOVERY;
        service < LG_NET_SERVICE_USB; ++service)
@@ -320,13 +376,24 @@ static bool networkConnectionSendHello(NetworkConnection * this)
           LG_NET_CORE_MESSAGE_CAPABILITY, LG_NET_CORE_VERSION_CURRENT,
           LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
           capabilityPayload, sizeof(capabilityPayload), true))
-      return false;
+      goto cleanup;
   }
 
-  return networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+  result = networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
       LG_NET_CORE_VERSION_CURRENT, LG_NET_ENVELOPE_FINAL,
       0, NETWORK_HELLO_REQUEST_ID, NULL, 0, true);
+
+cleanup:
+  networkAuthSecureZero(payload, sizeof(payload));
+  networkAuthSecureZero(&hello, sizeof(hello));
+  if (!result)
+  {
+    LG_LOCK(this->lock);
+    networkConnectionClearAuthProofNL(this);
+    LG_UNLOCK(this->lock);
+  }
+  return result;
 }
 
 static void networkConnectionReady(NetworkConnection * this)
@@ -431,6 +498,16 @@ static bool networkConnectionRequiredCapabilitiesSelected(
   return true;
 }
 
+static bool networkConnectionReadyToActivateNL(
+    const NetworkConnection * this)
+{
+  return this->helloAcknowledged &&
+    this->authenticationComplete &&
+    this->capabilitiesComplete &&
+    this->receivedCapabilities == this->expectedCapabilities &&
+    networkConnectionRequiredCapabilitiesSelected(this);
+}
+
 static void networkConnectionSetSessionFeatures(NetworkConnection * this)
 {
   const uint16_t services =
@@ -441,6 +518,264 @@ static void networkConnectionSetSessionFeatures(NetworkConnection * this)
     this->session.features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
   if (services & (UINT16_C(1) << LG_NET_SERVICE_AUDIO))
     this->session.features |= LG_TRANSPORT_FEATURE_AUDIO;
+}
+
+static bool networkConnectionHandleAuthChallenge(NetworkConnection * this,
+    const LGNetPacketView * packet)
+{
+  const LGNetEnvelopeFlags responseFlags =
+    LG_NET_ENVELOPE_RESPONSE |
+    LG_NET_ENVELOPE_FINAL    |
+    LG_NET_ENVELOPE_RELIABLE;
+  LGNetPasswordChallenge challenge;
+  if (packet->envelope.flags != responseFlags ||
+      packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
+      packet->envelope.componentEpoch != 0 ||
+      packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT ||
+      lgNetPasswordChallengeDecode(&challenge,
+        packet->payload, packet->payloadLength) != LG_NET_PARSE_OK ||
+      challenge.algorithm != LG_NET_PASSWORD_PBKDF2_HMAC_SHA256 ||
+      challenge.rounds < NETWORK_AUTH_PBKDF2_ROUNDS_MIN ||
+      challenge.rounds > NETWORK_AUTH_PBKDF2_ROUNDS_MAX ||
+      challenge.saltLength < NETWORK_AUTH_SALT_LENGTH_MIN ||
+      challenge.challengeLength < NETWORK_AUTH_CHALLENGE_LENGTH_MIN)
+    return false;
+
+  uint16_t protocolVersion;
+  uint64_t sessionEpoch;
+  uint8_t  clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  uint8_t  serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  LG_LOCK(this->lock);
+  const bool validState = this->password && *this->password &&
+    this->helloAcknowledged &&
+    this->authMode == LG_NET_AUTH_PASSWORD &&
+    !this->authenticationComplete &&
+    !this->authChallengeReceived &&
+    !this->authResponseSent &&
+    packet->envelope.sessionEpoch == this->sessionEpoch &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire);
+  if (validState)
+  {
+    this->authChallengeReceived = true;
+    protocolVersion             = this->protocolVersion;
+    sessionEpoch                = this->sessionEpoch;
+    memcpy(clientHelloNonce, this->clientHelloNonce,
+        sizeof(clientHelloNonce));
+    memcpy(serverHelloNonce, this->serverHelloNonce,
+        sizeof(serverHelloNonce));
+  }
+  LG_UNLOCK(this->lock);
+  if (!validState)
+    return false;
+
+  LGNetPasswordResponse response;
+  uint8_t               key[LG_NET_PASSWORD_SHA256_LENGTH] = { 0 };
+  uint8_t               transcript
+    [LG_NET_PASSWORD_CLIENT_PROOF_TRANSCRIPT_MAX_SIZE] = { 0 };
+  uint8_t               payload[LG_NET_PASSWORD_RESPONSE_HEADER_SIZE +
+    LG_NET_PASSWORD_NONCE_MAX_LENGTH +
+    LG_NET_PASSWORD_PROOF_MAX_LENGTH] = { 0 };
+  memset(&response, 0, sizeof(response));
+  response.algorithm   = LG_NET_PASSWORD_PBKDF2_HMAC_SHA256;
+  response.nonceLength = NETWORK_AUTH_RESPONSE_NONCE_LENGTH;
+  response.proofLength = LG_NET_PASSWORD_SHA256_LENGTH;
+
+  LGNetPasswordProofContext context =
+  {
+    .protocolVersion = protocolVersion,
+    .sessionEpoch    = sessionEpoch,
+    .helloNonce      = clientHelloNonce,
+    .helloAckNonce   = serverHelloNonce,
+    .challenge       = &challenge,
+    .response        = &response,
+  };
+  size_t transcriptSize = 0;
+  size_t payloadSize    = 0;
+  bool   stored         = false;
+  bool   sent           = false;
+  if (!networkAuthRandomBytes(response.nonce, response.nonceLength) ||
+      !networkBytesNonzero(response.nonce, response.nonceLength) ||
+      !networkAuthPBKDF2HMACSHA256(this->password,
+        strlen(this->password), challenge.salt, challenge.saltLength,
+        challenge.rounds, key, sizeof(key)) ||
+      !lgNetPasswordClientProofTranscriptSize(&context, &transcriptSize) ||
+      transcriptSize > sizeof(transcript) ||
+      !lgNetPasswordClientProofTranscriptEncode(
+        transcript, transcriptSize, &context) ||
+      !networkAuthHMACSHA256(key, sizeof(key), transcript,
+        transcriptSize, response.proof))
+    goto cleanup;
+
+  payloadSize = lgNetPasswordResponseSize(&response);
+  if (!payloadSize || payloadSize > sizeof(payload) ||
+      !lgNetPasswordResponseEncode(payload, payloadSize, &response))
+    goto cleanup;
+
+  LG_LOCK(this->lock);
+  stored = this->authChallengeReceived &&
+    !this->authResponseSent &&
+    !this->authenticationComplete &&
+    packet->envelope.sessionEpoch == this->sessionEpoch &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire);
+  if (stored)
+  {
+    this->authChallenge = challenge;
+    this->authResponse  = response;
+    memcpy(this->authKey, key, sizeof(key));
+    this->authResponseSent = true;
+    this->authKeyValid     = true;
+  }
+  LG_UNLOCK(this->lock);
+  if (!stored)
+    goto cleanup;
+
+  sent = networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+      LG_NET_CORE_MESSAGE_AUTH_RESPONSE, LG_NET_CORE_VERSION_CURRENT,
+      LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
+      payload, (uint32_t)payloadSize, true);
+
+cleanup:
+  if (stored && !sent)
+  {
+    LG_LOCK(this->lock);
+    networkConnectionClearAuthProofNL(this);
+    LG_UNLOCK(this->lock);
+  }
+  networkAuthSecureZero(payload, sizeof(payload));
+  networkAuthSecureZero(transcript, sizeof(transcript));
+  networkAuthSecureZero(key, sizeof(key));
+  networkAuthSecureZero(&response, sizeof(response));
+  networkAuthSecureZero(&challenge, sizeof(challenge));
+  networkAuthSecureZero(clientHelloNonce, sizeof(clientHelloNonce));
+  networkAuthSecureZero(serverHelloNonce, sizeof(serverHelloNonce));
+  return sent;
+}
+
+static bool networkConnectionHandleAuthResult(NetworkConnection * this,
+    const LGNetPacketView * packet)
+{
+  const LGNetEnvelopeFlags responseFlags =
+    LG_NET_ENVELOPE_RESPONSE |
+    LG_NET_ENVELOPE_FINAL    |
+    LG_NET_ENVELOPE_RELIABLE;
+  LGNetAuthResult result;
+  if (packet->envelope.flags != responseFlags ||
+      packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
+      packet->envelope.componentEpoch != 0 ||
+      packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT ||
+      lgNetAuthResultDecode(&result,
+        packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
+    return false;
+
+  if (result.result != LG_NET_AUTH_RESULT_ACCEPTED)
+  {
+    DEBUG_ERROR("Network password authentication was rejected "
+        "(result %u, retry after %u ms)",
+        (unsigned)result.result, (unsigned)result.retryAfterMs);
+    networkAuthSecureZero(&result, sizeof(result));
+    return false;
+  }
+  if (result.retryAfterMs ||
+      result.proofLength != LG_NET_PASSWORD_SHA256_LENGTH)
+  {
+    networkAuthSecureZero(&result, sizeof(result));
+    return false;
+  }
+
+  uint16_t               protocolVersion;
+  uint64_t               sessionEpoch;
+  uint8_t                clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  uint8_t                serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
+  LGNetPasswordChallenge challenge;
+  LGNetPasswordResponse  response;
+  uint8_t                key[LG_NET_PASSWORD_SHA256_LENGTH];
+  LG_LOCK(this->lock);
+  const bool validState = this->helloAcknowledged &&
+    this->authMode == LG_NET_AUTH_PASSWORD &&
+    !this->authenticationComplete &&
+    this->authChallengeReceived &&
+    this->authResponseSent &&
+    !this->authResultReceived &&
+    this->authKeyValid &&
+    packet->envelope.sessionEpoch == this->sessionEpoch &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire);
+  if (validState)
+  {
+    this->authResultReceived = true;
+    protocolVersion          = this->protocolVersion;
+    sessionEpoch             = this->sessionEpoch;
+    memcpy(clientHelloNonce, this->clientHelloNonce,
+        sizeof(clientHelloNonce));
+    memcpy(serverHelloNonce, this->serverHelloNonce,
+        sizeof(serverHelloNonce));
+    challenge = this->authChallenge;
+    response  = this->authResponse;
+    memcpy(key, this->authKey, sizeof(key));
+  }
+  LG_UNLOCK(this->lock);
+  if (!validState)
+  {
+    networkAuthSecureZero(&result, sizeof(result));
+    return false;
+  }
+
+  LGNetPasswordProofContext context =
+  {
+    .protocolVersion = protocolVersion,
+    .sessionEpoch    = sessionEpoch,
+    .helloNonce      = clientHelloNonce,
+    .helloAckNonce   = serverHelloNonce,
+    .challenge       = &challenge,
+    .response        = &response,
+  };
+  uint8_t transcript
+    [LG_NET_PASSWORD_SERVER_PROOF_TRANSCRIPT_MAX_SIZE] = { 0 };
+  uint8_t expectedProof[LG_NET_PASSWORD_SHA256_LENGTH] = { 0 };
+  size_t  transcriptSize                               = 0;
+  bool    verified                                     = false;
+  if (lgNetPasswordServerProofTranscriptSize(&context, &transcriptSize) &&
+      transcriptSize <= sizeof(transcript) &&
+      lgNetPasswordServerProofTranscriptEncode(
+        transcript, transcriptSize, &context) &&
+      networkAuthHMACSHA256(key, sizeof(key), transcript,
+        transcriptSize, expectedProof))
+    verified = networkAuthConstantTimeEqual(
+        expectedProof, result.proof, sizeof(expectedProof));
+
+  bool ready      = false;
+  bool stateValid = false;
+  LG_LOCK(this->lock);
+  stateValid = this->authResultReceived &&
+    !this->authenticationComplete &&
+    this->authResponseSent &&
+    this->authKeyValid &&
+    packet->envelope.sessionEpoch == this->sessionEpoch &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire);
+  if (verified && stateValid)
+  {
+    this->authenticationComplete = true;
+    ready                        =
+      networkConnectionReadyToActivateNL(this);
+    if (ready)
+      networkConnectionSetSessionFeatures(this);
+  }
+  networkConnectionClearAuthProofNL(this);
+  LG_UNLOCK(this->lock);
+
+  if (!verified)
+    DEBUG_ERROR("Network server password proof validation failed");
+  if (ready)
+    networkConnectionReady(this);
+
+  networkAuthSecureZero(expectedProof, sizeof(expectedProof));
+  networkAuthSecureZero(transcript, sizeof(transcript));
+  networkAuthSecureZero(key, sizeof(key));
+  networkAuthSecureZero(&response, sizeof(response));
+  networkAuthSecureZero(&challenge, sizeof(challenge));
+  networkAuthSecureZero(clientHelloNonce, sizeof(clientHelloNonce));
+  networkAuthSecureZero(serverHelloNonce, sizeof(serverHelloNonce));
+  networkAuthSecureZero(&result, sizeof(result));
+  return verified && stateValid;
 }
 
 static bool networkConnectionHandleCore(NetworkConnection * this,
@@ -461,36 +796,54 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
     case LG_NET_CORE_MESSAGE_HELLO_ACK:
     {
       LGNetHelloAck acknowledgement;
+      const LGNetAuthMode expectedAuthMode =
+        this->password && *this->password ?
+          LG_NET_AUTH_PASSWORD : LG_NET_AUTH_NONE;
       if (packet->envelope.flags != responseFlags ||
           packet->envelope.requestID != NETWORK_HELLO_REQUEST_ID ||
           packet->envelope.componentEpoch != 0 ||
+          packet->envelope.serviceVersion != LG_NET_CORE_VERSION_CURRENT ||
           lgNetHelloAckDecode(&acknowledgement,
             packet->payload, packet->payloadLength) != LG_NET_PARSE_OK ||
           acknowledgement.protocolVersion !=
             LG_NET_PROTOCOL_VERSION_CURRENT ||
-          acknowledgement.authMode != LG_NET_AUTH_NONE ||
+          acknowledgement.authMode != expectedAuthMode ||
+          acknowledgement.flags ||
+          acknowledgement.capabilityCount >
+            this->offeredCapabilityCount ||
           acknowledgement.maxPayloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
           acknowledgement.maxDatagramPayload >
             NETWORK_MAX_DATAGRAM_PAYLOAD ||
+          !networkBytesNonzero(
+            acknowledgement.nonce, sizeof(acknowledgement.nonce)) ||
           packet->envelope.sessionEpoch != acknowledgement.sessionEpoch)
         return false;
 
       LG_LOCK(this->lock);
-      if (this->helloAcknowledged)
+      if (this->helloAcknowledged ||
+          !networkBytesNonzero(
+            this->clientHelloNonce, sizeof(this->clientHelloNonce)))
       {
         LG_UNLOCK(this->lock);
         return false;
       }
 
       this->helloAcknowledged      = true;
-      this->authenticationComplete = true;
+      this->authenticationComplete =
+        acknowledgement.authMode == LG_NET_AUTH_NONE;
       this->expectedCapabilities   = acknowledgement.capabilityCount;
+      this->protocolVersion        = acknowledgement.protocolVersion;
+      this->authMode               = acknowledgement.authMode;
       this->sessionEpoch           = acknowledgement.sessionEpoch;
       this->maxPayloadLength       = acknowledgement.maxPayloadLength;
       this->maxDatagramPayload     = acknowledgement.maxDatagramPayload;
+      memcpy(this->serverHelloNonce, acknowledgement.nonce,
+          sizeof(this->serverHelloNonce));
       const bool sequenceReady = lgNetSequenceTrackerInit(
           &this->datagramReceive, acknowledgement.sessionEpoch,
           NETWORK_SEQUENCE_CONNECTION_EPOCH, 64, false);
+      if (this->authenticationComplete)
+        networkConnectionClearAuthProofNL(this);
       LG_UNLOCK(this->lock);
       return sequenceReady;
     }
@@ -514,26 +867,26 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
 
       bool ready;
       LG_LOCK(this->lock);
-      ready = !this->capabilitiesComplete &&
+      const bool valid = !this->capabilitiesComplete &&
         this->helloAcknowledged &&
-        this->authenticationComplete &&
         this->receivedCapabilities == this->expectedCapabilities &&
         networkConnectionRequiredCapabilitiesSelected(this);
-      this->capabilitiesComplete = ready;
+      this->capabilitiesComplete = valid;
+      ready                      =
+        valid && networkConnectionReadyToActivateNL(this);
       if (ready)
         networkConnectionSetSessionFeatures(this);
       LG_UNLOCK(this->lock);
       if (ready)
         networkConnectionReady(this);
-      return ready;
+      return valid;
     }
 
     case LG_NET_CORE_MESSAGE_AUTH_CHALLENGE:
-      DEBUG_ERROR("The server requested unsupported password authentication");
-      return false;
+      return networkConnectionHandleAuthChallenge(this, packet);
 
     case LG_NET_CORE_MESSAGE_AUTH_RESULT:
-      return false;
+      return networkConnectionHandleAuthResult(this, packet);
 
     default:
       return false;
@@ -1109,6 +1462,8 @@ void networkConnectionDestroy(NetworkConnection ** connection)
   free(this->receivePayload);
   free(this->receiveData);
   free(this->endpoint);
+  if (this->password)
+    networkAuthSecureZero(this->password, strlen(this->password));
   free(this->password);
   free(this->address);
   free(this);
@@ -1121,11 +1476,6 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
 {
   if (!this || !session || this->connection)
     return LG_TRANSPORT_ERROR;
-  if (this->password && *this->password)
-  {
-    DEBUG_ERROR("network:password requires a future password proof provider");
-    return LG_TRANSPORT_ERROR;
-  }
   if (cancelled && cancelled(cancelledOpaque))
     return LG_TRANSPORT_DISCONNECTED;
 
@@ -1141,6 +1491,8 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->sendSequence           = 0;
   this->datagramSendSequence   = 0;
   this->receiveSequence        = 0;
+  this->protocolVersion        = 0;
+  this->authMode               = LG_NET_AUTH_NONE;
   this->helloAcknowledged      = false;
   this->authenticationComplete = false;
   this->capabilitiesComplete   = false;
@@ -1154,6 +1506,7 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->maxDatagramPayload     = 0;
   this->maxDatagramSendLength  = 0;
   this->datagramSendEnabled    = false;
+  networkConnectionClearAuthProofNL(this);
   memset(this->serviceVersions, 0, sizeof(this->serviceVersions));
   memset(this->serviceMaxPayload, 0, sizeof(this->serviceMaxPayload));
   memset(this->serviceMaxDatagram, 0, sizeof(this->serviceMaxDatagram));
@@ -1227,6 +1580,7 @@ void networkConnectionCancel(NetworkConnection * this)
   atomic_store_explicit(&this->sessionValid, false, memory_order_release);
   this->certificatePending = false;
   memset(this->pendingFingerprint, 0, sizeof(this->pendingFingerprint));
+  networkConnectionClearAuthProofNL(this);
   if (this->connecting)
   {
     this->connectStatus = LG_TRANSPORT_DISCONNECTED;

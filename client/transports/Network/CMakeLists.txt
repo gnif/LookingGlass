@@ -14,12 +14,14 @@ set(TRANSPORT_NETWORK_SOURCES
 
 if(WIN32)
   list(APPEND TRANSPORT_NETWORK_SOURCES
+    platform/windows/auth_crypto.c
     platform/windows/fingerprint.c
     platform/windows/platform.c
   )
 else()
   find_package(OpenSSL REQUIRED COMPONENTS Crypto)
   list(APPEND TRANSPORT_NETWORK_SOURCES
+    platform/linux/auth_crypto.c
     platform/linux/fingerprint.c
     platform/linux/platform.c
   )

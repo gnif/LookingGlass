@@ -41,4 +41,5 @@ public:
 
   bool Start();
   void Stop();
+  void Process();
 };

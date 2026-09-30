@@ -121,12 +121,17 @@ bool CNetworkTransport::Setup(size_t alignment)
 ITransport::ProcessResult CNetworkTransport::Process(
   ITransportEvents& events)
 {
+  CNetworkServer * server;
   {
     CSRWSharedLock lock(m_lifecycleLock);
     if (m_state != State::INITIALIZED && m_state != State::READY)
       return m_state == State::STOPPED ?
         ProcessResult::FAILURE : ProcessResult::OK;
+    server = m_server.get();
   }
+
+  if (server)
+    server->Process();
 
   NetworkEvent event;
   for (unsigned i = 0; i < EVENT_DRAIN_LIMIT && m_events.Take(event); ++i)

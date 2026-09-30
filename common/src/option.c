@@ -78,10 +78,26 @@ static bool float_parser(struct Option * opt, const char * str)
   return true;
 }
 
+static void string_free(char * value)
+{
+  if (!value)
+    return;
+
+  const size_t             length = strlen(value);
+  volatile unsigned char * bytes  = (volatile unsigned char *)value;
+  for (size_t i = 0; i < length; ++i)
+    bytes[i] = 0;
+  free(value);
+}
+
 static bool string_parser(struct Option * opt, const char * str)
 {
-  free(opt->value.x_string);
-  opt->value.x_string = lg_strdup(str);
+  char * value = lg_strdup(str);
+  if (str && !value)
+    return false;
+
+  string_free(opt->value.x_string);
+  opt->value.x_string = value;
   return true;
 }
 
@@ -286,8 +302,8 @@ void option_free(void)
     if (o->cleanup)
       o->cleanup(o);
 
-    if (o->type == OPTION_TYPE_STRING && o->value.x_string)
-      free(o->value.x_string);
+    if (o->type == OPTION_TYPE_STRING)
+      string_free(o->value.x_string);
     free(o);
   }
   free(state.options);
@@ -382,7 +398,7 @@ bool option_parse(int argc, char * argv[])
       if (!module || !name)
       {
         DEBUG_WARN("Ignored invalid argument: %s", argv[a]);
-        free(arg);
+        string_free(arg);
         continue;
       }
 
@@ -404,13 +420,13 @@ bool option_parse(int argc, char * argv[])
         value = v;
       }
 
-      free(arg);
+      string_free(arg);
     }
 
     if (!o)
     {
       DEBUG_WARN("Ignored unknown argument: %s", argv[a]);
-      free(value);
+      string_free(value);
       continue;
     }
 
@@ -429,7 +445,7 @@ bool option_parse(int argc, char * argv[])
     }
 
     option_set(o, value);
-    free(value);
+    string_free(value);
   }
 
   return true;
@@ -592,7 +608,7 @@ bool option_load(const char * filename)
         free(name);
         name     = NULL;
         nameLen  = 0;
-        free(value);
+        string_free(value);
         value    = NULL;
         valueLen = 0;
         break;
@@ -681,7 +697,7 @@ exit:
 
   free(module);
   free(name  );
-  free(value );
+  string_free(value);
 
   return result;
 }
@@ -781,7 +797,9 @@ void option_print(void)
       struct Option * o = state.groups[g].options[i];
       if (o->preset)
         continue;
-      char * value = o->toString(o);
+      char * value = o->sensitive && o->type == OPTION_TYPE_STRING &&
+        o->value.x_string && *o->value.x_string ?
+          lg_strdup("<redacted>") : o->toString(o);
       if (!value)
       {
         value = lg_strdup("NULL");
@@ -894,7 +912,7 @@ bool option_dump_preset(FILE * file)
 
       char * value = o->toString(o);
       fprintf(file, "%s=%s\n", o->name, value);
-      free(value);
+      string_free(value);
     }
     fputc('\n', file);
   }
@@ -995,8 +1013,15 @@ void option_set_string(const char * module, const char * name, const char * valu
     return;
   }
   DEBUG_ASSERT(o->type == OPTION_TYPE_STRING);
-  free(o->value.x_string);
-  o->value.x_string = lg_strdup(value);
+  char * replacement = lg_strdup(value);
+  if (value && !replacement)
+  {
+    DEBUG_ERROR("out of memory");
+    return;
+  }
+
+  string_free(o->value.x_string);
+  o->value.x_string = replacement;
 }
 
 void option_set_bool(const char * module, const char * name, bool value)

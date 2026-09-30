@@ -69,6 +69,7 @@
     <ClCompile Include="CClipboardRing.cpp" />
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\auth.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\packet.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\protocol.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\route.c" />

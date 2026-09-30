@@ -54,8 +54,9 @@ struct Option
   char * old_name;
 
   char * description;
-  char shortopt;
-  bool preset;
+  char   shortopt;
+  bool   preset;
+  bool   sensitive;
   void * opaque;
 
   enum OptionType type;
