@@ -140,6 +140,37 @@ openKey:
   return true;
 }
 
+static bool networkIdentityCanUsePrivateKey(PCCERT_CONTEXT certificate)
+{
+  HCRYPTPROV_OR_NCRYPT_KEY_HANDLE key        = 0;
+  DWORD                           keySpec    = 0;
+  BOOL                            callerFree = FALSE;
+  const DWORD                     flags      =
+    CRYPT_ACQUIRE_COMPARE_KEY_FLAG     |
+    CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG |
+    CRYPT_ACQUIRE_SILENT_FLAG;
+  const bool acquired = CryptAcquireCertificatePrivateKey(
+    certificate,
+    flags,
+    NULL,
+    &key,
+    &keySpec,
+    &callerFree);
+  const bool result   = acquired &&
+    key &&
+    keySpec == CERT_NCRYPT_KEY_SPEC;
+
+  if (callerFree && key)
+  {
+    if (keySpec == CERT_NCRYPT_KEY_SPEC)
+      NCryptFreeObject((NCRYPT_HANDLE)key);
+    else
+      CryptReleaseContext((HCRYPTPROV)key, 0);
+  }
+
+  return result;
+}
+
 static bool networkIdentityMatchesKey(PCCERT_CONTEXT certificate)
 {
   DWORD size = 0;
@@ -158,7 +189,8 @@ static bool networkIdentityMatchesKey(PCCERT_CONTEXT certificate)
       LG_NETWORK_CERTIFICATE_KEY_NAME) == 0 &&
     info->pwszProvName &&
     wcscmp(info->pwszProvName, MS_KEY_STORAGE_PROVIDER) == 0 &&
-    CertVerifyTimeValidity(NULL, certificate->pCertInfo) == 0;
+    CertVerifyTimeValidity(NULL, certificate->pCertInfo) == 0 &&
+    networkIdentityCanUsePrivateKey(certificate);
 
   free(info);
   return result;

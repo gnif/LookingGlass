@@ -42,10 +42,12 @@
 #include <limits.h>
 #include <memory>
 #include <new>
+#include <ncrypt.h>
 #include <string.h>
 #include <string>
 #include <utility>
 #include <vector>
+#include <wincrypt.h>
 
 namespace
 {
@@ -199,7 +201,7 @@ namespace
     return QuicAddrFromString(text.c_str(), port, &address) != FALSE;
   }
 
-  bool ReadCertificateHash(QUIC_CERTIFICATE_HASH_STORE& certificate)
+  bool ReadCertificateHash(QUIC_CERTIFICATE_HASH& certificate)
   {
     HKEY key = nullptr;
     const LSTATUS openStatus = RegOpenKeyExW(HKEY_LOCAL_MACHINE,
@@ -225,10 +227,83 @@ namespace
       return false;
     }
 
-    certificate.Flags = QUIC_CERTIFICATE_HASH_STORE_FLAG_MACHINE_STORE;
-    if (strcpy_s(certificate.StoreName,
-        sizeof(certificate.StoreName), "MY") != 0)
+    return true;
+  }
+
+  bool LoadCertificateContext(HCERTSTORE& store,
+    PCCERT_CONTEXT& certificate)
+  {
+    QUIC_CERTIFICATE_HASH certificateHash = {};
+    if (!ReadCertificateHash(certificateHash))
       return false;
+
+    store = CertOpenStore(
+      CERT_STORE_PROV_SYSTEM_W,
+      0,
+      0,
+      CERT_SYSTEM_STORE_LOCAL_MACHINE |
+        CERT_STORE_OPEN_EXISTING_FLAG |
+        CERT_STORE_READONLY_FLAG,
+      L"MY");
+    if (!store)
+    {
+      DEBUG_ERROR("Failed to open the network identity certificate store: "
+        "0x%lx", static_cast<unsigned long>(GetLastError()));
+      return false;
+    }
+
+    CRYPT_HASH_BLOB hash  = {};
+    hash.cbData           = static_cast<DWORD>(
+      sizeof(certificateHash.ShaHash));
+    hash.pbData           = certificateHash.ShaHash;
+    certificate           = CertFindCertificateInStore(store,
+      X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_HASH,
+      &hash, nullptr);
+    if (!certificate)
+    {
+      const DWORD status = GetLastError();
+      DEBUG_ERROR("Failed to find the network identity certificate: 0x%lx",
+        static_cast<unsigned long>(status));
+      CertCloseStore(store, 0);
+      store = nullptr;
+      return false;
+    }
+
+    HCRYPTPROV_OR_NCRYPT_KEY_HANDLE privateKey  = 0;
+    DWORD                           keySpec     = 0;
+    BOOL                            callerFree  = FALSE;
+    const DWORD                     flags       =
+      CRYPT_ACQUIRE_CACHE_FLAG           |
+      CRYPT_ACQUIRE_COMPARE_KEY_FLAG     |
+      CRYPT_ACQUIRE_ONLY_NCRYPT_KEY_FLAG |
+      CRYPT_ACQUIRE_SILENT_FLAG;
+    if (!CryptAcquireCertificatePrivateKey(certificate,
+        flags,
+        nullptr, &privateKey, &keySpec, &callerFree))
+    {
+      const DWORD status = GetLastError();
+      DEBUG_ERROR("Failed to acquire the network identity private key: "
+        "0x%lx", static_cast<unsigned long>(status));
+      CertFreeCertificateContext(certificate);
+      CertCloseStore(store, 0);
+      certificate = nullptr;
+      store       = nullptr;
+      return false;
+    }
+
+    if (!privateKey || keySpec != CERT_NCRYPT_KEY_SPEC || callerFree)
+    {
+      DEBUG_ERROR("The network identity did not provide a cached CNG "
+        "private key");
+      if (callerFree && privateKey)
+        NCryptFreeObject(static_cast<NCRYPT_HANDLE>(privateKey));
+      CertFreeCertificateContext(certificate);
+      CertCloseStore(store, 0);
+      certificate = nullptr;
+      store       = nullptr;
+      return false;
+    }
+
     return true;
   }
 }
@@ -467,17 +542,19 @@ struct CNetworkServer::Impl
   CNetworkClipboard&        clipboard;
   CNetworkVideo&            video;
   NetworkSettings           settings;
-  const QUIC_API_TABLE    * api             = nullptr;
-  HQUIC                     registration    = nullptr;
-  HQUIC                     configuration   = nullptr;
-  HQUIC                     listener        = nullptr;
-  HANDLE                    drainedEvent    = nullptr;
+  const QUIC_API_TABLE    * api                = nullptr;
+  HQUIC                     registration       = nullptr;
+  HQUIC                     configuration      = nullptr;
+  HQUIC                     listener           = nullptr;
+  HCERTSTORE                certificateStore   = nullptr;
+  PCCERT_CONTEXT            certificate        = nullptr;
+  HANDLE                    drainedEvent       = nullptr;
   CSRWLock                  lock;
   std::vector<Connection *> connections;
-  uint32_t                  nextClient      = 1;
-  unsigned                  activeCallbacks = 0;
-  bool                      stopping        = true;
-  bool                      running         = false;
+  uint32_t                  nextClient         = 1;
+  unsigned                  activeCallbacks    = 0;
+  bool                      stopping           = true;
+  bool                      running            = false;
 
   void EnterCallback()
   {
@@ -4718,8 +4795,7 @@ retry:
       return false;
     }
 
-    QUIC_CERTIFICATE_HASH_STORE certificate = {};
-    if (!ReadCertificateHash(certificate))
+    if (!LoadCertificateContext(certificateStore, certificate))
     {
       DEBUG_ERROR("The persistent network identity is unavailable; run the "
         "Looking Glass IDD installer to provision it");
@@ -4728,10 +4804,10 @@ retry:
     }
 
     QUIC_CREDENTIAL_CONFIG credential = {};
-    credential.Type                 =
-      QUIC_CREDENTIAL_TYPE_CERTIFICATE_HASH_STORE;
-    credential.Flags                = QUIC_CREDENTIAL_FLAG_NONE;
-    credential.CertificateHashStore = &certificate;
+    credential.Type               = QUIC_CREDENTIAL_TYPE_CERTIFICATE_CONTEXT;
+    credential.Flags              = QUIC_CREDENTIAL_FLAG_NONE;
+    credential.CertificateContext = reinterpret_cast<QUIC_CERTIFICATE *>(
+      const_cast<CERT_CONTEXT *>(certificate));
     status = api->ConfigurationLoadCredential(configuration, &credential);
     if (QUIC_FAILED(status))
     {
@@ -4805,6 +4881,16 @@ retry:
     {
       api->ConfigurationClose(configuration);
       configuration = nullptr;
+    }
+    if (certificate)
+    {
+      CertFreeCertificateContext(certificate);
+      certificate = nullptr;
+    }
+    if (certificateStore)
+    {
+      CertCloseStore(certificateStore, 0);
+      certificateStore = nullptr;
     }
     if (registration && api)
     {
