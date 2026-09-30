@@ -930,6 +930,9 @@ struct CNetworkServer::Impl
         totalCountLimit = NETWORK_SEND_BULK_COUNT_MAX;
         totalByteLimit  = NETWORK_SEND_BULK_BYTES_MAX;
         break;
+
+      default:
+        return SendResult::FAILED;
     }
     if (delivery != Delivery::BULK && !SendPriority(service))
     {
@@ -987,6 +990,9 @@ struct CNetworkServer::Impl
         totalCountLimit = NETWORK_SEND_BULK_COUNT_MAX;
         totalByteLimit  = NETWORK_SEND_BULK_BYTES_MAX;
         break;
+
+      default:
+        return false;
     }
     if (delivery != Delivery::BULK && !SendPriority(service))
     {
