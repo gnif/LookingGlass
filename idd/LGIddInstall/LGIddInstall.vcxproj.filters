@@ -18,5 +18,16 @@
     <ClCompile Include="LGIddInstall.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="NetworkIdentity.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="NetworkIdentity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\LGCommon\NetworkIdentity.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
   </ItemGroup>
 </Project>

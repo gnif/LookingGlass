@@ -81,7 +81,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;crypt32.lib;ncrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
@@ -101,7 +101,7 @@ copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Com
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;crypt32.lib;ncrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
@@ -122,7 +122,7 @@ copy /Y "$(SolutionDir)..\LICENSE"  "$(SolutionDir)$(Platform)\$(Configuration)\
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;crypt32.lib;ncrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
@@ -142,7 +142,7 @@ copy /Y "$(TargetPath)" "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd\"</Com
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>setupapi.lib;shlwapi.lib;newdev.lib;crypt32.lib;ncrypt.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <PostBuildEvent>
       <Command>if not exist "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd" mkdir "$(SolutionDir)$(Platform)\$(Configuration)\LGIdd"
@@ -154,6 +154,11 @@ copy /Y "$(SolutionDir)..\LICENSE"  "$(SolutionDir)$(Platform)\$(Configuration)\
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="LGIddInstall.c" />
+    <ClCompile Include="NetworkIdentity.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="NetworkIdentity.h" />
+    <ClInclude Include="..\LGCommon\NetworkIdentity.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

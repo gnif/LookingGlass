@@ -35,6 +35,8 @@
 #include <sddl.h>
 #include <aclapi.h>
 
+#include "NetworkIdentity.h"
+
 #pragma comment(lib, "cfgmgr32.lib")
 
 #define LGIDD_CLASS_GUID GUID_DEVCLASS_DISPLAY
@@ -1020,6 +1022,10 @@ void install(const DeviceDesc *const devices[DEVICE_COUNT])
 
   _putws(L"Preparing registry key...");
   if (!ensureKeyWithAce())
+    goto cleanup;
+
+  _putws(L"Preparing network identity...");
+  if (!networkIdentityProvision())
     goto cleanup;
 
   for (size_t i = 0; i < DEVICE_COUNT; ++i)
