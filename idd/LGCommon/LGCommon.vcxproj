@@ -70,6 +70,7 @@
     <ClCompile Include="CDebug.cpp" />
     <ClCompile Include="CPipeEndpoint.cpp" />
     <ClCompile Include="..\..\common\src\network\protocol.c" />
+    <ClCompile Include="..\..\common\src\network\services.c" />
     <ClCompile Include="..\..\common\src\network\wire.c" />
     <ClCompile Include="RefreshRate.cpp" />
     <ClCompile Include="WCCopy.cpp" />
@@ -89,6 +90,7 @@
     <ClInclude Include="ClipboardRing.h" />
     <ClInclude Include="CPipeEndpoint.h" />
     <ClInclude Include="..\..\common\include\common\network\protocol.h" />
+    <ClInclude Include="..\..\common\include\common\network\services.h" />
     <ClInclude Include="..\..\common\include\common\network\wire.h" />
     <ClInclude Include="CSRWLock.h" />
     <ClInclude Include="DefaultDisplayModes.h" />

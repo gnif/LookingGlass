@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.10)
-project(lg_common LANGUAGES C)
+project(lg_common LANGUAGES C CXX)
 
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake/")
 
@@ -46,6 +46,7 @@ set(COMMON_SOURCES
   src/debug.c
   src/ll.c
   src/network/protocol.c
+  src/network/services.c
   src/network/wire.c
 )
 

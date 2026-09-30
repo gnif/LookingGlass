@@ -154,7 +154,7 @@ bool lgNetWriterBytes(
   }
 
   if (size)
-    memcpy(writer->data + writer->offset, data, size);
+    memmove(writer->data + writer->offset, data, size);
   writer->offset += size;
   return true;
 }
