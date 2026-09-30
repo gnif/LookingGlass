@@ -24,7 +24,22 @@
     <ClCompile Include="CPipeEndpoint.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\packet.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\protocol.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\route.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\repos\LGProtocol\src\network\services.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\stream.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\wire.c">
       <Filter>Source Files</Filter>
     </ClCompile>
     <ClCompile Include="RefreshRate.cpp">
