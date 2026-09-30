@@ -160,6 +160,15 @@ function(lg_add_static_msquic)
       set(LG_MSQUIC_MINGW_ROOT "/usr/${MINGW64_TRIPLE}")
     endif()
 
+    find_library(LG_MSQUIC_NTDLL_LIBRARY
+      NAMES ntdll
+      PATHS "${LG_MSQUIC_MINGW_ROOT}/lib"
+      NO_DEFAULT_PATH
+      REQUIRED)
+    list(REMOVE_ITEM LG_MSQUIC_SYSTEM_LIBRARIES ntdll)
+    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+      "${LG_MSQUIC_NTDLL_LIBRARY}")
+
     set(LG_MSQUIC_DEBUG_LIBRARY
       "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib")
     find_program(LG_MSQUIC_CLANG_CL clang-cl REQUIRED)
