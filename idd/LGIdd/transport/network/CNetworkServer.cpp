@@ -625,6 +625,13 @@ struct CNetworkServer::Impl
     };
   }
 
+  static bool PeerInfoAvailableLocked(const Connection& connection)
+  {
+    return connection.handshake == HandshakeState::READY ||
+      (connection.handshake == HandshakeState::PUBLISHING_CAPABILITIES &&
+        connection.session);
+  }
+
   bool AudioPeerInfo(const NetworkAudioPeer& peer,
     NetworkAudioPeerInfo& info)
   {
@@ -639,7 +646,7 @@ struct CNetworkServer::Impl
       const uint16_t serviceMask =
         UINT16_C(1) << LG_NET_SERVICE_AUDIO;
       if (connection->closing ||
-          connection->handshake != HandshakeState::READY ||
+          !PeerInfoAvailableLocked(*connection) ||
           !(connection->selectedServices & serviceMask))
         return false;
 
@@ -705,7 +712,7 @@ struct CNetworkServer::Impl
         UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD;
       const uint16_t fileMask      = UINT16_C(1) << LG_NET_SERVICE_FILE;
       if (connection->closing ||
-          connection->handshake != HandshakeState::READY ||
+          !PeerInfoAvailableLocked(*connection) ||
           !(connection->selectedServices & clipboardMask) ||
           !(connection->selectedServices & fileMask))
         return false;
@@ -781,7 +788,7 @@ struct CNetworkServer::Impl
       CSRWSharedLock connectionGuard(connection->lock);
       const uint16_t serviceMask = UINT16_C(1) << LG_NET_SERVICE_VIDEO;
       if (connection->closing ||
-          connection->handshake != HandshakeState::READY ||
+          !PeerInfoAvailableLocked(*connection) ||
           !(connection->selectedServices & serviceMask))
         return false;
 
@@ -1252,7 +1259,7 @@ struct CNetworkServer::Impl
   SendResult TrySendPacket(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
-    uint32_t payloadLength)
+    uint32_t payloadLength, bool activateSession = false)
   {
     const LGNetServiceVersionInfo * version =
       lgNetServiceVersionInfo(service);
@@ -1261,6 +1268,11 @@ struct CNetworkServer::Impl
     if (!version ||
         !lgNetMessageRouteAllows(route, LG_NET_ROLE_SERVER,
           LG_NET_ROUTE_DELIVERY_RELIABLE) ||
+        (activateSession &&
+          (service != LG_NET_SERVICE_CORE ||
+            messageType != LG_NET_CORE_MESSAGE_CAPABILITIES_DONE ||
+            flags != (LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL) ||
+            componentEpoch || !requestID || payloadLength)) ||
         (payloadLength && !payload) ||
         payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
         flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
@@ -1275,10 +1287,13 @@ struct CNetworkServer::Impl
       CSRWExclusiveLock guard(connection.lock);
       const uint16_t serviceMask = UINT16_C(1) << service;
       if (connection.closing || !connection.controlStream ||
+          (activateSession &&
+            (connection.handshake !=
+              HandshakeState::PUBLISHING_CAPABILITIES ||
+              !connection.session ||
+              requestID != connection.handshakeRequestID)) ||
           (service != LG_NET_SERVICE_CORE &&
-            ((connection.handshake != HandshakeState::READY &&
-              connection.handshake !=
-                HandshakeState::PUBLISHING_CAPABILITIES) ||
+            (connection.handshake != HandshakeState::READY ||
              !(connection.selectedServices & serviceMask) ||
              !(connection.reliableServices & serviceMask))))
         return SendResult::FAILED;
@@ -1354,6 +1369,11 @@ struct CNetworkServer::Impl
         --connection.sendSequence;
         ReleaseSendLocked(connection, *send);
       }
+      else if (activateSession)
+      {
+        connection.handshake         = HandshakeState::READY;
+        connection.handshakeDeadline = 0;
+      }
     }
     if (QUIC_FAILED(status))
       return SendResult::FAILED;
@@ -1364,10 +1384,10 @@ struct CNetworkServer::Impl
   bool SendPacket(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
-    uint32_t payloadLength)
+    uint32_t payloadLength, bool activateSession = false)
   {
     return TrySendPacket(connection, service, messageType, flags,
-      componentEpoch, requestID, payload, payloadLength) ==
+      componentEpoch, requestID, payload, payloadLength, activateSession) ==
         SendResult::SENT;
   }
 
@@ -2073,12 +2093,6 @@ retry:
         return false;
     }
 
-    if (!SendPacket(connection, LG_NET_SERVICE_CORE,
-          LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
-          LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
-          0, requestID, nullptr, 0))
-      return false;
-
     std::shared_ptr<CNetworkSession> session;
     try
     {
@@ -2092,26 +2106,24 @@ retry:
     if (!session)
       return false;
 
-    bool activated         = false;
+    bool prepared          = false;
     bool audioSelected     = false;
     bool clipboardSelected = false;
     bool videoSelected     = false;
     {
       CSRWExclusiveLock guard(connection.lock);
-      activated = !connection.closing &&
+      prepared = !connection.closing &&
         connection.handshake == HandshakeState::PUBLISHING_CAPABILITIES &&
         !connection.session;
-      if (activated)
+      if (prepared)
       {
-        connection.session           = std::move(session);
-        connection.handshakeDeadline = 0;
+        connection.session = std::move(session);
         NetworkAuthCrypto::SecureZero(&connection.passwordChallenge,
           sizeof(connection.passwordChallenge));
         NetworkAuthCrypto::SecureZero(
           connection.clientNonce, sizeof(connection.clientNonce));
         NetworkAuthCrypto::SecureZero(
           connection.serverNonce, sizeof(connection.serverNonce));
-        connection.handshake         = HandshakeState::READY;
         audioSelected                = (connection.selectedServices &
           (UINT16_C(1) << LG_NET_SERVICE_AUDIO)) != 0;
         const uint16_t clipboardServices =
@@ -2124,7 +2136,7 @@ retry:
           (UINT16_C(1) << LG_NET_SERVICE_VIDEO)) != 0;
       }
     }
-    if (!activated)
+    if (!prepared)
     {
       transport.RemoveSession(connection.client, connection.generation);
       return false;
@@ -2135,6 +2147,11 @@ retry:
         !clipboard.PeerConnected(ClipboardPeer(connection)))
       return false;
     if (videoSelected && !video.PeerConnected(VideoPeer(connection)))
+      return false;
+    if (!SendPacket(connection, LG_NET_SERVICE_CORE,
+          LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
+          LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL,
+          0, requestID, nullptr, 0, true))
       return false;
     DEBUG_INFO("Network client %u completed the control handshake",
       connection.client);
