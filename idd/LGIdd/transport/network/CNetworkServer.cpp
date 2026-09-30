@@ -2276,8 +2276,9 @@ retry:
     }
     else
     {
-      result.result       = cryptoError ?
-        LG_NET_AUTH_RESULT_ERROR : LG_NET_AUTH_RESULT_REJECTED;
+      result.result       = static_cast<LGNetAuthResultCode>(
+        cryptoError ?
+          LG_NET_AUTH_RESULT_ERROR : LG_NET_AUTH_RESULT_REJECTED);
       result.retryAfterMs = NETWORK_AUTH_RETRY_AFTER_MS;
     }
 
@@ -3223,10 +3224,11 @@ retry:
     shape.pitch            = snapshot.cursor.CursorShapeInfo.Pitch;
     shape.dataLength       = static_cast<uint32_t>(
       snapshot.cursorData.size());
-    shape.format           = snapshot.cursor.CursorShapeInfo.CursorType ==
-        IDDCX_CURSOR_SHAPE_TYPE_ALPHA ?
-      LG_NET_CURSOR_FORMAT_BGRA8_PREMULTIPLIED :
-      LG_NET_CURSOR_FORMAT_MASKED_COLOR;
+    shape.format           = static_cast<LGNetCursorFormat>(
+      snapshot.cursor.CursorShapeInfo.CursorType ==
+          IDDCX_CURSOR_SHAPE_TYPE_ALPHA ?
+        LG_NET_CURSOR_FORMAT_BGRA8_PREMULTIPLIED :
+        LG_NET_CURSOR_FORMAT_MASKED_COLOR);
     shape.hotspotX         = snapshot.cursor.CursorShapeInfo.XHot;
     shape.hotspotY         = snapshot.cursor.CursorShapeInfo.YHot;
     shape.data             = snapshot.cursorData.data();

@@ -259,7 +259,7 @@ namespace
 
   bool Multiply(size_t left, size_t right, size_t& result)
   {
-    if (right && left > std::numeric_limits<size_t>::max() / right)
+    if (right && left > (std::numeric_limits<size_t>::max)() / right)
       return false;
     result = left * right;
     return true;
@@ -267,7 +267,7 @@ namespace
 
   bool Add(size_t left, size_t right, size_t& result)
   {
-    if (left > std::numeric_limits<size_t>::max() - right)
+    if (left > (std::numeric_limits<size_t>::max)() - right)
       return false;
     result = left + right;
     return true;
@@ -760,9 +760,9 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
       if (FAILED(hr) || !device)
         return false;
 
-      const uint32_t alignedWidth  = std::max(
+      const uint32_t alignedWidth  = (std::max)(
         Align(cfg.width, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
-      const uint32_t alignedHeight = std::max(
+      const uint32_t alignedHeight = (std::max)(
         Align(cfg.height, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
       if (alignedWidth > MAX_WIDTH || alignedHeight > MAX_HEIGHT)
         return false;
@@ -784,7 +784,7 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         if (readbackBytes > UINT64_MAX - planes[i].readbackBytes)
           return false;
         readbackBytes += planes[i].readbackBytes;
-        maxPixels      = std::max(maxPixels, pixels);
+        maxPixels      = (std::max)(maxPixels, pixels);
       }
       if (!maxPixels || maxPixels > UINT_MAX || !readbackBytes)
         return false;
@@ -983,12 +983,14 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         for (unsigned subblock = 0; subblock < 8; ++subblock)
           for (unsigned pixel = 0; pixel < 8; ++pixel)
           {
-            const int      value    = values[block][subblock * 8U + pixel];
-            const uint16_t absolute = static_cast<uint16_t>(
+            const size_t   valueIndex =
+              static_cast<size_t>(subblock) * 8U + pixel;
+            const int      value      = values[block][valueIndex];
+            const uint16_t absolute   = static_cast<uint16_t>(
               value < 0 ? -value : value);
-            planes[subblock] = std::max(
+            planes[subblock] = (std::max)(
               planes[subblock], MagnitudeBits(absolute));
-            maxPlanes = std::max(maxPlanes, planes[subblock]);
+            maxPlanes        = (std::max)(maxPlanes, planes[subblock]);
           }
 
         const unsigned qualityPlanes = maxPlanes > 3U ? maxPlanes - 3U : 0;
@@ -997,7 +999,7 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         {
           const unsigned coded = planes[subblock] > qualityPlanes ?
             planes[subblock] - qualityPlanes : 0;
-          control |= static_cast<uint16_t>(std::min(coded, 3U) <<
+          control |= static_cast<uint16_t>((std::min)(coded, 3U) <<
             (subblock * 2U));
         }
         controls.push_back(control);
@@ -1014,8 +1016,10 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
             uint8_t        byte  = 0;
             for (unsigned pixel = 0; pixel < 8; ++pixel)
             {
-              const int      value    = values[block][subblock * 8U + pixel];
-              const uint16_t absolute = static_cast<uint16_t>(
+              const size_t   valueIndex =
+                static_cast<size_t>(subblock) * 8U + pixel;
+              const int      value      = values[block][valueIndex];
+              const uint16_t absolute   = static_cast<uint16_t>(
                 value < 0 ? -value : value);
               byte |= static_cast<uint8_t>(
                 ((absolute >> shift) & 1U) << pixel);
@@ -1042,7 +1046,9 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
             continue;
           for (unsigned pixel = 0; pixel < 8; ++pixel)
           {
-            const int value = values[block][subblock * 8U + pixel];
+            const size_t valueIndex =
+              static_cast<size_t>(subblock) * 8U + pixel;
+            const int    value      = values[block][valueIndex];
             if (!value)
               continue;
             if (value < 0)
@@ -1404,16 +1410,17 @@ struct CNetworkVideo::Impl
     config.configEpoch         = m_configEpoch;
     config.width               = m_activeCfg.width;
     config.height              = m_activeCfg.height;
-    config.pixelFormat         = chroma == LG_NET_VIDEO_CHROMA_420 ?
-      LG_NET_VIDEO_PIXEL_FORMAT_YUV420P10 :
-      LG_NET_VIDEO_PIXEL_FORMAT_YUV444P10;
+    config.pixelFormat         = static_cast<LGNetVideoPixelFormat>(
+      chroma == LG_NET_VIDEO_CHROMA_420 ?
+        LG_NET_VIDEO_PIXEL_FORMAT_YUV420P10 :
+        LG_NET_VIDEO_PIXEL_FORMAT_YUV444P10);
     config.chromaSubsampling   = chroma;
-    config.colorPrimaries      = hdr ?
-      LG_NET_COLOR_PRIMARIES_BT2020 : LG_NET_COLOR_PRIMARIES_BT709;
-    config.colorTransfer       = hdr ?
-      LG_NET_COLOR_TRANSFER_PQ : LG_NET_COLOR_TRANSFER_BT709;
-    config.colorMatrix         = hdr ?
-      LG_NET_COLOR_MATRIX_BT2020 : LG_NET_COLOR_MATRIX_BT709;
+    config.colorPrimaries      = static_cast<LGNetColorPrimaries>(hdr ?
+      LG_NET_COLOR_PRIMARIES_BT2020 : LG_NET_COLOR_PRIMARIES_BT709);
+    config.colorTransfer       = static_cast<LGNetColorTransfer>(hdr ?
+      LG_NET_COLOR_TRANSFER_PQ : LG_NET_COLOR_TRANSFER_BT709);
+    config.colorMatrix         = static_cast<LGNetColorMatrix>(hdr ?
+      LG_NET_COLOR_MATRIX_BT2020 : LG_NET_COLOR_MATRIX_BT709);
     config.colorRange          = LG_NET_COLOR_RANGE_LIMITED;
     config.planeCount          = 3;
     config.bitDepth            = 10;
@@ -1449,7 +1456,7 @@ struct CNetworkVideo::Impl
     if (!payload || payload->size() > UINT32_MAX ||
         m_sends.size() >= MAX_SEND_ITEMS ||
         payload->size() > MAX_SEND_BYTES -
-          std::min(m_sendBytes, MAX_SEND_BYTES))
+          (std::min)(m_sendBytes, MAX_SEND_BYTES))
       return false;
     try
     {
@@ -1546,11 +1553,11 @@ struct CNetworkVideo::Impl
         peer, LG_NET_VIDEO_STATE_ERROR, 1, requestID);
     }
     LGNetVideoStreamConfig config = StreamConfigNL();
-    config.maxFrameLength    = std::min(
+    config.maxFrameLength    = (std::min)(
       config.maxFrameLength, peer.subscription.maxFrameLength);
-    config.maxFragmentLength = std::min(
+    config.maxFragmentLength = (std::min)(
       config.maxFragmentLength, config.maxFrameLength);
-    config.maxFrameLatencyMs = std::min(
+    config.maxFrameLatencyMs = (std::min)(
       config.maxFrameLatencyMs, peer.subscription.maxFrameLatencyMs);
     if ((peer.subscription.flags &
           LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS) &&
@@ -1626,7 +1633,7 @@ struct CNetworkVideo::Impl
 
   bool QueueScheduleNL(PeerState& peer, const EncodedFrame& frame)
   {
-    const uint32_t deadlineMs     = std::min(
+    const uint32_t deadlineMs     = (std::min)(
       frame.deadlineMs, peer.subscription.maxFrameLatencyMs);
     const uint64_t presentationNs = frame.captureTimeNs +
       static_cast<uint64_t>(deadlineMs) * UINT64_C(1000000);
@@ -1650,7 +1657,7 @@ struct CNetworkVideo::Impl
   bool QueueWholeFrameNL(PeerState& peer, const EncodedFrame& encoded,
     NetworkVideoDelivery delivery)
   {
-    const uint32_t deadlineMs = std::min(
+    const uint32_t deadlineMs = (std::min)(
       encoded.deadlineMs, peer.subscription.maxFrameLatencyMs);
 
     LGNetVideoFrame frame = {};
@@ -1695,7 +1702,7 @@ struct CNetworkVideo::Impl
   {
     if (!encoded || maxPayload <= LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
       return false;
-    const uint32_t payloadLimit = std::min(
+    const uint32_t payloadLimit = (std::min)(
       maxPayload - LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE,
       static_cast<uint32_t>(LG_NET_VIDEO_MAX_FRAGMENT_LENGTH));
     if (!payloadLimit)
@@ -1715,7 +1722,7 @@ struct CNetworkVideo::Impl
     size_t     bytes    = 0;
     if ((newFrame && !EncodedQueueBytes(*encoded, bytes)) ||
         m_sends.size() >= MAX_SEND_ITEMS ||
-        bytes > MAX_SEND_BYTES - std::min(m_sendBytes, MAX_SEND_BYTES))
+        bytes > MAX_SEND_BYTES - (std::min)(m_sendBytes, MAX_SEND_BYTES))
       return false;
     try
     {
@@ -1753,7 +1760,7 @@ struct CNetworkVideo::Impl
     const EncodedBlock& block = item.encoded->blocks[item.blockIndex];
     if (item.blockOffset >= block.length)
       return false;
-    const uint32_t length = std::min(
+    const uint32_t length = (std::min)(
       item.payloadLimit, block.length - item.blockOffset);
 
     LGNetVideoFragment fragment = {};
@@ -1777,7 +1784,8 @@ struct CNetworkVideo::Impl
       fragment.flags |= LG_NET_VIDEO_FRAGMENT_BLOCK_START;
     if (item.blockOffset + length == block.length)
       fragment.flags |= LG_NET_VIDEO_FRAGMENT_BLOCK_END;
-    if (fragment.frameOffset + length == item.encoded->data.size())
+    if (static_cast<size_t>(fragment.frameOffset) + length ==
+        item.encoded->data.size())
       fragment.flags |= LG_NET_VIDEO_FRAGMENT_FRAME_END;
 
     const size_t size = lgNetVideoFragmentSize(&fragment);
@@ -1800,7 +1808,7 @@ struct CNetworkVideo::Impl
     if (!item.encoded || item.blockIndex >= item.encoded->blocks.size())
       return false;
     const EncodedBlock& block  = item.encoded->blocks[item.blockIndex];
-    const uint32_t      length = std::min(
+    const uint32_t      length = (std::min)(
       item.payloadLimit, block.length - item.blockOffset);
     item.blockOffset += length;
     ++item.fragmentIndex;
@@ -1924,9 +1932,10 @@ struct CNetworkVideo::Impl
 
     if (m_encoder.Submit(std::move(pending.frame),
           std::move(pending.lease), pending.cfg,
-          pending.cfg.profile.signal == FrameSignal::PQ_BT2020 ||
-            (pending.cfg.width & 1U) || (pending.cfg.height & 1U) ?
-              LG_NET_VIDEO_CHROMA_444 : LG_NET_VIDEO_CHROMA_420))
+          static_cast<LGNetVideoChromaSubsampling>(
+            pending.cfg.profile.signal == FrameSignal::PQ_BT2020 ||
+              (pending.cfg.width & 1U) || (pending.cfg.height & 1U) ?
+                LG_NET_VIDEO_CHROMA_444 : LG_NET_VIDEO_CHROMA_420)))
       return true;
 
     CSRWExclusiveLock lock(m_lock);
@@ -2416,9 +2425,9 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
       !SupportedProfile(cfg.profile))
     return CfgResult::NEXT;
-  const uint32_t alignedWidth  = std::max(
+  const uint32_t alignedWidth  = (std::max)(
     Align(cfg.width, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
-  const uint32_t alignedHeight = std::max(
+  const uint32_t alignedHeight = (std::max)(
     Align(cfg.height, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
   if (alignedWidth > MAX_WIDTH || alignedHeight > MAX_HEIGHT)
     return CfgResult::NEXT;

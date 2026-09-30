@@ -638,12 +638,14 @@ void CNetworkAudio::Impl::RebalanceRolesNL(uint64_t forcedSerial)
         (peer.requestedRoles & LG_NET_AUDIO_ROLE_CAPTURE) &&
         (peer.requestedRoles & LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE) &&
         capture && capture != &peer;
-      status = captureBusy ?
-        LG_NET_AUDIO_GRANT_BUSY : LG_NET_AUDIO_GRANT_UNSUPPORTED;
+      status = static_cast<LGNetAudioGrantStatus>(
+        captureBusy ?
+          LG_NET_AUDIO_GRANT_BUSY : LG_NET_AUDIO_GRANT_UNSUPPORTED);
     }
     else
-      status = desired == peer.requestedRoles ?
-        LG_NET_AUDIO_GRANT_GRANTED : LG_NET_AUDIO_GRANT_PARTIAL;
+      status = static_cast<LGNetAudioGrantStatus>(
+        desired == peer.requestedRoles ?
+          LG_NET_AUDIO_GRANT_GRANTED : LG_NET_AUDIO_GRANT_PARTIAL);
 
     const bool changed = peer.serial == forcedSerial ||
       desired != peer.grantedRoles || status != peer.grantStatus;
@@ -694,8 +696,9 @@ bool CNetworkAudio::Impl::WireFormatNL(const PeerState& peer,
 
   format.streamID        = playback ?
     PLAYBACK_STREAM_ID : CAPTURE_STREAM_ID;
-  format.direction       = playback ?
-    LG_NET_AUDIO_DIRECTION_PLAYBACK : LG_NET_AUDIO_DIRECTION_CAPTURE;
+  format.direction       = static_cast<LGNetAudioDirection>(
+    playback ?
+      LG_NET_AUDIO_DIRECTION_PLAYBACK : LG_NET_AUDIO_DIRECTION_CAPTURE);
   format.sampleFormat    = WireSampleFormat(stream.format.sampleFormat);
   format.formatEpoch     = stream.generation;
   format.sampleRate      = stream.format.sampleRate;
@@ -1981,7 +1984,8 @@ AudioResult CNetworkAudio::Impl::ContinuePlayback(const uint8_t * data)
     LGNetAudioClockState clock = {};
     clock.streamID          = PLAYBACK_STREAM_ID;
     clock.direction         = LG_NET_AUDIO_DIRECTION_PLAYBACK;
-    clock.flags             = clockValid ? LG_NET_AUDIO_CLOCK_VALID : 0;
+    clock.flags             = static_cast<LGNetAudioClockFlags>(
+      clockValid ? LG_NET_AUDIO_CLOCK_VALID : 0);
     if (clockStable)
       clock.flags |= LG_NET_AUDIO_CLOCK_STABLE;
     clock.formatEpoch       = target.formatEpoch;

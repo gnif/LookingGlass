@@ -452,7 +452,8 @@ bool CNetworkClipboard::Impl::PayloadFitsNL(const PeerState& peer,
     return false;
 
   const LGNetCapabilityFlags required =
-    bulk ? LG_NET_CAPABILITY_BULK : LG_NET_CAPABILITY_RELIABLE;
+    static_cast<LGNetCapabilityFlags>(
+      bulk ? LG_NET_CAPABILITY_BULK : LG_NET_CAPABILITY_RELIABLE);
   return (flags & required) && maximum >= payloadLength;
 }
 
@@ -483,7 +484,8 @@ uint32_t CNetworkClipboard::Impl::ChunkLengthNL(
     return 0;
 
   const LGNetCapabilityFlags required =
-    bulk ? LG_NET_CAPABILITY_BULK : LG_NET_CAPABILITY_RELIABLE;
+    static_cast<LGNetCapabilityFlags>(
+      bulk ? LG_NET_CAPABILITY_BULK : LG_NET_CAPABILITY_RELIABLE);
   if (!(flags & required) || maximum <= headerLength)
     return 0;
   return (std::min)(maximum - headerLength, MAX_CHUNK_LENGTH);
@@ -2502,8 +2504,8 @@ ClipboardChannelResult CNetworkClipboard::Impl::HandleHelperClipboardNL(
       chunk.offset              = record.offset + consumed;
       chunk.totalLength         = wireLength;
       chunk.dataLength          = length;
-      chunk.flags               = chunk.offset ? 0 :
-        LG_NET_CLIPBOARD_CHUNK_FIRST;
+      chunk.flags               = static_cast<LGNetClipboardChunkFlags>(
+        chunk.offset ? 0 : LG_NET_CLIPBOARD_CHUNK_FIRST);
       if ((record.flags & KVMFR_CLIPBOARD_FLAG_END) &&
         consumed + length == record.length)
         chunk.flags |= LG_NET_CLIPBOARD_CHUNK_FINAL;
@@ -2993,7 +2995,8 @@ ClipboardChannelResult CNetworkClipboard::Impl::HandleHelperFileNL(
       chunk.offset         = record.offset + consumed;
       chunk.totalLength    = wireLength;
       chunk.dataLength     = length;
-      chunk.flags          = chunk.offset ? 0 : LG_NET_FILE_CHUNK_FIRST;
+      chunk.flags          = static_cast<LGNetFileChunkFlags>(
+        chunk.offset ? 0 : LG_NET_FILE_CHUNK_FIRST);
       if ((record.flags & KVMFR_CLIPBOARD_FLAG_END) &&
         consumed + length == record.length)
         chunk.flags |= LG_NET_FILE_CHUNK_FINAL;
