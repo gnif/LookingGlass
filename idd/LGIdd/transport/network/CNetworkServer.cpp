@@ -3649,6 +3649,19 @@ retry:
     const bool         videoSubscribe   =
       packet.envelope.service == LG_NET_SERVICE_VIDEO &&
       packet.envelope.messageType == LG_NET_VIDEO_MESSAGE_SUBSCRIBE;
+    const bool         inputClaim       =
+      packet.envelope.service == LG_NET_SERVICE_INPUT &&
+      packet.envelope.messageType == LG_NET_INPUT_MESSAGE_CLAIM;
+    const bool         recoveryRequest  =
+      packet.envelope.service == LG_NET_SERVICE_RECOVERY &&
+      (packet.envelope.messageType == LG_NET_RECOVERY_MESSAGE_GET_INFO ||
+       packet.envelope.messageType == LG_NET_RECOVERY_MESSAGE_REQUEST);
+    const bool         controlRequest   =
+      packet.envelope.service == LG_NET_SERVICE_CONTROL &&
+      (packet.envelope.messageType ==
+         LG_NET_CONTROL_MESSAGE_CURSOR_POSITION ||
+       packet.envelope.messageType == LG_NET_CONTROL_MESSAGE_DISPLAY_SIZE ||
+       packet.envelope.messageType == LG_NET_CONTROL_MESSAGE_FRAME_SCHEDULE);
     const bool         audioResponse    =
       packet.envelope.service == LG_NET_SERVICE_AUDIO &&
       packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_STATE_ACK;
@@ -3657,7 +3670,8 @@ retry:
       packet.envelope.service == LG_NET_SERVICE_FILE;
     LGNetEnvelopeFlags expectedFlags    =
       LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
-    if (audioSubscribe || videoSubscribe)
+    if (audioSubscribe || videoSubscribe || inputClaim ||
+        recoveryRequest || controlRequest)
       expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
     if (cursorStatus || audioResponse)
       expectedFlags |= LG_NET_ENVELOPE_RESPONSE;
