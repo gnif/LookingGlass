@@ -171,6 +171,32 @@ static bool networkIdentityCanUsePrivateKey(PCCERT_CONTEXT certificate)
   return result;
 }
 
+static bool networkIdentityRepairKeyProvider(
+  PCCERT_CONTEXT      certificate,
+  CRYPT_KEY_PROV_INFO *info)
+{
+  const DWORD flags = NCRYPT_MACHINE_KEY_FLAG | NCRYPT_SILENT_FLAG;
+  if (info->dwFlags == flags && info->dwKeySpec == 0)
+    return true;
+
+  /* This CNG key has no legacy CAPI key specification. */
+  info->dwFlags   = flags;
+  info->dwKeySpec = 0;
+  if (!CertSetCertificateContextProperty(
+      certificate,
+      CERT_KEY_PROV_INFO_PROP_ID,
+      0,
+      info))
+  {
+    networkIdentityError(
+      L"CertSetCertificateContextProperty(key provider)",
+      GetLastError());
+    return false;
+  }
+
+  return true;
+}
+
 static bool networkIdentityMatchesKey(PCCERT_CONTEXT certificate)
 {
   DWORD size = 0;
@@ -182,15 +208,18 @@ static bool networkIdentityMatchesKey(PCCERT_CONTEXT certificate)
   if (!info)
     return false;
 
-  const bool result = CertGetCertificateContextProperty(
+  bool result = CertGetCertificateContextProperty(
       certificate, CERT_KEY_PROV_INFO_PROP_ID, info, &size) &&
     info->pwszContainerName &&
     wcscmp(info->pwszContainerName,
       LG_NETWORK_CERTIFICATE_KEY_NAME) == 0 &&
     info->pwszProvName &&
     wcscmp(info->pwszProvName, MS_KEY_STORAGE_PROVIDER) == 0 &&
-    CertVerifyTimeValidity(NULL, certificate->pCertInfo) == 0 &&
-    networkIdentityCanUsePrivateKey(certificate);
+    info->dwProvType == 0 &&
+    CertVerifyTimeValidity(NULL, certificate->pCertInfo) == 0;
+  if (result)
+    result = networkIdentityRepairKeyProvider(certificate, info) &&
+      networkIdentityCanUsePrivateKey(certificate);
 
   free(info);
   return result;
@@ -335,10 +364,10 @@ static PCCERT_CONTEXT networkIdentityCreateCertificate(
     .pwszContainerName = LG_NETWORK_CERTIFICATE_KEY_NAME,
     .pwszProvName      = MS_KEY_STORAGE_PROVIDER,
     .dwProvType        = 0,
-    .dwFlags           = CRYPT_MACHINE_KEYSET,
+    .dwFlags           = NCRYPT_MACHINE_KEY_FLAG | NCRYPT_SILENT_FLAG,
     .cProvParam        = 0,
     .rgProvParam       = NULL,
-    .dwKeySpec         = CERT_NCRYPT_KEY_SPEC,
+    .dwKeySpec         = 0,
   };
   CRYPT_ALGORITHM_IDENTIFIER signature =
   {
