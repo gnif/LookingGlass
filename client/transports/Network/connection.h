@@ -31,6 +31,14 @@
 
 typedef struct NetworkConnection NetworkConnection;
 
+typedef enum NetworkPacketDelivery
+{
+  NETWORK_PACKET_DELIVERY_RELIABLE,
+  NETWORK_PACKET_DELIVERY_DATAGRAM,
+  NETWORK_PACKET_DELIVERY_BULK,
+}
+NetworkPacketDelivery;
+
 typedef void (*NetworkTrustDecisionFn)(void * opaque, bool trusted);
 typedef bool (*NetworkTrustPromptFn)(void * opaque, const char * endpoint,
     const char * fingerprint, NetworkTrustDecisionFn decision,
@@ -38,11 +46,11 @@ typedef bool (*NetworkTrustPromptFn)(void * opaque, const char * endpoint,
 typedef void (*NetworkTrustCancelFn)(void * opaque);
 /* The packet view and payload are borrowed for the duration of the callback. */
 typedef void (*NetworkPacketFn)(void * opaque,
-    const LGNetPacketView * packet, bool datagram);
+    const LGNetPacketView * packet, NetworkPacketDelivery delivery);
 typedef void (*NetworkConnectionStateFn)(void * opaque, bool connected,
     LG_TransportStatus reason);
 typedef void (*NetworkSendReadyFn)(void * opaque, LGNetService service,
-    bool datagram);
+    NetworkPacketDelivery delivery);
 
 typedef struct NetworkConnectionParams
 {
@@ -85,3 +93,7 @@ LG_TransportStatus networkConnectionSendDatagram(
     uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength, bool discardIfBlocked);
+LG_TransportStatus networkConnectionSendBulk(NetworkConnection * connection,
+    LGNetService service, uint16_t messageType, uint16_t serviceVersion,
+    LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength);

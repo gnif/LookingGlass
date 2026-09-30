@@ -49,32 +49,33 @@
 
 namespace
 {
-  static constexpr uint64_t NETWORK_HANDSHAKE_TIMEOUT_MS    = 5000;
-  static constexpr uint64_t NETWORK_IDLE_TIMEOUT_MS         = 30000;
-  static constexpr uint32_t NETWORK_KEEPALIVE_INTERVAL_MS   = 1000;
-  static constexpr uint32_t NETWORK_INITIAL_RTT_MS          = 1;
-  static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS       = 16;
-  static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS      = 16;
-  static constexpr uint32_t NETWORK_MAX_CONTROL_PAYLOAD     =
+  static constexpr uint64_t NETWORK_HANDSHAKE_TIMEOUT_MS     = 5000;
+  static constexpr uint64_t NETWORK_IDLE_TIMEOUT_MS          = 30000;
+  static constexpr uint32_t NETWORK_KEEPALIVE_INTERVAL_MS    = 1000;
+  static constexpr uint32_t NETWORK_INITIAL_RTT_MS           = 1;
+  static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS        = 16;
+  static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS       = 16;
+  static constexpr uint16_t NETWORK_BULK_STREAMS_PER_SERVICE = 1;
+  static constexpr uint32_t NETWORK_MAX_CONTROL_PAYLOAD      =
     LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE +
       LG_NET_CURSOR_MAX_SHAPE_LENGTH;
-  static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER      =
+  static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER       =
     LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD;
-  static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD    = 1136;
-  static constexpr uint32_t NETWORK_INPUT_LEASE_MS          = 500;
-  static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER       = 0x01;
-  static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE     = 0x07;
-  static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT      = 6;
-  static constexpr size_t   NETWORK_SERVICE_COUNT           =
+  static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD     = 1136;
+  static constexpr uint32_t NETWORK_INPUT_LEASE_MS           = 500;
+  static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER        = 0x01;
+  static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE      = 0x07;
+  static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT       = 6;
+  static constexpr size_t   NETWORK_SERVICE_COUNT            =
     LG_NET_SERVICE_CONTROL + 1U;
-  static constexpr size_t   NETWORK_RECOVERY_REQUESTS       = 16;
-  static constexpr uint64_t NETWORK_SEQUENCE_COMPONENT      = UINT64_C(1);
-  static constexpr uint8_t  NETWORK_DATAGRAM_WINDOW         = 64;
-  static constexpr uint32_t NETWORK_PASSWORD_ROUNDS         = 100000;
-  static constexpr uint16_t NETWORK_PASSWORD_SALT_SIZE      = 32;
-  static constexpr uint16_t NETWORK_PASSWORD_CHALLENGE_SIZE = 32;
-  static constexpr uint16_t NETWORK_PASSWORD_NONCE_SIZE     = 32;
-  static constexpr uint32_t NETWORK_AUTH_RETRY_AFTER_MS     = 1000;
+  static constexpr size_t   NETWORK_RECOVERY_REQUESTS        = 16;
+  static constexpr uint64_t NETWORK_SEQUENCE_COMPONENT       = UINT64_C(1);
+  static constexpr uint8_t  NETWORK_DATAGRAM_WINDOW          = 64;
+  static constexpr uint32_t NETWORK_PASSWORD_ROUNDS          = 100000;
+  static constexpr uint16_t NETWORK_PASSWORD_SALT_SIZE       = 32;
+  static constexpr uint16_t NETWORK_PASSWORD_CHALLENGE_SIZE  = 32;
+  static constexpr uint16_t NETWORK_PASSWORD_NONCE_SIZE      = 32;
+  static constexpr uint32_t NETWORK_AUTH_RETRY_AFTER_MS      = 1000;
 
   static constexpr uint32_t NETWORK_SEND_RELIABLE_COUNT_MAX      = 512;
   static constexpr uint64_t NETWORK_SEND_RELIABLE_BYTES_MAX      =
@@ -88,10 +89,13 @@ namespace
   static constexpr uint32_t NETWORK_SEND_DATAGRAM_COUNT_RESERVED = 64;
   static constexpr uint64_t NETWORK_SEND_DATAGRAM_BYTES_RESERVED =
     UINT64_C(256) * 1024U;
+  static constexpr uint32_t NETWORK_SEND_BULK_COUNT_MAX          = 256;
+  static constexpr uint64_t NETWORK_SEND_BULK_BYTES_MAX          =
+    UINT64_C(256) * 1024U * 1024U;
   static constexpr uint32_t NETWORK_SEND_RESUME_NUMERATOR        = 3;
   static constexpr uint32_t NETWORK_SEND_RESUME_DENOMINATOR      = 4;
 
-  static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK       =
+  static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK        =
     LG_NET_KEYBOARD_LED_NUM_LOCK    |
     LG_NET_KEYBOARD_LED_CAPS_LOCK   |
     LG_NET_KEYBOARD_LED_SCROLL_LOCK |
@@ -232,14 +236,23 @@ namespace
 struct CNetworkServer::Impl
 {
   struct Connection;
+  struct BulkStream;
+
+  enum class Delivery
+  {
+    RELIABLE,
+    DATAGRAM,
+    BULK,
+  };
 
   struct Send
   {
-    QUIC_BUFFER          buffer   = {};
+    QUIC_BUFFER          buffer    = {};
     std::vector<uint8_t> data;
-    LGNetService         service  = LG_NET_SERVICE_CORE;
-    uint32_t             length   = 0;
-    bool                 datagram = false;
+    LGNetService         service   = LG_NET_SERVICE_CORE;
+    uint32_t             length    = 0;
+    Delivery             delivery  = Delivery::RELIABLE;
+    bool                 accounted = true;
   };
 
   struct SendLimits
@@ -257,6 +270,29 @@ struct CNetworkServer::Impl
     bool     serviceBlocked[NETWORK_SERVICE_COUNT];
     uint64_t serviceBlockedBytes[NETWORK_SERVICE_COUNT];
     uint16_t writableServices;
+  };
+
+  struct BulkStream
+  {
+    explicit BulkStream(Connection& connection) : connection(connection) {}
+
+    Connection&          connection;
+    BulkStream         * next             = nullptr;
+    HQUIC                handle           = nullptr;
+    LGNetService         service          = LG_NET_SERVICE_CORE;
+    uint64_t             streamID         = 0;
+    uint64_t             sendSequence     = 0;
+    uint64_t             receiveSequence  = 0;
+    bool                 outbound         = false;
+    bool                 bound            = false;
+    bool                 openingReturned  = false;
+    bool                 shutdownComplete = false;
+    uint8_t              bindingData[LG_NET_STREAM_BINDING_WIRE_SIZE] = {};
+    size_t               bindingLength                                = 0;
+    LGNetStreamParser    receiveParser                                = {};
+
+    std::vector<uint8_t> receiveData;
+    std::vector<uint8_t> receivePayload;
   };
 
   enum class SendResult
@@ -323,11 +359,19 @@ struct CNetworkServer::Impl
     uint16_t                         selectedServices             = 0;
     uint16_t                         reliableServices             = 0;
     uint16_t                         datagramServices             = 0;
-    LGNetCapability                  offeredCapabilities [NETWORK_SERVICE_COUNT] = {};
-    LGNetCapability                  selectedCapabilities[NETWORK_SERVICE_COUNT] = {};
+    uint16_t                         bulkServices                 = 0;
+    uint16_t                         maxPeerBulkStreams           = 0;
+    uint16_t                         peerBulkStreams              = 0;
+    uint16_t                         servicePeerBulkStreams[NETWORK_SERVICE_COUNT] = {};
+    LGNetCapability                  offeredCapabilities   [NETWORK_SERVICE_COUNT] = {};
+    LGNetCapability                  selectedCapabilities  [NETWORK_SERVICE_COUNT] = {};
 
     SendAccounting                   reliableSend                = {};
     SendAccounting                   datagramSend                = {};
+    SendAccounting                   bulkSend                    = {};
+
+    BulkStream                     * outboundBulk[NETWORK_SERVICE_COUNT] = {};
+    BulkStream                     * inboundBulk                         = nullptr;
 
     bool                             datagramSendEnabled          = false;
     bool                             closing                      = false;
@@ -395,9 +439,10 @@ struct CNetworkServer::Impl
   };
 
   Impl(CNetworkTransport& transport, CNetworkAudio& audio,
-      const NetworkSettings& settings) :
+      CNetworkClipboard& clipboard, const NetworkSettings& settings) :
     transport(transport),
     audio(audio),
+    clipboard(clipboard),
     settings(settings)
   {
   }
@@ -417,6 +462,7 @@ struct CNetworkServer::Impl
 
   CNetworkTransport&        transport;
   CNetworkAudio&            audio;
+  CNetworkClipboard&        clipboard;
   NetworkSettings           settings;
   const QUIC_API_TABLE    * api             = nullptr;
   HQUIC                     registration    = nullptr;
@@ -473,6 +519,15 @@ struct CNetworkServer::Impl
   }
 
   static NetworkAudioPeer AudioPeer(const Connection& connection)
+  {
+    return
+    {
+      connection.client,
+      connection.generation,
+    };
+  }
+
+  static NetworkClipboardPeer ClipboardPeer(const Connection& connection)
   {
     return
     {
@@ -546,6 +601,84 @@ struct CNetworkServer::Impl
     return NetworkAudioSendResult::FAILED;
   }
 
+  bool ClipboardPeerInfo(const NetworkClipboardPeer& peer,
+    NetworkClipboardPeerInfo& info)
+  {
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      CSRWSharedLock connectionGuard(connection->lock);
+      const uint16_t clipboardMask =
+        UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD;
+      const uint16_t fileMask      = UINT16_C(1) << LG_NET_SERVICE_FILE;
+      if (connection->closing ||
+          connection->handshake != HandshakeState::READY ||
+          !(connection->selectedServices & clipboardMask) ||
+          !(connection->selectedServices & fileMask))
+        return false;
+
+      const LGNetCapability& clipboardCapability =
+        connection->selectedCapabilities[LG_NET_SERVICE_CLIPBOARD];
+      const LGNetCapability& fileCapability =
+        connection->selectedCapabilities[LG_NET_SERVICE_FILE];
+      info.clipboardVersion         = clipboardCapability.versionMin;
+      info.fileVersion              = fileCapability.versionMin;
+      info.clipboardFlags           = clipboardCapability.flags;
+      info.fileFlags                = fileCapability.flags;
+      info.clipboardReliablePayload = clipboardCapability.maxPayloadLength;
+      info.fileReliablePayload      = fileCapability.maxPayloadLength;
+      info.clipboardBulkPayload     =
+        clipboardCapability.flags & LG_NET_CAPABILITY_BULK ?
+          clipboardCapability.maxPayloadLength : 0;
+      info.fileBulkPayload          =
+        fileCapability.flags & LG_NET_CAPABILITY_BULK ?
+          fileCapability.maxPayloadLength : 0;
+      return true;
+    }
+    return false;
+  }
+
+  NetworkClipboardSendResult SendClipboard(
+    const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+  {
+    if (service != LG_NET_SERVICE_CLIPBOARD &&
+        service != LG_NET_SERVICE_FILE)
+      return NetworkClipboardSendResult::FAILED;
+
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      const SendResult result = bulk ?
+        TrySendBulk(*connection, service, messageType, flags,
+          componentEpoch, requestID, payload, payloadLength) :
+        TrySendPacket(*connection, service, messageType, flags,
+          componentEpoch, requestID, payload, payloadLength);
+      switch (result)
+      {
+        case SendResult::SENT:
+          return NetworkClipboardSendResult::ACCEPTED;
+
+        case SendResult::BLOCKED:
+          return NetworkClipboardSendResult::BLOCKED;
+
+        case SendResult::FAILED:
+          return NetworkClipboardSendResult::FAILED;
+      }
+    }
+    return NetworkClipboardSendResult::FAILED;
+  }
+
   void Shutdown(Connection& connection, QUIC_UINT62 error)
   {
     HQUIC handle = nullptr;
@@ -561,9 +694,9 @@ struct CNetworkServer::Impl
         QUIC_CONNECTION_SHUTDOWN_FLAG_NONE, error);
   }
 
-  static SendLimits GetSendLimits(LGNetService service, bool datagram)
+  static SendLimits GetSendLimits(LGNetService service, Delivery delivery)
   {
-    if (datagram)
+    if (delivery == Delivery::DATAGRAM)
     {
       switch (service)
       {
@@ -578,6 +711,23 @@ struct CNetworkServer::Impl
 
         default:
           return { 64U, 256U * 1024U };
+      }
+    }
+
+    if (delivery == Delivery::BULK)
+    {
+      switch (service)
+      {
+        case LG_NET_SERVICE_VIDEO:
+          return { 128U, UINT64_C(192) * 1024U * 1024U };
+
+        case LG_NET_SERVICE_CLIPBOARD:
+        case LG_NET_SERVICE_FILE:
+        case LG_NET_SERVICE_USB:
+          return { 128U, UINT64_C(128) * 1024U * 1024U };
+
+        default:
+          return { 64U, UINT64_C(64) * 1024U * 1024U };
       }
     }
 
@@ -613,90 +763,167 @@ struct CNetworkServer::Impl
       service == LG_NET_SERVICE_CONTROL;
   }
 
-  static void BlockSendLocked(Connection& connection,
-    LGNetService service, bool datagram, uint64_t packetSize)
+  static bool BulkServiceSupported(LGNetService service)
   {
-    SendAccounting& accounting = datagram ?
-      connection.datagramSend : connection.reliableSend;
-    accounting.serviceBlocked[service]      = true;
-    accounting.serviceBlockedBytes[service] =
-      accounting.serviceBlockedBytes[service] > packetSize ?
-        accounting.serviceBlockedBytes[service] : packetSize;
-    accounting.writableServices            &= ~(UINT16_C(1) << service);
+    return service == LG_NET_SERVICE_VIDEO ||
+      service == LG_NET_SERVICE_CLIPBOARD ||
+      service == LG_NET_SERVICE_FILE;
+  }
+
+  static bool BulkOriginAllowed(LGNetService service, LGNetRole origin)
+  {
+    if (service == LG_NET_SERVICE_VIDEO)
+      return origin == LG_NET_ROLE_SERVER;
+    return (service == LG_NET_SERVICE_CLIPBOARD ||
+      service == LG_NET_SERVICE_FILE) &&
+      (origin == LG_NET_ROLE_CLIENT || origin == LG_NET_ROLE_SERVER);
+  }
+
+  static SendAccounting * GetSendAccountingLocked(Connection& connection,
+    Delivery delivery)
+  {
+    switch (delivery)
+    {
+      case Delivery::RELIABLE:
+        return &connection.reliableSend;
+
+      case Delivery::DATAGRAM:
+        return &connection.datagramSend;
+
+      case Delivery::BULK:
+        return &connection.bulkSend;
+    }
+
+    return nullptr;
+  }
+
+  static void BlockSendLocked(Connection& connection,
+    LGNetService service, Delivery delivery, uint64_t packetSize)
+  {
+    SendAccounting * accounting =
+      GetSendAccountingLocked(connection, delivery);
+    if (!accounting || service >= NETWORK_SERVICE_COUNT)
+      return;
+
+    accounting->serviceBlocked[service]      = true;
+    accounting->serviceBlockedBytes[service] =
+      accounting->serviceBlockedBytes[service] > packetSize ?
+        accounting->serviceBlockedBytes[service] : packetSize;
+    accounting->writableServices            &= ~(UINT16_C(1) << service);
   }
 
   static SendResult ReserveSendLocked(Connection& connection,
-    LGNetService service, bool datagram, uint64_t packetSize)
+    LGNetService service, Delivery delivery, uint64_t packetSize)
   {
     if (service >= NETWORK_SERVICE_COUNT)
       return SendResult::FAILED;
 
-    const SendLimits limits          = GetSendLimits(service, datagram);
-    uint32_t         totalCountLimit = datagram ?
-      NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
-    uint64_t         totalByteLimit  = datagram ?
-      NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
-    if (!SendPriority(service))
+    const SendLimits limits = GetSendLimits(service, delivery);
+    uint32_t         totalCountLimit;
+    uint64_t         totalByteLimit;
+    switch (delivery)
     {
-      totalCountLimit -= datagram ?
+      case Delivery::RELIABLE:
+        totalCountLimit = NETWORK_SEND_RELIABLE_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_RELIABLE_BYTES_MAX;
+        break;
+
+      case Delivery::DATAGRAM:
+        totalCountLimit = NETWORK_SEND_DATAGRAM_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_DATAGRAM_BYTES_MAX;
+        break;
+
+      case Delivery::BULK:
+        totalCountLimit = NETWORK_SEND_BULK_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_BULK_BYTES_MAX;
+        break;
+    }
+    if (delivery != Delivery::BULK && !SendPriority(service))
+    {
+      totalCountLimit -= delivery == Delivery::DATAGRAM ?
         NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
         NETWORK_SEND_RELIABLE_COUNT_RESERVED;
-      totalByteLimit  -= datagram ?
+      totalByteLimit  -= delivery == Delivery::DATAGRAM ?
         NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
         NETWORK_SEND_RELIABLE_BYTES_RESERVED;
     }
-    SendAccounting& accounting       = datagram ?
-      connection.datagramSend : connection.reliableSend;
+    SendAccounting * accounting =
+      GetSendAccountingLocked(connection, delivery);
+    if (!accounting)
+      return SendResult::FAILED;
 
     if (packetSize > limits.bytes || packetSize > totalByteLimit)
       return SendResult::FAILED;
 
-    if (accounting.count >= totalCountLimit ||
-        accounting.serviceCount[service] >= limits.count ||
-        accounting.bytes > totalByteLimit - packetSize ||
-        accounting.serviceBytes[service] > limits.bytes - packetSize)
+    if (accounting->count >= totalCountLimit ||
+        accounting->serviceCount[service] >= limits.count ||
+        accounting->bytes > totalByteLimit - packetSize ||
+        accounting->serviceBytes[service] > limits.bytes - packetSize)
     {
-      BlockSendLocked(connection, service, datagram, packetSize);
+      BlockSendLocked(connection, service, delivery, packetSize);
       return SendResult::BLOCKED;
     }
 
-    ++accounting.count;
-    ++accounting.serviceCount[service];
-    accounting.bytes                 += packetSize;
-    accounting.serviceBytes[service] += packetSize;
-    accounting.writableServices      &= ~(UINT16_C(1) << service);
+    ++accounting->count;
+    ++accounting->serviceCount[service];
+    accounting->bytes                 += packetSize;
+    accounting->serviceBytes[service] += packetSize;
+    accounting->writableServices      &= ~(UINT16_C(1) << service);
     return SendResult::SENT;
   }
 
-  static bool SendCanResumeLocked(const Connection& connection,
-    LGNetService service, bool datagram)
+  static bool SendCanResumeLocked(Connection& connection,
+    LGNetService service, Delivery delivery)
   {
-    const SendLimits limits          = GetSendLimits(service, datagram);
-    uint32_t         totalCountLimit = datagram ?
-      NETWORK_SEND_DATAGRAM_COUNT_MAX : NETWORK_SEND_RELIABLE_COUNT_MAX;
-    uint64_t         totalByteLimit  = datagram ?
-      NETWORK_SEND_DATAGRAM_BYTES_MAX : NETWORK_SEND_RELIABLE_BYTES_MAX;
-    if (!SendPriority(service))
+    const SendLimits limits = GetSendLimits(service, delivery);
+    uint32_t         totalCountLimit;
+    uint64_t         totalByteLimit;
+    switch (delivery)
     {
-      totalCountLimit -= datagram ?
+      case Delivery::RELIABLE:
+        totalCountLimit = NETWORK_SEND_RELIABLE_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_RELIABLE_BYTES_MAX;
+        break;
+
+      case Delivery::DATAGRAM:
+        totalCountLimit = NETWORK_SEND_DATAGRAM_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_DATAGRAM_BYTES_MAX;
+        break;
+
+      case Delivery::BULK:
+        totalCountLimit = NETWORK_SEND_BULK_COUNT_MAX;
+        totalByteLimit  = NETWORK_SEND_BULK_BYTES_MAX;
+        break;
+    }
+    if (delivery != Delivery::BULK && !SendPriority(service))
+    {
+      totalCountLimit -= delivery == Delivery::DATAGRAM ?
         NETWORK_SEND_DATAGRAM_COUNT_RESERVED :
         NETWORK_SEND_RELIABLE_COUNT_RESERVED;
-      totalByteLimit  -= datagram ?
+      totalByteLimit  -= delivery == Delivery::DATAGRAM ?
         NETWORK_SEND_DATAGRAM_BYTES_RESERVED :
         NETWORK_SEND_RELIABLE_BYTES_RESERVED;
     }
-    const SendAccounting& accounting = datagram ?
-      connection.datagramSend : connection.reliableSend;
+    const SendAccounting * accounting =
+      GetSendAccountingLocked(connection, delivery);
+    if (!accounting)
+      return false;
 
-    const uint32_t totalCount   = accounting.count;
-    const uint64_t totalBytes   = accounting.bytes;
-    const uint32_t serviceCount = accounting.serviceCount[service];
-    const uint64_t serviceBytes = accounting.serviceBytes[service];
-    const uint64_t blockedBytes = accounting.serviceBlockedBytes[service];
+    const uint32_t totalCount   = accounting->count;
+    const uint64_t totalBytes   = accounting->bytes;
+    const uint32_t serviceCount = accounting->serviceCount[service];
+    const uint64_t serviceBytes = accounting->serviceBytes[service];
+    const uint64_t blockedBytes =
+      accounting->serviceBlockedBytes[service];
 
-    if (connection.closing || !connection.controlStream ||
-        (datagram && (!connection.datagramSendEnabled ||
-          blockedBytes > connection.maxDatagramSendLength)))
+    if (connection.closing ||
+        (delivery == Delivery::RELIABLE && !connection.controlStream) ||
+        (delivery == Delivery::DATAGRAM &&
+          (!connection.datagramSendEnabled ||
+            blockedBytes > connection.maxDatagramSendLength)) ||
+        (delivery == Delivery::BULK &&
+          (!connection.outboundBulk[service] ||
+            !connection.outboundBulk[service]->bound)))
       return false;
 
     const uint32_t totalResumeCount   =
@@ -723,27 +950,33 @@ struct CNetworkServer::Impl
   }
 
   static uint16_t ReadyServicesLocked(Connection& connection,
-    bool datagram)
+    Delivery delivery)
   {
-    uint16_t        ready      = 0;
-    SendAccounting& accounting = datagram ?
-      connection.datagramSend : connection.reliableSend;
+    uint16_t         ready      = 0;
+    SendAccounting * accounting =
+      GetSendAccountingLocked(connection, delivery);
+    if (!accounting)
+      return 0;
+
     for (LGNetService service = LG_NET_SERVICE_CORE;
          service < NETWORK_SERVICE_COUNT; ++service)
     {
-      if (!accounting.serviceBlocked[service] || !SendCanResumeLocked(
-            connection, service, datagram))
+      if (!accounting->serviceBlocked[service] || !SendCanResumeLocked(
+            connection, service, delivery))
         continue;
 
-      accounting.serviceBlocked[service]      = false;
-      accounting.serviceBlockedBytes[service] = 0;
-      ready                                  |= UINT16_C(1) << service;
+      accounting->serviceBlocked[service]      = false;
+      accounting->serviceBlockedBytes[service] = 0;
+      ready                                   |= UINT16_C(1) << service;
     }
     return ready;
   }
 
   static void ReleaseSendLocked(Connection& connection, const Send& send)
   {
+    if (!send.accounted)
+      return;
+
     if (send.service >= NETWORK_SERVICE_COUNT)
     {
       DEBUG_ERROR("Network send accounting service out of range for "
@@ -751,47 +984,68 @@ struct CNetworkServer::Impl
       return;
     }
 
-    SendAccounting& accounting = send.datagram ?
-      connection.datagramSend : connection.reliableSend;
-    if (!accounting.count || !accounting.serviceCount[send.service] ||
-        accounting.bytes < send.length ||
-        accounting.serviceBytes[send.service] < send.length)
+    SendAccounting * accounting =
+      GetSendAccountingLocked(connection, send.delivery);
+    if (!accounting)
+    {
+      DEBUG_ERROR("Network send accounting delivery out of range for "
+        "client %u", connection.client);
+      return;
+    }
+    if (!accounting->count || !accounting->serviceCount[send.service] ||
+        accounting->bytes < send.length ||
+        accounting->serviceBytes[send.service] < send.length)
     {
       DEBUG_ERROR("Network send accounting underflow for client %u",
         connection.client);
       return;
     }
 
-    --accounting.count;
-    --accounting.serviceCount[send.service];
-    accounting.bytes                      -= send.length;
-    accounting.serviceBytes[send.service] -= send.length;
-    accounting.writableServices           |=
-      ReadyServicesLocked(connection, send.datagram);
+    --accounting->count;
+    --accounting->serviceCount[send.service];
+    accounting->bytes                      -= send.length;
+    accounting->serviceBytes[send.service] -= send.length;
+    accounting->writableServices           |=
+      ReadyServicesLocked(connection, send.delivery);
   }
 
   static bool ConsumeSendReady(Connection& connection,
-    LGNetService service, bool datagram)
+    LGNetService service, Delivery delivery)
   {
     if (service >= NETWORK_SERVICE_COUNT)
       return false;
 
     CSRWExclusiveLock guard(connection.lock);
-    SendAccounting& accounting = datagram ?
-      connection.datagramSend : connection.reliableSend;
+    SendAccounting * accounting =
+      GetSendAccountingLocked(connection, delivery);
+    if (!accounting)
+      return false;
     const uint16_t serviceMask = UINT16_C(1) << service;
     const bool     ready       =
-      (accounting.writableServices & serviceMask) != 0;
-    accounting.writableServices &= ~serviceMask;
+      (accounting->writableServices & serviceMask) != 0;
+    accounting->writableServices &= ~serviceMask;
     return ready;
   }
 
   void NotifyAudioSendReady(Connection& connection, bool datagram)
   {
-    if (ConsumeSendReady(
-          connection, LG_NET_SERVICE_AUDIO, datagram))
+    const Delivery delivery = datagram ?
+      Delivery::DATAGRAM : Delivery::RELIABLE;
+    if (ConsumeSendReady(connection, LG_NET_SERVICE_AUDIO, delivery))
       audio.SendReady(
         AudioPeer(connection), LG_NET_SERVICE_AUDIO, datagram);
+  }
+
+  void NotifyClipboardSendReady(Connection& connection, Delivery delivery)
+  {
+    const bool bulk = delivery == Delivery::BULK;
+    if (ConsumeSendReady(
+          connection, LG_NET_SERVICE_CLIPBOARD, delivery))
+      clipboard.SendReady(
+        ClipboardPeer(connection), LG_NET_SERVICE_CLIPBOARD, bulk);
+    if (ConsumeSendReady(connection, LG_NET_SERVICE_FILE, delivery))
+      clipboard.SendReady(
+        ClipboardPeer(connection), LG_NET_SERVICE_FILE, bulk);
   }
 
   SendResult TrySendPacket(Connection& connection, LGNetService service,
@@ -840,7 +1094,8 @@ struct CNetworkServer::Impl
         return SendResult::FAILED;
 
       const SendResult reserve =
-        ReserveSendLocked(connection, service, false, packetSize);
+        ReserveSendLocked(
+          connection, service, Delivery::RELIABLE, packetSize);
       if (reserve != SendResult::SENT)
         return reserve;
 
@@ -850,7 +1105,7 @@ struct CNetworkServer::Impl
         Send rollback;
         rollback.service  = service;
         rollback.length   = static_cast<uint32_t>(packetSize);
-        rollback.datagram = false;
+        rollback.delivery = Delivery::RELIABLE;
         ReleaseSendLocked(connection, rollback);
         return SendResult::FAILED;
       }
@@ -862,13 +1117,13 @@ struct CNetworkServer::Impl
       {
         send->service  = service;
         send->length   = static_cast<uint32_t>(packetSize);
-        send->datagram = false;
+        send->delivery = Delivery::RELIABLE;
         ReleaseSendLocked(connection, *send);
         return SendResult::FAILED;
       }
       send->service  = service;
       send->length   = static_cast<uint32_t>(packetSize);
-      send->datagram = false;
+      send->delivery = Delivery::RELIABLE;
 
       LGNetPacketParameters parameters;
       lgNetPacketParametersInit(&parameters, service, messageType,
@@ -913,6 +1168,245 @@ struct CNetworkServer::Impl
     return TrySendPacket(connection, service, messageType, flags,
       componentEpoch, requestID, payload, payloadLength) ==
         SendResult::SENT;
+  }
+
+  static void DetachBulkStreamLocked(BulkStream& stream)
+  {
+    Connection& connection = stream.connection;
+    if (stream.outbound)
+    {
+      if (stream.service < NETWORK_SERVICE_COUNT &&
+          connection.outboundBulk[stream.service] == &stream)
+        connection.outboundBulk[stream.service] = nullptr;
+      return;
+    }
+
+    BulkStream ** link = &connection.inboundBulk;
+    while (*link && *link != &stream)
+      link = &(*link)->next;
+    if (*link != &stream)
+      return;
+
+    *link = stream.next;
+    if (connection.peerBulkStreams)
+      --connection.peerBulkStreams;
+    if (stream.bound && stream.service < NETWORK_SERVICE_COUNT &&
+        connection.servicePeerBulkStreams[stream.service])
+      --connection.servicePeerBulkStreams[stream.service];
+  }
+
+  SendResult OpenBulkStream(Connection& connection, LGNetService service,
+    uint64_t packetSize)
+  {
+    std::unique_ptr<BulkStream> stream(
+      new (std::nothrow) BulkStream(connection));
+    if (!stream)
+      return SendResult::FAILED;
+    stream->service  = service;
+    stream->outbound = true;
+
+    HQUIC connectionHandle;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      const uint16_t serviceMask = UINT16_C(1) << service;
+      if (connection.closing || !connection.handle ||
+          !BulkOriginAllowed(service, LG_NET_ROLE_SERVER) ||
+          connection.handshake != HandshakeState::READY ||
+          !(connection.selectedServices & serviceMask) ||
+          !(connection.bulkServices & serviceMask) ||
+          !connection.selectedCapabilities
+            [service].maxUnidirectionalStreams)
+        return SendResult::FAILED;
+      if (connection.outboundBulk[service])
+      {
+        BlockSendLocked(
+          connection, service, Delivery::BULK, packetSize);
+        return SendResult::BLOCKED;
+      }
+
+      connection.outboundBulk[service] = stream.get();
+      connectionHandle                 = connection.handle;
+      BlockSendLocked(connection, service, Delivery::BULK, packetSize);
+    }
+
+    HQUIC       handle = nullptr;
+    QUIC_STATUS status = api->StreamOpen(connectionHandle,
+      QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL, BulkStreamCallback,
+      stream.get(), &handle);
+    if (QUIC_FAILED(status))
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      DetachBulkStreamLocked(*stream);
+      connection.bulkSend.serviceBlocked[service]      = false;
+      connection.bulkSend.serviceBlockedBytes[service] = 0;
+      return SendResult::FAILED;
+    }
+    stream->handle = handle;
+
+    status = api->StreamStart(handle,
+      QUIC_STREAM_START_FLAG_IMMEDIATE |
+        QUIC_STREAM_START_FLAG_SHUTDOWN_ON_FAIL);
+    if (QUIC_FAILED(status))
+    {
+      {
+        CSRWExclusiveLock guard(connection.lock);
+        DetachBulkStreamLocked(*stream);
+        connection.bulkSend.serviceBlocked[service]      = false;
+        connection.bulkSend.serviceBlockedBytes[service] = 0;
+      }
+      api->StreamClose(handle);
+      return SendResult::FAILED;
+    }
+
+    bool bound;
+    bool shutdownComplete;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      stream->openingReturned  = true;
+      bound                    = stream->bound &&
+        !stream->shutdownComplete;
+      shutdownComplete         = stream->shutdownComplete;
+      if (bound)
+        ReadyServicesLocked(connection, Delivery::BULK);
+    }
+    if (shutdownComplete)
+      return SendResult::FAILED;
+
+    stream.release();
+    return bound ? SendResult::SENT : SendResult::BLOCKED;
+  }
+
+  SendResult TrySendBulk(Connection& connection, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID, const void * payload,
+    uint32_t payloadLength)
+  {
+    const LGNetServiceVersionInfo * version =
+      lgNetServiceVersionInfo(service);
+    const LGNetMessageRoute       * route   =
+      lgNetMessageRoute(service, messageType);
+    if (!version ||
+        !lgNetMessageRouteAllows(route, LG_NET_ROLE_SERVER,
+          LG_NET_ROUTE_DELIVERY_BULK) ||
+        (payloadLength && !payload) ||
+        payloadLength > LG_NET_MAX_PAYLOAD_LENGTH ||
+        flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
+          LG_NET_ENVELOPE_EARLY_DATA))
+      return SendResult::FAILED;
+
+    const size_t     packetSize =
+      LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+    const SendLimits limits     =
+      GetSendLimits(service, Delivery::BULK);
+    if (packetSize > limits.bytes ||
+        packetSize > NETWORK_SEND_BULK_BYTES_MAX)
+      return SendResult::FAILED;
+
+retry:
+    std::unique_ptr<Send> send;
+    QUIC_STATUS           status;
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      const uint16_t serviceMask = UINT16_C(1) << service;
+      if (connection.closing || !connection.handle ||
+          connection.handshake != HandshakeState::READY ||
+          !(connection.selectedServices & serviceMask) ||
+          !(connection.bulkServices & serviceMask) ||
+          !connection.selectedCapabilities
+            [service].maxUnidirectionalStreams)
+        return SendResult::FAILED;
+
+      const uint16_t serviceVersion =
+        connection.selectedCapabilities[service].versionMin;
+      if (payloadLength > connection.selectedCapabilities
+            [service].maxPayloadLength ||
+          !lgNetServiceVersionSupported(service, serviceVersion) ||
+          serviceVersion < route->serviceVersionMin)
+        return SendResult::FAILED;
+
+      BulkStream * stream = connection.outboundBulk[service];
+      if (!stream)
+      {
+        guard.Unlock();
+        const SendResult open =
+          OpenBulkStream(connection, service, packetSize);
+        if (open == SendResult::SENT)
+          goto retry;
+        return open;
+      }
+      if (!stream->bound)
+      {
+        stream->openingReturned = true;
+        BlockSendLocked(connection, service, Delivery::BULK, packetSize);
+        return SendResult::BLOCKED;
+      }
+      if (stream->sendSequence == UINT64_MAX)
+        return SendResult::FAILED;
+
+      const SendResult reserve = ReserveSendLocked(
+        connection, service, Delivery::BULK, packetSize);
+      if (reserve != SendResult::SENT)
+        return reserve;
+
+      send.reset(new (std::nothrow) Send());
+      if (!send)
+      {
+        Send rollback;
+        rollback.service  = service;
+        rollback.length   = static_cast<uint32_t>(packetSize);
+        rollback.delivery = Delivery::BULK;
+        ReleaseSendLocked(connection, rollback);
+        return SendResult::FAILED;
+      }
+      try
+      {
+        send->data.resize(packetSize);
+      }
+      catch (...)
+      {
+        send->service  = service;
+        send->length   = static_cast<uint32_t>(packetSize);
+        send->delivery = Delivery::BULK;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
+      }
+      send->service  = service;
+      send->length   = static_cast<uint32_t>(packetSize);
+      send->delivery = Delivery::BULK;
+
+      LGNetPacketParameters parameters;
+      lgNetPacketParametersInit(&parameters, service, messageType,
+        serviceVersion, route->messageVersion);
+      parameters.flags          = flags | LG_NET_ENVELOPE_FINAL;
+      parameters.sessionEpoch   = connection.sessionEpoch;
+      parameters.componentEpoch = componentEpoch;
+      parameters.sequence       = ++stream->sendSequence;
+      parameters.requestID      = requestID;
+
+      size_t wireSize;
+      if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
+            &wireSize, &parameters, payload, payloadLength) ||
+          wireSize != packetSize)
+      {
+        --stream->sendSequence;
+        ReleaseSendLocked(connection, *send);
+        return SendResult::FAILED;
+      }
+
+      send->buffer.Buffer = send->data.data();
+      send->buffer.Length = static_cast<uint32_t>(wireSize);
+      status = api->StreamSend(stream->handle, &send->buffer, 1,
+        QUIC_SEND_FLAG_NONE, send.get());
+      if (QUIC_FAILED(status))
+      {
+        --stream->sendSequence;
+        ReleaseSendLocked(connection, *send);
+      }
+    }
+    if (QUIC_FAILED(status))
+      return SendResult::FAILED;
+    send.release();
+    return SendResult::SENT;
   }
 
   SendResult TrySendDatagram(Connection& connection, LGNetService service,
@@ -961,15 +1455,17 @@ struct CNetworkServer::Impl
       if (!connection.datagramSendEnabled ||
           packetSize > connection.maxDatagramSendLength)
       {
-        const SendLimits limits = GetSendLimits(service, true);
+        const SendLimits limits = GetSendLimits(service, Delivery::DATAGRAM);
         if (packetSize <= limits.bytes &&
             packetSize <= NETWORK_SEND_DATAGRAM_BYTES_MAX)
-          BlockSendLocked(connection, service, true, packetSize);
+          BlockSendLocked(
+            connection, service, Delivery::DATAGRAM, packetSize);
         return SendResult::BLOCKED;
       }
 
       const SendResult reserve =
-        ReserveSendLocked(connection, service, true, packetSize);
+        ReserveSendLocked(
+          connection, service, Delivery::DATAGRAM, packetSize);
       if (reserve != SendResult::SENT)
         return reserve;
 
@@ -979,7 +1475,7 @@ struct CNetworkServer::Impl
         Send rollback;
         rollback.service  = service;
         rollback.length   = static_cast<uint32_t>(packetSize);
-        rollback.datagram = true;
+        rollback.delivery = Delivery::DATAGRAM;
         ReleaseSendLocked(connection, rollback);
         return SendResult::FAILED;
       }
@@ -991,13 +1487,13 @@ struct CNetworkServer::Impl
       {
         send->service  = service;
         send->length   = static_cast<uint32_t>(packetSize);
-        send->datagram = true;
+        send->delivery = Delivery::DATAGRAM;
         ReleaseSendLocked(connection, *send);
         return SendResult::FAILED;
       }
       send->service  = service;
       send->length   = static_cast<uint32_t>(packetSize);
-      send->datagram = true;
+      send->delivery = Delivery::DATAGRAM;
 
       LGNetPacketParameters parameters;
       lgNetPacketParametersInit(&parameters, service, messageType,
@@ -1100,6 +1596,11 @@ struct CNetworkServer::Impl
       connection.selectedServices         = 0;
       connection.reliableServices         = 0;
       connection.datagramServices         = 0;
+      connection.bulkServices             = 0;
+      connection.maxPeerBulkStreams       = 0;
+      connection.peerBulkStreams          = 0;
+      memset(connection.servicePeerBulkStreams, 0,
+        sizeof(connection.servicePeerBulkStreams));
       memcpy(connection.clientNonce, hello.nonce,
         sizeof(connection.clientNonce));
       memcpy(connection.serverNonce, serverNonce,
@@ -1120,7 +1621,13 @@ struct CNetworkServer::Impl
         capability.service <= LG_NET_SERVICE_CORE ||
         capability.service > LG_NET_SERVICE_CONTROL ||
         capability.service == LG_NET_SERVICE_USB ||
-        capability.flags & LG_NET_CAPABILITY_SELECTED)
+        capability.flags & LG_NET_CAPABILITY_SELECTED ||
+        capability.maxBidirectionalStreams ||
+        capability.maxUnidirectionalStreams > NETWORK_PEER_UNIDI_STREAMS ||
+        (!!(capability.flags & LG_NET_CAPABILITY_BULK) !=
+          !!capability.maxUnidirectionalStreams) ||
+        !(capability.flags & (LG_NET_CAPABILITY_RELIABLE |
+          LG_NET_CAPABILITY_DATAGRAM | LG_NET_CAPABILITY_BULK)))
       return false;
 
     const LGNetServiceVersionInfo * version =
@@ -1155,6 +1662,10 @@ struct CNetworkServer::Impl
     uint32_t minimumPayload;
     switch (offered.service)
     {
+      case LG_NET_SERVICE_VIDEO:
+        minimumPayload = LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE;
+        break;
+
       case LG_NET_SERVICE_RECOVERY:
         minimumPayload = LG_NET_RECOVERY_REQUEST_WIRE_SIZE;
         break;
@@ -1170,6 +1681,14 @@ struct CNetworkServer::Impl
       case LG_NET_SERVICE_AUDIO:
         minimumPayload = LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE +
           AUDIO_MAX_PCM_BYTES;
+        break;
+
+      case LG_NET_SERVICE_CLIPBOARD:
+        minimumPayload = LG_NET_CLIPBOARD_OFFER_HEADER_WIRE_SIZE;
+        break;
+
+      case LG_NET_SERVICE_FILE:
+        minimumPayload = LG_NET_FILE_ENTRY_HEADER_WIRE_SIZE;
         break;
 
       case LG_NET_SERVICE_CONTROL:
@@ -1214,7 +1733,10 @@ struct CNetworkServer::Impl
     selected.maxBidirectionalStreams  = 0;
     selected.maxUnidirectionalStreams = 0;
     const uint32_t minimumDatagram = offered.service ==
-        LG_NET_SERVICE_INPUT ? LG_NET_INPUT_ABSOLUTE_WIRE_SIZE :
+        LG_NET_SERVICE_VIDEO ?
+          LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE + 1U :
+      offered.service == LG_NET_SERVICE_INPUT ?
+        LG_NET_INPUT_ABSOLUTE_WIRE_SIZE :
       offered.service == LG_NET_SERVICE_CURSOR ?
         LG_NET_CURSOR_POSITION_WIRE_SIZE :
       offered.service == LG_NET_SERVICE_AUDIO ?
@@ -1228,6 +1750,17 @@ struct CNetworkServer::Impl
       selected.maxDatagramPayload   = offered.maxDatagramPayload <
         connection.maxDatagramPayload ? offered.maxDatagramPayload :
           connection.maxDatagramPayload;
+    }
+    if (BulkServiceSupported(offered.service) &&
+        (offered.flags & LG_NET_CAPABILITY_BULK) &&
+        offered.maxUnidirectionalStreams)
+    {
+      selected.flags                    |= LG_NET_CAPABILITY_BULK;
+      selected.maxUnidirectionalStreams  =
+        offered.maxUnidirectionalStreams <
+            NETWORK_BULK_STREAMS_PER_SERVICE ?
+          offered.maxUnidirectionalStreams :
+          NETWORK_BULK_STREAMS_PER_SERVICE;
     }
     return lgNetCapabilityValid(&selected);
   }
@@ -1358,8 +1891,9 @@ struct CNetworkServer::Impl
     if (!session)
       return false;
 
-    bool activated     = false;
-    bool audioSelected = false;
+    bool activated         = false;
+    bool audioSelected     = false;
+    bool clipboardSelected = false;
     {
       CSRWExclusiveLock guard(connection.lock);
       activated = !connection.closing &&
@@ -1378,6 +1912,12 @@ struct CNetworkServer::Impl
         connection.handshake = HandshakeState::READY;
         audioSelected         = (connection.selectedServices &
           (UINT16_C(1) << LG_NET_SERVICE_AUDIO)) != 0;
+        const uint16_t clipboardServices =
+          (UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD) |
+          (UINT16_C(1) << LG_NET_SERVICE_FILE);
+        clipboardSelected =
+          (connection.selectedServices & clipboardServices) ==
+            clipboardServices;
       }
     }
     if (!activated)
@@ -1386,6 +1926,9 @@ struct CNetworkServer::Impl
       return false;
     }
     if (audioSelected && !audio.PeerConnected(AudioPeer(connection)))
+      return false;
+    if (clipboardSelected &&
+        !clipboard.PeerConnected(ClipboardPeer(connection)))
       return false;
     DEBUG_INFO("Network client %u completed the control handshake",
       connection.client);
@@ -1431,6 +1974,16 @@ struct CNetworkServer::Impl
           connection.reliableServices |= serviceMask;
         if (capability.flags & LG_NET_CAPABILITY_DATAGRAM)
           connection.datagramServices |= serviceMask;
+        if (capability.flags & LG_NET_CAPABILITY_BULK)
+        {
+          if (capability.maxUnidirectionalStreams >
+              NETWORK_PEER_UNIDI_STREAMS -
+                connection.maxPeerBulkStreams)
+            return false;
+          connection.bulkServices       |= serviceMask;
+          connection.maxPeerBulkStreams +=
+            capability.maxUnidirectionalStreams;
+        }
         ++connection.selectedCapabilityCount;
       }
     }
@@ -2237,7 +2790,8 @@ struct CNetworkServer::Impl
     const LGNetInputStatusCode code =
       packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE &&
         result == InputResult::ACCEPTED ?
-          LG_NET_INPUT_STATUS_RELEASED : InputStatusCode(result);
+          static_cast<LGNetInputStatusCode>(LG_NET_INPUT_STATUS_RELEASED) :
+          InputStatusCode(result);
     if (result != InputResult::ACCEPTED)
       InvalidateInputClaim(connection, control.claimEpoch);
     return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_STATUS,
@@ -2861,24 +3415,34 @@ struct CNetworkServer::Impl
 
   bool HandlePacket(Connection& connection, const LGNetPacketView& packet)
   {
-    const bool         cursorStatus   =
+    const bool         cursorStatus     =
       packet.envelope.service == LG_NET_SERVICE_CURSOR &&
       packet.envelope.messageType == LG_NET_CURSOR_MESSAGE_STATUS;
-    const bool         audioSubscribe =
+    const bool         audioSubscribe   =
       packet.envelope.service == LG_NET_SERVICE_AUDIO &&
       packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_SUBSCRIBE;
-    const bool         audioResponse  =
+    const bool         audioResponse    =
       packet.envelope.service == LG_NET_SERVICE_AUDIO &&
       packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_STATE_ACK;
-    LGNetEnvelopeFlags expectedFlags  =
+    const bool         clipboardPacket  =
+      packet.envelope.service == LG_NET_SERVICE_CLIPBOARD ||
+      packet.envelope.service == LG_NET_SERVICE_FILE;
+    LGNetEnvelopeFlags expectedFlags    =
       LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
     if (audioSubscribe)
       expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
     if (cursorStatus || audioResponse)
       expectedFlags |= LG_NET_ENVELOPE_RESPONSE;
+    constexpr LGNetEnvelopeFlags DELIVERY_FLAGS =
+      LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
+      LG_NET_ENVELOPE_FINAL | LG_NET_ENVELOPE_ERROR |
+      LG_NET_ENVELOPE_EARLY_DATA;
     if (packet.envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
         packet.envelope.payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
-        packet.envelope.flags != expectedFlags ||
+        (clipboardPacket ?
+          (packet.envelope.flags & DELIVERY_FLAGS) !=
+            (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL) :
+          packet.envelope.flags != expectedFlags) ||
         !lgNetEnvelopeRouteValid(&packet.envelope, LG_NET_ROLE_CLIENT,
           LG_NET_ROUTE_DELIVERY_RELIABLE))
       return false;
@@ -2979,6 +3543,12 @@ struct CNetworkServer::Impl
       case LG_NET_SERVICE_AUDIO:
         return audio.HandlePacket(AudioPeer(connection), packet, false) !=
           NetworkAudioPacketResult::INVALID;
+
+      case LG_NET_SERVICE_CLIPBOARD:
+      case LG_NET_SERVICE_FILE:
+        return clipboard.HandlePacket(
+          ClipboardPeer(connection), packet, false) !=
+            NetworkClipboardPacketResult::INVALID;
 
       case LG_NET_SERVICE_CONTROL:
         return HandleControl(connection, packet);
@@ -3134,6 +3704,265 @@ struct CNetworkServer::Impl
     return DrainReceive(connection);
   }
 
+  bool ActivateBulkReceive(BulkStream& stream)
+  {
+    LGNetStreamBinding binding;
+    if (lgNetStreamBindingDecode(&binding, stream.bindingData,
+          sizeof(stream.bindingData)) != LG_NET_PARSE_OK ||
+        binding.originRole != LG_NET_ROLE_CLIENT ||
+        binding.flags != (LG_NET_STREAM_BINDING_UNIDIRECTIONAL |
+          LG_NET_STREAM_BINDING_BULK) ||
+        binding.streamID != stream.streamID ||
+        binding.service <= LG_NET_SERVICE_CORE ||
+        binding.service >= NETWORK_SERVICE_COUNT ||
+        !BulkOriginAllowed(binding.service, LG_NET_ROLE_CLIENT))
+      return false;
+
+    Connection& connection = stream.connection;
+    uint32_t    maxPayload;
+    {
+      CSRWSharedLock guard(connection.lock);
+      const uint16_t serviceMask = UINT16_C(1) << binding.service;
+      const bool     valid       = !connection.closing &&
+        connection.handshake == HandshakeState::READY &&
+        binding.sessionEpoch == connection.sessionEpoch &&
+        (connection.selectedServices & serviceMask) &&
+        (connection.bulkServices & serviceMask) &&
+        connection.selectedCapabilities
+          [binding.service].maxUnidirectionalStreams &&
+        connection.servicePeerBulkStreams[binding.service] <
+          connection.selectedCapabilities
+            [binding.service].maxUnidirectionalStreams;
+      maxPayload = valid ? connection.selectedCapabilities
+        [binding.service].maxPayloadLength : 0;
+    }
+    if (!maxPayload)
+      return false;
+
+    try
+    {
+      stream.receiveData.resize(
+        LG_NET_ENVELOPE_WIRE_SIZE + static_cast<size_t>(maxPayload));
+    }
+    catch (...)
+    {
+      return false;
+    }
+    if (!lgNetStreamParserInit(&stream.receiveParser,
+          stream.receiveData.data(), stream.receiveData.size(), maxPayload))
+      return false;
+
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      const uint16_t serviceMask = UINT16_C(1) << binding.service;
+      const bool     valid       = !connection.closing &&
+        connection.handshake == HandshakeState::READY &&
+        binding.sessionEpoch == connection.sessionEpoch &&
+        (connection.selectedServices & serviceMask) &&
+        (connection.bulkServices & serviceMask) &&
+        connection.selectedCapabilities
+          [binding.service].maxPayloadLength == maxPayload &&
+        connection.selectedCapabilities
+          [binding.service].maxUnidirectionalStreams &&
+        connection.servicePeerBulkStreams[binding.service] <
+          connection.selectedCapabilities
+            [binding.service].maxUnidirectionalStreams;
+      if (!valid)
+        return false;
+
+      stream.service = binding.service;
+      stream.bound   = true;
+      ++connection.servicePeerBulkStreams[binding.service];
+    }
+    return true;
+  }
+
+  bool HandleBulkPacket(BulkStream& stream, const LGNetPacketView& packet)
+  {
+    if (packet.envelope.service <= LG_NET_SERVICE_CORE ||
+        packet.envelope.service >= NETWORK_SERVICE_COUNT ||
+        !BulkOriginAllowed(
+          packet.envelope.service, LG_NET_ROLE_CLIENT))
+      return false;
+
+    Connection& connection = stream.connection;
+    {
+      CSRWSharedLock guard(connection.lock);
+      const uint16_t serviceMask = UINT16_C(1) << packet.envelope.service;
+      if (connection.closing ||
+          connection.handshake != HandshakeState::READY ||
+          !stream.bound || packet.envelope.service != stream.service ||
+          packet.envelope.sessionEpoch != connection.sessionEpoch ||
+          !(connection.selectedServices & serviceMask) ||
+          !(connection.bulkServices & serviceMask) ||
+          packet.envelope.serviceVersion !=
+            connection.selectedCapabilities
+              [packet.envelope.service].versionMin ||
+          packet.envelope.payloadLength >
+            connection.selectedCapabilities
+              [packet.envelope.service].maxPayloadLength)
+        return false;
+    }
+
+    if (packet.envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
+        !(packet.envelope.flags & LG_NET_ENVELOPE_FINAL) ||
+        packet.envelope.flags & (LG_NET_ENVELOPE_RELIABLE |
+          LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_EARLY_DATA) ||
+        !lgNetEnvelopeRouteValid(&packet.envelope, LG_NET_ROLE_CLIENT,
+          LG_NET_ROUTE_DELIVERY_BULK))
+      return false;
+
+    switch (packet.envelope.service)
+    {
+      case LG_NET_SERVICE_CLIPBOARD:
+      case LG_NET_SERVICE_FILE:
+        return clipboard.HandlePacket(
+          ClipboardPeer(connection), packet, true) !=
+            NetworkClipboardPacketResult::INVALID;
+
+      default:
+        return false;
+    }
+  }
+
+  bool DrainBulkReceive(BulkStream& stream)
+  {
+    for (;;)
+    {
+      LGNetStreamPacket       streamPacket;
+      const LGNetStreamResult result = lgNetStreamParserNext(
+        &stream.receiveParser, &streamPacket, nullptr);
+      if (result == LG_NET_STREAM_NEED_DATA)
+        return true;
+      if (result != LG_NET_STREAM_PACKET)
+        return false;
+
+      LGNetPacketView packet = {};
+      packet.envelope        = streamPacket.envelope;
+      packet.payloadLength   = streamPacket.payloadLength;
+      packet.wireSize        = streamPacket.wireSize;
+      if (!streamPacket.payload[1].size)
+        packet.payload = streamPacket.payload[0].data;
+      else
+      {
+        try
+        {
+          stream.receivePayload.resize(streamPacket.payloadLength);
+        }
+        catch (...)
+        {
+          return false;
+        }
+        memcpy(stream.receivePayload.data(), streamPacket.payload[0].data,
+          streamPacket.payload[0].size);
+        memcpy(stream.receivePayload.data() + streamPacket.payload[0].size,
+          streamPacket.payload[1].data, streamPacket.payload[1].size);
+        packet.payload = stream.receivePayload.data();
+      }
+
+      {
+        CSRWExclusiveLock guard(stream.connection.lock);
+        if (!stream.bound || !packet.envelope.sequence ||
+            stream.receiveSequence == UINT64_MAX ||
+            packet.envelope.sequence != stream.receiveSequence + 1)
+          return false;
+        stream.receiveSequence = packet.envelope.sequence;
+      }
+      if (!HandleBulkPacket(stream, packet) ||
+          !lgNetStreamParserConsume(&stream.receiveParser))
+        return false;
+
+      if (!lgNetStreamParserBuffered(&stream.receiveParser))
+        lgNetStreamParserReset(&stream.receiveParser);
+    }
+  }
+
+  bool ReceiveBulk(BulkStream& stream, const QUIC_BUFFER * buffers,
+    uint32_t count)
+  {
+    if (count && !buffers)
+      return false;
+
+    for (uint32_t index = 0; index < count; ++index)
+    {
+      if (buffers[index].Length && !buffers[index].Buffer)
+        return false;
+
+      size_t offset = 0;
+      while (offset < buffers[index].Length)
+      {
+        if (!stream.bound)
+        {
+          const size_t remaining = buffers[index].Length - offset;
+          size_t       length    = sizeof(stream.bindingData) -
+            stream.bindingLength;
+          if (length > remaining)
+            length = remaining;
+          memcpy(stream.bindingData + stream.bindingLength,
+            buffers[index].Buffer + offset, length);
+          stream.bindingLength += length;
+          offset               += length;
+          if (stream.bindingLength == sizeof(stream.bindingData) &&
+              !ActivateBulkReceive(stream))
+            return false;
+          continue;
+        }
+
+        size_t accepted;
+        if (!lgNetStreamParserAppend(&stream.receiveParser,
+              buffers[index].Buffer + offset,
+              buffers[index].Length - offset, &accepted))
+          return false;
+        offset += accepted;
+        if (!DrainBulkReceive(stream) ||
+            (!accepted &&
+              !lgNetStreamParserWritable(&stream.receiveParser)))
+          return false;
+      }
+    }
+
+    return !stream.bound || DrainBulkReceive(stream);
+  }
+
+  bool AcceptBulkStream(Connection& connection, HQUIC handle,
+    QUIC_STREAM_OPEN_FLAGS flags)
+  {
+    if (flags != QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL)
+      return false;
+
+    QUIC_UINT62 streamID;
+    uint32_t    streamIDSize = sizeof(streamID);
+    if (QUIC_FAILED(api->GetParam(handle, QUIC_PARAM_STREAM_ID,
+          &streamIDSize, &streamID)) ||
+        streamIDSize != sizeof(streamID) || (streamID & 3U) != 2U)
+      return false;
+
+    std::unique_ptr<BulkStream> stream(
+      new (std::nothrow) BulkStream(connection));
+    if (!stream)
+      return false;
+    stream->handle   = handle;
+    stream->streamID = streamID;
+
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      if (connection.closing ||
+          connection.handshake != HandshakeState::READY ||
+          !connection.maxPeerBulkStreams ||
+          connection.peerBulkStreams >= connection.maxPeerBulkStreams)
+        return false;
+
+      stream->next             = connection.inboundBulk;
+      connection.inboundBulk   = stream.get();
+      ++connection.peerBulkStreams;
+    }
+
+    api->SetCallbackHandler(handle,
+      reinterpret_cast<void *>(BulkStreamCallback), stream.get());
+    stream.release();
+    return true;
+  }
+
   void ConnectionClosed(Connection& connection)
   {
     const uint32_t client     = connection.client;
@@ -3150,11 +3979,22 @@ struct CNetworkServer::Impl
     {
       CSRWExclusiveLock guard(connection.lock);
       if (connection.reliableSend.count || connection.reliableSend.bytes ||
-          connection.datagramSend.count || connection.datagramSend.bytes)
+          connection.datagramSend.count || connection.datagramSend.bytes ||
+          connection.bulkSend.count || connection.bulkSend.bytes)
         DEBUG_ERROR("Network client %u closed with sends in flight",
           connection.client);
+      if (connection.inboundBulk)
+        DEBUG_ERROR("Network client %u closed with inbound bulk streams",
+          connection.client);
+      for (LGNetService service = LG_NET_SERVICE_CORE;
+           service < NETWORK_SERVICE_COUNT; ++service)
+        if (connection.outboundBulk[service])
+          DEBUG_ERROR("Network client %u closed with a bulk stream for "
+            "service %u", connection.client,
+            static_cast<unsigned>(service));
       session = std::move(connection.session);
     }
+    clipboard.PeerDisconnected(ClipboardPeer(connection));
     audio.PeerDisconnected(AudioPeer(connection));
     if (session)
       transport.RemoveSession(client, generation);
@@ -3253,14 +4093,30 @@ struct CNetworkServer::Impl
 
       case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
       {
-        const bool invalidFlags =
-          event->PEER_STREAM_STARTED.Flags &
-            (QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL |
-             QUIC_STREAM_OPEN_FLAG_0_RTT);
+        const QUIC_STREAM_OPEN_FLAGS flags =
+          event->PEER_STREAM_STARTED.Flags;
+        if (flags & QUIC_STREAM_OPEN_FLAG_UNIDIRECTIONAL)
+        {
+          if (!owner.AcceptBulkStream(connection,
+                event->PEER_STREAM_STARTED.Stream, flags))
+          {
+            owner.api->SetCallbackHandler(
+              event->PEER_STREAM_STARTED.Stream,
+              reinterpret_cast<void *>(RejectedStreamCallback), &owner);
+            owner.api->StreamShutdown(event->PEER_STREAM_STARTED.Stream,
+              QUIC_STREAM_SHUTDOWN_FLAG_ABORT |
+                QUIC_STREAM_SHUTDOWN_FLAG_IMMEDIATE,
+              NETWORK_ERROR_PROTOCOL);
+            owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          }
+          return QUIC_STATUS_SUCCESS;
+        }
+
         bool accepted = false;
         {
           CSRWExclusiveLock guard(connection.lock);
-          if (!invalidFlags && !connection.closing &&
+          if (flags == QUIC_STREAM_OPEN_FLAG_NONE &&
+              !connection.closing &&
               !connection.controlStream)
           {
             connection.controlStream = event->PEER_STREAM_STARTED.Stream;
@@ -3297,7 +4153,7 @@ struct CNetworkServer::Impl
           connection.maxDatagramSendLength          =
             event->DATAGRAM_STATE_CHANGED.MaxSendLength;
           connection.datagramSend.writableServices |=
-            ReadyServicesLocked(connection, true);
+            ReadyServicesLocked(connection, Delivery::DATAGRAM);
         }
         owner.NotifyAudioSendReady(connection, true);
         return QUIC_STATUS_SUCCESS;
@@ -3359,6 +4215,7 @@ struct CNetworkServer::Impl
           ReleaseSendLocked(connection, *send);
         }
         owner.NotifyAudioSendReady(connection, false);
+        owner.NotifyClipboardSendReady(connection, Delivery::RELIABLE);
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -3384,6 +4241,189 @@ struct CNetworkServer::Impl
     }
   }
 
+  static QUIC_STATUS QUIC_API BulkStreamCallback(HQUIC handle,
+    void * context, QUIC_STREAM_EVENT * event)
+  {
+    BulkStream& stream     = *static_cast<BulkStream *>(context);
+    Connection& connection = stream.connection;
+    Impl&       owner      = connection.owner;
+    CallbackGuard callback(owner);
+
+    switch (event->Type)
+    {
+      case QUIC_STREAM_EVENT_START_COMPLETE:
+      {
+        if (QUIC_FAILED(event->START_COMPLETE.Status))
+        {
+          bool deferFree;
+          {
+            CSRWExclusiveLock guard(connection.lock);
+            DetachBulkStreamLocked(stream);
+            deferFree               = stream.outbound &&
+              !stream.openingReturned;
+            stream.shutdownComplete = true;
+          }
+          owner.api->StreamClose(handle);
+          if (!deferFree)
+            delete &stream;
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+        if (!stream.outbound || !event->START_COMPLETE.ID ||
+            (event->START_COMPLETE.ID & 3U) != 3U)
+        {
+          owner.api->StreamShutdown(handle,
+            QUIC_STREAM_SHUTDOWN_FLAG_ABORT |
+              QUIC_STREAM_SHUTDOWN_FLAG_IMMEDIATE,
+            NETWORK_ERROR_PROTOCOL);
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+
+        uint64_t sessionEpoch;
+        {
+          CSRWSharedLock guard(connection.lock);
+          const uint16_t serviceMask = UINT16_C(1) << stream.service;
+          if (connection.closing ||
+              connection.handshake != HandshakeState::READY ||
+              connection.outboundBulk[stream.service] != &stream ||
+              !(connection.selectedServices & serviceMask) ||
+              !(connection.bulkServices & serviceMask))
+          {
+            owner.api->StreamShutdown(handle,
+              QUIC_STREAM_SHUTDOWN_FLAG_ABORT |
+                QUIC_STREAM_SHUTDOWN_FLAG_IMMEDIATE,
+              NETWORK_ERROR_PROTOCOL);
+            return QUIC_STATUS_SUCCESS;
+          }
+          sessionEpoch = connection.sessionEpoch;
+        }
+
+        LGNetStreamBinding binding;
+        lgNetStreamBindingInit(&binding, stream.service, LG_NET_ROLE_SERVER,
+          event->START_COMPLETE.ID, sessionEpoch,
+          LG_NET_STREAM_BINDING_UNIDIRECTIONAL |
+            LG_NET_STREAM_BINDING_BULK);
+        std::unique_ptr<Send> send(new (std::nothrow) Send());
+        if (!send)
+        {
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+        try
+        {
+          send->data.resize(LG_NET_STREAM_BINDING_WIRE_SIZE);
+        }
+        catch (...)
+        {
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+        if (!lgNetStreamBindingEncode(send->data.data(), send->data.size(),
+              &binding))
+        {
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+
+        send->buffer.Buffer = send->data.data();
+        send->buffer.Length = LG_NET_STREAM_BINDING_WIRE_SIZE;
+        send->service       = stream.service;
+        send->length        = LG_NET_STREAM_BINDING_WIRE_SIZE;
+        send->delivery      = Delivery::BULK;
+        send->accounted     = false;
+
+        uint16_t    ready;
+        QUIC_STATUS status;
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          const uint16_t serviceMask = UINT16_C(1) << stream.service;
+          const bool     valid       = !connection.closing &&
+            connection.handshake == HandshakeState::READY &&
+            connection.sessionEpoch == sessionEpoch &&
+            connection.outboundBulk[stream.service] == &stream &&
+            (connection.selectedServices & serviceMask) &&
+            (connection.bulkServices & serviceMask);
+          status = valid ? owner.api->StreamSend(handle, &send->buffer, 1,
+            QUIC_SEND_FLAG_NONE, send.get()) : QUIC_STATUS_ABORTED;
+          ready  = 0;
+          if (QUIC_SUCCEEDED(status))
+          {
+            stream.streamID = event->START_COMPLETE.ID;
+            stream.bound    = true;
+            if (stream.openingReturned)
+              ready = ReadyServicesLocked(connection, Delivery::BULK);
+          }
+        }
+        if (QUIC_FAILED(status))
+        {
+          owner.api->StreamShutdown(handle,
+            QUIC_STREAM_SHUTDOWN_FLAG_ABORT |
+              QUIC_STREAM_SHUTDOWN_FLAG_IMMEDIATE,
+            NETWORK_ERROR_PROTOCOL);
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+
+        send.release();
+        if (ready)
+          owner.NotifyClipboardSendReady(connection, Delivery::BULK);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      case QUIC_STREAM_EVENT_RECEIVE:
+        if (stream.outbound || !owner.ReceiveBulk(stream,
+              event->RECEIVE.Buffers, event->RECEIVE.BufferCount))
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+        return QUIC_STATUS_SUCCESS;
+
+      case QUIC_STREAM_EVENT_SEND_COMPLETE:
+      {
+        std::unique_ptr<Send> send(
+          static_cast<Send *>(event->SEND_COMPLETE.ClientContext));
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          ReleaseSendLocked(connection, *send);
+        }
+        owner.NotifyClipboardSendReady(connection, Delivery::BULK);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+      case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
+      case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
+      {
+        bool closing;
+        {
+          CSRWSharedLock guard(connection.lock);
+          closing = connection.closing;
+        }
+        if (!closing)
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+      {
+        bool deferFree;
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          DetachBulkStreamLocked(stream);
+          deferFree               = stream.outbound &&
+            !stream.openingReturned;
+          stream.shutdownComplete = true;
+        }
+        owner.api->StreamClose(handle);
+        if (!deferFree)
+          delete &stream;
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      default:
+        return QUIC_STATUS_SUCCESS;
+    }
+  }
+
   static QUIC_STATUS QUIC_API RejectedStreamCallback(HQUIC handle,
     void * context, QUIC_STREAM_EVENT * event)
   {
@@ -3398,6 +4438,7 @@ struct CNetworkServer::Impl
   {
     const uint64_t now = GetTickCount64();
     audio.Process(now);
+    clipboard.Process(now);
     CSRWSharedLock guard(lock);
     if (stopping || !api)
       return;
@@ -3624,8 +4665,9 @@ struct CNetworkServer::Impl
 };
 
 CNetworkServer::CNetworkServer(CNetworkTransport& transport,
-  CNetworkAudio& audio, const NetworkSettings& settings) :
-  m_impl(new Impl(transport, audio, settings))
+  CNetworkAudio& audio, CNetworkClipboard& clipboard,
+  const NetworkSettings& settings) :
+  m_impl(new Impl(transport, audio, clipboard, settings))
 {
 }
 
@@ -3664,4 +4706,22 @@ NetworkAudioSendResult CNetworkServer::SendAudio(
     m_impl->SendAudio(peer, datagram, service, messageType, flags,
       componentEpoch, requestID, payload, payloadLength) :
     NetworkAudioSendResult::FAILED;
+}
+
+bool CNetworkServer::ClipboardPeerInfo(
+  const NetworkClipboardPeer& peer, NetworkClipboardPeerInfo& info)
+{
+  return m_impl && m_impl->ClipboardPeerInfo(peer, info);
+}
+
+NetworkClipboardSendResult CNetworkServer::SendClipboard(
+  const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
+  uint16_t messageType, LGNetEnvelopeFlags flags,
+  uint64_t componentEpoch, uint64_t requestID,
+  const void * payload, uint32_t payloadLength)
+{
+  return m_impl ?
+    m_impl->SendClipboard(peer, bulk, service, messageType, flags,
+      componentEpoch, requestID, payload, payloadLength) :
+    NetworkClipboardSendResult::FAILED;
 }

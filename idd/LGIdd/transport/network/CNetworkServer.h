@@ -21,13 +21,16 @@
 #pragma once
 
 #include "transport/network/CNetworkAudio.h"
+#include "transport/network/CNetworkClipboard.h"
 
 #include <memory>
 
 class CNetworkTransport;
 struct NetworkSettings;
 
-class CNetworkServer final : public INetworkAudioSender
+class CNetworkServer final :
+  public INetworkAudioSender,
+  public INetworkClipboardSender
 {
 private:
   struct Impl;
@@ -35,7 +38,7 @@ private:
 
 public:
   CNetworkServer(CNetworkTransport& transport, CNetworkAudio& audio,
-    const NetworkSettings& settings);
+    CNetworkClipboard& clipboard, const NetworkSettings& settings);
   ~CNetworkServer();
 
   CNetworkServer(const CNetworkServer&) = delete;
@@ -49,6 +52,14 @@ public:
     NetworkAudioPeerInfo& info) override;
   NetworkAudioSendResult SendAudio(
     const NetworkAudioPeer& peer, bool datagram, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength) override;
+
+  bool ClipboardPeerInfo(const NetworkClipboardPeer& peer,
+    NetworkClipboardPeerInfo& info) override;
+  NetworkClipboardSendResult SendClipboard(
+    const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength) override;

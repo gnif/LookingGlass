@@ -20,6 +20,7 @@
 
 #include "network.h"
 #include "audio.h"
+#include "clipboard.h"
 #include "connection.h"
 #include "control.h"
 #include "cursor.h"
@@ -43,13 +44,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NETWORK_ADDRESS_MAX        255U
-#define NETWORK_ENDPOINT_TEXT_SIZE (NETWORK_ADDRESS_MAX + 9U)
-#define NETWORK_MAX_PAYLOAD        \
+#define NETWORK_ADDRESS_MAX           255U
+#define NETWORK_ENDPOINT_TEXT_SIZE    (NETWORK_ADDRESS_MAX + 9U)
+#define NETWORK_MAX_PAYLOAD           \
   (LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + LG_NET_CURSOR_MAX_SHAPE_LENGTH)
-#define NETWORK_MAX_DATAGRAM       1136U
-#define NETWORK_AUDIO_MAX_PAYLOAD  \
+#define NETWORK_MAX_DATAGRAM          1136U
+#define NETWORK_AUDIO_MAX_PAYLOAD     \
   (LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE + 65536U)
+#define NETWORK_TRANSFER_CHUNK        (256U * 1024U)
+#define NETWORK_CLIPBOARD_MAX_PAYLOAD \
+  (LG_NET_CLIPBOARD_CHUNK_HEADER_WIRE_SIZE + NETWORK_TRANSFER_CHUNK)
+#define NETWORK_FILE_MAX_PAYLOAD      \
+  (LG_NET_FILE_CHUNK_HEADER_WIRE_SIZE + NETWORK_TRANSFER_CHUNK)
 
 static const LGNetCapability NETWORK_CAPABILITIES[] =
 {
@@ -102,6 +108,30 @@ static const LGNetCapability NETWORK_CAPABILITIES[] =
     .maxUnidirectionalStreams = 0,
   },
   {
+    .service                  = LG_NET_SERVICE_CLIPBOARD,
+    .versionMin               = LG_NET_CLIPBOARD_VERSION_MIN,
+    .versionMax               = LG_NET_CLIPBOARD_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE |
+      LG_NET_CAPABILITY_BULK,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_CLIPBOARD_MAX_PAYLOAD,
+    .maxDatagramPayload       = 0,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 1,
+  },
+  {
+    .service                  = LG_NET_SERVICE_FILE,
+    .versionMin               = LG_NET_FILE_VERSION_MIN,
+    .versionMax               = LG_NET_FILE_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE |
+      LG_NET_CAPABILITY_BULK,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_FILE_MAX_PAYLOAD,
+    .maxDatagramPayload       = 0,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 1,
+  },
+  {
     .service                  = LG_NET_SERVICE_CONTROL,
     .versionMin               = LG_NET_CONTROL_VERSION_MIN,
     .versionMax               = LG_NET_CONTROL_VERSION_CURRENT,
@@ -125,6 +155,7 @@ struct LG_Transport
 {
   NetworkConnection * connection;
   NetworkAudio      * audio;
+  NetworkClipboard  * clipboard;
   NetworkControl    * control;
   NetworkCursor     * cursor;
   NetworkInput      * input;
@@ -341,6 +372,7 @@ static void networkConnectionState(void * opaque, bool connected,
 
   networkInputConnectionState(this->input, connected);
   networkAudioConnectionState(this->audio, connected);
+  networkClipboardConnectionState(this->clipboard, connected);
   networkControlConnectionState(this->control, connected);
   networkRecoveryConnectionState(this->recovery, connected);
   const bool cursorAvailable =
@@ -359,28 +391,39 @@ static void networkConnectionState(void * opaque, bool connected,
 }
 
 static void networkPacket(void * opaque, const LGNetPacketView * packet,
-    bool datagram)
+    NetworkPacketDelivery delivery)
 {
-  LG_Transport * this = opaque;
-  bool valid;
+  LG_Transport * this     = opaque;
+  const bool     datagram =
+    delivery == NETWORK_PACKET_DELIVERY_DATAGRAM;
+  bool           valid;
   switch (packet->envelope.service)
   {
     case LG_NET_SERVICE_RECOVERY:
-      valid = networkRecoveryPacket(this->recovery, packet, datagram);
+      valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
+        networkRecoveryPacket(this->recovery, packet, datagram);
       break;
     case LG_NET_SERVICE_CURSOR:
-      valid = networkCursorPacket(this->cursor, packet, datagram);
+      valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
+        networkCursorPacket(this->cursor, packet, datagram);
       break;
     case LG_NET_SERVICE_INPUT:
-      valid = networkInputPacket(this->input, packet, datagram);
+      valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
+        networkInputPacket(this->input, packet, datagram);
       break;
     case LG_NET_SERVICE_AUDIO:
-      valid = datagram ?
-        networkAudioDatagram(this->audio, packet) :
-        networkAudioPacket(this->audio, packet);
+      valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
+        (datagram ? networkAudioDatagram(this->audio, packet) :
+          networkAudioPacket(this->audio, packet));
+      break;
+    case LG_NET_SERVICE_CLIPBOARD:
+    case LG_NET_SERVICE_FILE:
+      valid = delivery != NETWORK_PACKET_DELIVERY_DATAGRAM &&
+        networkClipboardPacket(this->clipboard, packet, delivery);
       break;
     case LG_NET_SERVICE_CONTROL:
-      valid = networkControlPacket(this->control, packet, datagram);
+      valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
+        networkControlPacket(this->control, packet, datagram);
       break;
     default:
       valid = false;
@@ -397,11 +440,17 @@ static void networkPacket(void * opaque, const LGNetPacketView * packet,
 }
 
 static void networkSendReady(void * opaque, LGNetService service,
-    bool datagram)
+    NetworkPacketDelivery delivery)
 {
-  LG_Transport * this = opaque;
-  if (service == LG_NET_SERVICE_AUDIO)
+  LG_Transport * this     = opaque;
+  const bool     datagram =
+    delivery == NETWORK_PACKET_DELIVERY_DATAGRAM;
+  if (service == LG_NET_SERVICE_AUDIO &&
+      delivery != NETWORK_PACKET_DELIVERY_BULK)
     networkAudioSendReady(this->audio, datagram);
+  if ((service == LG_NET_SERVICE_CLIPBOARD ||
+      service == LG_NET_SERVICE_FILE) && !datagram)
+    networkClipboardSendReady(this->clipboard, service, delivery);
   lgSignalEvent(this->frameEvent);
 }
 
@@ -463,6 +512,7 @@ static bool networkCreate(LG_Transport ** result)
   if (!networkConnectionCreate(&this->connection, &params))
     goto fail;
   if (!networkAudioCreate(&this->audio, this->connection) ||
+      !networkClipboardCreate(&this->clipboard, this->connection) ||
       !networkControlCreate(&this->control, this->connection) ||
       !networkCursorCreate(&this->cursor, this->connection) ||
       !networkInputCreate(&this->input, this->connection) ||
@@ -477,6 +527,7 @@ fail:
   networkInputDestroy(&this->input);
   networkCursorDestroy(&this->cursor);
   networkControlDestroy(&this->control);
+  networkClipboardDestroy(&this->clipboard);
   networkAudioDestroy(&this->audio);
   networkConnectionDestroy(&this->connection);
   if (this->frameEvent)
@@ -512,6 +563,7 @@ static void networkDestroy(LG_Transport ** transport)
   networkInputDestroy(&this->input);
   networkCursorDestroy(&this->cursor);
   networkControlDestroy(&this->control);
+  networkClipboardDestroy(&this->clipboard);
   networkAudioDestroy(&this->audio);
   networkConnectionDestroy(&this->connection);
   lgFreeEvent(this->frameEvent);
@@ -542,6 +594,7 @@ static void networkDisconnect(LG_Transport * this)
 {
   networkInputConnectionState(this->input, false);
   networkAudioConnectionState(this->audio, false);
+  networkClipboardConnectionState(this->clipboard, false);
   networkControlConnectionState(this->control, false);
   networkRecoveryConnectionState(this->recovery, false);
   networkCursorConnectionState(this->cursor, false);
@@ -728,9 +781,14 @@ static const LG_AudioOps * networkGetAudioOps(LG_Transport * this,
 static const LG_ClipboardOps * networkGetClipboardOps(LG_Transport * this,
     void ** opaque)
 {
-  (void)this;
   *opaque = NULL;
-  return NULL;
+  if (!networkConnectionServiceAvailable(this->connection,
+        LG_NET_SERVICE_CLIPBOARD, LG_NET_CAPABILITY_RELIABLE) ||
+      !networkConnectionServiceAvailable(this->connection,
+        LG_NET_SERVICE_FILE, LG_NET_CAPABILITY_RELIABLE))
+    return NULL;
+  *opaque = this->clipboard;
+  return networkClipboardGetOps();
 }
 
 static LG_TransportStatus networkSendControl(LG_Transport * this,

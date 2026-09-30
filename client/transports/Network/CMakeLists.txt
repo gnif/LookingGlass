@@ -7,6 +7,7 @@ endif()
 
 set(TRANSPORT_NETWORK_SOURCES
   audio.c
+  clipboard.c
   connection.c
   control.c
   cursor.c

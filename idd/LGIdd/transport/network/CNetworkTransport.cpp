@@ -76,7 +76,8 @@ bool CNetworkTransport::Initialize()
 
   try
   {
-    m_server.reset(new CNetworkServer(*this, m_audio, m_settings));
+    m_server.reset(
+      new CNetworkServer(*this, m_audio, m_clipboard, m_settings));
   }
   catch (...)
   {
@@ -86,6 +87,13 @@ bool CNetworkTransport::Initialize()
   if (!m_audio.AttachSender(*m_server))
   {
     DEBUG_ERROR("Failed to attach the network audio sender");
+    m_server.reset();
+    return false;
+  }
+  if (!m_clipboard.AttachSender(*m_server))
+  {
+    DEBUG_ERROR("Failed to attach the network clipboard sender");
+    m_audio.DetachSender();
     m_server.reset();
     return false;
   }
@@ -163,6 +171,7 @@ void CNetworkTransport::Stop()
 
   if (server)
     server->Stop();
+  m_clipboard.DetachSender();
   m_audio.DetachSender();
 
   std::vector<SessionPtr> sessions;
@@ -175,6 +184,7 @@ void CNetworkTransport::Stop()
 
   m_input.Stop();
   m_audio.Stop();
+  m_clipboard.Stop();
   m_control.SetControlEvents(nullptr, {});
   m_events.Reset();
 }
@@ -204,13 +214,13 @@ const FrameProfile * CNetworkTransport::Profiles(unsigned& count) const
 
 CfgResult CNetworkTransport::Probe(const FrameCfg& cfg) const
 {
-  UNREFERENCED_PARAMETER(cfg);
+  (void)cfg;
   return CfgResult::REJECTED;
 }
 
 CfgResult CNetworkTransport::Prepare(const FrameCfg& cfg)
 {
-  UNREFERENCED_PARAMETER(cfg);
+  (void)cfg;
   return CfgResult::REJECTED;
 }
 
@@ -235,6 +245,12 @@ DirectFrameBufferMemory CNetworkTransport::GetDirectMemory() const
 IAudioSource * CNetworkTransport::Audio()
 {
   return (m_config.services & TRANSPORT_SERVICE_AUDIO) ? &m_audio : nullptr;
+}
+
+IClipboardSource * CNetworkTransport::Clipboard()
+{
+  return (m_config.services & TRANSPORT_SERVICE_CLIPBOARD) ?
+    &m_clipboard : nullptr;
 }
 
 IControlSink * CNetworkTransport::Control()

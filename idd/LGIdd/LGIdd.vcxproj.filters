@@ -289,6 +289,9 @@
     <ClInclude Include="transport\network\CNetworkAudio.h">
       <Filter>Transport\Network</Filter>
     </ClInclude>
+    <ClInclude Include="transport\network\CNetworkClipboard.h">
+      <Filter>Transport\Network</Filter>
+    </ClInclude>
     <ClInclude Include="transport\network\CNetworkServer.h">
       <Filter>Transport\Network</Filter>
     </ClInclude>
@@ -481,6 +484,9 @@
       <Filter>Transport\LGMP</Filter>
     </ClCompile>
     <ClCompile Include="transport\network\CNetworkAudio.cpp">
+      <Filter>Transport\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\network\CNetworkClipboard.cpp">
       <Filter>Transport\Network</Filter>
     </ClCompile>
     <ClCompile Include="transport\network\CNetworkServer.cpp">
