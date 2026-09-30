@@ -93,6 +93,7 @@ public:
   IInputSource * Input() override;
 
   const NetworkSettings& Settings() const { return m_settings; }
+  bool ServiceEnabled(LGNetService service) const;
   bool ControlSnapshot(NetworkControlSnapshot& state) const;
 
   // The QUIC provider calls these only after authenticating a peer. Keeping

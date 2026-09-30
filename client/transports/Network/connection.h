@@ -52,6 +52,8 @@ typedef struct NetworkConnectionParams
   NetworkTrustCancelFn       trustCancel;
   NetworkPacketFn            packet;
   NetworkConnectionStateFn   state;
+  const LGNetCapability    * capabilities;
+  uint32_t                   capabilityCount;
   void                     * opaque;
 }
 NetworkConnectionParams;
@@ -68,6 +70,8 @@ void networkConnectionDisconnect(NetworkConnection * connection);
 bool networkConnectionValid(const NetworkConnection * connection);
 bool networkConnectionServiceAvailable(NetworkConnection * connection,
     LGNetService service, LGNetCapabilityFlags required);
+bool networkConnectionServiceVersion(NetworkConnection * connection,
+    LGNetService service, uint16_t * version);
 
 LG_TransportStatus networkConnectionSend(NetworkConnection * connection,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,

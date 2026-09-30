@@ -33,6 +33,9 @@
     <ClCompile Include="..\..\repos\LGProtocol\src\network\route.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\sequence.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\..\repos\LGProtocol\src\network\services.c">
       <Filter>Source Files</Filter>
     </ClCompile>

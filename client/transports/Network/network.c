@@ -20,6 +20,7 @@
 
 #include "network.h"
 #include "connection.h"
+#include "input.h"
 #include "known_hosts.h"
 
 #include "app.h"
@@ -39,6 +40,24 @@
 
 #define NETWORK_ADDRESS_MAX        255U
 #define NETWORK_ENDPOINT_TEXT_SIZE (NETWORK_ADDRESS_MAX + 9U)
+#define NETWORK_MAX_PAYLOAD        (1024U * 1024U)
+#define NETWORK_MAX_DATAGRAM       1136U
+
+static const LGNetCapability NETWORK_CAPABILITIES[] =
+{
+  {
+    .service                  = LG_NET_SERVICE_INPUT,
+    .versionMin               = LG_NET_INPUT_VERSION_MIN,
+    .versionMax               = LG_NET_INPUT_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE |
+      LG_NET_CAPABILITY_DATAGRAM,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
+    .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 0,
+  },
+};
 
 struct NetworkTrustPrompt
 {
@@ -50,6 +69,7 @@ struct NetworkTrustPrompt
 struct LG_Transport
 {
   NetworkConnection * connection;
+  NetworkInput      * input;
   NetworkKnownHosts   knownHosts;
   LGEvent           * frameEvent;
   LGEvent           * promptIdle;
@@ -252,6 +272,8 @@ static void networkConnectionState(void * opaque, bool connected,
   const LG_TransportStatus   status = connected ?
     LG_TRANSPORT_UNAVAILABLE : reason;
 
+  networkInputConnectionState(this->input, connected);
+
   LG_LOCK(this->stateLock);
   networkSetUnavailable(&this->videoStatus.frame, status);
   networkSetUnavailable(&this->videoStatus.pointer, status);
@@ -264,11 +286,13 @@ static void networkConnectionState(void * opaque, bool connected,
 static void networkPacket(void * opaque, const LGNetPacketView * packet,
     bool datagram)
 {
-  (void)opaque;
-  (void)packet;
-  (void)datagram;
-  /* Media and service dispatch is added behind this boundary in the next
-   * implementation stage. The connection still validates all wire framing. */
+  LG_Transport * this = opaque;
+  if (packet->envelope.service == LG_NET_SERVICE_INPUT &&
+      !networkInputPacket(this->input, packet, datagram))
+  {
+    DEBUG_ERROR("Invalid network input message");
+    networkConnectionCancel(this->connection);
+  }
 }
 
 static bool networkCreate(LG_Transport ** result)
@@ -312,23 +336,30 @@ static bool networkCreate(LG_Transport ** result)
 
   const NetworkConnectionParams params =
   {
-    .address     = address,
-    .port        = port,
-    .password    = option_get_string("network", "password"),
-    .knownHosts  = &this->knownHosts,
-    .trustPrompt = networkTrustPrompt,
-    .trustCancel = networkCancelTrustPrompt,
-    .packet      = networkPacket,
-    .state       = networkConnectionState,
-    .opaque      = this,
+    .address         = address,
+    .port            = port,
+    .password        = option_get_string("network", "password"),
+    .knownHosts      = &this->knownHosts,
+    .trustPrompt     = networkTrustPrompt,
+    .trustCancel     = networkCancelTrustPrompt,
+    .packet          = networkPacket,
+    .state           = networkConnectionState,
+    .capabilities    = NETWORK_CAPABILITIES,
+    .capabilityCount = sizeof(NETWORK_CAPABILITIES) /
+      sizeof(NETWORK_CAPABILITIES[0]),
+    .opaque          = this,
   };
   if (!networkConnectionCreate(&this->connection, &params))
+    goto fail;
+  if (!networkInputCreate(&this->input, this->connection))
     goto fail;
 
   *result = this;
   return true;
 
 fail:
+  networkInputDestroy(&this->input);
+  networkConnectionDestroy(&this->connection);
   if (this->frameEvent)
     lgFreeEvent(this->frameEvent);
   if (this->promptIdle)
@@ -358,6 +389,7 @@ static void networkDestroy(LG_Transport ** transport)
   LG_UNLOCK(this->stateLock);
   LG_UNLOCK(this->callbackLock);
 
+  networkInputDestroy(&this->input);
   networkConnectionDestroy(&this->connection);
   lgFreeEvent(this->frameEvent);
   lgFreeEvent(this->promptIdle);
@@ -385,6 +417,7 @@ static LG_TransportStatus networkConnect(LG_Transport * this,
 
 static void networkDisconnect(LG_Transport * this)
 {
+  networkInputConnectionState(this->input, false);
   networkConnectionDisconnect(this->connection);
   lgSignalEvent(this->frameEvent);
 }
@@ -512,9 +545,8 @@ static const LG_VideoOps * networkGetVideoOps(LG_Transport * this)
 static const LG_InputOps * networkGetInputOps(LG_Transport * this,
     void ** opaque)
 {
-  (void)this;
-  *opaque = NULL;
-  return NULL;
+  *opaque = this->input;
+  return networkInputGetOps();
 }
 
 static const LG_AudioOps * networkGetAudioOps(LG_Transport * this,

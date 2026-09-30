@@ -7,6 +7,7 @@ endif()
 
 set(TRANSPORT_NETWORK_SOURCES
   connection.c
+  input.c
   known_hosts.c
   network.c
 )

@@ -230,6 +230,35 @@ IInputSource * CNetworkTransport::Input()
   return (m_config.services & TRANSPORT_SERVICE_INPUT) ? &m_input : nullptr;
 }
 
+bool CNetworkTransport::ServiceEnabled(LGNetService service) const
+{
+  switch (service)
+  {
+    case LG_NET_SERVICE_RECOVERY:
+    case LG_NET_SERVICE_CURSOR:
+      return (m_config.services & TRANSPORT_SERVICE_CONTROL) != 0;
+
+    case LG_NET_SERVICE_INPUT:
+      return (m_config.services & TRANSPORT_SERVICE_INPUT) != 0;
+
+    case LG_NET_SERVICE_AUDIO:
+      return (m_config.services & TRANSPORT_SERVICE_AUDIO) != 0;
+
+    case LG_NET_SERVICE_CLIPBOARD:
+    case LG_NET_SERVICE_FILE:
+      return (m_config.services & TRANSPORT_SERVICE_CLIPBOARD) != 0;
+
+    case LG_NET_SERVICE_VIDEO:
+      return (m_config.services & TRANSPORT_SERVICE_FRAME) != 0;
+
+    case LG_NET_SERVICE_CORE:
+    case LG_NET_SERVICE_USB:
+      return false;
+  }
+
+  return false;
+}
+
 bool CNetworkTransport::ControlSnapshot(
   NetworkControlSnapshot& state) const
 {

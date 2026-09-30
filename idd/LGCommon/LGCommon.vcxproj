@@ -72,6 +72,7 @@
     <ClCompile Include="..\..\repos\LGProtocol\src\network\packet.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\protocol.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\route.c" />
+    <ClCompile Include="..\..\repos\LGProtocol\src\network\sequence.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\services.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\stream.c" />
     <ClCompile Include="..\..\repos\LGProtocol\src\network\wire.c" />

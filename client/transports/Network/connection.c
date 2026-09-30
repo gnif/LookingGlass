@@ -25,6 +25,11 @@
 #include "common/event.h"
 #include "common/locking.h"
 
+#include <LGProtocol/NetworkPacket.h>
+#include <LGProtocol/NetworkRoute.h>
+#include <LGProtocol/NetworkSequence.h>
+#include <LGProtocol/NetworkStream.h>
+
 #include <msquic.h>
 
 #if !defined(QUIC_API_VERSION_2)
@@ -36,18 +41,18 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NETWORK_CONNECT_POLL_MS       50U
-#define NETWORK_HANDSHAKE_TIMEOUT_MS  5000U
-#define NETWORK_IDLE_TIMEOUT_MS       10000U
-#define NETWORK_KEEPALIVE_INTERVAL_MS 1000U
-#define NETWORK_INITIAL_RTT_MS        1U
-#define NETWORK_MAX_PEER_STREAMS      16U
-#define NETWORK_MAX_HEADER_SIZE       4096U
-#define NETWORK_MAX_CONTROL_PAYLOAD   (1024U * 1024U)
-#define NETWORK_MAX_CONTROL_BUFFER    \
-  (2U * (NETWORK_MAX_HEADER_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
-#define NETWORK_MAX_DATAGRAM_PAYLOAD  1136U
-#define NETWORK_HELLO_REQUEST_ID      UINT64_C(1)
+#define NETWORK_CONNECT_POLL_MS              50U
+#define NETWORK_HANDSHAKE_TIMEOUT_MS         5000U
+#define NETWORK_IDLE_TIMEOUT_MS              10000U
+#define NETWORK_KEEPALIVE_INTERVAL_MS        1000U
+#define NETWORK_INITIAL_RTT_MS               1U
+#define NETWORK_MAX_PEER_STREAMS             16U
+#define NETWORK_MAX_CONTROL_PAYLOAD          (1024U * 1024U)
+#define NETWORK_MAX_CONTROL_BUFFER           \
+  (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
+#define NETWORK_MAX_DATAGRAM_PAYLOAD         1136U
+#define NETWORK_HELLO_REQUEST_ID             UINT64_C(1)
+#define NETWORK_SEQUENCE_CONNECTION_EPOCH    UINT64_C(1)
 
 struct NetworkSend
 {
@@ -83,35 +88,41 @@ struct NetworkConnection
   NetworkConnectionStateFn   state;
   void                     * opaque;
 
+  LGNetCapability  offeredCapabilities[LG_NET_SERVICE_USB + 1U];
+  uint32_t         offeredCapabilityCount;
+  uint16_t         offeredServices;
+
   bool                certificatePending;
   char                pendingFingerprint[NETWORK_FINGERPRINT_TEXT_SIZE];
 
-  LG_TransportStatus  connectStatus;
-  bool                connecting;
-  LG_TransportSession session;
-  uint64_t            sessionEpoch;
-  uint64_t            sendSequence;
-  uint64_t            datagramSendSequence;
-  uint64_t            receiveSequence;
-  bool                helloAcknowledged;
-  bool                authenticationComplete;
-  bool                capabilitiesComplete;
-  bool                connectFailed;
-  uint32_t            expectedCapabilities;
-  uint32_t            receivedCapabilities;
-  uint16_t            receivedServices;
-  uint16_t            reliableServices;
-  uint16_t            datagramServices;
-  uint32_t            maxPayloadLength;
-  uint32_t            maxDatagramPayload;
-  uint16_t            maxDatagramSendLength;
-  bool                datagramSendEnabled;
-  uint32_t            serviceMaxPayload[LG_NET_SERVICE_USB + 1U];
-  uint32_t            serviceMaxDatagram[LG_NET_SERVICE_USB + 1U];
+  LG_TransportStatus   connectStatus;
+  bool                 connecting;
+  LG_TransportSession  session;
+  uint64_t             sessionEpoch;
+  uint64_t             sendSequence;
+  uint64_t             datagramSendSequence;
+  uint64_t             receiveSequence;
+  LGNetSequenceTracker datagramReceive;
+  bool                 helloAcknowledged;
+  bool                 authenticationComplete;
+  bool                 capabilitiesComplete;
+  bool                 connectFailed;
+  uint32_t             expectedCapabilities;
+  uint32_t             receivedCapabilities;
+  uint16_t             receivedServices;
+  uint16_t             reliableServices;
+  uint16_t             datagramServices;
+  uint16_t             serviceVersions[LG_NET_SERVICE_USB + 1U];
+  uint32_t             maxPayloadLength;
+  uint32_t             maxDatagramPayload;
+  uint16_t             maxDatagramSendLength;
+  bool                 datagramSendEnabled;
+  uint32_t             serviceMaxPayload[LG_NET_SERVICE_USB + 1U];
+  uint32_t             serviceMaxDatagram[LG_NET_SERVICE_USB + 1U];
 
-  uint8_t * receiveData;
-  size_t    receiveSize;
-  size_t    receiveCapacity;
+  LGNetStreamParser   receiveParser;
+  uint8_t           * receiveData;
+  uint8_t           * receivePayload;
 };
 
 static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
@@ -144,52 +155,23 @@ static char * networkEndpoint(const char * address, uint16_t port)
   return endpoint;
 }
 
-static uint16_t networkServiceVersion(LGNetService service)
+static bool networkCapabilityOfferValid(
+    const LGNetCapability * capability)
 {
-  switch (service)
-  {
-    case LG_NET_SERVICE_CORE:
-      return LG_NET_CORE_VERSION_CURRENT;
+  const LGNetServiceVersionInfo * version = capability ?
+    lgNetServiceVersionInfo(capability->service) : NULL;
+  if (!lgNetCapabilityValid(capability) ||
+      !version ||
+      capability->service <= LG_NET_SERVICE_CORE ||
+      capability->service >= LG_NET_SERVICE_USB ||
+      capability->flags & LG_NET_CAPABILITY_SELECTED ||
+      capability->versionMin < version->minimum ||
+      capability->versionMax > version->maximum ||
+      !(capability->flags & (LG_NET_CAPABILITY_RELIABLE |
+        LG_NET_CAPABILITY_DATAGRAM | LG_NET_CAPABILITY_BULK)))
+    return false;
 
-    case LG_NET_SERVICE_RECOVERY:
-      return LG_NET_RECOVERY_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_VIDEO:
-      return LG_NET_VIDEO_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_CURSOR:
-      return LG_NET_CURSOR_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_INPUT:
-      return LG_NET_INPUT_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_AUDIO:
-      return LG_NET_AUDIO_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_CLIPBOARD:
-      return LG_NET_CLIPBOARD_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_FILE:
-      return LG_NET_FILE_VERSION_CURRENT;
-
-    case LG_NET_SERVICE_USB:
-      return LG_NET_USB_VERSION_RESERVED;
-  }
-
-  return 0;
-}
-
-static uint16_t networkReadU16(const uint8_t * data)
-{
-  return (uint16_t)data[0] | (uint16_t)((uint16_t)data[1] << 8);
-}
-
-static uint32_t networkReadU32(const uint8_t * data)
-{
-  return (uint32_t)data[0]         |
-    ((uint32_t)data[1] << 8)       |
-    ((uint32_t)data[2] << 16)      |
-    ((uint32_t)data[3] << 24);
+  return true;
 }
 
 static void networkConnectionSetState(NetworkConnection * this,
@@ -229,13 +211,15 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength, bool allowConnecting)
 {
+  LGNetEnvelope routeEnvelope;
+  lgNetEnvelopeInit(&routeEnvelope, service, messageType, serviceVersion,
+      LG_NET_MESSAGE_VERSION_CURRENT);
   if (payloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
       (payloadLength && !payload) ||
-      !lgNetServiceKnown(service) ||
-      !lgNetMessageKnown(service, messageType) ||
-      serviceVersion != networkServiceVersion(service) ||
       (flags &
         (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_EARLY_DATA)) ||
+      !lgNetEnvelopeRouteValid(&routeEnvelope, LG_NET_ROLE_CLIENT,
+        LG_NET_ROUTE_DELIVERY_RELIABLE) ||
       atomic_load_explicit(&this->stopping, memory_order_acquire))
     return false;
 
@@ -245,20 +229,20 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
   if (!send)
     return false;
 
-  LGNetEnvelope envelope;
-  lgNetEnvelopeInit(&envelope, service, messageType, serviceVersion,
+  LGNetPacketParameters parameters;
+  lgNetPacketParametersInit(&parameters, service, messageType, serviceVersion,
       LG_NET_MESSAGE_VERSION_CURRENT);
-  envelope.flags          = flags | LG_NET_ENVELOPE_RELIABLE;
-  envelope.payloadLength  = payloadLength;
-  envelope.componentEpoch = componentEpoch;
-  envelope.requestID      = requestID;
+  parameters.flags          = flags | LG_NET_ENVELOPE_RELIABLE;
+  parameters.componentEpoch = componentEpoch;
+  parameters.requestID      = requestID;
 
   LG_LOCK(this->lock);
   HQUIC          stream           = this->controlStream;
   const bool     serviceReady     =
     allowConnecting || service == LG_NET_SERVICE_CORE ||
     ((this->receivedServices & (UINT16_C(1) << service)) &&
-      (this->reliableServices & (UINT16_C(1) << service)));
+      (this->reliableServices & (UINT16_C(1) << service)) &&
+      this->serviceVersions[service] == serviceVersion);
   const uint32_t maxPayloadLength = allowConnecting ?
     NETWORK_MAX_CONTROL_PAYLOAD :
     service == LG_NET_SERVICE_CORE ?
@@ -273,10 +257,13 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
     return false;
   }
 
-  envelope.sessionEpoch = this->sessionEpoch;
-  envelope.sequence     = ++this->sendSequence;
-  if (!lgNetPacketEncode(send->data, packetSize, &envelope, payload))
+  parameters.sessionEpoch = this->sessionEpoch;
+  parameters.sequence     = ++this->sendSequence;
+  size_t wireSize;
+  if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
+        &parameters, payload, payloadLength) || wireSize != packetSize)
   {
+    --this->sendSequence;
     LG_UNLOCK(this->lock);
     free(send);
     return false;
@@ -287,6 +274,8 @@ static bool networkConnectionSendPacket(NetworkConnection * this,
 
   const QUIC_STATUS status = this->api->StreamSend(stream,
       &send->buffer, 1, QUIC_SEND_FLAG_NONE, send);
+  if (QUIC_FAILED(status))
+    --this->sendSequence;
   LG_UNLOCK(this->lock);
 
   if (QUIC_FAILED(status))
@@ -303,20 +292,41 @@ static bool networkConnectionSendHello(NetworkConnection * this)
   lgNetHelloInit(&hello, LG_NET_ROLE_CLIENT);
   hello.maxPayloadLength   = NETWORK_MAX_CONTROL_PAYLOAD;
   hello.maxDatagramPayload = NETWORK_MAX_DATAGRAM_PAYLOAD;
-  if (this->password && *this->password)
-  {
-    DEBUG_ERROR("Network password authentication is not implemented yet");
-    return false;
-  }
+  hello.capabilityCount    = this->offeredCapabilityCount;
+  hello.authModes          = this->password && *this->password ?
+    LG_NET_AUTH_MODE_FLAG(LG_NET_AUTH_PASSWORD) :
+    LG_NET_AUTH_MODE_FLAG(LG_NET_AUTH_NONE);
 
   uint8_t payload[LG_NET_HELLO_WIRE_SIZE];
   if (!lgNetHelloEncode(payload, sizeof(payload), &hello))
     return false;
 
-  return networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+  if (!networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
       LG_NET_CORE_MESSAGE_HELLO, LG_NET_CORE_VERSION_CURRENT,
       LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
-      payload, sizeof(payload), true);
+      payload, sizeof(payload), true))
+    return false;
+
+  for (LGNetService service = LG_NET_SERVICE_RECOVERY;
+       service < LG_NET_SERVICE_USB; ++service)
+  {
+    if (!(this->offeredServices & (UINT16_C(1) << service)))
+      continue;
+
+    uint8_t capabilityPayload[LG_NET_CAPABILITY_WIRE_SIZE];
+    if (!lgNetCapabilityEncode(capabilityPayload,
+          sizeof(capabilityPayload), &this->offeredCapabilities[service]) ||
+        !networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+          LG_NET_CORE_MESSAGE_CAPABILITY, LG_NET_CORE_VERSION_CURRENT,
+          LG_NET_ENVELOPE_FINAL, 0, NETWORK_HELLO_REQUEST_ID,
+          capabilityPayload, sizeof(capabilityPayload), true))
+      return false;
+  }
+
+  return networkConnectionSendPacket(this, LG_NET_SERVICE_CORE,
+      LG_NET_CORE_MESSAGE_CAPABILITIES_DONE,
+      LG_NET_CORE_VERSION_CURRENT, LG_NET_ENVELOPE_FINAL,
+      0, NETWORK_HELLO_REQUEST_ID, NULL, 0, true);
 }
 
 static void networkConnectionReady(NetworkConnection * this)
@@ -349,26 +359,53 @@ static bool networkConnectionHandleCapability(NetworkConnection * this,
         packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
     return false;
 
+  if (capability.service <= LG_NET_SERVICE_CORE ||
+      capability.service >= LG_NET_SERVICE_USB)
+    return false;
+
   LG_LOCK(this->lock);
+  const uint16_t             serviceMask   =
+    UINT16_C(1) << capability.service;
+  const LGNetCapability      offered       =
+    this->offeredCapabilities[capability.service];
+  const LGNetCapabilityFlags selectedFlags =
+    capability.flags &
+    (LG_NET_CAPABILITY_RELIABLE | LG_NET_CAPABILITY_DATAGRAM |
+      LG_NET_CAPABILITY_BULK | LG_NET_CAPABILITY_MULTI_CLIENT);
+  const LGNetCapabilityFlags offeredFlags  =
+    offered.flags &
+    (LG_NET_CAPABILITY_RELIABLE | LG_NET_CAPABILITY_DATAGRAM |
+      LG_NET_CAPABILITY_BULK | LG_NET_CAPABILITY_MULTI_CLIENT);
   if (!this->helloAcknowledged || this->capabilitiesComplete ||
       this->receivedCapabilities >= this->expectedCapabilities ||
-      capability.service <= LG_NET_SERVICE_CORE ||
-      capability.service > LG_NET_SERVICE_USB ||
+      !(this->offeredServices & serviceMask) ||
       !(capability.flags & LG_NET_CAPABILITY_SELECTED) ||
-      capability.versionMin != networkServiceVersion(capability.service) ||
+      capability.flags & LG_NET_CAPABILITY_REQUIRED ||
+      !(selectedFlags & LG_NET_CAPABILITY_RELIABLE) ||
+      selectedFlags & ~offeredFlags ||
+      capability.features & ~offered.features ||
+      capability.versionMin < offered.versionMin ||
+      capability.versionMin > offered.versionMax ||
+      capability.maxPayloadLength > offered.maxPayloadLength ||
       capability.maxPayloadLength > this->maxPayloadLength ||
+      capability.maxDatagramPayload > offered.maxDatagramPayload ||
       capability.maxDatagramPayload > this->maxDatagramPayload ||
-      (this->receivedServices & (UINT16_C(1) << capability.service)))
+      capability.maxBidirectionalStreams >
+        offered.maxBidirectionalStreams ||
+      capability.maxUnidirectionalStreams >
+        offered.maxUnidirectionalStreams ||
+      (this->receivedServices & serviceMask))
   {
     LG_UNLOCK(this->lock);
     return false;
   }
 
-  this->receivedServices |= UINT16_C(1) << capability.service;
+  this->receivedServices |= serviceMask;
   if (capability.flags & LG_NET_CAPABILITY_RELIABLE)
     this->reliableServices |= UINT16_C(1) << capability.service;
   if (capability.flags & LG_NET_CAPABILITY_DATAGRAM)
     this->datagramServices |= UINT16_C(1) << capability.service;
+  this->serviceVersions[capability.service]    = capability.versionMin;
   this->serviceMaxPayload[capability.service]  =
     capability.maxPayloadLength;
   this->serviceMaxDatagram[capability.service] =
@@ -378,6 +415,34 @@ static bool networkConnectionHandleCapability(NetworkConnection * this,
   return true;
 }
 
+static bool networkConnectionRequiredCapabilitiesSelected(
+    const NetworkConnection * this)
+{
+  for (LGNetService service = LG_NET_SERVICE_RECOVERY;
+       service < LG_NET_SERVICE_USB; ++service)
+  {
+    const uint16_t serviceMask = UINT16_C(1) << service;
+    if ((this->offeredServices & serviceMask) &&
+        (this->offeredCapabilities[service].flags &
+          LG_NET_CAPABILITY_REQUIRED) &&
+        !(this->receivedServices & serviceMask))
+      return false;
+  }
+  return true;
+}
+
+static void networkConnectionSetSessionFeatures(NetworkConnection * this)
+{
+  const uint16_t services =
+    this->receivedServices & this->reliableServices;
+  if (services & (UINT16_C(1) << LG_NET_SERVICE_INPUT))
+    this->session.features |= LG_TRANSPORT_FEATURE_INPUT;
+  if (services & (UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD))
+    this->session.features |= LG_TRANSPORT_FEATURE_CLIPBOARD;
+  if (services & (UINT16_C(1) << LG_NET_SERVICE_AUDIO))
+    this->session.features |= LG_TRANSPORT_FEATURE_AUDIO;
+}
+
 static bool networkConnectionHandleCore(NetworkConnection * this,
     const LGNetPacketView * packet)
 {
@@ -385,7 +450,8 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
     LG_NET_ENVELOPE_RESPONSE |
     LG_NET_ENVELOPE_FINAL    |
     LG_NET_ENVELOPE_RELIABLE;
-  uint64_t                 sessionEpoch;
+
+  uint64_t sessionEpoch;
   LG_LOCK(this->lock);
   sessionEpoch = this->sessionEpoch;
   LG_UNLOCK(this->lock);
@@ -422,8 +488,11 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
       this->sessionEpoch           = acknowledgement.sessionEpoch;
       this->maxPayloadLength       = acknowledgement.maxPayloadLength;
       this->maxDatagramPayload     = acknowledgement.maxDatagramPayload;
+      const bool sequenceReady = lgNetSequenceTrackerInit(
+          &this->datagramReceive, acknowledgement.sessionEpoch,
+          NETWORK_SEQUENCE_CONNECTION_EPOCH, 64, false);
       LG_UNLOCK(this->lock);
-      return true;
+      return sequenceReady;
     }
 
     case LG_NET_CORE_MESSAGE_CAPABILITY:
@@ -448,8 +517,11 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
       ready = !this->capabilitiesComplete &&
         this->helloAcknowledged &&
         this->authenticationComplete &&
-        this->receivedCapabilities == this->expectedCapabilities;
+        this->receivedCapabilities == this->expectedCapabilities &&
+        networkConnectionRequiredCapabilitiesSelected(this);
       this->capabilitiesComplete = ready;
+      if (ready)
+        networkConnectionSetSessionFeatures(this);
       LG_UNLOCK(this->lock);
       if (ready)
         networkConnectionReady(this);
@@ -484,6 +556,8 @@ static bool networkConnectionHandlePacket(NetworkConnection * this,
       (UINT16_C(1) << packet->envelope.service)) &&
     (this->reliableServices &
       (UINT16_C(1) << packet->envelope.service)) &&
+    packet->envelope.serviceVersion ==
+      this->serviceVersions[packet->envelope.service] &&
     packet->payloadLength <=
       this->serviceMaxPayload[packet->envelope.service];
   LG_UNLOCK(this->lock);
@@ -503,7 +577,7 @@ static bool networkConnectionValidateControl(NetworkConnection * this,
   maxPayloadLength = this->maxPayloadLength;
   LG_UNLOCK(this->lock);
 
-  return packet->envelope.headerSize <= NETWORK_MAX_HEADER_SIZE &&
+  return packet->envelope.headerSize == LG_NET_ENVELOPE_WIRE_SIZE &&
     packet->payloadLength <= maxPayloadLength &&
     packet->envelope.messageVersion == LG_NET_MESSAGE_VERSION_CURRENT &&
     (packet->envelope.flags &
@@ -511,11 +585,8 @@ static bool networkConnectionValidateControl(NetworkConnection * this,
         (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL) &&
     !(packet->envelope.flags &
       (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_EARLY_DATA)) &&
-    lgNetServiceKnown(packet->envelope.service) &&
-    lgNetMessageKnown(packet->envelope.service,
-      packet->envelope.messageType) &&
-    packet->envelope.serviceVersion ==
-      networkServiceVersion(packet->envelope.service);
+    lgNetEnvelopeRouteValid(&packet->envelope, LG_NET_ROLE_SERVER,
+      LG_NET_ROUTE_DELIVERY_RELIABLE);
 }
 
 static bool networkConnectionDecodeDatagram(NetworkConnection * this,
@@ -526,117 +597,67 @@ static bool networkConnectionDecodeDatagram(NetworkConnection * this,
         buffer->Length) != LG_NET_PARSE_OK ||
       packet->wireSize != buffer->Length ||
       packet->envelope.service == LG_NET_SERVICE_CORE ||
-      !lgNetServiceKnown(packet->envelope.service) ||
-      !lgNetMessageKnown(packet->envelope.service,
-        packet->envelope.messageType) ||
-      packet->envelope.serviceVersion !=
-        networkServiceVersion(packet->envelope.service))
+      !lgNetEnvelopeRouteValid(&packet->envelope, LG_NET_ROLE_SERVER,
+        LG_NET_ROUTE_DELIVERY_DATAGRAM))
     return false;
 
-  uint64_t sessionEpoch;
-  uint16_t receivedServices;
-  uint16_t datagramServices;
-  uint32_t serviceMaxDatagram;
+  if (!atomic_load_explicit(
+        &this->sessionValid, memory_order_acquire) ||
+      packet->envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
+      !packet->envelope.sequence ||
+      packet->envelope.messageVersion != LG_NET_MESSAGE_VERSION_CURRENT ||
+      (packet->envelope.flags &
+        (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_FINAL)) !=
+        (LG_NET_ENVELOPE_DATAGRAM | LG_NET_ENVELOPE_FINAL) ||
+      (packet->envelope.flags &
+        (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_EARLY_DATA)))
+    return false;
+
   LG_LOCK(this->lock);
-  sessionEpoch        = this->sessionEpoch;
-  receivedServices    = this->receivedServices;
-  datagramServices    = this->datagramServices;
-  serviceMaxDatagram  =
-    this->serviceMaxDatagram[packet->envelope.service];
+  const uint16_t serviceMask = UINT16_C(1) << packet->envelope.service;
+  const bool     valid       =
+    packet->envelope.sessionEpoch == this->sessionEpoch &&
+    (this->receivedServices & serviceMask) &&
+    (this->datagramServices & serviceMask) &&
+    packet->envelope.serviceVersion ==
+      this->serviceVersions[packet->envelope.service] &&
+    this->serviceMaxDatagram[packet->envelope.service] &&
+    packet->payloadLength <=
+      this->serviceMaxDatagram[packet->envelope.service] &&
+    lgNetSequenceAccepted(lgNetSequenceTrackerCheck(
+      &this->datagramReceive, packet->envelope.sessionEpoch,
+      NETWORK_SEQUENCE_CONNECTION_EPOCH, packet->envelope.sequence));
   LG_UNLOCK(this->lock);
-
-  return atomic_load_explicit(
-      &this->sessionValid, memory_order_acquire) &&
-    (receivedServices & (UINT16_C(1) << packet->envelope.service)) &&
-    (datagramServices & (UINT16_C(1) << packet->envelope.service)) &&
-    serviceMaxDatagram &&
-    packet->envelope.headerSize <= NETWORK_MAX_HEADER_SIZE &&
-    packet->payloadLength <= serviceMaxDatagram &&
-    packet->envelope.sessionEpoch == sessionEpoch &&
-    packet->envelope.sequence != 0 &&
-    packet->envelope.messageVersion == LG_NET_MESSAGE_VERSION_CURRENT &&
-    (packet->envelope.flags & LG_NET_ENVELOPE_DATAGRAM) &&
-    !(packet->envelope.flags &
-      (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_EARLY_DATA));
+  return valid;
 }
 
-static bool networkConnectionReserveReceive(NetworkConnection * this,
-    size_t additional)
+static bool networkConnectionDrainReceive(NetworkConnection * this)
 {
-  if (this->receiveSize > NETWORK_MAX_CONTROL_BUFFER ||
-      additional > NETWORK_MAX_CONTROL_BUFFER - this->receiveSize)
-    return false;
-
-  const size_t required = this->receiveSize + additional;
-  if (required <= this->receiveCapacity)
-    return true;
-
-  size_t capacity = this->receiveCapacity ? this->receiveCapacity : 4096U;
-  while (capacity < required)
+  for (;;)
   {
-    const size_t next = capacity * 2U;
-    if (next < capacity || next > NETWORK_MAX_CONTROL_BUFFER)
+    LGNetStreamPacket streamPacket;
+    const LGNetStreamResult result = lgNetStreamParserNext(
+        &this->receiveParser, &streamPacket, NULL);
+    if (result == LG_NET_STREAM_NEED_DATA)
+      return true;
+    if (result != LG_NET_STREAM_PACKET)
+      return false;
+
+    LGNetPacketView packet =
     {
-      capacity = NETWORK_MAX_CONTROL_BUFFER;
-      break;
+      .envelope      = streamPacket.envelope,
+      .payload       = streamPacket.payload[0].data,
+      .payloadLength = streamPacket.payloadLength,
+      .wireSize      = streamPacket.wireSize,
+    };
+    if (streamPacket.payload[1].size)
+    {
+      memcpy(this->receivePayload, streamPacket.payload[0].data,
+          streamPacket.payload[0].size);
+      memcpy(this->receivePayload + streamPacket.payload[0].size,
+          streamPacket.payload[1].data, streamPacket.payload[1].size);
+      packet.payload = this->receivePayload;
     }
-    capacity = next;
-  }
-
-  uint8_t * data = realloc(this->receiveData, capacity);
-  if (!data)
-    return false;
-  this->receiveData     = data;
-  this->receiveCapacity = capacity;
-  return true;
-}
-
-static bool networkConnectionReceive(NetworkConnection * this,
-    const QUIC_BUFFER * buffers, uint32_t count)
-{
-  if (count && !buffers)
-    return false;
-
-  size_t additional = 0;
-  for (uint32_t i = 0; i < count; ++i)
-  {
-    if (buffers[i].Length && !buffers[i].Buffer)
-      return false;
-    if (buffers[i].Length > SIZE_MAX - additional)
-      return false;
-    additional += buffers[i].Length;
-  }
-
-  if (!networkConnectionReserveReceive(this, additional))
-    return false;
-
-  for (uint32_t i = 0; i < count; ++i)
-  {
-    if (!buffers[i].Length)
-      continue;
-    memcpy(this->receiveData + this->receiveSize,
-        buffers[i].Buffer, buffers[i].Length);
-    this->receiveSize += buffers[i].Length;
-  }
-
-  while (this->receiveSize >= LG_NET_ENVELOPE_WIRE_SIZE)
-  {
-    const uint16_t headerSize  = networkReadU16(this->receiveData + 8U);
-    const uint32_t payloadSize = networkReadU32(this->receiveData + 24U);
-    if (headerSize < LG_NET_ENVELOPE_WIRE_SIZE ||
-        headerSize > NETWORK_MAX_HEADER_SIZE ||
-        payloadSize > NETWORK_MAX_CONTROL_PAYLOAD ||
-        payloadSize > NETWORK_MAX_CONTROL_BUFFER - headerSize)
-      return false;
-
-    const size_t packetSize = (size_t)headerSize + payloadSize;
-    if (packetSize > this->receiveSize)
-      break;
-
-    LGNetPacketView packet;
-    if (lgNetPacketDecode(&packet, this->receiveData,
-          packetSize) != LG_NET_PARSE_OK)
-      return false;
 
     LG_LOCK(this->lock);
     const bool sequenceValid = this->receiveSequence != UINT64_MAX &&
@@ -645,14 +666,39 @@ static bool networkConnectionReceive(NetworkConnection * this,
       this->receiveSequence = packet.envelope.sequence;
     LG_UNLOCK(this->lock);
     if (!sequenceValid || !networkConnectionValidateControl(this, &packet) ||
-        !networkConnectionHandlePacket(this, &packet, false))
+        !networkConnectionHandlePacket(this, &packet, false) ||
+        !lgNetStreamParserConsume(&this->receiveParser))
       return false;
-
-    this->receiveSize -= packetSize;
-    memmove(this->receiveData, this->receiveData + packetSize,
-        this->receiveSize);
   }
-  return true;
+}
+
+static bool networkConnectionReceive(NetworkConnection * this,
+    const QUIC_BUFFER * buffers, uint32_t count)
+{
+  if (count && !buffers)
+    return false;
+
+  for (uint32_t i = 0; i < count; ++i)
+  {
+    if (buffers[i].Length && !buffers[i].Buffer)
+      return false;
+    size_t offset = 0;
+    while (offset < buffers[i].Length)
+    {
+      size_t accepted;
+      if (!lgNetStreamParserAppend(&this->receiveParser,
+            buffers[i].Buffer + offset, buffers[i].Length - offset,
+            &accepted))
+        return false;
+      offset += accepted;
+      if (!networkConnectionDrainReceive(this))
+        return false;
+      if (!accepted && offset < buffers[i].Length)
+        return false;
+    }
+  }
+
+  return networkConnectionDrainReceive(this);
 }
 
 static void networkConnectionTrustDecision(void * opaque, bool trusted)
@@ -922,7 +968,9 @@ bool networkConnectionCreate(NetworkConnection ** result,
     const NetworkConnectionParams * params)
 {
   if (!result || !params || !params->address || !params->knownHosts ||
-      (!!params->trustPrompt != !!params->trustCancel))
+      (!!params->trustPrompt != !!params->trustCancel) ||
+      params->capabilityCount > LG_NET_MAX_CAPABILITY_RECORDS ||
+      (params->capabilityCount && !params->capabilities))
     return false;
 
   NetworkConnection * this = calloc(1, sizeof(*this));
@@ -933,6 +981,20 @@ bool networkConnectionCreate(NetworkConnection ** result,
   LG_LOCK_INIT(this->stateCallbackLock);
   atomic_init(&this->stopping, false);
   atomic_init(&this->sessionValid, false);
+
+  for (uint32_t index = 0; index < params->capabilityCount; ++index)
+  {
+    const LGNetCapability * capability = &params->capabilities[index];
+    if (!networkCapabilityOfferValid(capability))
+      goto fail;
+
+    const uint16_t serviceMask = UINT16_C(1) << capability->service;
+    if (this->offeredServices & serviceMask)
+      goto fail;
+    this->offeredCapabilities[capability->service] = *capability;
+    this->offeredServices                          |= serviceMask;
+    ++this->offeredCapabilityCount;
+  }
 
   this->address  = networkDuplicate(params->address);
   this->password = networkDuplicate(params->password);
@@ -952,6 +1014,13 @@ bool networkConnectionCreate(NetworkConnection ** result,
   this->connectEvent = lgCreateEvent(false, 0);
   this->closeEvent   = lgCreateEvent(false, 0);
   if (!this->connectEvent || !this->closeEvent)
+    goto fail;
+
+  this->receiveData    = malloc(NETWORK_MAX_CONTROL_BUFFER);
+  this->receivePayload = malloc(NETWORK_MAX_CONTROL_PAYLOAD);
+  if (!this->receiveData || !this->receivePayload ||
+      !lgNetStreamParserInit(&this->receiveParser, this->receiveData,
+        NETWORK_MAX_CONTROL_BUFFER, NETWORK_MAX_CONTROL_PAYLOAD))
     goto fail;
 
   if (QUIC_FAILED(MsQuicOpen2(&this->api)))
@@ -1037,6 +1106,7 @@ void networkConnectionDestroy(NetworkConnection ** connection)
     lgFreeEvent(this->connectEvent);
   LG_LOCK_FREE(this->stateCallbackLock);
   LG_LOCK_FREE(this->lock);
+  free(this->receivePayload);
   free(this->receiveData);
   free(this->endpoint);
   free(this->password);
@@ -1084,9 +1154,10 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->maxDatagramPayload     = 0;
   this->maxDatagramSendLength  = 0;
   this->datagramSendEnabled    = false;
+  memset(this->serviceVersions, 0, sizeof(this->serviceVersions));
   memset(this->serviceMaxPayload, 0, sizeof(this->serviceMaxPayload));
   memset(this->serviceMaxDatagram, 0, sizeof(this->serviceMaxDatagram));
-  this->receiveSize            = 0;
+  lgNetStreamParserReset(&this->receiveParser);
   memset(&this->session, 0, sizeof(this->session));
   snprintf(this->session.version, sizeof(this->session.version),
       "LG network protocol %u", LG_NET_PROTOCOL_VERSION_CURRENT);
@@ -1237,6 +1308,23 @@ bool networkConnectionServiceAvailable(NetworkConnection * this,
   return available;
 }
 
+bool networkConnectionServiceVersion(NetworkConnection * this,
+    LGNetService service, uint16_t * version)
+{
+  if (!version || !networkConnectionValid(this) ||
+      service <= LG_NET_SERVICE_CORE || service >= LG_NET_SERVICE_USB)
+    return false;
+
+  LG_LOCK(this->lock);
+  const uint16_t serviceMask = UINT16_C(1) << service;
+  const bool     available   =
+    (this->receivedServices & serviceMask) != 0;
+  if (available)
+    *version = this->serviceVersions[service];
+  LG_UNLOCK(this->lock);
+  return available;
+}
+
 LG_TransportStatus networkConnectionSend(NetworkConnection * this,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
@@ -1258,28 +1346,28 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
 {
   if (!this || !networkConnectionValid(this))
     return LG_TRANSPORT_DISCONNECTED;
-  if ((payloadLength && !payload) ||
-      !lgNetServiceKnown(service) || service == LG_NET_SERVICE_CORE ||
-      !lgNetMessageKnown(service, messageType) ||
-      serviceVersion != networkServiceVersion(service) ||
-      flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
-        LG_NET_ENVELOPE_EARLY_DATA))
-    return LG_TRANSPORT_ERROR;
-
-  const size_t         packetSize = LG_NET_ENVELOPE_WIRE_SIZE +
-    payloadLength;
-  struct NetworkSend * send       = malloc(sizeof(*send) + packetSize);
-  if (!send)
-    return LG_TRANSPORT_ERROR;
-
-  LGNetEnvelope envelope;
-  lgNetEnvelopeInit(&envelope, service, messageType, serviceVersion,
+  LGNetEnvelope routeEnvelope;
+  lgNetEnvelopeInit(&routeEnvelope, service, messageType, serviceVersion,
       LG_NET_MESSAGE_VERSION_CURRENT);
-  envelope.flags          = flags | LG_NET_ENVELOPE_DATAGRAM |
+  if ((payloadLength && !payload) || service == LG_NET_SERVICE_CORE ||
+      flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
+        LG_NET_ENVELOPE_EARLY_DATA) ||
+      !lgNetEnvelopeRouteValid(&routeEnvelope, LG_NET_ROLE_CLIENT,
+        LG_NET_ROUTE_DELIVERY_DATAGRAM))
+    return LG_TRANSPORT_ERROR;
+
+  if (payloadLength > LG_NET_MAX_PAYLOAD_LENGTH)
+    return LG_TRANSPORT_ERROR;
+
+  const size_t packetSize = LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+
+  LGNetPacketParameters parameters;
+  lgNetPacketParametersInit(&parameters, service, messageType, serviceVersion,
+      LG_NET_MESSAGE_VERSION_CURRENT);
+  parameters.flags          = flags | LG_NET_ENVELOPE_DATAGRAM |
     LG_NET_ENVELOPE_FINAL;
-  envelope.payloadLength  = payloadLength;
-  envelope.componentEpoch = componentEpoch;
-  envelope.requestID      = requestID;
+  parameters.componentEpoch = componentEpoch;
+  parameters.requestID      = requestID;
 
   LG_LOCK(this->lock);
   const uint16_t serviceMask = UINT16_C(1) << service;
@@ -1288,20 +1376,30 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
       !atomic_load_explicit(&this->sessionValid, memory_order_acquire) ||
       !(this->receivedServices & serviceMask) ||
       !(this->datagramServices & serviceMask) ||
+      this->serviceVersions[service] != serviceVersion ||
       !this->datagramSendEnabled ||
       payloadLength > this->serviceMaxDatagram[service] ||
       packetSize > this->maxDatagramSendLength ||
       this->datagramSendSequence == UINT64_MAX)
   {
     LG_UNLOCK(this->lock);
-    free(send);
     return LG_TRANSPORT_UNAVAILABLE;
   }
 
-  envelope.sessionEpoch = this->sessionEpoch;
-  envelope.sequence     = ++this->datagramSendSequence;
-  if (!lgNetPacketEncode(send->data, packetSize, &envelope, payload))
+  struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
+  if (!send)
   {
+    LG_UNLOCK(this->lock);
+    return LG_TRANSPORT_ERROR;
+  }
+
+  parameters.sessionEpoch = this->sessionEpoch;
+  parameters.sequence     = ++this->datagramSendSequence;
+  size_t wireSize;
+  if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
+        &parameters, payload, payloadLength) || wireSize != packetSize)
+  {
+    --this->datagramSendSequence;
     LG_UNLOCK(this->lock);
     free(send);
     return LG_TRANSPORT_ERROR;
@@ -1314,6 +1412,8 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
     sendFlags |= QUIC_SEND_FLAG_CANCEL_ON_BLOCKED;
   const QUIC_STATUS status = this->api->DatagramSend(connection,
       &send->buffer, 1, sendFlags, send);
+  if (QUIC_FAILED(status))
+    --this->datagramSendSequence;
   LG_UNLOCK(this->lock);
 
   if (QUIC_FAILED(status))
