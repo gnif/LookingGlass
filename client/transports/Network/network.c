@@ -27,6 +27,7 @@
 #include "input.h"
 #include "known_hosts.h"
 #include "recovery.h"
+#include "video.h"
 
 #include "app.h"
 #include "interface/renderer.h"
@@ -56,6 +57,9 @@
   (LG_NET_CLIPBOARD_CHUNK_HEADER_WIRE_SIZE + NETWORK_TRANSFER_CHUNK)
 #define NETWORK_FILE_MAX_PAYLOAD      \
   (LG_NET_FILE_CHUNK_HEADER_WIRE_SIZE + NETWORK_TRANSFER_CHUNK)
+#define NETWORK_VIDEO_MAX_PAYLOAD     \
+  (LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE + \
+    LG_NET_VIDEO_MAX_FRAGMENT_LENGTH)
 
 static const LGNetCapability NETWORK_CAPABILITIES[] =
 {
@@ -93,6 +97,19 @@ static const LGNetCapability NETWORK_CAPABILITIES[] =
     .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
     .maxBidirectionalStreams  = 0,
     .maxUnidirectionalStreams = 0,
+  },
+  {
+    .service                  = LG_NET_SERVICE_VIDEO,
+    .versionMin               =
+      LG_NET_VIDEO_BLOCK_FRAGMENTATION_INTRODUCED_SERVICE_VERSION,
+    .versionMax               = LG_NET_VIDEO_VERSION_CURRENT,
+    .flags                    = LG_NET_CAPABILITY_RELIABLE |
+      LG_NET_CAPABILITY_DATAGRAM | LG_NET_CAPABILITY_BULK,
+    .features                 = 0,
+    .maxPayloadLength         = NETWORK_VIDEO_MAX_PAYLOAD,
+    .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
+    .maxBidirectionalStreams  = 0,
+    .maxUnidirectionalStreams = 1,
   },
   {
     .service                  = LG_NET_SERVICE_AUDIO,
@@ -160,8 +177,8 @@ struct LG_Transport
   NetworkCursor     * cursor;
   NetworkInput      * input;
   NetworkRecovery   * recovery;
+  NetworkVideo      * video;
   NetworkKnownHosts   knownHosts;
-  LGEvent           * frameEvent;
   LGEvent           * promptIdle;
 
   LG_Lock callbackLock;
@@ -172,7 +189,6 @@ struct LG_Transport
   LG_VideoStatusFn videoStatusFn;
   void            * videoStatusOpaque;
 
-  bool                      rendererAttached;
   bool                      promptCallbackActive;
   struct NetworkTrustPrompt prompt;
 };
@@ -340,6 +356,17 @@ static void networkNotifyVideoStatus(LG_Transport * this)
   LG_UNLOCK(this->callbackLock);
 }
 
+static void networkVideoStatus(void * opaque,
+    const LG_VideoComponentStatus * status)
+{
+  LG_Transport * this = opaque;
+
+  LG_LOCK(this->stateLock);
+  this->videoStatus.frame = *status;
+  LG_UNLOCK(this->stateLock);
+  networkNotifyVideoStatus(this);
+}
+
 static uint64_t networkNextEpoch(uint64_t epoch)
 {
   ++epoch;
@@ -375,18 +402,17 @@ static void networkConnectionState(void * opaque, bool connected,
   networkClipboardConnectionState(this->clipboard, connected);
   networkControlConnectionState(this->control, connected);
   networkRecoveryConnectionState(this->recovery, connected);
+  networkVideoConnectionState(this->video, connected);
   const bool cursorAvailable =
     networkCursorConnectionState(this->cursor, connected);
 
   LG_LOCK(this->stateLock);
-  networkSetUnavailable(&this->videoStatus.frame, status);
   if (cursorAvailable)
     networkSetAvailable(&this->videoStatus.pointer);
   else
     networkSetUnavailable(&this->videoStatus.pointer, status);
   LG_UNLOCK(this->stateLock);
 
-  lgSignalEvent(this->frameEvent);
   networkNotifyVideoStatus(this);
 }
 
@@ -415,6 +441,10 @@ static void networkPacket(void * opaque, const LGNetPacketView * packet,
       valid = delivery != NETWORK_PACKET_DELIVERY_BULK &&
         (datagram ? networkAudioDatagram(this->audio, packet) :
           networkAudioPacket(this->audio, packet));
+      break;
+    case LG_NET_SERVICE_VIDEO:
+      valid = datagram ? networkVideoDatagram(this->video, packet) :
+        networkVideoPacket(this->video, packet);
       break;
     case LG_NET_SERVICE_CLIPBOARD:
     case LG_NET_SERVICE_FILE:
@@ -451,7 +481,9 @@ static void networkSendReady(void * opaque, LGNetService service,
   if ((service == LG_NET_SERVICE_CLIPBOARD ||
       service == LG_NET_SERVICE_FILE) && !datagram)
     networkClipboardSendReady(this->clipboard, service, delivery);
-  lgSignalEvent(this->frameEvent);
+  if (service == LG_NET_SERVICE_VIDEO &&
+      delivery != NETWORK_PACKET_DELIVERY_BULK)
+    networkVideoSendReady(this->video, datagram);
 }
 
 static bool networkCreate(LG_Transport ** result)
@@ -474,10 +506,8 @@ static bool networkCreate(LG_Transport ** result)
   if (!networkKnownHostsInit(&this->knownHosts))
     goto fail;
 
-  this->frameEvent = lgCreateEvent(true, 0);
   this->promptIdle = lgCreateEvent(false, 0);
-  if (!this->frameEvent || !this->promptIdle ||
-      !lgSignalEvent(this->promptIdle))
+  if (!this->promptIdle || !lgSignalEvent(this->promptIdle))
     goto fail;
 
   const char    * address = option_get_string("network", "address");
@@ -516,13 +546,16 @@ static bool networkCreate(LG_Transport ** result)
       !networkControlCreate(&this->control, this->connection) ||
       !networkCursorCreate(&this->cursor, this->connection) ||
       !networkInputCreate(&this->input, this->connection) ||
-      !networkRecoveryCreate(&this->recovery, this->connection))
+      !networkRecoveryCreate(&this->recovery, this->connection) ||
+      !networkVideoCreate(&this->video, this->connection))
     goto fail;
+  networkVideoSetStatusListener(this->video, networkVideoStatus, this);
 
   *result = this;
   return true;
 
 fail:
+  networkVideoDestroy(&this->video);
   networkRecoveryDestroy(&this->recovery);
   networkInputDestroy(&this->input);
   networkCursorDestroy(&this->cursor);
@@ -530,8 +563,6 @@ fail:
   networkClipboardDestroy(&this->clipboard);
   networkAudioDestroy(&this->audio);
   networkConnectionDestroy(&this->connection);
-  if (this->frameEvent)
-    lgFreeEvent(this->frameEvent);
   if (this->promptIdle)
     lgFreeEvent(this->promptIdle);
   networkKnownHostsFree(&this->knownHosts);
@@ -560,13 +591,13 @@ static void networkDestroy(LG_Transport ** transport)
   LG_UNLOCK(this->callbackLock);
 
   networkRecoveryDestroy(&this->recovery);
+  networkVideoDestroy(&this->video);
   networkInputDestroy(&this->input);
   networkCursorDestroy(&this->cursor);
   networkControlDestroy(&this->control);
   networkClipboardDestroy(&this->clipboard);
   networkAudioDestroy(&this->audio);
   networkConnectionDestroy(&this->connection);
-  lgFreeEvent(this->frameEvent);
   lgFreeEvent(this->promptIdle);
   networkKnownHostsFree(&this->knownHosts);
   LG_LOCK_FREE(this->promptLock);
@@ -597,9 +628,9 @@ static void networkDisconnect(LG_Transport * this)
   networkClipboardConnectionState(this->clipboard, false);
   networkControlConnectionState(this->control, false);
   networkRecoveryConnectionState(this->recovery, false);
+  networkVideoConnectionState(this->video, false);
   networkCursorConnectionState(this->cursor, false);
   networkConnectionDisconnect(this->connection);
-  lgSignalEvent(this->frameEvent);
 }
 
 static bool networkSessionValid(LG_Transport * this)
@@ -633,67 +664,40 @@ static bool networkSupportsDMA(LG_Transport * this)
 static bool networkAttachRenderer(LG_Transport * this,
     const LG_RendererInterop * interop)
 {
-  const size_t requiredSize = offsetof(LG_RendererInterop,
-      egl.sharedTextureImport) + sizeof(interop->egl.sharedTextureImport);
-  if (!interop ||
-      interop->version < LG_RENDERER_INTEROP_EGL_TEXTURE_VERSION ||
-      interop->size < requiredSize ||
-      interop->type != LG_RENDERER_INTEROP_EGL ||
-      !interop->egl.display || !interop->egl.config ||
-      !interop->egl.shareContext || !interop->egl.sharedTextureImport)
-  {
-    DEBUG_ERROR("The network transport requires EGL shared textures");
-    return false;
-  }
-
-  this->rendererAttached = true;
-  return true;
+  return networkVideoAttachRenderer(this->video, interop);
 }
 
 static void networkDetachRenderer(LG_Transport * this)
 {
-  this->rendererAttached = false;
+  networkVideoDetachRenderer(this->video);
 }
 
 static LG_TransportStatus networkNextFrame(LG_Transport * this, bool useDMA,
     LG_TransportFrame * frame)
 {
-  (void)useDMA;
-  (void)frame;
-
-  if (!this->rendererAttached)
-    return LG_TRANSPORT_ERROR;
-  if (!networkSessionValid(this))
-    return LG_TRANSPORT_DISCONNECTED;
-
-  lgWaitEvent(this->frameEvent, 100);
-  return networkSessionValid(this) ?
-    LG_TRANSPORT_UNAVAILABLE : LG_TRANSPORT_DISCONNECTED;
+  return networkVideoNextFrame(this->video, useDMA, frame);
 }
 
 static void networkGetFrameTiming(LG_Transport * this,
     const LG_TransportFrame * frame, LG_TransportFrameTiming * timing)
 {
-  (void)this;
-  (void)frame;
-  memset(timing, 0, sizeof(*timing));
+  networkVideoGetFrameTiming(this->video, frame, timing);
 }
 
 static void networkReleaseFrame(LG_Transport * this,
     LG_TransportFrame * frame)
 {
-  (void)this;
-  (void)frame;
+  networkVideoReleaseFrame(this->video, frame);
 }
 
 static void networkCancelFrameWait(LG_Transport * this)
 {
-  lgSignalEvent(this->frameEvent);
+  networkVideoCancelFrameWait(this->video);
 }
 
 static void networkStopFrame(LG_Transport * this)
 {
-  lgSignalEvent(this->frameEvent);
+  networkVideoStopFrame(this->video);
 }
 
 static LG_TransportStatus networkNextPointer(LG_Transport * this,

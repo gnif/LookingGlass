@@ -439,10 +439,12 @@ struct CNetworkServer::Impl
   };
 
   Impl(CNetworkTransport& transport, CNetworkAudio& audio,
-      CNetworkClipboard& clipboard, const NetworkSettings& settings) :
+      CNetworkClipboard& clipboard, CNetworkVideo& video,
+      const NetworkSettings& settings) :
     transport(transport),
     audio(audio),
     clipboard(clipboard),
+    video(video),
     settings(settings)
   {
   }
@@ -463,6 +465,7 @@ struct CNetworkServer::Impl
   CNetworkTransport&        transport;
   CNetworkAudio&            audio;
   CNetworkClipboard&        clipboard;
+  CNetworkVideo&            video;
   NetworkSettings           settings;
   const QUIC_API_TABLE    * api             = nullptr;
   HQUIC                     registration    = nullptr;
@@ -528,6 +531,15 @@ struct CNetworkServer::Impl
   }
 
   static NetworkClipboardPeer ClipboardPeer(const Connection& connection)
+  {
+    return
+    {
+      connection.client,
+      connection.generation,
+    };
+  }
+
+  static NetworkVideoPeer VideoPeer(const Connection& connection)
   {
     return
     {
@@ -677,6 +689,87 @@ struct CNetworkServer::Impl
       }
     }
     return NetworkClipboardSendResult::FAILED;
+  }
+
+  bool VideoPeerInfo(const NetworkVideoPeer& peer,
+    NetworkVideoPeerInfo& info)
+  {
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      CSRWSharedLock connectionGuard(connection->lock);
+      const uint16_t serviceMask = UINT16_C(1) << LG_NET_SERVICE_VIDEO;
+      if (connection->closing ||
+          connection->handshake != HandshakeState::READY ||
+          !(connection->selectedServices & serviceMask))
+        return false;
+
+      const LGNetCapability& capability =
+        connection->selectedCapabilities[LG_NET_SERVICE_VIDEO];
+      info.serviceVersion     = capability.versionMin;
+      info.capabilityFlags    = capability.flags;
+      info.maxReliablePayload = capability.maxPayloadLength;
+      info.maxDatagramPayload = capability.maxDatagramPayload;
+      info.maxBulkPayload     =
+        capability.flags & LG_NET_CAPABILITY_BULK ?
+          capability.maxPayloadLength : 0;
+      return true;
+    }
+    return false;
+  }
+
+  NetworkVideoSendResult SendVideo(
+    const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+  {
+    CSRWSharedLock guard(lock);
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation)
+        continue;
+
+      SendResult result = SendResult::FAILED;
+      switch (delivery)
+      {
+        case NetworkVideoDelivery::RELIABLE:
+          result = TrySendPacket(*connection, LG_NET_SERVICE_VIDEO,
+            messageType, flags, componentEpoch, requestID,
+            payload, payloadLength);
+          break;
+
+        case NetworkVideoDelivery::DATAGRAM:
+          result = TrySendDatagram(*connection, LG_NET_SERVICE_VIDEO,
+            messageType, flags, componentEpoch, requestID,
+            payload, payloadLength, true);
+          break;
+
+        case NetworkVideoDelivery::BULK:
+          result = TrySendBulk(*connection, LG_NET_SERVICE_VIDEO,
+            messageType, flags, componentEpoch, requestID,
+            payload, payloadLength);
+          break;
+      }
+
+      switch (result)
+      {
+        case SendResult::SENT:
+          return NetworkVideoSendResult::ACCEPTED;
+
+        case SendResult::BLOCKED:
+          return NetworkVideoSendResult::BLOCKED;
+
+        case SendResult::FAILED:
+          return NetworkVideoSendResult::FAILED;
+      }
+    }
+    return NetworkVideoSendResult::FAILED;
   }
 
   void Shutdown(Connection& connection, QUIC_UINT62 error)
@@ -1046,6 +1139,31 @@ struct CNetworkServer::Impl
     if (ConsumeSendReady(connection, LG_NET_SERVICE_FILE, delivery))
       clipboard.SendReady(
         ClipboardPeer(connection), LG_NET_SERVICE_FILE, bulk);
+  }
+
+  void NotifyVideoSendReady(Connection& connection, Delivery delivery)
+  {
+    NetworkVideoDelivery videoDelivery = NetworkVideoDelivery::RELIABLE;
+    switch (delivery)
+    {
+      case Delivery::RELIABLE:
+        videoDelivery = NetworkVideoDelivery::RELIABLE;
+        break;
+
+      case Delivery::DATAGRAM:
+        videoDelivery = NetworkVideoDelivery::DATAGRAM;
+        break;
+
+      case Delivery::BULK:
+        videoDelivery = NetworkVideoDelivery::BULK;
+        break;
+
+      default:
+        return;
+    }
+    if (!ConsumeSendReady(connection, LG_NET_SERVICE_VIDEO, delivery))
+      return;
+    video.SendReady(VideoPeer(connection), videoDelivery);
   }
 
   SendResult TrySendPacket(Connection& connection, LGNetService service,
@@ -1894,6 +2012,7 @@ retry:
     bool activated         = false;
     bool audioSelected     = false;
     bool clipboardSelected = false;
+    bool videoSelected     = false;
     {
       CSRWExclusiveLock guard(connection.lock);
       activated = !connection.closing &&
@@ -1909,15 +2028,17 @@ retry:
           connection.clientNonce, sizeof(connection.clientNonce));
         NetworkAuthCrypto::SecureZero(
           connection.serverNonce, sizeof(connection.serverNonce));
-        connection.handshake = HandshakeState::READY;
-        audioSelected         = (connection.selectedServices &
+        connection.handshake         = HandshakeState::READY;
+        audioSelected                = (connection.selectedServices &
           (UINT16_C(1) << LG_NET_SERVICE_AUDIO)) != 0;
         const uint16_t clipboardServices =
           (UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD) |
           (UINT16_C(1) << LG_NET_SERVICE_FILE);
-        clipboardSelected =
+        clipboardSelected            =
           (connection.selectedServices & clipboardServices) ==
             clipboardServices;
+        videoSelected                = (connection.selectedServices &
+          (UINT16_C(1) << LG_NET_SERVICE_VIDEO)) != 0;
       }
     }
     if (!activated)
@@ -1929,6 +2050,8 @@ retry:
       return false;
     if (clipboardSelected &&
         !clipboard.PeerConnected(ClipboardPeer(connection)))
+      return false;
+    if (videoSelected && !video.PeerConnected(VideoPeer(connection)))
       return false;
     DEBUG_INFO("Network client %u completed the control handshake",
       connection.client);
@@ -3421,6 +3544,9 @@ retry:
     const bool         audioSubscribe   =
       packet.envelope.service == LG_NET_SERVICE_AUDIO &&
       packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_SUBSCRIBE;
+    const bool         videoSubscribe   =
+      packet.envelope.service == LG_NET_SERVICE_VIDEO &&
+      packet.envelope.messageType == LG_NET_VIDEO_MESSAGE_SUBSCRIBE;
     const bool         audioResponse    =
       packet.envelope.service == LG_NET_SERVICE_AUDIO &&
       packet.envelope.messageType == LG_NET_AUDIO_MESSAGE_STATE_ACK;
@@ -3429,7 +3555,7 @@ retry:
       packet.envelope.service == LG_NET_SERVICE_FILE;
     LGNetEnvelopeFlags expectedFlags    =
       LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
-    if (audioSubscribe)
+    if (audioSubscribe || videoSubscribe)
       expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
     if (cursorStatus || audioResponse)
       expectedFlags |= LG_NET_ENVELOPE_RESPONSE;
@@ -3544,6 +3670,11 @@ retry:
         return audio.HandlePacket(AudioPeer(connection), packet, false) !=
           NetworkAudioPacketResult::INVALID;
 
+      case LG_NET_SERVICE_VIDEO:
+        return video.HandlePacket(VideoPeer(connection), packet,
+          NetworkVideoDelivery::RELIABLE) !=
+            NetworkVideoPacketResult::INVALID;
+
       case LG_NET_SERVICE_CLIPBOARD:
       case LG_NET_SERVICE_FILE:
         return clipboard.HandlePacket(
@@ -3621,6 +3752,10 @@ retry:
     if (packet.envelope.service == LG_NET_SERVICE_AUDIO)
       return audio.HandlePacket(AudioPeer(connection), packet, true) !=
         NetworkAudioPacketResult::INVALID;
+    if (packet.envelope.service == LG_NET_SERVICE_VIDEO)
+      return video.HandlePacket(VideoPeer(connection), packet,
+        NetworkVideoDelivery::DATAGRAM) !=
+          NetworkVideoPacketResult::INVALID;
     return false;
   }
 
@@ -3994,6 +4129,7 @@ retry:
             static_cast<unsigned>(service));
       session = std::move(connection.session);
     }
+    video.PeerDisconnected(VideoPeer(connection));
     clipboard.PeerDisconnected(ClipboardPeer(connection));
     audio.PeerDisconnected(AudioPeer(connection));
     if (session)
@@ -4156,6 +4292,7 @@ retry:
             ReadyServicesLocked(connection, Delivery::DATAGRAM);
         }
         owner.NotifyAudioSendReady(connection, true);
+        owner.NotifyVideoSendReady(connection, Delivery::DATAGRAM);
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -4170,6 +4307,7 @@ retry:
             ReleaseSendLocked(connection, *send);
           }
           owner.NotifyAudioSendReady(connection, true);
+          owner.NotifyVideoSendReady(connection, Delivery::DATAGRAM);
         }
         return QUIC_STATUS_SUCCESS;
 
@@ -4215,6 +4353,7 @@ retry:
           ReleaseSendLocked(connection, *send);
         }
         owner.NotifyAudioSendReady(connection, false);
+        owner.NotifyVideoSendReady(connection, Delivery::RELIABLE);
         owner.NotifyClipboardSendReady(connection, Delivery::RELIABLE);
         return QUIC_STATUS_SUCCESS;
       }
@@ -4352,7 +4491,10 @@ retry:
             stream.streamID = event->START_COMPLETE.ID;
             stream.bound    = true;
             if (stream.openingReturned)
+            {
               ready = ReadyServicesLocked(connection, Delivery::BULK);
+              connection.bulkSend.writableServices |= ready;
+            }
           }
         }
         if (QUIC_FAILED(status))
@@ -4367,7 +4509,10 @@ retry:
 
         send.release();
         if (ready)
+        {
+          owner.NotifyVideoSendReady(connection, Delivery::BULK);
           owner.NotifyClipboardSendReady(connection, Delivery::BULK);
+        }
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -4385,6 +4530,7 @@ retry:
           CSRWExclusiveLock guard(connection.lock);
           ReleaseSendLocked(connection, *send);
         }
+        owner.NotifyVideoSendReady(connection, Delivery::BULK);
         owner.NotifyClipboardSendReady(connection, Delivery::BULK);
         return QUIC_STATUS_SUCCESS;
       }
@@ -4438,6 +4584,7 @@ retry:
   {
     const uint64_t now = GetTickCount64();
     audio.Process(now);
+    video.Process(now);
     clipboard.Process(now);
     CSRWSharedLock guard(lock);
     if (stopping || !api)
@@ -4666,8 +4813,8 @@ retry:
 
 CNetworkServer::CNetworkServer(CNetworkTransport& transport,
   CNetworkAudio& audio, CNetworkClipboard& clipboard,
-  const NetworkSettings& settings) :
-  m_impl(new Impl(transport, audio, clipboard, settings))
+  CNetworkVideo& video, const NetworkSettings& settings) :
+  m_impl(new Impl(transport, audio, clipboard, video, settings))
 {
 }
 
@@ -4724,4 +4871,22 @@ NetworkClipboardSendResult CNetworkServer::SendClipboard(
     m_impl->SendClipboard(peer, bulk, service, messageType, flags,
       componentEpoch, requestID, payload, payloadLength) :
     NetworkClipboardSendResult::FAILED;
+}
+
+bool CNetworkServer::VideoPeerInfo(
+  const NetworkVideoPeer& peer, NetworkVideoPeerInfo& info)
+{
+  return m_impl && m_impl->VideoPeerInfo(peer, info);
+}
+
+NetworkVideoSendResult CNetworkServer::SendVideo(
+  const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
+  uint16_t messageType, LGNetEnvelopeFlags flags,
+  uint64_t componentEpoch, uint64_t requestID,
+  const void * payload, uint32_t payloadLength)
+{
+  return m_impl ?
+    m_impl->SendVideo(peer, delivery, messageType, flags,
+      componentEpoch, requestID, payload, payloadLength) :
+    NetworkVideoSendResult::FAILED;
 }

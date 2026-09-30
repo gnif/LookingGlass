@@ -22,6 +22,7 @@
 
 #include "transport/network/CNetworkAudio.h"
 #include "transport/network/CNetworkClipboard.h"
+#include "transport/network/CNetworkVideo.h"
 
 #include <memory>
 
@@ -30,7 +31,8 @@ struct NetworkSettings;
 
 class CNetworkServer final :
   public INetworkAudioSender,
-  public INetworkClipboardSender
+  public INetworkClipboardSender,
+  public INetworkVideoSender
 {
 private:
   struct Impl;
@@ -38,7 +40,8 @@ private:
 
 public:
   CNetworkServer(CNetworkTransport& transport, CNetworkAudio& audio,
-    CNetworkClipboard& clipboard, const NetworkSettings& settings);
+    CNetworkClipboard& clipboard, CNetworkVideo& video,
+    const NetworkSettings& settings);
   ~CNetworkServer();
 
   CNetworkServer(const CNetworkServer&) = delete;
@@ -60,6 +63,14 @@ public:
     NetworkClipboardPeerInfo& info) override;
   NetworkClipboardSendResult SendClipboard(
     const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength) override;
+
+  bool VideoPeerInfo(const NetworkVideoPeer& peer,
+    NetworkVideoPeerInfo& info) override;
+  NetworkVideoSendResult SendVideo(
+    const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength) override;

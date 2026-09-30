@@ -15,6 +15,9 @@ set(TRANSPORT_NETWORK_SOURCES
   known_hosts.c
   network.c
   recovery.c
+  video.c
+  video/decoder_egl.c
+  video/pyrowave.c
 )
 
 if(WIN32)
@@ -40,6 +43,7 @@ target_include_directories(transport_Network PRIVATE
 
 target_link_libraries(transport_Network PRIVATE
   lg_common
+  lg_egl_provider
   msquic::msquic
 )
 

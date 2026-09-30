@@ -25,6 +25,7 @@
 #include "transport/network/CNetworkAudio.h"
 #include "transport/network/CNetworkClipboard.h"
 #include "transport/network/CNetworkSession.h"
+#include "transport/network/CNetworkVideo.h"
 #include "transport/network/NetworkSettings.h"
 
 #include <memory>
@@ -32,9 +33,8 @@
 
 class CNetworkServer;
 
-// This provider owns transport-independent lifecycle and session state. It
-// deliberately advertises no frame capabilities and no texture sink until a
-// GPU codec backend is attached; it must not be mistaken for working media.
+// This provider owns the transport-independent lifecycle, media endpoints,
+// and authenticated session state used by the QUIC server.
 class CNetworkTransport final : public ITransport
 {
 private:
@@ -53,6 +53,7 @@ private:
   NetworkSettings                 m_settings;
   CNetworkAudio                   m_audio;
   CNetworkClipboard               m_clipboard;
+  CNetworkVideo                   m_video;
   std::unique_ptr<CNetworkServer> m_server;
 
   mutable CSRWLock  m_lifecycleLock;
@@ -97,6 +98,7 @@ public:
   IClipboardSource * Clipboard() override;
   IControlSink * Control() override;
   IInputSource * Input() override;
+  ITexSink * TexSink() override;
 
   const NetworkSettings& Settings() const { return m_settings; }
   bool ServiceEnabled(LGNetService service) const;

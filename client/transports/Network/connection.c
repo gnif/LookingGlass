@@ -1071,8 +1071,7 @@ static void networkConnectionSetSessionFeatures(NetworkConnection * this)
   if (services & (UINT16_C(1) << LG_NET_SERVICE_CONTROL))
     this->session.features |=
       LG_TRANSPORT_FEATURE_SET_CURSOR_POS |
-      LG_TRANSPORT_FEATURE_WINDOW_SIZE    |
-      LG_TRANSPORT_FEATURE_FRAME_SCHEDULE;
+      LG_TRANSPORT_FEATURE_WINDOW_SIZE;
 }
 
 static bool networkConnectionHandleAuthChallenge(NetworkConnection * this,

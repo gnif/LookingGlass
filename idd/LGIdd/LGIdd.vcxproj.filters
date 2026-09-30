@@ -301,6 +301,9 @@
     <ClInclude Include="transport\network\CNetworkTransport.h">
       <Filter>Transport\Network</Filter>
     </ClInclude>
+    <ClInclude Include="transport\network\CNetworkVideo.h">
+      <Filter>Transport\Network</Filter>
+    </ClInclude>
     <ClInclude Include="transport\network\NetworkAuthCrypto.h">
       <Filter>Transport\Network</Filter>
     </ClInclude>
@@ -496,6 +499,9 @@
       <Filter>Transport\Network</Filter>
     </ClCompile>
     <ClCompile Include="transport\network\CNetworkTransport.cpp">
+      <Filter>Transport\Network</Filter>
+    </ClCompile>
+    <ClCompile Include="transport\network\CNetworkVideo.cpp">
       <Filter>Transport\Network</Filter>
     </ClCompile>
     <ClCompile Include="transport\network\NetworkAuthCrypto.cpp">

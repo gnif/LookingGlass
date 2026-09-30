@@ -77,7 +77,8 @@ bool CNetworkTransport::Initialize()
   try
   {
     m_server.reset(
-      new CNetworkServer(*this, m_audio, m_clipboard, m_settings));
+      new CNetworkServer(
+        *this, m_audio, m_clipboard, m_video, m_settings));
   }
   catch (...)
   {
@@ -97,11 +98,25 @@ bool CNetworkTransport::Initialize()
     m_server.reset();
     return false;
   }
+  if (!m_video.AttachSender(*m_server))
+  {
+    DEBUG_ERROR("Failed to attach the network video sender");
+    m_clipboard.DetachSender();
+    m_audio.DetachSender();
+    m_server.reset();
+    return false;
+  }
+  if ((m_config.services & TRANSPORT_SERVICE_FRAME) && !m_video.Start())
+  {
+    DEBUG_ERROR("Failed to start the network video endpoint");
+    m_video.DetachSender();
+    m_clipboard.DetachSender();
+    m_audio.DetachSender();
+    m_server.reset();
+    return false;
+  }
 
   m_state = State::INITIALIZED;
-  if (m_config.services & TRANSPORT_SERVICE_FRAME)
-    DEBUG_WARN("Network video is unavailable until the GPU codec and "
-      "texture sink are attached");
   return true;
 }
 
@@ -171,6 +186,7 @@ void CNetworkTransport::Stop()
 
   if (server)
     server->Stop();
+  m_video.DetachSender();
   m_clipboard.DetachSender();
   m_audio.DetachSender();
 
@@ -183,6 +199,7 @@ void CNetworkTransport::Stop()
     session->Close();
 
   m_input.Stop();
+  m_video.Stop();
   m_audio.Stop();
   m_clipboard.Stop();
   m_control.SetControlEvents(nullptr, {});
@@ -208,33 +225,42 @@ void CNetworkTransport::RecoveryStatus(const SourceKey& source,
 
 const FrameProfile * CNetworkTransport::Profiles(unsigned& count) const
 {
-  count = 0;
-  return nullptr;
+  if (!(m_config.services & TRANSPORT_SERVICE_FRAME))
+  {
+    count = 0;
+    return nullptr;
+  }
+  return m_video.Profiles(count);
 }
 
 CfgResult CNetworkTransport::Probe(const FrameCfg& cfg) const
 {
-  (void)cfg;
-  return CfgResult::REJECTED;
+  return (m_config.services & TRANSPORT_SERVICE_FRAME) ?
+    m_video.Probe(cfg) : CfgResult::REJECTED;
 }
 
 CfgResult CNetworkTransport::Prepare(const FrameCfg& cfg)
 {
-  (void)cfg;
-  return CfgResult::REJECTED;
+  return (m_config.services & TRANSPORT_SERVICE_FRAME) ?
+    m_video.Prepare(cfg) : CfgResult::REJECTED;
 }
 
 void CNetworkTransport::Commit()
 {
+  if (m_config.services & TRANSPORT_SERVICE_FRAME)
+    m_video.Commit();
 }
 
 void CNetworkTransport::Abort()
 {
+  if (m_config.services & TRANSPORT_SERVICE_FRAME)
+    m_video.Abort();
 }
 
 std::shared_ptr<const FrameCaps> CNetworkTransport::GetFrameCaps() const
 {
-  return std::shared_ptr<const FrameCaps>();
+  return (m_config.services & TRANSPORT_SERVICE_FRAME) ?
+    m_video.GetFrameCaps() : std::shared_ptr<const FrameCaps>();
 }
 
 DirectFrameBufferMemory CNetworkTransport::GetDirectMemory() const
@@ -262,6 +288,11 @@ IControlSink * CNetworkTransport::Control()
 IInputSource * CNetworkTransport::Input()
 {
   return (m_config.services & TRANSPORT_SERVICE_INPUT) ? &m_input : nullptr;
+}
+
+ITexSink * CNetworkTransport::TexSink()
+{
+  return (m_config.services & TRANSPORT_SERVICE_FRAME) ? &m_video : nullptr;
 }
 
 bool CNetworkTransport::ServiceEnabled(LGNetService service) const
