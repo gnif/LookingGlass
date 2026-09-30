@@ -1,13 +1,19 @@
 include(ExternalProject)
 
+# MsQuic's static archive flattener must be able to see this imported target
+# from outside the directory where FindOpenSSL is invoked.
+if(LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY AND NOT TARGET OpenSSL::Crypto)
+  add_library(OpenSSL::Crypto UNKNOWN IMPORTED GLOBAL)
+  set_target_properties(OpenSSL::Crypto PROPERTIES
+    IMPORTED_LINK_INTERFACE_LANGUAGES "C"
+    IMPORTED_LOCATION                 "${LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES     "${LG_MSQUIC_OPENSSL_INCLUDE_DIR}"
+  )
+endif()
+
 function(lg_add_static_msquic)
   if(TARGET msquic::msquic)
     return()
-  endif()
-
-  if(NOT WIN32)
-    message(FATAL_ERROR
-      "The in-tree static MsQuic target is only available on Windows")
   endif()
 
   if(CMAKE_VERSION VERSION_LESS 3.20)
@@ -36,8 +42,8 @@ function(lg_add_static_msquic)
     "-DQUIC_BUILD_TOOLS=OFF"
     "-DQUIC_BUILD_TEST=OFF"
     "-DQUIC_BUILD_PERF=OFF"
-    "-DQUIC_TLS_LIB=schannel"
     "-DQUIC_ENABLE_LOGGING=OFF"
+    "-DQUIC_LINUX_XDP_ENABLED=OFF"
     "-DQUIC_STATIC_LINK_CRT=OFF"
     "-DQUIC_STATIC_LINK_PARTIAL_CRT=OFF"
     "-DQUIC_SOURCE_LINK=OFF"
@@ -51,7 +57,89 @@ function(lg_add_static_msquic)
       "git submodule update --init --recursive")
   endif()
 
-  if(MSVC)
+  if(WIN32)
+    list(APPEND LG_MSQUIC_CMAKE_ARGS
+      "-DQUIC_TLS_LIB=schannel")
+    set(LG_MSQUIC_RELEASE_LIBRARY
+      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib")
+  endif()
+
+  if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(NOT EXISTS "${LG_MSQUIC_SOURCE_DIR}/submodules/quictls/Configure")
+      message(FATAL_ERROR
+        "The MsQuic submodules are not initialized; run "
+        "git submodule update --init --recursive")
+    endif()
+
+    find_package(OpenSSL 3.0 REQUIRED COMPONENTS Crypto)
+    set(THREADS_PREFER_PTHREAD_FLAG ON)
+    find_package(Threads REQUIRED)
+    find_library(LG_MSQUIC_ATOMIC_LIBRARY NAMES atomic libatomic.so.1)
+    find_library(LG_MSQUIC_NUMA_LIBRARY NAMES numa libnuma.so.1)
+
+    set(LG_MSQUIC_DEBUG_LIBRARY
+      "${LG_MSQUIC_BINARY_DIR}/bin/Debug/libmsquic.a")
+    set(LG_MSQUIC_RELEASE_LIBRARY
+      "${LG_MSQUIC_BINARY_DIR}/bin/Release/libmsquic.a")
+    set(LG_MSQUIC_SYSTEM_LIBRARIES
+      OpenSSL::Crypto
+      Threads::Threads
+      ${CMAKE_DL_LIBS}
+    )
+    if(LG_MSQUIC_ATOMIC_LIBRARY)
+      list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+        "${LG_MSQUIC_ATOMIC_LIBRARY}")
+    endif()
+    if(LG_MSQUIC_NUMA_LIBRARY)
+      list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+        "${LG_MSQUIC_NUMA_LIBRARY}")
+    endif()
+
+    list(APPEND LG_MSQUIC_CMAKE_ARGS
+      "-DQUIC_TLS_LIB=quictls"
+      "-DQUIC_USE_SYSTEM_LIBCRYPTO=ON"
+      "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}"
+      "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DOPENSSL_CRYPTO_LIBRARY=${OPENSSL_CRYPTO_LIBRARY}"
+      "-DOPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}"
+      "-DCMAKE_PROJECT_INCLUDE=${PROJECT_TOP}/cmake/MsQuic.cmake"
+      "-DLG_MSQUIC_OPENSSL_CRYPTO_LIBRARY=${OPENSSL_CRYPTO_LIBRARY}"
+      "-DLG_MSQUIC_OPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}"
+    )
+    if(CMAKE_TOOLCHAIN_FILE)
+      if(IS_ABSOLUTE "${CMAKE_TOOLCHAIN_FILE}")
+        set(LG_MSQUIC_TOOLCHAIN_FILE "${CMAKE_TOOLCHAIN_FILE}")
+      elseif(EXISTS "${CMAKE_BINARY_DIR}/${CMAKE_TOOLCHAIN_FILE}")
+        get_filename_component(LG_MSQUIC_TOOLCHAIN_FILE
+          "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_BINARY_DIR}")
+      else()
+        get_filename_component(LG_MSQUIC_TOOLCHAIN_FILE
+          "${CMAKE_TOOLCHAIN_FILE}" ABSOLUTE BASE_DIR "${CMAKE_SOURCE_DIR}")
+      endif()
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_TOOLCHAIN_FILE=${LG_MSQUIC_TOOLCHAIN_FILE}")
+    endif()
+    if(CMAKE_SYSROOT)
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_SYSROOT=${CMAKE_SYSROOT}")
+    endif()
+
+    if(CMAKE_CONFIGURATION_TYPES)
+      set(LG_MSQUIC_BUILD_COMMAND
+        "${CMAKE_COMMAND}" --build <BINARY_DIR>
+        --config $<CONFIG>
+        --target msquic_lib
+        --parallel
+      )
+    else()
+      set(LG_MSQUIC_BUILD_COMMAND
+        "${CMAKE_COMMAND}" --build <BINARY_DIR>
+        --target msquic_lib
+        --parallel
+      )
+    endif()
+  elseif(MSVC)
     set(LG_MSQUIC_DEBUG_LIBRARY
       "${LG_MSQUIC_BINARY_DIR}/bin/Debug/msquic.lib")
     set(LG_MSQUIC_BUILD_CONFIG "$<CONFIG>")
@@ -154,8 +242,8 @@ function(lg_add_static_msquic)
     )
   else()
     message(FATAL_ERROR
-      "Static MsQuic on Windows requires MSVC or the MinGW-w64 "
-      "clang-cl cross-build toolchain")
+      "Static MsQuic requires Linux, MSVC, or the MinGW-w64 clang-cl "
+      "cross-build toolchain")
   endif()
 
   ExternalProject_Add(lg_msquic_build
@@ -167,23 +255,21 @@ function(lg_add_static_msquic)
     CMAKE_ARGS ${LG_MSQUIC_CMAKE_ARGS}
     BUILD_COMMAND ${LG_MSQUIC_BUILD_COMMAND}
     BUILD_BYPRODUCTS
-      "${LG_MSQUIC_BINARY_DIR}/bin/Debug/msquic.lib"
-      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib"
+      "${LG_MSQUIC_DEBUG_LIBRARY}"
+      "${LG_MSQUIC_RELEASE_LIBRARY}"
   )
 
   add_library(lg_msquic STATIC IMPORTED GLOBAL)
   set_target_properties(lg_msquic PROPERTIES
-    IMPORTED_CONFIGURATIONS "Debug;Release;RelWithDebInfo;MinSizeRel"
-    IMPORTED_LOCATION_DEBUG "${LG_MSQUIC_DEBUG_LIBRARY}"
-    IMPORTED_LOCATION_RELEASE
-      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib"
-    IMPORTED_LOCATION_RELWITHDEBINFO
-      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib"
-    IMPORTED_LOCATION_MINSIZEREL
-      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib"
-    INTERFACE_COMPILE_DEFINITIONS QUIC_BUILD_STATIC
-    INTERFACE_INCLUDE_DIRECTORIES "${LG_MSQUIC_SOURCE_DIR}/src/inc"
-    INTERFACE_LINK_LIBRARIES "${LG_MSQUIC_SYSTEM_LIBRARIES}"
+    IMPORTED_CONFIGURATIONS            "Debug;Release;RelWithDebInfo;MinSizeRel"
+    IMPORTED_LOCATION                  "${LG_MSQUIC_RELEASE_LIBRARY}"
+    IMPORTED_LOCATION_DEBUG            "${LG_MSQUIC_DEBUG_LIBRARY}"
+    IMPORTED_LOCATION_RELEASE          "${LG_MSQUIC_RELEASE_LIBRARY}"
+    IMPORTED_LOCATION_RELWITHDEBINFO   "${LG_MSQUIC_RELEASE_LIBRARY}"
+    IMPORTED_LOCATION_MINSIZEREL       "${LG_MSQUIC_RELEASE_LIBRARY}"
+    INTERFACE_COMPILE_DEFINITIONS      QUIC_BUILD_STATIC
+    INTERFACE_INCLUDE_DIRECTORIES      "${LG_MSQUIC_SOURCE_DIR}/src/inc"
+    INTERFACE_LINK_LIBRARIES           "${LG_MSQUIC_SYSTEM_LIBRARIES}"
   )
   add_dependencies(lg_msquic lg_msquic_build)
   add_library(msquic::msquic ALIAS lg_msquic)

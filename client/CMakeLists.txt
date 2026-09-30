@@ -115,13 +115,14 @@ option(ENABLE_SPICE "Build with SPICE transport support"
   ${LG_CLIENT_PLATFORM_LINUX})
 add_feature_info(ENABLE_SPICE ENABLE_SPICE "SPICE transport support.")
 
-option(ENABLE_NETWORK "Build with network transport support" OFF)
+option(ENABLE_NETWORK "Build with network transport support"
+  ${LG_CLIENT_PLATFORM_LINUX})
 add_feature_info(ENABLE_NETWORK ENABLE_NETWORK "QUIC network transport.")
 if(ENABLE_NETWORK AND NOT ENABLE_EGL)
   message(FATAL_ERROR "ENABLE_NETWORK requires ENABLE_EGL")
 endif()
 
-if(ENABLE_NETWORK AND LG_CLIENT_PLATFORM_WINDOWS)
+if(ENABLE_NETWORK)
   include(MsQuic)
   lg_add_static_msquic()
 endif()
