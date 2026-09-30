@@ -216,19 +216,21 @@ typedef enum LG_RendererInteropType
 }
 LG_RendererInteropType;
 
-#define LG_RENDERER_INTEROP_VERSION 1
+#define LG_RENDERER_INTEROP_EGL_TEXTURE_VERSION 2
+#define LG_RENDERER_INTEROP_VERSION             2
 
 typedef struct LG_RendererInterop
 {
-  uint32_t version;
-  uint32_t size;
+  uint32_t               version;
+  uint32_t               size;
   LG_RendererInteropType type;
   struct
   {
     EGLDisplay display;
-    EGLConfig config;
+    EGLConfig  config;
     EGLContext shareContext;
-    bool dmaBufImport;
+    bool       dmaBufImport;
+    bool       sharedTextureImport;
   }
   egl;
 }

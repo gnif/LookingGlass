@@ -366,12 +366,13 @@ static bool egl_getInterop(LG_Renderer * renderer,
       interop->size < sizeof(*interop))
     return false;
 
-  interop->version          = LG_RENDERER_INTEROP_VERSION;
-  interop->type             = LG_RENDERER_INTEROP_EGL;
-  interop->egl.display      = this->display;
-  interop->egl.config       = this->configs;
-  interop->egl.shareContext = this->context;
-  interop->egl.dmaBufImport = this->dmaSupport;
+  interop->version                 = LG_RENDERER_INTEROP_VERSION;
+  interop->type                    = LG_RENDERER_INTEROP_EGL;
+  interop->egl.display             = this->display;
+  interop->egl.config              = this->configs;
+  interop->egl.shareContext        = this->context;
+  interop->egl.dmaBufImport        = this->dmaSupport;
+  interop->egl.sharedTextureImport = true;
   return true;
 }
 

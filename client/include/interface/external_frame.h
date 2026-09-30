@@ -23,13 +23,38 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
 
 typedef enum LG_ExternalFrameType
 {
-  LG_EXTERNAL_FRAME_INVALID = 0,
-  LG_EXTERNAL_FRAME_DMABUF  = 1,
+  LG_EXTERNAL_FRAME_INVALID     = 0,
+  LG_EXTERNAL_FRAME_DMABUF      = 1,
+  LG_EXTERNAL_FRAME_EGL_TEXTURE = 2,
 }
 LG_ExternalFrameType;
+
+#define LG_EXTERNAL_FRAME_EGL_TEXTURE_VERSION 1U
+
+/*
+ * A texture created in a context which shares objects with the renderer's EGL
+ * context. The producer must perform all decode and colour conversion on the
+ * GPU and expose a completed RGB(A) GL_TEXTURE_2D; this interface deliberately
+ * provides no CPU pixel or YUV conversion path.
+ *
+ * readySync is an optional GLsync encoded as an integer-sized handle. The
+ * consumer waits on it before sampling, but does not delete it. Both the
+ * texture and readySync remain owned by the external frame and remain valid
+ * while the consumer holds a reference to that frame.
+ */
+typedef struct LG_ExternalFrameEGLTexture
+{
+  uint32_t  version;
+  uint32_t  size;
+  uint32_t  texture;
+  uint32_t  target;
+  uintptr_t readySync;
+}
+LG_ExternalFrameEGLTexture;
 
 typedef struct LG_ExternalFrame LG_ExternalFrame;
 
@@ -41,7 +66,8 @@ typedef struct LG_ExternalFrame LG_ExternalFrame;
  * never close or otherwise release a queried resource.
  *
  * LG_EXTERNAL_FRAME_DMABUF queries return one native file descriptor in an
- * int-sized result buffer.
+ * int-sized result buffer. LG_EXTERNAL_FRAME_EGL_TEXTURE queries return an
+ * LG_ExternalFrameEGLTexture.
  */
 typedef struct LG_ExternalFrameOps
 {

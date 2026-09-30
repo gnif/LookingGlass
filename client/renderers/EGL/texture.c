@@ -36,6 +36,7 @@
 extern const EGL_TextureOps EGL_TextureBuffer;
 extern const EGL_TextureOps EGL_TextureBufferStream;
 extern const EGL_TextureOps EGL_TextureFrameBuffer;
+extern const EGL_TextureOps EGL_TextureExternal;
 
 bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
     EGL_TexType type)
@@ -59,6 +60,10 @@ bool egl_textureInit(EGL_Texture ** texture_, EGLDisplay * display,
 
     case EGL_TEXTYPE_DMABUF:
       ops = &EGL_TextureDMABUF;
+      break;
+
+    case EGL_TEXTYPE_EXTERNAL:
+      ops = &EGL_TextureExternal;
       break;
 
     default:
@@ -212,10 +217,40 @@ bool egl_textureUpdateFromDMA(EGL_Texture * this,
   return this->ops.update(this, &update);
 }
 
+bool egl_textureUpdateFromExternal(EGL_Texture * this,
+    LG_RendererFrameToken frameToken, LG_ExternalFrame * externalFrame,
+    LG_FrameReleaseFn releaseFn, void * releaseOpaque,
+    uint64_t releaseHandle)
+{
+  const struct EGL_TexUpdate update =
+  {
+    .type          = EGL_TEXTYPE_EXTERNAL,
+    .frameToken    = frameToken,
+    .externalFrame = externalFrame,
+    .releaseFn     = releaseFn,
+    .releaseOpaque = releaseOpaque,
+    .releaseHandle = releaseHandle,
+    .x             = 0,
+    .y             = 0,
+    .width         = this->format.width,
+    .height        = this->format.height,
+    .pitch         = this->format.pitch,
+    .stride        = this->format.stride,
+  };
+
+  return this->ops.update(this, &update);
+}
+
 void egl_textureReset(EGL_Texture * this)
 {
   if (this->ops.reset)
     this->ops.reset(this);
+}
+
+void egl_textureDeactivate(EGL_Texture * this)
+{
+  if (this->ops.deactivate)
+    this->ops.deactivate(this);
 }
 
 void egl_texturePoll(EGL_Texture * this)

@@ -73,6 +73,7 @@ struct EGL_Desktop
   EGLDisplay * display;
 
   EGL_Texture          * texture;
+  EGL_Texture          * externalTexture;
   struct DesktopShader   shader;
   EGL_DesktopRects     * mesh;
   GLfloat                matrix[6];
@@ -97,7 +98,7 @@ struct EGL_Desktop
   // colorblind mode
   int cbMode;
 
-  bool useDMA;
+  bool              useDMA;
   LG_RendererFormat format;
 
   // map HDR content to SDR
@@ -109,6 +110,7 @@ struct EGL_Desktop
 
   EGL_PostProcess * pp;
   _Atomic(bool) processFrame;
+  _Atomic(bool) externalActive;
 };
 
 // forwards
@@ -176,6 +178,13 @@ bool egl_desktopInit(EGL * egl, EGL_Desktop ** desktop_, EGLDisplay * display,
         useDMA ? EGL_TEXTYPE_DMABUF : EGL_TEXTYPE_FRAMEBUFFER))
   {
     DEBUG_ERROR("Failed to initialize the desktop texture");
+    return false;
+  }
+
+  if (!egl_textureInit(
+        &desktop->externalTexture, display, EGL_TEXTYPE_EXTERNAL))
+  {
+    DEBUG_ERROR("Failed to initialize the external desktop texture");
     return false;
   }
 
@@ -252,6 +261,7 @@ void egl_desktopFree(EGL_Desktop ** desktop)
     return;
 
   egl_textureFree    (&(*desktop)->texture         );
+  egl_textureFree    (&(*desktop)->externalTexture );
   egl_textureFree    (&(*desktop)->swSurfaceTexture);
   egl_shaderFree     (&(*desktop)->shader   .shader);
   egl_desktopRectsFree(&(*desktop)->mesh           );
@@ -377,6 +387,19 @@ bool egl_desktopSetup(EGL_Desktop * desktop, const LG_RendererFormat format)
     return false;
   }
 
+  if (!egl_textureSetup(
+    desktop->externalTexture,
+    pixFmt,
+    desktop->format.dataWidth,
+    desktop->format.dataHeight,
+    desktop->format.stride,
+    desktop->format.pitch
+  ))
+  {
+    DEBUG_ERROR("Failed to setup the external desktop texture");
+    return false;
+  }
+
   return true;
 }
 
@@ -387,6 +410,21 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
     uint64_t * waitTimeNs, LG_FrameReleaseFn releaseFn,
     void * releaseOpaque, uint64_t releaseHandle)
 {
+  const LG_ExternalFrameType externalType =
+    lgExternalFrameType(externalFrame);
+
+  if (externalType == LG_EXTERNAL_FRAME_EGL_TEXTURE)
+  {
+    if (!egl_textureUpdateFromExternal(desktop->externalTexture, frameToken,
+          externalFrame, releaseFn, releaseOpaque, releaseHandle))
+      return false;
+
+    lgExternalFrameRelease(externalFrame);
+    atomic_store(&desktop->externalActive, true);
+    atomic_store(&desktop->processFrame, true);
+    return true;
+  }
+
   /*
    * Both the DMA and staged upload paths need a complete frame. Do this
    * before selecting either path so a producer that is still filling an
@@ -402,13 +440,16 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
     return true;
   }
 
-  if (likely(desktop->useDMA && externalFrame))
+  if (likely(desktop->useDMA &&
+        externalType == LG_EXTERNAL_FRAME_DMABUF))
   {
     if (likely(egl_textureUpdateFromDMA(
             desktop->texture, frame, frameToken, externalFrame, waitTimeNs,
             releaseFn, releaseOpaque, releaseHandle)))
     {
       lgExternalFrameRelease(externalFrame);
+      atomic_store(&desktop->externalActive, false);
+      egl_textureDeactivate(desktop->externalTexture);
       atomic_store(&desktop->processFrame, true);
       return true;
     }
@@ -447,6 +488,8 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
     lgExternalFrameRelease(externalFrame);
     if (releaseFn)
       releaseFn(releaseOpaque, releaseHandle);
+    atomic_store(&desktop->externalActive, false);
+    egl_textureDeactivate(desktop->externalTexture);
     return true;
   }
 
@@ -456,12 +499,15 @@ bool egl_desktopUpdate(EGL_Desktop * desktop,
 void egl_desktopRestart(EGL_Desktop * desktop)
 {
   egl_textureReset(desktop->texture);
+  egl_textureReset(desktop->externalTexture);
   atomic_store(&desktop->processFrame, false);
+  atomic_store(&desktop->externalActive, false);
 }
 
 void egl_desktopPoll(EGL_Desktop * desktop)
 {
   egl_texturePoll(desktop->texture);
+  egl_texturePoll(desktop->externalTexture);
 }
 
 void egl_desktopResize(EGL_Desktop * desktop, int width, int height)
@@ -485,6 +531,7 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   /* This also retires completed snapshots while the software surface is
    * shown. */
   egl_texturePoll(desktop->texture);
+  egl_texturePoll(desktop->externalTexture);
 
   if (unlikely(desktop->useSwSurface))
   {
@@ -494,7 +541,8 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   }
   else
   {
-    tex    = desktop->texture;
+    tex    = atomic_load(&desktop->externalActive) ?
+      desktop->externalTexture : desktop->texture;
     width  = desktop->width;
     height = desktop->height;
   }
@@ -592,8 +640,9 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
   {
     if (bindStatus != EGL_TEX_STATUS_NOTREADY)
       DEBUG_ERROR("Failed to bind the desktop texture");
-    if (!desktop->useSwSurface && desktop->useDMA && processFrame)
-      egl_textureMarkUsed(desktop->texture);
+    if (!desktop->useSwSurface &&
+        (tex == desktop->externalTexture || desktop->useDMA) && processFrame)
+      egl_textureMarkUsed(tex);
     return false;
   }
   *renderedFrameToken = tex->frameToken;
@@ -646,9 +695,10 @@ bool egl_desktopRender(EGL_Desktop * desktop, unsigned int outputWidth,
       desktop->linearComposition);
   egl_shaderUse(shader->shader);
   egl_desktopRectsRender(desktop->mesh);
-  if (!desktop->useSwSurface && desktop->useDMA &&
+  if (!desktop->useSwSurface &&
+      (tex == desktop->externalTexture || desktop->useDMA) &&
       (processFrame || texture == tex))
-    egl_textureMarkUsed(desktop->texture);
+    egl_textureMarkUsed(tex);
   return true;
 }
 

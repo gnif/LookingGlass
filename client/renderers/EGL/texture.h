@@ -107,6 +107,9 @@ typedef struct EGL_TextureOps
   /* release queued updates and reset stream state */
   void (*reset)(EGL_Texture * texture);
 
+  /* retire the selected frame when another texture source takes over */
+  void (*deactivate)(EGL_Texture * texture);
+
   /* poll asynchronous work without changing the selected frame */
   void (*poll)(EGL_Texture * texture);
 
@@ -153,7 +156,13 @@ bool egl_textureUpdateFromDMA(EGL_Texture * texture,
     LG_FrameReleaseFn releaseFn, void * releaseOpaque,
     uint64_t releaseHandle);
 
+bool egl_textureUpdateFromExternal(EGL_Texture * texture,
+    LG_RendererFrameToken frameToken, LG_ExternalFrame * externalFrame,
+    LG_FrameReleaseFn releaseFn, void * releaseOpaque,
+    uint64_t releaseHandle);
+
 void egl_textureReset(EGL_Texture * texture);
+void egl_textureDeactivate(EGL_Texture * texture);
 void egl_texturePoll(EGL_Texture * texture);
 void egl_textureMarkUsed(EGL_Texture * texture);
 

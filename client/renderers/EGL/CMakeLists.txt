@@ -73,6 +73,7 @@ set(RENDERER_EGL_SOURCES
   texture_util.c
   texture.c
   texture_buffer.c
+  texture_external.c
   texture_framebuffer.c
   model.c
   desktop.c
