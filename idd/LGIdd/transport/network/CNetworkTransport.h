@@ -28,6 +28,8 @@
 #include <memory>
 #include <vector>
 
+class CNetworkServer;
+
 // This provider owns transport-independent lifecycle and session state. It
 // deliberately advertises no frame capabilities and no texture sink until a
 // GPU codec backend is attached; it must not be mistaken for working media.
@@ -45,8 +47,9 @@ private:
     STOPPED,
   };
 
-  TransportInstance m_config;
-  NetworkSettings   m_settings;
+  TransportInstance               m_config;
+  NetworkSettings                 m_settings;
+  std::unique_ptr<CNetworkServer> m_server;
 
   mutable CSRWLock  m_lifecycleLock;
   State             m_state     = State::CONSTRUCTED;

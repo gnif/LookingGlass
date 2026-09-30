@@ -20,6 +20,8 @@
 
 #include "transport/network/CNetworkTransport.h"
 
+#include "transport/network/CNetworkServer.h"
+
 #include "CDebug.h"
 
 #include <new>
@@ -72,6 +74,16 @@ bool CNetworkTransport::Initialize()
   if (m_state != State::OPEN)
     return false;
 
+  try
+  {
+    m_server.reset(new CNetworkServer(*this, m_settings));
+  }
+  catch (...)
+  {
+    DEBUG_ERROR("Failed to allocate the network server");
+    return false;
+  }
+
   m_state = State::INITIALIZED;
   if (m_config.services & TRANSPORT_SERVICE_FRAME)
     DEBUG_WARN("Network video is unavailable until the GPU codec and "
@@ -81,15 +93,29 @@ bool CNetworkTransport::Initialize()
 
 bool CNetworkTransport::Setup(size_t alignment)
 {
+  CNetworkServer * server;
+  {
+    CSRWExclusiveLock lock(m_lifecycleLock);
+    if (m_state == State::READY)
+      return m_alignment == alignment;
+    if (m_state != State::INITIALIZED)
+      return false;
+
+    m_alignment = alignment;
+    m_state     = State::READY;
+    server      = m_server.get();
+  }
+
+  if (server && server->Start())
+    return true;
+
   CSRWExclusiveLock lock(m_lifecycleLock);
   if (m_state == State::READY)
-    return m_alignment == alignment;
-  if (m_state != State::INITIALIZED)
-    return false;
-
-  m_alignment = alignment;
-  m_state     = State::READY;
-  return true;
+  {
+    m_alignment = 0;
+    m_state     = State::INITIALIZED;
+  }
+  return false;
 }
 
 ITransport::ProcessResult CNetworkTransport::Process(
@@ -115,12 +141,17 @@ ITransport::ProcessResult CNetworkTransport::Process(
 
 void CNetworkTransport::Stop()
 {
+  CNetworkServer * server;
   {
     CSRWExclusiveLock lock(m_lifecycleLock);
     if (m_state == State::STOPPED)
       return;
     m_state = State::STOPPED;
+    server  = m_server.get();
   }
+
+  if (server)
+    server->Stop();
 
   std::vector<SessionPtr> sessions;
   {
