@@ -19,3 +19,6 @@
 [submodule "repos/LGProtocol"]
 	path = repos/LGProtocol
 	url = https://github.com/gnif/LGProtocol.git
+[submodule "repos/MsQuic"]
+	path = repos/MsQuic
+	url = https://github.com/microsoft/msquic.git

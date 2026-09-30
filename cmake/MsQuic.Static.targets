@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <LGMsQuicSourceDir>$([MSBuild]::NormalizeDirectory('$(MSBuildThisFileDirectory)..\repos\MsQuic'))</LGMsQuicSourceDir>
+    <LGMsQuicBuildDir>$([MSBuild]::NormalizeDirectory('$(MSBuildProjectDirectory)\$(IntDir)MsQuic'))</LGMsQuicBuildDir>
+    <LGMsQuicArchitecture Condition="'$(Platform)'=='Win32'">Win32</LGMsQuicArchitecture>
+    <LGMsQuicArchitecture Condition="'$(Platform)'=='x64'">x64</LGMsQuicArchitecture>
+    <LGMsQuicLibrary>$(LGMsQuicBuildDir)bin\$(LGBaseConfiguration)\msquic.lib</LGMsQuicLibrary>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(LGMsQuicSourceDir)src\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>QUIC_BUILD_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <AdditionalDependencies>$(LGMsQuicLibrary);ws2_32.lib;schannel.lib;secur32.lib;OneCore.lib;wbemuuid.lib;winmm.lib;ntdll.lib;bcrypt.lib;ncrypt.lib;crypt32.lib;iphlpapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <Target
+    Name="ConfigureLGMsQuic"
+    BeforeTargets="ClCompile"
+    Inputs="$(LGMsQuicSourceDir)CMakeLists.txt;$(MSBuildThisFileFullPath)"
+    Outputs="$(LGMsQuicBuildDir)CMakeCache.txt">
+    <Error
+      Condition="!Exists('$(LGMsQuicSourceDir)CMakeLists.txt')"
+      Text="The MsQuic submodule is not initialized. Run git submodule update --init --recursive." />
+    <Error
+      Condition="'$(LGMsQuicArchitecture)'==''"
+      Text="Static MsQuic does not support the $(Platform) platform in this project." />
+    <MakeDir Directories="$(LGMsQuicBuildDir)" />
+    <Exec
+      Command="cmake -S &quot;$(LGMsQuicSourceDir)&quot; -B &quot;$(LGMsQuicBuildDir)&quot; -G &quot;Visual Studio 17 2022&quot; -A &quot;$(LGMsQuicArchitecture)&quot; -T v143 -DCMAKE_SYSTEM_VERSION=&quot;$(WindowsTargetPlatformVersion)&quot; -DQUIC_BUILD_SHARED=OFF -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF -DQUIC_BUILD_PERF=OFF -DQUIC_TLS_LIB=schannel -DQUIC_ENABLE_LOGGING=OFF -DQUIC_STATIC_LINK_CRT=OFF -DQUIC_STATIC_LINK_PARTIAL_CRT=OFF -DQUIC_SOURCE_LINK=OFF -DQUIC_PDBALTPATH=OFF -DQUIC_EMBED_GIT_HASH=OFF" />
+  </Target>
+  <Target
+    Name="BuildLGMsQuic"
+    BeforeTargets="Link"
+    DependsOnTargets="ConfigureLGMsQuic">
+    <Exec
+      Command="cmake --build &quot;$(LGMsQuicBuildDir)&quot; --config &quot;$(LGBaseConfiguration)&quot; --target msquic_lib --parallel" />
+    <Error
+      Condition="!Exists('$(LGMsQuicLibrary)')"
+      Text="The static MsQuic build did not produce $(LGMsQuicLibrary)." />
+  </Target>
+</Project>

@@ -418,6 +418,7 @@
       Text="The deployment package is missing one or more signed LGInput files." />
     <Copy SourceFiles="$(PackageDir)LGInput\LGInput.inf;$(PackageDir)LGInput\LGInput.dll;$(PackageDir)LGInput\LGInput.cat" DestinationFolder="$(PackageDir)" />
   </Target>
+  <Import Project="..\..\cmake\MsQuic.Static.targets" />
   <ImportGroup Label="ExtensionTargets" />
   <Target Name="EnsureNuGetPackageBuildImports" BeforeTargets="PrepareForBuild">
     <PropertyGroup>
