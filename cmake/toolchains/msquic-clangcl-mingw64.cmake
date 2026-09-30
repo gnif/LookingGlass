@@ -111,6 +111,7 @@ list(APPEND MSQUIC_CLANG_CL_OPTIONS
   "/clang:-Wno-int-conversion"
   "/clang:-Wno-unused-function"
   "/clang:-Wno-incompatible-pointer-types"
+  "/clang:-Wno-duplicate-decl-specifier"
   "/FI${MSQUIC_COMPAT_HEADER}")
 list(JOIN MSQUIC_CLANG_CL_OPTIONS " " MSQUIC_CLANG_CL_FLAGS)
 

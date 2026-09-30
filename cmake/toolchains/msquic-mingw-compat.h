@@ -22,7 +22,7 @@
 #define _H_LG_MSQUIC_MINGW_COMPAT_
 
 #ifndef FORCEINLINE
-#define FORCEINLINE __inline__ __attribute__((__always_inline__))
+#define FORCEINLINE __forceinline
 #endif
 
 #ifndef EXTERN_C_START
@@ -42,6 +42,10 @@
 #include <mstcpip.h>
 
 #include <string.h>
+
+#ifndef __cplusplus
+#define inline static __inline__
+#endif
 
 #undef UNREFERENCED_PARAMETER
 #define UNREFERENCED_PARAMETER(parameter) ((void)(parameter))

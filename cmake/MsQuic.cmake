@@ -82,6 +82,9 @@ function(lg_add_static_msquic)
     find_program(LG_MSQUIC_WINDRES
       NAMES "${MINGW64_TRIPLE}-windres" x86_64-w64-mingw32-windres
       REQUIRED)
+    find_program(LG_MSQUIC_DLLTOOL
+      NAMES "${MINGW64_TRIPLE}-dlltool" x86_64-w64-mingw32-dlltool
+      REQUIRED)
 
     # MsQuic's Windows sources use the CL command-line ABI and its monolithic
     # archive rule uses lib.exe syntax. Compile those sources with clang-cl,
@@ -89,6 +92,29 @@ function(lg_add_static_msquic)
     # surrounding client build.
     set(LG_MSQUIC_IMPORT_DIR "${LG_MSQUIC_BINARY_DIR}/mingw-imports")
     file(MAKE_DIRECTORY "${LG_MSQUIC_IMPORT_DIR}")
+
+    set(LG_MSQUIC_SECUR32EX_DEF
+      "${LG_MSQUIC_IMPORT_DIR}/secur32ex.def")
+    set(LG_MSQUIC_SECUR32EX_LIBRARY
+      "${LG_MSQUIC_IMPORT_DIR}/secur32ex.lib")
+    file(WRITE "${LG_MSQUIC_SECUR32EX_DEF}"
+      "LIBRARY secur32.dll\n"
+      "EXPORTS\n"
+      "  QueryContextAttributesExW\n")
+    execute_process(
+      COMMAND "${LG_MSQUIC_DLLTOOL}"
+        --input-def "${LG_MSQUIC_SECUR32EX_DEF}"
+        --output-lib "${LG_MSQUIC_SECUR32EX_LIBRARY}"
+      RESULT_VARIABLE LG_MSQUIC_DLLTOOL_RESULT
+      ERROR_VARIABLE  LG_MSQUIC_DLLTOOL_ERROR)
+    if(NOT LG_MSQUIC_DLLTOOL_RESULT EQUAL 0)
+      message(FATAL_ERROR
+        "Unable to create the extended Secur32 import library: "
+        "${LG_MSQUIC_DLLTOOL_ERROR}")
+    endif()
+
+    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+      "${LG_MSQUIC_SECUR32EX_LIBRARY}")
 
     foreach(LG_MSQUIC_SYSTEM_LIBRARY
         onecore
