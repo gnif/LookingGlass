@@ -30,7 +30,7 @@ static constexpr uint16_t NETWORK_MAX_CLIENTS         = 32;
 
 struct NetworkSettings
 {
-  std::wstring  bindAddress = L"::";
+  std::wstring  bindAddress = L"*";
   uint16_t      port        = static_cast<uint16_t>(LG_NET_DEFAULT_PORT);
   uint16_t      maxClients  = NETWORK_DEFAULT_MAX_CLIENTS;
   LGNetAuthMode auth        = LG_NET_AUTH_MODE_DEFAULT;
