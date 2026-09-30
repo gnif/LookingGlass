@@ -1609,8 +1609,21 @@ struct CNetworkVideo::Impl
 
   void DropPeerFramesNL(PeerState& peer)
   {
+    // Finish a frame once any of its fragments have been accepted. Replacing
+    // it mid-flight prevents a continuously changing desktop from ever
+    // delivering a complete frame on a constrained link.
+    uint64_t activeFrame = 0;
+    for (const SendItem& item : m_sends)
+      if (item.frameID && item.encoded && item.fragmentIndex &&
+          SamePeer(item.peer, peer.peer))
+      {
+        activeFrame = item.frameID;
+        break;
+      }
+
     for (auto item = m_sends.begin(); item != m_sends.end();)
-      if (item->frameID && SamePeer(item->peer, peer.peer))
+      if (item->frameID && item->frameID != activeFrame &&
+          SamePeer(item->peer, peer.peer))
       {
         ReleaseSendAccountingNL(*item);
         item = m_sends.erase(item);
