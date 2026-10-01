@@ -29,12 +29,13 @@ namespace
 {
   enum Field : unsigned
   {
-    FIELD_BIND         = 1U << 0,
-    FIELD_PORT         = 1U << 1,
-    FIELD_MAX_CLIENTS  = 1U << 2,
-    FIELD_AUTH         = 1U << 3,
-    FIELD_PASSWORD     = 1U << 4,
-    FIELD_VIDEO_CHROMA = 1U << 5,
+    FIELD_BIND          = 1U << 0,
+    FIELD_PORT          = 1U << 1,
+    FIELD_MAX_CLIENTS   = 1U << 2,
+    FIELD_AUTH          = 1U << 3,
+    FIELD_PASSWORD      = 1U << 4,
+    FIELD_VIDEO_CHROMA  = 1U << 5,
+    FIELD_VIDEO_BITRATE = 1U << 6,
   };
 
   std::wstring Trim(const std::wstring& value)
@@ -151,6 +152,14 @@ namespace
             LG_NET_VIDEO_CHROMA_444);
       else
         return Fail(error, L"invalid video chroma subsampling");
+    }
+    else if (Equal(key, L"videoBitrateMbps"))
+    {
+      field = FIELD_VIDEO_BITRATE;
+      unsigned long parsed = 0;
+      if (!ParseUnsigned(value, NETWORK_MAX_VIDEO_BITRATE_MBPS, parsed))
+        return Fail(error, L"invalid video bitrate");
+      settings.videoBitrateMbps = static_cast<uint32_t>(parsed);
     }
     else
       return Fail(error, L"unknown setting");

@@ -96,7 +96,8 @@ public:
   bool AttachSender(INetworkVideoSender& sender);
   void DetachSender();
 
-  bool Start(LGNetVideoChromaSubsampling videoChroma);
+  bool Start(uint32_t videoBitrateMbps,
+    LGNetVideoChromaSubsampling videoChroma);
   void Stop();
   void Process(uint64_t nowMs);
 

@@ -58,11 +58,12 @@ ITransport::OpenResult CNetworkTransport::Open()
   m_settings = std::move(settings);
   m_state    = State::OPEN;
   DEBUG_INFO("Network transport configured on [%ls]:%u for up to %u "
-    "clients (%ls authentication, %ls video)",
+    "clients (%ls authentication, %u Mbit/s, %ls video)",
     m_settings.bindAddress.c_str(),
     static_cast<unsigned>(m_settings.port),
     static_cast<unsigned>(m_settings.maxClients),
     m_settings.auth == LG_NET_AUTH_PASSWORD ? L"password" : L"none",
+    static_cast<unsigned>(m_settings.videoBitrateMbps),
     m_settings.videoChroma ==
       static_cast<LGNetVideoChromaSubsampling>(LG_NET_VIDEO_CHROMA_420) ?
         L"4:2:0" : L"4:4:4");
@@ -110,7 +111,8 @@ bool CNetworkTransport::Initialize()
     return false;
   }
   if ((m_config.services & TRANSPORT_SERVICE_FRAME) &&
-      !m_video.Start(m_settings.videoChroma))
+      !m_video.Start(
+        m_settings.videoBitrateMbps, m_settings.videoChroma))
   {
     DEBUG_ERROR("Failed to start the network video endpoint");
     m_video.DetachSender();
