@@ -22,19 +22,247 @@
 
 #include <new>
 
+namespace
+{
+  bool SameFormat(const AudioFormat& left, const AudioFormat& right)
+  {
+    return
+      left.sampleFormat  == right.sampleFormat  &&
+      left.sampleRate    == right.sampleRate    &&
+      left.channelMask   == right.channelMask   &&
+      left.channels      == right.channels      &&
+      left.containerBits == right.containerBits &&
+      left.validBits     == right.validBits     &&
+      left.blockAlign    == right.blockAlign;
+  }
+
+  bool SameStream(const AudioStreamStatus& left,
+    const AudioStreamStatus& right)
+  {
+    return
+      left.generation  == right.generation  &&
+      left.state       == right.state       &&
+      left.formatValid == right.formatValid &&
+      (!left.formatValid || SameFormat(left.format, right.format));
+  }
+}
+
+void CAudioHub::CTarget::Attach(CAudioHub& owner, unsigned binding)
+{
+  m_owner   = &owner;
+  m_binding = binding;
+}
+
+AudioResult CAudioHub::CTarget::SetAudioActive(bool active)
+{
+  return m_owner ? m_owner->TargetSetAudioActive(m_binding, active) :
+    AudioResult::UNAVAILABLE;
+}
+
+AudioResult CAudioHub::CTarget::SendCapture(const AudioPacket& packet,
+  const uint8_t * data, size_t size)
+{
+  return m_owner ?
+    m_owner->TargetSendCapture(m_binding, packet, data, size) :
+    AudioResult::UNAVAILABLE;
+}
+
+AudioResult CAudioHub::CTarget::SetClockFeedback(
+  const AudioClockFeedback& feedback)
+{
+  return m_owner ?
+    m_owner->TargetSetClockFeedback(m_binding, feedback) :
+    AudioResult::UNAVAILABLE;
+}
+
+void CAudioHub::CTarget::PlaybackReceiveReady()
+{
+  if (m_owner)
+    m_owner->TargetPlaybackReceiveReady(m_binding);
+}
+
+void CAudioHub::CTarget::AudioFailed()
+{
+  if (m_owner)
+    m_owner->TargetAudioFailed(m_binding);
+}
+
 CAudioHub::CAudioHub() :
   m_device(new (std::nothrow) CLGAudioDevice())
 {
+  for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+    m_bindings[i].target.Attach(*this, i);
 }
 
 CAudioHub::CAudioHub(std::unique_ptr<ILGAudioDevice> device) :
   m_device(std::move(device))
 {
+  for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+    m_bindings[i].target.Attach(*this, i);
 }
 
 CAudioHub::~CAudioHub()
 {
   Stop();
+}
+
+bool CAudioHub::BindingLiveNL(unsigned binding) const
+{
+  if (binding >= TRANSPORT_MAX_INSTANCES)
+    return false;
+  const Binding& target = m_bindings[binding];
+  return target.occupied && target.running && !target.failed &&
+    target.source != nullptr;
+}
+
+bool CAudioHub::AnyActiveNL() const
+{
+  for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+    if (BindingLiveNL(i) && m_bindings[i].activeRequested)
+      return true;
+  return false;
+}
+
+void CAudioHub::ClearAuthoritiesNL(unsigned binding)
+{
+  if (m_captureAuthority == binding)
+  {
+    m_captureAuthority          = NO_BINDING;
+    m_captureEndpointGeneration = 0;
+    m_captureStreamGeneration   = 0;
+  }
+  if (m_clockAuthority == binding)
+  {
+    m_clockAuthority          = NO_BINDING;
+    m_clockEndpointGeneration = 0;
+    m_clockStreamGeneration   = 0;
+  }
+}
+
+void CAudioHub::RequestPlaybackWakeNL()
+{
+  if (!m_stopped && m_deviceStarted)
+    m_playbackWakePending = true;
+}
+
+void CAudioHub::RetirePlaybackNL(unsigned binding)
+{
+  if (binding >= TRANSPORT_MAX_INSTANCES)
+    return;
+
+  Binding& target = m_bindings[binding];
+  if (m_playbackActive &&
+      (target.playback == PlaybackState::READY ||
+       target.playback == PlaybackState::BUSY))
+    RequestPlaybackWakeNL();
+  if (target.playback != PlaybackState::IDLE)
+    target.playback = PlaybackState::DONE;
+  target.playbackReadyEarly = false;
+}
+
+void CAudioHub::DeactivateBindingNL(unsigned binding)
+{
+  if (binding >= TRANSPORT_MAX_INSTANCES)
+    return;
+
+  ClearAuthoritiesNL(binding);
+  m_bindings[binding].captureReceivePending = false;
+  RetirePlaybackNL(binding);
+}
+
+void CAudioHub::FlushPlaybackWake()
+{
+  for (;;)
+  {
+    // PlaybackReceiveReady may synchronously enter LGAudioPlayback. Defer it
+    // until neither source callbacks nor target operations are serialized.
+    CSRWExclusiveLock operationLock =
+      CSRWExclusiveLock::Try(m_operationLock);
+    if (!operationLock)
+      return;
+    CSRWExclusiveLock callbackLock =
+      CSRWExclusiveLock::Try(m_callbackLock);
+    if (!callbackLock)
+      return;
+
+    bool wake = false;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_playbackWakeDispatching)
+        return;
+      if (m_playbackWakePending && !m_stopped && m_deviceStarted)
+      {
+        m_playbackWakeDispatching = true;
+        m_playbackWakePending     = false;
+        wake                      = true;
+      }
+      else if (m_stopped || !m_deviceStarted)
+        m_playbackWakePending = false;
+    }
+    callbackLock.Unlock();
+    operationLock.Unlock();
+    if (!wake)
+      return;
+
+    m_device->PlaybackReceiveReady();
+    {
+      CSRWExclusiveLock lock(m_lock);
+      m_playbackWakeDispatching = false;
+    }
+  }
+}
+
+void CAudioHub::ResetPlaybackNL()
+{
+  m_playbackActive      = false;
+  m_playbackAccepted    = false;
+  m_playbackFailed      = false;
+  m_playbackWakePending = false;
+  for (Binding& binding : m_bindings)
+  {
+    binding.playback           = PlaybackState::IDLE;
+    binding.playbackReadyEarly = false;
+  }
+}
+
+bool CAudioHub::MarkFailedNL(unsigned binding, bool& deactivate)
+{
+  deactivate = false;
+  if (binding >= TRANSPORT_MAX_INSTANCES)
+    return false;
+
+  Binding& target = m_bindings[binding];
+  if (!target.occupied || !target.source ||
+      (!target.running && !target.reserved))
+    return false;
+
+  const bool wasActive = AnyActiveNL();
+  const bool changed   = !target.failed;
+  target.failed                = true;
+  target.failurePending        = true;
+  target.activeRequested       = false;
+  DeactivateBindingNL(binding);
+  deactivate = wasActive && !AnyActiveNL();
+  return changed;
+}
+
+bool CAudioHub::MarkFailed(unsigned binding)
+{
+  bool changed       = false;
+  bool deactivate    = false;
+  bool deviceStarted = false;
+  {
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      changed       = MarkFailedNL(binding, deactivate);
+      deviceStarted = m_deviceStarted;
+    }
+    if (deactivate && deviceStarted)
+      (void)m_device->SetActive(false);
+  }
+  FlushPlaybackWake();
+  return changed;
 }
 
 bool CAudioHub::StartDevice()
@@ -50,14 +278,22 @@ bool CAudioHub::StartDevice()
   if (!m_device->Start(*this))
     return false;
 
+  CSRWExclusiveLock callbackLock(m_callbackLock);
+  const LGAudioDeviceSnapshot snapshot = m_device->Snapshot();
   CSRWExclusiveLock lock(m_lock);
   if (m_stopped)
   {
     lock.Unlock();
+    callbackLock.Unlock();
     m_device->Stop();
     return false;
   }
   m_deviceStarted = true;
+  m_state         = snapshot.status;
+  m_stateKnown    = true;
+  lock.Unlock();
+  callbackLock.Unlock();
+  FlushPlaybackWake();
   return true;
 }
 
@@ -67,17 +303,6 @@ bool CAudioHub::Start()
   return StartDevice();
 }
 
-bool CAudioHub::MarkFailed(IAudioSource * source)
-{
-  CSRWExclusiveLock lock(m_lock);
-  if (!source || m_source != source || (!m_active && !m_reserved))
-    return false;
-  const bool changed = !m_failed;
-  m_failed         = true;
-  m_failurePending = true;
-  return changed;
-}
-
 bool CAudioHub::Bind(
   BackendId backend, uint32_t epoch, IAudioSource& source)
 {
@@ -85,302 +310,639 @@ bool CAudioHub::Bind(
   if (!backend || !epoch || !StartDevice())
     return false;
 
+  unsigned index         = NO_BINDING;
+  bool     bindComplete  = false;
+  bool     bindResult    = false;
   {
+    CSRWExclusiveLock operationLock(m_operationLock);
     CSRWExclusiveLock lock(m_lock);
-    if (m_stopped || m_source || m_active || m_reserved ||
-        m_deactivating)
-      return false;
-    m_source         = &source;
-    m_backend        = backend;
-    m_epoch          = epoch;
-    m_active         = true;
-    m_reserved       = true;
-    m_failed         = false;
-    m_failurePending = false;
-  }
-
-  CSRWExclusiveLock callbackLock(m_callbackLock);
-  const bool started = source.Start(*this);
-  bool attached = false;
-  {
-    CSRWExclusiveLock lock(m_lock);
-    if (started && m_source == &source && m_backend == backend &&
-        m_epoch == epoch && m_active && m_reserved && !m_failed &&
-        !m_stopped)
-    {
-      m_running  = true;
-      m_reserved = false;
-      attached   = true;
-    }
+    if (m_stopped)
+      bindComplete = true;
     else
     {
-      m_active  = false;
-      m_running = false;
+      for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+      {
+        const Binding& binding = m_bindings[i];
+        if (binding.occupied && binding.backend == backend &&
+            binding.epoch == epoch)
+        {
+          bindComplete = true;
+          bindResult   = binding.source == &source && binding.running &&
+            !binding.failed;
+          break;
+        }
+        if (index == NO_BINDING && !binding.occupied)
+          index = i;
+      }
+      if (!bindComplete && index == NO_BINDING)
+        bindComplete = true;
+    }
+
+    if (!bindComplete)
+    {
+      Binding& binding = m_bindings[index];
+      binding.source         = &source;
+      binding.backend        = backend;
+      binding.epoch          = epoch;
+      binding.occupied       = true;
+      binding.reserved       = true;
+      binding.running        = false;
+      binding.failed         = false;
+      binding.failurePending = false;
+    }
+  }
+  FlushPlaybackWake();
+  if (bindComplete)
+    return bindResult;
+
+  CSRWExclusiveLock callbackLock(m_callbackLock);
+  const bool          started  = source.Start(m_bindings[index].target);
+  bool                attached = false;
+  AudioEndpointStatus state    = {};
+  {
+    CSRWExclusiveLock operationLock(m_operationLock);
+    CSRWExclusiveLock lock(m_lock);
+    Binding& binding = m_bindings[index];
+    if (started && !m_stopped && binding.occupied &&
+        binding.source == &source && binding.backend == backend &&
+        binding.epoch == epoch && binding.reserved && !binding.failed)
+    {
+      binding.running  = true;
+      binding.reserved = false;
+      state            = m_state;
+      attached         = true;
     }
   }
 
   if (!attached)
   {
     source.Stop();
-    CSRWExclusiveLock lock(m_lock);
-    if (m_source == &source && m_backend == backend && m_epoch == epoch)
     {
-      m_source         = nullptr;
-      m_backend        = 0;
-      m_epoch          = 0;
-      m_active         = false;
-      m_running        = false;
-      m_reserved       = false;
-      m_failed         = false;
-      m_failurePending = false;
+      CSRWExclusiveLock operationLock(m_operationLock);
+      CSRWExclusiveLock lock(m_lock);
+      Binding& binding = m_bindings[index];
+      if (binding.occupied && binding.source == &source &&
+          binding.backend == backend && binding.epoch == epoch)
+        binding.Reset();
     }
+    callbackLock.Unlock();
+    FlushPlaybackWake();
     return false;
   }
 
-  source.AudioState(m_device->Snapshot().status);
+  source.AudioState(state);
+  callbackLock.Unlock();
+  FlushPlaybackWake();
   return true;
 }
 
 void CAudioHub::Unbind(BackendId backend, uint32_t epoch)
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  IAudioSource * source = nullptr;
-  bool stop = false;
+  IAudioSource * source        = nullptr;
+  unsigned       index         = NO_BINDING;
+  bool           stop          = false;
+  bool           deactivate    = false;
+  bool           deviceStarted = false;
   {
-    CSRWExclusiveLock lock(m_lock);
-    if ((!m_active && !m_failed && !m_reserved) ||
-        m_backend != backend || m_epoch != epoch || !m_source)
-      return;
-    source           = m_source;
-    stop             = m_running || m_reserved;
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = true;
-    m_failed         = false;
-    m_failurePending = false;
-  }
-
-  {
-    // Serialize the request and barrier publication with state callbacks so
-    // a fast inactive callback cannot pass before the barrier is visible.
-    CSRWExclusiveLock callbackLock(m_callbackLock);
-    // Start deactivation before asking the source to quiesce, then repeat it
-    // after Stop so a target call already in flight cannot reactivate the
-    // device on behalf of the departing source.
-    m_device->SetActive(false);
-    if (stop)
-      source->Stop();
-    const LGAudioDeviceSnapshot before = m_device->Snapshot();
-    const AudioResult deactivate = m_device->SetActive(false);
-    const LGAudioDeviceSnapshot after = m_device->Snapshot();
-    const bool pending = deactivate == AudioResult::ACCEPTED &&
-        (before.status.active || before.activeRequested ||
-          after.status.active || after.activeRequested ||
-          after.deactivating);
+    CSRWExclusiveLock operationLock(m_operationLock);
     {
       CSRWExclusiveLock lock(m_lock);
-      m_deactivating = pending;
-      m_deactivationGeneration = pending ?
-        before.status.generation : 0;
+      for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+      {
+        Binding& binding = m_bindings[i];
+        if (!binding.occupied || binding.backend != backend ||
+            binding.epoch != epoch || !binding.source)
+          continue;
+        const bool wasActive = AnyActiveNL();
+        index  = i;
+        source = binding.source;
+        stop   = binding.running || binding.reserved;
+
+        binding.running               = false;
+        binding.reserved              = true;
+        binding.activeRequested       = false;
+        binding.failurePending        = false;
+        DeactivateBindingNL(i);
+
+        deactivate    = wasActive && !AnyActiveNL();
+        deviceStarted = m_deviceStarted;
+        break;
+      }
     }
+    if (deactivate && deviceStarted)
+      (void)m_device->SetActive(false);
+  }
+  FlushPlaybackWake();
+  if (!source || index >= TRANSPORT_MAX_INSTANCES)
+    return;
+
+  {
+    CSRWExclusiveLock callbackLock(m_callbackLock);
+    if (stop)
+      source->Stop();
   }
 
-  CSRWExclusiveLock lock(m_lock);
-  if (m_source == source && m_backend == backend && m_epoch == epoch)
   {
-    m_source         = nullptr;
-    m_backend        = 0;
-    m_epoch          = 0;
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = false;
-    m_failed         = false;
-    m_failurePending = false;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    CSRWExclusiveLock lock(m_lock);
+    Binding& binding = m_bindings[index];
+    if (binding.occupied && binding.source == source &&
+        binding.backend == backend && binding.epoch == epoch)
+      binding.Reset();
   }
+  FlushPlaybackWake();
 }
 
 bool CAudioHub::TakeFailure(SourceKey& source)
 {
   CSRWSharedLock lifecycleLock(m_lifecycleLock);
   CSRWExclusiveLock lock(m_lock);
-  if (!m_failurePending)
-    return false;
-  source = {};
-  source.backend = m_backend;
-  source.epoch   = m_epoch;
-  m_failurePending = false;
-  return true;
+  for (Binding& binding : m_bindings)
+  {
+    if (!binding.occupied || !binding.failurePending)
+      continue;
+    source         = {};
+    source.backend = binding.backend;
+    source.epoch   = binding.epoch;
+
+    binding.failurePending = false;
+    return true;
+  }
+  return false;
 }
 
 LGAudioDeviceSnapshot CAudioHub::Snapshot() const
 {
-  CSRWSharedLock lock(const_cast<CSRWLock&>(m_lock));
+  CSRWSharedLock lifecycleLock(const_cast<CSRWLock&>(m_lifecycleLock));
   return m_device ? m_device->Snapshot() : LGAudioDeviceSnapshot {};
 }
 
 void CAudioHub::Stop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  IAudioSource * source = nullptr;
-  bool stopSource = false;
-  bool stopDevice = false;
+  IAudioSource * sources[TRANSPORT_MAX_INSTANCES] = {};
+  unsigned       sourceCount                      = 0;
+  bool           stopDevice                       = false;
   {
-    CSRWExclusiveLock lock(m_lock);
-    if (m_stopped)
-      return;
-    m_stopped        = true;
-    source           = m_source;
-    stopSource       = source && (m_running || m_reserved);
-    stopDevice       = m_deviceStarted;
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = source != nullptr;
-    m_failed         = false;
-    m_failurePending = false;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_stopped)
+        return;
+      m_stopped  = true;
+      stopDevice = m_deviceStarted;
+      for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+      {
+        Binding& binding = m_bindings[i];
+        if (!binding.occupied || !binding.source)
+          continue;
+        if (binding.running || binding.reserved)
+          sources[sourceCount++] = binding.source;
+        binding.running               = false;
+        binding.reserved              = true;
+        binding.activeRequested       = false;
+        binding.failurePending        = false;
+        binding.captureReceivePending = false;
+        ClearAuthoritiesNL(i);
+      }
+      ResetPlaybackNL();
+    }
+    if (stopDevice)
+      (void)m_device->SetActive(false);
   }
 
-  if (m_device)
-    m_device->SetActive(false);
   {
     CSRWExclusiveLock callbackLock(m_callbackLock);
-    if (stopSource)
-      source->Stop();
+    for (unsigned i = 0; i < sourceCount; ++i)
+      sources[i]->Stop();
   }
   if (stopDevice)
     m_device->Stop();
 
+  CSRWExclusiveLock operationLock(m_operationLock);
   CSRWExclusiveLock lock(m_lock);
-  m_source         = nullptr;
-  m_backend        = 0;
-  m_epoch          = 0;
-  m_deviceStarted  = false;
-  m_active         = false;
-  m_running        = false;
-  m_reserved       = false;
-  m_failed         = false;
-  m_failurePending = false;
-  m_deactivating   = false;
-  m_deactivationGeneration = 0;
+  for (Binding& binding : m_bindings)
+    binding.Reset();
+  m_deviceStarted = false;
+  m_state         = {};
+  m_stateKnown    = false;
 }
 
-AudioResult CAudioHub::SetAudioActive(bool active)
+AudioResult CAudioHub::TargetSetAudioActive(
+  unsigned binding, bool active)
 {
-  IAudioSource * source = nullptr;
+  AudioResult result        = AudioResult::ACCEPTED;
+  bool        deactivate    = false;
+  bool        deviceChanged = false;
+  bool        nowActive     = false;
+  bool        requestDone   = false;
   {
-    CSRWSharedLock lock(m_lock);
-    if (m_stopped || !m_active || !m_running || m_failed ||
-        !m_deviceStarted)
-      return AudioResult::UNAVAILABLE;
-    source = m_source;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_stopped || !BindingLiveNL(binding) || !m_deviceStarted)
+      {
+        result      = AudioResult::UNAVAILABLE;
+        requestDone = true;
+      }
+      else
+      {
+        Binding& target = m_bindings[binding];
+        if (target.activeRequested == active)
+          requestDone = true;
+        else
+        {
+          const bool wasActive   = AnyActiveNL();
+          target.activeRequested = active;
+          nowActive              = AnyActiveNL();
+          deviceChanged          = wasActive != nowActive;
+          if (!deviceChanged && !active)
+            DeactivateBindingNL(binding);
+        }
+      }
+    }
+
+    if (!requestDone && deviceChanged)
+    {
+      result = m_device->SetActive(nowActive);
+      CSRWExclusiveLock lock(m_lock);
+      if (m_stopped || !BindingLiveNL(binding) ||
+          m_bindings[binding].activeRequested != active)
+        result = AudioResult::UNAVAILABLE;
+      else if (result == AudioResult::ACCEPTED ||
+          (!active && (result == AudioResult::UNAVAILABLE ||
+            result == AudioResult::STALE)))
+      {
+        if (!active)
+          DeactivateBindingNL(binding);
+      }
+      else if (result == AudioResult::FAILED)
+      {
+        if (!active)
+          m_bindings[binding].activeRequested = true;
+        (void)MarkFailedNL(binding, deactivate);
+      }
+      else
+      {
+        m_bindings[binding].activeRequested = !active;
+        if (active)
+          DeactivateBindingNL(binding);
+      }
+    }
+
+    if (deactivate)
+      (void)m_device->SetActive(false);
   }
-  const AudioResult result = m_device->SetActive(active);
-  if (result == AudioResult::FAILED)
-    MarkFailed(source);
+  FlushPlaybackWake();
   return result;
 }
 
-AudioResult CAudioHub::SendCapture(const AudioPacket& packet,
-  const uint8_t * data, size_t size)
+AudioResult CAudioHub::TargetSendCapture(unsigned binding,
+  const AudioPacket& packet, const uint8_t * data, size_t size)
 {
-  IAudioSource * source = nullptr;
+  AudioResult result      = AudioResult::UNAVAILABLE;
+  bool        deactivate  = false;
+  bool        requestDone = false;
   {
-    CSRWSharedLock lock(m_lock);
-    if (m_stopped || !m_active || !m_running || m_failed ||
-        !m_deviceStarted)
-      return AudioResult::UNAVAILABLE;
-    source = m_source;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_stopped || !BindingLiveNL(binding) ||
+          !m_bindings[binding].activeRequested || !m_deviceStarted)
+        requestDone = true;
+      else
+      {
+        if (m_captureAuthority != NO_BINDING &&
+            (m_captureAuthority >= TRANSPORT_MAX_INSTANCES ||
+             !BindingLiveNL(m_captureAuthority) ||
+             !m_bindings[m_captureAuthority].activeRequested ||
+             !m_stateKnown || !m_state.available || !m_state.active ||
+             m_state.capture.state != AudioStreamState::RUNNING ||
+             m_state.generation != m_captureEndpointGeneration ||
+             m_state.capture.generation != m_captureStreamGeneration))
+        {
+          m_captureAuthority          = NO_BINDING;
+          m_captureEndpointGeneration = 0;
+          m_captureStreamGeneration   = 0;
+        }
+        if (m_captureAuthority != NO_BINDING &&
+            m_captureAuthority != binding)
+          requestDone = true;
+      }
+    }
+
+    if (!requestDone)
+    {
+      result = m_device->SendCapture(packet, data, size);
+      {
+        CSRWExclusiveLock lock(m_lock);
+        if (m_stopped || !BindingLiveNL(binding) ||
+            !m_bindings[binding].activeRequested || !m_deviceStarted)
+          result = AudioResult::UNAVAILABLE;
+        else
+        {
+          Binding& target = m_bindings[binding];
+          target.captureReceivePending = result == AudioResult::BUSY;
+          if (result == AudioResult::ACCEPTED &&
+              m_captureAuthority == NO_BINDING)
+          {
+            m_captureAuthority          = binding;
+            m_captureEndpointGeneration = packet.endpointGeneration;
+            m_captureStreamGeneration   = packet.streamGeneration;
+          }
+          if (result == AudioResult::FAILED)
+            (void)MarkFailedNL(binding, deactivate);
+        }
+      }
+    }
+
+    if (deactivate)
+      (void)m_device->SetActive(false);
   }
-  const AudioResult result = m_device->SendCapture(packet, data, size);
-  if (result == AudioResult::FAILED)
-    MarkFailed(source);
+  FlushPlaybackWake();
   return result;
 }
 
-AudioResult CAudioHub::SetClockFeedback(
+AudioResult CAudioHub::TargetSetClockFeedback(unsigned binding,
   const AudioClockFeedback& feedback)
 {
-  IAudioSource * source = nullptr;
+  AudioResult result      = AudioResult::UNAVAILABLE;
+  bool        deactivate  = false;
+  bool        requestDone = false;
   {
-    CSRWSharedLock lock(m_lock);
-    if (m_stopped || !m_active || !m_running || m_failed ||
-        !m_deviceStarted)
-      return AudioResult::UNAVAILABLE;
-    source = m_source;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (m_stopped || !BindingLiveNL(binding) ||
+          !m_bindings[binding].activeRequested || !m_deviceStarted)
+        requestDone = true;
+      else
+      {
+        if (m_clockAuthority != NO_BINDING &&
+            (m_clockAuthority >= TRANSPORT_MAX_INSTANCES ||
+             !BindingLiveNL(m_clockAuthority) ||
+             !m_bindings[m_clockAuthority].activeRequested ||
+             !m_stateKnown || !m_state.available || !m_state.active ||
+             m_state.playback.state != AudioStreamState::RUNNING ||
+             m_state.generation != m_clockEndpointGeneration ||
+             m_state.playback.generation != m_clockStreamGeneration))
+        {
+          m_clockAuthority          = NO_BINDING;
+          m_clockEndpointGeneration = 0;
+          m_clockStreamGeneration   = 0;
+        }
+        if (m_clockAuthority != NO_BINDING &&
+            m_clockAuthority != binding)
+          requestDone = true;
+      }
+    }
+
+    if (!requestDone)
+    {
+      result = m_device->SetClockFeedback(feedback);
+      {
+        CSRWExclusiveLock lock(m_lock);
+        if (m_stopped || !BindingLiveNL(binding) ||
+            !m_bindings[binding].activeRequested || !m_deviceStarted)
+          result = AudioResult::UNAVAILABLE;
+        else
+        {
+          if (result == AudioResult::ACCEPTED &&
+              m_clockAuthority == NO_BINDING)
+          {
+            m_clockAuthority          = binding;
+            m_clockEndpointGeneration = feedback.endpointGeneration;
+            m_clockStreamGeneration   = feedback.playbackGeneration;
+          }
+          if (result == AudioResult::FAILED)
+            (void)MarkFailedNL(binding, deactivate);
+        }
+      }
+    }
+
+    if (deactivate)
+      (void)m_device->SetActive(false);
   }
-  const AudioResult result = m_device->SetClockFeedback(feedback);
-  if (result == AudioResult::FAILED)
-    MarkFailed(source);
+  FlushPlaybackWake();
   return result;
 }
 
-void CAudioHub::PlaybackReceiveReady()
+void CAudioHub::TargetPlaybackReceiveReady(unsigned binding)
 {
   {
-    CSRWSharedLock lock(m_lock);
-    if (m_stopped || !m_active || !m_running || m_failed ||
-        !m_deviceStarted)
-      return;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (!m_stopped && BindingLiveNL(binding) &&
+          m_bindings[binding].activeRequested && m_playbackActive)
+      {
+        Binding& target = m_bindings[binding];
+        if (target.playback == PlaybackState::BUSY)
+        {
+          target.playback = PlaybackState::READY;
+          RequestPlaybackWakeNL();
+        }
+        else if (target.playback == PlaybackState::CALLING)
+          target.playbackReadyEarly = true;
+      }
+    }
   }
-  m_device->PlaybackReceiveReady();
+  FlushPlaybackWake();
 }
 
-void CAudioHub::AudioFailed()
+void CAudioHub::TargetAudioFailed(unsigned binding)
 {
-  IAudioSource * source = nullptr;
-  {
-    CSRWSharedLock lock(m_lock);
-    source = m_source;
-  }
-  if (source)
-    MarkFailed(source);
+  (void)MarkFailed(binding);
 }
 
 void CAudioHub::LGAudioState(const AudioEndpointStatus& state)
 {
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IAudioSource * source = nullptr;
+  IAudioSource * sources[TRANSPORT_MAX_INSTANCES] = {};
+  unsigned       sourceCount                      = 0;
   {
     CSRWExclusiveLock lock(m_lock);
-    if (m_deactivating && !state.active &&
-        state.generation != m_deactivationGeneration)
+    if (m_stopped)
+      return;
+
+    const bool endpointChanged = !m_stateKnown ||
+      m_state.capabilities != state.capabilities ||
+      m_state.generation != state.generation ||
+      m_state.available  != state.available  ||
+      m_state.active     != state.active;
+    const bool playbackChanged = endpointChanged ||
+      !SameStream(m_state.playback, state.playback);
+    const bool captureChanged  = endpointChanged ||
+      !SameStream(m_state.capture, state.capture);
+    if (captureChanged)
     {
-      m_deactivating = false;
-      m_deactivationGeneration = 0;
+      m_captureAuthority          = NO_BINDING;
+      m_captureEndpointGeneration = 0;
+      m_captureStreamGeneration   = 0;
+      for (Binding& binding : m_bindings)
+        binding.captureReceivePending = false;
     }
-    if (!m_stopped && m_active && m_running && !m_failed)
-      source = m_source;
+    if (playbackChanged)
+    {
+      m_clockAuthority          = NO_BINDING;
+      m_clockEndpointGeneration = 0;
+      m_clockStreamGeneration   = 0;
+      if (m_playbackActive)
+      {
+        for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+          RetirePlaybackNL(i);
+      }
+      else
+        ResetPlaybackNL();
+    }
+    m_state      = state;
+    m_stateKnown = true;
+    for (Binding& binding : m_bindings)
+      if (binding.occupied && binding.running && !binding.failed &&
+          binding.source)
+        sources[sourceCount++] = binding.source;
   }
-  if (source)
-    source->AudioState(state);
+  for (unsigned i = 0; i < sourceCount; ++i)
+    sources[i]->AudioState(state);
+  callbackLock.Unlock();
+  FlushPlaybackWake();
 }
 
 AudioResult CAudioHub::LGAudioPlayback(const AudioPacket& packet,
   const uint8_t * data, size_t size)
 {
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IAudioSource * source = nullptr;
+  unsigned calls   [TRANSPORT_MAX_INSTANCES]  = {};
+  unsigned failures[TRANSPORT_MAX_INSTANCES]  = {};
+  unsigned callCount                          = 0;
+  unsigned failureCount                       = 0;
   {
-    CSRWSharedLock lock(m_lock);
-    if (!m_stopped && m_active && m_running && !m_failed)
-      source = m_source;
+    CSRWExclusiveLock lock(m_lock);
+    if (m_stopped)
+      return AudioResult::UNAVAILABLE;
+    if (!m_playbackActive)
+    {
+      m_playbackActive   = true;
+      m_playbackAccepted = false;
+      m_playbackFailed   = false;
+      for (Binding& binding : m_bindings)
+      {
+        binding.playback           = binding.occupied && binding.running &&
+            !binding.failed && binding.activeRequested && binding.source ?
+          PlaybackState::READY : PlaybackState::IDLE;
+        binding.playbackReadyEarly = false;
+      }
+    }
+    for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+    {
+      Binding& binding = m_bindings[i];
+      if (!BindingLiveNL(i) || !binding.activeRequested ||
+          binding.playback != PlaybackState::READY)
+        continue;
+      binding.playback           = PlaybackState::CALLING;
+      binding.playbackReadyEarly = false;
+      calls[callCount++]         = i;
+    }
   }
-  if (!source)
-    return AudioResult::UNAVAILABLE;
-  const AudioResult result = source->SendPlayback(packet, data, size);
-  if (result == AudioResult::FAILED)
-    MarkFailed(source);
+
+  for (unsigned i = 0; i < callCount; ++i)
+  {
+    const unsigned index  = calls[i];
+    IAudioSource * source = nullptr;
+    {
+      CSRWSharedLock lock(m_lock);
+      if (BindingLiveNL(index) && m_bindings[index].activeRequested &&
+          m_bindings[index].playback == PlaybackState::CALLING)
+        source = m_bindings[index].source;
+    }
+    const AudioResult result = source ?
+      source->SendPlayback(packet, data, size) : AudioResult::UNAVAILABLE;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      Binding& binding = m_bindings[index];
+      if (!BindingLiveNL(index) || !binding.activeRequested ||
+          binding.playback != PlaybackState::CALLING)
+        continue;
+      switch (result)
+      {
+        case AudioResult::ACCEPTED:
+          binding.playback   = PlaybackState::DONE;
+          m_playbackAccepted = true;
+          break;
+        case AudioResult::BUSY:
+          if (binding.playbackReadyEarly)
+          {
+            binding.playback = PlaybackState::READY;
+            RequestPlaybackWakeNL();
+          }
+          else
+            binding.playback = PlaybackState::BUSY;
+          break;
+        case AudioResult::FAILED:
+          binding.playback         = PlaybackState::DONE;
+          m_playbackFailed         = true;
+          failures[failureCount++] = index;
+          break;
+        default:
+          binding.playback = PlaybackState::DONE;
+          break;
+      }
+      binding.playbackReadyEarly = false;
+    }
+  }
+
+  AudioResult result = AudioResult::UNAVAILABLE;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    bool pending = false;
+    for (const Binding& binding : m_bindings)
+      if (binding.playback == PlaybackState::READY ||
+          binding.playback == PlaybackState::CALLING ||
+          binding.playback == PlaybackState::BUSY)
+      {
+        pending = true;
+        break;
+      }
+    if (pending)
+      result = AudioResult::BUSY;
+    else
+    {
+      result = m_playbackAccepted ? AudioResult::ACCEPTED :
+        (m_playbackFailed ? AudioResult::FAILED :
+          AudioResult::UNAVAILABLE);
+      ResetPlaybackNL();
+    }
+  }
+  callbackLock.Unlock();
+  for (unsigned i = 0; i < failureCount; ++i)
+    (void)MarkFailed(failures[i]);
+  FlushPlaybackWake();
   return result;
 }
 
 void CAudioHub::LGAudioCaptureReady()
 {
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IAudioSource * source = nullptr;
+  IAudioSource * sources[TRANSPORT_MAX_INSTANCES] = {};
+  unsigned       sourceCount                      = 0;
   {
-    CSRWSharedLock lock(m_lock);
-    if (!m_stopped && m_active && m_running && !m_failed)
-      source = m_source;
+    CSRWExclusiveLock operationLock(m_operationLock);
+    CSRWExclusiveLock lock(m_lock);
+    if (m_stopped)
+      return;
+    for (unsigned i = 0; i < TRANSPORT_MAX_INSTANCES; ++i)
+    {
+      Binding& binding = m_bindings[i];
+      if (!BindingLiveNL(i) || !binding.activeRequested ||
+          !binding.captureReceivePending)
+        continue;
+      binding.captureReceivePending = false;
+      sources[sourceCount++]        = binding.source;
+    }
   }
-  if (source)
-    source->CaptureReceiveReady();
+  for (unsigned i = 0; i < sourceCount; ++i)
+    sources[i]->CaptureReceiveReady();
+  callbackLock.Unlock();
+  FlushPlaybackWake();
 }

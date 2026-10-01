@@ -27,29 +27,112 @@
 
 #include <memory>
 
-class CAudioHub final : public IAudioTarget,
-  private IAudioDeviceEvents
+class CAudioHub final : private IAudioDeviceEvents
 {
 private:
-  CSRWLock m_lifecycleLock;
-  CSRWLock m_callbackLock;
-  CSRWLock m_lock;
+  static constexpr unsigned NO_BINDING = TRANSPORT_MAX_INSTANCES;
+
+  enum class PlaybackState : uint8_t
+  {
+    IDLE,
+    READY,
+    CALLING,
+    BUSY,
+    DONE,
+  };
+
+  class CTarget final : public IAudioTarget
+  {
+  private:
+    CAudioHub * m_owner   = nullptr;
+    unsigned    m_binding = NO_BINDING;
+
+  public:
+    void Attach(CAudioHub& owner, unsigned binding);
+
+    AudioResult SetAudioActive(bool active) override;
+    AudioResult SendCapture(const AudioPacket& packet,
+      const uint8_t * data, size_t size) override;
+    AudioResult SetClockFeedback(
+      const AudioClockFeedback& feedback) override;
+    void PlaybackReceiveReady() override;
+    void AudioFailed() override;
+  };
+
+  struct Binding
+  {
+    CTarget        target;
+    IAudioSource * source                = nullptr;
+    BackendId      backend               = 0;
+    uint32_t       epoch                 = 0;
+    PlaybackState  playback              = PlaybackState::IDLE;
+    bool           occupied              = false;
+    bool           reserved              = false;
+    bool           running               = false;
+    bool           failed                = false;
+    bool           failurePending        = false;
+    bool           activeRequested       = false;
+    bool           playbackReadyEarly    = false;
+    bool           captureReceivePending = false;
+
+    void Reset()
+    {
+      source                = nullptr;
+      backend               = 0;
+      epoch                 = 0;
+      playback              = PlaybackState::IDLE;
+      occupied              = false;
+      reserved              = false;
+      running               = false;
+      failed                = false;
+      failurePending        = false;
+      activeRequested       = false;
+      playbackReadyEarly    = false;
+      captureReceivePending = false;
+    }
+  };
+
+  CSRWLock                         m_lifecycleLock;
+  CSRWLock                         m_callbackLock;
+  CSRWLock                         m_operationLock;
+  CSRWLock                         m_lock;
   std::unique_ptr<ILGAudioDevice> m_device;
-  IAudioSource * m_source = nullptr;
-  BackendId m_backend = 0;
-  uint32_t  m_epoch   = 0;
-  bool m_deviceStarted = false;
-  bool m_active         = false;
-  bool m_running        = false;
-  bool m_reserved       = false;
-  bool m_failed         = false;
-  bool m_failurePending = false;
-  bool m_deactivating   = false;
-  uint64_t m_deactivationGeneration = 0;
-  bool m_stopped        = false;
+  Binding                          m_bindings[TRANSPORT_MAX_INSTANCES];
+  AudioEndpointStatus              m_state;
+  unsigned                         m_captureAuthority          = NO_BINDING;
+  unsigned                         m_clockAuthority            = NO_BINDING;
+  uint64_t                         m_captureEndpointGeneration = 0;
+  uint64_t                         m_captureStreamGeneration   = 0;
+  uint64_t                         m_clockEndpointGeneration   = 0;
+  uint64_t                         m_clockStreamGeneration     = 0;
+  bool                             m_deviceStarted             = false;
+  bool                             m_stateKnown                = false;
+  bool                             m_playbackActive            = false;
+  bool                             m_playbackAccepted          = false;
+  bool                             m_playbackFailed            = false;
+  bool                             m_playbackWakeDispatching   = false;
+  bool                             m_playbackWakePending       = false;
+  bool                             m_stopped                   = false;
 
   bool StartDevice();
-  bool MarkFailed(IAudioSource * source);
+  bool BindingLiveNL(unsigned binding) const;
+  bool AnyActiveNL() const;
+  void ClearAuthoritiesNL(unsigned binding);
+  void RetirePlaybackNL(unsigned binding);
+  void DeactivateBindingNL(unsigned binding);
+  void RequestPlaybackWakeNL();
+  void FlushPlaybackWake();
+  bool MarkFailedNL(unsigned binding, bool& deactivate);
+  bool MarkFailed(unsigned binding);
+  void ResetPlaybackNL();
+
+  AudioResult TargetSetAudioActive(unsigned binding, bool active);
+  AudioResult TargetSendCapture(unsigned binding,
+    const AudioPacket& packet, const uint8_t * data, size_t size);
+  AudioResult TargetSetClockFeedback(unsigned binding,
+    const AudioClockFeedback& feedback);
+  void TargetPlaybackReceiveReady(unsigned binding);
+  void TargetAudioFailed(unsigned binding);
 
   void LGAudioState(const AudioEndpointStatus& state) override;
   AudioResult LGAudioPlayback(const AudioPacket& packet,
@@ -72,12 +155,4 @@ public:
   bool TakeFailure(SourceKey& source);
   LGAudioDeviceSnapshot Snapshot() const;
   void Stop();
-
-  AudioResult SetAudioActive(bool active) override;
-  AudioResult SendCapture(const AudioPacket& packet,
-    const uint8_t * data, size_t size) override;
-  AudioResult SetClockFeedback(
-    const AudioClockFeedback& feedback) override;
-  void PlaybackReceiveReady() override;
-  void AudioFailed() override;
 };
