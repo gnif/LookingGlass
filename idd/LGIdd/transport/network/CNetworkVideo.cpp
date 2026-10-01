@@ -49,6 +49,7 @@
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "capture/CFrameScheduler.h"
 #include "d3d/CD3D12CommandQueue.h"
 
 #include <Windows.h>
@@ -1388,6 +1389,7 @@ void FinalizeMain()
   struct EncodedFrame
   {
     uint64_t                                    configEpoch   = 0;
+    uint64_t                                    sourceSerial  = 0;
     uint64_t                                    frameID       = 0;
     uint64_t                                    captureTimeNs = 0;
     uint32_t                                    deadlineMs    = 0;
@@ -2584,10 +2586,12 @@ void FinalizeMain()
 
       if (result)
       {
-        output.configEpoch    = configEpoch;
-        output.frameID        = frameID;
-        output.captureTimeNs  = slot->captureTime;
-        output.deadlineMs     = MAX_FRAME_LATENCY_MS;
+        output.configEpoch   = configEpoch;
+        output.sourceSerial  = slot->frame.desc.frame.content ?
+          slot->frame.desc.frame.content->serial : 0;
+        output.frameID       = frameID;
+        output.captureTimeNs = slot->captureTime;
+        output.deadlineMs    = MAX_FRAME_LATENCY_MS;
       }
       ReleaseSlot(*slot);
       return result;
@@ -2725,15 +2729,17 @@ struct CNetworkVideo::Impl
   bool     m_active     = false;
   bool     m_pending    = false;
 
-  uint64_t m_configEpoch    = 0;
-  uint64_t m_nextFrameID    = 0;
-  uint64_t m_nextPeerSerial = 0;
-  uint64_t m_nextSendSerial = 0;
+  uint64_t m_configEpoch        = 0;
+  uint64_t m_latestSourceSerial = 0;
+  uint64_t m_nextFrameID        = 0;
+  uint64_t m_nextPeerSerial     = 0;
+  uint64_t m_nextSendSerial     = 0;
 
-  std::vector<PeerState>   m_peers;
-  std::deque<PendingFrame> m_frames;
-  std::deque<SendItem>     m_sends;
-  size_t                   m_sendBytes = 0;
+  std::vector<PeerState>                m_peers;
+  std::deque<PendingFrame>              m_frames;
+  std::deque<SendItem>                  m_sends;
+  std::shared_ptr<const EncodedFrame>   m_latestFrame;
+  size_t                                m_sendBytes = 0;
 
   PyroWaveD3D12Encoder m_encoder;
 
@@ -3100,8 +3106,10 @@ struct CNetworkVideo::Impl
 
   void FailNL(uint32_t detail)
   {
-    m_failed = true;
+    m_failed             = true;
+    m_latestSourceSerial = 0;
     m_frames.clear();
+    m_latestFrame.reset();
     for (PeerState& peer : m_peers)
       if (peer.subscribed)
         QueueStatusNL(peer, LG_NET_VIDEO_STATE_ERROR, detail);
@@ -3146,11 +3154,12 @@ struct CNetworkVideo::Impl
     peer.statusSent = false;
   }
 
-  bool QueueScheduleNL(PeerState& peer, const EncodedFrame& frame)
+  bool QueueScheduleNL(PeerState& peer, const EncodedFrame& frame,
+    uint64_t frameID, uint64_t presentationBaseNs)
   {
     const uint32_t deadlineMs     = (std::min)(
       frame.deadlineMs, peer.subscription.maxFrameLatencyMs);
-    const uint64_t presentationNs = frame.captureTimeNs +
+    const uint64_t presentationNs = presentationBaseNs +
       static_cast<uint64_t>(deadlineMs) * UINT64_C(1000000);
 
     LGNetVideoSchedule schedule = {};
@@ -3158,28 +3167,29 @@ struct CNetworkVideo::Impl
     schedule.flags                   = LG_NET_VIDEO_SCHEDULE_PRESENT |
       LG_NET_VIDEO_SCHEDULE_DROP_IF_LATE;
     schedule.configEpoch             = frame.configEpoch;
-    schedule.frameID                 = frame.frameID;
+    schedule.frameID                 = frameID;
     schedule.captureTimestampNs      = frame.captureTimeNs;
     schedule.presentationTimestampNs = presentationNs;
     schedule.deadlineTimestampNs     = presentationNs;
     return QueueFixedNL<LGNetVideoSchedule,
       lgNetVideoScheduleEncode>(peer.peer,
         NetworkVideoDelivery::RELIABLE, LG_NET_VIDEO_MESSAGE_SCHEDULE,
-        LG_NET_ENVELOPE_FINAL, frame.configEpoch, 0, frame.frameID,
+        LG_NET_ENVELOPE_FINAL, frame.configEpoch, 0, frameID,
         schedule, LG_NET_VIDEO_SCHEDULE_WIRE_SIZE);
   }
 
   static std::shared_ptr<const std::vector<uint8_t>> BuildWholeFramePayload(
-    const EncodedFrame& encoded, uint32_t deadlineMs)
+    const EncodedFrame& encoded, uint32_t deadlineMs,
+    uint64_t frameID, uint64_t presentationBaseNs)
   {
     LGNetVideoFrame frame = {};
     frame.streamID                = STREAM_ID;
     frame.codec                   = LG_NET_VIDEO_CODEC_PYROWAVE;
     frame.flags                   = LG_NET_VIDEO_FRAME_KEYFRAME;
     frame.configEpoch             = encoded.configEpoch;
-    frame.frameID                 = encoded.frameID;
+    frame.frameID                 = frameID;
     frame.captureTimestampNs      = encoded.captureTimeNs;
-    frame.presentationTimestampNs = encoded.captureTimeNs +
+    frame.presentationTimestampNs = presentationBaseNs +
       static_cast<uint64_t>(deadlineMs) * UINT64_C(1000000);
     frame.encodedLength           = static_cast<uint32_t>(encoded.data.size());
     frame.blockCount              = static_cast<uint32_t>(encoded.blocks.size());
@@ -3207,18 +3217,22 @@ struct CNetworkVideo::Impl
   }
 
   bool QueueWholeFrameNL(PeerState& peer, const EncodedFrame& encoded,
-    NetworkVideoDelivery delivery)
+    NetworkVideoDelivery delivery, uint64_t frameID,
+    uint64_t presentationBaseNs)
   {
     const uint32_t deadlineMs = (std::min)(
       encoded.deadlineMs, peer.subscription.maxFrameLatencyMs);
     std::shared_ptr<const std::vector<uint8_t>> payload =
-      deadlineMs == encoded.deadlineMs ? encoded.wholePayload : nullptr;
+      deadlineMs == encoded.deadlineMs && frameID == encoded.frameID &&
+        presentationBaseNs == encoded.captureTimeNs ?
+          encoded.wholePayload : nullptr;
     if (!payload)
-      payload = BuildWholeFramePayload(encoded, deadlineMs);
+      payload = BuildWholeFramePayload(
+        encoded, deadlineMs, frameID, presentationBaseNs);
     if (!payload)
       return false;
     return QueueNL(peer.peer, delivery, LG_NET_VIDEO_MESSAGE_FRAME,
-      LG_NET_ENVELOPE_FINAL, encoded.configEpoch, 0, encoded.frameID,
+      LG_NET_ENVELOPE_FINAL, encoded.configEpoch, 0, frameID,
       std::move(payload));
   }
 
@@ -3277,7 +3291,7 @@ struct CNetworkVideo::Impl
 
   bool QueueFragmentsNL(PeerState& peer,
     std::shared_ptr<const EncodedFrame> encoded,
-    NetworkVideoDelivery delivery, uint32_t maxPayload,
+    NetworkVideoDelivery delivery, uint64_t frameID, uint32_t maxPayload,
     uint32_t firstBlockIndex = 0,
     uint32_t firstFragmentIndex = 0)
   {
@@ -3307,7 +3321,7 @@ struct CNetworkVideo::Impl
       item.messageType    = LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT;
       item.flags          = LG_NET_ENVELOPE_FINAL;
       item.componentEpoch = encoded->configEpoch;
-      item.frameID        = encoded->frameID;
+      item.frameID        = frameID;
       item.encoded        = std::move(encoded);
       item.fragmentIndex  = firstFragmentIndex;
       item.fragmentCount  = fragmentCount;
@@ -3327,8 +3341,8 @@ struct CNetworkVideo::Impl
 
   bool QueueReliableFirstBlockNL(PeerState& peer,
     const std::shared_ptr<const EncodedFrame>& encoded,
-    uint32_t payloadLimit, uint32_t criticalFragmentCount,
-    uint32_t fragmentCount)
+    uint64_t frameID, uint32_t payloadLimit,
+    uint32_t criticalFragmentCount, uint32_t fragmentCount)
   {
     if (!encoded || encoded->blocks.empty() || !payloadLimit ||
         !criticalFragmentCount || fragmentCount < criticalFragmentCount ||
@@ -3351,7 +3365,7 @@ struct CNetworkVideo::Impl
       item.messageType    = LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT;
       item.flags          = LG_NET_ENVELOPE_FINAL;
       item.componentEpoch = encoded->configEpoch;
-      item.frameID        = encoded->frameID;
+      item.frameID        = frameID;
       item.encoded        = encoded;
       item.fragmentIndex  = fragmentIndex;
       item.fragmentCount  = fragmentCount;
@@ -3371,7 +3385,7 @@ struct CNetworkVideo::Impl
           payload->size() > peer.info.maxReliablePayload ||
           !QueueNL(peer.peer, NetworkVideoDelivery::RELIABLE,
             LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT, LG_NET_ENVELOPE_FINAL,
-            encoded->configEpoch, 0, encoded->frameID, std::move(payload)))
+            encoded->configEpoch, 0, frameID, std::move(payload)))
         return false;
       blockOffset += (std::min)(payloadLimit, block.length - blockOffset);
     }
@@ -3395,7 +3409,7 @@ struct CNetworkVideo::Impl
     LGNetVideoFragment fragment = {};
     fragment.streamID      = STREAM_ID;
     fragment.configEpoch   = item.encoded->configEpoch;
-    fragment.frameID       = item.encoded->frameID;
+    fragment.frameID       = item.frameID;
     fragment.frameOffset   = block.offset + item.blockOffset;
     fragment.frameLength   =
       static_cast<uint32_t>(item.encoded->data.size());
@@ -3450,9 +3464,10 @@ struct CNetworkVideo::Impl
   }
 
   bool QueueFrameNL(PeerState& peer,
-    const std::shared_ptr<const EncodedFrame>& frame)
+    const std::shared_ptr<const EncodedFrame>& frame,
+    uint64_t frameID, uint64_t presentationBaseNs)
   {
-    if (!frame || !peer.configured ||
+    if (!frame || !frameID || !presentationBaseNs || !peer.configured ||
         peer.componentEpoch != frame->configEpoch ||
         frame->data.empty() || frame->data.size() >
           peer.subscription.maxFrameLength)
@@ -3480,10 +3495,11 @@ struct CNetworkVideo::Impl
           criticalPayloadLimit, criticalFragmentCount) &&
         FragmentPlan(*frame, DeliveryPayload(peer.info, delivery), 1U,
           criticalFragmentCount, payloadLimit, fragmentCount);
-      result = plan && QueueScheduleNL(peer, *frame) &&
-        QueueReliableFirstBlockNL(peer, frame, criticalPayloadLimit,
-          criticalFragmentCount, fragmentCount) &&
-        QueueFragmentsNL(peer, frame, delivery,
+      result = plan && QueueScheduleNL(
+          peer, *frame, frameID, presentationBaseNs) &&
+        QueueReliableFirstBlockNL(peer, frame, frameID,
+          criticalPayloadLimit, criticalFragmentCount, fragmentCount) &&
+        QueueFragmentsNL(peer, frame, delivery, frameID,
           payloadLimit + LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE, 1U,
           criticalFragmentCount);
     }
@@ -3491,20 +3507,23 @@ struct CNetworkVideo::Impl
     {
       delivery = NetworkVideoDelivery::BULK;
       result   = fullSize <= peer.info.maxBulkPayload ?
-        QueueWholeFrameNL(peer, *frame, delivery) :
-        QueueScheduleNL(peer, *frame) &&
+        QueueWholeFrameNL(
+          peer, *frame, delivery, frameID, presentationBaseNs) :
+        QueueScheduleNL(peer, *frame, frameID, presentationBaseNs) &&
           QueueFragmentsNL(
-            peer, frame, delivery, DeliveryPayload(peer.info, delivery));
+            peer, frame, delivery, frameID,
+            DeliveryPayload(peer.info, delivery));
     }
     else if (!datagrams && fullSize <= peer.info.maxReliablePayload)
       result = QueueWholeFrameNL(
-        peer, *frame, NetworkVideoDelivery::RELIABLE);
+        peer, *frame, NetworkVideoDelivery::RELIABLE,
+        frameID, presentationBaseNs);
     else
     {
       const uint32_t maxPayload = DeliveryPayload(peer.info, delivery);
       result = DeliverySupported(peer.info, delivery) &&
-        QueueScheduleNL(peer, *frame) &&
-        QueueFragmentsNL(peer, frame, delivery, maxPayload);
+        QueueScheduleNL(peer, *frame, frameID, presentationBaseNs) &&
+        QueueFragmentsNL(peer, frame, delivery, frameID, maxPayload);
     }
 
     if (!result)
@@ -3514,10 +3533,38 @@ struct CNetworkVideo::Impl
       peer.congested = true;
       return false;
     }
-    peer.lastFrameID       = frame->frameID;
+    peer.lastFrameID       = frameID;
     peer.lastCaptureTimeNs = frame->captureTimeNs;
     peer.keyframePending   = false;
     return true;
+  }
+
+  bool ReplayLatestFrameNL(PeerState& peer)
+  {
+    if (!m_latestFrame || !m_latestSourceSerial ||
+        m_latestFrame->configEpoch != m_configEpoch ||
+        m_latestFrame->sourceSerial != m_latestSourceSerial ||
+        m_latestFrame->data.size() > peer.subscription.maxFrameLength)
+      return false;
+
+    const uint64_t frameID = Next64(m_nextFrameID);
+    if (!QueueFrameNL(peer, m_latestFrame, frameID,
+          CFrameScheduler::Nanotime()))
+      return false;
+
+    m_nextFrameID = frameID;
+    QueueStatusNL(peer, LG_NET_VIDEO_STATE_STREAMING, 0);
+    return true;
+  }
+
+  bool RetryFrameReplays()
+  {
+    bool queued = false;
+    CSRWExclusiveLock lock(m_lock);
+    for (PeerState& peer : m_peers)
+      if (peer.subscribed && peer.configured && peer.keyframePending)
+        queued |= ReplayLatestFrameNL(peer);
+    return queued;
   }
 
   static bool PeerFrameDueNL(
@@ -3566,7 +3613,8 @@ struct CNetworkVideo::Impl
     }
     if (buildWholePayload)
     {
-      frame.wholePayload = BuildWholeFramePayload(frame, frame.deadlineMs);
+      frame.wholePayload = BuildWholeFramePayload(frame, frame.deadlineMs,
+        frame.frameID, frame.captureTimeNs);
       if (!frame.wholePayload)
         return;
     }
@@ -3585,11 +3633,22 @@ struct CNetworkVideo::Impl
     if (!m_started || m_stopped || m_failed || !m_active ||
         encoded->configEpoch != m_configEpoch)
       return;
+    uint64_t frameID = encoded->frameID;
+    if (frameID != m_nextFrameID)
+    {
+      frameID        = Next64(m_nextFrameID);
+      m_nextFrameID  = frameID;
+    }
+    // An older in-flight encode must not replace a newer retained source.
+    if (encoded->sourceSerial &&
+        encoded->sourceSerial == m_latestSourceSerial)
+      m_latestFrame = encoded;
     for (PeerState& peer : m_peers)
       if (peer.subscribed && peer.configured &&
           PeerFrameDueNL(peer, *encoded))
       {
-        if (!QueueFrameNL(peer, encoded))
+        if (!QueueFrameNL(peer, encoded,
+              frameID, encoded->captureTimeNs))
           QueueStatusNL(peer, LG_NET_VIDEO_STATE_STALLED, 2);
         else
           QueueStatusNL(peer, LG_NET_VIDEO_STATE_STREAMING, 0);
@@ -3604,13 +3663,8 @@ struct CNetworkVideo::Impl
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_encoder.Busy() || m_frames.empty() || !m_started ||
-          m_stopped || m_failed || !m_active || !HasSubscribersNL())
+          m_stopped || m_failed || !m_active)
         return false;
-      pending = std::move(m_frames.front());
-      m_frames.pop_front();
-      if (pending.configEpoch != m_configEpoch ||
-          !SameCfg(pending.cfg, m_activeCfg))
-        return true;
       bool configured = false;
       for (const PeerState& peer : m_peers)
         if (peer.subscribed && peer.configured)
@@ -3620,6 +3674,11 @@ struct CNetworkVideo::Impl
           configured = true;
         }
       if (!configured)
+        return false;
+      pending = std::move(m_frames.front());
+      m_frames.pop_front();
+      if (pending.configEpoch != m_configEpoch ||
+          !SameCfg(pending.cfg, m_activeCfg))
         return true;
       frameLimit = (std::min)(
         frameLimit, FrameLimitNL(pending.lease->time.postStart));
@@ -3812,6 +3871,8 @@ struct CNetworkVideo::Impl
     {
     }
     Flush();
+    if (RetryFrameReplays())
+      Flush();
   }
 };
 
@@ -3847,10 +3908,13 @@ void CNetworkVideo::DetachSender()
   CSRWExclusiveLock processLock(m_impl->m_processLock);
   CSRWExclusiveLock callbackLock(m_impl->m_senderCallbackLock);
   CSRWExclusiveLock lock(m_impl->m_lock);
-  m_impl->m_sender    = nullptr;
-  m_impl->m_sendBytes = 0;
+  m_impl->m_sender             = nullptr;
+  m_impl->m_latestSourceSerial = 0;
+  m_impl->m_sendBytes          = 0;
+  m_impl->m_frames.clear();
   m_impl->m_sends.clear();
   m_impl->m_peers.clear();
+  m_impl->m_latestFrame.reset();
 }
 
 bool CNetworkVideo::Start(uint32_t videoBitrateMbps,
@@ -3890,8 +3954,10 @@ void CNetworkVideo::Stop()
     m_impl->m_changing                = false;
     m_impl->m_sendBytes               = 0;
     m_impl->m_lastBudgetCaptureTimeNs = 0;
+    m_impl->m_latestSourceSerial      = 0;
     m_impl->m_frames.clear();
     m_impl->m_sends.clear();
+    m_impl->m_latestFrame.reset();
     for (Impl::PeerState& peer : m_impl->m_peers)
     {
       peer.configured     = false;
@@ -3973,10 +4039,7 @@ void CNetworkVideo::PeerDisconnected(const NetworkVideoPeer& key)
   if (peer != m_impl->m_peers.end())
     m_impl->m_peers.erase(peer);
   if (!m_impl->HasSubscribersNL())
-  {
     m_impl->m_lastBudgetCaptureTimeNs = 0;
-    m_impl->m_frames.clear();
-  }
 }
 
 NetworkVideoPacketResult CNetworkVideo::HandlePacket(
@@ -4035,6 +4098,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
         if (!m_impl->QueueConfigNL(
               *peer, packet.envelope.requestID))
           return NetworkVideoPacketResult::INVALID;
+        m_impl->ReplayLatestFrameNL(*peer);
       }
       else if (!m_impl->QueueStatusNL(
           *peer, LG_NET_VIDEO_STATE_SUBSCRIBED, 0,
@@ -4065,10 +4129,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       peer->componentEpoch  = 0;
       peer->keyframePending = false;
       if (!m_impl->HasSubscribersNL())
-      {
         m_impl->m_lastBudgetCaptureTimeNs = 0;
-        m_impl->m_frames.clear();
-      }
       break;
     }
 
@@ -4091,6 +4152,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
       peer->keyframePending = true;
+      m_impl->ReplayLatestFrameNL(*peer);
       break;
     }
 
@@ -4117,7 +4179,10 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
         feedback.flags & LG_NET_VIDEO_FEEDBACK_CONGESTED;
       if (feedback.flags & (LG_NET_VIDEO_FEEDBACK_REQUEST_KEYFRAME |
             LG_NET_VIDEO_FEEDBACK_DECODER_STALLED))
+      {
         peer->keyframePending = true;
+        m_impl->ReplayLatestFrameNL(*peer);
+      }
       break;
     }
 
@@ -4226,7 +4291,9 @@ void CNetworkVideo::Commit()
     m_impl->m_changing                = false;
     m_impl->m_configEpoch             = Next64(m_impl->m_configEpoch);
     m_impl->m_lastBudgetCaptureTimeNs = 0;
+    m_impl->m_latestSourceSerial      = 0;
     m_impl->m_frames.clear();
+    m_impl->m_latestFrame.reset();
     for (Impl::PeerState& peer : m_impl->m_peers)
       if (peer.subscribed)
       {
@@ -4261,13 +4328,13 @@ PushResult CNetworkVideo::Push(FrameIn frame, TexLease lease) noexcept
   if (!lock)
     return PushResult::BUSY;
   if (!m_impl->m_started || m_impl->m_stopped || m_impl->m_failed ||
-      !m_impl->m_active || m_impl->m_changing ||
-      !m_impl->HasSubscribersNL())
+      !m_impl->m_active || m_impl->m_changing)
     return PushResult::BUSY;
 
   const CFrameTex          * texture = lease.Get();
   const D3D12_RESOURCE_DESC  desc    = texture->Get()->GetDesc();
-  if (frame.graph != texture->graph || frame.desc.node != texture->node ||
+  if (!frame.desc.frame.content || !frame.desc.frame.content->serial ||
+      frame.graph != texture->graph || frame.desc.node != texture->node ||
       !Frame::Same(frame.desc.profile, m_impl->m_activeCfg.profile) ||
       !Frame::Same(texture->profile, m_impl->m_activeCfg.profile) ||
       desc.Dimension != D3D12_RESOURCE_DIMENSION_TEXTURE2D ||
@@ -4276,9 +4343,11 @@ PushResult CNetworkVideo::Push(FrameIn frame, TexLease lease) noexcept
       desc.Format != ProfileFormat(m_impl->m_activeCfg.profile.pixel) ||
       texture->State() != D3D12_RESOURCE_STATE_COMMON)
     return PushResult::STALE;
+  const uint64_t sourceSerial = frame.desc.frame.content->serial;
 
   try
   {
+    // Keep the newest source available until a subscriber can encode it.
     if (m_impl->m_frames.size() >= MAX_PENDING_FRAMES)
       m_impl->m_frames.pop_front();
     Impl::PendingFrame pending;
@@ -4287,6 +4356,7 @@ PushResult CNetworkVideo::Push(FrameIn frame, TexLease lease) noexcept
     pending.cfg         = m_impl->m_activeCfg;
     pending.configEpoch = m_impl->m_configEpoch;
     m_impl->m_frames.push_back(std::move(pending));
+    m_impl->m_latestSourceSerial = sourceSerial;
   }
   catch (...)
   {
