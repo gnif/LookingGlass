@@ -526,13 +526,14 @@ static void networkVideoSendSubscribeNL(NetworkVideo * video, uint64_t now)
       (!video->subscribePending && now < video->nextSubscribeNs))
     return;
 
+  /* Codec blocks are too small to use one QUIC datagram each efficiently.
+   * Prefer bulk delivery until the video protocol can aggregate multiple
+   * blocks into each datagram. */
   const LGNetVideoSubscribe subscribe =
   {
     .subscriptionID    = video->subscriberID,
     .preferredCodec    = LG_NET_VIDEO_CODEC_PYROWAVE,
-    .flags             = LG_NET_VIDEO_SUBSCRIBE_LOW_LATENCY |
-      (video->datagramsAvailable ?
-        LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS : 0U),
+    .flags             = LG_NET_VIDEO_SUBSCRIBE_LOW_LATENCY,
     .maxWidth          = NETWORK_VIDEO_MAX_WIDTH,
     .maxHeight         = NETWORK_VIDEO_MAX_HEIGHT,
     .maxFrameLength    = NETWORK_VIDEO_MAX_FRAME_LENGTH,
