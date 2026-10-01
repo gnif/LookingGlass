@@ -28,6 +28,7 @@
 
 #include <memory>
 #include <stdint.h>
+#include <vector>
 
 struct NetworkVideoPeer
 {
@@ -76,7 +77,7 @@ public:
     const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
-    const void * payload, uint32_t payloadLength) = 0;
+    std::shared_ptr<const std::vector<uint8_t>> payload) = 0;
 };
 
 class CNetworkVideo final : public ITexSink

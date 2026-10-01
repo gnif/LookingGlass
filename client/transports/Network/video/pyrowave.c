@@ -48,7 +48,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
+#include <string.h>
 
 #define NETWORK_PYROWAVE_HEADER_SIZE          8U
 #define NETWORK_PYROWAVE_DECOMPOSITION_LEVELS 5U
@@ -224,38 +224,41 @@ static bool networkPyroWaveSequenceProfile(
     range          == wireRange;
 }
 
-NetworkPyroWaveResult networkPyroWaveValidate(
+NetworkPyroWaveResult networkPyroWaveParse(
     const LGNetVideoStreamConfig * config, const void * data, size_t size,
-    uint32_t expectedBlocks, uint8_t * sequence)
+    uint32_t expectedBlocks, uint32_t * offsets, uint32_t offsetCount,
+    NetworkPyroWaveLayout * layout)
 {
   if (!networkPyroWaveProfileValid(config))
     return NETWORK_PYROWAVE_UNSUPPORTED;
-  if (!data || size < NETWORK_PYROWAVE_HEADER_SIZE || !expectedBlocks)
+  if (!data || size < NETWORK_PYROWAVE_HEADER_SIZE ||
+      size > config->maxFrameLength || !expectedBlocks || !offsets || !layout)
     return NETWORK_PYROWAVE_INVALID;
 
   uint32_t capacity;
   if (!networkPyroWaveBlockCapacity(config, &capacity) ||
-      expectedBlocks > capacity)
+      expectedBlocks > capacity || offsetCount != capacity)
     return NETWORK_PYROWAVE_INVALID;
 
-  const size_t seenSize = ((size_t)capacity + 7U) / 8U;
-  uint8_t    * seen     = calloc(1, seenSize);
-  if (!seen)
-    return NETWORK_PYROWAVE_NO_MEMORY;
+  memset(offsets, 0xff, (size_t)capacity * sizeof(*offsets));
+  *layout = (NetworkPyroWaveLayout){0};
 
   const uint8_t * bytes          = data;
-  size_t          remaining      = size;
+  size_t          cursor         = 0;
   uint32_t        uniqueBlocks   = 0;
   uint32_t        declaredBlocks = 0;
+  uint32_t        headerFirst    = 0;
+  uint32_t        headerSecond   = 0;
   uint8_t         frameSequence  = 0;
   bool            haveSequence   = false;
   bool            haveHeader     = false;
   bool            valid          = true;
 
-  while (valid && remaining >= NETWORK_PYROWAVE_HEADER_SIZE)
+  while (valid && size - cursor >= NETWORK_PYROWAVE_HEADER_SIZE)
   {
-    const uint32_t first          = networkPyroWaveReadU32(bytes);
-    const uint32_t second         = networkPyroWaveReadU32(bytes + 4U);
+    const uint32_t first          = networkPyroWaveReadU32(bytes + cursor);
+    const uint32_t second         = networkPyroWaveReadU32(
+        bytes + cursor + sizeof(uint32_t));
     const uint8_t  packetSequence =
       (uint8_t)((first >> 28) & NETWORK_PYROWAVE_SEQUENCE_MASK);
     const bool     extended       = (first >> 31) != 0;
@@ -277,16 +280,18 @@ NetworkPyroWaveResult networkPyroWaveValidate(
       if (code || width != config->width || height != config->height ||
           !blocks || blocks > capacity ||
           !networkPyroWaveSequenceProfile(config, second) ||
-          (haveHeader && blocks != declaredBlocks))
+          (haveHeader &&
+            (first != headerFirst || second != headerSecond)))
       {
         valid = false;
         break;
       }
 
       declaredBlocks = blocks;
+      headerFirst    = first;
+      headerSecond   = second;
       haveHeader     = true;
-      bytes          += NETWORK_PYROWAVE_HEADER_SIZE;
-      remaining      -= NETWORK_PYROWAVE_HEADER_SIZE;
+      cursor         += NETWORK_PYROWAVE_HEADER_SIZE;
       continue;
     }
 
@@ -294,31 +299,26 @@ NetworkPyroWaveResult networkPyroWaveValidate(
     const uint32_t payloadWords = (first >> 16) & UINT32_C(0x00000FFF);
     const uint32_t blockIndex   = second >> 8;
     const size_t   packetSize   = (size_t)payloadWords * sizeof(uint32_t);
-    if (!ballot || payloadWords < 2U || packetSize > remaining ||
-        blockIndex >= capacity ||
-        !networkPyroWavePacketValid(bytes, packetSize, (uint16_t)ballot))
+    if (!ballot || payloadWords < 2U || packetSize > size - cursor ||
+        blockIndex >= capacity || offsets[blockIndex] != UINT32_MAX ||
+        !networkPyroWavePacketValid(
+          bytes + cursor, packetSize, (uint16_t)ballot))
     {
       valid = false;
       break;
     }
 
-    const uint8_t mask = (uint8_t)(1U << (blockIndex & 7U));
-    if (!(seen[blockIndex >> 3] & mask))
-    {
-      seen[blockIndex >> 3] |= mask;
-      ++uniqueBlocks;
-    }
-    bytes     += packetSize;
-    remaining -= packetSize;
+    offsets[blockIndex] = (uint32_t)(cursor / sizeof(uint32_t));
+    ++uniqueBlocks;
+    cursor += packetSize;
   }
 
-  valid = valid && !remaining && haveHeader && haveSequence &&
+  valid = valid && cursor == size && haveHeader && haveSequence &&
     declaredBlocks == uniqueBlocks && expectedBlocks == uniqueBlocks;
-  free(seen);
   if (!valid)
     return NETWORK_PYROWAVE_INVALID;
 
-  if (sequence)
-    *sequence = frameSequence;
+  layout->sequence   = frameSequence;
+  layout->chromaLeft = (headerSecond >> 31) != 0;
   return NETWORK_PYROWAVE_OK;
 }

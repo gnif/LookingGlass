@@ -59,11 +59,19 @@ namespace
   static constexpr uint16_t NETWORK_PEER_BIDI_STREAMS        = 16;
   static constexpr uint16_t NETWORK_PEER_UNIDI_STREAMS       = 16;
   static constexpr uint16_t NETWORK_BULK_STREAMS_PER_SERVICE = 1;
+  static constexpr uint32_t NETWORK_STREAM_RECV_BUFFER       =
+    1U * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_STREAM_RECV_WINDOW       =
+    128U * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_CONN_RECV_WINDOW         =
+    256U * 1024U * 1024U;
   static constexpr uint32_t NETWORK_MAX_CONTROL_PAYLOAD      =
     LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE +
       LG_NET_CURSOR_MAX_SHAPE_LENGTH;
   static constexpr size_t   NETWORK_MAX_CONTROL_BUFFER       =
     LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD;
+  static constexpr uint32_t NETWORK_MAX_NEGOTIATED_PAYLOAD   =
+    LG_NET_MAX_PAYLOAD_LENGTH;
   static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD     = 1136;
   static constexpr uint32_t NETWORK_INPUT_LEASE_MS           = 500;
   static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER        = 0x01;
@@ -95,6 +103,10 @@ namespace
   static constexpr uint32_t NETWORK_SEND_BULK_COUNT_MAX          = 256;
   static constexpr uint64_t NETWORK_SEND_BULK_BYTES_MAX          =
     UINT64_C(256) * 1024U * 1024U;
+  static constexpr uint32_t NETWORK_VIDEO_BULK_COUNT_MAX         = 3;
+  static constexpr uint64_t NETWORK_VIDEO_BULK_BYTES_MAX         =
+    static_cast<uint64_t>(NETWORK_VIDEO_BULK_COUNT_MAX) *
+      (LG_NET_ENVELOPE_WIRE_SIZE + LG_NET_MAX_PAYLOAD_LENGTH);
   static constexpr uint32_t NETWORK_SEND_RESUME_NUMERATOR        = 3;
   static constexpr uint32_t NETWORK_SEND_RESUME_DENOMINATOR      = 4;
 
@@ -352,12 +364,18 @@ struct CNetworkServer::Impl
 
   struct Send
   {
-    QUIC_BUFFER          buffer    = {};
+    using SharedData = std::shared_ptr<const std::vector<uint8_t>>;
+
+    QUIC_BUFFER          buffers [2]                         = {};
+    uint8_t              envelope[LG_NET_ENVELOPE_WIRE_SIZE] = {};
     std::vector<uint8_t> data;
-    LGNetService         service   = LG_NET_SERVICE_CORE;
-    uint32_t             length    = 0;
-    Delivery             delivery  = Delivery::RELIABLE;
-    bool                 accounted = true;
+    SharedData           sharedData;
+
+    uint32_t             bufferCount = 1;
+    LGNetService         service     = LG_NET_SERVICE_CORE;
+    uint32_t             length      = 0;
+    Delivery             delivery    = Delivery::RELIABLE;
+    bool                 accounted   = true;
   };
 
   struct SendLimits
@@ -826,7 +844,8 @@ struct CNetworkServer::Impl
         connection->selectedCapabilities[LG_NET_SERVICE_VIDEO];
       info.serviceVersion     = capability.versionMin;
       info.capabilityFlags    = capability.flags;
-      info.maxReliablePayload = capability.maxPayloadLength;
+      info.maxReliablePayload = (std::min)(
+        capability.maxPayloadLength, NETWORK_MAX_CONTROL_PAYLOAD);
       info.maxDatagramPayload = capability.maxDatagramPayload;
       info.maxBulkPayload     =
         capability.flags & LG_NET_CAPABILITY_BULK ?
@@ -840,8 +859,16 @@ struct CNetworkServer::Impl
     const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
-    const void * payload, uint32_t payloadLength)
+    std::shared_ptr<const std::vector<uint8_t>> payload)
   {
+    if (payload && payload->size() > UINT32_MAX)
+      return NetworkVideoSendResult::FAILED;
+
+    const auto payloadLength = static_cast<uint32_t>(
+      payload ? payload->size() : 0U);
+    const auto payloadData   = payloadLength ?
+      static_cast<const void *>(payload->data()) : nullptr;
+
     CSRWSharedLock guard(lock);
     for (Connection * connection : connections)
     {
@@ -855,19 +882,19 @@ struct CNetworkServer::Impl
         case NetworkVideoDelivery::RELIABLE:
           result = TrySendPacket(*connection, LG_NET_SERVICE_VIDEO,
             messageType, flags, componentEpoch, requestID,
-            payload, payloadLength);
+            payloadData, payloadLength);
           break;
 
         case NetworkVideoDelivery::DATAGRAM:
           result = TrySendDatagram(*connection, LG_NET_SERVICE_VIDEO,
             messageType, flags, componentEpoch, requestID,
-            payload, payloadLength, true);
+            payloadData, payloadLength, true, std::move(payload));
           break;
 
         case NetworkVideoDelivery::BULK:
           result = TrySendBulk(*connection, LG_NET_SERVICE_VIDEO,
             messageType, flags, componentEpoch, requestID,
-            payload, payloadLength);
+            payloadData, payloadLength, std::move(payload));
           break;
       }
 
@@ -926,7 +953,11 @@ struct CNetworkServer::Impl
       switch (service)
       {
         case LG_NET_SERVICE_VIDEO:
-          return { 128U, UINT64_C(192) * 1024U * 1024U };
+          return
+          {
+            NETWORK_VIDEO_BULK_COUNT_MAX,
+            NETWORK_VIDEO_BULK_BYTES_MAX,
+          };
 
         case LG_NET_SERVICE_CLIPBOARD:
         case LG_NET_SERVICE_FILE:
@@ -1390,10 +1421,11 @@ struct CNetworkServer::Impl
         return SendResult::FAILED;
       }
 
-      send->buffer.Buffer = send->data.data();
-      send->buffer.Length = static_cast<uint32_t>(wireSize);
-      status = api->StreamSend(connection.controlStream, &send->buffer, 1,
-        QUIC_SEND_FLAG_NONE, send.get());
+      send->buffers[0].Buffer = send->data.data();
+      send->buffers[0].Length = static_cast<uint32_t>(wireSize);
+      status                  = api->StreamSend(
+        connection.controlStream, send->buffers,
+        send->bufferCount, QUIC_SEND_FLAG_NONE, send.get());
       if (QUIC_FAILED(status))
       {
         --connection.sendSequence;
@@ -1530,8 +1562,17 @@ struct CNetworkServer::Impl
   SendResult TrySendBulk(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
-    uint32_t payloadLength)
+    uint32_t payloadLength,
+    std::shared_ptr<const std::vector<uint8_t>> sharedPayload = {})
   {
+    if (sharedPayload)
+    {
+      if (service != LG_NET_SERVICE_VIDEO ||
+          sharedPayload->size() != static_cast<size_t>(payloadLength))
+        return SendResult::FAILED;
+      payload = payloadLength ? sharedPayload->data() : nullptr;
+    }
+
     const LGNetServiceVersionInfo * version =
       lgNetServiceVersionInfo(service);
     const LGNetMessageRoute       * route   =
@@ -1545,10 +1586,11 @@ struct CNetworkServer::Impl
           LG_NET_ENVELOPE_EARLY_DATA))
       return SendResult::FAILED;
 
-    const size_t     packetSize =
+    const size_t     packetSize     =
       LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
-    const SendLimits limits     =
+    const SendLimits limits         =
       GetSendLimits(service, Delivery::BULK);
+    const bool       scatterPayload = static_cast<bool>(sharedPayload);
     if (packetSize > limits.bytes ||
         packetSize > NETWORK_SEND_BULK_BYTES_MAX)
       return SendResult::FAILED;
@@ -1609,17 +1651,20 @@ retry:
         ReleaseSendLocked(connection, rollback);
         return SendResult::FAILED;
       }
-      try
+      if (!scatterPayload)
       {
-        send->data.resize(packetSize);
-      }
-      catch (...)
-      {
-        send->service  = service;
-        send->length   = static_cast<uint32_t>(packetSize);
-        send->delivery = Delivery::BULK;
-        ReleaseSendLocked(connection, *send);
-        return SendResult::FAILED;
+        try
+        {
+          send->data.resize(packetSize);
+        }
+        catch (...)
+        {
+          send->service  = service;
+          send->length   = static_cast<uint32_t>(packetSize);
+          send->delivery = Delivery::BULK;
+          ReleaseSendLocked(connection, *send);
+          return SendResult::FAILED;
+        }
       }
       send->service  = service;
       send->length   = static_cast<uint32_t>(packetSize);
@@ -1634,20 +1679,54 @@ retry:
       parameters.sequence       = ++stream->sendSequence;
       parameters.requestID      = requestID;
 
-      size_t wireSize;
-      if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
-            &wireSize, &parameters, payload, payloadLength) ||
-          wireSize != packetSize)
+      size_t wireSize = 0;
+      if (scatterPayload)
+      {
+        LGNetEnvelope envelope;
+        lgNetEnvelopeInit(&envelope, parameters.service,
+          parameters.messageType, parameters.serviceVersion,
+          parameters.messageVersion);
+        envelope.flags          = parameters.flags;
+        envelope.sessionEpoch   = parameters.sessionEpoch;
+        envelope.componentEpoch = parameters.componentEpoch;
+        envelope.sequence       = parameters.sequence;
+        envelope.requestID      = parameters.requestID;
+        envelope.payloadLength  = payloadLength;
+        if (lgNetEnvelopeEncode(send->envelope, sizeof(send->envelope),
+              &envelope))
+          wireSize = packetSize;
+      }
+      else if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
+            &wireSize, &parameters, payload, payloadLength))
+        wireSize = 0;
+
+      if (wireSize != packetSize)
       {
         --stream->sendSequence;
         ReleaseSendLocked(connection, *send);
         return SendResult::FAILED;
       }
 
-      send->buffer.Buffer = send->data.data();
-      send->buffer.Length = static_cast<uint32_t>(wireSize);
-      status = api->StreamSend(stream->handle, &send->buffer, 1,
-        QUIC_SEND_FLAG_NONE, send.get());
+      if (scatterPayload)
+      {
+        send->buffers[0].Buffer = send->envelope;
+        send->buffers[0].Length = LG_NET_ENVELOPE_WIRE_SIZE;
+        send->sharedData        = std::move(sharedPayload);
+        if (payloadLength)
+        {
+          send->buffers[1].Buffer = const_cast<uint8_t *>(
+            send->sharedData->data());
+          send->buffers[1].Length = payloadLength;
+          send->bufferCount       = 2;
+        }
+      }
+      else
+      {
+        send->buffers[0].Buffer = send->data.data();
+        send->buffers[0].Length = static_cast<uint32_t>(wireSize);
+      }
+      status = api->StreamSend(stream->handle, send->buffers,
+        send->bufferCount, QUIC_SEND_FLAG_NONE, send.get());
       if (QUIC_FAILED(status))
       {
         --stream->sendSequence;
@@ -1663,8 +1742,17 @@ retry:
   SendResult TrySendDatagram(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
-    uint32_t payloadLength, bool discardIfBlocked)
+    uint32_t payloadLength, bool discardIfBlocked,
+    std::shared_ptr<const std::vector<uint8_t>> sharedPayload = {})
   {
+    if (sharedPayload)
+    {
+      if (service != LG_NET_SERVICE_VIDEO ||
+          sharedPayload->size() != static_cast<size_t>(payloadLength))
+        return SendResult::FAILED;
+      payload = payloadLength ? sharedPayload->data() : nullptr;
+    }
+
     const LGNetServiceVersionInfo * version =
       lgNetServiceVersionInfo(service);
     const LGNetMessageRoute       * route   =
@@ -1678,8 +1766,9 @@ retry:
           LG_NET_ENVELOPE_EARLY_DATA))
       return SendResult::FAILED;
 
-    const size_t          packetSize =
+    const size_t          packetSize     =
       LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+    const bool            scatterPayload = static_cast<bool>(sharedPayload);
     std::unique_ptr<Send> send;
     QUIC_STATUS           status;
     {
@@ -1730,17 +1819,20 @@ retry:
         ReleaseSendLocked(connection, rollback);
         return SendResult::FAILED;
       }
-      try
+      if (!scatterPayload)
       {
-        send->data.resize(packetSize);
-      }
-      catch (...)
-      {
-        send->service  = service;
-        send->length   = static_cast<uint32_t>(packetSize);
-        send->delivery = Delivery::DATAGRAM;
-        ReleaseSendLocked(connection, *send);
-        return SendResult::FAILED;
+        try
+        {
+          send->data.resize(packetSize);
+        }
+        catch (...)
+        {
+          send->service  = service;
+          send->length   = static_cast<uint32_t>(packetSize);
+          send->delivery = Delivery::DATAGRAM;
+          ReleaseSendLocked(connection, *send);
+          return SendResult::FAILED;
+        }
       }
       send->service  = service;
       send->length   = static_cast<uint32_t>(packetSize);
@@ -1756,23 +1848,57 @@ retry:
       parameters.sequence       = ++connection.datagramSendSequence;
       parameters.requestID      = requestID;
 
-      size_t wireSize;
-      if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
-            &wireSize, &parameters, payload, payloadLength) ||
-          wireSize > UINT32_MAX)
+      size_t wireSize = 0;
+      if (scatterPayload)
+      {
+        LGNetEnvelope envelope;
+        lgNetEnvelopeInit(&envelope, parameters.service,
+          parameters.messageType, parameters.serviceVersion,
+          parameters.messageVersion);
+        envelope.flags          = parameters.flags;
+        envelope.sessionEpoch   = parameters.sessionEpoch;
+        envelope.componentEpoch = parameters.componentEpoch;
+        envelope.sequence       = parameters.sequence;
+        envelope.requestID      = parameters.requestID;
+        envelope.payloadLength  = payloadLength;
+        if (lgNetEnvelopeEncode(send->envelope, sizeof(send->envelope),
+              &envelope))
+          wireSize = packetSize;
+      }
+      else if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
+            &wireSize, &parameters, payload, payloadLength))
+        wireSize = 0;
+
+      if (wireSize != packetSize)
       {
         --connection.datagramSendSequence;
         ReleaseSendLocked(connection, *send);
         return SendResult::FAILED;
       }
 
-      send->buffer.Buffer = send->data.data();
-      send->buffer.Length = static_cast<uint32_t>(wireSize);
+      if (scatterPayload)
+      {
+        send->buffers[0].Buffer = send->envelope;
+        send->buffers[0].Length = LG_NET_ENVELOPE_WIRE_SIZE;
+        send->sharedData        = std::move(sharedPayload);
+        if (payloadLength)
+        {
+          send->buffers[1].Buffer = const_cast<uint8_t *>(
+            send->sharedData->data());
+          send->buffers[1].Length = payloadLength;
+          send->bufferCount       = 2;
+        }
+      }
+      else
+      {
+        send->buffers[0].Buffer = send->data.data();
+        send->buffers[0].Length = static_cast<uint32_t>(wireSize);
+      }
       QUIC_SEND_FLAGS sendFlags = QUIC_SEND_FLAG_PRIORITY_WORK;
       if (discardIfBlocked)
         sendFlags |= QUIC_SEND_FLAG_CANCEL_ON_BLOCKED;
-      status = api->DatagramSend(connection.handle, &send->buffer, 1,
-        sendFlags, send.get());
+      status = api->DatagramSend(connection.handle, send->buffers,
+        send->bufferCount, sendFlags, send.get());
       if (QUIC_FAILED(status))
       {
         --connection.datagramSendSequence;
@@ -1838,8 +1964,8 @@ retry:
       connection.receivedCapabilities     = 0;
       connection.selectedCapabilityCount  = 0;
       connection.maxPayload               = hello.maxPayloadLength <
-        NETWORK_MAX_CONTROL_PAYLOAD ? hello.maxPayloadLength :
-          static_cast<uint32_t>(NETWORK_MAX_CONTROL_PAYLOAD);
+        NETWORK_MAX_NEGOTIATED_PAYLOAD ? hello.maxPayloadLength :
+          NETWORK_MAX_NEGOTIATED_PAYLOAD;
       connection.maxDatagramPayload       = hello.maxDatagramPayload <
         NETWORK_MAX_DATAGRAM_PAYLOAD ? hello.maxDatagramPayload :
           NETWORK_MAX_DATAGRAM_PAYLOAD;
@@ -4694,12 +4820,12 @@ retry:
           return QUIC_STATUS_SUCCESS;
         }
 
-        send->buffer.Buffer = send->data.data();
-        send->buffer.Length = LG_NET_STREAM_BINDING_WIRE_SIZE;
-        send->service       = stream.service;
-        send->length        = LG_NET_STREAM_BINDING_WIRE_SIZE;
-        send->delivery      = Delivery::BULK;
-        send->accounted     = false;
+        send->buffers[0].Buffer = send->data.data();
+        send->buffers[0].Length = LG_NET_STREAM_BINDING_WIRE_SIZE;
+        send->service           = stream.service;
+        send->length            = LG_NET_STREAM_BINDING_WIRE_SIZE;
+        send->delivery          = Delivery::BULK;
+        send->accounted         = false;
 
         uint16_t    ready;
         QUIC_STATUS status;
@@ -4712,8 +4838,9 @@ retry:
             connection.outboundBulk[stream.service] == &stream &&
             (connection.selectedServices & serviceMask) &&
             (connection.bulkServices & serviceMask);
-          status = valid ? owner.api->StreamSend(handle, &send->buffer, 1,
-            QUIC_SEND_FLAG_NONE, send.get()) : QUIC_STATUS_ABORTED;
+          status = valid ? owner.api->StreamSend(handle, send->buffers,
+            send->bufferCount, QUIC_SEND_FLAG_NONE, send.get()) :
+            QUIC_STATUS_ABORTED;
           ready  = 0;
           if (QUIC_SUCCEEDED(status))
           {
@@ -4905,25 +5032,36 @@ retry:
     }
 
     QUIC_SETTINGS quicSettings = {};
-    quicSettings.IsSet.HandshakeIdleTimeoutMs = TRUE;
-    quicSettings.IsSet.IdleTimeoutMs          = TRUE;
-    quicSettings.IsSet.InitialRttMs           = TRUE;
-    quicSettings.IsSet.MaxAckDelayMs          = TRUE;
-    quicSettings.IsSet.KeepAliveIntervalMs    = TRUE;
-    quicSettings.IsSet.PeerBidiStreamCount    = TRUE;
-    quicSettings.IsSet.PeerUnidiStreamCount   = TRUE;
-    quicSettings.IsSet.DatagramReceiveEnabled = TRUE;
-    quicSettings.IsSet.ServerResumptionLevel  = TRUE;
+    quicSettings.IsSet.HandshakeIdleTimeoutMs         = TRUE;
+    quicSettings.IsSet.IdleTimeoutMs                  = TRUE;
+    quicSettings.IsSet.StreamRecvBufferDefault        = TRUE;
+    quicSettings.IsSet.ConnFlowControlWindow          = TRUE;
+    quicSettings.IsSet.InitialRttMs                   = TRUE;
+    quicSettings.IsSet.MaxAckDelayMs                  = TRUE;
+    quicSettings.IsSet.KeepAliveIntervalMs            = TRUE;
+    quicSettings.IsSet.PeerBidiStreamCount            = TRUE;
+    quicSettings.IsSet.PeerUnidiStreamCount           = TRUE;
+    quicSettings.IsSet.SendBufferingEnabled           = TRUE;
+    quicSettings.IsSet.DatagramReceiveEnabled         = TRUE;
+    quicSettings.IsSet.ServerResumptionLevel          = TRUE;
+    quicSettings.IsSet.StreamRecvWindowUnidiDefault   = TRUE;
     quicSettings.HandshakeIdleTimeoutMs       = NETWORK_HANDSHAKE_TIMEOUT_MS;
     quicSettings.IdleTimeoutMs                = NETWORK_IDLE_TIMEOUT_MS;
+    quicSettings.StreamRecvBufferDefault      =
+      NETWORK_STREAM_RECV_BUFFER;
+    quicSettings.ConnFlowControlWindow        =
+      NETWORK_CONN_RECV_WINDOW;
     quicSettings.InitialRttMs                 = NETWORK_INITIAL_RTT_MS;
     quicSettings.MaxAckDelayMs                = 1;
     quicSettings.KeepAliveIntervalMs          =
       NETWORK_KEEPALIVE_INTERVAL_MS;
     quicSettings.PeerBidiStreamCount          = NETWORK_PEER_BIDI_STREAMS;
     quicSettings.PeerUnidiStreamCount         = NETWORK_PEER_UNIDI_STREAMS;
+    quicSettings.SendBufferingEnabled         = FALSE;
     quicSettings.DatagramReceiveEnabled       = TRUE;
     quicSettings.ServerResumptionLevel        = QUIC_SERVER_NO_RESUME;
+    quicSettings.StreamRecvWindowUnidiDefault =
+      NETWORK_STREAM_RECV_WINDOW;
 
     QUIC_BUFFER alpn = {};
     alpn.Buffer      = reinterpret_cast<uint8_t *>(
@@ -5121,10 +5259,10 @@ NetworkVideoSendResult CNetworkServer::SendVideo(
   const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
   uint16_t messageType, LGNetEnvelopeFlags flags,
   uint64_t componentEpoch, uint64_t requestID,
-  const void * payload, uint32_t payloadLength)
+  std::shared_ptr<const std::vector<uint8_t>> payload)
 {
   return m_impl ?
     m_impl->SendVideo(peer, delivery, messageType, flags,
-      componentEpoch, requestID, payload, payloadLength) :
+      componentEpoch, requestID, std::move(payload)) :
     NetworkVideoSendResult::FAILED;
 }

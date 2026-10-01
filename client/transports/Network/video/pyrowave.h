@@ -31,12 +31,19 @@ typedef enum NetworkPyroWaveResult
   NETWORK_PYROWAVE_OK,
   NETWORK_PYROWAVE_INVALID,
   NETWORK_PYROWAVE_UNSUPPORTED,
-  NETWORK_PYROWAVE_NO_MEMORY,
 }
 NetworkPyroWaveResult;
 
+typedef struct NetworkPyroWaveLayout
+{
+  uint8_t sequence;
+  bool    chromaLeft;
+}
+NetworkPyroWaveLayout;
+
 bool networkPyroWaveProfileValid(const LGNetVideoStreamConfig * config);
 
-NetworkPyroWaveResult networkPyroWaveValidate(
+NetworkPyroWaveResult networkPyroWaveParse(
     const LGNetVideoStreamConfig * config, const void * data, size_t size,
-    uint32_t expectedBlocks, uint8_t * sequence);
+    uint32_t expectedBlocks, uint32_t * offsets, uint32_t offsetCount,
+    NetworkPyroWaveLayout * layout);

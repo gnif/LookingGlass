@@ -56,7 +56,7 @@
 #include <wrl.h>
 
 #include <algorithm>
-#include <array>
+#include <atomic>
 #include <cmath>
 #include <deque>
 #include <limits>
@@ -68,23 +68,57 @@ using namespace Microsoft::WRL;
 
 namespace
 {
-  constexpr uint32_t STREAM_ID              = 1;
-  constexpr uint32_t MAX_WIDTH              = 8192;
-  constexpr uint32_t MAX_HEIGHT             = 8192;
-  constexpr uint32_t MAX_FRAME_LENGTH       = LG_NET_VIDEO_MAX_FRAME_LENGTH;
-  constexpr uint32_t MAX_BLOCKS             = 262144;
-  constexpr uint32_t MAX_PENDING_FRAMES     = 2;
-  constexpr uint32_t MAX_SEND_ITEMS         = 8192;
-  constexpr size_t   MAX_SEND_BYTES         = 96U * 1024U * 1024U;
-  constexpr uint32_t MAX_FRAME_LATENCY_MS   = 50;
-  constexpr uint32_t PYROWAVE_LEVELS        = 5;
-  constexpr uint32_t PYROWAVE_ALIGNMENT     = 1U << PYROWAVE_LEVELS;
-  constexpr uint32_t PYROWAVE_MIN_DIMENSION = 4U << PYROWAVE_LEVELS;
-  constexpr uint8_t  PYROWAVE_QUANT_CODE    = 104;
-  constexpr uint8_t  PYROWAVE_QSCALE_CODE   = 6;
-  constexpr float    PYROWAVE_QUANT_SCALE   = 512.0f;
+  constexpr uint32_t STREAM_ID                  = 1;
+  constexpr uint32_t MAX_WIDTH                  = 8192;
+  constexpr uint32_t MAX_HEIGHT                 = 8192;
+  constexpr uint32_t MAX_FRAME_LENGTH           = LG_NET_VIDEO_MAX_FRAME_LENGTH;
+  constexpr uint32_t MAX_BLOCKS                 = 262144;
+  constexpr uint32_t MAX_PENDING_FRAMES         = 1;
+  constexpr uint32_t MAX_SEND_ITEMS             = 8192;
+  constexpr size_t   MAX_SEND_BYTES             = 96U * 1024U * 1024U;
+  constexpr uint32_t MAX_FRAME_LATENCY_MS       = 50;
+  constexpr uint32_t ENCODER_SLOT_COUNT         = 2;
+  constexpr uint32_t PYROWAVE_LEVELS            = 5;
+  constexpr uint32_t PYROWAVE_ALIGNMENT         = 1U << PYROWAVE_LEVELS;
+  constexpr uint32_t PYROWAVE_MIN_DIMENSION     = 4U << PYROWAVE_LEVELS;
+  constexpr uint32_t PYROWAVE_PACKET_BYTES      = 2488;
+  constexpr uint32_t PYROWAVE_BLOCK_BYTES_MAX   =
+    PYROWAVE_PACKET_BYTES + 8U;
+  // Reserve an equal fragment budget for every possible codec block so a
+  // negotiated delivery path can always represent the encoded frame.
+  constexpr uint32_t PYROWAVE_FRAGS_PER_BLOCK   =
+    LG_NET_VIDEO_MAX_FRAGMENTS / MAX_BLOCKS;
+  constexpr uint32_t PYROWAVE_FRAGMENT_DATA_MIN =
+    (PYROWAVE_BLOCK_BYTES_MAX + PYROWAVE_FRAGS_PER_BLOCK - 1U) /
+      PYROWAVE_FRAGS_PER_BLOCK;
+  constexpr uint32_t PYROWAVE_FRAGMENT_MIN      =
+    LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE + PYROWAVE_FRAGMENT_DATA_MIN;
+  constexpr uint32_t PYROWAVE_PACKET_META_WORDS = 2;
+  constexpr uint32_t PYROWAVE_QUANT_WORDS_8X8   = 40;
+  constexpr uint32_t PYROWAVE_STATE_BYTES       = 16;
+  constexpr uint32_t PYROWAVE_QUANT_LEVELS      = 19;
+  constexpr uint32_t PYROWAVE_STAT_WORDS        =
+    1U + PYROWAVE_QUANT_LEVELS * 2U;
+  constexpr uint32_t PYROWAVE_RDO_BUCKETS       = 128;
+  constexpr uint32_t PYROWAVE_RDO_DIVISIONS     = 16;
+  constexpr uint32_t PYROWAVE_RDO_WORDS         =
+    16U + PYROWAVE_RDO_BUCKETS * PYROWAVE_RDO_DIVISIONS;
+  constexpr uint32_t PYROWAVE_MAX_8X8_BLOCKS    = MAX_BLOCKS * 16U;
+  constexpr uint64_t MAX_PLANE_ELEMENTS         = UINT64_C(1) <<
+    D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP;
 
-  constexpr LGNetEnvelopeFlags DELIVERY_MASK =
+  constexpr LGNetVideoChromaSubsampling CHROMA_420 =
+    static_cast<LGNetVideoChromaSubsampling>(LG_NET_VIDEO_CHROMA_420);
+  constexpr LGNetVideoChromaSubsampling CHROMA_444 =
+    static_cast<LGNetVideoChromaSubsampling>(LG_NET_VIDEO_CHROMA_444);
+
+  static_assert(PYROWAVE_FRAGS_PER_BLOCK > 0,
+    "The transport must represent every codec block");
+  static_assert(PYROWAVE_BLOCK_BYTES_MAX <=
+      PYROWAVE_FRAGS_PER_BLOCK * LG_NET_VIDEO_MAX_FRAGMENT_LENGTH,
+    "The fragment payload limit must represent every codec block");
+
+  constexpr LGNetEnvelopeFlags DELIVERY_MASK    =
     LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL |
     LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
     LG_NET_ENVELOPE_ACK_REQUIRED | LG_NET_ENVELOPE_ERROR |
@@ -97,6 +131,30 @@ namespace
     { FrameStorage::D3D12_TEXTURE, FramePixel::RGB10A2, FrameSignal::PQ_BT2020 },
   };
 
+  uint32_t Align(uint32_t value, uint32_t alignment)
+  {
+    return (value + alignment - 1U) & ~(alignment - 1U);
+  }
+
+  bool PlaneElementsFit(uint32_t width, uint32_t height,
+    LGNetVideoChromaSubsampling chroma)
+  {
+    if (!width || !height || width > MAX_WIDTH || height > MAX_HEIGHT)
+      return false;
+    const uint32_t alignedWidth  = (std::max)(
+      Align(width, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
+    const uint32_t alignedHeight = (std::max)(
+      Align(height, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
+    if (alignedWidth > MAX_WIDTH || alignedHeight > MAX_HEIGHT)
+      return false;
+    const uint64_t lumaPixels    =
+      static_cast<uint64_t>(alignedWidth) * alignedHeight;
+    const uint64_t planeElements =
+      chroma == CHROMA_420 ?
+        lumaPixels + lumaPixels / 2U : lumaPixels * 3U;
+    return planeElements <= MAX_PLANE_ELEMENTS;
+  }
+
   class NetworkVideoFrameCaps final : public FrameCaps
   {
   public:
@@ -106,7 +164,8 @@ namespace
       if (requiredSizeMiB)
         *requiredSizeMiB = 0;
       return mode.width && mode.height && mode.refresh100uHz &&
-        mode.width <= MAX_WIDTH && mode.height <= MAX_HEIGHT;
+        PlaneElementsFit(mode.width, mode.height,
+          CHROMA_444);
     }
   };
 
@@ -129,21 +188,23 @@ namespace
     return false;
   }
 
-  uint32_t Align(uint32_t value, uint32_t alignment)
+  uint32_t NextPowerOfTwo(uint32_t value)
   {
-    return (value + alignment - 1U) & ~(alignment - 1U);
+    if (value <= 1U)
+      return 1U;
+    --value;
+    value |= value >> 1U;
+    value |= value >> 2U;
+    value |= value >> 4U;
+    value |= value >> 8U;
+    value |= value >> 16U;
+    return value + 1U;
   }
 
   uint64_t Next64(uint64_t value)
   {
     ++value;
     return value ? value : 1;
-  }
-
-  uint64_t MonotonicNs()
-  {
-    const uint64_t now = GetTickCount64() * UINT64_C(1000000);
-    return now ? now : 1;
   }
 
   LGNetEnvelopeFlags DeliveryFlag(NetworkVideoDelivery delivery)
@@ -224,37 +285,18 @@ namespace
     return 0;
   }
 
-  void AppendLE16(std::vector<uint8_t>& data, uint16_t value)
+  bool DatagramFragmentsSupported(const NetworkVideoPeerInfo& info)
   {
-    data.push_back(static_cast<uint8_t>(value));
-    data.push_back(static_cast<uint8_t>(value >> 8));
+    return DeliverySupported(info, NetworkVideoDelivery::RELIABLE) &&
+      info.maxReliablePayload >= PYROWAVE_FRAGMENT_MIN &&
+      DeliverySupported(info, NetworkVideoDelivery::DATAGRAM) &&
+      info.maxDatagramPayload >= PYROWAVE_FRAGMENT_MIN;
   }
 
-  void AppendLE32(std::vector<uint8_t>& data, uint32_t value)
+  bool BulkFragmentsSupported(const NetworkVideoPeerInfo& info)
   {
-    data.push_back(static_cast<uint8_t>(value));
-    data.push_back(static_cast<uint8_t>(value >> 8));
-    data.push_back(static_cast<uint8_t>(value >> 16));
-    data.push_back(static_cast<uint8_t>(value >> 24));
-  }
-
-  void StoreLE32(uint8_t * data, uint32_t value)
-  {
-    data[0] = static_cast<uint8_t>(value);
-    data[1] = static_cast<uint8_t>(value >> 8);
-    data[2] = static_cast<uint8_t>(value >> 16);
-    data[3] = static_cast<uint8_t>(value >> 24);
-  }
-
-  unsigned MagnitudeBits(uint16_t value)
-  {
-    unsigned bits = 0;
-    while (value)
-    {
-      ++bits;
-      value >>= 1;
-    }
-    return bits;
+    return DeliverySupported(info, NetworkVideoDelivery::BULK) &&
+      info.maxBulkPayload >= PYROWAVE_FRAGMENT_MIN;
   }
 
   bool Multiply(size_t left, size_t right, size_t& result)
@@ -292,30 +334,38 @@ namespace
     return DXGI_FORMAT_UNKNOWN;
   }
 
-  // The CDF 9/7 lifting constants and pass order below are derived from
-  // PyroWave commit 89f7e47d4abbf650c91fae766728af866c5e32a0.
+  // The tiled transform, quantization, rate control, and packing pipeline is
+  // derived from PyroWave commit 89f7e47d4abbf650c91fae766728af866c5e32a0.
   // Copyright (c) 2025 Hans-Kristian Arntzen, provided under the MIT license.
   constexpr char ENCODER_SHADER[] = R"hlsl(
-Texture2D<float4>              Source  : register(t0);
-RWStructuredBuffer<float>      Wave    : register(u0);
-RWStructuredBuffer<float>      Scratch : register(u1);
-RWStructuredBuffer<uint>       Quant   : register(u2);
+Texture2D<float4>         Source       : register(t0);
+RWStructuredBuffer<float> Wave         : register(u0);
+RWStructuredBuffer<float> Scratch      : register(u1);
+RWStructuredBuffer<float> Atlas        : register(u2);
+RWStructuredBuffer<float> Planes       : register(u3);
+RWByteAddressBuffer       Packed       : register(u4);
+RWByteAddressBuffer       PackState    : register(u5);
+RWStructuredBuffer<uint>  Aux          : register(u6);
+RWStructuredBuffer<uint>  QuantPayload : register(u7);
 
 cbuffer Parameters : register(b0)
 {
   uint4  Dim0;
   uint4  Op0;
   uint4  Op1;
+  uint4  AuxBase;
   float4 Values;
 };
 
 uint mirrorCoord(int coord, uint length)
 {
-  if (coord < 0)
-    return uint(-coord);
-  if (uint(coord) >= length)
-    return 2u * length - 2u - uint(coord);
-  return uint(coord);
+  if (length <= 1u)
+    return 0u;
+  const int period  = int(2u * (length - 1u));
+  int       wrapped = coord % period;
+  if (wrapped < 0)
+    wrapped += period;
+  return uint(wrapped) < length ? uint(wrapped) : uint(period - wrapped);
 }
 
 float3 rgbToYCbCr(float3 rgb, bool bt2020)
@@ -328,110 +378,985 @@ float3 rgbToYCbCr(float3 rgb, bool bt2020)
     (rgb.r - y) / (2.0 * (1.0 - kr)));
 }
 
-float3 loadYCbCr(uint2 coord, bool bt2020)
+float3 loadSourceYCbCr(int2 coord, bool bt2020)
 {
-  coord.x = min(coord.x, Dim0.x - 1u);
-  coord.y = min(coord.y, Dim0.y - 1u);
+  coord.x = clamp(coord.x, 0, int(Dim0.x) - 1);
+  coord.y = clamp(coord.y, 0, int(Dim0.y) - 1);
   return rgbToYCbCr(Source.Load(int3(coord, 0)).rgb, bt2020);
+}
+
+float lumaValue(float value)
+{
+  return (64.0 / 1023.0 + value * (876.0 / 1023.0)) - 0.5;
+}
+
+float chromaValue(float value)
+{
+  return (512.0 / 1023.0 - 0.5) + value * (896.0 / 1023.0);
 }
 
 [numthreads(8, 8, 1)]
 void ColorMain(uint3 tid : SV_DispatchThreadID)
 {
-  const uint component = Op0.z;
+  const bool subsampled = Op0.w != 0u;
+  const bool bt2020     = Op1.x != 0u;
+  if (subsampled)
+  {
+    const uint chromaWidth  = Dim0.z >> 1u;
+    const uint chromaHeight = Dim0.w >> 1u;
+    if (tid.x >= chromaWidth || tid.y >= chromaHeight)
+      return;
+    const uint2  chromaLimit = Dim0.xy >> 1u;
+    const uint2  chromaCoord = min(tid.xy, chromaLimit - 1u);
+    const int2   chromaSrc   = int2(chromaCoord * 2u);
+    const float3 a           = loadSourceYCbCr(chromaSrc, bt2020);
+    const float3 b           = loadSourceYCbCr(
+      chromaSrc + int2(1, 0), bt2020);
+    const float3 c           = loadSourceYCbCr(
+      chromaSrc + int2(0, 1), bt2020);
+    const float3 d           = loadSourceYCbCr(
+      chromaSrc + int2(1, 1), bt2020);
+    float3       ya          = a;
+    float3       yb          = b;
+    float3       yc          = c;
+    float3       yd          = d;
+    const int2   lumaSrc     = int2(tid.xy * 2u);
+    if (any(tid.xy != chromaCoord))
+    {
+      ya = loadSourceYCbCr(lumaSrc, bt2020);
+      yb = loadSourceYCbCr(lumaSrc + int2(1, 0), bt2020);
+      yc = loadSourceYCbCr(lumaSrc + int2(0, 1), bt2020);
+      yd = loadSourceYCbCr(lumaSrc + int2(1, 1), bt2020);
+    }
+    const uint   y0  = (tid.y * 2u) * Dim0.z + tid.x * 2u;
+    const uint   y1  = y0 + Dim0.z;
+    Planes[Op0.x + y0]      = lumaValue(ya.x);
+    Planes[Op0.x + y0 + 1u] = lumaValue(yb.x);
+    Planes[Op0.x + y1]      = lumaValue(yc.x);
+    Planes[Op0.x + y1 + 1u] = lumaValue(yd.x);
+    const uint chroma = tid.y * chromaWidth + tid.x;
+    Planes[Op0.y + chroma] = chromaValue(
+      (a.y + b.y + c.y + d.y) * 0.25);
+    Planes[Op0.z + chroma] = chromaValue(
+      (a.z + b.z + c.z + d.z) * 0.25);
+    return;
+  }
+
   if (tid.x >= Dim0.z || tid.y >= Dim0.w)
     return;
+  const float3 yuv   = loadSourceYCbCr(int2(tid.xy), bt2020);
+  const uint   index = tid.y * Dim0.z + tid.x;
+  Planes[Op0.x + index] = lumaValue(yuv.x);
+  Planes[Op0.y + index] = chromaValue(yuv.y);
+  Planes[Op0.z + index] = chromaValue(yuv.z);
+}
 
-  const bool bt2020 = Op1.z != 0u;
-  float3     yuv;
-  if (Op0.w != 0u && component != 0u)
+groupshared float2 DWTShared[20 * 41];
+
+uint2 unswizzle8x8(uint index)
+{
+  uint y = index & 1u;
+  uint x = (index >> 1u) & 3u;
+  y |= ((index >> 3u) & 3u) << 1u;
+  x |= ((index >> 5u) & 1u) << 2u;
+  return uint2(x, y);
+}
+
+float loadPlaneValue(int2 coord)
+{
+  const uint x     = mirrorCoord(coord.x, Op0.x);
+  const uint y     = mirrorCoord(coord.y, Op0.y);
+  const uint index = Op1.w + y * Dim0.z + x;
+  if (Op1.x == 0u)
+    return Planes[index];
+  return Op1.y != 0u ? Scratch[index] : Wave[index];
+}
+
+void storeDWTValue(uint x, uint y, float value, bool low)
+{
+  if (x >= Op0.x || y >= Op0.y)
+    return;
+  const uint index = Op1.w + y * Dim0.z + x;
+  Atlas[index] = value;
+  if (!low)
+    return;
+  if (Op1.z != 0u)
+    Scratch[index] = value;
+  else
+    Wave[index] = value;
+}
+
+float2 loadDWTShared(uint y, uint x)
+{
+  return DWTShared[y * 41u + x];
+}
+
+void storeDWTShared(uint y, uint x, float2 value)
+{
+  DWTShared[y * 41u + x] = value;
+}
+
+void loadDWTQuad(uint2 group, uint2 local)
+{
+  const int2 coord = int2(group * 32u + local) - 4;
+  storeDWTShared(local.y >> 1u, local.x,
+    float2(loadPlaneValue(coord), loadPlaneValue(coord + int2(0, 1))));
+  storeDWTShared(local.y >> 1u, local.x + 1u,
+    float2(loadPlaneValue(coord + int2(1, 0)),
+      loadPlaneValue(coord + int2(1, 1))));
+}
+
+void forwardTransform8x2(uint lane)
+{
+  const float alpha = -1.586134342059924;
+  const float beta  = -0.052980118572961;
+  const float gamma =  0.882911075530934;
+  const float delta =  0.443506852043971;
+  const float k     =  1.230174104914001;
+  const float invK  =  1.0 / k;
+  const uint2 local = uint2(8u * (lane & 3u), lane >> 2u);
+  float2      values[16];
+  [unroll]
+  for (uint i = 0u; i < 16u; ++i)
+    values[i] = loadDWTShared(local.y, local.x + i);
+  [unroll]
+  for (uint i = 1u; i < 15u; i += 2u)
+    values[i] += alpha * (values[i - 1u] + values[i + 1u]);
+  [unroll]
+  for (uint i = 2u; i < 14u; i += 2u)
+    values[i] += beta * (values[i - 1u] + values[i + 1u]);
+  [unroll]
+  for (uint i = 3u; i < 13u; i += 2u)
+    values[i] += gamma * (values[i - 1u] + values[i + 1u]);
+  [unroll]
+  for (uint i = 4u; i < 12u; i += 2u)
+    values[i] += delta * (values[i - 1u] + values[i + 1u]);
+
+  GroupMemoryBarrierWithGroupSync();
+
+  [unroll]
+  for (uint i = 2u; i < 6u; ++i)
   {
-    const uint2 src = tid.xy * 2u;
-    yuv  = loadYCbCr(src,                       bt2020);
-    yuv += loadYCbCr(src + uint2(1u, 0u),       bt2020);
-    yuv += loadYCbCr(src + uint2(0u, 1u),       bt2020);
-    yuv += loadYCbCr(src + uint2(1u, 1u),       bt2020);
-    yuv *= 0.25;
+    const float2 a = values[2u * i] * invK;
+    const float2 b = values[2u * i + 1u] * k;
+    const uint   y = (local.x >> 1u) + i - 2u;
+    storeDWTShared(y, 2u * local.y, float2(a.x, b.x));
+    storeDWTShared(y, 2u * local.y + 1u, float2(a.y, b.y));
   }
-  else
-    yuv = loadYCbCr(tid.xy, bt2020);
-
-  float value;
-  if (component == 0u)
-    value = (16.0 / 255.0 + yuv.x * (219.0 / 255.0)) - 0.5;
-  else
-    value = yuv[component] * (224.0 / 255.0);
-  Wave[tid.y * Dim0.z + tid.x] = value;
 }
 
-[numthreads(8, 8, 1)]
-void LiftMain(uint3 tid : SV_DispatchThreadID)
+void forwardTransform4x2(uint lane, bool active, uint yOffset)
 {
-  if (tid.x >= Op0.x || tid.y >= Op0.y)
-    return;
+  const float alpha = -1.586134342059924;
+  const float beta  = -0.052980118572961;
+  const float gamma =  0.882911075530934;
+  const float delta =  0.443506852043971;
+  const float k     =  1.230174104914001;
+  const float invK  =  1.0 / k;
+  const uint2 local = uint2(4u * (lane & 7u), (lane >> 3u) + yOffset);
+  float2      values[12];
+  if (active)
+  {
+    [unroll]
+    for (uint i = 0u; i < 12u; ++i)
+      values[i] = loadDWTShared(local.y, local.x + i);
+    [unroll]
+    for (uint i = 1u; i < 11u; i += 2u)
+      values[i] += alpha * (values[i - 1u] + values[i + 1u]);
+    [unroll]
+    for (uint i = 2u; i < 10u; i += 2u)
+      values[i] += beta * (values[i - 1u] + values[i + 1u]);
+    [unroll]
+    for (uint i = 3u; i < 9u; i += 2u)
+      values[i] += gamma * (values[i - 1u] + values[i + 1u]);
+    [unroll]
+    for (uint i = 4u; i < 8u; i += 2u)
+      values[i] += delta * (values[i - 1u] + values[i + 1u]);
+  }
 
-  const bool vertical = Op0.z != 0u;
-  const uint coord    = vertical ? tid.y : tid.x;
-  if ((coord & 1u) != Op1.x)
-    return;
+  GroupMemoryBarrierWithGroupSync();
 
-  const uint length = vertical ? Op0.y : Op0.x;
-  const uint before = mirrorCoord(int(coord) - 1, length);
-  const uint after  = mirrorCoord(int(coord) + 1, length);
-
-  const uint centerIndex = tid.y * Dim0.z + tid.x;
-  const uint beforeIndex = vertical ? before * Dim0.z + tid.x :
-    tid.y * Dim0.z + before;
-  const uint afterIndex  = vertical ? after * Dim0.z + tid.x :
-    tid.y * Dim0.z + after;
-  if (vertical)
-    Scratch[centerIndex] += Values.x *
-      (Scratch[beforeIndex] + Scratch[afterIndex]);
-  else
-    Wave[centerIndex] += Values.x *
-      (Wave[beforeIndex] + Wave[afterIndex]);
-}
-
-[numthreads(8, 8, 1)]
-void HorizontalSplitMain(uint3 tid : SV_DispatchThreadID)
-{
-  if (tid.x >= Op0.x || tid.y >= Op0.y)
-    return;
-  const uint half = Op0.x >> 1;
-  const bool high = tid.x >= half;
-  const uint srcX = high ? 2u * (tid.x - half) + 1u : 2u * tid.x;
-  Scratch[tid.y * Dim0.z + tid.x] =
-    Wave[tid.y * Dim0.z + srcX] * (high ? Values.z : Values.y);
-}
-
-[numthreads(8, 8, 1)]
-void VerticalSplitMain(uint3 tid : SV_DispatchThreadID)
-{
-  if (tid.x >= Op0.x || tid.y >= Op0.y)
-    return;
-  const uint half = Op0.y >> 1;
-  const bool high = tid.y >= half;
-  const uint srcY = high ? 2u * (tid.y - half) + 1u : 2u * tid.y;
-  Wave[tid.y * Dim0.z + tid.x] =
-    Scratch[srcY * Dim0.z + tid.x] * (high ? Values.z : Values.y);
-}
-
-int quantize(float value)
-{
-  const float magnitude = floor(abs(value) * Values.w);
-  const int   result    = int(min(magnitude, 32767.0));
-  return value < 0.0 ? -result : result;
+  if (active)
+  {
+    [unroll]
+    for (uint i = 2u; i < 4u; ++i)
+    {
+      const float2 a = values[2u * i] * invK;
+      const float2 b = values[2u * i + 1u] * k;
+      const uint   y = (local.x >> 1u) + i - 2u;
+      storeDWTShared(y, 2u * local.y, float2(a.x, b.x));
+      storeDWTShared(y, 2u * local.y + 1u, float2(a.y, b.y));
+    }
+  }
 }
 
 [numthreads(64, 1, 1)]
-void QuantMain(uint3 tid : SV_DispatchThreadID)
+void DWTMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 {
-  const uint first = tid.x * 2u;
-  if (first >= Op1.y)
+  const uint2 local = 2u * unswizzle8x8(lane);
+  loadDWTQuad(groupID.xy, local);
+  loadDWTQuad(groupID.xy, local + uint2(16u, 0u));
+  loadDWTQuad(groupID.xy, local + uint2(0u, 16u));
+  loadDWTQuad(groupID.xy, local + uint2(16u, 16u));
+
+  const uint2 right = uint2(32u + 2u * (lane & 3u),
+    2u * (lane >> 2u));
+  loadDWTQuad(groupID.xy, right);
+
+  const uint2 bottom = uint2(2u * (lane & 15u),
+    32u + 2u * (lane >> 4u));
+  loadDWTQuad(groupID.xy, bottom);
+
+  if (lane < 16u)
+  {
+    const uint2 corner = uint2(32u + 2u * (lane & 3u),
+      32u + 2u * (lane >> 2u));
+    loadDWTQuad(groupID.xy, corner);
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  forwardTransform8x2(lane);
+  forwardTransform4x2(lane, lane < 32u, 16u);
+  GroupMemoryBarrierWithGroupSync();
+
+  forwardTransform8x2(lane);
+  GroupMemoryBarrierWithGroupSync();
+
+  const uint2 outputLocal = unswizzle8x8(lane);
+  const uint  bandWidth   = Op0.x >> 1u;
+  const uint  bandHeight  = Op0.y >> 1u;
+  for (uint y = outputLocal.y; y < 16u; y += 8u)
+  {
+    for (uint x = outputLocal.x * 2u; x < 32u; x += 16u)
+    {
+      const float2 v0   = loadDWTShared(y, x);
+      const float2 v1   = loadDWTShared(y, x + 1u);
+      const uint   outX = groupID.x * 16u + (x >> 1u);
+      const uint   outY = groupID.y * 16u + y;
+      if (outX < bandWidth && outY < bandHeight)
+      {
+        storeDWTValue(outX, outY, v0.x, true);
+        storeDWTValue(outX + bandWidth, outY, v1.x, false);
+        storeDWTValue(outX, outY + bandHeight, v0.y, false);
+        storeDWTValue(outX + bandWidth, outY + bandHeight, v1.y, false);
+      }
+    }
+  }
+}
+
+static const uint QuantLevels       = 19u;
+static const uint StatWords         = 1u + QuantLevels * 2u;
+static const uint RDOBuckets        = 128u;
+static const uint RDODivisions      = 16u;
+static const uint RDOStateBase      = 16u;
+static const uint RDOStateWords     =
+  RDOStateBase + RDOBuckets * RDODivisions;
+static const uint PacketWordsPerMax = 622u;
+
+uint magnitudeBits(uint magnitude)
+{
+  return magnitude != 0u ? uint(firstbithigh(magnitude)) + 1u : 0u;
+}
+
+void computeQuantScale(float maxValue, out uint code, out float scale)
+{
+  if (maxValue < 1.0)
+  {
+    code  = 6u;
+    scale = 1.0;
     return;
-  const int low  = quantize(Wave[first]);
-  const int high = first + 1u < Op1.y ? quantize(Wave[first + 1u]) : 0;
-  Quant[tid.x] = (uint(low) & 0xffffu) | ((uint(high) & 0xffffu) << 16u);
+  }
+
+  const int   exponent = int(floor(log2(maxValue - 0.25))) + 1;
+  const float target   = exp2(float(exponent)) - 0.25;
+  const float invScale = maxValue / target;
+  code  = min(uint(ceil((invScale - 0.25) * 8.0)), 15u);
+  scale = 1.0 / (float(code) / 8.0 + 0.25);
+}
+
+float bandCoefficient(uint x, uint y)
+{
+  const uint index = Dim0.y + (Op0.y + y) * Dim0.x + Op0.x + x;
+  return Atlas[index] * Values.x;
+}
+
+[numthreads(256, 1, 1)]
+void ClearMain(uint3 tid : SV_DispatchThreadID)
+{
+  if (tid.x == 0u)
+    QuantPayload[0] = 1u;
+  if (tid.x < Dim0.x)
+    Aux[AuxBase.w + RDOStateWords + tid.x] = 0u;
+  if (tid.x < Dim0.y)
+    Aux[AuxBase.w + tid.x] = 0u;
+}
+)hlsl"
+R"hlsl(
+groupshared uint  QuantMax         [128];
+groupshared uint  QuantScaleCode   [16];
+groupshared float QuantScaleValue  [16];
+groupshared uint  QuantQuality     [16];
+groupshared uint  QuantControl     [16];
+groupshared uint  QuantPlanes      [128];
+groupshared uint  QuantSigns       [128];
+groupshared float QuantError       [128];
+groupshared uint  QuantPayloadBase [16];
+groupshared uint  QuantPayloadValid[16];
+
+[numthreads(128, 1, 1)]
+void QuantMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
+{
+  const uint block    = lane >> 3u;
+  const uint subblock = lane & 7u;
+  const uint blockX   = groupID.x * 4u + (block & 3u);
+  const uint blockY   = groupID.y * 4u + (block >> 2u);
+  const bool valid    = blockX < Op0.z && blockY < Op0.w;
+  const uint baseX    = blockX * 8u + (subblock >> 2u) * 4u;
+  const uint baseY    = blockY * 8u + (subblock & 3u) * 2u;
+  float      values  [8];
+  float      localMax = 0.0;
+  for (uint x = 0u; x < 4u; ++x)
+  {
+    const uint xCoord = baseX + x;
+    const bool top    = valid && xCoord < Dim0.z && baseY < Dim0.w;
+    const bool bottom = valid && xCoord < Dim0.z && baseY + 1u < Dim0.w;
+    values[2u * x]      = top ? bandCoefficient(xCoord, baseY) : 0.0;
+    values[2u * x + 1u] = bottom ?
+      bandCoefficient(xCoord, baseY + 1u) : 0.0;
+    localMax = max(localMax, abs(values[2u * x]));
+    localMax = max(localMax, abs(values[2u * x + 1u]));
+  }
+  QuantMax[lane] = asuint(localMax);
+  GroupMemoryBarrierWithGroupSync();
+
+  if (subblock == 0u)
+  {
+    float blockMax = 0.0;
+    for (uint index = 0u; index < 8u; ++index)
+      blockMax = max(blockMax, asfloat(QuantMax[block * 8u + index]));
+    uint  code;
+    float scale;
+    computeQuantScale(blockMax, code, scale);
+    QuantScaleCode[block]  = code;
+    QuantScaleValue[block] = scale;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  const float adaptive = QuantScaleValue[block];
+  const float invQuant = 1.0 / max(Values.x * adaptive, 1e-20);
+  uint        magnitudes[8];
+  uint        signMask = 0u;
+  uint        maximum  = 0u;
+  for (uint index = 0u; index < 8u; ++index)
+  {
+    const float scaled = abs(values[index] * adaptive);
+    magnitudes[index]  = uint(min(floor(scaled), 262143.0));
+    maximum            = max(maximum, magnitudes[index]);
+    if (values[index] < 0.0)
+      signMask |= 1u << index;
+  }
+  QuantMax[lane] = maximum;
+  GroupMemoryBarrierWithGroupSync();
+
+  const uint blockIndex = Op1.z + blockY * Op0.z + blockX;
+  if (subblock == 0u)
+  {
+    uint maxPlanes = 0u;
+    uint control   = 0u;
+    for (uint index = 0u; index < 8u; ++index)
+      maxPlanes = max(maxPlanes,
+        magnitudeBits(QuantMax[block * 8u + index]));
+    const uint quality = maxPlanes > 3u ? maxPlanes - 3u : 0u;
+    for (uint index = 0u; index < 8u; ++index)
+    {
+      const uint planes = magnitudeBits(QuantMax[block * 8u + index]);
+      const uint coded  = planes > quality ?
+        min(planes - quality, 3u) : 0u;
+      control |= coded << (index * 2u);
+    }
+    QuantQuality[block] = quality;
+    QuantControl[block] = valid && maxPlanes != 0u ?
+      control | (quality << 16u) | (QuantScaleCode[block] << 20u) : 0u;
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  const uint quality      = QuantQuality[block];
+  const uint planes       = magnitudeBits(maximum);
+  const uint coded        = planes > quality ?
+    min(planes - quality, 3u) : 0u;
+  const uint count        = quality + coded;
+  const uint payloadBytes = count != 0u ? count + 1u : 0u;
+  const uint payloadWords = (payloadBytes + 3u) >> 2u;
+  uint       payload[5];
+  [unroll]
+  for (uint word = 0u; word < 5u; ++word)
+    payload[word] = 0u;
+  if (payloadWords != 0u)
+  {
+    payload[0] = signMask;
+    for (uint plane = 0u; plane < count; ++plane)
+    {
+      const uint shift = count - plane - 1u;
+      uint       value = 0u;
+      for (uint index = 0u; index < 8u; ++index)
+        value |= ((magnitudes[index] >> shift) & 1u) << index;
+      const uint byte = plane + 1u;
+      payload[byte >> 2u] |= value << ((byte & 3u) * 8u);
+    }
+  }
+  QuantPlanes[lane] = valid ? payloadWords : 0u;
+  GroupMemoryBarrierWithGroupSync();
+
+  if (subblock == 0u)
+  {
+    uint totalWords = 0u;
+    for (uint index = 0u; index < 8u; ++index)
+      totalWords += QuantPlanes[block * 8u + index];
+
+    uint payloadBase  = 0u;
+    uint payloadValid = 0u;
+    if (valid && totalWords != 0u)
+    {
+      InterlockedAdd(QuantPayload[0], totalWords, payloadBase);
+      if (payloadBase <= Op1.w && totalWords <= Op1.w - payloadBase)
+        payloadValid = 1u;
+      else
+      {
+        uint ignored;
+        PackState.InterlockedOr(8u, 1u, ignored);
+      }
+    }
+    QuantPayloadBase [block] = payloadBase;
+    QuantPayloadValid[block] = payloadValid;
+    if (valid)
+    {
+      Aux[AuxBase.y + blockIndex * 2u]      = payloadValid != 0u ?
+        QuantControl[block] : 0u;
+      Aux[AuxBase.y + blockIndex * 2u + 1u] = payloadValid != 0u ?
+        payloadBase : 0u;
+    }
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (valid && QuantPayloadValid[block] != 0u)
+  {
+    uint payloadBase = QuantPayloadBase[block];
+    for (uint previous = 0u; previous < subblock; ++previous)
+      payloadBase += QuantPlanes[block * 8u + previous];
+    for (uint word = 0u; word < payloadWords; ++word)
+      QuantPayload[payloadBase + word] = payload[word];
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  for (uint q = 0u; q < QuantLevels; ++q)
+  {
+    uint        maximum     = 0u;
+    uint        signs       = 0u;
+    float       squareError = 0.0;
+    const float step        = exp2(float(q));
+    for (uint index = 0u; index < 8u; ++index)
+    {
+      const float scaled    = abs(values[index] * adaptive);
+      const uint  magnitude = magnitudes[index] >> q;
+      maximum  = max(maximum, magnitude);
+      signs   += magnitude != 0u ? 1u : 0u;
+      const float reconstructed = magnitude != 0u ?
+        (float(magnitude) + 0.5) * step : 0.0;
+      const float error         = (scaled - reconstructed) * invQuant;
+      squareError += error * error * Values.y;
+    }
+    QuantPlanes[lane] = magnitudeBits(maximum);
+    QuantSigns[lane]  = signs;
+    QuantError[lane]  = q == 0u ? 0.0 : min(squareError, 60000.0);
+    GroupMemoryBarrierWithGroupSync();
+
+    if (subblock == 0u && valid)
+    {
+      uint  maxPlanes      = 0u;
+      uint  magnitudeBytes = 0u;
+      uint  signBits       = 0u;
+      float error          = 0.0;
+      for (uint index = 0u; index < 8u; ++index)
+      {
+        const uint source = block * 8u + index;
+        maxPlanes  = max(maxPlanes, QuantPlanes[source]);
+        signBits  += QuantSigns[source];
+        error     += QuantError[source];
+      }
+      const uint qualityPlanes = maxPlanes > 3u ? maxPlanes - 3u : 0u;
+      for (uint index = 0u; index < 8u; ++index)
+      {
+        const uint planes = QuantPlanes[block * 8u + index];
+        const uint coded  = planes > qualityPlanes ?
+          min(planes - qualityPlanes, 3u) : 0u;
+        magnitudeBytes += coded + qualityPlanes;
+      }
+      const uint stat       = blockIndex * StatWords;
+      if (q == 0u)
+        Aux[AuxBase.x + stat] = maxPlanes;
+      Aux[AuxBase.x + stat + 1u + q * 2u] =
+        asuint(min(error, 60000.0));
+      Aux[AuxBase.x + stat + 2u + q * 2u] =
+        magnitudeBytes * 8u + signBits;
+    }
+    GroupMemoryBarrierWithGroupSync();
+  }
+}
+
+uint distortionBucket(float distortion, uint cost,
+  float baseDistortion, uint baseCost)
+{
+  if (cost >= baseCost)
+    return 0u;
+  const float delta = max(distortion - baseDistortion, 0.0);
+  if (delta <= 0.0)
+    return 0u;
+  const float index = 60.0 + 2.0 * log2(delta / float(baseCost - cost));
+  return min(uint(max(index + 0.5, 0.0)), RDOBuckets - 1u);
+}
+
+groupshared uint  AnalyzeCostLane       [64];
+groupshared float AnalyzeDistortionLane [64];
+groupshared uint  AnalyzeCost           [QuantLevels];
+groupshared float AnalyzeDistortion     [QuantLevels];
+
+[numthreads(64, 1, 1)]
+void AnalyzeMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
+{
+  const uint blockSlot   = lane & 15u;
+  const uint quantGroup  = lane >> 4u;
+  const uint blockX      = groupID.x * 4u + (blockSlot & 3u);
+  const uint blockY      = groupID.y * 4u + (blockSlot >> 2u);
+  const bool valid       = blockX < Op0.z && blockY < Op0.w;
+  const uint blockIndex8 = Op1.z + blockY * Op0.z + blockX;
+
+  for (uint round = 0u; round < (QuantLevels + 3u) / 4u; ++round)
+  {
+    const uint quant      = quantGroup + 4u * round;
+    const bool quantLive  = quant < QuantLevels;
+    uint       cost       = 0u;
+    float      distortion = 0.0;
+    if (valid && quantLive)
+    {
+      const uint stat = blockIndex8 * StatWords + 1u + quant * 2u;
+      cost       = Aux[AuxBase.x + stat + 1u];
+      distortion = asfloat(Aux[AuxBase.x + stat]);
+      if (cost != 0u)
+        cost += 24u;
+    }
+    AnalyzeCostLane[lane]       = cost;
+    AnalyzeDistortionLane[lane] = distortion;
+    GroupMemoryBarrierWithGroupSync();
+
+    if (blockSlot == 0u && quantLive)
+    {
+      uint  totalCost       = 0u;
+      float totalDistortion = 0.0;
+      for (uint index = 0u; index < 16u; ++index)
+      {
+        const uint source = quantGroup * 16u + index;
+        totalCost       += AnalyzeCostLane[source];
+        totalDistortion += AnalyzeDistortionLane[source];
+      }
+      if (totalCost != 0u)
+        totalCost += 64u;
+      AnalyzeCost[quant]       = (totalCost + 31u) >> 5u;
+      AnalyzeDistortion[quant] = totalDistortion;
+    }
+    GroupMemoryBarrierWithGroupSync();
+  }
+
+  if (lane == 0u)
+  {
+    const uint blockIndex  = Op1.y + groupID.y * Op1.x + groupID.x;
+    const uint perDivision = max(uint(Values.w), 1u);
+    const uint division    = min(
+      blockIndex / perDivision, RDODivisions - 1u);
+    uint       ignored;
+    InterlockedAdd(Aux[AuxBase.w], AnalyzeCost[0], ignored);
+
+    uint previous = 0u;
+    for (uint quant = 1u; quant < QuantLevels; ++quant)
+    {
+      const uint raw    = distortionBucket(
+        AnalyzeDistortion[quant], AnalyzeCost[quant],
+        AnalyzeDistortion[0], AnalyzeCost[0]);
+      const uint bucket = min(max(raw, previous + 1u),
+        RDOBuckets - QuantLevels + quant);
+      const uint saving = AnalyzeCost[quant - 1u] > AnalyzeCost[quant] ?
+        AnalyzeCost[quant - 1u] - AnalyzeCost[quant] : 0u;
+      Aux[AuxBase.z + blockIndex * (QuantLevels - 1u) + quant - 1u] =
+        saving != 0u ? (saving << 7u) | bucket : 0u;
+      if (saving != 0u)
+        InterlockedAdd(
+          Aux[AuxBase.w + RDOStateBase +
+            bucket * RDODivisions + division],
+          saving, ignored);
+      previous = bucket;
+    }
+  }
+}
+
+groupshared uint RDOScan[512];
+
+[numthreads(512, 1, 1)]
+void FinalizeRDOMain(uint lane : SV_GroupIndex)
+{
+  const uint base  = AuxBase.w + RDOStateBase + lane * 4u;
+  uint4      value = uint4(Aux[base], Aux[base + 1u],
+    Aux[base + 2u], Aux[base + 3u]);
+  value.y += value.x;
+  value.z += value.y;
+  value.w += value.z;
+  RDOScan[lane] = value.w;
+  GroupMemoryBarrierWithGroupSync();
+
+  for (uint step = 1u; step < 512u; step <<= 1u)
+  {
+    const uint up = lane >= step ? RDOScan[lane - step] : 0u;
+    GroupMemoryBarrierWithGroupSync();
+    value += up;
+    RDOScan[lane] = value.w;
+    GroupMemoryBarrierWithGroupSync();
+  }
+  Aux[base]      = value.x;
+  Aux[base + 1u] = value.y;
+  Aux[base + 2u] = value.z;
+  Aux[base + 3u] = value.w;
+}
+
+[numthreads(64, 1, 1)]
+void ResolveMain(uint3 tid : SV_DispatchThreadID)
+{
+  const uint blockIndex = tid.x;
+  if (blockIndex >= Dim0.y)
+    return;
+
+  const uint consumed = Aux[AuxBase.w];
+  if (consumed <= Dim0.x)
+  {
+    Aux[AuxBase.w + RDOStateWords + blockIndex] = 0u;
+    return;
+  }
+
+  const uint required    = consumed - Dim0.x;
+  const uint subdivision = min(
+    blockIndex / max(Dim0.z, 1u), RDODivisions - 1u);
+  uint       selected    = 0u;
+  for (uint quant = 1u; quant < QuantLevels; ++quant)
+  {
+    const uint operation =
+      Aux[AuxBase.z + blockIndex * (QuantLevels - 1u) + quant - 1u];
+    const uint saving    = operation >> 7u;
+    if (saving == 0u)
+      continue;
+
+    const uint bucket  = operation & (RDOBuckets - 1u);
+    const uint segment = bucket * RDODivisions + subdivision;
+    const uint after   = Aux[AuxBase.w + RDOStateBase + segment];
+    const uint before  = segment != 0u ?
+      Aux[AuxBase.w + RDOStateBase + segment - 1u] : 0u;
+    if (after <= required)
+      selected = quant;
+    else if (before < required)
+    {
+      uint cursor;
+      InterlockedAdd(Aux[AuxBase.w + 1u], saving, cursor);
+      if (cursor < required - before)
+        selected = quant;
+    }
+  }
+  Aux[AuxBase.w + RDOStateWords + blockIndex] = selected;
+}
+)hlsl"
+R"hlsl(
+groupshared uint PackControl        [64];
+groupshared uint PackScale          [64];
+groupshared uint PackMagnitudeBytes [64];
+groupshared uint PackMagnitudeOffset[64];
+groupshared uint PackSignBits       [64];
+groupshared uint PackSignificant    [64 * 8];
+groupshared uint PackWords          [4 * PacketWordsPerMax];
+groupshared uint PackBallot         [4];
+groupshared uint PackPlaneBase      [4];
+groupshared uint PackSignBase       [4];
+groupshared uint PackSize           [4];
+groupshared uint PackOffset         [4];
+groupshared uint PackValid          [4];
+
+void packByteOr(uint record, uint offset, uint value)
+{
+  InterlockedOr(PackWords[record * PacketWordsPerMax + (offset >> 2u)],
+    (value & 0xffu) << ((offset & 3u) * 8u));
+}
+
+void packControlOr(uint record, uint compact, uint value)
+{
+  const uint offset = 8u + compact * 2u;
+  InterlockedOr(PackWords[record * PacketWordsPerMax + (offset >> 2u)],
+    (value & 0xffffu) << ((offset & 2u) * 8u));
+}
+
+uint modifyQuantCode(uint code, uint quant)
+{
+  const uint exponent = code >> 3u;
+  return ((exponent > quant ? exponent - quant : 0u) << 3u) |
+    (code & 7u);
+}
+
+uint quantizeControlWord(uint code, uint quant)
+{
+  if (quant == 0u || code == 0u)
+    return code;
+
+  uint       quality      = (code >> 16u) & 15u;
+  const uint qualityQuant = min(quality, quant);
+  quality -= qualityQuant;
+  quant   -= qualityQuant;
+  if (quant != 0u)
+  {
+    quant = min(quant, 3u);
+    uint plane0 = code & 0x5555u;
+    uint plane1 = (code & 0xaaaau) >> 1u;
+    uint plane2 = plane0 & plane1;
+    do
+    {
+      plane0 = plane1;
+      plane1 = plane2;
+      plane2 = 0u;
+      --quant;
+    }
+    while (quant != 0u);
+    plane0 &= ~plane1;
+    code = (code & ~0xffffu) | plane0 | (plane1 << 1u);
+  }
+  return (code & ~(15u << 16u)) | (quality << 16u);
+}
+
+uint quantPayloadByte(uint wordOffset, uint byteOffset)
+{
+  return (QuantPayload[wordOffset + (byteOffset >> 2u)] >>
+    ((byteOffset & 3u) * 8u)) & 0xffu;
+}
+
+uint quantPayloadSubblockOffset(
+  uint codeWord, uint payloadBase, uint subblock)
+{
+  const uint quality = (codeWord >> 16u) & 15u;
+  uint       offset  = payloadBase;
+  for (uint previous = 0u; previous < subblock; ++previous)
+  {
+    const uint planes =
+      ((codeWord >> (previous * 2u)) & 3u) + quality;
+    if (planes != 0u)
+      offset += (planes + 4u) >> 2u;
+  }
+  return offset;
+}
+
+[numthreads(64, 1, 1)]
+void PackMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
+{
+  const uint  record      = lane >> 4u;
+  const uint  block       = lane & 15u;
+  const uint  packetX     = groupID.x * 2u + (record & 1u);
+  const uint  packetY     = groupID.y * 2u + (record >> 1u);
+  const uint  blocksY     = (Dim0.w + 31u) / 32u;
+  const bool  packetLive  = packetX < Op1.x && packetY < blocksY;
+  const uint  blockIndex  = Op1.y + packetY * Op1.x + packetX;
+  const uint  quant       = packetLive ? min(
+    Aux[AuxBase.w + RDOStateWords + blockIndex], QuantLevels - 1u) : 0u;
+  const uint  blockX      = packetX * 4u + (block & 3u);
+  const uint  blockY      = packetY * 4u + (block >> 2u);
+  const bool  blockLive   = packetLive && blockX < Op0.z && blockY < Op0.w;
+  const uint  blockIndex8 = Op1.z + blockY * Op0.z + blockX;
+  const uint2 meta        = blockLive ?
+    uint2(Aux[AuxBase.y + blockIndex8 * 2u],
+      Aux[AuxBase.y + blockIndex8 * 2u + 1u]) : uint2(0u, 0u);
+  const uint  codeWord    = quantizeControlWord(meta.x, quant);
+  const uint  controlWord = codeWord & 0xffffu;
+  const uint  quality     = (codeWord >> 16u) & 15u;
+  const uint  scaleCode   = (codeWord >> 20u) & 15u;
+
+  if (block == 0u)
+  {
+    PackBallot[record] = 0u;
+    PackValid[record]  = 0u;
+    if (packetLive)
+    {
+      Aux[AuxBase.z + blockIndex * 2u]      = 0u;
+      Aux[AuxBase.z + blockIndex * 2u + 1u] = 0u;
+    }
+  }
+  for (uint word = block; word < PacketWordsPerMax; word += 16u)
+    PackWords[record * PacketWordsPerMax + word] = 0u;
+  GroupMemoryBarrierWithGroupSync();
+
+  uint magnitude = 0u;
+  uint signBits  = 0u;
+  for (uint subblock = 0u; subblock < 8u; ++subblock)
+  {
+    const uint coded =
+      ((controlWord >> (subblock * 2u)) & 3u) + quality;
+    magnitude += coded;
+
+    uint significant = 0u;
+    if (blockLive && coded != 0u)
+    {
+      const uint payloadOffset = quantPayloadSubblockOffset(
+        meta.x, meta.y, subblock);
+      for (uint plane = 0u; plane < coded; ++plane)
+        significant |= quantPayloadByte(payloadOffset, plane + 1u);
+    }
+    PackSignificant[lane * 8u + subblock] = significant;
+    signBits += countbits(significant);
+  }
+  PackControl[lane]        = controlWord;
+  PackScale[lane]          = (scaleCode << 4u) | quality;
+  PackMagnitudeBytes[lane] = magnitude;
+  PackSignBits[lane]       = signBits;
+  if (blockLive && controlWord != 0u)
+    InterlockedOr(PackBallot[record], 1u << block);
+  GroupMemoryBarrierWithGroupSync();
+
+  if (block == 0u && packetLive && PackBallot[record] != 0u)
+  {
+    const uint ballot         = PackBallot[record];
+    const uint groups         = countbits(ballot);
+    uint       magnitudeBytes = 0u;
+    uint       packetSignBits = 0u;
+    for (uint group = 0u; group < 16u; ++group)
+    {
+      const uint index = record * 16u + group;
+      PackMagnitudeOffset[index] = magnitudeBytes;
+      if ((ballot & (1u << group)) != 0u)
+      {
+        magnitudeBytes += PackMagnitudeBytes[index];
+        packetSignBits += PackSignBits[index];
+      }
+    }
+    PackPlaneBase[record] = 8u + groups * 3u;
+    PackSignBase[record]  = PackPlaneBase[record] + magnitudeBytes;
+    PackSize[record]      =
+      (PackSignBase[record] + (packetSignBits + 7u) / 8u + 3u) & ~3u;
+    PackWords[record * PacketWordsPerMax] = ballot |
+      ((PackSize[record] >> 2u) << 16u) | (uint(Values.z) << 28u);
+    PackWords[record * PacketWordsPerMax + 1u] =
+      modifyQuantCode(uint(Values.w), quant) | (blockIndex << 8u);
+
+    uint offset;
+    PackState.InterlockedAdd(0u, PackSize[record], offset);
+    if (Op1.w >= 8u && offset <= Op1.w - 8u &&
+        PackSize[record] <= Op1.w - 8u - offset)
+    {
+      uint ignored;
+      PackState.InterlockedAdd(4u, 1u, ignored);
+      PackOffset[record] = offset + 8u;
+      PackValid[record]  = 1u;
+      Aux[AuxBase.z + blockIndex * 2u]      = offset + 8u;
+      Aux[AuxBase.z + blockIndex * 2u + 1u] = PackSize[record];
+    }
+    else
+    {
+      uint ignored;
+      PackState.InterlockedOr(8u, 1u, ignored);
+    }
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  const uint ballot = PackBallot[record];
+  const bool active = PackValid[record] != 0u &&
+    (ballot & (1u << block)) != 0u;
+  if (active)
+  {
+    const uint compact     = countbits(ballot & ((1u << block) - 1u));
+    const uint controlWord = PackControl[lane];
+    packControlOr(record, compact, controlWord);
+    packByteOr(record, 8u + countbits(ballot) * 2u + compact,
+      PackScale[lane]);
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (active)
+    for (uint subblock = 0u; subblock < 8u; ++subblock)
+    {
+      const uint outputQuality  = PackScale[lane] & 15u;
+      const uint coded          =
+        ((PackControl[lane] >> (subblock * 2u)) & 3u) + outputQuality;
+      const uint payloadOffset  = quantPayloadSubblockOffset(
+        meta.x, meta.y, subblock);
+      uint       subblockOffset = 0u;
+      for (uint previous = 0u; previous < subblock; ++previous)
+        subblockOffset +=
+          ((PackControl[lane] >> (previous * 2u)) & 3u) + outputQuality;
+      for (uint plane = 0u; plane < coded; ++plane)
+      {
+        const uint byte = quantPayloadByte(payloadOffset, plane + 1u);
+        packByteOr(record, PackPlaneBase[record] +
+          PackMagnitudeOffset[lane] + subblockOffset + plane, byte);
+      }
+    }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (active)
+  {
+    uint signBit   = 0u;
+    uint localSign = 0u;
+    for (uint group = 0u; group < block; ++group)
+      if ((ballot & (1u << group)) != 0u)
+        signBit += PackSignBits[record * 16u + group];
+    for (uint subblock = 0u; subblock < 8u; ++subblock)
+    {
+      const uint payloadOffset = quantPayloadSubblockOffset(
+        meta.x, meta.y, subblock);
+      uint       significant   = PackSignificant[lane * 8u + subblock];
+      uint       signMask      = 0u;
+      if (significant != 0u)
+        signMask = quantPayloadByte(payloadOffset, 0u);
+      for (uint pixel = 0u; pixel < 8u; ++pixel)
+      {
+        if ((significant & (1u << pixel)) == 0u)
+          continue;
+        if ((signMask & (1u << pixel)) != 0u)
+          packByteOr(record,
+            PackSignBase[record] + (signBit + localSign) / 8u,
+            1u << ((signBit + localSign) & 7u));
+        ++localSign;
+      }
+    }
+  }
+  GroupMemoryBarrierWithGroupSync();
+
+  if (PackValid[record] != 0u)
+    for (uint word = block; word < PackSize[record] / 4u; word += 16u)
+      Packed.Store(PackOffset[record] + word * 4u,
+        PackWords[record * PacketWordsPerMax + word]);
+}
+
+[numthreads(1, 1, 1)]
+void FinalizeMain()
+{
+  uint packetCount = PackState.Load(4u);
+  if (packetCount == 0u)
+  {
+    const uint packetWord0 = 1u | (3u << 16u) | (Op0.x << 28u);
+    Packed.Store(8u, packetWord0);
+    Packed.Store(12u, Op0.w);
+    Packed.Store(16u, 6u << 20u);
+    Aux[AuxBase.z]      = 8u;
+    Aux[AuxBase.z + 1u] = 12u;
+    PackState.Store(0u, 12u);
+    PackState.Store(4u, 1u);
+    packetCount = 1u;
+  }
+  const uint hdr         = Op0.z != 0u ? 1u : 0u;
+  const uint word0       = (Dim0.x - 1u) |
+    ((Dim0.y - 1u) << 14u) | (Op0.x << 28u) | (1u << 31u);
+  const uint word1       = packetCount | (Op0.y << 26u) |
+    (hdr << 27u) | (hdr << 28u) | (hdr << 29u) | (1u << 30u);
+  Packed.Store(0u, word0);
+  Packed.Store(4u, word1);
+  PackState.Store(0u, PackState.Load(0u) + 8u);
 }
 )hlsl";
 
@@ -443,66 +1368,112 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
 
   struct EncodedFrame
   {
-    uint64_t                  configEpoch    = 0;
-    uint64_t                  frameID        = 0;
-    uint64_t                  captureTimeNs  = 0;
-    uint32_t                  deadlineMs     = 0;
-    std::vector<uint8_t>      data;
-    std::vector<EncodedBlock> blocks;
+    uint64_t                                    configEpoch   = 0;
+    uint64_t                                    frameID       = 0;
+    uint64_t                                    captureTimeNs = 0;
+    uint32_t                                    deadlineMs    = 0;
+    std::vector<uint8_t>                        data;
+    std::vector<EncodedBlock>                   blocks;
+    std::shared_ptr<const std::vector<uint8_t>> wholePayload;
   };
 
   struct ShaderParameters
   {
-    uint32_t dim0  [4] = {};
-    uint32_t op0   [4] = {};
-    uint32_t op1   [4] = {};
-    float    values[4] = {};
+    uint32_t dim0   [4] = {};
+    uint32_t op0    [4] = {};
+    uint32_t op1    [4] = {};
+    uint32_t auxBase[4] = {};
+    float    values [4] = {};
   };
 
-  static_assert(sizeof(ShaderParameters) == 16U * sizeof(uint32_t),
+  static_assert(sizeof(ShaderParameters) == 20U * sizeof(uint32_t),
     "Unexpected shader parameter layout");
+  constexpr UINT SHADER_PARAMETER_DWORDS = static_cast<UINT>(
+    sizeof(ShaderParameters) / sizeof(uint32_t));
 
   class PyroWaveD3D12Encoder
   {
   private:
     enum Pipeline
     {
+      PIPELINE_CLEAR,
       PIPELINE_COLOR,
-      PIPELINE_LIFT,
-      PIPELINE_HORIZONTAL_SPLIT,
-      PIPELINE_VERTICAL_SPLIT,
+      PIPELINE_DWT,
       PIPELINE_QUANT,
+      PIPELINE_ANALYZE,
+      PIPELINE_RDO_FINALIZE,
+      PIPELINE_RESOLVE,
+      PIPELINE_PACK,
+      PIPELINE_FINALIZE,
       PIPELINE_COUNT,
     };
 
     struct Plane
     {
-      uint32_t width          = 0;
-      uint32_t height         = 0;
-      uint32_t levels         = 0;
-      uint64_t readbackOffset = 0;
-      uint64_t readbackBytes  = 0;
+      uint32_t width  = 0;
+      uint32_t height = 0;
+      uint32_t levels = 0;
+      uint32_t offset = 0;
     };
 
-    ComPtr<ID3D12Device3>          m_device;
-    CD3D12CommandQueue             m_queue;
-    ComPtr<ID3D12RootSignature>    m_rootSignature;
-    ComPtr<ID3D12PipelineState>    m_pipelines[PIPELINE_COUNT];
-    ComPtr<ID3D12DescriptorHeap>   m_descriptors;
-    ComPtr<ID3D12Resource>         m_wave;
-    ComPtr<ID3D12Resource>         m_scratch;
-    ComPtr<ID3D12Resource>         m_quant;
-    ComPtr<ID3D12Resource>         m_readback;
-    D12Sync                        m_sync;
-    TexLease                       m_lease;
-    FrameIn                        m_frame;
-    FrameCfg                       m_cfg;
-    Plane                          m_planes[3]     = {};
-    LGNetVideoChromaSubsampling    m_chroma        = 0;
-    uint64_t                       m_readbackBytes = 0;
-    uint32_t                       m_sequence      = 0;
-    bool                           m_ready         = false;
-    bool                           m_inFlight      = false;
+    struct Slot
+    {
+      ComPtr<ID3D12DescriptorHeap> descriptors;
+      ComPtr<ID3D12DescriptorHeap> clearDescriptors;
+      ComPtr<ID3D12Resource>       wave;
+      ComPtr<ID3D12Resource>       scratch;
+      ComPtr<ID3D12Resource>       atlas;
+      ComPtr<ID3D12Resource>       planes;
+      ComPtr<ID3D12Resource>       packed;
+      ComPtr<ID3D12Resource>       packState;
+      ComPtr<ID3D12Resource>       aux;
+      ComPtr<ID3D12Resource>       quantPayload;
+      ComPtr<ID3D12Resource>       readback;
+      D12Sync                      computeSync;
+      D12Sync                      sync;
+      TexLease                     lease;
+      FrameIn                      frame;
+      const uint8_t              * mapped      = nullptr;
+      uint64_t                     captureTime = 0;
+      uint64_t                     order       = 0;
+      uint32_t                     sequence    = 0;
+      bool                         inFlight    = false;
+      bool                         used        = false;
+    };
+
+    ComPtr<ID3D12Device3>       m_device;
+    CD3D12CommandQueue          m_computeQueue;
+    CD3D12CommandQueue          m_copyQueue;
+    ComPtr<ID3D12RootSignature> m_rootSignature;
+    ComPtr<ID3D12PipelineState> m_pipelines[PIPELINE_COUNT];
+    Slot                        m_slots    [ENCODER_SLOT_COUNT];
+    FrameCfg                    m_cfg;
+    Plane                       m_planes   [3]    = {};
+    LGNetVideoChromaSubsampling m_chroma          = 0;
+    uint64_t                    m_packedOffset    = 0;
+    uint64_t                    m_readbackBytes   = 0;
+    uint64_t                    m_submitOrder     = 0;
+    uint32_t                    m_blockCapacity   = 0;
+    uint32_t                    m_block8Capacity  = 0;
+    uint32_t                    m_blocksPerRDO    = 0;
+    uint32_t                    m_packedCapacity  = 0;
+    uint32_t                    m_auxBase  [4]    = {};
+    uint32_t                    m_auxWords        = 0;
+    uint32_t                    m_payloadWords    = 0;
+    uint32_t                    m_frameLimit      = 0;
+    uint32_t                    m_sequence        = 0;
+    bool                        m_ready           = false;
+    HANDLE                      m_wakeEvent       = nullptr;
+
+    static void CompletionFunction(CD3D12CommandSlot * slot,
+      bool result, void * param1, void * param2)
+    {
+      (void)slot;
+      (void)result;
+      (void)param2;
+      if (param1)
+        SetEvent(static_cast<HANDLE>(param1));
+    }
 
     static bool CreateBuffer(ID3D12Device3 * device, uint64_t bytes,
       D3D12_HEAP_TYPE heapType, D3D12_RESOURCE_STATES state,
@@ -561,21 +1532,18 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
 
     bool CreatePipelines()
     {
-      D3D12_DESCRIPTOR_RANGE ranges[4] = {};
+      D3D12_DESCRIPTOR_RANGE ranges[2] = {};
 
       ranges[0].RangeType                         =
         D3D12_DESCRIPTOR_RANGE_TYPE_SRV;
       ranges[0].NumDescriptors                    = 1;
       ranges[0].BaseShaderRegister                = 0;
       ranges[0].OffsetInDescriptorsFromTableStart = 0;
-      for (unsigned i = 1; i < 4; ++i)
-      {
-        ranges[i].RangeType                         =
-          D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
-        ranges[i].NumDescriptors                    = 1;
-        ranges[i].BaseShaderRegister                = i - 1;
-        ranges[i].OffsetInDescriptorsFromTableStart = i;
-      }
+      ranges[1].RangeType                         =
+        D3D12_DESCRIPTOR_RANGE_TYPE_UAV;
+      ranges[1].NumDescriptors                    = 8;
+      ranges[1].BaseShaderRegister                = 0;
+      ranges[1].OffsetInDescriptorsFromTableStart = 1;
 
       D3D12_ROOT_PARAMETER parameters[2] = {};
 
@@ -583,7 +1551,7 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;
       parameters[0].ShaderVisibility                    =
         D3D12_SHADER_VISIBILITY_ALL;
-      parameters[0].DescriptorTable.NumDescriptorRanges = 4;
+      parameters[0].DescriptorTable.NumDescriptorRanges = 2;
       parameters[0].DescriptorTable.pDescriptorRanges   = ranges;
       parameters[1].ParameterType                       =
         D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;
@@ -591,8 +1559,8 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         D3D12_SHADER_VISIBILITY_ALL;
       parameters[1].Constants.ShaderRegister            = 0;
       parameters[1].Constants.RegisterSpace             = 0;
-      parameters[1].Constants.Num32BitValues             =
-        sizeof(ShaderParameters) / sizeof(uint32_t);
+      parameters[1].Constants.Num32BitValues            =
+        SHADER_PARAMETER_DWORDS;
 
       D3D12_ROOT_SIGNATURE_DESC signature = {};
 
@@ -625,11 +1593,15 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
 
       static const char * ENTRIES[PIPELINE_COUNT] =
       {
+        "ClearMain",
         "ColorMain",
-        "LiftMain",
-        "HorizontalSplitMain",
-        "VerticalSplitMain",
+        "DWTMain",
         "QuantMain",
+        "AnalyzeMain",
+        "FinalizeRDOMain",
+        "ResolveMain",
+        "PackMain",
+        "FinalizeMain",
       };
       for (unsigned i = 0; i < PIPELINE_COUNT; ++i)
       {
@@ -652,33 +1624,43 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         }
       }
 
-      D3D12_DESCRIPTOR_HEAP_DESC heap = {};
-
-      heap.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
-      heap.NumDescriptors = 4;
-      heap.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
-      hr = m_device->CreateDescriptorHeap(
-        &heap, IID_PPV_ARGS(&m_descriptors));
-      if (FAILED(hr))
-      {
-        DEBUG_ERROR_HR(hr,
-          "Failed to create the network video descriptor heap");
-        return false;
-      }
       return true;
     }
 
-    D3D12_CPU_DESCRIPTOR_HANDLE Descriptor(unsigned index) const
+    D3D12_CPU_DESCRIPTOR_HANDLE Descriptor(
+      const Slot& slot, unsigned index) const
     {
       D3D12_CPU_DESCRIPTOR_HANDLE result =
-        m_descriptors->GetCPUDescriptorHandleForHeapStart();
+        slot.descriptors->GetCPUDescriptorHandleForHeapStart();
       result.ptr += static_cast<SIZE_T>(index) *
         m_device->GetDescriptorHandleIncrementSize(
           D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
       return result;
     }
 
-    void CreateDescriptors(ID3D12Resource * source)
+    D3D12_GPU_DESCRIPTOR_HANDLE GPUDescriptor(
+      const Slot& slot, unsigned index) const
+    {
+      D3D12_GPU_DESCRIPTOR_HANDLE result =
+        slot.descriptors->GetGPUDescriptorHandleForHeapStart();
+      result.ptr += static_cast<UINT64>(index) *
+        m_device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      return result;
+    }
+
+    D3D12_CPU_DESCRIPTOR_HANDLE ClearDescriptor(
+      const Slot& slot, unsigned index) const
+    {
+      D3D12_CPU_DESCRIPTOR_HANDLE result =
+        slot.clearDescriptors->GetCPUDescriptorHandleForHeapStart();
+      result.ptr += static_cast<SIZE_T>(index) *
+        m_device->GetDescriptorHandleIncrementSize(
+          D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);
+      return result;
+    }
+
+    void CreateSourceDescriptor(Slot& slot, ID3D12Resource * source)
     {
       D3D12_SHADER_RESOURCE_VIEW_DESC srv = {};
 
@@ -686,31 +1668,59 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
       srv.ViewDimension           = D3D12_SRV_DIMENSION_TEXTURE2D;
       srv.Shader4ComponentMapping = D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;
       srv.Texture2D.MipLevels     = 1;
-      m_device->CreateShaderResourceView(source, &srv, Descriptor(0));
+      m_device->CreateShaderResourceView(source, &srv, Descriptor(slot, 0));
+    }
 
+    bool CreateStaticDescriptors(Slot& slot)
+    {
       ID3D12Resource * resources[] =
       {
-        m_wave.Get(),
-        m_scratch.Get(),
-        m_quant.Get(),
+        slot.wave.Get(),
+        slot.scratch.Get(),
+        slot.atlas.Get(),
+        slot.planes.Get(),
+        slot.packed.Get(),
+        slot.packState.Get(),
+        slot.aux.Get(),
+        slot.quantPayload.Get(),
       };
       const uint64_t elements[] =
       {
-        m_wave->GetDesc().Width / sizeof(float),
-        m_scratch->GetDesc().Width / sizeof(float),
-        m_quant->GetDesc().Width / sizeof(uint32_t),
+        slot.wave->GetDesc().Width / sizeof(float),
+        slot.scratch->GetDesc().Width / sizeof(float),
+        slot.atlas->GetDesc().Width / sizeof(float),
+        slot.planes->GetDesc().Width / sizeof(float),
+        slot.packed->GetDesc().Width / sizeof(uint32_t),
+        slot.packState->GetDesc().Width / sizeof(uint32_t),
+        slot.aux->GetDesc().Width / sizeof(uint32_t),
+        slot.quantPayload->GetDesc().Width / sizeof(uint32_t),
       };
-      for (unsigned i = 0; i < 3; ++i)
+      constexpr uint64_t MAX_ELEMENTS =
+        1ULL << D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP;
+      for (unsigned i = 0; i < 8; ++i)
       {
-        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+        if (!elements[i] || elements[i] > MAX_ELEMENTS ||
+            elements[i] > UINT_MAX)
+          return false;
 
-        uav.Format                      = DXGI_FORMAT_UNKNOWN;
+        D3D12_UNORDERED_ACCESS_VIEW_DESC uav = {};
+        const bool                       raw = i == 4 || i == 5;
+
+        uav.Format                      = raw ?
+          DXGI_FORMAT_R32_TYPELESS : DXGI_FORMAT_UNKNOWN;
         uav.ViewDimension               = D3D12_UAV_DIMENSION_BUFFER;
         uav.Buffer.NumElements          = static_cast<UINT>(elements[i]);
-        uav.Buffer.StructureByteStride  = sizeof(uint32_t);
+        uav.Buffer.StructureByteStride  = raw ? 0U :
+          static_cast<UINT>(sizeof(uint32_t));
+        uav.Buffer.Flags                = raw ?
+          D3D12_BUFFER_UAV_FLAG_RAW : D3D12_BUFFER_UAV_FLAG_NONE;
         m_device->CreateUnorderedAccessView(
-          resources[i], nullptr, &uav, Descriptor(i + 1));
+          resources[i], nullptr, &uav, Descriptor(slot, i + 1));
+        if (i == 5)
+          m_device->CreateUnorderedAccessView(
+            resources[i], nullptr, &uav, ClearDescriptor(slot, 0));
       }
+      return true;
     }
 
     static void UAVBarrier(ID3D12GraphicsCommandList * list,
@@ -742,17 +1752,139 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
     void Dispatch(ID3D12GraphicsCommandList * list, Pipeline pipeline,
       const ShaderParameters& parameters, uint32_t x, uint32_t y)
     {
+      ShaderParameters values = parameters;
+      std::copy(std::begin(m_auxBase), std::end(m_auxBase),
+        std::begin(values.auxBase));
       list->SetPipelineState(m_pipelines[pipeline].Get());
       list->SetComputeRoot32BitConstants(1,
-        sizeof(parameters) / sizeof(uint32_t), &parameters, 0);
+        SHADER_PARAMETER_DWORDS, &values, 0);
       list->Dispatch(x, y, 1);
     }
 
-    bool Configure(const FrameCfg& cfg,
-      LGNetVideoChromaSubsampling chroma, ID3D12Resource * source)
+    static bool CalculateBlockCapacity(const Plane (&planes)[3],
+      LGNetVideoChromaSubsampling chroma, uint32_t& capacity,
+      uint32_t& capacity8)
+    {
+      uint64_t blocks  = 0;
+      uint64_t blocks8 = 0;
+      for (int level = static_cast<int>(PYROWAVE_LEVELS) - 1;
+           level >= 0; --level)
+        for (unsigned component = 0; component < 3; ++component)
+        {
+          if (chroma == CHROMA_420 && component && !level)
+            continue;
+          const uint32_t localLevel =
+            chroma == CHROMA_420 && component ?
+              static_cast<uint32_t>(level - 1) :
+              static_cast<uint32_t>(level);
+          const uint32_t bandWidth  =
+            planes[component].width >> (localLevel + 1U);
+          const uint32_t bandHeight =
+            planes[component].height >> (localLevel + 1U);
+          const uint32_t bands      =
+            level == static_cast<int>(PYROWAVE_LEVELS) - 1 ? 4U : 3U;
+          blocks += static_cast<uint64_t>((bandWidth + 31U) / 32U) *
+            ((bandHeight + 31U) / 32U) * bands;
+          blocks8 += static_cast<uint64_t>((bandWidth + 7U) / 8U) *
+            ((bandHeight + 7U) / 8U) * bands;
+        }
+      if (!blocks || blocks > MAX_BLOCKS || !blocks8 ||
+          blocks8 > PYROWAVE_MAX_8X8_BLOCKS)
+        return false;
+      capacity  = static_cast<uint32_t>(blocks);
+      capacity8 = static_cast<uint32_t>(blocks8);
+      return true;
+    }
+
+    bool CreateSlot(Slot& slot, uint64_t planePixels)
+    {
+      D3D12_DESCRIPTOR_HEAP_DESC heap = {};
+
+      heap.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+      heap.NumDescriptors = 9;
+      heap.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE;
+      HRESULT hr = m_device->CreateDescriptorHeap(
+        &heap, IID_PPV_ARGS(&slot.descriptors));
+      if (FAILED(hr))
+      {
+        DEBUG_ERROR_HR(hr,
+          "Failed to create the network video descriptor heap");
+        return false;
+      }
+
+      D3D12_DESCRIPTOR_HEAP_DESC clearHeap = {};
+
+      clearHeap.Type           = D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV;
+      clearHeap.NumDescriptors = 1;
+      clearHeap.Flags          = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
+      hr = m_device->CreateDescriptorHeap(
+        &clearHeap, IID_PPV_ARGS(&slot.clearDescriptors));
+      if (FAILED(hr))
+      {
+        DEBUG_ERROR_HR(hr,
+          "Failed to create the network video clear descriptor heap");
+        return false;
+      }
+
+      if (!CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.wave) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.scratch) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.atlas) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.planes) ||
+          !CreateBuffer(m_device.Get(), m_packedCapacity,
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.packed) ||
+          !CreateBuffer(m_device.Get(), PYROWAVE_STATE_BYTES,
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.packState) ||
+          !CreateBuffer(m_device.Get(),
+            static_cast<uint64_t>(m_auxWords) * sizeof(uint32_t),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.aux) ||
+          !CreateBuffer(m_device.Get(),
+            static_cast<uint64_t>(m_payloadWords) * sizeof(uint32_t),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
+            slot.quantPayload) ||
+          !CreateBuffer(m_device.Get(), m_readbackBytes,
+            D3D12_HEAP_TYPE_READBACK,
+            D3D12_RESOURCE_STATE_COPY_DEST,
+            D3D12_RESOURCE_FLAG_NONE, slot.readback))
+        return false;
+
+      void          * mapped = nullptr;
+      const HRESULT   mapHr  = slot.readback->Map(0, nullptr, &mapped);
+      if (FAILED(mapHr) || !mapped)
+      {
+        DEBUG_ERROR_HR(mapHr,
+          "Failed to map the network video readback buffer");
+        return false;
+      }
+      slot.mapped = static_cast<const uint8_t *>(mapped);
+      return CreateStaticDescriptors(slot);
+    }
+
+    bool Configure(const FrameCfg& cfg, LGNetVideoChromaSubsampling chroma,
+      uint32_t frameLimit, ID3D12Resource * source)
     {
       if (!source || !SupportedProfile(cfg.profile) || !cfg.width ||
-          !cfg.height || cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT)
+          !cfg.height || cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
+          frameLimit < 20U)
         return false;
 
       ComPtr<ID3D12Device3> device;
@@ -767,59 +1899,104 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
       if (alignedWidth > MAX_WIDTH || alignedHeight > MAX_HEIGHT)
         return false;
 
-      Plane    planes[3]     = {};
-      uint64_t readbackBytes = 0;
-      uint64_t maxPixels     = 0;
+      Plane    planes[3]   = {};
+      uint64_t planePixels = 0;
       for (unsigned i = 0; i < 3; ++i)
       {
-        const bool subsampled = chroma == LG_NET_VIDEO_CHROMA_420 && i;
+        const bool subsampled = chroma == CHROMA_420 && i;
         planes[i].width       = subsampled ? alignedWidth / 2U : alignedWidth;
         planes[i].height      = subsampled ? alignedHeight / 2U : alignedHeight;
         planes[i].levels      = subsampled ?
           PYROWAVE_LEVELS - 1U : PYROWAVE_LEVELS;
         const uint64_t pixels =
           static_cast<uint64_t>(planes[i].width) * planes[i].height;
-        planes[i].readbackOffset = readbackBytes;
-        planes[i].readbackBytes  = ((pixels + 1U) / 2U) * sizeof(uint32_t);
-        if (readbackBytes > UINT64_MAX - planes[i].readbackBytes)
+        if (planePixels > UINT32_MAX || pixels > UINT32_MAX - planePixels)
           return false;
-        readbackBytes += planes[i].readbackBytes;
-        maxPixels      = (std::max)(maxPixels, pixels);
+        planes[i].offset = static_cast<uint32_t>(planePixels);
+        planePixels     += pixels;
       }
-      if (!maxPixels || maxPixels > UINT_MAX || !readbackBytes)
+      constexpr uint64_t MAX_ELEMENTS =
+        1ULL << D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP;
+
+      uint32_t blockCapacity  = 0;
+      uint32_t block8Capacity = 0;
+      if (!planePixels || planePixels > MAX_ELEMENTS ||
+          !CalculateBlockCapacity(
+            planes, chroma, blockCapacity, block8Capacity))
+        return false;
+
+      const uint64_t statsBase    = 0;
+      const uint64_t metaBase     =
+        statsBase + static_cast<uint64_t>(block8Capacity) *
+          PYROWAVE_STAT_WORDS;
+      const uint64_t rdoOpsBase   =
+        metaBase + static_cast<uint64_t>(block8Capacity) * 2U;
+      const uint64_t rdoStateBase =
+        rdoOpsBase + static_cast<uint64_t>(blockCapacity) *
+          (PYROWAVE_QUANT_LEVELS - 1U);
+      const uint64_t auxWords     = rdoStateBase +
+        PYROWAVE_RDO_WORDS + blockCapacity;
+      const uint64_t payloadWords =
+        1U + static_cast<uint64_t>(block8Capacity) *
+          PYROWAVE_QUANT_WORDS_8X8;
+      if (auxWords > MAX_ELEMENTS || payloadWords > MAX_ELEMENTS ||
+          rdoStateBase > UINT32_MAX)
+        return false;
+
+      const uint64_t worstPacked     =
+        static_cast<uint64_t>(blockCapacity) * PYROWAVE_PACKET_BYTES + 8U;
+      const uint64_t targetPacked    =
+        static_cast<uint64_t>(alignedWidth) * alignedHeight * 2U + 8U;
+      const uint64_t packedCapacity  = (std::min)(worstPacked,
+        (std::min)(targetPacked,
+          static_cast<uint64_t>(frameLimit & ~UINT32_C(3))));
+      const uint64_t packetMetaBytes =
+        static_cast<uint64_t>(blockCapacity) *
+          PYROWAVE_PACKET_META_WORDS * sizeof(uint32_t);
+      const uint64_t packedOffset    =
+        PYROWAVE_STATE_BYTES + packetMetaBytes;
+      const uint64_t readbackBytes   = packedOffset + packedCapacity;
+      if (!packedCapacity || packedCapacity > UINT32_MAX)
         return false;
 
       Reset();
-      m_device = device;
-      m_cfg    = cfg;
-      m_chroma = chroma;
+      m_device          = device;
+      m_cfg             = cfg;
+      m_chroma          = chroma;
+      m_packedOffset    = packedOffset;
+      m_readbackBytes   = readbackBytes;
+      m_blockCapacity   = blockCapacity;
+      m_block8Capacity  = block8Capacity;
+      m_blocksPerRDO    = NextPowerOfTwo(
+        (blockCapacity + PYROWAVE_RDO_DIVISIONS - 1U) /
+        PYROWAVE_RDO_DIVISIONS);
+      m_packedCapacity  = static_cast<uint32_t>(packedCapacity);
+      m_auxBase[0]      = static_cast<uint32_t>(statsBase);
+      m_auxBase[1]      = static_cast<uint32_t>(metaBase);
+      m_auxBase[2]      = static_cast<uint32_t>(rdoOpsBase);
+      m_auxBase[3]      = static_cast<uint32_t>(rdoStateBase);
+      m_auxWords        = static_cast<uint32_t>(auxWords);
+      m_payloadWords    = static_cast<uint32_t>(payloadWords);
+      m_frameLimit      = frameLimit;
       std::copy(std::begin(planes), std::end(planes), std::begin(m_planes));
-      m_readbackBytes = readbackBytes;
 
-      if (!m_queue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COMPUTE,
-            L"Network Video", CD3D12CommandSlot::FAST, 1) ||
-          !CreatePipelines() ||
-          !CreateBuffer(m_device.Get(), maxPixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_wave) ||
-          !CreateBuffer(m_device.Get(), maxPixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_scratch) ||
-          !CreateBuffer(m_device.Get(),
-            ((maxPixels + 1U) / 2U) * sizeof(uint32_t),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_quant) ||
-          !CreateBuffer(m_device.Get(), readbackBytes,
-            D3D12_HEAP_TYPE_READBACK,
-            D3D12_RESOURCE_STATE_COPY_DEST,
-            D3D12_RESOURCE_FLAG_NONE, m_readback))
+      if (!m_computeQueue.Init(m_device.Get(),
+            D3D12_COMMAND_LIST_TYPE_COMPUTE, L"Network Video Compute",
+            CD3D12CommandSlot::FAST, ENCODER_SLOT_COUNT) ||
+          !m_copyQueue.Init(m_device.Get(), D3D12_COMMAND_LIST_TYPE_COPY,
+            L"Network Video Copy", CD3D12CommandSlot::FAST,
+            ENCODER_SLOT_COUNT) ||
+          !CreatePipelines())
       {
         Reset();
         return false;
       }
+      for (Slot& slot : m_slots)
+        if (!CreateSlot(slot, planePixels))
+        {
+          Reset();
+          return false;
+        }
 
       m_ready = true;
       return true;
@@ -834,325 +2011,293 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
         device.Get() == m_device.Get();
     }
 
-    void RecordPlane(ID3D12GraphicsCommandList * list, unsigned component)
+    static uint32_t QuantBits(
+      int level, unsigned component, unsigned band)
     {
-      static constexpr float    LIFT [4] =
-      {
-        -1.586134342059924f,
-        -0.052980118572961f,
-         0.882911075530934f,
-         0.443506852043971f,
-      };
-      static constexpr uint32_t PHASE[4] = { 1, 0, 1, 0 };
-      static constexpr float    K        = 1.230174104914001f;
-      static constexpr float    INV_K    = 1.0f / K;
-
-      const Plane& plane = m_planes[component];
-
-      ShaderParameters parameters = {};
-      parameters.dim0[0]   = m_cfg.width;
-      parameters.dim0[1]   = m_cfg.height;
-      parameters.dim0[2]   = plane.width;
-      parameters.dim0[3]   = plane.height;
-      parameters.op0[2]    = component;
-      parameters.op0[3]    = m_chroma == LG_NET_VIDEO_CHROMA_420;
-      parameters.op1[2]    = m_cfg.profile.signal == FrameSignal::PQ_BT2020;
-      parameters.values[1] = INV_K;
-      parameters.values[2] = K;
-      parameters.values[3] = PYROWAVE_QUANT_SCALE;
-      Dispatch(list, PIPELINE_COLOR, parameters,
-        (plane.width + 7U) / 8U, (plane.height + 7U) / 8U);
-      UAVBarrier(list, m_wave.Get());
-
-      uint32_t activeWidth  = plane.width;
-      uint32_t activeHeight = plane.height;
-      for (unsigned level = 0; level < plane.levels; ++level)
-      {
-        parameters.op0[0] = activeWidth;
-        parameters.op0[1] = activeHeight;
-        parameters.op0[2] = 0;
-        for (unsigned pass = 0; pass < 4; ++pass)
-        {
-          parameters.op1[0]    = PHASE[pass];
-          parameters.values[0] = LIFT[pass];
-          Dispatch(list, PIPELINE_LIFT, parameters,
-            (activeWidth + 7U) / 8U, (activeHeight + 7U) / 8U);
-          UAVBarrier(list, m_wave.Get());
-        }
-
-        Dispatch(list, PIPELINE_HORIZONTAL_SPLIT, parameters,
-          (activeWidth + 7U) / 8U, (activeHeight + 7U) / 8U);
-        UAVBarrier(list, m_scratch.Get());
-
-        parameters.op0[2] = 1;
-        for (unsigned pass = 0; pass < 4; ++pass)
-        {
-          parameters.op1[0]    = PHASE[pass];
-          parameters.values[0] = LIFT[pass];
-          Dispatch(list, PIPELINE_LIFT, parameters,
-            (activeWidth + 7U) / 8U, (activeHeight + 7U) / 8U);
-          UAVBarrier(list, m_scratch.Get());
-        }
-
-        Dispatch(list, PIPELINE_VERTICAL_SPLIT, parameters,
-          (activeWidth + 7U) / 8U, (activeHeight + 7U) / 8U);
-        UAVBarrier(list, m_wave.Get());
-        activeWidth  >>= 1;
-        activeHeight >>= 1;
-      }
-
-      const uint32_t pixels = plane.width * plane.height;
-
-      parameters.op1[1] = pixels;
-      Dispatch(list, PIPELINE_QUANT, parameters,
-        ((pixels + 1U) / 2U + 63U) / 64U, 1);
-      UAVBarrier(list, m_quant.Get());
-      Transition(list, m_quant.Get(), D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-        D3D12_RESOURCE_STATE_COPY_SOURCE);
-      list->CopyBufferRegion(m_readback.Get(), plane.readbackOffset,
-        m_quant.Get(), 0, plane.readbackBytes);
-      Transition(list, m_quant.Get(), D3D12_RESOURCE_STATE_COPY_SOURCE,
-        D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+      const uint32_t bits = 8U + static_cast<uint32_t>(level) +
+        (band == 0 ? 2U : band < 3 ? 1U : 0U) - (component ? 1U : 0U);
+      return (std::min)(12U, bits);
     }
 
-    int16_t Coefficient(
-      const uint8_t * data, unsigned component, uint32_t x, uint32_t y) const
+    float DistortionScale(
+      int level, unsigned component, unsigned band) const
     {
-      const Plane& plane       = m_planes[component];
-      const uint64_t index     = static_cast<uint64_t>(y) * plane.width + x;
-      const uint64_t wordIndex = index / 2U;
-      const uint8_t * source   = data + plane.readbackOffset +
-        wordIndex * sizeof(uint32_t);
-      const uint32_t word      =
-        static_cast<uint32_t>(source[0])       |
-        static_cast<uint32_t>(source[1]) << 8  |
-        static_cast<uint32_t>(source[2]) << 16 |
-        static_cast<uint32_t>(source[3]) << 24;
-      return static_cast<int16_t>(index & 1U ? word >> 16 : word);
+      const float     horizontal  = band & 1U ? 0.75f : 0.25f;
+      const float     vertical    = band & 2U ? 0.75f : 0.25f;
+      constexpr float DPI         = 96.0f;
+      constexpr float CPD         = 0.34f * DPI;
+      float           cycles      =
+        std::sqrt(horizontal * horizontal + vertical * vertical) *
+        CPD * std::exp2(-static_cast<float>(level));
+      cycles = (std::max)(cycles, 8.0f);
+      float           sensitivity =
+        2.6f * (0.0192f + 0.114f * cycles) *
+        std::exp(-std::pow(0.114f * cycles, 1.1f));
+      if (component && level != static_cast<int>(PYROWAVE_LEVELS) - 1 &&
+          m_chroma == CHROMA_420)
+        sensitivity *= 0.6f;
+      const uint32_t normalizedBits = 8U + static_cast<uint32_t>(level) +
+        (band == 0 ? 2U : band < 3 ? 1U : 0U) - (component ? 1U : 0U);
+      const float    resolution     =
+        static_cast<float>(1U << normalizedBits);
+      const float    weighted       = sensitivity * resolution;
+      return weighted * weighted / 256.0f;
     }
 
-    static void CoefficientCoord(unsigned linear, uint32_t& x, uint32_t& y)
+    bool RecordBands(ID3D12GraphicsCommandList * list, Pipeline pipeline,
+      uint32_t sequence)
     {
-      y = (linear & 1U) | (((linear >> 3U) & 3U) << 1U);
-      x = ((linear >> 1U) & 3U) | (((linear >> 5U) & 1U) << 2U);
-    }
-
-    bool AppendBlock(const uint8_t * coefficients, unsigned component,
-      uint32_t bandX, uint32_t bandY, uint32_t bandWidth,
-      uint32_t bandHeight, uint32_t blockX, uint32_t blockY,
-      uint32_t blockIndex, EncodedFrame& output)
-    {
-      std::array<std::array<int16_t, 64>, 16> values = {};
-      uint16_t                                ballot = 0;
-      for (unsigned block = 0; block < 16; ++block)
-      {
-        const uint32_t block8X = block & 3U;
-        const uint32_t block8Y = block >> 2U;
-
-        bool nonzero = false;
-        for (unsigned linear = 0; linear < 64; ++linear)
-        {
-          uint32_t localX;
-          uint32_t localY;
-          CoefficientCoord(linear, localX, localY);
-          const uint32_t x = blockX * 32U + block8X * 8U + localX;
-          const uint32_t y = blockY * 32U + block8Y * 8U + localY;
-          if (x < bandWidth && y < bandHeight)
-            values[block][linear] = Coefficient(coefficients, component,
-              bandX + x, bandY + y);
-          nonzero |= values[block][linear] != 0;
-        }
-        if (nonzero)
-          ballot |= static_cast<uint16_t>(1U << block);
-      }
-      if (!ballot)
-        return true;
-
-      std::vector<uint16_t> controls;
-      std::vector<uint8_t>  scales;
-      std::vector<uint8_t>  magnitude;
-      std::vector<uint8_t>  signs;
-      controls.reserve(16);
-      scales.reserve(16);
-      for (unsigned block = 0; block < 16; ++block)
-      {
-        if (!(ballot & (1U << block)))
-          continue;
-        unsigned maxPlanes = 0;
-        unsigned planes[8] = {};
-        for (unsigned subblock = 0; subblock < 8; ++subblock)
-          for (unsigned pixel = 0; pixel < 8; ++pixel)
-          {
-            const size_t   valueIndex =
-              static_cast<size_t>(subblock) * 8U + pixel;
-            const int      value      = values[block][valueIndex];
-            const uint16_t absolute   = static_cast<uint16_t>(
-              value < 0 ? -value : value);
-            planes[subblock] = (std::max)(
-              planes[subblock], MagnitudeBits(absolute));
-            maxPlanes        = (std::max)(maxPlanes, planes[subblock]);
-          }
-
-        const unsigned qualityPlanes = maxPlanes > 3U ? maxPlanes - 3U : 0;
-        uint16_t       control       = 0;
-        for (unsigned subblock = 0; subblock < 8; ++subblock)
-        {
-          const unsigned coded = planes[subblock] > qualityPlanes ?
-            planes[subblock] - qualityPlanes : 0;
-          control |= static_cast<uint16_t>((std::min)(coded, 3U) <<
-            (subblock * 2U));
-        }
-        controls.push_back(control);
-        scales.push_back(static_cast<uint8_t>(
-          (PYROWAVE_QSCALE_CODE << 4U) | qualityPlanes));
-
-        for (unsigned subblock = 0; subblock < 8; ++subblock)
-        {
-          const unsigned coded =
-            ((control >> (subblock * 2U)) & 3U) + qualityPlanes;
-          for (unsigned plane = 0; plane < coded; ++plane)
-          {
-            const unsigned shift = coded - plane - 1U;
-            uint8_t        byte  = 0;
-            for (unsigned pixel = 0; pixel < 8; ++pixel)
-            {
-              const size_t   valueIndex =
-                static_cast<size_t>(subblock) * 8U + pixel;
-              const int      value      = values[block][valueIndex];
-              const uint16_t absolute   = static_cast<uint16_t>(
-                value < 0 ? -value : value);
-              byte |= static_cast<uint8_t>(
-                ((absolute >> shift) & 1U) << pixel);
-            }
-            magnitude.push_back(byte);
-          }
-        }
-      }
-
-      uint8_t  signByte = 0;
-      unsigned signBit  = 0;
-      for (unsigned block = 0, compact = 0; block < 16; ++block)
-      {
-        if (!(ballot & (1U << block)))
-          continue;
-        const uint16_t control       = controls[compact];
-        const unsigned qualityPlanes = scales[compact] & 0xfU;
-        ++compact;
-        for (unsigned subblock = 0; subblock < 8; ++subblock)
-        {
-          const unsigned coded =
-            ((control >> (subblock * 2U)) & 3U) + qualityPlanes;
-          if (!coded)
-            continue;
-          for (unsigned pixel = 0; pixel < 8; ++pixel)
-          {
-            const size_t valueIndex =
-              static_cast<size_t>(subblock) * 8U + pixel;
-            const int    value      = values[block][valueIndex];
-            if (!value)
-              continue;
-            if (value < 0)
-              signByte |= static_cast<uint8_t>(1U << signBit);
-            if (++signBit == 8U)
-            {
-              signs.push_back(signByte);
-              signByte = 0;
-              signBit  = 0;
-            }
-          }
-        }
-      }
-      if (signBit)
-        signs.push_back(signByte);
-
-      const size_t start = output.data.size();
-      output.data.resize(start + 8U, 0);
-      for (uint16_t control : controls)
-        AppendLE16(output.data, control);
-      output.data.insert(output.data.end(), scales.begin(), scales.end());
-      output.data.insert(
-        output.data.end(), magnitude.begin(), magnitude.end());
-      output.data.insert(output.data.end(), signs.begin(), signs.end());
-      while (output.data.size() & 3U)
-        output.data.push_back(0);
-
-      const size_t bytes = output.data.size() - start;
-      const size_t words = bytes / sizeof(uint32_t);
-      if (words > 0xfffU || blockIndex > 0xffffffU)
-        return false;
-      const uint32_t word0 = ballot |
-        static_cast<uint32_t>(words << 16U) |
-        (m_sequence << 28U);
-      const uint32_t word1 = PYROWAVE_QUANT_CODE | (blockIndex << 8U);
-      StoreLE32(output.data.data() + start, word0);
-      StoreLE32(output.data.data() + start + 4U, word1);
-      output.blocks.push_back(
-        { static_cast<uint32_t>(start), static_cast<uint32_t>(bytes) });
-      return output.data.size() <= MAX_FRAME_LENGTH &&
-        output.blocks.size() <= MAX_BLOCKS;
-    }
-
-    bool Packetize(const uint8_t * coefficients, EncodedFrame& output)
-    {
-      output.data.assign(8, 0);
-      output.blocks.clear();
-      uint32_t blockIndex = 0;
+      uint32_t blockBase  = 0;
+      uint32_t blockBase8 = 0;
       for (int level = static_cast<int>(PYROWAVE_LEVELS) - 1;
            level >= 0; --level)
         for (unsigned component = 0; component < 3; ++component)
         {
-          if (m_chroma == LG_NET_VIDEO_CHROMA_420 && component && !level)
+          if (m_chroma == CHROMA_420 && component && !level)
             continue;
           const uint32_t localLevel =
-            m_chroma == LG_NET_VIDEO_CHROMA_420 && component ?
+            m_chroma == CHROMA_420 && component ?
               static_cast<uint32_t>(level - 1) :
               static_cast<uint32_t>(level);
           const uint32_t bandWidth  =
             m_planes[component].width >> (localLevel + 1U);
           const uint32_t bandHeight =
             m_planes[component].height >> (localLevel + 1U);
+          const uint32_t blocksX    = (bandWidth + 31U) / 32U;
+          const uint32_t blocksY    = (bandHeight + 31U) / 32U;
+          const uint32_t blocks8X   = (bandWidth + 7U) / 8U;
+          const uint32_t blocks8Y   = (bandHeight + 7U) / 8U;
           const unsigned firstBand  =
             level == static_cast<int>(PYROWAVE_LEVELS) - 1 ? 0 : 1;
           for (unsigned band = firstBand; band < 4; ++band)
           {
-            const uint32_t bandX   = band & 1U ? bandWidth : 0;
-            const uint32_t bandY   = band & 2U ? bandHeight : 0;
-            const uint32_t blocksX = (bandWidth + 31U) / 32U;
-            const uint32_t blocksY = (bandHeight + 31U) / 32U;
-            for (uint32_t y = 0; y < blocksY; ++y)
-              for (uint32_t x = 0; x < blocksX; ++x)
-              {
-                if (blockIndex >= MAX_BLOCKS ||
-                    !AppendBlock(coefficients, component, bandX, bandY,
-                      bandWidth, bandHeight, x, y, blockIndex, output))
-                  return false;
-                ++blockIndex;
-              }
+            const uint32_t   quantBits  =
+              QuantBits(level, component, band);
+            ShaderParameters parameters = {};
+            parameters.dim0[0]   = m_planes[component].width;
+            parameters.dim0[1]   = m_planes[component].offset;
+            parameters.dim0[2]   = bandWidth;
+            parameters.dim0[3]   = bandHeight;
+            parameters.op0[0]    = band & 1U ? bandWidth : 0;
+            parameters.op0[1]    = band & 2U ? bandHeight : 0;
+            parameters.op0[2]    = blocks8X;
+            parameters.op0[3]    = blocks8Y;
+            parameters.op1[0]    = blocksX;
+            parameters.op1[1]    = blockBase;
+            parameters.op1[2]    = blockBase8;
+            parameters.op1[3]    = pipeline == PIPELINE_QUANT ?
+              m_payloadWords : m_packedCapacity;
+            parameters.values[0] = static_cast<float>(1U << quantBits);
+            parameters.values[1] = DistortionScale(
+              level, component, band);
+            parameters.values[2] = static_cast<float>(
+              pipeline == PIPELINE_PACK ? sequence : m_blockCapacity);
+            parameters.values[3] = static_cast<float>(
+              pipeline == PIPELINE_PACK ? 8U * (4U + quantBits) :
+                m_blocksPerRDO);
+
+            if (pipeline == PIPELINE_QUANT || pipeline == PIPELINE_ANALYZE)
+              Dispatch(list, pipeline, parameters, blocksX, blocksY);
+            else if (pipeline == PIPELINE_PACK)
+              Dispatch(list, pipeline, parameters,
+                (blocksX + 1U) / 2U, (blocksY + 1U) / 2U);
+            else
+              return false;
+
+            blockBase  += blocksX * blocksY;
+            blockBase8 += blocks8X * blocks8Y;
           }
         }
+      return blockBase == m_blockCapacity &&
+        blockBase8 == m_block8Capacity;
+    }
 
-      if (blockIndex > MAX_BLOCKS || output.blocks.empty() ||
-          output.data.size() > MAX_FRAME_LENGTH)
+    void RecordTransforms(ID3D12GraphicsCommandList * list)
+    {
+      uint32_t activeWidth [3];
+      uint32_t activeHeight[3];
+      for (unsigned component = 0; component < 3; ++component)
+      {
+        activeWidth [component] = m_planes[component].width;
+        activeHeight[component] = m_planes[component].height;
+      }
+
+      for (unsigned level = 0; level < PYROWAVE_LEVELS; ++level)
+      {
+        for (unsigned component = 0; component < 3; ++component)
+        {
+          const Plane& plane = m_planes[component];
+          if (level >= plane.levels)
+            continue;
+
+          ShaderParameters transform = {};
+          transform.dim0[2] = plane.width;
+          transform.dim0[3] = plane.height;
+          transform.op0[0]  = activeWidth [component];
+          transform.op0[1]  = activeHeight[component];
+          transform.op1[0]  = level;
+          transform.op1[1]  = level ? ((level - 1U) & 1U) : 0U;
+          transform.op1[2]  = level & 1U;
+          transform.op1[3]  = plane.offset;
+          Dispatch(list, PIPELINE_DWT, transform,
+            (activeWidth[component] + 31U) / 32U,
+            (activeHeight[component] + 31U) / 32U);
+          activeWidth [component] >>= 1;
+          activeHeight[component] >>= 1;
+        }
+        UAVBarrier(list, nullptr);
+      }
+    }
+
+    void PrepareReadback(ID3D12GraphicsCommandList * list, Slot& slot)
+    {
+      UAVBarrier(list, slot.packed.Get());
+      UAVBarrier(list, slot.packState.Get());
+      UAVBarrier(list, slot.aux.Get());
+      ID3D12Resource * resources[] =
+      {
+        slot.packed.Get(),
+        slot.packState.Get(),
+        slot.aux.Get(),
+      };
+      for (ID3D12Resource * resource : resources)
+        Transition(list, resource, D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+          D3D12_RESOURCE_STATE_COMMON);
+    }
+
+    void RecordReadback(ID3D12GraphicsCommandList * list, Slot& slot)
+    {
+      list->CopyBufferRegion(slot.readback.Get(), 0,
+        slot.packState.Get(), 0, PYROWAVE_STATE_BYTES);
+      list->CopyBufferRegion(slot.readback.Get(), PYROWAVE_STATE_BYTES,
+        slot.aux.Get(),
+        static_cast<uint64_t>(m_auxBase[2]) * sizeof(uint32_t),
+        static_cast<uint64_t>(m_blockCapacity) *
+          PYROWAVE_PACKET_META_WORDS * sizeof(uint32_t));
+      list->CopyBufferRegion(slot.readback.Get(), m_packedOffset,
+        slot.packed.Get(), 0, m_packedCapacity);
+    }
+
+    static uint32_t LoadLE32(const uint8_t * data)
+    {
+      return static_cast<uint32_t>(data[0])       |
+        static_cast<uint32_t>(data[1]) << 8U      |
+        static_cast<uint32_t>(data[2]) << 16U     |
+        static_cast<uint32_t>(data[3]) << 24U;
+    }
+
+    bool Compact(const Slot& slot, const uint8_t * readback,
+      EncodedFrame& output) const
+    {
+      const uint32_t packedBytes = LoadLE32(readback);
+      const uint32_t packetCount = LoadLE32(readback + 4U);
+      const uint32_t overflow    = LoadLE32(readback + 8U);
+      if (overflow || !packetCount || packetCount > m_blockCapacity ||
+          packedBytes < 8U || packedBytes > m_packedCapacity ||
+          packedBytes > MAX_FRAME_LENGTH)
         return false;
 
-      const uint32_t word0 = (m_cfg.width - 1U) |
-        ((m_cfg.height - 1U) << 14U) | (m_sequence << 28U) |
-        (1U << 31U);
-      const bool     hdr   =
+      const uint8_t * packetMeta    = readback + PYROWAVE_STATE_BYTES;
+      const uint8_t * packed        = readback + m_packedOffset;
+      const bool      hdr           =
         m_cfg.profile.signal == FrameSignal::PQ_BT2020;
-      const uint32_t word1 =
-        static_cast<uint32_t>(output.blocks.size()) |
-        ((m_chroma == LG_NET_VIDEO_CHROMA_444 ? 1U : 0U) << 26U) |
+      const uint32_t  expectedWord0 = (m_cfg.width - 1U) |
+        ((m_cfg.height - 1U) << 14U) | (slot.sequence << 28U) |
+        (1U << 31U);
+      const uint32_t  expectedWord1 = packetCount |
+        ((m_chroma == CHROMA_444 ? 1U : 0U) << 26U) |
         (static_cast<uint32_t>(hdr) << 27U) |
         (static_cast<uint32_t>(hdr) << 28U) |
-        (static_cast<uint32_t>(hdr) << 29U) |
-        (1U << 30U);
-      StoreLE32(output.data.data(), word0);
-      StoreLE32(output.data.data() + 4U, word1);
+        (static_cast<uint32_t>(hdr) << 29U) | (1U << 30U);
+      if (LoadLE32(packed) != expectedWord0 ||
+          LoadLE32(packed + 4U) != expectedWord1)
+        return false;
+
+      try
+      {
+        output.blocks.clear();
+        output.blocks.reserve(packetCount);
+        output.data.resize(packedBytes);
+        std::copy_n(packed, 8U, output.data.begin());
+
+        uint32_t outputOffset = 8U;
+        for (uint32_t blockIndex = 0;
+             blockIndex < m_blockCapacity; ++blockIndex)
+        {
+          const uint8_t * meta = packetMeta +
+            static_cast<size_t>(blockIndex) *
+              PYROWAVE_PACKET_META_WORDS * sizeof(uint32_t);
+          const uint32_t sourceOffset = LoadLE32(meta);
+          const uint32_t length       = LoadLE32(meta + sizeof(uint32_t));
+          if (!length)
+          {
+            if (sourceOffset)
+              return false;
+            continue;
+          }
+          if (sourceOffset < 8U || sourceOffset > packedBytes ||
+              length < 8U || length > PYROWAVE_PACKET_BYTES ||
+              length > packedBytes - sourceOffset ||
+              length > packedBytes - outputOffset)
+            return false;
+
+          const uint8_t * packet       = packed + sourceOffset;
+          const uint32_t  header       = LoadLE32(packet);
+          const uint32_t  headerLength =
+            ((header >> 16U) & 0xfffU) * sizeof(uint32_t);
+          const uint32_t  packetBlock  = LoadLE32(
+            packet + sizeof(uint32_t)) >> 8U;
+          if (headerLength != length || packetBlock != blockIndex)
+            return false;
+
+          std::copy_n(packet, length,
+            output.data.begin() + outputOffset);
+          output.blocks.push_back({ outputOffset, length });
+          outputOffset += length;
+        }
+        if (output.blocks.size() != packetCount ||
+            outputOffset != packedBytes)
+          return false;
+      }
+      catch (...)
+      {
+        return false;
+      }
+
       output.blocks[0].offset  = 0;
       output.blocks[0].length += 8U;
 
       return true;
+    }
+
+    Slot * OldestSlot()
+    {
+      Slot * oldest = nullptr;
+      for (Slot& slot : m_slots)
+        if (slot.inFlight && (!oldest || slot.order < oldest->order))
+          oldest = &slot;
+      return oldest;
+    }
+
+    const Slot * OldestSlot() const
+    {
+      const Slot * oldest = nullptr;
+      for (const Slot& slot : m_slots)
+        if (slot.inFlight && (!oldest || slot.order < oldest->order))
+          oldest = &slot;
+      return oldest;
+    }
+
+    static void ReleaseSlot(Slot& slot)
+    {
+      slot.computeSync = {};
+      slot.sync        = {};
+      slot.inFlight    = false;
+      slot.captureTime = 0;
+      slot.order       = 0;
+      slot.frame       = {};
+
+      slot.lease.Reset();
     }
 
   public:
@@ -1163,115 +2308,301 @@ void QuantMain(uint3 tid : SV_DispatchThreadID)
 
     bool Busy() const
     {
-      return m_inFlight;
+      for (const Slot& slot : m_slots)
+        if (!slot.inFlight)
+          return false;
+      return true;
+    }
+
+    void SetWakeEvent(HANDLE event)
+    {
+      m_wakeEvent = event;
+    }
+
+    bool HasInFlight() const
+    {
+      return OldestSlot() != nullptr;
+    }
+
+    void ReleaseCompletedLeases()
+    {
+      for (Slot& slot : m_slots)
+        if (slot.inFlight && slot.lease &&
+            slot.computeSync.State() == D12SyncState::READY)
+          slot.lease.Reset();
+    }
+
+    bool Failed() const
+    {
+      if (m_computeQueue.Failed() || m_copyQueue.Failed())
+        return true;
+      for (const Slot& slot : m_slots)
+        if (slot.inFlight &&
+            (slot.computeSync.State() == D12SyncState::FAILED ||
+             slot.sync.State() == D12SyncState::FAILED))
+          return true;
+      return false;
     }
 
     bool Submit(FrameIn frame, TexLease lease, const FrameCfg& cfg,
-      LGNetVideoChromaSubsampling chroma)
+      LGNetVideoChromaSubsampling chroma, uint32_t frameLimit)
     {
-      if (m_inFlight || !lease || !lease.Get() ||
+      if (!lease || !lease.Get() ||
           lease->State() != D3D12_RESOURCE_STATE_COMMON)
         return false;
       ID3D12Resource * source = lease->Get();
       if (!m_ready || !SameCfg(m_cfg, cfg) || m_chroma != chroma ||
-          !SameDevice(source))
-        if (!Configure(cfg, chroma, source))
+          m_frameLimit != frameLimit || !SameDevice(source))
+        if (!Configure(cfg, chroma, frameLimit, source))
           return false;
 
-      CD3D12CommandSlot * command = m_queue.Try(0);
-      if (!command)
+      unsigned slotIndex = 0;
+      while (slotIndex < ENCODER_SLOT_COUNT && m_slots[slotIndex].inFlight)
+        ++slotIndex;
+      if (slotIndex == ENCODER_SLOT_COUNT)
         return false;
-      if (!lease->Wait(*command))
+      Slot&               slot           = m_slots[slotIndex];
+      CD3D12CommandSlot * computeCommand =
+        m_computeQueue.Acquire(slotIndex);
+      if (!computeCommand)
+        return false;
+      CD3D12CommandSlot * copyCommand    =
+        m_copyQueue.Acquire(slotIndex);
+      if (!copyCommand)
       {
-        command->Cancel();
+        computeCommand->Cancel();
+        return false;
+      }
+      if (!lease->Wait(*computeCommand))
+      {
+        copyCommand->Cancel();
+        computeCommand->Cancel();
         return false;
       }
 
-      CreateDescriptors(source);
-      ID3D12DescriptorHeap * heaps[] = { m_descriptors.Get() };
+      slot.captureTime = lease->time.postStart;
+      slot.sequence    = m_sequence;
+      CreateSourceDescriptor(slot, source);
+      ID3D12DescriptorHeap * heaps[] = { slot.descriptors.Get() };
 
-      ComPtr<ID3D12GraphicsCommandList> list = command->GetGfxList();
-      list->SetDescriptorHeaps(1, heaps);
-      list->SetComputeRootSignature(m_rootSignature.Get());
-      list->SetComputeRootDescriptorTable(
-        0, m_descriptors->GetGPUDescriptorHandleForHeapStart());
-      for (unsigned component = 0; component < 3; ++component)
-        RecordPlane(list.Get(), component);
-      if (!command->Execute(&m_sync))
+      ComPtr<ID3D12GraphicsCommandList> computeList =
+        computeCommand->GetGfxList();
+      ComPtr<ID3D12GraphicsCommandList> copyList    =
+        copyCommand->GetGfxList();
+      computeList->SetDescriptorHeaps(1, heaps);
+      computeList->SetComputeRootSignature(m_rootSignature.Get());
+      computeList->SetComputeRootDescriptorTable(
+        0, slot.descriptors->GetGPUDescriptorHandleForHeapStart());
+      if (slot.used)
+      {
+        Transition(computeList.Get(), slot.packed.Get(),
+          D3D12_RESOURCE_STATE_COMMON,
+          D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Transition(computeList.Get(), slot.packState.Get(),
+          D3D12_RESOURCE_STATE_COMMON,
+          D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+        Transition(computeList.Get(), slot.aux.Get(),
+          D3D12_RESOURCE_STATE_COMMON,
+          D3D12_RESOURCE_STATE_UNORDERED_ACCESS);
+      }
+      const UINT clear[4] = {};
+      computeList->ClearUnorderedAccessViewUint(GPUDescriptor(slot, 6),
+        ClearDescriptor(slot, 0), slot.packState.Get(), clear, 0, nullptr);
+      UAVBarrier(computeList.Get(), slot.packState.Get());
+
+      ShaderParameters clearState = {};
+      clearState.dim0[0] = m_blockCapacity;
+      clearState.dim0[1] = PYROWAVE_RDO_WORDS;
+      Dispatch(computeList.Get(), PIPELINE_CLEAR, clearState,
+        ((std::max)(m_blockCapacity, PYROWAVE_RDO_WORDS) + 255U) / 256U,
+        1);
+      UAVBarrier(computeList.Get(), slot.aux.Get());
+      UAVBarrier(computeList.Get(), slot.quantPayload.Get());
+
+      ShaderParameters color = {};
+      color.dim0[0] = m_cfg.width;
+      color.dim0[1] = m_cfg.height;
+      color.dim0[2] = m_planes[0].width;
+      color.dim0[3] = m_planes[0].height;
+      color.op0[0]  = m_planes[0].offset;
+      color.op0[1]  = m_planes[1].offset;
+      color.op0[2]  = m_planes[2].offset;
+      color.op0[3]  = m_chroma == CHROMA_420;
+      color.op1[0]  = m_cfg.profile.signal == FrameSignal::PQ_BT2020;
+      const uint32_t colorWidth  = m_chroma == CHROMA_420 ?
+        m_planes[0].width / 2U : m_planes[0].width;
+      const uint32_t colorHeight = m_chroma == CHROMA_420 ?
+        m_planes[0].height / 2U : m_planes[0].height;
+      Dispatch(computeList.Get(), PIPELINE_COLOR, color,
+        (colorWidth + 7U) / 8U, (colorHeight + 7U) / 8U);
+      UAVBarrier(computeList.Get(), slot.planes.Get());
+
+      RecordTransforms(computeList.Get());
+      if (!RecordBands(computeList.Get(), PIPELINE_QUANT, slot.sequence))
+      {
+        copyCommand->Cancel();
+        computeCommand->Cancel();
         return false;
+      }
+      UAVBarrier(computeList.Get(), slot.aux.Get());
+      UAVBarrier(computeList.Get(), slot.quantPayload.Get());
+      UAVBarrier(computeList.Get(), slot.packState.Get());
+      if (!RecordBands(computeList.Get(), PIPELINE_ANALYZE, slot.sequence))
+      {
+        copyCommand->Cancel();
+        computeCommand->Cancel();
+        return false;
+      }
+      UAVBarrier(computeList.Get(), slot.aux.Get());
 
-      m_frame    = std::move(frame);
-      m_lease    = std::move(lease);
-      m_inFlight = true;
+      ShaderParameters finalizeRDO = {};
+      Dispatch(computeList.Get(), PIPELINE_RDO_FINALIZE, finalizeRDO, 1, 1);
+      UAVBarrier(computeList.Get(), slot.aux.Get());
+
+      ShaderParameters resolve = {};
+      resolve.dim0[0] = (m_packedCapacity - 8U) / UINT32_C(4);
+      resolve.dim0[1] = m_blockCapacity;
+      resolve.dim0[2] = m_blocksPerRDO;
+      Dispatch(computeList.Get(), PIPELINE_RESOLVE, resolve,
+        (m_blockCapacity + 63U) / 64U, 1);
+      UAVBarrier(computeList.Get(), slot.aux.Get());
+
+      if (!RecordBands(computeList.Get(), PIPELINE_PACK, slot.sequence))
+      {
+        copyCommand->Cancel();
+        computeCommand->Cancel();
+        return false;
+      }
+      UAVBarrier(computeList.Get(), slot.packed.Get());
+      UAVBarrier(computeList.Get(), slot.packState.Get());
+      UAVBarrier(computeList.Get(), slot.aux.Get());
+      ShaderParameters finalize = {};
+      finalize.dim0[0] = m_cfg.width;
+      finalize.dim0[1] = m_cfg.height;
+      finalize.op0[0]  = slot.sequence;
+      finalize.op0[1]  = m_chroma == CHROMA_444;
+      finalize.op0[2]  =
+        m_cfg.profile.signal == FrameSignal::PQ_BT2020;
+      finalize.op0[3]  = 8U * (4U + QuantBits(
+        static_cast<int>(PYROWAVE_LEVELS) - 1, 0, 0));
+      Dispatch(computeList.Get(), PIPELINE_FINALIZE, finalize, 1, 1);
+      PrepareReadback(computeList.Get(), slot);
+      RecordReadback(copyList.Get(), slot);
+
+      computeCommand->SetCompletionCallback(
+        &CompletionFunction, m_wakeEvent, nullptr);
+      if (!computeCommand->Execute(&slot.computeSync))
+      {
+        copyCommand->Cancel();
+        Reset();
+        return false;
+      }
+      slot.used = true;
+      if (!copyCommand->WaitFor(
+            slot.computeSync.fence.Get(), slot.computeSync.value))
+      {
+        copyCommand->Cancel();
+        Reset();
+        return false;
+      }
+      copyCommand->SetCompletionCallback(
+        &CompletionFunction, m_wakeEvent, nullptr);
+      if (!copyCommand->Execute(&slot.sync))
+      {
+        Reset();
+        return false;
+      }
+
+      slot.frame    = std::move(frame);
+      slot.lease    = std::move(lease);
+      slot.order    = Next64(m_submitOrder);
+      slot.inFlight = true;
+      m_submitOrder = slot.order;
+      m_sequence    = (m_sequence + 1U) & 7U;
       return true;
     }
 
     D12SyncState State() const
     {
-      return m_inFlight ? m_sync.State() : D12SyncState::FAILED;
+      const Slot * slot = OldestSlot();
+      return slot ? slot->sync.State() : D12SyncState::PENDING;
     }
 
     bool Complete(uint64_t configEpoch, uint64_t frameID,
       EncodedFrame& output)
     {
-      if (!m_inFlight || m_sync.State() != D12SyncState::READY)
+      Slot * slot = OldestSlot();
+      if (!slot || slot->sync.State() != D12SyncState::READY)
         return false;
+      slot->lease.Reset();
 
-      const D3D12_RANGE readRange =
+      if (!slot->mapped)
       {
-        0,
-        static_cast<SIZE_T>(m_readbackBytes),
-      };
-      void          * mapped = nullptr;
-      const HRESULT   hr     = m_readback->Map(0, &readRange, &mapped);
-      const uint8_t * data   = static_cast<const uint8_t *>(mapped);
-      if (FAILED(hr) || !data)
-      {
-        m_inFlight = false;
-        m_lease.Reset();
+        ReleaseSlot(*slot);
         return false;
       }
 
       output = {};
 
-      const bool result = Packetize(data, output);
+      const bool result = Compact(*slot, slot->mapped, output);
 
-      const D3D12_RANGE writeRange = { 0, 0 };
-      m_readback->Unmap(0, &writeRange);
       if (result)
       {
         output.configEpoch    = configEpoch;
         output.frameID        = frameID;
-        output.captureTimeNs  = MonotonicNs();
+        output.captureTimeNs  = slot->captureTime;
         output.deadlineMs     = MAX_FRAME_LATENCY_MS;
       }
-      m_sequence = (m_sequence + 1U) & 7U;
-      m_inFlight = false;
-      m_lease.Reset();
-      m_sync = {};
+      ReleaseSlot(*slot);
       return result;
     }
 
     void Reset()
     {
-      m_queue.WaitForIdle();
-      m_inFlight = false;
-      m_ready    = false;
-      m_lease.Reset();
-      m_sync = {};
-      m_readback.Reset();
-      m_quant.Reset();
-      m_scratch.Reset();
-      m_wave.Reset();
-      m_descriptors.Reset();
+      m_computeQueue.WaitForIdle();
+      m_copyQueue.WaitForIdle();
+      m_ready = false;
+      for (Slot& slot : m_slots)
+      {
+        ReleaseSlot(slot);
+        if (slot.mapped)
+        {
+          const D3D12_RANGE writeRange = { 0, 0 };
+          slot.readback->Unmap(0, &writeRange);
+          slot.mapped = nullptr;
+        }
+        slot.readback.Reset();
+        slot.quantPayload.Reset();
+        slot.aux.Reset();
+        slot.packState.Reset();
+        slot.packed.Reset();
+        slot.planes.Reset();
+        slot.atlas.Reset();
+        slot.scratch.Reset();
+        slot.wave.Reset();
+        slot.clearDescriptors.Reset();
+        slot.descriptors.Reset();
+        slot.used = false;
+      }
       for (ComPtr<ID3D12PipelineState>& pipeline : m_pipelines)
         pipeline.Reset();
       m_rootSignature.Reset();
-      m_queue.DeInit();
+      m_copyQueue.DeInit();
+      m_computeQueue.DeInit();
       m_device.Reset();
-      m_cfg           = {};
-      m_chroma        = 0;
-      m_readbackBytes = 0;
+      m_cfg             = {};
+      m_chroma          = 0;
+      m_packedOffset    = 0;
+      m_readbackBytes   = 0;
+      m_submitOrder     = 0;
+      m_blockCapacity   = 0;
+      m_block8Capacity  = 0;
+      m_blocksPerRDO    = 0;
+      m_packedCapacity  = 0;
+      m_auxWords        = 0;
+      m_payloadWords    = 0;
+      m_frameLimit      = 0;
+      std::fill(std::begin(m_auxBase), std::end(m_auxBase), 0U);
       std::fill(std::begin(m_planes), std::end(m_planes), Plane {});
     }
   };
@@ -1285,15 +2616,20 @@ struct CNetworkVideo::Impl
     NetworkVideoPeerInfo info                   = {};
     LGNetVideoSubscribe  subscription           = {};
     LGNetVideoFeedback   feedback               = {};
+    LGNetVideoState      lastStatusState        = {};
     uint64_t             serial                 = 0;
     uint64_t             componentEpoch         = 0;
     uint64_t             statusSequence         = 0;
+    uint64_t             statusEpoch            = 0;
     uint64_t             lastFrameID            = 0;
     uint64_t             lastCompleteID         = 0;
     uint64_t             lastCaptureTimeNs      = 0;
     uint64_t             sendReadyGeneration[3] = {};
+    uint32_t             lastStatusDetail       = 0;
+    uint32_t             lastStatusFlags        = 0;
     uint32_t             droppedFrames          = 0;
     uint8_t              blockedDeliveries      = 0;
+    bool                 statusSent             = false;
     bool                 subscribed             = false;
     bool                 configured             = false;
     bool                 congested              = false;
@@ -1311,28 +2647,33 @@ struct CNetworkVideo::Impl
 
   struct SendItem
   {
-    uint64_t                              serial         = 0;
-    NetworkVideoPeer                      peer           = {};
-    NetworkVideoDelivery                  delivery       =
+    uint64_t                                    serial         = 0;
+    NetworkVideoPeer                            peer           = {};
+    NetworkVideoDelivery                        delivery       =
       NetworkVideoDelivery::RELIABLE;
-    uint16_t                              messageType    = 0;
-    LGNetEnvelopeFlags                    flags          =
+    uint16_t                                    messageType    = 0;
+    LGNetEnvelopeFlags                          flags          =
       LG_NET_ENVELOPE_FINAL;
-    uint64_t                              componentEpoch = 0;
-    uint64_t                              requestID      = 0;
-    uint64_t                              frameID        = 0;
-    std::shared_ptr<std::vector<uint8_t>> payload;
-    std::shared_ptr<const EncodedFrame>    encoded;
-    uint32_t                              fragmentIndex  = 0;
-    uint32_t                              fragmentCount  = 0;
-    uint32_t                              blockIndex     = 0;
-    uint32_t                              blockOffset    = 0;
-    uint32_t                              payloadLimit   = 0;
+    uint64_t                                    componentEpoch = 0;
+    uint64_t                                    requestID      = 0;
+    uint64_t                                    frameID        = 0;
+    std::shared_ptr<const std::vector<uint8_t>> payload;
+    std::shared_ptr<const EncodedFrame>         encoded;
+    uint32_t                                    fragmentIndex  = 0;
+    uint32_t                                    fragmentCount  = 0;
+    uint32_t                                    blockIndex     = 0;
+    uint32_t                                    blockOffset    = 0;
+    uint32_t                                    payloadLimit   = 0;
+    bool                                        started        = false;
   };
 
   CSRWLock m_processLock;
   CSRWLock m_senderCallbackLock;
   CSRWLock m_lock;
+
+  HANDLE            m_workerWake   = nullptr;
+  HANDLE            m_workerThread = nullptr;
+  std::atomic<bool> m_workerStop   = false;
 
   INetworkVideoSender * m_sender   = nullptr;
   bool                  m_started  = false;
@@ -1356,6 +2697,82 @@ struct CNetworkVideo::Impl
   size_t                   m_sendBytes = 0;
 
   PyroWaveD3D12Encoder m_encoder;
+
+  Impl()
+  {
+    m_workerWake = CreateEvent(nullptr, FALSE, FALSE, nullptr);
+    if (!m_workerWake)
+      return;
+    m_encoder.SetWakeEvent(m_workerWake);
+    m_workerThread = CreateThread(
+      nullptr, 0, WorkerProc, this, 0, nullptr);
+    if (!m_workerThread)
+    {
+      m_encoder.SetWakeEvent(nullptr);
+      CloseHandle(m_workerWake);
+      m_workerWake = nullptr;
+    }
+    else if (!SetThreadPriority(m_workerThread, THREAD_PRIORITY_HIGHEST))
+      DEBUG_WARN_HR(GetLastError(),
+        "Failed to raise the network video worker priority");
+  }
+
+  ~Impl()
+  {
+    m_workerStop.store(true, std::memory_order_release);
+    if (m_workerWake)
+      SetEvent(m_workerWake);
+    if (m_workerThread)
+    {
+      WaitForSingleObject(m_workerThread, INFINITE);
+      CloseHandle(m_workerThread);
+      m_workerThread = nullptr;
+    }
+    m_encoder.SetWakeEvent(nullptr);
+    if (m_workerWake)
+    {
+      CloseHandle(m_workerWake);
+      m_workerWake = nullptr;
+    }
+  }
+
+  static DWORD WINAPI WorkerProc(void * opaque)
+  {
+    Impl * self = static_cast<Impl *>(opaque);
+    for (;;)
+    {
+      if (WaitForSingleObject(self->m_workerWake, INFINITE) != WAIT_OBJECT_0 ||
+          self->m_workerStop.load(std::memory_order_acquire))
+        break;
+      try
+      {
+        self->DriveEncoder();
+      }
+      catch (...)
+      {
+        DEBUG_ERROR("Unhandled failure in the network video worker");
+        {
+          CSRWExclusiveLock processLock(self->m_processLock);
+          self->m_encoder.Reset();
+          CSRWExclusiveLock lock(self->m_lock);
+          self->FailNL(8);
+        }
+        self->Wake();
+      }
+    }
+    return 0;
+  }
+
+  bool WorkerReady() const
+  {
+    return m_workerWake && m_workerThread;
+  }
+
+  void Wake()
+  {
+    if (m_workerWake)
+      SetEvent(m_workerWake);
+  }
 
   PeerState * FindPeerNL(const NetworkVideoPeer& peer)
   {
@@ -1391,8 +2808,8 @@ struct CNetworkVideo::Impl
       return 0;
     if (m_activeCfg.profile.signal == FrameSignal::PQ_BT2020 ||
         (m_activeCfg.width & 1U) || (m_activeCfg.height & 1U))
-      return LG_NET_VIDEO_CHROMA_444;
-    return LG_NET_VIDEO_CHROMA_420;
+      return CHROMA_444;
+    return CHROMA_420;
   }
 
   LGNetVideoStreamConfig StreamConfigNL() const
@@ -1411,7 +2828,7 @@ struct CNetworkVideo::Impl
     config.width               = m_activeCfg.width;
     config.height              = m_activeCfg.height;
     config.pixelFormat         = static_cast<LGNetVideoPixelFormat>(
-      chroma == LG_NET_VIDEO_CHROMA_420 ?
+      chroma == CHROMA_420 ?
         LG_NET_VIDEO_PIXEL_FORMAT_YUV420P10 :
         LG_NET_VIDEO_PIXEL_FORMAT_YUV444P10);
     config.chromaSubsampling   = chroma;
@@ -1444,14 +2861,15 @@ struct CNetworkVideo::Impl
         request.preferredCodec == LG_NET_VIDEO_CODEC_PYROWAVE) &&
       request.maxWidth >= m_activeCfg.width &&
       request.maxHeight >= m_activeCfg.height &&
-      request.maxFrameLength >= 8U &&
+      request.maxFrameLength >= 20U &&
       (!(request.flags & LG_NET_VIDEO_SUBSCRIBE_REQUIRE_HDR) || hdr);
   }
 
   bool QueueNL(const NetworkVideoPeer& peer,
     NetworkVideoDelivery delivery, uint16_t messageType,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
-    uint64_t frameID, std::shared_ptr<std::vector<uint8_t>> payload)
+    uint64_t frameID,
+    std::shared_ptr<const std::vector<uint8_t>> payload)
   {
     if (!payload || payload->size() > UINT32_MAX ||
         m_sends.size() >= MAX_SEND_ITEMS ||
@@ -1474,7 +2892,7 @@ struct CNetworkVideo::Impl
       const uint64_t serial = item.serial;
       m_sends.push_back(std::move(item));
       m_nextSendSerial = serial;
-      m_sendBytes     += bytes;
+      m_sendBytes      += bytes;
     }
     catch (...)
     {
@@ -1487,8 +2905,11 @@ struct CNetworkVideo::Impl
     const EncodedFrame& encoded, size_t& bytes)
   {
     size_t blockBytes;
+    size_t encodedBytes;
     return Multiply(encoded.blocks.size(), sizeof(EncodedBlock), blockBytes) &&
-      Add(encoded.data.size(), blockBytes, bytes);
+      Add(encoded.data.size(), blockBytes, encodedBytes) &&
+      Add(encodedBytes, encoded.wholePayload ?
+        encoded.wholePayload->size() : 0, bytes);
   }
 
   bool EncodedQueuedNL(const EncodedFrame * encoded,
@@ -1561,7 +2982,7 @@ struct CNetworkVideo::Impl
       config.maxFrameLatencyMs, peer.subscription.maxFrameLatencyMs);
     if ((peer.subscription.flags &
           LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS) &&
-        DeliverySupported(peer.info, NetworkVideoDelivery::DATAGRAM))
+        DatagramFragmentsSupported(peer.info))
       config.flags |= LG_NET_VIDEO_STREAM_DATAGRAMS;
     if (!lgNetVideoStreamConfigValid(&config) ||
         !QueueFixedNL<LGNetVideoStreamConfig,
@@ -1597,14 +3018,29 @@ struct CNetworkVideo::Impl
       status.flags |= LG_NET_VIDEO_STATUS_RECONFIGURING;
     status.detail         = detail;
 
-    peer.statusSequence = status.statusSequence;
-    return QueueFixedNL<LGNetVideoStatus, lgNetVideoStatusEncode>(
+    if (!requestID && peer.statusSent &&
+        peer.statusEpoch == status.configEpoch &&
+        peer.lastStatusState == status.state &&
+        peer.lastStatusFlags == status.flags &&
+        peer.lastStatusDetail == status.detail)
+      return true;
+
+    if (!QueueFixedNL<LGNetVideoStatus, lgNetVideoStatusEncode>(
       peer.peer, NetworkVideoDelivery::RELIABLE,
       LG_NET_VIDEO_MESSAGE_STATUS,
       LG_NET_ENVELOPE_FINAL | (requestID ?
         LG_NET_ENVELOPE_RESPONSE : 0),
       peer.componentEpoch, requestID, 0, status,
-      LG_NET_VIDEO_STATUS_WIRE_SIZE);
+      LG_NET_VIDEO_STATUS_WIRE_SIZE))
+      return false;
+
+    peer.statusSequence   = status.statusSequence;
+    peer.statusEpoch      = status.configEpoch;
+    peer.lastStatusState  = status.state;
+    peer.lastStatusFlags  = status.flags;
+    peer.lastStatusDetail = status.detail;
+    peer.statusSent       = true;
+    return true;
   }
 
   void FailNL(uint32_t detail)
@@ -1623,7 +3059,8 @@ struct CNetworkVideo::Impl
     // delivering a complete frame on a constrained link.
     uint64_t activeFrame = 0;
     for (const SendItem& item : m_sends)
-      if (item.frameID && item.encoded && item.fragmentIndex &&
+      if (item.frameID && item.started &&
+          item.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
           SamePeer(item.peer, peer.peer))
       {
         activeFrame = item.frameID;
@@ -1651,6 +3088,7 @@ struct CNetworkVideo::Impl
       }
       else
         ++item;
+    peer.statusSent = false;
   }
 
   bool QueueScheduleNL(PeerState& peer, const EncodedFrame& frame)
@@ -1676,12 +3114,9 @@ struct CNetworkVideo::Impl
         schedule, LG_NET_VIDEO_SCHEDULE_WIRE_SIZE);
   }
 
-  bool QueueWholeFrameNL(PeerState& peer, const EncodedFrame& encoded,
-    NetworkVideoDelivery delivery)
+  static std::shared_ptr<const std::vector<uint8_t>> BuildWholeFramePayload(
+    const EncodedFrame& encoded, uint32_t deadlineMs)
   {
-    const uint32_t deadlineMs = (std::min)(
-      encoded.deadlineMs, peer.subscription.maxFrameLatencyMs);
-
     LGNetVideoFrame frame = {};
     frame.streamID                = STREAM_ID;
     frame.codec                   = LG_NET_VIDEO_CODEC_PYROWAVE;
@@ -1699,7 +3134,7 @@ struct CNetworkVideo::Impl
 
     const size_t size = lgNetVideoFrameSize(&frame);
     if (!size || size > UINT32_MAX)
-      return false;
+      return {};
 
     std::shared_ptr<std::vector<uint8_t>> payload;
     try
@@ -1708,37 +3143,99 @@ struct CNetworkVideo::Impl
     }
     catch (...)
     {
-      return false;
+      return {};
     }
     if (!lgNetVideoFrameEncode(
           payload->data(), payload->size(), &frame))
+      return {};
+    return payload;
+  }
+
+  bool QueueWholeFrameNL(PeerState& peer, const EncodedFrame& encoded,
+    NetworkVideoDelivery delivery)
+  {
+    const uint32_t deadlineMs = (std::min)(
+      encoded.deadlineMs, peer.subscription.maxFrameLatencyMs);
+    std::shared_ptr<const std::vector<uint8_t>> payload =
+      deadlineMs == encoded.deadlineMs ? encoded.wholePayload : nullptr;
+    if (!payload)
+      payload = BuildWholeFramePayload(encoded, deadlineMs);
+    if (!payload)
       return false;
     return QueueNL(peer.peer, delivery, LG_NET_VIDEO_MESSAGE_FRAME,
       LG_NET_ENVELOPE_FINAL, encoded.configEpoch, 0, encoded.frameID,
       std::move(payload));
   }
 
-  bool QueueFragmentsNL(PeerState& peer,
-    std::shared_ptr<const EncodedFrame> encoded,
-    NetworkVideoDelivery delivery, uint32_t maxPayload)
+  static bool FragmentPlan(const EncodedFrame& encoded,
+    uint32_t maxPayload, uint32_t firstBlockIndex,
+    uint32_t firstFragmentIndex,
+    uint32_t& payloadLimit, uint32_t& fragmentCount)
   {
-    if (!encoded || maxPayload <= LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
+    if (maxPayload <= LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE ||
+        firstBlockIndex > encoded.blocks.size())
       return false;
-    const uint32_t payloadLimit = (std::min)(
+    payloadLimit = (std::min)(
       maxPayload - LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE,
       static_cast<uint32_t>(LG_NET_VIDEO_MAX_FRAGMENT_LENGTH));
     if (!payloadLimit)
       return false;
 
-    uint64_t fragmentCount64 = 0;
-    for (const EncodedBlock& block : encoded->blocks)
+    uint64_t fragmentCount64 = firstFragmentIndex;
+    for (size_t blockIndex = firstBlockIndex;
+         blockIndex < encoded.blocks.size(); ++blockIndex)
+    {
+      const EncodedBlock& block = encoded.blocks[blockIndex];
+      if (!block.length)
+        return false;
       fragmentCount64 +=
         (static_cast<uint64_t>(block.length) + payloadLimit - 1U) /
         payloadLimit;
+    }
     if (!fragmentCount64 || fragmentCount64 > LG_NET_VIDEO_MAX_FRAGMENTS ||
         fragmentCount64 > UINT32_MAX)
       return false;
-    const uint32_t fragmentCount = static_cast<uint32_t>(fragmentCount64);
+    fragmentCount = static_cast<uint32_t>(fragmentCount64);
+    return true;
+  }
+
+  static bool CriticalFragmentPlan(const EncodedFrame& encoded,
+    uint32_t maxPayload, uint32_t& payloadLimit,
+    uint32_t& fragmentCount)
+  {
+    if (encoded.blocks.empty() ||
+        maxPayload <= LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
+      return false;
+    payloadLimit = (std::min)(
+      maxPayload - LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE,
+      static_cast<uint32_t>(LG_NET_VIDEO_MAX_FRAGMENT_LENGTH));
+    const uint32_t length = encoded.blocks.front().length;
+    if (!payloadLimit || !length)
+      return false;
+    const uint64_t count =
+      (static_cast<uint64_t>(length) + payloadLimit - 1U) / payloadLimit;
+    if (!count || count > LG_NET_VIDEO_MAX_FRAGMENTS || count > UINT32_MAX)
+      return false;
+    fragmentCount = static_cast<uint32_t>(count);
+    return true;
+  }
+
+  bool QueueFragmentsNL(PeerState& peer,
+    std::shared_ptr<const EncodedFrame> encoded,
+    NetworkVideoDelivery delivery, uint32_t maxPayload,
+    uint32_t firstBlockIndex = 0,
+    uint32_t firstFragmentIndex = 0)
+  {
+    if (!encoded)
+      return false;
+    uint32_t payloadLimit;
+    uint32_t fragmentCount;
+    if (!FragmentPlan(*encoded, maxPayload, firstBlockIndex,
+          firstFragmentIndex,
+          payloadLimit, fragmentCount))
+      return false;
+    if (firstBlockIndex == encoded->blocks.size())
+      return true;
 
     const bool newFrame = !EncodedQueuedNL(encoded.get());
     size_t     bytes    = 0;
@@ -1757,18 +3254,73 @@ struct CNetworkVideo::Impl
       item.componentEpoch = encoded->configEpoch;
       item.frameID        = encoded->frameID;
       item.encoded        = std::move(encoded);
+      item.fragmentIndex  = firstFragmentIndex;
       item.fragmentCount  = fragmentCount;
+      item.blockIndex     = firstBlockIndex;
       item.payloadLimit   = payloadLimit;
       const uint64_t serial = item.serial;
       m_sends.push_back(std::move(item));
       m_nextSendSerial = serial;
-      m_sendBytes     += bytes;
+      m_sendBytes      += bytes;
     }
     catch (...)
     {
       return false;
     }
     return true;
+  }
+
+  bool QueueReliableFirstBlockNL(PeerState& peer,
+    const std::shared_ptr<const EncodedFrame>& encoded,
+    uint32_t payloadLimit, uint32_t criticalFragmentCount,
+    uint32_t fragmentCount)
+  {
+    if (!encoded || encoded->blocks.empty() || !payloadLimit ||
+        !criticalFragmentCount || fragmentCount < criticalFragmentCount ||
+        !DeliverySupported(peer.info, NetworkVideoDelivery::RELIABLE) ||
+        peer.info.maxReliablePayload <=
+          LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
+      return false;
+    const EncodedBlock& block = encoded->blocks.front();
+    if (!block.length || payloadLimit > peer.info.maxReliablePayload -
+          LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
+      return false;
+
+    uint32_t blockOffset = 0;
+    for (uint32_t fragmentIndex = 0;
+         fragmentIndex < criticalFragmentCount; ++fragmentIndex)
+    {
+      SendItem item;
+      item.peer           = peer.peer;
+      item.delivery       = NetworkVideoDelivery::RELIABLE;
+      item.messageType    = LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT;
+      item.flags          = LG_NET_ENVELOPE_FINAL;
+      item.componentEpoch = encoded->configEpoch;
+      item.frameID        = encoded->frameID;
+      item.encoded        = encoded;
+      item.fragmentIndex  = fragmentIndex;
+      item.fragmentCount  = fragmentCount;
+      item.blockOffset    = blockOffset;
+      item.payloadLimit   = payloadLimit;
+
+      std::shared_ptr<std::vector<uint8_t>> payload;
+      try
+      {
+        payload = std::make_shared<std::vector<uint8_t>>();
+      }
+      catch (...)
+      {
+        return false;
+      }
+      if (!BuildFragmentPayload(item, *payload) ||
+          payload->size() > peer.info.maxReliablePayload ||
+          !QueueNL(peer.peer, NetworkVideoDelivery::RELIABLE,
+            LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT, LG_NET_ENVELOPE_FINAL,
+            encoded->configEpoch, 0, encoded->frameID, std::move(payload)))
+        return false;
+      blockOffset += (std::min)(payloadLimit, block.length - blockOffset);
+    }
+    return blockOffset == block.length;
   }
 
   bool BuildFragmentPayload(
@@ -1852,36 +3404,51 @@ struct CNetworkVideo::Impl
       return false;
 
     DropPeerFramesNL(peer);
-    if (!QueueScheduleNL(peer, *frame))
-      return false;
-
     const bool     datagrams =
       (peer.subscription.flags & LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS) &&
-      DeliverySupported(peer.info, NetworkVideoDelivery::DATAGRAM);
-    const bool     bulk      =
-      DeliverySupported(peer.info, NetworkVideoDelivery::BULK);
+      DatagramFragmentsSupported(peer.info);
+    const bool     bulk      = BulkFragmentsSupported(peer.info);
     const uint32_t fullSize  = static_cast<uint32_t>(frame->data.size()) +
       LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE;
 
     NetworkVideoDelivery delivery = NetworkVideoDelivery::RELIABLE;
     bool                 result;
-    if (bulk)
+    if (datagrams)
+    {
+      delivery = NetworkVideoDelivery::DATAGRAM;
+      uint32_t   criticalPayloadLimit  = 0;
+      uint32_t   criticalFragmentCount = 0;
+      uint32_t   payloadLimit          = 0;
+      uint32_t   fragmentCount         = 0;
+      const bool plan                  =
+        CriticalFragmentPlan(*frame, peer.info.maxReliablePayload,
+          criticalPayloadLimit, criticalFragmentCount) &&
+        FragmentPlan(*frame, DeliveryPayload(peer.info, delivery), 1U,
+          criticalFragmentCount, payloadLimit, fragmentCount);
+      result = plan && QueueScheduleNL(peer, *frame) &&
+        QueueReliableFirstBlockNL(peer, frame, criticalPayloadLimit,
+          criticalFragmentCount, fragmentCount) &&
+        QueueFragmentsNL(peer, frame, delivery,
+          payloadLimit + LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE, 1U,
+          criticalFragmentCount);
+    }
+    else if (bulk)
     {
       delivery = NetworkVideoDelivery::BULK;
       result   = fullSize <= peer.info.maxBulkPayload ?
         QueueWholeFrameNL(peer, *frame, delivery) :
-        QueueFragmentsNL(
-          peer, frame, delivery, DeliveryPayload(peer.info, delivery));
+        QueueScheduleNL(peer, *frame) &&
+          QueueFragmentsNL(
+            peer, frame, delivery, DeliveryPayload(peer.info, delivery));
     }
     else if (!datagrams && fullSize <= peer.info.maxReliablePayload)
       result = QueueWholeFrameNL(
         peer, *frame, NetworkVideoDelivery::RELIABLE);
     else
     {
-      if (datagrams)
-        delivery = NetworkVideoDelivery::DATAGRAM;
       const uint32_t maxPayload = DeliveryPayload(peer.info, delivery);
       result = DeliverySupported(peer.info, delivery) &&
+        QueueScheduleNL(peer, *frame) &&
         QueueFragmentsNL(peer, frame, delivery, maxPayload);
     }
 
@@ -1910,8 +3477,45 @@ struct CNetworkVideo::Impl
       frame.captureTimeNs - peer.lastCaptureTimeNs >= period;
   }
 
+  static bool PeerUsesWholeFrameNL(
+    const PeerState& peer, const EncodedFrame& frame)
+  {
+    const uint64_t fullSize = static_cast<uint64_t>(frame.data.size()) +
+      LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE;
+    const bool datagrams =
+      (peer.subscription.flags & LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS) &&
+      DatagramFragmentsSupported(peer.info);
+    if (datagrams)
+      return false;
+    if (BulkFragmentsSupported(peer.info))
+      return fullSize <= peer.info.maxBulkPayload;
+    return fullSize <= peer.info.maxReliablePayload;
+  }
+
   void PublishFrame(EncodedFrame&& frame)
   {
+    bool buildWholePayload = false;
+    {
+      CSRWSharedLock lock(m_lock);
+      if (!m_started || m_stopped || m_failed || !m_active ||
+          frame.configEpoch != m_configEpoch)
+        return;
+      for (const PeerState& peer : m_peers)
+        if (peer.subscribed && peer.configured &&
+            PeerFrameDueNL(peer, frame) &&
+            PeerUsesWholeFrameNL(peer, frame))
+        {
+          buildWholePayload = true;
+          break;
+        }
+    }
+    if (buildWholePayload)
+    {
+      frame.wholePayload = BuildWholeFramePayload(frame, frame.deadlineMs);
+      if (!frame.wholePayload)
+        return;
+    }
+
     std::shared_ptr<const EncodedFrame> encoded;
     try
     {
@@ -1923,7 +3527,7 @@ struct CNetworkVideo::Impl
     }
 
     CSRWExclusiveLock lock(m_lock);
-    if (!m_started || m_stopped || !m_active ||
+    if (!m_started || m_stopped || m_failed || !m_active ||
         encoded->configEpoch != m_configEpoch)
       return;
     for (PeerState& peer : m_peers)
@@ -1940,6 +3544,7 @@ struct CNetworkVideo::Impl
   bool SubmitPending()
   {
     PendingFrame pending;
+    uint32_t     frameLimit = MAX_FRAME_LENGTH;
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_encoder.Busy() || m_frames.empty() || !m_started ||
@@ -1950,6 +3555,16 @@ struct CNetworkVideo::Impl
       if (pending.configEpoch != m_configEpoch ||
           !SameCfg(pending.cfg, m_activeCfg))
         return true;
+      bool configured = false;
+      for (const PeerState& peer : m_peers)
+        if (peer.subscribed && peer.configured)
+        {
+          frameLimit = (std::min)(
+            frameLimit, peer.subscription.maxFrameLength);
+          configured = true;
+        }
+      if (!configured)
+        return true;
     }
 
     if (m_encoder.Submit(std::move(pending.frame),
@@ -1957,7 +3572,8 @@ struct CNetworkVideo::Impl
           static_cast<LGNetVideoChromaSubsampling>(
             pending.cfg.profile.signal == FrameSignal::PQ_BT2020 ||
               (pending.cfg.width & 1U) || (pending.cfg.height & 1U) ?
-                LG_NET_VIDEO_CHROMA_444 : LG_NET_VIDEO_CHROMA_420)))
+                CHROMA_444 : CHROMA_420),
+          frameLimit))
       return true;
 
     CSRWExclusiveLock lock(m_lock);
@@ -1973,7 +3589,8 @@ struct CNetworkVideo::Impl
       if (m_sends.empty())
         return;
     }
-    size_t skipped = 0;
+    size_t skipped      = 0;
+    bool   madeProgress = false;
     for (size_t count = 0; count < limit; ++count)
     {
       SendItem              item;
@@ -1988,6 +3605,7 @@ struct CNetworkVideo::Impl
         {
           ReleaseSendAccountingNL(m_sends.front());
           m_sends.pop_front();
+          madeProgress = true;
           continue;
         }
         if (peer->blockedDeliveries &
@@ -2006,17 +3624,25 @@ struct CNetworkVideo::Impl
       }
       skipped = 0;
 
-      std::vector<uint8_t>         fragmentPayload;
-      const bool                   prepared    = item.payload ||
-        BuildFragmentPayload(item, fragmentPayload);
-      const void                 * payload     = item.payload ?
-        item.payload->data() : fragmentPayload.data();
-      const size_t                 payloadSize = item.payload ?
-        item.payload->size() : fragmentPayload.size();
-      const NetworkVideoSendResult result      = prepared ?
+      std::shared_ptr<const std::vector<uint8_t>> payload = item.payload;
+      if (!payload)
+      {
+        std::shared_ptr<std::vector<uint8_t>> fragmentPayload;
+        try
+        {
+          fragmentPayload = std::make_shared<std::vector<uint8_t>>();
+        }
+        catch (...)
+        {
+        }
+        if (fragmentPayload &&
+            BuildFragmentPayload(item, *fragmentPayload))
+          payload = std::move(fragmentPayload);
+      }
+      const NetworkVideoSendResult result = payload ?
         sender->SendVideo(item.peer, item.delivery, item.messageType,
-          item.flags, item.componentEpoch, item.requestID, payload,
-          static_cast<uint32_t>(payloadSize)) :
+          item.flags, item.componentEpoch, item.requestID,
+          std::move(payload)) :
         NetworkVideoSendResult::FAILED;
 
       CSRWExclusiveLock lock(m_lock);
@@ -2055,6 +3681,14 @@ struct CNetworkVideo::Impl
         }
         return;
       }
+      if (item.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
+          item.frameID)
+        for (SendItem& queued : m_sends)
+          if (queued.frameID == item.frameID &&
+              queued.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
+              SamePeer(queued.peer, item.peer))
+            queued.started = true;
+      madeProgress = true;
       const bool complete = !m_sends.front().encoded ||
         AdvanceFragmentNL(m_sends.front());
       if (complete)
@@ -2065,6 +3699,63 @@ struct CNetworkVideo::Impl
       if (peer && item.frameID)
         peer->congested = false;
     }
+
+    CSRWSharedLock lock(m_lock);
+    if (madeProgress && !m_sends.empty())
+      Wake();
+  }
+
+  void DriveEncoder()
+  {
+    CSRWExclusiveLock processLock(m_processLock);
+
+    m_encoder.ReleaseCompletedLeases();
+
+    {
+      CSRWSharedLock lock(m_lock);
+      if (m_failed)
+      {
+        lock.Unlock();
+        Flush(32);
+        return;
+      }
+    }
+
+    if (m_encoder.Failed())
+    {
+      m_encoder.Reset();
+      CSRWExclusiveLock lock(m_lock);
+      FailNL(5);
+      return;
+    }
+
+    while (m_encoder.HasInFlight() &&
+           m_encoder.State() == D12SyncState::READY)
+    {
+      uint64_t configEpoch;
+      uint64_t frameID;
+      {
+        CSRWExclusiveLock lock(m_lock);
+        configEpoch = m_configEpoch;
+        frameID     = Next64(m_nextFrameID);
+
+        m_nextFrameID = frameID;
+      }
+      EncodedFrame frame;
+      if (m_encoder.Complete(configEpoch, frameID, frame))
+        PublishFrame(std::move(frame));
+      else
+      {
+        CSRWExclusiveLock lock(m_lock);
+        FailNL(4);
+        return;
+      }
+    }
+
+    while (!m_encoder.Busy() && SubmitPending())
+    {
+    }
+    Flush();
   }
 };
 
@@ -2108,12 +3799,15 @@ void CNetworkVideo::DetachSender()
 
 bool CNetworkVideo::Start()
 {
-  if (!m_impl)
+  if (!m_impl || !m_impl->WorkerReady())
     return false;
-  CSRWExclusiveLock lock(m_impl->m_lock);
-  if (m_impl->m_stopped || m_impl->m_failed)
-    return false;
-  m_impl->m_started = true;
+  {
+    CSRWExclusiveLock lock(m_impl->m_lock);
+    if (m_impl->m_stopped || m_impl->m_failed)
+      return false;
+    m_impl->m_started = true;
+  }
+  m_impl->Wake();
   return true;
 }
 
@@ -2163,7 +3857,9 @@ bool CNetworkVideo::PeerConnected(const NetworkVideoPeer& key)
   if (info.serviceVersion < LG_NET_VIDEO_VERSION_MIN ||
       info.serviceVersion > LG_NET_VIDEO_VERSION_CURRENT ||
       !(info.capabilityFlags & LG_NET_CAPABILITY_RELIABLE) ||
-      info.maxReliablePayload < LG_NET_VIDEO_STATUS_WIRE_SIZE)
+      info.maxReliablePayload < LG_NET_VIDEO_STATUS_WIRE_SIZE ||
+      info.maxReliablePayload < LG_NET_VIDEO_STREAM_CONFIG_WIRE_SIZE ||
+      info.maxReliablePayload < PYROWAVE_FRAGMENT_MIN)
     return false;
 
   CSRWExclusiveLock lock(m_impl->m_lock);
@@ -2354,10 +4050,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
   }
 
   lock.Unlock();
-  CSRWExclusiveLock processLock =
-    CSRWExclusiveLock::Try(m_impl->m_processLock);
-  if (processLock)
-    m_impl->Flush(32);
+  m_impl->Wake();
   return NetworkVideoPacketResult::HANDLED;
 }
 
@@ -2366,42 +4059,7 @@ void CNetworkVideo::Process(uint64_t nowMs)
   (void)nowMs;
   if (!m_impl)
     return;
-  CSRWExclusiveLock processLock(m_impl->m_processLock);
-
-  if (m_impl->m_encoder.Busy())
-  {
-    const D12SyncState state = m_impl->m_encoder.State();
-    if (state == D12SyncState::READY)
-    {
-      uint64_t configEpoch;
-      uint64_t frameID;
-      {
-        CSRWExclusiveLock lock(m_impl->m_lock);
-        configEpoch = m_impl->m_configEpoch;
-        frameID     = Next64(m_impl->m_nextFrameID);
-
-        m_impl->m_nextFrameID = frameID;
-      }
-      EncodedFrame frame;
-      if (m_impl->m_encoder.Complete(configEpoch, frameID, frame))
-        m_impl->PublishFrame(std::move(frame));
-      else
-      {
-        CSRWExclusiveLock lock(m_impl->m_lock);
-        m_impl->FailNL(4);
-      }
-    }
-    else if (state == D12SyncState::FAILED)
-    {
-      m_impl->m_encoder.Reset();
-      CSRWExclusiveLock lock(m_impl->m_lock);
-      m_impl->FailNL(5);
-    }
-  }
-
-  if (!m_impl->m_encoder.Busy())
-    m_impl->SubmitPending();
-  m_impl->Flush();
+  m_impl->Wake();
 }
 
 void CNetworkVideo::SendReady(
@@ -2421,10 +4079,7 @@ void CNetworkVideo::SendReady(
     peer->sendReadyGeneration[index] =
       Next64(peer->sendReadyGeneration[index]);
   }
-  CSRWExclusiveLock processLock =
-    CSRWExclusiveLock::Try(m_impl->m_processLock);
-  if (processLock)
-    m_impl->Flush();
+  m_impl->Wake();
 }
 
 const FrameProfile * CNetworkVideo::Profiles(unsigned& count) const
@@ -2451,11 +4106,11 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
       !SupportedProfile(cfg.profile))
     return CfgResult::NEXT;
-  const uint32_t alignedWidth  = (std::max)(
-    Align(cfg.width, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
-  const uint32_t alignedHeight = (std::max)(
-    Align(cfg.height, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
-  if (alignedWidth > MAX_WIDTH || alignedHeight > MAX_HEIGHT)
+  const LGNetVideoChromaSubsampling chroma =
+    cfg.profile.signal == FrameSignal::PQ_BT2020 ||
+      (cfg.width & 1U) || (cfg.height & 1U) ?
+        CHROMA_444 : CHROMA_420;
+  if (!PlaneElementsFit(cfg.width, cfg.height, chroma))
     return CfgResult::NEXT;
   return CfgResult::ACCEPTED;
 }
@@ -2503,6 +4158,7 @@ void CNetworkVideo::Commit()
       }
   }
   m_impl->m_encoder.Reset();
+  m_impl->Wake();
 }
 
 void CNetworkVideo::Abort()
@@ -2556,6 +4212,8 @@ PushResult CNetworkVideo::Push(FrameIn frame, TexLease lease) noexcept
   {
     return PushResult::FAILED;
   }
+  lock.Unlock();
+  m_impl->Wake();
   return PushResult::ACCEPTED;
 }
 

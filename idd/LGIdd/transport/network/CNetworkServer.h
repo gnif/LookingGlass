@@ -73,5 +73,5 @@ public:
     const NetworkVideoPeer& peer, NetworkVideoDelivery delivery,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
-    const void * payload, uint32_t payloadLength) override;
+    std::shared_ptr<const std::vector<uint8_t>> payload) override;
 };

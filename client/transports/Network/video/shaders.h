@@ -190,7 +190,6 @@ static const char NETWORK_VIDEO_IDWT_SHADER_0[] =
   "layout(r32f,binding=1) writeonly uniform highp image2D outputImage;\n"
   "uniform ivec2 resolution;\n"
   "uniform vec2 invResolution;\n"
-  "uniform int inputLevel;\n"
   "uniform int baseLayer;\n"
   "uniform bool dcShift;\n"
   "const int APRON=4, HALF_APRON=2, BLOCK=32, HALF_BLOCK=16;\n"

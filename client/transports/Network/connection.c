@@ -25,6 +25,7 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
+#include "common/thread.h"
 
 #include <LGProtocol/NetworkAuth.h>
 #include <LGProtocol/NetworkPacket.h>
@@ -50,10 +51,14 @@
 #define NETWORK_KEEPALIVE_INTERVAL_MS         1000U
 #define NETWORK_INITIAL_RTT_MS                1U
 #define NETWORK_MAX_PEER_STREAMS              16U
+#define NETWORK_STREAM_RECV_BUFFER            (1U * 1024U * 1024U)
+#define NETWORK_STREAM_RECV_WINDOW            (128U * 1024U * 1024U)
+#define NETWORK_CONN_RECV_WINDOW              (256U * 1024U * 1024U)
 #define NETWORK_MAX_CONTROL_PAYLOAD           \
   (LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + LG_NET_CURSOR_MAX_SHAPE_LENGTH)
 #define NETWORK_MAX_CONTROL_BUFFER            \
   (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
+#define NETWORK_MAX_NEGOTIATED_PAYLOAD        LG_NET_MAX_PAYLOAD_LENGTH
 #define NETWORK_MAX_DATAGRAM_PAYLOAD          1136U
 #define NETWORK_HELLO_REQUEST_ID              UINT64_C(1)
 #define NETWORK_SEQUENCE_CONNECTION_EPOCH     UINT64_C(1)
@@ -125,12 +130,25 @@ struct NetworkBulkStream
   bool                       bound;
   bool                       openingReturned;
   bool                       shutdownComplete;
+  bool                       receivePending;
+  bool                       receiveFailed;
+  uint32_t                   receiveReferences;
   uint8_t                    bindingData[LG_NET_STREAM_BINDING_WIRE_SIZE];
   size_t                     bindingLength;
   LGNetStreamParser          receiveParser;
   uint8_t                  * receiveData;
   uint8_t                  * receivePayload;
   size_t                     receivePayloadSize;
+};
+
+struct NetworkBulkReceive
+{
+  struct NetworkBulkReceive * next;
+  struct NetworkBulkStream  * stream;
+  HQUIC                       handle;
+  uint64_t                    length;
+  uint32_t                    bufferCount;
+  QUIC_BUFFER                 buffers[];
 };
 
 struct NetworkConnection
@@ -141,10 +159,13 @@ struct NetworkConnection
   HQUIC                  connection;
   HQUIC                  controlStream;
 
-  LGEvent * connectEvent;
-  LGEvent * closeEvent;
-  LG_Lock   lock;
-  LG_Lock   stateCallbackLock;
+  LGEvent  * connectEvent;
+  LGEvent  * closeEvent;
+  LGEvent  * bulkReceiveEvent;
+  LGEvent  * bulkReceiveIdle;
+  LGThread * bulkReceiveThread;
+  LG_Lock    lock;
+  LG_Lock    stateCallbackLock;
 
   atomic_bool stopping;
   atomic_bool sessionValid;
@@ -220,6 +241,11 @@ struct NetworkConnection
   struct NetworkBulkStream * outboundBulk
     [LG_NET_SERVICE_CONTROL + 1U];
   struct NetworkBulkStream * inboundBulk;
+
+  struct NetworkBulkReceive * bulkReceiveHead;
+  struct NetworkBulkReceive * bulkReceiveTail;
+  uint32_t                    bulkReceiveReferences;
+  bool                        bulkReceiveStopping;
 
   uint8_t                clientHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
   uint8_t                serverHelloNonce[LG_NET_HELLO_NONCE_LENGTH];
@@ -948,7 +974,7 @@ static bool networkConnectionSendHello(NetworkConnection * this)
 {
   LGNetHello hello;
   lgNetHelloInit(&hello, LG_NET_ROLE_CLIENT);
-  hello.maxPayloadLength   = NETWORK_MAX_CONTROL_PAYLOAD;
+  hello.maxPayloadLength   = NETWORK_MAX_NEGOTIATED_PAYLOAD;
   hello.maxDatagramPayload = NETWORK_MAX_DATAGRAM_PAYLOAD;
   hello.capabilityCount    = this->offeredCapabilityCount;
   hello.authModes          = this->password && *this->password ?
@@ -1443,7 +1469,8 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
           acknowledgement.flags ||
           acknowledgement.capabilityCount >
             this->offeredCapabilityCount ||
-          acknowledgement.maxPayloadLength > NETWORK_MAX_CONTROL_PAYLOAD ||
+          acknowledgement.maxPayloadLength >
+            NETWORK_MAX_NEGOTIATED_PAYLOAD ||
           acknowledgement.maxDatagramPayload >
             NETWORK_MAX_DATAGRAM_PAYLOAD ||
           !networkBytesNonzero(
@@ -1649,6 +1676,7 @@ static bool networkConnectionValidateControl(NetworkConnection * this,
     (packet->envelope.service == LG_NET_SERVICE_CONTROL &&
       packet->envelope.messageType == LG_NET_CONTROL_MESSAGE_STATUS);
   return packet->envelope.headerSize == LG_NET_ENVELOPE_WIRE_SIZE &&
+    packet->payloadLength <= NETWORK_MAX_CONTROL_PAYLOAD &&
     packet->payloadLength <= maxPayloadLength &&
     packet->envelope.messageVersion == LG_NET_MESSAGE_VERSION_CURRENT &&
     (packet->envelope.flags & LG_NET_ENVELOPE_RELIABLE) &&
@@ -2004,6 +2032,76 @@ static bool networkBulkStreamReceive(struct NetworkBulkStream * stream,
   return !stream->bound || networkBulkStreamDrainReceive(stream);
 }
 
+static bool networkBulkStreamQueueReceive(struct NetworkBulkStream * stream,
+    const QUIC_BUFFER * buffers, uint32_t bufferCount, uint64_t length)
+{
+  const size_t bufferBytes = (size_t)bufferCount * sizeof(*buffers);
+  if ((bufferCount && !buffers) ||
+      (bufferCount && bufferBytes / sizeof(*buffers) != bufferCount) ||
+      bufferBytes > SIZE_MAX - sizeof(struct NetworkBulkReceive))
+    return false;
+
+  uint64_t bufferLength = 0;
+  for (uint32_t index = 0; index < bufferCount; ++index)
+  {
+    if ((buffers[index].Length && !buffers[index].Buffer) ||
+        UINT64_MAX - bufferLength < buffers[index].Length)
+      return false;
+    bufferLength += buffers[index].Length;
+  }
+  if (bufferLength != length)
+    return false;
+
+  const size_t                receiveSize =
+    sizeof(struct NetworkBulkReceive) + bufferBytes;
+  struct NetworkBulkReceive * receive     = malloc(receiveSize);
+  if (!receive)
+    return false;
+
+  receive->next        = NULL;
+  receive->stream      = stream;
+  receive->handle      = stream->handle;
+  receive->length      = length;
+  receive->bufferCount = bufferCount;
+  /* MsQuic retains the payload while this receive is pending, but the buffer
+   * descriptor array itself is only valid for the callback duration. */
+  if (bufferCount)
+    memcpy(receive->buffers, buffers, bufferBytes);
+
+  NetworkConnection * this = stream->connection;
+  LG_LOCK(this->lock);
+  /* Multi-receive is intentionally disabled for this connection. */
+  const bool accepted =
+    !this->bulkReceiveStopping &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire) &&
+    !stream->shutdownComplete &&
+    !stream->receivePending &&
+    !stream->receiveFailed;
+  if (accepted)
+  {
+    if (!this->bulkReceiveReferences)
+      lgResetEvent(this->bulkReceiveIdle);
+    ++this->bulkReceiveReferences;
+    ++stream->receiveReferences;
+    stream->receivePending        = true;
+    if (this->bulkReceiveTail)
+      this->bulkReceiveTail->next = receive;
+    else
+      this->bulkReceiveHead       = receive;
+    this->bulkReceiveTail         = receive;
+  }
+  LG_UNLOCK(this->lock);
+
+  if (!accepted)
+  {
+    free(receive);
+    return false;
+  }
+
+  lgSignalEvent(this->bulkReceiveEvent);
+  return true;
+}
+
 static LG_TransportStatus networkConnectionOpenBulkStream(
     NetworkConnection * this, LGNetService service, uint64_t packetSize)
 {
@@ -2104,6 +2202,76 @@ static void networkConnectionProtocolFailure(NetworkConnection * this)
   if (connection)
     this->api->ConnectionShutdown(connection,
         QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
+}
+
+static int networkBulkReceiveThread(void * opaque)
+{
+  NetworkConnection * this = opaque;
+
+  for (;;)
+  {
+    lgWaitEvent(this->bulkReceiveEvent, TIMEOUT_INFINITE);
+
+    for (;;)
+    {
+      LG_LOCK(this->lock);
+      struct NetworkBulkReceive * receive = this->bulkReceiveHead;
+      if (receive)
+      {
+        this->bulkReceiveHead = receive->next;
+        if (!this->bulkReceiveHead)
+          this->bulkReceiveTail = NULL;
+      }
+      const bool stopping = this->bulkReceiveStopping;
+      LG_UNLOCK(this->lock);
+
+      if (!receive)
+      {
+        if (stopping)
+          return 0;
+        break;
+      }
+
+      struct NetworkBulkStream * stream   = receive->stream;
+      const bool                 received = networkBulkStreamReceive(stream,
+          receive->buffers, receive->bufferCount);
+
+      LG_LOCK(this->lock);
+      stream->receivePending = false;
+      if (!received)
+        stream->receiveFailed = true;
+      LG_UNLOCK(this->lock);
+
+      this->api->StreamReceiveComplete(receive->handle, receive->length);
+      if (!received && !atomic_load_explicit(
+            &this->stopping, memory_order_acquire))
+        networkConnectionProtocolFailure(this);
+
+      bool closeStream = false;
+      bool freeStream  = false;
+      LG_LOCK(this->lock);
+      if (stream->receiveReferences)
+        --stream->receiveReferences;
+      if (this->bulkReceiveReferences)
+      {
+        --this->bulkReceiveReferences;
+        if (!this->bulkReceiveReferences)
+          lgSignalEvent(this->bulkReceiveIdle);
+      }
+      if (!stream->receiveReferences && stream->shutdownComplete)
+      {
+        closeStream = true;
+        freeStream  = !stream->outbound || stream->openingReturned;
+      }
+      LG_UNLOCK(this->lock);
+
+      if (closeStream)
+        this->api->StreamClose(receive->handle);
+      if (freeStream)
+        networkBulkStreamFree(stream);
+      free(receive);
+    }
+  }
 }
 
 static bool networkConnectionAcceptBulkStream(NetworkConnection * this,
@@ -2560,10 +2728,16 @@ static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
     }
 
     case QUIC_STREAM_EVENT_RECEIVE:
-      if (stream->outbound || !networkBulkStreamReceive(stream,
-            event->RECEIVE.Buffers, event->RECEIVE.BufferCount))
-        networkConnectionProtocolFailure(this);
-      return QUIC_STATUS_SUCCESS;
+      if (stream->outbound || !networkBulkStreamQueueReceive(stream,
+            event->RECEIVE.Buffers, event->RECEIVE.BufferCount,
+            event->RECEIVE.TotalBufferLength))
+      {
+        if (!atomic_load_explicit(
+              &this->stopping, memory_order_acquire))
+          networkConnectionProtocolFailure(this);
+        return QUIC_STATUS_SUCCESS;
+      }
+      return QUIC_STATUS_PENDING;
 
     case QUIC_STREAM_EVENT_SEND_COMPLETE:
     {
@@ -2587,11 +2761,13 @@ static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
     {
       LG_LOCK(this->lock);
       networkBulkStreamDetachNL(stream);
-      const bool deferFree =
-        stream->outbound && !stream->openingReturned;
+      const bool deferClose = stream->receiveReferences != 0;
+      const bool deferFree  = deferClose ||
+        (stream->outbound && !stream->openingReturned);
       stream->shutdownComplete = deferFree;
       LG_UNLOCK(this->lock);
-      this->api->StreamClose(handle);
+      if (!deferClose)
+        this->api->StreamClose(handle);
       if (!deferFree)
         networkBulkStreamFree(stream);
       return QUIC_STATUS_SUCCESS;
@@ -2663,9 +2839,13 @@ bool networkConnectionCreate(NetworkConnection ** result,
   this->sendReady   = params->sendReady;
   this->opaque      = params->opaque;
 
-  this->connectEvent = lgCreateEvent(false, 0);
-  this->closeEvent   = lgCreateEvent(false, 0);
-  if (!this->connectEvent || !this->closeEvent)
+  this->connectEvent     = lgCreateEvent(false, 0);
+  this->closeEvent       = lgCreateEvent(false, 0);
+  this->bulkReceiveEvent = lgCreateEvent(true, 0);
+  this->bulkReceiveIdle  = lgCreateEvent(false, 0);
+  if (!this->connectEvent || !this->closeEvent ||
+      !this->bulkReceiveEvent || !this->bulkReceiveIdle ||
+      !lgSignalEvent(this->bulkReceiveIdle))
     goto fail;
 
   this->receiveData    = malloc(NETWORK_MAX_CONTROL_BUFFER);
@@ -2696,21 +2876,31 @@ bool networkConnectionCreate(NetworkConnection ** result,
   {
     .IsSet =
     {
-      .HandshakeIdleTimeoutMs = true,
-      .IdleTimeoutMs          = true,
-      .InitialRttMs           = true,
-      .KeepAliveIntervalMs    = true,
-      .PeerBidiStreamCount    = true,
-      .PeerUnidiStreamCount   = true,
-      .DatagramReceiveEnabled = true,
+      .HandshakeIdleTimeoutMs         = true,
+      .IdleTimeoutMs                  = true,
+      .StreamRecvBufferDefault        = true,
+      .ConnFlowControlWindow          = true,
+      .InitialRttMs                   = true,
+      .MaxAckDelayMs                  = true,
+      .KeepAliveIntervalMs            = true,
+      .PeerBidiStreamCount            = true,
+      .PeerUnidiStreamCount           = true,
+      .SendBufferingEnabled           = true,
+      .DatagramReceiveEnabled         = true,
+      .StreamRecvWindowUnidiDefault   = true,
     },
-    .HandshakeIdleTimeoutMs  = NETWORK_HANDSHAKE_TIMEOUT_MS,
-    .IdleTimeoutMs           = NETWORK_IDLE_TIMEOUT_MS,
-    .InitialRttMs            = NETWORK_INITIAL_RTT_MS,
-    .KeepAliveIntervalMs     = NETWORK_KEEPALIVE_INTERVAL_MS,
-    .PeerBidiStreamCount     = NETWORK_MAX_PEER_STREAMS,
-    .PeerUnidiStreamCount    = NETWORK_MAX_PEER_STREAMS,
-    .DatagramReceiveEnabled  = true,
+    .HandshakeIdleTimeoutMs         = NETWORK_HANDSHAKE_TIMEOUT_MS,
+    .IdleTimeoutMs                  = NETWORK_IDLE_TIMEOUT_MS,
+    .StreamRecvBufferDefault        = NETWORK_STREAM_RECV_BUFFER,
+    .ConnFlowControlWindow          = NETWORK_CONN_RECV_WINDOW,
+    .InitialRttMs                   = NETWORK_INITIAL_RTT_MS,
+    .MaxAckDelayMs                  = 1,
+    .KeepAliveIntervalMs            = NETWORK_KEEPALIVE_INTERVAL_MS,
+    .PeerBidiStreamCount            = NETWORK_MAX_PEER_STREAMS,
+    .PeerUnidiStreamCount           = NETWORK_MAX_PEER_STREAMS,
+    .SendBufferingEnabled           = false,
+    .DatagramReceiveEnabled         = true,
+    .StreamRecvWindowUnidiDefault   = NETWORK_STREAM_RECV_WINDOW,
   };
   if (QUIC_FAILED(this->api->ConfigurationOpen(this->registration,
         &alpn, 1, &settings, sizeof(settings), NULL,
@@ -2731,6 +2921,10 @@ bool networkConnectionCreate(NetworkConnection ** result,
         this->configuration, &credential)))
     goto fail;
 
+  if (!lgCreateThread("networkReceive", networkBulkReceiveThread,
+        this, &this->bulkReceiveThread))
+    goto fail;
+
   *result = this;
   return true;
 
@@ -2745,13 +2939,34 @@ void networkConnectionDestroy(NetworkConnection ** connection)
     return;
 
   NetworkConnection * this = *connection;
+  LGThread          * bulkReceiveThread;
+  *connection = NULL;
   networkConnectionDisconnect(this);
+
+  LG_LOCK(this->lock);
+  this->bulkReceiveStopping = true;
+  bulkReceiveThread         = this->bulkReceiveThread;
+  this->bulkReceiveThread   = NULL;
+  LG_UNLOCK(this->lock);
+  if (this->bulkReceiveEvent)
+    lgSignalEvent(this->bulkReceiveEvent);
+  if (bulkReceiveThread && !lgJoinThread(bulkReceiveThread, NULL))
+  {
+    DEBUG_ERROR("Failed to stop the network receive worker; "
+        "preserving state");
+    return;
+  }
+
   if (this->configuration)
     this->api->ConfigurationClose(this->configuration);
   if (this->registration)
     this->api->RegistrationClose(this->registration);
   if (this->api)
     MsQuicClose(this->api);
+  if (this->bulkReceiveIdle)
+    lgFreeEvent(this->bulkReceiveIdle);
+  if (this->bulkReceiveEvent)
+    lgFreeEvent(this->bulkReceiveEvent);
   if (this->closeEvent)
     lgFreeEvent(this->closeEvent);
   if (this->connectEvent)
@@ -2766,7 +2981,6 @@ void networkConnectionDestroy(NetworkConnection ** connection)
   free(this->password);
   free(this->address);
   free(this);
-  *connection = NULL;
 }
 
 LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
@@ -2805,7 +3019,7 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->bulkServices           = 0;
   this->maxPeerBulkStreams     = 0;
   this->peerBulkStreams        = 0;
-  this->maxPayloadLength       = NETWORK_MAX_CONTROL_PAYLOAD;
+  this->maxPayloadLength       = NETWORK_MAX_NEGOTIATED_PAYLOAD;
   this->maxDatagramPayload     = 0;
   this->maxDatagramSendLength  = 0;
   this->datagramSendEnabled    = false;
@@ -2921,6 +3135,7 @@ void networkConnectionDisconnect(NetworkConnection * this)
     return;
 
   lgWaitEvent(this->closeEvent, TIMEOUT_INFINITE);
+  lgWaitEvent(this->bulkReceiveIdle, TIMEOUT_INFINITE);
   LG_LOCK(this->stateCallbackLock);
   LG_LOCK(this->lock);
   const bool ownsConnection = this->connection == connection;
