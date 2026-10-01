@@ -2805,11 +2805,8 @@ struct CNetworkVideo::Impl
   LGNetVideoChromaSubsampling ChromaNL() const
   {
     if (!m_active)
-      return 0;
-    if (m_activeCfg.profile.signal == FrameSignal::PQ_BT2020 ||
-        (m_activeCfg.width & 1U) || (m_activeCfg.height & 1U))
-      return CHROMA_444;
-    return CHROMA_420;
+      return static_cast<LGNetVideoChromaSubsampling>(0);
+    return CHROMA_444;
   }
 
   LGNetVideoStreamConfig StreamConfigNL() const
@@ -3569,10 +3566,7 @@ struct CNetworkVideo::Impl
 
     if (m_encoder.Submit(std::move(pending.frame),
           std::move(pending.lease), pending.cfg,
-          static_cast<LGNetVideoChromaSubsampling>(
-            pending.cfg.profile.signal == FrameSignal::PQ_BT2020 ||
-              (pending.cfg.width & 1U) || (pending.cfg.height & 1U) ?
-                CHROMA_444 : CHROMA_420),
+          CHROMA_444,
           frameLimit))
       return true;
 
@@ -4106,10 +4100,7 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
       !SupportedProfile(cfg.profile))
     return CfgResult::NEXT;
-  const LGNetVideoChromaSubsampling chroma =
-    cfg.profile.signal == FrameSignal::PQ_BT2020 ||
-      (cfg.width & 1U) || (cfg.height & 1U) ?
-        CHROMA_444 : CHROMA_420;
+  const LGNetVideoChromaSubsampling chroma = CHROMA_444;
   if (!PlaneElementsFit(cfg.width, cfg.height, chroma))
     return CfgResult::NEXT;
   return CfgResult::ACCEPTED;
