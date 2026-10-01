@@ -29,11 +29,12 @@ namespace
 {
   enum Field : unsigned
   {
-    FIELD_BIND        = 1U << 0,
-    FIELD_PORT        = 1U << 1,
-    FIELD_MAX_CLIENTS = 1U << 2,
-    FIELD_AUTH        = 1U << 3,
-    FIELD_PASSWORD    = 1U << 4,
+    FIELD_BIND         = 1U << 0,
+    FIELD_PORT         = 1U << 1,
+    FIELD_MAX_CLIENTS  = 1U << 2,
+    FIELD_AUTH         = 1U << 3,
+    FIELD_PASSWORD     = 1U << 4,
+    FIELD_VIDEO_CHROMA = 1U << 5,
   };
 
   std::wstring Trim(const std::wstring& value)
@@ -136,6 +137,20 @@ namespace
       if (!ValidText(value, 255))
         return Fail(error, L"invalid password");
       settings.password = value;
+    }
+    else if (Equal(key, L"videoChroma"))
+    {
+      field = FIELD_VIDEO_CHROMA;
+      if (Equal(value, L"420"))
+        settings.videoChroma =
+          static_cast<LGNetVideoChromaSubsampling>(
+            LG_NET_VIDEO_CHROMA_420);
+      else if (Equal(value, L"444"))
+        settings.videoChroma =
+          static_cast<LGNetVideoChromaSubsampling>(
+            LG_NET_VIDEO_CHROMA_444);
+      else
+        return Fail(error, L"invalid video chroma subsampling");
     }
     else
       return Fail(error, L"unknown setting");

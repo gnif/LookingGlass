@@ -25,21 +25,27 @@
 #include <stdint.h>
 #include <string>
 
-static constexpr uint16_t NETWORK_DEFAULT_MAX_CLIENTS = 4;
-static constexpr uint16_t NETWORK_MAX_CLIENTS         = 32;
+static constexpr uint16_t                    NETWORK_DEFAULT_MAX_CLIENTS  = 4;
+static constexpr uint16_t                    NETWORK_MAX_CLIENTS          = 32;
+static constexpr LGNetVideoChromaSubsampling NETWORK_DEFAULT_VIDEO_CHROMA =
+  static_cast<LGNetVideoChromaSubsampling>(LG_NET_VIDEO_CHROMA_444);
 
 struct NetworkSettings
 {
-  std::wstring  bindAddress = L"*";
-  uint16_t      port        = static_cast<uint16_t>(LG_NET_DEFAULT_PORT);
-  uint16_t      maxClients  = NETWORK_DEFAULT_MAX_CLIENTS;
-  LGNetAuthMode auth        = LG_NET_AUTH_MODE_DEFAULT;
-  std::wstring  password;
+  std::wstring                  bindAddress = L"*";
+  uint16_t                      port        =
+    static_cast<uint16_t>(LG_NET_DEFAULT_PORT);
+  uint16_t                      maxClients  = NETWORK_DEFAULT_MAX_CLIENTS;
+  LGNetAuthMode                 auth        = LG_NET_AUTH_MODE_DEFAULT;
+  std::wstring                  password;
+  LGNetVideoChromaSubsampling   videoChroma =
+    NETWORK_DEFAULT_VIDEO_CHROMA;
 };
 
 // Settings use a semicolon-separated key=value list. Supported keys are
-// bind, port, maxClients, auth, and password. Password authentication requires
-// a non-empty password. The default address requests a dual-stack wildcard
-// listener from the eventual QUIC provider.
+// bind, port, maxClients, auth, password, and videoChroma. videoChroma accepts
+// 420 or 444 and defaults to 444. Password authentication requires a non-empty
+// password. The default address requests a dual-stack wildcard listener from
+// the eventual QUIC provider.
 bool ParseNetworkSettings(const std::wstring& source,
   NetworkSettings& settings, std::wstring * error = nullptr);

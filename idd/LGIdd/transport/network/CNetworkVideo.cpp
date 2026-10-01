@@ -141,6 +141,8 @@ namespace
   {
     if (!width || !height || width > MAX_WIDTH || height > MAX_HEIGHT)
       return false;
+    if (chroma == CHROMA_420 && ((width | height) & 1U))
+      return false;
     const uint32_t alignedWidth  = (std::max)(
       Align(width, PYROWAVE_ALIGNMENT), PYROWAVE_MIN_DIMENSION);
     const uint32_t alignedHeight = (std::max)(
@@ -157,15 +159,22 @@ namespace
 
   class NetworkVideoFrameCaps final : public FrameCaps
   {
+  private:
+    const LGNetVideoChromaSubsampling m_chroma;
+
   public:
+    explicit NetworkVideoFrameCaps(LGNetVideoChromaSubsampling chroma) :
+      m_chroma(chroma)
+    {
+    }
+
     bool CanUseMode(const FrameMode& mode,
       uint32_t * requiredSizeMiB = nullptr) const override
     {
       if (requiredSizeMiB)
         *requiredSizeMiB = 0;
       return mode.width && mode.height && mode.refresh100uHz &&
-        PlaneElementsFit(mode.width, mode.height,
-          CHROMA_444);
+        PlaneElementsFit(mode.width, mode.height, m_chroma);
     }
   };
 
@@ -2675,11 +2684,12 @@ struct CNetworkVideo::Impl
   HANDLE            m_workerThread = nullptr;
   std::atomic<bool> m_workerStop   = false;
 
-  INetworkVideoSender * m_sender   = nullptr;
-  bool                  m_started  = false;
-  bool                  m_stopped  = false;
-  bool                  m_failed   = false;
-  bool                  m_changing = false;
+  INetworkVideoSender          * m_sender      = nullptr;
+  LGNetVideoChromaSubsampling    m_videoChroma = CHROMA_444;
+  bool                           m_started     = false;
+  bool                           m_stopped     = false;
+  bool                           m_failed      = false;
+  bool                           m_changing    = false;
 
   FrameCfg m_activeCfg  = {};
   FrameCfg m_pendingCfg = {};
@@ -2806,7 +2816,7 @@ struct CNetworkVideo::Impl
   {
     if (!m_active)
       return static_cast<LGNetVideoChromaSubsampling>(0);
-    return CHROMA_444;
+    return m_videoChroma;
   }
 
   LGNetVideoStreamConfig StreamConfigNL() const
@@ -3540,8 +3550,9 @@ struct CNetworkVideo::Impl
 
   bool SubmitPending()
   {
-    PendingFrame pending;
-    uint32_t     frameLimit = MAX_FRAME_LENGTH;
+    PendingFrame                  pending;
+    LGNetVideoChromaSubsampling   chroma     = CHROMA_444;
+    uint32_t                      frameLimit = MAX_FRAME_LENGTH;
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_encoder.Busy() || m_frames.empty() || !m_started ||
@@ -3562,11 +3573,12 @@ struct CNetworkVideo::Impl
         }
       if (!configured)
         return true;
+      chroma = m_videoChroma;
     }
 
     if (m_encoder.Submit(std::move(pending.frame),
           std::move(pending.lease), pending.cfg,
-          CHROMA_444,
+          chroma,
           frameLimit))
       return true;
 
@@ -3791,15 +3803,17 @@ void CNetworkVideo::DetachSender()
   m_impl->m_peers.clear();
 }
 
-bool CNetworkVideo::Start()
+bool CNetworkVideo::Start(LGNetVideoChromaSubsampling videoChroma)
 {
-  if (!m_impl || !m_impl->WorkerReady())
+  if (!m_impl || !m_impl->WorkerReady() ||
+      (videoChroma != CHROMA_420 && videoChroma != CHROMA_444))
     return false;
   {
     CSRWExclusiveLock lock(m_impl->m_lock);
     if (m_impl->m_stopped || m_impl->m_failed)
       return false;
-    m_impl->m_started = true;
+    m_impl->m_videoChroma = videoChroma;
+    m_impl->m_started     = true;
   }
   m_impl->Wake();
   return true;
@@ -4084,9 +4098,15 @@ const FrameProfile * CNetworkVideo::Profiles(unsigned& count) const
 
 std::shared_ptr<const FrameCaps> CNetworkVideo::GetFrameCaps() const
 {
-  static const std::shared_ptr<const FrameCaps> caps(
-    new (std::nothrow) NetworkVideoFrameCaps());
-  return caps;
+  if (!m_impl)
+    return std::shared_ptr<const FrameCaps>();
+  LGNetVideoChromaSubsampling chroma;
+  {
+    CSRWSharedLock lock(m_impl->m_lock);
+    chroma = m_impl->m_videoChroma;
+  }
+  return std::shared_ptr<const FrameCaps>(
+    new (std::nothrow) NetworkVideoFrameCaps(chroma));
 }
 
 CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
@@ -4100,7 +4120,7 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
       !SupportedProfile(cfg.profile))
     return CfgResult::NEXT;
-  const LGNetVideoChromaSubsampling chroma = CHROMA_444;
+  const LGNetVideoChromaSubsampling chroma = m_impl->m_videoChroma;
   if (!PlaneElementsFit(cfg.width, cfg.height, chroma))
     return CfgResult::NEXT;
   return CfgResult::ACCEPTED;
