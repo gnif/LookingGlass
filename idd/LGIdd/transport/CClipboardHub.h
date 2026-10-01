@@ -25,32 +25,76 @@
 #include "transport/IClipboardSource.h"
 #include "transport/ITransport.h"
 
-class CClipboardHub final : public IClipboardTarget,
-  private IClipboardChannelHandler
+class CClipboardHub final : private IClipboardChannelHandler
 {
 private:
-  CClipboardChannel& m_channel;
+  static constexpr unsigned MAX_SOURCES = TRANSPORT_MAX_INSTANCES;
+
+  struct Source final : public IClipboardTarget
+  {
+    CClipboardHub    * owner          = nullptr;
+    BackendId          backend        = 0;
+    uint32_t           epoch          = 0;
+    uint32_t           generation     = 0;
+    IClipboardSource * endpoint       = nullptr;
+    bool               running        = false;
+    bool               active         = false;
+    bool               reserved       = false;
+    bool               failed         = false;
+    bool               failurePending = false;
+
+    ClipboardClaimResult Claim(const ClipboardSourceId& source,
+      KVMFRClipboardMessage& cached) override;
+    void Release(const ClipboardSourceId& source) override;
+    ClipboardChannelResult SendClipboard(
+      const KVMFRClipboardMessage& record,
+      const uint8_t * data) override;
+    ClipboardChannelResult SendClipboardBatch(
+      const ClipboardChannelWrite * records,
+      size_t count, size_t& accepted) override;
+    void ClipboardReceiveReady() override;
+    void ClipboardFailed() override;
+  };
+
+  CClipboardChannel&  m_channel;
   CSRWLock            m_lifecycleLock;
   CSRWLock            m_callbackLock;
   CSRWLock            m_lock;
 
-  IClipboardSource * m_source          = nullptr;
-  BackendId          m_backend         = 0;
-  uint32_t           m_epoch           = 0;
-  uint64_t           m_channelEpoch    = 0;
-  uint32_t           m_generation      = 1;
-  bool               m_available       = false;
-  bool               m_active          = false;
-  bool               m_running         = false;
-  bool               m_reserved        = false;
-  bool               m_failed          = false;
-  bool               m_failurePending  = false;
-  bool               m_stopped         = false;
+  Source                m_sources[MAX_SOURCES];
+  Source              * m_owner           = nullptr;
+  Source              * m_cachedSource    = nullptr;
+  ClipboardSourceId     m_ownerId;
+  KVMFRClipboardMessage m_cachedClipboard = {};
+  uint64_t              m_channelEpoch    = 0;
+  uint32_t              m_generation      = 1;
+  bool                  m_cachedValid     = false;
+  bool                  m_available       = false;
+  bool                  m_resetting       = false;
+  bool                  m_stopped         = false;
 
-  void AdvanceGenerationNL();
-  bool MarkFailed(IClipboardSource& source);
+  uint32_t NextGenerationNL();
+  bool BindingPresentNL(const Source& source) const;
+  bool BindingValidNL(const Source& source) const;
+  bool OwnerIsNL(
+    const Source& source, const ClipboardSourceId& id) const;
+  bool MarkFailed(Source& source);
+  void CachePublicationNL(
+    const KVMFRClipboardMessage& record, Source * source);
+  void InvalidateSourceCacheNL(const Source& source);
   ClipboardChannelResult HoldOrDiscard(
     const KVMFRClipboardMessage& record);
+
+  ClipboardClaimResult Claim(Source& source,
+    const ClipboardSourceId& id, KVMFRClipboardMessage& cached);
+  void Release(Source& source, const ClipboardSourceId& id);
+  ClipboardChannelResult SendClipboard(Source& source,
+    const KVMFRClipboardMessage& record, const uint8_t * data);
+  ClipboardChannelResult SendClipboardBatch(Source& source,
+    const ClipboardChannelWrite * records,
+    size_t count, size_t& accepted);
+  void ClipboardReceiveReady(Source& source);
+  void ClipboardFailed(Source& source);
 
   void ClipboardState(bool available, uint64_t epoch) override;
   ClipboardChannelResult ClipboardRecord(
@@ -69,13 +113,4 @@ public:
   void Unbind(BackendId backend, uint32_t epoch);
   bool TakeFailure(SourceKey& source);
   void Stop();
-
-  ClipboardChannelResult SendClipboard(
-    const KVMFRClipboardMessage& record,
-    const uint8_t * data) override;
-  ClipboardChannelResult SendClipboardBatch(
-    const ClipboardChannelWrite * records,
-    size_t count, size_t& accepted) override;
-  void ClipboardReceiveReady() override;
-  void ClipboardFailed() override;
 };

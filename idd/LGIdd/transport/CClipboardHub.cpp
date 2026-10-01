@@ -60,6 +60,8 @@ namespace
 CClipboardHub::CClipboardHub(CClipboardChannel& channel) :
   m_channel(channel)
 {
+  for (Source& source : m_sources)
+    source.owner = this;
   m_channel.SetHandler(this);
 }
 
@@ -68,27 +70,107 @@ CClipboardHub::~CClipboardHub()
   Stop();
 }
 
-void CClipboardHub::AdvanceGenerationNL()
+ClipboardClaimResult CClipboardHub::Source::Claim(
+  const ClipboardSourceId& source, KVMFRClipboardMessage& cached)
 {
-  Seq::Inc(m_generation);
+  return owner->Claim(*this, source, cached);
 }
 
-bool CClipboardHub::MarkFailed(IClipboardSource& source)
+void CClipboardHub::Source::Release(const ClipboardSourceId& source)
+{
+  owner->Release(*this, source);
+}
+
+ClipboardChannelResult CClipboardHub::Source::SendClipboard(
+  const KVMFRClipboardMessage& record, const uint8_t * data)
+{
+  return owner->SendClipboard(*this, record, data);
+}
+
+ClipboardChannelResult CClipboardHub::Source::SendClipboardBatch(
+  const ClipboardChannelWrite * records, size_t count, size_t& accepted)
+{
+  return owner->SendClipboardBatch(*this, records, count, accepted);
+}
+
+void CClipboardHub::Source::ClipboardReceiveReady()
+{
+  owner->ClipboardReceiveReady(*this);
+}
+
+void CClipboardHub::Source::ClipboardFailed()
+{
+  owner->ClipboardFailed(*this);
+}
+
+uint32_t CClipboardHub::NextGenerationNL()
+{
+  Seq::Inc(m_generation);
+  return m_generation;
+}
+
+bool CClipboardHub::BindingPresentNL(const Source& source) const
+{
+  return source.active && source.endpoint && source.backend && source.epoch;
+}
+
+bool CClipboardHub::BindingValidNL(const Source& source) const
+{
+  return BindingPresentNL(source) && source.running && !source.reserved &&
+    !source.failed && source.generation;
+}
+
+bool CClipboardHub::OwnerIsNL(
+  const Source& source, const ClipboardSourceId& id) const
+{
+  return m_owner == &source && m_ownerId.client == id.client &&
+    m_ownerId.generation == id.generation;
+}
+
+bool CClipboardHub::MarkFailed(Source& source)
 {
   CSRWExclusiveLock lock(m_lock);
-  if (m_source != &source || (!m_active && !m_reserved))
+  if (!BindingPresentNL(source) && !source.reserved)
     return false;
 
-  const bool changed = !m_failed;
-  m_failed         = true;
-  m_failurePending = true;
+  const bool changed      = !source.failed;
+  source.failed           = true;
+  source.failurePending   = true;
   return changed;
+}
+
+void CClipboardHub::CachePublicationNL(
+  const KVMFRClipboardMessage& record, Source * source)
+{
+  if (record.type != KVMFR_CLIPBOARD_MESSAGE_OFFER &&
+      record.type != KVMFR_CLIPBOARD_MESSAGE_CLEAR)
+    return;
+
+  m_cachedClipboard = record;
+  m_cachedSource    = source;
+  m_cachedValid     = true;
+}
+
+void CClipboardHub::InvalidateSourceCacheNL(const Source& source)
+{
+  if (m_cachedSource != &source)
+    return;
+  if (m_cachedValid &&
+      m_cachedClipboard.type == KVMFR_CLIPBOARD_MESSAGE_CLEAR)
+  {
+    m_cachedSource = nullptr;
+    return;
+  }
+
+  m_cachedClipboard = {};
+  m_cachedSource    = nullptr;
+  m_cachedValid     = false;
 }
 
 ClipboardChannelResult CClipboardHub::HoldOrDiscard(
   const KVMFRClipboardMessage& record)
 {
-  // Preserve the pending clipboard publication until a source is rebound.
+  // Preserve the pending clipboard publication until a client claims it.
   // Transfer-scoped records belong to the source which admitted them and
   // must never cross a transport generation.
   if (record.type == KVMFR_CLIPBOARD_MESSAGE_OFFER ||
@@ -139,47 +221,58 @@ bool CClipboardHub::Bind(
   if (!backend || !epoch)
     return false;
 
-  bool     available;
-  uint32_t generation;
-  uint64_t channelEpoch;
+  Source * selected   = nullptr;
+  bool     available  = false;
+  uint32_t generation = 0;
   {
     CSRWExclusiveLock lock(m_lock);
-    if (m_stopped || m_source || m_active || m_reserved)
+    if (m_stopped)
       return false;
 
-    AdvanceGenerationNL();
-    m_source         = &source;
-    m_backend        = backend;
-    m_epoch          = epoch;
-    m_active         = true;
-    m_reserved       = true;
-    m_failed         = false;
-    m_failurePending = false;
-    available        = m_available;
-    generation       = m_generation;
-    channelEpoch     = m_channelEpoch;
+    for (Source& slot : m_sources)
+      if ((slot.active || slot.failed || slot.reserved) &&
+          slot.backend == backend && slot.epoch == epoch)
+        return false;
+    for (Source& slot : m_sources)
+      if (!slot.active && !slot.failed && !slot.reserved)
+      {
+        slot.backend        = backend;
+        slot.epoch          = epoch;
+        slot.generation     = NextGenerationNL();
+        slot.endpoint       = &source;
+        slot.running        = false;
+        slot.active         = true;
+        slot.reserved       = true;
+        slot.failurePending = false;
+        selected            = &slot;
+        available           = m_available && !m_resetting;
+        generation          = slot.generation;
+        break;
+      }
   }
+  if (!selected)
+    return false;
 
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  const bool started = source.Start(*this);
-  bool attached = false;
+  const bool started  = source.Start(*selected);
+  bool       attached = false;
   {
     CSRWExclusiveLock lock(m_lock);
-    if (started && m_source == &source && m_backend == backend &&
-        m_epoch == epoch && m_active && m_reserved && !m_failed &&
+    if (started && selected->endpoint == &source &&
+        selected->backend == backend && selected->epoch == epoch &&
+        selected->active && selected->reserved && !selected->failed &&
         !m_stopped)
     {
-      m_running    = true;
-      m_reserved   = false;
-      available    = m_available;
-      generation   = m_generation;
-      channelEpoch = m_channelEpoch;
-      attached     = true;
+      selected->running  = true;
+      selected->reserved = false;
+      available          = m_available && !m_resetting;
+      generation         = selected->generation;
+      attached           = true;
     }
     else
     {
-      m_active = false;
-      m_running = false;
+      selected->active  = false;
+      selected->running = false;
     }
   }
 
@@ -187,99 +280,133 @@ bool CClipboardHub::Bind(
   {
     source.Stop();
     CSRWExclusiveLock lock(m_lock);
-    if (m_source == &source && m_backend == backend && m_epoch == epoch)
+    if (selected->endpoint == &source && selected->backend == backend &&
+        selected->epoch == epoch)
     {
-      m_source         = nullptr;
-      m_backend        = 0;
-      m_epoch          = 0;
-      m_active         = false;
-      m_running        = false;
-      m_reserved       = false;
-      m_failed         = false;
-      m_failurePending = false;
+      selected->backend        = 0;
+      selected->epoch          = 0;
+      selected->generation     = 0;
+      selected->endpoint       = nullptr;
+      selected->running        = false;
+      selected->active         = false;
+      selected->reserved       = false;
+      selected->failed         = false;
+      selected->failurePending = false;
     }
     return false;
   }
 
   source.ClipboardState(available, generation);
-  callbackLock.Unlock();
-  if (available && channelEpoch)
-    m_channel.Kick(channelEpoch);
   return true;
 }
 
 void CClipboardHub::Unbind(BackendId backend, uint32_t epoch)
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  IClipboardSource * source = nullptr;
-  bool stop = false;
+  Source           * selected     = nullptr;
+  IClipboardSource * source       = nullptr;
+  bool               stop         = false;
+  bool               resetChannel = false;
+  uint64_t           channelEpoch = 0;
   {
     CSRWExclusiveLock lock(m_lock);
-    if ((!m_active && !m_failed && !m_reserved) ||
-        m_backend != backend || m_epoch != epoch || !m_source)
-      return;
-
-    source           = m_source;
-    stop             = m_running || m_reserved;
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = true;
-    m_failed         = false;
-    m_failurePending = false;
-    AdvanceGenerationNL();
+    for (Source& slot : m_sources)
+      if ((slot.active || slot.failed || slot.reserved) &&
+          slot.backend == backend && slot.epoch == epoch && slot.endpoint)
+      {
+        selected            = &slot;
+        source              = slot.endpoint;
+        stop                = slot.running || slot.reserved;
+        resetChannel        = m_owner == &slot;
+        channelEpoch        = m_channelEpoch;
+        slot.active         = false;
+        slot.running        = false;
+        slot.reserved       = true;
+        slot.failed         = false;
+        slot.failurePending = false;
+        InvalidateSourceCacheNL(slot);
+        if (resetChannel)
+        {
+          m_owner     = nullptr;
+          m_ownerId   = {};
+          m_resetting = true;
+        }
+        break;
+      }
   }
+  if (!selected)
+    return;
 
   CSRWExclusiveLock callbackLock(m_callbackLock);
   if (stop)
     source->Stop();
 
   CSRWExclusiveLock lock(m_lock);
-  if (m_source == source && m_backend == backend && m_epoch == epoch)
+  if (selected->endpoint == source && selected->backend == backend &&
+      selected->epoch == epoch)
   {
-    m_source         = nullptr;
-    m_backend        = 0;
-    m_epoch          = 0;
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = false;
-    m_failed         = false;
-    m_failurePending = false;
+    selected->backend        = 0;
+    selected->epoch          = 0;
+    selected->generation     = 0;
+    selected->endpoint       = nullptr;
+    selected->running        = false;
+    selected->active         = false;
+    selected->reserved       = false;
+    selected->failed         = false;
+    selected->failurePending = false;
   }
+  lock.Unlock();
+  callbackLock.Unlock();
+  lifecycleLock.Unlock();
+
+  if (resetChannel && channelEpoch)
+    m_channel.Reset(channelEpoch, ERROR_DEVICE_NOT_CONNECTED);
 }
 
 bool CClipboardHub::TakeFailure(SourceKey& source)
 {
   CSRWSharedLock lifecycleLock(m_lifecycleLock);
   CSRWExclusiveLock lock(m_lock);
-  if (!m_failurePending)
-    return false;
-
-  source = {};
-  source.backend    = m_backend;
-  source.epoch      = m_epoch;
-  m_failurePending  = false;
-  return true;
+  for (Source& slot : m_sources)
+  {
+    if (!slot.failurePending)
+      continue;
+    source              = {};
+    source.backend      = slot.backend;
+    source.epoch        = slot.epoch;
+    slot.failurePending = false;
+    return true;
+  }
+  return false;
 }
 
 void CClipboardHub::Stop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  IClipboardSource * source = nullptr;
-  bool stop = false;
+  Source * sources[MAX_SOURCES] = {};
+  unsigned count                = 0;
   {
     CSRWExclusiveLock lock(m_lock);
     if (m_stopped)
       return;
 
-    m_stopped        = true;
-    source           = m_source;
-    stop             = source && (m_running || m_reserved);
-    m_active         = false;
-    m_running        = false;
-    m_reserved       = source != nullptr;
-    m_failed         = false;
-    m_failurePending = false;
-    AdvanceGenerationNL();
+    m_stopped         = true;
+    m_owner           = nullptr;
+    m_cachedSource    = nullptr;
+    m_ownerId         = {};
+    m_cachedClipboard = {};
+    m_cachedValid     = false;
+    m_resetting       = false;
+    for (Source& source : m_sources)
+      if (source.endpoint)
+      {
+        source.active         = false;
+        source.running        = false;
+        source.reserved       = true;
+        source.failed         = false;
+        source.failurePending = false;
+        sources[count++]      = &source;
+      }
   }
 
   // Clearing the channel handler is a callback-quiescence barrier. It must
@@ -288,41 +415,114 @@ void CClipboardHub::Stop()
   m_channel.ClearHandler(this);
 
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  if (stop)
-    source->Stop();
+  for (unsigned i = count; i > 0; --i)
+    sources[i - 1]->endpoint->Stop();
 
   CSRWExclusiveLock lock(m_lock);
-  m_source         = nullptr;
-  m_backend        = 0;
-  m_epoch          = 0;
-  m_active         = false;
-  m_running        = false;
-  m_reserved       = false;
-  m_failed         = false;
-  m_failurePending = false;
+  for (Source& source : m_sources)
+  {
+    source.backend        = 0;
+    source.epoch          = 0;
+    source.generation     = 0;
+    source.endpoint       = nullptr;
+    source.running        = false;
+    source.active         = false;
+    source.reserved       = false;
+    source.failed         = false;
+    source.failurePending = false;
+  }
+}
+
+ClipboardClaimResult CClipboardHub::Claim(Source& source,
+  const ClipboardSourceId& id, KVMFRClipboardMessage& cached)
+{
+  cached = {};
+  if (!id.client || !id.generation)
+    return ClipboardClaimResult::STALE;
+
+  uint64_t channelEpoch = 0;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    if (!BindingValidNL(source))
+      return ClipboardClaimResult::STALE;
+    if (!m_available || m_resetting || !m_channelEpoch ||
+        !m_channel.Available())
+      return ClipboardClaimResult::UNAVAILABLE;
+    if (m_owner)
+      return OwnerIsNL(source, id) ?
+        ClipboardClaimResult::ACCEPTED : ClipboardClaimResult::BUSY;
+
+    m_owner   = &source;
+    m_ownerId = id;
+    // A client-originated OFFER cannot be served by a replacement client.
+    // Its matching cleanup CLEAR is safe to replay, as is any
+    // Helper-originated publication.
+    if (m_cachedValid && (!m_cachedSource ||
+        m_cachedClipboard.type == KVMFR_CLIPBOARD_MESSAGE_CLEAR))
+    {
+      cached            = m_cachedClipboard;
+      cached.generation = source.generation;
+    }
+    channelEpoch = m_channelEpoch;
+  }
+
+  m_channel.Kick(channelEpoch);
+  return ClipboardClaimResult::ACCEPTED;
+}
+
+void CClipboardHub::Release(
+  Source& source, const ClipboardSourceId& id)
+{
+  uint64_t channelEpoch = 0;
+  {
+    CSRWExclusiveLock lock(m_lock);
+    if (!OwnerIsNL(source, id))
+      return;
+    m_owner       = nullptr;
+    m_ownerId     = {};
+    channelEpoch  = m_channelEpoch;
+  }
+
+  if (channelEpoch)
+    m_channel.Kick(channelEpoch);
 }
 
 void CClipboardHub::ClipboardState(bool available, uint64_t epoch)
 {
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IClipboardSource * source = nullptr;
-  uint32_t generation;
+  Source   * sources[MAX_SOURCES]     = {};
+  uint32_t   generations[MAX_SOURCES] = {};
+  unsigned   count                    = 0;
   {
     CSRWExclusiveLock lock(m_lock);
     if (m_stopped)
       return;
 
-    if (m_available != available || m_channelEpoch != epoch)
-      AdvanceGenerationNL();
-    m_available    = available;
-    m_channelEpoch = epoch;
-    generation     = m_generation;
-    if (m_active && m_running && !m_failed)
-      source = m_source;
+    const bool changed = m_available != available ||
+      m_channelEpoch != epoch || m_resetting;
+    m_available        = available;
+    m_channelEpoch     = epoch;
+    m_resetting        = false;
+    if (!changed)
+      return;
+
+    m_owner           = nullptr;
+    m_cachedSource    = nullptr;
+    m_ownerId         = {};
+    m_cachedClipboard = {};
+    m_cachedValid     = false;
+    for (Source& source : m_sources)
+      if (BindingValidNL(source))
+      {
+        source.generation  = NextGenerationNL();
+        sources[count]     = &source;
+        generations[count] = source.generation;
+        ++count;
+      }
   }
 
-  if (source)
-    source->ClipboardState(available, generation);
+  for (unsigned i = 0; i < count; ++i)
+    sources[i]->endpoint->ClipboardState(available, generations[i]);
 }
 
 ClipboardChannelResult CClipboardHub::ClipboardRecord(
@@ -332,24 +532,39 @@ ClipboardChannelResult CClipboardHub::ClipboardRecord(
     return ClipboardChannelResult::FAILED;
 
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IClipboardSource * source = nullptr;
-  uint32_t generation;
+  Source           * source     = nullptr;
+  IClipboardSource * endpoint   = nullptr;
+  ClipboardSourceId  ownerId    = {};
+  uint32_t           generation = 0;
   {
     CSRWSharedLock lock(m_lock);
     if (m_stopped || !m_available)
       return ClipboardChannelResult::ACCEPTED;
-    if (m_failed || !m_active || !m_running || !m_source)
+    source = m_owner;
+    if (!source || !BindingValidNL(*source))
       return HoldOrDiscard(record);
-    source     = m_source;
-    generation = m_generation;
+    endpoint   = source->endpoint;
+    ownerId    = m_ownerId;
+    generation = source->generation;
   }
 
+  // Helper records are transport-agnostic. Stamp them only after selecting
+  // the active transport binding.
   KVMFRClipboardMessage stamped = record;
   stamped.generation = generation;
   const ClipboardChannelResult result =
-    source->SendClipboard(stamped,
+    endpoint->SendClipboard(stamped,
       data.empty() ? nullptr : data.data());
-  if (result != ClipboardChannelResult::FAILED)
+  if (result == ClipboardChannelResult::ACCEPTED)
+  {
+    CSRWExclusiveLock lock(m_lock);
+    CachePublicationNL(stamped, nullptr);
+    const bool publication = stamped.type == KVMFR_CLIPBOARD_MESSAGE_OFFER ||
+      stamped.type == KVMFR_CLIPBOARD_MESSAGE_CLEAR;
+    return publication && m_owner && !OwnerIsNL(*source, ownerId) ?
+      ClipboardChannelResult::BUSY : result;
+  }
+  if (result == ClipboardChannelResult::BUSY)
     return result;
 
   if (MarkFailed(*source))
@@ -364,59 +579,78 @@ ClipboardChannelResult CClipboardHub::ClipboardRecord(
 void CClipboardHub::ClipboardReset(uint64_t epoch, uint32_t reason)
 {
   CSRWExclusiveLock callbackLock(m_callbackLock);
-  IClipboardSource * source = nullptr;
-  uint32_t generation;
+  Source   * sources[MAX_SOURCES]     = {};
+  uint32_t   generations[MAX_SOURCES] = {};
+  unsigned   count                    = 0;
   {
     CSRWExclusiveLock lock(m_lock);
     if (m_stopped || m_channelEpoch != epoch)
       return;
 
-    AdvanceGenerationNL();
-    generation = m_generation;
-    if (m_active && m_running && !m_failed)
-      source = m_source;
+    m_owner           = nullptr;
+    m_cachedSource    = nullptr;
+    m_ownerId         = {};
+    m_cachedClipboard = {};
+    m_cachedValid     = false;
+    m_resetting       = true;
+    for (Source& source : m_sources)
+      if (BindingValidNL(source))
+      {
+        source.generation  = NextGenerationNL();
+        sources[count]     = &source;
+        generations[count] = source.generation;
+        ++count;
+      }
   }
 
-  if (source)
-    source->ClipboardReset(generation, reason);
+  for (unsigned i = 0; i < count; ++i)
+    sources[i]->endpoint->ClipboardReset(generations[i], reason);
 }
 
-ClipboardChannelResult CClipboardHub::SendClipboard(
+ClipboardChannelResult CClipboardHub::SendClipboard(Source& source,
   const KVMFRClipboardMessage& record, const uint8_t * data)
 {
-  const ClipboardChannelWrite write = { record, data };
-  size_t accepted = 0;
-  return SendClipboardBatch(&write, 1, accepted);
+  const ClipboardChannelWrite write    = { record, data };
+  size_t                      accepted = 0;
+  return SendClipboardBatch(source, &write, 1, accepted);
 }
 
-ClipboardChannelResult CClipboardHub::SendClipboardBatch(
+ClipboardChannelResult CClipboardHub::SendClipboardBatch(Source& source,
   const ClipboardChannelWrite * records, size_t count, size_t& accepted)
 {
   accepted = 0;
   if (!records || !count || count > KVMFR_CLIPBOARD_SLOT_COUNT)
     return ClipboardChannelResult::FAILED;
 
-  // Keep the shared lock through Send so Unbind cannot advance the binding
+  // Keep the lock through Send so Unbind cannot advance the binding
   // generation after validation but before the records enter the channel.
-  CSRWSharedLock lock(m_lock);
-  if (m_stopped || !m_available || !m_active || !m_running || m_failed ||
-      !m_source)
+  CSRWExclusiveLock lock(m_lock);
+  if (m_stopped || !BindingValidNL(source) || m_owner != &source)
     return ClipboardChannelResult::FAILED;
+  if (!m_available || m_resetting || !m_channel.Available())
+    return ClipboardChannelResult::BUSY;
 
   for (size_t i = 0; i < count; ++i)
     if (!ValidClientDirection(records[i].record) ||
-        records[i].record.generation != m_generation)
+        records[i].record.generation != source.generation)
       return ClipboardChannelResult::FAILED;
 
-  return m_channel.SendBatch(records, count, accepted);
+  const ClipboardChannelResult result =
+    m_channel.SendBatch(records, count, accepted);
+  for (size_t i = 0; i < accepted; ++i)
+    CachePublicationNL(records[i].record, &source);
+  if (result == ClipboardChannelResult::FAILED &&
+      (m_resetting || !m_channel.Available()))
+    return ClipboardChannelResult::BUSY;
+  return result;
 }
 
-void CClipboardHub::ClipboardReceiveReady()
+void CClipboardHub::ClipboardReceiveReady(Source& source)
 {
   {
     CSRWSharedLock lock(m_lock);
-    if (m_stopped || !m_available || !m_active || m_failed ||
-        !m_running)
+    if (m_stopped || !m_available || !BindingValidNL(source) ||
+        m_owner != &source)
       return;
   }
 
@@ -425,14 +659,9 @@ void CClipboardHub::ClipboardReceiveReady()
     m_channel.Kick(epoch);
 }
 
-void CClipboardHub::ClipboardFailed()
+void CClipboardHub::ClipboardFailed(Source& source)
 {
-  IClipboardSource * source;
-  {
-    CSRWSharedLock lock(m_lock);
-    source = m_source;
-  }
-  if (!source || !MarkFailed(*source))
+  if (!MarkFailed(source))
     return;
 
   const uint64_t epoch = m_channel.Epoch();

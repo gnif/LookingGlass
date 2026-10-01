@@ -398,9 +398,11 @@ bool CLGMPClipboardTransport::Start(IClipboardTarget& target)
 
   {
     CSRWExclusiveLock lock(m_lock);
-    m_target = &target;
-    m_failed = false;
-    m_statusDirty = true;
+    m_target            = &target;
+    m_hubOwner          = {};
+    m_hubReleasePending = false;
+    m_failed            = false;
+    m_statusDirty       = true;
   }
   m_thread = CreateThread(nullptr, 0, ThreadProc, this, 0, nullptr);
   if (!m_thread)
@@ -446,11 +448,13 @@ void CLGMPClipboardTransport::Stop()
   CSRWExclusiveLock lock(m_lock);
   DropPendingTarget();
   ResetProtocol(false);
-  m_available = false;
+  m_available          = false;
   m_endpointGeneration = 0;
-  m_target = nullptr;
-  m_failed = false;
-  m_statusDirty = true;
+  m_target             = nullptr;
+  m_hubOwner           = {};
+  m_hubReleasePending  = false;
+  m_failed             = false;
+  m_statusDirty        = true;
 }
 
 bool CLGMPClipboardTransport::IsOwner(
@@ -462,15 +466,20 @@ bool CLGMPClipboardTransport::IsOwner(
 
 bool CLGMPClipboardTransport::OwnerSubscribed() const
 {
-  if (!m_ownerClientID)
+  return ClientSubscribed(m_ownerClientID);
+}
+
+bool CLGMPClipboardTransport::ClientSubscribed(uint32_t clientID) const
+{
+  if (!clientID || !m_queue)
     return false;
 
   uint32_t clients[LGMP_MAX_CLIENTS] = {};
-  unsigned count = 0;
+  unsigned count                     = 0;
   if (lgmpHostGetClientIDs(m_queue, clients, &count) != LGMP_OK)
     return false;
   for (unsigned i = 0; i < count; ++i)
-    if (clients[i] == m_ownerClientID)
+    if (clients[i] == clientID)
       return true;
   return false;
 }
@@ -938,28 +947,28 @@ void CLGMPClipboardTransport::FinishOwnerRelease()
   if (!m_ownerClientID)
     return;
 
-  const uint32_t clientID     = m_ownerClientID;
-  const uint32_t generation   = m_ownerGeneration;
-  const char * const reason   = m_ownerReleaseReason ?
+  const uint32_t     clientID       = m_ownerClientID;
+  const uint32_t     generation     = m_ownerGeneration;
+  const char * const reason         = m_ownerReleaseReason ?
     m_ownerReleaseReason : "unspecified";
-  const Transfer clientToHelper = m_clientToHelper;
-  const Transfer helperToClient = m_helperToClient;
-  const bool clearHelper      = m_releaseClearHelper;
-  m_ownerClientID             = 0;
-  m_ownerGeneration           = 0;
-  m_ownerReleasing            = false;
-  m_releaseClearHelper        = false;
-  m_ownerReleaseReason        = nullptr;
-  m_ownerDeadline             = 0;
-  m_ownerDrainDeadline        = 0;
-  m_replayPending             = false;
+  const Transfer     clientToHelper = m_clientToHelper;
+  const Transfer     helperToClient = m_helperToClient;
+  const bool         clearHelper    = m_releaseClearHelper;
+  m_ownerClientID                 = 0;
+  m_ownerGeneration               = 0;
+  m_ownerReleasing                = false;
+  m_releaseClearHelper            = false;
+  m_ownerReleaseReason            = nullptr;
+  m_ownerDeadline                 = 0;
+  m_ownerDrainDeadline            = 0;
+  m_replayPending                 = false;
   ClearQueuedStreamTargets();
-  m_discardClientToHelper     = 0;
+  m_discardClientToHelper         = 0;
   m_clientToHelper.Clear();
   m_helperToClient.Clear();
   if (helperToClient.Active())
     m_discardHelperToClient = helperToClient.transfer;
-  m_statusDirty               = true;
+  m_statusDirty                   = true;
 
   if (clearHelper)
   {
@@ -972,8 +981,9 @@ void CLGMPClipboardTransport::FinishOwnerRelease()
   {
     m_files.Reset();
     m_clientClipboardGeneration = 0;
-    m_clientFormats = 0;
+    m_clientFormats             = 0;
   }
+  m_hubReleasePending             = m_hubOwner.client != 0;
 
   DEBUG_INFO("Clipboard owner %u generation %u released (%s)",
     clientID, generation, reason);
@@ -1002,8 +1012,27 @@ bool CLGMPClipboardTransport::RetryOwnerRelease()
   return !m_failed;
 }
 
+void CLGMPClipboardTransport::ReleaseHubOwner(bool force)
+{
+  if (!m_hubOwner.client)
+  {
+    m_hubReleasePending = false;
+    return;
+  }
+  if (!force && (m_failed || !m_hubReleasePending || m_ownerClientID ||
+      m_ownerReleasing || m_pendingTarget.valid || m_streamTargetCount ||
+      m_internalTargetCount))
+    return;
+
+  if (m_target)
+    m_target->Release(m_hubOwner);
+  m_hubOwner          = {};
+  m_hubReleasePending = false;
+}
+
 void CLGMPClipboardTransport::ResetProtocol(bool keepClipboard)
 {
+  DropPendingClaim();
   DropPendingTarget();
   if (m_ownerClientID)
     ReleaseOwner("endpoint reset", false);
@@ -1518,6 +1547,104 @@ void CLGMPClipboardTransport::DropPendingTarget()
   }
 }
 
+void CLGMPClipboardTransport::DropPendingClaim()
+{
+  if (!m_pendingClaim.valid)
+    return;
+
+  m_pendingClaim.Clear();
+  if (m_queue)
+  {
+    const LGMP_STATUS status = lgmpHostAckData(m_queue);
+    if (status != LGMP_OK)
+      Fail("lgmpHostAckData", status);
+  }
+}
+
+bool CLGMPClipboardTransport::RetryClaim()
+{
+  if (!m_pendingClaim.valid)
+    return true;
+
+  const uint32_t              clientID = m_pendingClaim.clientID;
+  const KVMFRClipboardMessage message  = m_pendingClaim.record;
+  if (!ClientSubscribed(clientID) || !m_available ||
+      !ValidateClaim(message))
+  {
+    DropPendingClaim();
+    return !m_failed;
+  }
+
+  if (m_ownerClientID)
+  {
+    if (!m_ownerReleasing && IsOwner(clientID, message.generation))
+      RenewLease();
+    DropPendingClaim();
+    return !m_failed;
+  }
+  if (m_hubReleasePending)
+    return true;
+
+  const ClipboardSourceId    source =
+  {
+    clientID,
+    message.generation,
+  };
+  KVMFRClipboardMessage      cached = {};
+  const ClipboardClaimResult claim  = m_target ?
+    m_target->Claim(source, cached) : ClipboardClaimResult::UNAVAILABLE;
+  if (claim == ClipboardClaimResult::BUSY ||
+      claim == ClipboardClaimResult::UNAVAILABLE)
+    return true;
+  if (claim != ClipboardClaimResult::ACCEPTED)
+  {
+    DropPendingClaim();
+    return !m_failed;
+  }
+  m_hubOwner = source;
+
+  if (!BindStreams(clientID))
+  {
+    m_target->Release(m_hubOwner);
+    m_hubOwner = {};
+    DeInitStreams();
+    DropPendingClaim();
+    m_failed = true;
+    if (m_stopEvent)
+      SetEvent(m_stopEvent);
+    return false;
+  }
+
+  m_ownerClientID    = clientID;
+  m_ownerGeneration  = message.generation;
+  m_cachedClipboard  = {};
+  m_cachedValid      = false;
+  m_helperFormats    = 0;
+  if (cached.version)
+  {
+    if ((cached.type != KVMFR_CLIPBOARD_MESSAGE_OFFER &&
+        cached.type != KVMFR_CLIPBOARD_MESSAGE_CLEAR) ||
+        !ValidateOutboundRecord(cached))
+    {
+      ReleaseOwner("invalid hub clipboard replay", false, true);
+      DropPendingClaim();
+      m_failed = true;
+      return false;
+    }
+    ApplyOutbound(cached);
+  }
+  RenewLease();
+  m_statusDirty   = true;
+  m_replayPending = m_cachedValid;
+  DropPendingClaim();
+  if (m_failed)
+    return false;
+
+  DEBUG_INFO("Clipboard owner %u generation %u acquired",
+    m_ownerClientID, m_ownerGeneration);
+  return true;
+}
+
 bool CLGMPClipboardTransport::ProcessMessage(
   uint32_t clientID, const KVMFRClipboardMessage& message)
 {
@@ -1532,24 +1659,14 @@ bool CLGMPClipboardTransport::ProcessMessage(
         RenewLease();
       return true;
     }
-
-    if (!BindStreams(clientID))
-    {
-      DeInitStreams();
-      m_failed = true;
-      if (m_stopEvent)
-        SetEvent(m_stopEvent);
+    if (m_pendingClaim.valid)
       return true;
-    }
 
-    m_ownerClientID   = clientID;
-    m_ownerGeneration = message.generation;
-    RenewLease();
-    m_statusDirty   = true;
-    m_replayPending = m_cachedValid;
-    DEBUG_INFO("Clipboard owner %u generation %u acquired",
-      m_ownerClientID, m_ownerGeneration);
-    return true;
+    m_pendingClaim.valid    = true;
+    m_pendingClaim.clientID = clientID;
+    m_pendingClaim.record   = message;
+    (void)RetryClaim();
+    return false;
   }
 
   if (!IsOwner(clientID, message.generation))
@@ -1625,12 +1742,14 @@ bool CLGMPClipboardTransport::ProcessMessage(
 
 bool CLGMPClipboardTransport::DrainMessage()
 {
-  for (unsigned count = 0; count < 64 && !m_pendingTarget.valid; ++count)
+  for (unsigned count = 0; count < 64 && !m_pendingClaim.valid &&
+      !m_pendingTarget.valid && !m_failed; ++count)
   {
     uint8_t data[LGMP_MSGS_SIZE] = {};
-    size_t size = 0;
-    uint32_t clientID = 0;
-    const LGMP_STATUS status = lgmpHostReadDataWithSource(
+
+    size_t            size     = 0;
+    uint32_t          clientID = 0;
+    const LGMP_STATUS status   = lgmpHostReadDataWithSource(
       m_queue, data, &size, &clientID);
     if (status == LGMP_ERR_QUEUE_EMPTY)
       return true;
@@ -1663,7 +1782,7 @@ bool CLGMPClipboardTransport::DrainMessage()
       }
     }
   }
-  return true;
+  return !m_failed;
 }
 
 ClipboardChannelResult CLGMPClipboardTransport::SendControl(
@@ -1927,6 +2046,7 @@ void CLGMPClipboardTransport::ClipboardState(
 
   if (generation != m_endpointGeneration || available != m_available)
   {
+    DropPendingClaim();
     DropPendingTarget();
     ClearStreamTargets();
     m_internalTargetCount = 0;
@@ -1958,6 +2078,7 @@ void CLGMPClipboardTransport::ClipboardReset(
   CSRWExclusiveLock lock(m_lock);
   if (!generation)
     return;
+  DropPendingClaim();
   DropPendingTarget();
   ClearStreamTargets();
   m_internalTargetCount = 0;
@@ -2009,10 +2130,10 @@ void CLGMPClipboardTransport::Thread()
   bool notifyFailed = false;
   for (;;)
   {
-    uint32_t waitUs = IDLE_POLL_MS * 1000U;
-    bool streamReceived = false;
-    bool notifyReady = false;
-    IClipboardTarget * readyTarget = nullptr;
+    uint32_t           waitUs         = IDLE_POLL_MS * 1000U;
+    bool               streamReceived = false;
+    bool               notifyReady    = false;
+    IClipboardTarget * readyTarget    = nullptr;
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_failed)
@@ -2033,7 +2154,7 @@ void CLGMPClipboardTransport::Thread()
 
       // A restarted client can reuse dataset and transfer IDs. Deliver every
       // old-owner cleanup record before admitting messages from a new owner.
-      if (!RetryTarget() || !RetryStreamTargets() ||
+      if (!RetryClaim() || !RetryTarget() || !RetryStreamTargets() ||
           !PumpInternalTarget() ||
           (!m_streamTargetCount && m_internalTargetCount == 0 &&
             !DrainMessage()) ||
@@ -2045,14 +2166,16 @@ void CLGMPClipboardTransport::Thread()
         notifyFailed = true;
         break;
       }
+      ReleaseHubOwner();
 
       if (m_outboundBlocked)
       {
         notifyReady = m_target != nullptr;
         readyTarget = m_target;
       }
-      if (m_pendingTarget.valid || m_internalTargetCount ||
-          m_streamTargetCount || m_ownerClientID)
+      if (m_pendingClaim.valid || m_pendingTarget.valid ||
+          m_internalTargetCount ||
+          m_streamTargetCount || m_ownerClientID || m_hubReleasePending)
         waitUs = ACTIVE_POLL_MS * 1000U;
       if (m_ownerClientID)
       {
@@ -2115,10 +2238,14 @@ void CLGMPClipboardTransport::Thread()
   IClipboardTarget * target = nullptr;
   {
     CSRWExclusiveLock lock(m_lock);
+    DropPendingClaim();
     DropPendingTarget();
     ClearStreamTargets();
     if (m_ownerClientID)
       ReleaseOwner("transport stopped", false, true);
+    notifyFailed = notifyFailed || m_failed;
+    if (!notifyFailed)
+      ReleaseHubOwner(true);
     target = m_target;
   }
   if (notifyFailed && target)

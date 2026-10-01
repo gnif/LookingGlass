@@ -25,10 +25,31 @@
 
 #include <stdint.h>
 
+struct ClipboardSourceId
+{
+  uint64_t client     = 0;
+  uint64_t generation = 0;
+};
+
+enum class ClipboardClaimResult
+{
+  ACCEPTED,
+  BUSY,
+  UNAVAILABLE,
+  STALE,
+};
+
 class IClipboardTarget
 {
 public:
   virtual ~IClipboardTarget() = default;
+
+  // Claim arbitrates clipboard ownership across every transport. The first
+  // active client is accepted; cached receives the latest publication for
+  // replay by the new owner, or an empty record when none is available.
+  virtual ClipboardClaimResult Claim(const ClipboardSourceId& source,
+    KVMFRClipboardMessage& cached) = 0;
+  virtual void Release(const ClipboardSourceId& source) = 0;
 
   // Sends one client-to-Helper record. record.generation must be the binding
   // generation most recently supplied by ClipboardState; transports which

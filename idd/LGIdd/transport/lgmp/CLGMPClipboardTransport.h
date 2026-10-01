@@ -88,9 +88,9 @@ private:
 
   struct PendingTarget
   {
-    bool valid       = false;
-    bool acknowledge = false;
-    KVMFRClipboardMessage record = {};
+    bool                  valid       = false;
+    bool                  acknowledge = false;
+    KVMFRClipboardMessage record      = {};
 
     void Clear()
     {
@@ -100,67 +100,88 @@ private:
     }
   };
 
+  struct PendingClaim
+  {
+    bool                  valid    = false;
+    uint32_t              clientID = 0;
+    KVMFRClipboardMessage record   = {};
+
+    void Clear()
+    {
+      valid    = false;
+      clientID = 0;
+      record   = {};
+    }
+  };
+
   struct StreamTarget
   {
-    KVMFRClipboardMessage record = {};
-    uint8_t data[KVMFR_CLIPBOARD_DATA_BYTES] = {};
+    KVMFRClipboardMessage record                           = {};
+    uint8_t               data[KVMFR_CLIPBOARD_DATA_BYTES] = {};
 
     void Clear() { record = {}; }
   };
 
   CLGMPHost& m_host;
 
-  PLGMPHostQueue m_queue = nullptr;
-  PLGMPHostStream m_hostToClientStream = nullptr;
-  PLGMPHostStream m_clientToHostStream = nullptr;
-  PLGMPMemory m_statusMemory [MEMORY_COUNT] = {};
-  PLGMPMemory m_messageMemory[MEMORY_COUNT] = {};
+  PLGMPHostQueue          m_queue                = nullptr;
+  PLGMPHostStream         m_hostToClientStream   = nullptr;
+  PLGMPHostStream         m_clientToHostStream   = nullptr;
 
-  CSRWLock m_lifecycleLock;
-  CSRWLock m_lock;
-  IClipboardTarget * m_target = nullptr;
-  HANDLE m_stopEvent = nullptr;
-  HANDLE m_wakeEvent = nullptr;
-  HANDLE m_pollTimer = nullptr;
-  HANDLE m_thread    = nullptr;
+  PLGMPMemory             m_statusMemory [MEMORY_COUNT] = {};
+  PLGMPMemory             m_messageMemory[MEMORY_COUNT] = {};
 
-  bool m_available          = false;
-  bool m_statusDirty        = true;
-  bool m_cachedValid        = false;
-  bool m_replayPending      = false;
-  bool m_outboundBlocked    = false;
-  bool m_ownerReleasing     = false;
-  bool m_releaseClearHelper = false;
-  bool m_failed             = false;
-  uint32_t m_endpointGeneration = 0;
-  uint32_t m_ownerClientID       = 0;
-  uint32_t m_ownerGeneration     = 0;
-  uint32_t m_statusSerial        = 0;
-  uint32_t m_messageSerial       = 0;
-  uint32_t m_helperFormats       = 0;
-  uint32_t m_clientFormats       = 0;
-  uint32_t m_blockedOwnerClientID   = 0;
-  uint32_t m_blockedOwnerGeneration = 0;
-  uint64_t m_ownerDeadline       = 0;
-  uint64_t m_ownerDrainDeadline  = 0;
-  uint64_t m_clientClipboardGeneration = 0;
-  uint64_t m_discardClientToHelper = 0;
-  uint64_t m_discardHelperToClient = 0;
-  const char * m_ownerReleaseReason = nullptr;
-  KVMFRClipboardMessage m_cachedClipboard = {};
-  KVMFRClipboardMessage m_blockedOutbound = {};
-  KVMFRStreamDescriptor m_hostToClientDescriptor = {};
-  KVMFRStreamDescriptor m_clientToHostDescriptor = {};
-  Transfer m_clientToHelper;
-  Transfer m_helperToClient;
-  PendingTarget m_pendingTarget;
-  StreamTarget m_streamTarget[STREAM_TARGET_COUNT];
-  unsigned m_streamTargetHead     = 0;
-  unsigned m_streamTargetCount    = 0;
-  unsigned m_streamTargetPrepared = 0;
-  KVMFRClipboardMessage m_internalTarget[INTERNAL_TARGET_COUNT] = {};
-  unsigned m_internalTargetCount = 0;
-  CLGMPClipboardFiles m_files;
+  CSRWLock                m_lifecycleLock;
+  CSRWLock                m_lock;
+  IClipboardTarget      * m_target               = nullptr;
+  ClipboardSourceId       m_hubOwner;
+  HANDLE                  m_stopEvent            = nullptr;
+  HANDLE                  m_wakeEvent            = nullptr;
+  HANDLE                  m_pollTimer            = nullptr;
+  HANDLE                  m_thread               = nullptr;
+
+  bool                    m_available                  = false;
+  bool                    m_statusDirty                = true;
+  bool                    m_cachedValid                = false;
+  bool                    m_replayPending              = false;
+  bool                    m_outboundBlocked            = false;
+  bool                    m_ownerReleasing             = false;
+  bool                    m_releaseClearHelper         = false;
+  bool                    m_hubReleasePending          = false;
+  bool                    m_failed                     = false;
+  uint32_t                m_endpointGeneration         = 0;
+  uint32_t                m_ownerClientID              = 0;
+  uint32_t                m_ownerGeneration            = 0;
+  uint32_t                m_statusSerial               = 0;
+  uint32_t                m_messageSerial              = 0;
+  uint32_t                m_helperFormats              = 0;
+  uint32_t                m_clientFormats              = 0;
+  uint32_t                m_blockedOwnerClientID       = 0;
+  uint32_t                m_blockedOwnerGeneration     = 0;
+  uint64_t                m_ownerDeadline              = 0;
+  uint64_t                m_ownerDrainDeadline         = 0;
+  uint64_t                m_clientClipboardGeneration  = 0;
+  uint64_t                m_discardClientToHelper      = 0;
+  uint64_t                m_discardHelperToClient      = 0;
+  const char            * m_ownerReleaseReason         = nullptr;
+  KVMFRClipboardMessage   m_cachedClipboard            = {};
+  KVMFRClipboardMessage   m_blockedOutbound            = {};
+  KVMFRStreamDescriptor   m_hostToClientDescriptor     = {};
+  KVMFRStreamDescriptor   m_clientToHostDescriptor     = {};
+  Transfer                m_clientToHelper;
+  Transfer                m_helperToClient;
+  PendingClaim            m_pendingClaim;
+  PendingTarget           m_pendingTarget;
+
+  StreamTarget            m_streamTarget[STREAM_TARGET_COUNT];
+  unsigned                m_streamTargetHead           = 0;
+  unsigned                m_streamTargetCount          = 0;
+  unsigned                m_streamTargetPrepared       = 0;
+
+  KVMFRClipboardMessage   m_internalTarget[INTERNAL_TARGET_COUNT] = {};
+  unsigned                m_internalTargetCount                   = 0;
+
+  CLGMPClipboardFiles     m_files;
 
   bool Initialize();
   void DeInit();
@@ -175,6 +196,7 @@ private:
   void Wake() const;
 
   bool IsOwner(uint32_t clientID, uint32_t generation) const;
+  bool ClientSubscribed(uint32_t clientID) const;
   bool OwnerSubscribed() const;
   void RenewLease();
   void BlockOutbound(const KVMFRClipboardMessage& record,
@@ -185,6 +207,7 @@ private:
     bool force = false);
   void FinishOwnerRelease();
   bool RetryOwnerRelease();
+  void ReleaseHubOwner(bool force = false);
   void ResetProtocol(bool keepClipboard);
   void QueueHelperClear();
   void QueueTransferCancel(const Transfer& transfer);
@@ -214,6 +237,8 @@ private:
   bool DrainMessage();
   bool ProcessMessage(uint32_t clientID,
     const KVMFRClipboardMessage& message);
+  bool RetryClaim();
+  void DropPendingClaim();
   bool RetryTarget();
   void FinishTarget(bool accepted);
   void DropPendingTarget();
