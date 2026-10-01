@@ -4022,7 +4022,7 @@ static void networkClipboardDispatchDisconnected(
     struct NetworkFileTransfer * fileReads,
     struct NetworkFileTransfer * fileWrites,
     struct NetworkFileAcquisition * acquisitions,
-    bool release)
+    bool release, bool clearAttachment)
 {
   LG_LOCK(clipboard->eventLock);
   LG_LOCK(clipboard->stateLock);
@@ -4060,6 +4060,16 @@ static void networkClipboardDispatchDisconnected(
             item->localAcquisition, LG_CLIPBOARD_FILE_ERROR_DISCONNECTED);
     if (release && events->release)
       events->release(opaque);
+  }
+
+  if (clearAttachment)
+  {
+    LG_LOCK(clipboard->stateLock);
+    clipboard->events      = NULL;
+    clipboard->eventOpaque = NULL;
+    clipboard->attached    = false;
+    clipboard->localOffer  = (struct NetworkLocalOffer) { 0 };
+    LG_UNLOCK(clipboard->stateLock);
   }
   LG_UNLOCK(clipboard->eventLock);
 }
@@ -4163,7 +4173,9 @@ void networkClipboardConnectionState(NetworkClipboard * clipboard,
 
   struct NetworkFileAcquisition * acquisitions =
     clipboard->fileAcquisitions;
-  const bool release = clipboard->remoteOffer.published;
+
+  const bool release         = clipboard->remoteOffer.published;
+  const bool clearAttachment = !clipboardService && clipboard->attached;
 
   clipboard->clipboardReads    = NULL;
   clipboard->clipboardWrites   = NULL;
@@ -4185,19 +4197,22 @@ void networkClipboardConnectionState(NetworkClipboard * clipboard,
   networkClipboardClearSendNL(clipboard);
   networkClipboardClearInboundNL(clipboard);
   networkClipboardRemoteOfferResetNL(clipboard);
-  networkClipboardSetAvailableNL(clipboard, clipboardService);
-  if (clipboardService && clipboard->attached)
-    networkClipboardQueueClaimNL(clipboard);
   LG_UNLOCK(clipboard->stateLock);
 
   networkClipboardDispatchDisconnected(clipboard,
       clipboardReads, clipboardWrites, fileReads, fileWrites,
-      acquisitions, release);
+      acquisitions, release, clearAttachment);
   networkClipboardTransfersFree(clipboardReads);
   networkClipboardTransfersFree(clipboardWrites);
   networkClipboardFileTransfersFree(fileReads);
   networkClipboardFileTransfersFree(fileWrites);
   networkClipboardAcquisitionsFree(acquisitions);
+
+  LG_LOCK(clipboard->stateLock);
+  networkClipboardSetAvailableNL(clipboard, clipboardService);
+  if (clipboardService && clipboard->attached)
+    networkClipboardQueueClaimNL(clipboard);
+  LG_UNLOCK(clipboard->stateLock);
 
   networkClipboardProcess(clipboard);
 }
