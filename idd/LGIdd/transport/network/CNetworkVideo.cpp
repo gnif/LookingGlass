@@ -2233,6 +2233,8 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
   if (!DeliverySupported(peer->info, delivery))
     return NetworkVideoPacketResult::INVALID;
 
+  /* A configuration update crosses client traffic already in flight. Decode
+   * and validate stale messages, but do not make their epoch mismatch fatal. */
   switch (packet.envelope.messageType)
   {
     case LG_NET_VIDEO_MESSAGE_SUBSCRIBE:
@@ -2283,10 +2285,13 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       LGNetVideoControl control = {};
       if (lgNetVideoControlDecode(&control, packet.payload,
             packet.payloadLength) != LG_NET_PARSE_OK ||
-          control.streamID != STREAM_ID ||
-          (control.configEpoch &&
-            control.configEpoch != peer->componentEpoch))
+          control.streamID != STREAM_ID)
         return NetworkVideoPacketResult::INVALID;
+      if ((control.configEpoch &&
+            control.configEpoch != peer->componentEpoch) ||
+          (packet.envelope.componentEpoch &&
+            packet.envelope.componentEpoch != peer->componentEpoch))
+        return NetworkVideoPacketResult::IGNORED;
       m_impl->DropPeerSendsNL(*peer);
       peer->subscribed      = false;
       peer->configured      = false;
@@ -2304,9 +2309,14 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       LGNetVideoControl control = {};
       if (lgNetVideoControlDecode(&control, packet.payload,
             packet.payloadLength) != LG_NET_PARSE_OK ||
-          control.streamID != STREAM_ID || !peer->subscribed ||
-          (control.configEpoch &&
-            control.configEpoch != peer->componentEpoch))
+          control.streamID != STREAM_ID)
+        return NetworkVideoPacketResult::INVALID;
+      if ((control.configEpoch &&
+            control.configEpoch != peer->componentEpoch) ||
+          (packet.envelope.componentEpoch &&
+            packet.envelope.componentEpoch != peer->componentEpoch))
+        return NetworkVideoPacketResult::IGNORED;
+      if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
       peer->keyframePending = true;
       break;
@@ -2321,9 +2331,13 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       LGNetVideoFeedback feedback = {};
       if (lgNetVideoFeedbackDecode(&feedback, packet.payload,
             packet.payloadLength) != LG_NET_PARSE_OK ||
-          feedback.streamID != STREAM_ID || !peer->subscribed ||
-          packet.envelope.componentEpoch != peer->componentEpoch ||
+          feedback.streamID != STREAM_ID ||
+          !packet.envelope.componentEpoch ||
           feedback.highestSeenFrameID > peer->lastFrameID)
+        return NetworkVideoPacketResult::INVALID;
+      if (packet.envelope.componentEpoch != peer->componentEpoch)
+        return NetworkVideoPacketResult::IGNORED;
+      if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
       peer->feedback       = feedback;
       peer->lastCompleteID = feedback.lastCompleteFrameID;
