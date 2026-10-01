@@ -47,7 +47,7 @@
 
 #define NETWORK_CONNECT_POLL_MS               50U
 #define NETWORK_HANDSHAKE_TIMEOUT_MS          5000U
-#define NETWORK_IDLE_TIMEOUT_MS               10000U
+#define NETWORK_IDLE_TIMEOUT_MS               30000U
 #define NETWORK_KEEPALIVE_INTERVAL_MS         1000U
 #define NETWORK_INITIAL_RTT_MS                1U
 #define NETWORK_MAX_PEER_STREAMS              16U

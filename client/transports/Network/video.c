@@ -48,6 +48,7 @@
 #define NETWORK_VIDEO_MAX_FRAGMENTS            LG_NET_VIDEO_MAX_FRAGMENTS
 #define NETWORK_VIDEO_MAX_BLOCKS               LG_NET_VIDEO_MAX_BLOCKS
 #define NETWORK_VIDEO_MAX_FRAME_LATENCY_MS     50U
+#define NETWORK_VIDEO_ASSEMBLY_STALL_MS        2000U
 #define NETWORK_VIDEO_MAX_FRAME_RATE           UINT32_MAX
 #define NETWORK_VIDEO_SCHEDULE_CACHE           8U
 #define NETWORK_VIDEO_MAX_LEASES               8U
@@ -211,6 +212,14 @@ static uint64_t networkVideoNext64(uint64_t value)
 static uint32_t networkVideoSaturatingIncrement(uint32_t value)
 {
   return value == UINT32_MAX ? value : value + 1U;
+}
+
+/* Frame latency remains the datagram presentation deadline. Reliable frame
+ * assembly instead expires after this period without receiving new data. */
+static uint64_t networkVideoAssemblyDeadline(uint64_t now)
+{
+  return now + (uint64_t)NETWORK_VIDEO_ASSEMBLY_STALL_MS *
+    UINT64_C(1000000);
 }
 
 static uint32_t networkVideoReadU32(const uint8_t * data)
@@ -709,17 +718,19 @@ static bool networkVideoAllocateAssemblyNL(NetworkVideo * video,
       fragment->blockCount > NETWORK_VIDEO_MAX_BLOCKS)
     return false;
 
-  struct NetworkVideoAssembly assembly =
+  const bool                  sparseAllowed =
+    (video->config.flags & LG_NET_VIDEO_STREAM_DATAGRAMS) != 0;
+  struct NetworkVideoAssembly assembly      =
   {
     .active         = true,
-    .sparseAllowed  =
-      (video->config.flags & LG_NET_VIDEO_STREAM_DATAGRAMS) != 0,
+    .sparseAllowed  = sparseAllowed,
     .generation     = video->decodeGeneration,
     .configEpoch    = fragment->configEpoch,
     .frameID        = fragment->frameID,
     .firstReceiveNs = now,
-    .deadlineNs     = now +
-      (uint64_t)video->config.maxFrameLatencyMs * UINT64_C(1000000),
+    .deadlineNs     = sparseAllowed ?
+      now + (uint64_t)video->config.maxFrameLatencyMs * UINT64_C(1000000) :
+      networkVideoAssemblyDeadline(now),
     .frameLength    = fragment->frameLength,
     .fragmentCount  = fragment->fragmentCount,
     .blockCount     = fragment->blockCount,
@@ -959,6 +970,8 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
     (fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_START) != 0;
   block->end              |=
     (fragment->flags & LG_NET_VIDEO_FRAGMENT_BLOCK_END) != 0;
+  if (!assembly->sparseAllowed)
+    assembly->deadlineNs = networkVideoAssemblyDeadline(now);
 
   if (!networkVideoAssemblyComplete(assembly))
     return true;

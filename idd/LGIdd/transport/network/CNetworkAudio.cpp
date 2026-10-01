@@ -39,7 +39,7 @@ namespace
   constexpr uint32_t PLAYBACK_STREAM_ID = 1;
   constexpr uint32_t CAPTURE_STREAM_ID  = 2;
   constexpr uint64_t AUDIO_LEASE_MS     = 2000;
-  constexpr uint64_t AUTHORITY_STALL_MS = 20;
+  constexpr uint64_t AUTHORITY_STALL_MS = 250;
   constexpr size_t   CLOCK_CACHE_SIZE   = 8;
   constexpr size_t   RECENT_PACKET_SIZE = 16;
 
@@ -1372,6 +1372,11 @@ NetworkAudioPacketResult CNetworkAudio::Impl::HandleSubscribe(
       SameSubscription(peer.request, subscribe))
   {
     peer.deadline = now + AUDIO_LEASE_MS;
+    if (peer.feedbackRevoked)
+    {
+      peer.feedbackRevoked = false;
+      RebalanceRolesNL();
+    }
     if (!peer.pumpInFlight && peer.pumpStage == PumpStage::DONE)
     {
       peer.pumpStage = PumpStage::RENEWAL_GRANT;
