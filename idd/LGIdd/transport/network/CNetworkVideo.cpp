@@ -1607,6 +1607,15 @@ struct CNetworkVideo::Impl
       LG_NET_VIDEO_STATUS_WIRE_SIZE);
   }
 
+  void FailNL(uint32_t detail)
+  {
+    m_failed = true;
+    m_frames.clear();
+    for (PeerState& peer : m_peers)
+      if (peer.subscribed)
+        QueueStatusNL(peer, LG_NET_VIDEO_STATE_ERROR, detail);
+  }
+
   void DropPeerFramesNL(PeerState& peer)
   {
     // Finish a frame once any of its fragments have been accepted. Replacing
@@ -1934,7 +1943,7 @@ struct CNetworkVideo::Impl
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_encoder.Busy() || m_frames.empty() || !m_started ||
-          m_stopped || !m_active || !HasSubscribersNL())
+          m_stopped || m_failed || !m_active || !HasSubscribersNL())
         return false;
       pending = std::move(m_frames.front());
       m_frames.pop_front();
@@ -1952,10 +1961,7 @@ struct CNetworkVideo::Impl
       return true;
 
     CSRWExclusiveLock lock(m_lock);
-    m_failed = true;
-    for (PeerState& peer : m_peers)
-      if (peer.subscribed)
-        QueueStatusNL(peer, LG_NET_VIDEO_STATE_ERROR, 3);
+    FailNL(3);
     return false;
   }
 
@@ -2368,21 +2374,14 @@ void CNetworkVideo::Process(uint64_t nowMs)
       else
       {
         CSRWExclusiveLock lock(m_impl->m_lock);
-        m_impl->m_failed = true;
-        for (Impl::PeerState& peer : m_impl->m_peers)
-          if (peer.subscribed)
-            m_impl->QueueStatusNL(
-              peer, LG_NET_VIDEO_STATE_ERROR, 4);
+        m_impl->FailNL(4);
       }
     }
     else if (state == D12SyncState::FAILED)
     {
       m_impl->m_encoder.Reset();
       CSRWExclusiveLock lock(m_impl->m_lock);
-      m_impl->m_failed = true;
-      for (Impl::PeerState& peer : m_impl->m_peers)
-        if (peer.subscribed)
-          m_impl->QueueStatusNL(peer, LG_NET_VIDEO_STATE_ERROR, 5);
+      m_impl->FailNL(5);
     }
   }
 
@@ -2432,7 +2431,7 @@ CfgResult CNetworkVideo::Probe(const FrameCfg& cfg) const
   if (!m_impl)
     return CfgResult::FAILED;
   CSRWSharedLock lock(m_impl->m_lock);
-  if (m_impl->m_stopped || m_impl->m_failed)
+  if (m_impl->m_stopped)
     return CfgResult::FAILED;
   if (!Frame::Valid(cfg.mode) || !cfg.width || !cfg.height ||
       cfg.width > MAX_WIDTH || cfg.height > MAX_HEIGHT ||
@@ -2475,6 +2474,7 @@ void CNetworkVideo::Commit()
     m_impl->m_pendingCfg  = {};
     m_impl->m_active      = true;
     m_impl->m_pending     = false;
+    m_impl->m_failed      = false;
     m_impl->m_changing    = false;
     m_impl->m_configEpoch = Next64(m_impl->m_configEpoch);
     m_impl->m_frames.clear();

@@ -141,7 +141,29 @@ void CD3D12CommandSlot::DeInit()
   m_cmdList.Reset();
   m_gfxList.Reset();
   m_allocator.Reset();
-  m_queue = nullptr;
+
+  for (UINT i = 0; i < MAX_FENCE_WAITS; ++i)
+  {
+    m_fenceWaits[i].fence.Reset();
+    m_fenceWaits[i].value = 0;
+  }
+
+  m_queue                  = nullptr;
+  m_name                   = nullptr;
+  m_needsReset             = false;
+  m_fenceTarget            = 0;
+  m_fenceWaitCount         = 0;
+  m_completionCallback     = nullptr;
+  m_completionParams[0]    = nullptr;
+  m_completionParams[1]    = nullptr;
+  m_completionResult       = true;
+  m_queryBase              = 0;
+  m_timingActive           = false;
+  m_timestampFrequency     = 0;
+  m_calibrationGPU         = 0;
+  m_calibrationCPU         = 0;
+  Atomic::Store(m_submitted, false, std::memory_order_release);
+  Atomic::Store(m_state, STATE_FREE, std::memory_order_release);
 }
 
 bool CD3D12CommandSlot::Acquire()
@@ -505,6 +527,9 @@ void CD3D12CommandQueue::DeInit()
   m_queue.Reset();
   m_timingSupported = false;
   m_qpcFrequency    = 0;
+  m_fenceValue      = 0;
+  m_name            = nullptr;
+  Atomic::Store(m_failed, false, std::memory_order_release);
 }
 
 CD3D12CommandSlot * CD3D12CommandQueue::Try(UINT slotIndex)
