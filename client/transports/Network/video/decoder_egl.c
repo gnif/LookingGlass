@@ -95,8 +95,8 @@ struct NetworkVideoDecoder
   GLuint dequantProgram;
   GLuint idwtProgram;
   GLuint yuvProgram;
-  GLuint coefficientTexture;
-  GLuint planeTextures[NETWORK_VIDEO_COMPONENTS];
+  GLuint coefficientTextures[NETWORK_VIDEO_LEVELS];
+  GLuint planeTextures      [NETWORK_VIDEO_COMPONENTS];
   GLuint offsetBuffer;
   GLuint payloadBuffer;
 
@@ -235,21 +235,21 @@ static GLuint networkVideoCreateProgram(
 
 static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
 {
-  if (decoder->coefficientTexture)
-    glDeleteTextures(1, &decoder->coefficientTexture);
+  glDeleteTextures(NETWORK_VIDEO_LEVELS, decoder->coefficientTextures);
   glDeleteTextures(NETWORK_VIDEO_COMPONENTS, decoder->planeTextures);
   if (decoder->offsetBuffer)
     glDeleteBuffers(1, &decoder->offsetBuffer);
   if (decoder->payloadBuffer)
     glDeleteBuffers(1, &decoder->payloadBuffer);
 
-  decoder->coefficientTexture = 0;
-  decoder->offsetBuffer       = 0;
-  decoder->payloadBuffer      = 0;
-  decoder->alignedWidth       = 0;
-  decoder->alignedHeight      = 0;
-  decoder->blockCapacity      = 0;
-  decoder->configured         = false;
+  decoder->offsetBuffer  = 0;
+  decoder->payloadBuffer = 0;
+  decoder->alignedWidth  = 0;
+  decoder->alignedHeight = 0;
+  decoder->blockCapacity = 0;
+  decoder->configured    = false;
+  memset(decoder->coefficientTextures, 0,
+      sizeof(decoder->coefficientTextures));
   memset(decoder->planeTextures, 0, sizeof(decoder->planeTextures));
   memset(&decoder->config, 0, sizeof(decoder->config));
   memset(decoder->blocks, 0, sizeof(decoder->blocks));
@@ -371,21 +371,25 @@ static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
   {
   }
 
-  glGenTextures(1, &decoder->coefficientTexture);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, decoder->coefficientTexture);
-  glTexStorage3D(GL_TEXTURE_2D_ARRAY, NETWORK_VIDEO_LEVELS, GL_R32F,
-      decoder->alignedWidth / 2U, decoder->alignedHeight / 2U,
-      NETWORK_VIDEO_COMPONENTS * NETWORK_VIDEO_BANDS);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER,
-      GL_NEAREST_MIPMAP_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S,
-      GL_MIRRORED_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T,
-      GL_MIRRORED_REPEAT);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL,
-      NETWORK_VIDEO_LEVELS - 1U);
+  glGenTextures(NETWORK_VIDEO_LEVELS, decoder->coefficientTextures);
+  for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
+  {
+    if (!decoder->coefficientTextures[level])
+      return false;
+
+    const uint32_t width  = decoder->alignedWidth  >> (level + 1U);
+    const uint32_t height = decoder->alignedHeight >> (level + 1U);
+    glBindTexture(GL_TEXTURE_2D_ARRAY,
+        decoder->coefficientTextures[level]);
+    glTexStorage3D(GL_TEXTURE_2D_ARRAY, 1, GL_R32F, width, height,
+        NETWORK_VIDEO_COMPONENTS * NETWORK_VIDEO_BANDS);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S,
+        GL_MIRRORED_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T,
+        GL_MIRRORED_REPEAT);
+  }
 
   for (unsigned component = 0;
        component < NETWORK_VIDEO_COMPONENTS; ++component)
@@ -407,8 +411,8 @@ static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
       (GLsizeiptr)decoder->blockCapacity * sizeof(uint32_t),
       NULL, GL_STREAM_DRAW);
   glGenBuffers(1, &decoder->payloadBuffer);
-  return decoder->coefficientTexture && decoder->offsetBuffer &&
-    decoder->payloadBuffer && glGetError() == GL_NO_ERROR;
+  return decoder->offsetBuffer && decoder->payloadBuffer &&
+    glGetError() == GL_NO_ERROR;
 }
 
 static void networkVideoExternalRetain(LG_ExternalFrame * base)
@@ -788,7 +792,7 @@ static void networkVideoDequantNL(NetworkVideoDecoder * decoder)
   {
     const uint32_t width  = decoder->alignedWidth  >> (level + 1U);
     const uint32_t height = decoder->alignedHeight >> (level + 1U);
-    glBindImageTexture(0, decoder->coefficientTexture, level,
+    glBindImageTexture(0, decoder->coefficientTextures[level], 0,
         GL_TRUE, 0, GL_WRITE_ONLY, GL_R32F);
     networkVideoSetUniform2i(decoder->dequantProgram,
         "resolution", width, height);
@@ -823,7 +827,6 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
 {
   glUseProgram(decoder->idwtProgram);
   glActiveTexture(GL_TEXTURE0);
-  glBindTexture(GL_TEXTURE_2D_ARRAY, decoder->coefficientTexture);
   glUniform1i(glGetUniformLocation(decoder->idwtProgram,
       "coefficients"), 0);
 
@@ -835,8 +838,8 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
     for (int level = NETWORK_VIDEO_LEVELS - 1;
          level >= (int)finalLevel; --level)
     {
-      glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, level);
-      glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL, level);
+      glBindTexture(GL_TEXTURE_2D_ARRAY,
+          decoder->coefficientTextures[level]);
       const uint32_t inputWidth  = decoder->alignedWidth >> (level + 1);
       const uint32_t inputHeight = decoder->alignedHeight >> (level + 1);
       networkVideoSetUniform2i(decoder->idwtProgram,
@@ -858,7 +861,7 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
       }
       else
       {
-        glBindImageTexture(1, decoder->coefficientTexture, level - 1,
+        glBindImageTexture(1, decoder->coefficientTextures[level - 1], 0,
             GL_FALSE, component * NETWORK_VIDEO_BANDS,
             GL_WRITE_ONLY, GL_R32F);
       }
@@ -868,9 +871,6 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
           GL_TEXTURE_FETCH_BARRIER_BIT);
     }
   }
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_BASE_LEVEL, 0);
-  glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAX_LEVEL,
-      NETWORK_VIDEO_LEVELS - 1U);
 }
 
 static void networkVideoColorRange(
