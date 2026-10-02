@@ -422,9 +422,17 @@ function(lg_add_static_msquic)
   list(APPEND LG_MSQUIC_LINK_LIBRARIES
     ${LG_MSQUIC_SYSTEM_LIBRARIES})
 
-  # The submodule and injected compatibility files can change without
-  # invalidating ExternalProject's build stamp. Invoke the nested build so
-  # its own dependency tracking can update only the affected outputs.
+  set(LG_MSQUIC_RECONFIGURE_COMMAND
+    "${CMAKE_COMMAND}"
+    -S <SOURCE_DIR>
+    -B <BINARY_DIR>
+    ${LG_MSQUIC_CMAKE_ARGS}
+  )
+
+  # The submodule, configuration, and injected compatibility files can change
+  # without invalidating ExternalProject's configure stamp. Reconfigure before
+  # every nested build, then let its dependency tracking update only the
+  # affected outputs.
   ExternalProject_Add(lg_msquic_build
     SOURCE_DIR "${LG_MSQUIC_SOURCE_DIR}"
     BINARY_DIR "${LG_MSQUIC_BINARY_DIR}"
@@ -433,7 +441,9 @@ function(lg_add_static_msquic)
     INSTALL_COMMAND ""
     CMAKE_ARGS ${LG_MSQUIC_CMAKE_ARGS}
     BUILD_ALWAYS ON
-    BUILD_COMMAND ${LG_MSQUIC_BUILD_COMMAND}
+    BUILD_COMMAND
+      ${LG_MSQUIC_RECONFIGURE_COMMAND}
+      COMMAND ${LG_MSQUIC_BUILD_COMMAND}
     BUILD_BYPRODUCTS ${LG_MSQUIC_BUILD_BYPRODUCTS}
   )
 
