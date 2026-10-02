@@ -15,7 +15,7 @@ Install the following tools:
 - Visual Studio 2022 Build Tools with the Desktop development with C++
   workload, Clang tools for Windows, and a Windows SDK
 - CMake 3.21 or newer
-- Ninja
+- Ninja, with ``ninja.exe`` available on ``PATH``
 - Git
 - Perl
 - NASM
@@ -23,6 +23,10 @@ Install the following tools:
 
 Set ``VCPKG_ROOT`` to the vcpkg checkout. The client manifest installs native
 MSVC-ABI builds of ANGLE and libsamplerate automatically.
+
+Ninja can be installed with ``winget install Ninja-build.Ninja``. Open a new
+Developer PowerShell after installing it and confirm that ``ninja --version``
+works before configuring the client.
 
 Building
 --------
