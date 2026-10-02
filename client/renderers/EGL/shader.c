@@ -24,6 +24,7 @@
 #include "common/stringutils.h"
 #include "util.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -384,12 +385,22 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
       }
     }
 
-    int processedLen = fragment_size;
+    int          processedLen = fragment_size;
     const char * defineFormat = "#define %s %s\n";
     for(const EGL_ShaderDefine * define = defines; define->name; ++define)
-      processedLen += snprintf(NULL, 0, defineFormat, define->name, define->value);
+    {
+      const int defineLength = snprintf(
+          NULL, 0, defineFormat, define->name, define->value);
+      if (defineLength < 0 || processedLen > INT_MAX - defineLength)
+      {
+        DEBUG_ERROR("Failed to format shader defines");
+        goto exit;
+      }
 
-    processed = malloc(processedLen);
+      processedLen += defineLength;
+    }
+
+    processed = malloc((size_t)processedLen + 1);
     if (!processed)
     {
       DEBUG_ERROR("Out of memory");
@@ -400,13 +411,24 @@ bool egl_shaderCompile(EGL_Shader * this, const char * vertex_code,
 
     int offset = insertPos;
     for(const EGL_ShaderDefine * define = defines; define->name; ++define)
-      offset += sprintf(processed + offset, defineFormat,
-          define->name, define->value);
+    {
+      const size_t available = (size_t)(processedLen - offset) + 1;
+      const int    written   = snprintf(processed + offset, available,
+          defineFormat, define->name, define->value);
+      if (written < 0 || (size_t)written >= available)
+      {
+        DEBUG_ERROR("Failed to format shader defines");
+        goto exit;
+      }
+
+      offset += written;
+    }
 
     memcpy(
         processed       + offset,
         fragment_code + insertPos,
         fragment_size - insertPos);
+    processed[processedLen] = '\0';
 
     fragment_code = processed;
     fragment_size = processedLen;

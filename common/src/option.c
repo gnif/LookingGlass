@@ -103,15 +103,13 @@ static bool string_parser(struct Option * opt, const char * str)
 
 static char * int_toString(struct Option * opt)
 {
-  int len = snprintf(NULL, 0, "%d", opt->value.x_int);
-  char * ret = malloc(len + 1);
-  if (!ret)
+  char * ret;
+  if (alloc_sprintf(&ret, "%d", opt->value.x_int) < 0)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
 
-  sprintf(ret, "%d", opt->value.x_int);
   return ret;
 }
 
@@ -122,15 +120,13 @@ static char * bool_toString(struct Option * opt)
 
 static char * float_toString(struct Option * opt)
 {
-  int len = snprintf(NULL, 0, "%f", opt->value.x_float);
-  char * ret = malloc(len + 1);
-  if (!ret)
+  char * ret;
+  if (alloc_sprintf(&ret, "%f", opt->value.x_float) < 0)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
 
-  sprintf(ret, "%f", opt->value.x_float);
   return ret;
 }
 

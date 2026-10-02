@@ -24,6 +24,7 @@
 #include "common/stringlist.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdio.h>
 
 typedef enum LGFileType
@@ -42,6 +43,7 @@ bool       lgCreateDirectory (const char * path);
 bool       lgDeleteFile      (const char * path);
 bool       lgDeleteDirectory (const char * path);
 FILE     * lgOpenFile        (const char * path, const char * mode);
+bool       lgFileErrorString (int error, char * buffer, size_t size);
 
 /* Returns an owned list of entry names, or NULL when the directory cannot be
  * opened or read. The special entries "." and ".." are omitted. */

@@ -51,9 +51,14 @@ int valloc_sprintf(char ** str, const char * format, va_list ap)
   if (len < 0)
     return len;
 
-  *str = malloc(len + 1);
+  *str = malloc((size_t)len + 1);
+  if (!*str)
+  {
+    errno = ENOMEM;
+    return -1;
+  }
 
-  int ret = vsnprintf(*str, len + 1, format, ap);
+  int ret = vsnprintf(*str, (size_t)len + 1, format, ap);
   if (ret < 0)
   {
     free(*str);

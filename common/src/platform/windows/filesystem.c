@@ -151,6 +151,15 @@ FILE * lgOpenFile(const char * path, const char * mode)
   return result;
 }
 
+bool lgFileErrorString(int error, char * buffer, size_t size)
+{
+  if (!buffer || !size)
+    return false;
+
+  buffer[0] = '\0';
+  return strerror_s(buffer, size, error) == 0;
+}
+
 StringList lgListDirectory(const char * path)
 {
   wchar_t * wide = widePath(path);

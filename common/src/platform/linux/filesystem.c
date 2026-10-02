@@ -77,6 +77,22 @@ FILE * lgOpenFile(const char * path, const char * mode)
   return fopen(path, mode);
 }
 
+bool lgFileErrorString(int error, char * buffer, size_t size)
+{
+  if (!buffer || !size)
+    return false;
+
+  const char * message = strerror(error);
+  if (!message)
+  {
+    buffer[0] = '\0';
+    return false;
+  }
+
+  str_copy(buffer, size, message, strlen(message));
+  return true;
+}
+
 StringList lgListDirectory(const char * path)
 {
   DIR * directory = opendir(path);

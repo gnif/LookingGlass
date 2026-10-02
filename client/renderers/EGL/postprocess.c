@@ -234,7 +234,11 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   FILE * file = lgOpenFile(path, "w");
   if (!file)
   {
-    const char * strError = strerror(errno);
+    const int errorCode     = errno;
+    char      strError[256] = { 0 };
+    if (!lgFileErrorString(errorCode, strError, sizeof(strError)))
+      snprintf(strError, sizeof(strError), "Error %d", errorCode);
+
     DEBUG_ERROR("Failed to open preset \"%s\" for writing: %s", name, strError);
     free(path);
 

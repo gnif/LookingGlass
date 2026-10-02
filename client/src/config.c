@@ -840,14 +840,12 @@ static char * optPosToString(struct Option * opt)
   if (g_params.center)
     return lg_strdup("center");
 
-  int len = snprintf(NULL, 0, "%dx%d", g_params.x, g_params.y);
-  char * str = malloc(len + 1);
-  if (!str)
+  char * str;
+  if (alloc_sprintf(&str, "%dx%d", g_params.x, g_params.y) < 0)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
-  sprintf(str, "%dx%d", g_params.x, g_params.y);
 
   return str;
 }
@@ -877,14 +875,12 @@ static StringList optSizeValues(struct Option * opt)
 
 static char * optSizeToString(struct Option * opt)
 {
-  int len = snprintf(NULL, 0, "%ux%u", g_params.w, g_params.h);
-  char * str = malloc(len + 1);
-  if (!str)
+  char * str;
+  if (alloc_sprintf(&str, "%ux%u", g_params.w, g_params.h) < 0)
   {
     DEBUG_ERROR("out of memory");
     return NULL;
   }
-  sprintf(str, "%ux%u", g_params.w, g_params.h);
 
   return str;
 }
