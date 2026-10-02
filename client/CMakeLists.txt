@@ -42,6 +42,13 @@ if(LG_CLIENT_PLATFORM_WINDOWS AND MSVC AND
     "C++; use the windows-clangcl configure preset")
 endif()
 
+if(LG_CLIENT_PLATFORM_WINDOWS AND MSVC AND
+    NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+  message(FATAL_ERROR
+    "The native Windows client requires an x64 clang-cl target; remove the "
+    "existing build directory and use the windows-clangcl configure preset")
+endif()
+
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
 include(OptimizeForNative) # option(OPTIMIZE_FOR_NATIVE)
 include(UninstallTarget)

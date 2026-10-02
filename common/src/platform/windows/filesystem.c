@@ -22,6 +22,7 @@
 
 #include "common/win32.h"
 
+#include <share.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -144,7 +145,7 @@ FILE * lgOpenFile(const char * path, const char * mode)
     return NULL;
   }
 
-  FILE * result = _wfopen(widePathValue, wideMode);
+  FILE * result = _wfsopen(widePathValue, wideMode, _SH_DENYNO);
   free(widePathValue);
   free(wideMode);
   return result;

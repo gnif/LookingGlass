@@ -19,8 +19,6 @@
         "rhs": "Windows"
       },
       "cacheVariables": {
-        "CMAKE_C_COMPILER": "clang-cl",
-        "CMAKE_CXX_COMPILER": "clang-cl",
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL",
         "ENABLE_AUDIO": true,
@@ -28,6 +26,7 @@
         "ENABLE_NETWORK": true,
         "ENABLE_WASAPI": true,
         "OPTIMIZE_FOR_NATIVE": "OFF",
+        "VCPKG_CHAINLOAD_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchains/windows-clangcl.cmake",
         "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-triplets",
         "VCPKG_TARGET_TRIPLET": "x64-windows-lg"
       }
