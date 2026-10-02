@@ -63,6 +63,35 @@ if(LG_MSQUIC_MINGW_COMPAT_HEADER)
   cmake_language(DEFER CALL lg_configure_msquic_mingw_targets)
 endif()
 
+# MsQuic enables MSVC code analysis unconditionally on its core target. The
+# analyzer produces SDK-version-dependent diagnostics in third-party sources,
+# which MsQuic then promotes to errors through its own /WX policy.
+if(LG_MSQUIC_DISABLE_CODE_ANALYSIS)
+  function(lg_disable_msquic_code_analysis)
+    foreach(LG_MSQUIC_TARGET
+        core
+        msquic_platform
+        msquic)
+      if(NOT TARGET ${LG_MSQUIC_TARGET})
+        continue()
+      endif()
+
+      get_property(LG_MSQUIC_COMPILE_OPTIONS
+        TARGET ${LG_MSQUIC_TARGET}
+        PROPERTY COMPILE_OPTIONS)
+      if(NOT LG_MSQUIC_COMPILE_OPTIONS)
+        continue()
+      endif()
+
+      list(REMOVE_ITEM LG_MSQUIC_COMPILE_OPTIONS /analyze)
+      set_property(TARGET ${LG_MSQUIC_TARGET} PROPERTY
+        COMPILE_OPTIONS "${LG_MSQUIC_COMPILE_OPTIONS}")
+    endforeach()
+  endfunction()
+
+  cmake_language(DEFER CALL lg_disable_msquic_code_analysis)
+endif()
+
 function(lg_add_static_msquic)
   if(TARGET msquic::msquic)
     return()
@@ -150,7 +179,9 @@ function(lg_add_static_msquic)
       "-DLIB_SSL=${LG_MSQUIC_OPENSSL_SSL_LIBRARY}"
       "-DLIB_CRYPTO=${LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY}"
       "-DCMAKE_C_COMPILER=${LG_MSQUIC_CL}"
-      "-DCMAKE_CXX_COMPILER=${LG_MSQUIC_CL}")
+      "-DCMAKE_CXX_COMPILER=${LG_MSQUIC_CL}"
+      "-DCMAKE_PROJECT_INCLUDE=${PROJECT_TOP}/cmake/MsQuic.cmake"
+      "-DLG_MSQUIC_DISABLE_CODE_ANALYSIS=ON")
     if(NOT CMAKE_CONFIGURATION_TYPES)
       list(APPEND LG_MSQUIC_CMAKE_ARGS
         "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
