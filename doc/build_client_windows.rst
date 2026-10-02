@@ -32,10 +32,12 @@ Building
 
 Open an x64 Native Tools command prompt. Alternatively, initialize a regular
 PowerShell session for an x64 host and target first (replace ``Community``
-with the installed Visual Studio edition when necessary):
+with the installed Visual Studio edition when necessary). The process-scoped
+policy change below applies only to the current PowerShell session:
 
 .. code:: powershell
 
+   Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force
    $vsTools = 'C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools'
    & "$vsTools\Launch-VsDevShell.ps1" `
      -Arch amd64 -HostArch amd64 -SkipAutomaticLocation
