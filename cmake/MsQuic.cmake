@@ -11,6 +11,58 @@ if(LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY AND NOT TARGET OpenSSL::Crypto)
   )
 endif()
 
+# MsQuic assumes that every Windows compiler accepts MSVC command-line
+# options. Correct its build flags and component targets so the active MinGW
+# toolchain can build them directly.
+if(LG_MSQUIC_MINGW_COMPAT_HEADER)
+  # MsQuic uses BCrypt pseudo-handles and interlocked list operations exposed
+  # by the Windows 10 SDK baseline.
+  add_compile_definitions(
+    WINVER=0x0A00
+    _WIN32_WINNT=0x0A00)
+
+  # GCC diagnoses the MSVC-compatible pointer and integer conversions and
+  # Windows-style multi-character pool tags used throughout this code.
+  add_compile_options(
+    "$<$<COMPILE_LANG_AND_ID:C,GNU>:-Wno-incompatible-pointer-types>"
+    "$<$<COMPILE_LANG_AND_ID:C,GNU>:-Wno-int-conversion>"
+    "$<$<COMPILE_LANG_AND_ID:C,GNU>:-Wno-multichar>")
+
+  function(lg_configure_msquic_mingw_targets)
+    foreach(LG_MSQUIC_TARGET
+        inc
+        warnings
+        main_binary_link_args
+        core
+        msquic_platform)
+      if(NOT TARGET ${LG_MSQUIC_TARGET})
+        message(FATAL_ERROR
+          "Required MsQuic target is missing: ${LG_MSQUIC_TARGET}")
+      endif()
+    endforeach()
+
+    set_target_properties(
+      inc
+      warnings
+      main_binary_link_args
+      PROPERTIES
+        INTERFACE_COMPILE_OPTIONS "")
+
+    target_include_directories(msquic_platform SYSTEM PRIVATE
+      "${PROJECT_SOURCE_DIR}/submodules/xdp-for-windows/published/external")
+
+    foreach(LG_MSQUIC_TARGET
+        core
+        msquic_platform)
+      target_compile_options(${LG_MSQUIC_TARGET} PRIVATE
+        "SHELL:-include \"${LG_MSQUIC_MINGW_COMPAT_HEADER}\""
+        -fms-extensions)
+    endforeach()
+  endfunction()
+
+  cmake_language(DEFER CALL lg_configure_msquic_mingw_targets)
+endif()
+
 function(lg_add_static_msquic)
   if(TARGET msquic::msquic)
     return()
@@ -26,10 +78,6 @@ function(lg_add_static_msquic)
   set(LG_MSQUIC_SYSTEM_LIBRARIES
     ws2_32
     schannel
-    secur32
-    onecore
-    wbemuuid
-    winmm
     ntdll
     bcrypt
     ncrypt
@@ -43,7 +91,7 @@ function(lg_add_static_msquic)
     "-DQUIC_BUILD_TEST=OFF"
     "-DQUIC_BUILD_PERF=OFF"
     "-DQUIC_ENABLE_LOGGING=OFF"
-    "-DQUIC_LINUX_XDP_ENABLED=OFF"
+    "-DQUIC_LINUX_IOURING_ENABLED=OFF"
     "-DQUIC_STATIC_LINK_CRT=OFF"
     "-DQUIC_STATIC_LINK_PARTIAL_CRT=OFF"
     "-DQUIC_SOURCE_LINK=OFF"
@@ -57,7 +105,7 @@ function(lg_add_static_msquic)
       "git submodule update --init --recursive")
   endif()
 
-  if(WIN32)
+  if(MSVC)
     list(APPEND LG_MSQUIC_CMAKE_ARGS
       "-DQUIC_TLS_LIB=schannel")
     set(LG_MSQUIC_RELEASE_LIBRARY
@@ -153,108 +201,178 @@ function(lg_add_static_msquic)
     if(NOT MINGW64_TRIPLE)
       set(MINGW64_TRIPLE x86_64-w64-mingw32)
     endif()
-
-    if(CMAKE_FIND_ROOT_PATH)
-      list(GET CMAKE_FIND_ROOT_PATH 0 LG_MSQUIC_MINGW_ROOT)
+    if(CMAKE_SYSTEM_PROCESSOR)
+      set(LG_MSQUIC_SYSTEM_PROCESSOR "${CMAKE_SYSTEM_PROCESSOR}")
+    elseif(MINGW64_TRIPLE MATCHES "^x86_64-")
+      set(LG_MSQUIC_SYSTEM_PROCESSOR AMD64)
+    elseif(MINGW64_TRIPLE MATCHES "^(aarch64|arm64)-")
+      set(LG_MSQUIC_SYSTEM_PROCESSOR ARM64)
+    elseif(MINGW64_TRIPLE MATCHES "^arm")
+      set(LG_MSQUIC_SYSTEM_PROCESSOR ARM)
+    elseif(MINGW64_TRIPLE MATCHES "^i[3-6]86-")
+      set(LG_MSQUIC_SYSTEM_PROCESSOR x86)
     else()
-      set(LG_MSQUIC_MINGW_ROOT "/usr/${MINGW64_TRIPLE}")
-    endif()
-
-    find_library(LG_MSQUIC_NTDLL_LIBRARY
-      NAMES ntdll
-      PATHS "${LG_MSQUIC_MINGW_ROOT}/lib"
-      NO_DEFAULT_PATH
-      REQUIRED)
-    list(REMOVE_ITEM LG_MSQUIC_SYSTEM_LIBRARIES ntdll)
-    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
-      "${LG_MSQUIC_NTDLL_LIBRARY}")
-
-    set(LG_MSQUIC_DEBUG_LIBRARY
-      "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib")
-    find_program(LG_MSQUIC_CLANG_CL clang-cl REQUIRED)
-    find_program(LG_MSQUIC_LLVM_LIB llvm-lib REQUIRED)
-    find_program(LG_MSQUIC_MINGW_GCC
-      NAMES "${MINGW64_TRIPLE}-gcc" x86_64-w64-mingw32-gcc
-      REQUIRED)
-    find_program(LG_MSQUIC_WINDRES
-      NAMES "${MINGW64_TRIPLE}-windres" x86_64-w64-mingw32-windres
-      REQUIRED)
-    find_program(LG_MSQUIC_DLLTOOL
-      NAMES "${MINGW64_TRIPLE}-dlltool" x86_64-w64-mingw32-dlltool
-      REQUIRED)
-
-    # MsQuic's Windows sources use the CL command-line ABI and its monolithic
-    # archive rule uses lib.exe syntax. Compile those sources with clang-cl,
-    # while targeting the same MinGW-w64 ABI and import libraries as the
-    # surrounding client build.
-    set(LG_MSQUIC_IMPORT_DIR "${LG_MSQUIC_BINARY_DIR}/mingw-imports")
-    file(MAKE_DIRECTORY "${LG_MSQUIC_IMPORT_DIR}")
-
-    set(LG_MSQUIC_SECUR32EX_DEF
-      "${LG_MSQUIC_IMPORT_DIR}/secur32ex.def")
-    set(LG_MSQUIC_SECUR32EX_LIBRARY
-      "${LG_MSQUIC_IMPORT_DIR}/secur32ex.lib")
-    file(WRITE "${LG_MSQUIC_SECUR32EX_DEF}"
-      "LIBRARY secur32.dll\n"
-      "EXPORTS\n"
-      "  QueryContextAttributesExW\n")
-    execute_process(
-      COMMAND "${LG_MSQUIC_DLLTOOL}"
-        --input-def "${LG_MSQUIC_SECUR32EX_DEF}"
-        --output-lib "${LG_MSQUIC_SECUR32EX_LIBRARY}"
-      RESULT_VARIABLE LG_MSQUIC_DLLTOOL_RESULT
-      ERROR_VARIABLE  LG_MSQUIC_DLLTOOL_ERROR)
-    if(NOT LG_MSQUIC_DLLTOOL_RESULT EQUAL 0)
       message(FATAL_ERROR
-        "Unable to create the extended Secur32 import library: "
-        "${LG_MSQUIC_DLLTOOL_ERROR}")
+        "Unable to determine the MinGW-w64 target processor from "
+        "${MINGW64_TRIPLE}")
     endif()
 
-    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
-      "${LG_MSQUIC_SECUR32EX_LIBRARY}")
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+    find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
 
-    foreach(LG_MSQUIC_SYSTEM_LIBRARY
-        onecore
-        secur32
-        wbemuuid
-        winmm)
-      string(TOUPPER "${LG_MSQUIC_SYSTEM_LIBRARY}"
-        LG_MSQUIC_SYSTEM_LIBRARY_UPPER)
-      find_library(LG_MSQUIC_${LG_MSQUIC_SYSTEM_LIBRARY_UPPER}_LIBRARY
-        NAMES "${LG_MSQUIC_SYSTEM_LIBRARY}"
-        PATHS "${LG_MSQUIC_MINGW_ROOT}/lib"
-        NO_DEFAULT_PATH
-        REQUIRED)
-      configure_file(
-        "${LG_MSQUIC_${LG_MSQUIC_SYSTEM_LIBRARY_UPPER}_LIBRARY}"
-        "${LG_MSQUIC_IMPORT_DIR}/${LG_MSQUIC_SYSTEM_LIBRARY}.lib"
-        COPYONLY)
+    foreach(LG_MSQUIC_OPENSSL_LIBRARY
+        "${OPENSSL_SSL_LIBRARY}"
+        "${OPENSSL_CRYPTO_LIBRARY}")
+      if(NOT EXISTS "${LG_MSQUIC_OPENSSL_LIBRARY}" OR
+          LG_MSQUIC_OPENSSL_LIBRARY MATCHES "\\.dll\\.a$")
+        message(FATAL_ERROR
+          "Static MinGW OpenSSL libraries are required; install the "
+          "mingw-w64 OpenSSL package for the active toolchain")
+      endif()
     endforeach()
 
+    get_filename_component(LG_MSQUIC_OPENSSL_SSL_DIR
+      "${OPENSSL_SSL_LIBRARY}" DIRECTORY)
+    get_filename_component(LG_MSQUIC_OPENSSL_CRYPTO_DIR
+      "${OPENSSL_CRYPTO_LIBRARY}" DIRECTORY)
+    if(NOT "${LG_MSQUIC_OPENSSL_SSL_DIR}" STREQUAL
+        "${LG_MSQUIC_OPENSSL_CRYPTO_DIR}")
+      message(FATAL_ERROR
+        "The MinGW OpenSSL SSL and Crypto libraries must share a directory")
+    endif()
+
+    set(LG_MSQUIC_RELEASE_LIBRARY
+      "${LG_MSQUIC_BINARY_DIR}/obj/Release/libcore.a")
+    set(LG_MSQUIC_RELEASE_LINK_LIBRARIES
+      "${LG_MSQUIC_BINARY_DIR}/obj/Release/libmsquic_platform.a"
+      OpenSSL::SSL
+      OpenSSL::Crypto)
+    set(LG_MSQUIC_DEBUG_LIBRARY
+      "${LG_MSQUIC_RELEASE_LIBRARY}")
+    set(LG_MSQUIC_DEBUG_LINK_LIBRARIES
+      ${LG_MSQUIC_RELEASE_LINK_LIBRARIES})
+
+    if(CMAKE_RC_COMPILER)
+      set(LG_MSQUIC_WINDRES "${CMAKE_RC_COMPILER}")
+    else()
+      find_program(LG_MSQUIC_WINDRES
+        NAMES
+          "${MINGW64_TRIPLE}-windres"
+          x86_64-w64-mingw32-windres
+          windres
+        REQUIRED)
+    endif()
+    set(LG_MSQUIC_C_COMPILER_ARGS)
+    if(CMAKE_C_COMPILER_TARGET AND
+        CMAKE_C_COMPILER_ID MATCHES "Clang")
+      list(APPEND LG_MSQUIC_C_COMPILER_ARGS
+        "--target=${CMAKE_C_COMPILER_TARGET}")
+    endif()
+
+    execute_process(
+      COMMAND "${CMAKE_C_COMPILER}"
+        ${LG_MSQUIC_C_COMPILER_ARGS}
+        -print-file-name=libkernel32.a
+      RESULT_VARIABLE LG_MSQUIC_MINGW_ROOT_RESULT
+      OUTPUT_VARIABLE LG_MSQUIC_MINGW_LIBRARY
+      ERROR_VARIABLE  LG_MSQUIC_MINGW_ROOT_ERROR
+      OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if(NOT LG_MSQUIC_MINGW_ROOT_RESULT EQUAL 0 OR
+        LG_MSQUIC_MINGW_LIBRARY STREQUAL "libkernel32.a")
+      message(FATAL_ERROR
+        "Unable to locate the MinGW-w64 target root: "
+        "${LG_MSQUIC_MINGW_ROOT_ERROR}")
+    endif()
+    get_filename_component(LG_MSQUIC_MINGW_LIBRARY
+      "${LG_MSQUIC_MINGW_LIBRARY}" REALPATH)
+    get_filename_component(LG_MSQUIC_MINGW_LIBRARY_DIR
+      "${LG_MSQUIC_MINGW_LIBRARY}" DIRECTORY)
+    get_filename_component(LG_MSQUIC_MINGW_ROOT
+      "${LG_MSQUIC_MINGW_LIBRARY_DIR}" DIRECTORY)
+
+    list(REMOVE_ITEM LG_MSQUIC_SYSTEM_LIBRARIES
+      schannel)
+    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+      wbemuuid
+      winmm
+      gdi32)
+
     list(APPEND LG_MSQUIC_CMAKE_ARGS
+      "-DQUIC_TLS_LIB=openssl"
+      "-DQUIC_USE_EXTERNAL_OPENSSL=ON"
+      "-DQUIC_OPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}"
+      "-DQUIC_OPENSSL_LIB_DIR=${LG_MSQUIC_OPENSSL_SSL_DIR}"
+      "-DLIB_SSL=${OPENSSL_SSL_LIBRARY}"
+      "-DLIB_CRYPTO=${OPENSSL_CRYPTO_LIBRARY}"
       "-DCMAKE_BUILD_TYPE=RelWithDebInfo"
-      "-DCMAKE_TOOLCHAIN_FILE=${PROJECT_TOP}/cmake/toolchains/msquic-clangcl-mingw64.cmake"
-      "-DMSQUIC_MINGW_TRIPLE=${MINGW64_TRIPLE}"
-      "-DMSQUIC_MINGW_ROOT=${LG_MSQUIC_MINGW_ROOT}"
-      "-DMSQUIC_CLANG_CL=${LG_MSQUIC_CLANG_CL}"
-      "-DMSQUIC_LLVM_LIB=${LG_MSQUIC_LLVM_LIB}"
-      "-DMSQUIC_MINGW_GCC=${LG_MSQUIC_MINGW_GCC}"
-      "-DMSQUIC_WINDRES=${LG_MSQUIC_WINDRES}"
+      "-DCMAKE_SYSTEM_NAME=Windows"
+      "-DCMAKE_SYSTEM_PROCESSOR=${LG_MSQUIC_SYSTEM_PROCESSOR}"
+      "-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY"
+      "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DCMAKE_AR=${CMAKE_AR}"
+      "-DCMAKE_RANLIB=${CMAKE_RANLIB}"
+      "-DCMAKE_RC_COMPILER=${LG_MSQUIC_WINDRES}"
+      "-DCMAKE_FIND_ROOT_PATH=${LG_MSQUIC_MINGW_ROOT}"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY"
+      "-DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY"
+      "-DCMAKE_PROJECT_INCLUDE=${PROJECT_TOP}/cmake/MsQuic.cmake"
+      "-DLG_MSQUIC_MINGW_COMPAT_HEADER=${PROJECT_TOP}/cmake/toolchains/msquic-mingw-compat.h"
       "-DHAS_SPECTRE=OFF"
       "-DHAS_GUARDCF=OFF"
     )
+    if(CMAKE_C_COMPILER_TARGET)
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_C_COMPILER_TARGET=${CMAKE_C_COMPILER_TARGET}")
+    endif()
+    if(CMAKE_CXX_COMPILER_TARGET)
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_CXX_COMPILER_TARGET=${CMAKE_CXX_COMPILER_TARGET}")
+    endif()
+    if(CMAKE_SYSROOT)
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_SYSROOT=${CMAKE_SYSROOT}")
+    endif()
     set(LG_MSQUIC_BUILD_COMMAND
-      "${CMAKE_COMMAND}" -E env "LIB=${LG_MSQUIC_IMPORT_DIR}"
       "${CMAKE_COMMAND}" --build <BINARY_DIR>
-      --target msquic_lib
+      --target core msquic_platform
       --parallel
     )
   else()
     message(FATAL_ERROR
-      "Static MsQuic requires Linux, MSVC, or the MinGW-w64 clang-cl "
-      "cross-build toolchain")
+      "Static MsQuic requires Linux, MSVC, or a MinGW-w64 toolchain")
   endif()
 
+  set(LG_MSQUIC_BUILD_BYPRODUCTS
+    "${LG_MSQUIC_DEBUG_LIBRARY}"
+    "${LG_MSQUIC_RELEASE_LIBRARY}")
+  foreach(LG_MSQUIC_LIBRARY IN LISTS
+      LG_MSQUIC_DEBUG_LINK_LIBRARIES
+      LG_MSQUIC_RELEASE_LINK_LIBRARIES)
+    if(IS_ABSOLUTE "${LG_MSQUIC_LIBRARY}")
+      list(APPEND LG_MSQUIC_BUILD_BYPRODUCTS
+        "${LG_MSQUIC_LIBRARY}")
+    endif()
+  endforeach()
+  list(REMOVE_DUPLICATES LG_MSQUIC_BUILD_BYPRODUCTS)
+
+  set(LG_MSQUIC_LINK_LIBRARIES)
+  foreach(LG_MSQUIC_LIBRARY IN LISTS LG_MSQUIC_DEBUG_LINK_LIBRARIES)
+    list(APPEND LG_MSQUIC_LINK_LIBRARIES
+      "$<$<CONFIG:Debug>:${LG_MSQUIC_LIBRARY}>")
+  endforeach()
+  foreach(LG_MSQUIC_LIBRARY IN LISTS LG_MSQUIC_RELEASE_LINK_LIBRARIES)
+    list(APPEND LG_MSQUIC_LINK_LIBRARIES
+      "$<$<NOT:$<CONFIG:Debug>>:${LG_MSQUIC_LIBRARY}>")
+  endforeach()
+  list(APPEND LG_MSQUIC_LINK_LIBRARIES
+    ${LG_MSQUIC_SYSTEM_LIBRARIES})
+
+  # The submodule and injected compatibility files can change without
+  # invalidating ExternalProject's build stamp. Invoke the nested build so
+  # its own dependency tracking can update only the affected outputs.
   ExternalProject_Add(lg_msquic_build
     SOURCE_DIR "${LG_MSQUIC_SOURCE_DIR}"
     BINARY_DIR "${LG_MSQUIC_BINARY_DIR}"
@@ -262,10 +380,9 @@ function(lg_add_static_msquic)
     UPDATE_COMMAND ""
     INSTALL_COMMAND ""
     CMAKE_ARGS ${LG_MSQUIC_CMAKE_ARGS}
+    BUILD_ALWAYS ON
     BUILD_COMMAND ${LG_MSQUIC_BUILD_COMMAND}
-    BUILD_BYPRODUCTS
-      "${LG_MSQUIC_DEBUG_LIBRARY}"
-      "${LG_MSQUIC_RELEASE_LIBRARY}"
+    BUILD_BYPRODUCTS ${LG_MSQUIC_BUILD_BYPRODUCTS}
   )
 
   add_library(lg_msquic STATIC IMPORTED GLOBAL)
@@ -278,7 +395,7 @@ function(lg_add_static_msquic)
     IMPORTED_LOCATION_MINSIZEREL       "${LG_MSQUIC_RELEASE_LIBRARY}"
     INTERFACE_COMPILE_DEFINITIONS      QUIC_BUILD_STATIC
     INTERFACE_INCLUDE_DIRECTORIES      "${LG_MSQUIC_SOURCE_DIR}/src/inc"
-    INTERFACE_LINK_LIBRARIES           "${LG_MSQUIC_SYSTEM_LIBRARIES}"
+    INTERFACE_LINK_LIBRARIES           "${LG_MSQUIC_LINK_LIBRARIES}"
   )
   add_dependencies(lg_msquic lg_msquic_build)
   add_library(msquic::msquic ALIAS lg_msquic)

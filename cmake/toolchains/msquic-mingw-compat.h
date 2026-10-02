@@ -44,8 +44,21 @@
 #include <string.h>
 
 #ifndef __cplusplus
-#define inline static __inline__
+#ifndef static_assert
+#define static_assert _Static_assert
 #endif
+
+#define inline        static __inline__
+#endif
+
+#include <msquic_winuser.h>
+
+#ifndef __cplusplus
+#undef inline
+#endif
+
+#undef QUIC_INLINE
+#define QUIC_INLINE static inline
 
 #undef UNREFERENCED_PARAMETER
 #define UNREFERENCED_PARAMETER(parameter) ((void)(parameter))
@@ -89,13 +102,13 @@
 #define __analysis_assert(expression) ((void)(0 && (expression)))
 #endif
 
-#ifndef InterlockedAnd8
-#define InterlockedAnd8 _InterlockedAnd8
-#endif
+#undef InterlockedAnd8
+#define InterlockedAnd8(destination, value) \
+  __atomic_fetch_and((destination), (value), __ATOMIC_SEQ_CST)
 
-#ifndef InterlockedOr8
-#define InterlockedOr8 _InterlockedOr8
-#endif
+#undef InterlockedOr8
+#define InterlockedOr8(destination, value)  \
+  __atomic_fetch_or((destination), (value), __ATOMIC_SEQ_CST)
 
 #ifndef InterlockedIncrementNoFence64
 #define InterlockedIncrementNoFence64 _InterlockedIncrement64

@@ -3,6 +3,13 @@
 
 LIBRARY "ntdll.dll"
 EXPORTS
+NtCreateFile
 NtDelayExecution
+NtDeviceIoControlFile
+NtSetInformationThread
 NtSetTimerResolution
+RtlInitUnicodeString
+RtlIpv4AddressToStringExA
+RtlIpv6AddressToStringExA
 RtlNtStatusToDosError
+RtlUTF8ToUnicodeN
