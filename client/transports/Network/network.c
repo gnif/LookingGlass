@@ -487,11 +487,17 @@ static void networkSendReady(void * opaque, LGNetService service,
 static bool networkCreate(LG_Transport ** result)
 {
   if (!result)
+  {
+    DEBUG_ERROR("Network transport creation requires an output pointer");
     return false;
+  }
 
   LG_Transport * this = calloc(1, sizeof(*this));
   if (!this)
+  {
+    DEBUG_ERROR("Failed to allocate the network transport");
     return false;
+  }
 
   LG_LOCK_INIT(this->callbackLock);
   LG_LOCK_INIT(this->stateLock);
@@ -502,17 +508,31 @@ static bool networkCreate(LG_Transport ** result)
   this->videoStatus.pointer.epoch  = 1;
   this->videoStatus.pointer.reason = LG_TRANSPORT_DISCONNECTED;
   if (!networkKnownHostsInit(&this->knownHosts))
+  {
+    DEBUG_ERROR("Failed to initialize the network known-hosts store");
     goto fail;
+  }
 
   this->promptIdle = lgCreateEvent(false, 0);
-  if (!this->promptIdle || !lgSignalEvent(this->promptIdle))
+  if (!this->promptIdle)
+  {
+    DEBUG_ERROR("Failed to create the network trust-prompt event");
     goto fail;
+  }
+  if (!lgSignalEvent(this->promptIdle))
+  {
+    DEBUG_ERROR("Failed to initialize the network trust-prompt event");
+    goto fail;
+  }
 
   const char    * address = option_get_string("network", "address");
   const uint16_t  port    = (uint16_t)option_get_int("network", "port");
   char            endpoint[NETWORK_ENDPOINT_TEXT_SIZE];
   if (!address)
+  {
+    DEBUG_ERROR("The network server address is not configured");
     goto fail;
+  }
   snprintf(endpoint, sizeof(endpoint), "[%s]:%u", address, port);
   if (option_get_bool("network", "forgetCertificate") &&
       !networkKnownHostsForget(&this->knownHosts, endpoint))
@@ -538,15 +558,45 @@ static bool networkCreate(LG_Transport ** result)
     .opaque          = this,
   };
   if (!networkConnectionCreate(&this->connection, &params))
+  {
+    DEBUG_ERROR("Failed to create the network connection");
     goto fail;
-  if (!networkAudioCreate(&this->audio, this->connection) ||
-      !networkClipboardCreate(&this->clipboard, this->connection) ||
-      !networkControlCreate(&this->control, this->connection) ||
-      !networkCursorCreate(&this->cursor, this->connection) ||
-      !networkInputCreate(&this->input, this->connection) ||
-      !networkRecoveryCreate(&this->recovery, this->connection) ||
-      !networkVideoCreate(&this->video, this->connection))
+  }
+  if (!networkAudioCreate(&this->audio, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network audio service");
     goto fail;
+  }
+  if (!networkClipboardCreate(&this->clipboard, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network clipboard service");
+    goto fail;
+  }
+  if (!networkControlCreate(&this->control, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network control service");
+    goto fail;
+  }
+  if (!networkCursorCreate(&this->cursor, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network cursor service");
+    goto fail;
+  }
+  if (!networkInputCreate(&this->input, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network input service");
+    goto fail;
+  }
+  if (!networkRecoveryCreate(&this->recovery, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network recovery service");
+    goto fail;
+  }
+  if (!networkVideoCreate(&this->video, this->connection))
+  {
+    DEBUG_ERROR("Failed to create the network video service");
+    goto fail;
+  }
   networkVideoSetStatusListener(this->video, networkVideoStatus, this);
 
   *result = this;

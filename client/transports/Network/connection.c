@@ -2194,6 +2194,8 @@ static LG_TransportStatus networkConnectionOpenBulkStream(
 
 static void networkConnectionProtocolFailure(NetworkConnection * this)
 {
+  if (!atomic_load_explicit(&this->stopping, memory_order_acquire))
+    DEBUG_ERROR("Network protocol processing failed");
   networkConnectionFail(this, LG_TRANSPORT_ERROR);
 
   LG_LOCK(this->lock);
@@ -2346,6 +2348,8 @@ static void networkConnectionTrustDecision(void * opaque, bool trusted)
         QUIC_TLS_ALERT_CODE_BAD_CERTIFICATE);
   if (QUIC_FAILED(status))
   {
+    DEBUG_ERROR("MsQuic certificate validation completion failed: 0x%08x",
+        (unsigned)status);
     networkConnectionFail(this, LG_TRANSPORT_ERROR);
     this->api->ConnectionShutdown(connection,
         QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
@@ -2358,13 +2362,19 @@ static QUIC_STATUS networkConnectionCertificate(NetworkConnection * this,
   const QUIC_BUFFER * certificate =
     (const QUIC_BUFFER *)event->PEER_CERTIFICATE_RECEIVED.Certificate;
   if (!certificate || !certificate->Buffer || !certificate->Length)
+  {
+    DEBUG_ERROR("Network server did not provide a usable certificate");
     return QUIC_STATUS_BAD_CERTIFICATE;
+  }
 
   uint8_t fingerprint[NETWORK_FINGERPRINT_SIZE];
   char    fingerprintText[NETWORK_FINGERPRINT_TEXT_SIZE];
   if (!networkFingerprintSHA256(certificate->Buffer,
         certificate->Length, fingerprint))
+  {
+    DEBUG_ERROR("Failed to fingerprint the network server certificate");
     return QUIC_STATUS_BAD_CERTIFICATE;
+  }
   networkFingerprintFormat(fingerprint, fingerprintText);
 
   switch (networkKnownHostsCheck(
@@ -2445,6 +2455,8 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
           QUIC_STREAM_OPEN_FLAG_NONE, networkStreamCallback, this, &stream);
       if (QUIC_FAILED(status))
       {
+        DEBUG_ERROR("MsQuic control StreamOpen failed: 0x%08x",
+            (unsigned)status);
         networkConnectionFail(this, LG_TRANSPORT_ERROR);
         this->api->ConnectionShutdown(handle,
             QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
@@ -2459,6 +2471,8 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
             QUIC_STREAM_START_FLAG_SHUTDOWN_ON_FAIL);
       if (QUIC_FAILED(status))
       {
+        DEBUG_ERROR("MsQuic control StreamStart failed: 0x%08x",
+            (unsigned)status);
         networkConnectionFail(this, LG_TRANSPORT_ERROR);
         this->api->ConnectionShutdown(handle,
             QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
@@ -2484,7 +2498,8 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
     {
       const QUIC_UINT62 error =
         event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode;
-      if (error && networkConnectionRecordPeerError(this, error))
+      if (!atomic_load_explicit(&this->stopping, memory_order_acquire) &&
+          networkConnectionRecordPeerError(this, error))
         DEBUG_WARN("Network server closed the connection: error 0x%llx",
             (unsigned long long)error);
       networkConnectionFail(this, LG_TRANSPORT_DISCONNECTED);
@@ -2569,9 +2584,17 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
   switch (event->Type)
   {
     case QUIC_STREAM_EVENT_START_COMPLETE:
-      if (QUIC_FAILED(event->START_COMPLETE.Status) ||
-          !networkConnectionSendHello(this))
+      if (QUIC_FAILED(event->START_COMPLETE.Status))
       {
+        DEBUG_ERROR("MsQuic control stream start failed: 0x%08x",
+            (unsigned)event->START_COMPLETE.Status);
+        networkConnectionFail(this, LG_TRANSPORT_ERROR);
+        this->api->ConnectionShutdown(this->connection,
+            QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
+      }
+      else if (!networkConnectionSendHello(this))
+      {
+        DEBUG_ERROR("Failed to send the network control handshake");
         networkConnectionFail(this, LG_TRANSPORT_ERROR);
         this->api->ConnectionShutdown(this->connection,
             QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
@@ -2582,6 +2605,7 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
       if (!networkConnectionReceive(
             this, event->RECEIVE.Buffers, event->RECEIVE.BufferCount))
       {
+        DEBUG_ERROR("Failed to process network control stream data");
         networkConnectionFail(this, LG_TRANSPORT_ERROR);
         this->api->ConnectionShutdown(this->connection,
             QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
@@ -2600,8 +2624,26 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
     }
 
     case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+      if (!atomic_load_explicit(&this->stopping, memory_order_acquire))
+        DEBUG_ERROR("Network server closed the control stream");
+      this->api->ConnectionShutdown(this->connection,
+          QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
+      return QUIC_STATUS_SUCCESS;
+
     case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
+      if (!atomic_load_explicit(&this->stopping, memory_order_acquire))
+        DEBUG_ERROR("Network server aborted the control send stream: "
+            "0x%llx",
+            (unsigned long long)event->PEER_SEND_ABORTED.ErrorCode);
+      this->api->ConnectionShutdown(this->connection,
+          QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
+      return QUIC_STATUS_SUCCESS;
+
     case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
+      if (!atomic_load_explicit(&this->stopping, memory_order_acquire))
+        DEBUG_ERROR("Network server aborted the control receive stream: "
+            "0x%llx",
+            (unsigned long long)event->PEER_RECEIVE_ABORTED.ErrorCode);
       this->api->ConnectionShutdown(this->connection,
           QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
       return QUIC_STATUS_SUCCESS;
@@ -2794,11 +2836,17 @@ bool networkConnectionCreate(NetworkConnection ** result,
       (!!params->trustPrompt != !!params->trustCancel) ||
       params->capabilityCount > LG_NET_MAX_CAPABILITY_RECORDS ||
       (params->capabilityCount && !params->capabilities))
+  {
+    DEBUG_ERROR("Invalid network connection parameters");
     return false;
+  }
 
   NetworkConnection * this = calloc(1, sizeof(*this));
   if (!this)
+  {
+    DEBUG_ERROR("Failed to allocate the network connection");
     return false;
+  }
 
   LG_LOCK_INIT(this->lock);
   LG_LOCK_INIT(this->stateCallbackLock);
@@ -2812,11 +2860,19 @@ bool networkConnectionCreate(NetworkConnection ** result,
     if (!networkCapabilityOfferValid(capability) ||
         capability->maxUnidirectionalStreams >
           NETWORK_MAX_PEER_STREAMS - offeredBulkStreams)
+    {
+      DEBUG_ERROR("Invalid network capability at index %u",
+          (unsigned)index);
       goto fail;
+    }
 
     const uint16_t serviceMask = UINT16_C(1) << capability->service;
     if (this->offeredServices & serviceMask)
+    {
+      DEBUG_ERROR("Duplicate network capability for service %u",
+          (unsigned)capability->service);
       goto fail;
+    }
     this->offeredCapabilities[capability->service] = *capability;
     this->offeredServices                          |= serviceMask;
     offeredBulkStreams += capability->maxUnidirectionalStreams;
@@ -2828,7 +2884,10 @@ bool networkConnectionCreate(NetworkConnection ** result,
   this->endpoint = networkEndpoint(params->address, params->port);
   if (!this->address || (params->password && !this->password) ||
       !this->endpoint)
+  {
+    DEBUG_ERROR("Failed to allocate the network connection endpoint");
     goto fail;
+  }
 
   this->port        = params->port;
   this->knownHosts  = params->knownHosts;
@@ -2846,26 +2905,41 @@ bool networkConnectionCreate(NetworkConnection ** result,
   if (!this->connectEvent || !this->closeEvent ||
       !this->bulkReceiveEvent || !this->bulkReceiveIdle ||
       !lgSignalEvent(this->bulkReceiveIdle))
+  {
+    DEBUG_ERROR("Failed to initialize the network connection events");
     goto fail;
+  }
 
   this->receiveData    = malloc(NETWORK_MAX_CONTROL_BUFFER);
   this->receivePayload = malloc(NETWORK_MAX_CONTROL_PAYLOAD);
   if (!this->receiveData || !this->receivePayload ||
       !lgNetStreamParserInit(&this->receiveParser, this->receiveData,
         NETWORK_MAX_CONTROL_BUFFER, NETWORK_MAX_CONTROL_PAYLOAD))
+  {
+    DEBUG_ERROR("Failed to initialize the network receive buffers");
     goto fail;
+  }
 
-  if (QUIC_FAILED(MsQuicOpen2(&this->api)))
+  QUIC_STATUS status = MsQuicOpen2(&this->api);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuicOpen2 failed: 0x%08x", (unsigned)status);
     goto fail;
+  }
 
   const QUIC_REGISTRATION_CONFIG registration =
   {
     .AppName          = "looking-glass-client",
     .ExecutionProfile = QUIC_EXECUTION_PROFILE_LOW_LATENCY,
   };
-  if (QUIC_FAILED(this->api->RegistrationOpen(
-        &registration, &this->registration)))
+  status = this->api->RegistrationOpen(
+      &registration, &this->registration);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic RegistrationOpen failed: 0x%08x",
+        (unsigned)status);
     goto fail;
+  }
 
   const QUIC_BUFFER alpn =
   {
@@ -2902,10 +2976,15 @@ bool networkConnectionCreate(NetworkConnection ** result,
     .DatagramReceiveEnabled         = true,
     .StreamRecvWindowUnidiDefault   = NETWORK_STREAM_RECV_WINDOW,
   };
-  if (QUIC_FAILED(this->api->ConfigurationOpen(this->registration,
-        &alpn, 1, &settings, sizeof(settings), NULL,
-        &this->configuration)))
+  status = this->api->ConfigurationOpen(this->registration,
+      &alpn, 1, &settings, sizeof(settings), NULL,
+      &this->configuration);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic ConfigurationOpen failed: 0x%08x",
+        (unsigned)status);
     goto fail;
+  }
 
   /* PKI chain validation is disabled because identity is enforced by the
    * certificate callback and the persistent TOFU store above. */
@@ -2917,13 +2996,21 @@ bool networkConnectionCreate(NetworkConnection ** result,
       QUIC_CREDENTIAL_FLAG_INDICATE_CERTIFICATE_RECEIVED |
       QUIC_CREDENTIAL_FLAG_USE_PORTABLE_CERTIFICATES,
   };
-  if (QUIC_FAILED(this->api->ConfigurationLoadCredential(
-        this->configuration, &credential)))
+  status = this->api->ConfigurationLoadCredential(
+      this->configuration, &credential);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic ConfigurationLoadCredential failed: 0x%08x",
+        (unsigned)status);
     goto fail;
+  }
 
   if (!lgCreateThread("networkReceive", networkBulkReceiveThread,
         this, &this->bulkReceiveThread))
+  {
+    DEBUG_ERROR("Failed to create the network receive worker");
     goto fail;
+  }
 
   *result = this;
   return true;
@@ -2988,7 +3075,10 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
     void * cancelledOpaque)
 {
   if (!this || !session || this->connection)
+  {
+    DEBUG_ERROR("Invalid network connection state for connect");
     return LG_TRANSPORT_ERROR;
+  }
   if (cancelled && cancelled(cancelledOpaque))
     return LG_TRANSPORT_DISCONNECTED;
 
@@ -3043,6 +3133,8 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
       networkConnectionCallback, this, &this->connection);
   if (QUIC_FAILED(status))
   {
+    DEBUG_ERROR("MsQuic ConnectionOpen failed for %s: 0x%08x",
+        this->endpoint, (unsigned)status);
     LG_LOCK(this->lock);
     this->connecting    = false;
     this->connectStatus = LG_TRANSPORT_ERROR;
