@@ -25,6 +25,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#ifdef __cplusplus
+extern "C"
+{
+#endif
+
 typedef struct FontPlatform FontPlatform;
 
 typedef enum FontPlatformFaceResult
@@ -47,5 +52,9 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName);
 bool font_platformResolve(FontPlatform * platform,
     const uint32_t * glyphs, size_t glyphCount,
     FontPlatformAddFaceFn addFace, void * opaque, size_t * unresolved);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

@@ -1,10 +1,10 @@
 cmake_minimum_required(VERSION 3.10)
-project(client_platform_Windows LANGUAGES C)
+project(client_platform_Windows LANGUAGES C CXX)
 
 add_library(client_platform_Windows STATIC
   clipboard_files.c
   config.c
-  font.c
+  font.cpp
   input.c
   process.c
 )

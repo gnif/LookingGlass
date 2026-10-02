@@ -18,19 +18,22 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#define COBJMACROS
 #include <windows.h>
-#include <initguid.h>
 #include <dwrite.h>
 
 #include "font_platform.h"
 
-#include "common/debug.h"
-#include "common/win32.h"
-
+#include <inttypes.h>
 #include <limits.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+extern "C"
+{
+  #include "common/debug.h"
+  #include "common/win32.h"
+}
 
 struct FontPlatform
 {
@@ -48,64 +51,68 @@ static bool font_platformGetFacePath(
   *index = 0;
 
   UINT32  fileCount = 0;
-  HRESULT result    = IDWriteFontFace_GetFiles(face, &fileCount, NULL);
+  HRESULT result    = face->GetFiles(&fileCount, NULL);
   if (FAILED(result) || fileCount != 1)
     return false;
 
   IDWriteFontFile * file = NULL;
-  result = IDWriteFontFace_GetFiles(face, &fileCount, &file);
+  result = face->GetFiles(&fileCount, &file);
   if (FAILED(result) || !file)
     return false;
 
   IDWriteFontFileLoader * loader = NULL;
-  result = IDWriteFontFile_GetLoader(file, &loader);
+  result = file->GetLoader(&loader);
   if (FAILED(result) || !loader)
   {
-    IDWriteFontFile_Release(file);
+    file->Release();
     return false;
   }
 
   IDWriteLocalFontFileLoader * local = NULL;
-  result = IDWriteFontFileLoader_QueryInterface(loader,
-      &IID_IDWriteLocalFontFileLoader, (void **)&local);
+  result = loader->QueryInterface(__uuidof(IDWriteLocalFontFileLoader),
+      reinterpret_cast<void **>(&local));
   if (FAILED(result) || !local)
   {
-    IDWriteFontFileLoader_Release(loader);
-    IDWriteFontFile_Release(file);
+    loader->Release();
+    file->Release();
     return false;
   }
 
-  const void * key;
-  UINT32       keySize;
-  result = IDWriteFontFile_GetReferenceKey(file, &key, &keySize);
+  const void * key          = NULL;
+  UINT32       keySize      = 0;
+  UINT32       pathLength   = 0;
+  UINT32       pathCapacity = 0;
+  size_t       pathSize     = 0;
+  wchar_t    * widePath     = NULL;
+  UINT32       faceIndex    = 0;
+
+  result = file->GetReferenceKey(&key, &keySize);
   if (FAILED(result))
     goto done;
 
-  UINT32 pathLength;
-  result = IDWriteLocalFontFileLoader_GetFilePathLengthFromKey(
-      local, key, keySize, &pathLength);
+  result = local->GetFilePathLengthFromKey(key, keySize, &pathLength);
   if (FAILED(result))
     goto done;
 
-  const UINT32 pathCapacity = pathLength + 1;
+  pathCapacity = pathLength + 1;
   if (!pathCapacity)
     goto done;
 
-  const size_t pathSize = (size_t)pathCapacity * sizeof(wchar_t);
+  pathSize = static_cast<size_t>(pathCapacity) * sizeof(wchar_t);
   if (pathSize / sizeof(wchar_t) != pathCapacity)
     goto done;
 
-  wchar_t * widePath = malloc(pathSize);
+  widePath = static_cast<wchar_t *>(malloc(pathSize));
   if (!widePath)
     goto done;
 
-  result = IDWriteLocalFontFileLoader_GetFilePathFromKey(
-      local, key, keySize, widePath, pathCapacity);
+  result = local->GetFilePathFromKey(
+      key, keySize, widePath, pathCapacity);
   if (SUCCEEDED(result))
     *path = lgWideToUtf8(widePath);
   free(widePath);
 
-  const UINT32 faceIndex = IDWriteFontFace_GetIndex(face);
+  faceIndex = face->GetIndex();
   if (!*path || faceIndex > INT_MAX)
   {
     free(*path);
@@ -113,12 +120,12 @@ static bool font_platformGetFacePath(
     goto done;
   }
 
-  *index = (int)faceIndex;
+  *index = static_cast<int>(faceIndex);
 
 done:
-  IDWriteLocalFontFileLoader_Release(local);
-  IDWriteFontFileLoader_Release(loader);
-  IDWriteFontFile_Release(file);
+  local->Release();
+  loader->Release();
+  file->Release();
   return *path != NULL;
 }
 
@@ -126,12 +133,12 @@ static bool font_platformGetFontPath(
     IDWriteFont * font, char ** path, int * index)
 {
   IDWriteFontFace * face   = NULL;
-  const HRESULT     result = IDWriteFont_CreateFontFace(font, &face);
+  const HRESULT     result = font->CreateFontFace(&face);
   if (FAILED(result) || !face)
     return false;
 
   const bool success = font_platformGetFacePath(face, path, index);
-  IDWriteFontFace_Release(face);
+  face->Release();
   return success;
 }
 
@@ -141,24 +148,24 @@ static bool font_platformGetFamilyFont(FontPlatform * platform,
   *font = NULL;
 
   IDWriteFontFamily * family = NULL;
-  HRESULT             result = IDWriteFontCollection_GetFontFamily(
-      platform->collection, familyIndex, &family);
+  HRESULT             result = platform->collection->GetFontFamily(
+      familyIndex, &family);
   if (FAILED(result) || !family)
     return false;
 
-  result = IDWriteFontFamily_GetFirstMatchingFont(family,
+  result = family->GetFirstMatchingFont(
       DWRITE_FONT_WEIGHT_REGULAR, DWRITE_FONT_STRETCH_NORMAL,
       DWRITE_FONT_STYLE_NORMAL, font);
-  IDWriteFontFamily_Release(family);
+  family->Release();
   return SUCCEEDED(result) && *font;
 }
 
 static bool font_platformFindFamily(FontPlatform * platform,
     const wchar_t * name, UINT32 * familyIndex)
 {
-  BOOL exists = FALSE;
-  const HRESULT result = IDWriteFontCollection_FindFamilyName(
-      platform->collection, name, familyIndex, &exists);
+  BOOL          exists = FALSE;
+  const HRESULT result = platform->collection->FindFamilyName(
+      name, familyIndex, &exists);
   return SUCCEEDED(result) && exists;
 }
 
@@ -175,27 +182,29 @@ static bool font_platformAddFont(IDWriteFont * font,
     return false;
 
   IDWriteFontFace * face   = NULL;
-  HRESULT           result = IDWriteFont_CreateFontFace(font, &face);
+  HRESULT           result = font->CreateFontFace(&face);
   if (FAILED(result) || !face)
     return true;
 
-  uint16_t * indices = malloc(*remainingCount * sizeof(*indices));
-  uint32_t * covered = malloc(*remainingCount * sizeof(*covered));
+  uint16_t * indices = static_cast<uint16_t *>(
+      malloc(*remainingCount * sizeof(*indices)));
+  uint32_t * covered = static_cast<uint32_t *>(
+      malloc(*remainingCount * sizeof(*covered)));
   if (!indices || !covered)
   {
     free(indices);
     free(covered);
-    IDWriteFontFace_Release(face);
+    face->Release();
     return false;
   }
 
-  result = IDWriteFontFace_GetGlyphIndices(face, remaining,
-      (UINT32)*remainingCount, indices);
+  result = face->GetGlyphIndices(
+      remaining, static_cast<UINT32>(*remainingCount), indices);
   if (FAILED(result))
   {
     free(indices);
     free(covered);
-    IDWriteFontFace_Release(face);
+    face->Release();
     return true;
   }
 
@@ -208,7 +217,7 @@ static bool font_platformAddFont(IDWriteFont * font,
   if (!coveredCount)
   {
     free(covered);
-    IDWriteFontFace_Release(face);
+    face->Release();
     return true;
   }
 
@@ -217,11 +226,11 @@ static bool font_platformAddFont(IDWriteFont * font,
   if (!font_platformGetFacePath(face, &path, &index))
   {
     free(covered);
-    IDWriteFontFace_Release(face);
+    face->Release();
     return true;
   }
 
-  IDWriteFontFace_Release(face);
+  face->Release();
   const FontPlatformFaceResult faceResult = addFace(
       opaque, path, index, covered, coveredCount);
   free(path);
@@ -264,7 +273,8 @@ bool font_platformInit(FontPlatform ** platform)
 
   *platform = NULL;
 
-  FontPlatform * state = calloc(1, sizeof(*state));
+  FontPlatform * state = static_cast<FontPlatform *>(
+      calloc(1, sizeof(*state)));
   if (!state)
     return false;
 
@@ -273,30 +283,32 @@ bool font_platformInit(FontPlatform ** platform)
     state->comInitialized = true;
   else if (result != RPC_E_CHANGED_MODE)
   {
-    DEBUG_ERROR("CoInitializeEx failed: 0x%08lx", (unsigned long)result);
+    DEBUG_ERROR("CoInitializeEx failed: 0x%08lx",
+        static_cast<unsigned long>(result));
     free(state);
     return false;
   }
 
   result = DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED,
-      &IID_IDWriteFactory, (IUnknown **)&state->factory);
+      __uuidof(IDWriteFactory),
+      reinterpret_cast<IUnknown **>(&state->factory));
   if (FAILED(result) || !state->factory)
   {
     DEBUG_ERROR("DWriteCreateFactory failed: 0x%08lx",
-        (unsigned long)result);
+        static_cast<unsigned long>(result));
     if (state->comInitialized)
       CoUninitialize();
     free(state);
     return false;
   }
 
-  result = IDWriteFactory_GetSystemFontCollection(
-      state->factory, &state->collection, FALSE);
+  result = state->factory->GetSystemFontCollection(
+      &state->collection, FALSE);
   if (FAILED(result) || !state->collection)
   {
     DEBUG_ERROR("GetSystemFontCollection failed: 0x%08lx",
-        (unsigned long)result);
-    IDWriteFactory_Release(state->factory);
+        static_cast<unsigned long>(result));
+    state->factory->Release();
     if (state->comInitialized)
       CoUninitialize();
     free(state);
@@ -313,11 +325,11 @@ void font_platformFree(FontPlatform * platform)
     return;
 
   if (platform->primary)
-    IDWriteFont_Release(platform->primary);
+    platform->primary->Release();
   if (platform->collection)
-    IDWriteFontCollection_Release(platform->collection);
+    platform->collection->Release();
   if (platform->factory)
-    IDWriteFactory_Release(platform->factory);
+    platform->factory->Release();
   if (platform->comInitialized)
     CoUninitialize();
 
@@ -333,7 +345,7 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName)
   if (!familyLength || familyLength == SIZE_MAX)
     return NULL;
 
-  char * familyName = malloc(familyLength + 1);
+  char * familyName = static_cast<char *>(malloc(familyLength + 1));
   if (!familyName)
     return NULL;
   memcpy(familyName, fontName, familyLength);
@@ -364,7 +376,7 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName)
   {
     if (selected)
     {
-      IDWriteFont_Release(selected);
+      selected->Release();
       selected = NULL;
     }
 
@@ -378,7 +390,7 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName)
       {
         if (selected)
         {
-          IDWriteFont_Release(selected);
+          selected->Release();
           selected = NULL;
         }
         continue;
@@ -389,7 +401,7 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName)
     }
 
     if (!selected &&
-        IDWriteFontCollection_GetFontFamilyCount(platform->collection) &&
+        platform->collection->GetFontFamilyCount() &&
         font_platformGetFamilyFont(platform, 0, &selected) &&
         font_platformGetFontPath(selected, &selectedPath, &selectedIndex))
       selectedFamily = 0;
@@ -399,13 +411,13 @@ char * font_platformSelect(FontPlatform * platform, const char * fontName)
   if (!selected || !selectedPath)
   {
     if (selected)
-      IDWriteFont_Release(selected);
+      selected->Release();
     DEBUG_ERROR("Failed to locate the requested font: %s", fontName);
     return NULL;
   }
 
   if (platform->primary)
-    IDWriteFont_Release(platform->primary);
+    platform->primary->Release();
   platform->primary       = selected;
   platform->primaryFamily = selectedFamily;
   return selectedPath;
@@ -420,19 +432,19 @@ bool font_platformResolve(FontPlatform * platform,
       glyphCount > SIZE_MAX / sizeof(*glyphs))
     return false;
 
-  uint32_t * remaining = malloc(glyphCount * sizeof(*remaining));
+  uint32_t * remaining = static_cast<uint32_t *>(
+      malloc(glyphCount * sizeof(*remaining)));
   if (!remaining && glyphCount)
     return false;
   if (glyphCount)
     memcpy(remaining, glyphs, glyphCount * sizeof(*remaining));
 
-  size_t remainingCount = glyphCount;
+  const UINT32 familyCount    = platform->collection->GetFontFamilyCount();
+  size_t       remainingCount = glyphCount;
   if (!font_platformAddFont(platform->primary, remaining,
         &remainingCount, addFace, opaque))
     goto fail;
 
-  const UINT32 familyCount = IDWriteFontCollection_GetFontFamilyCount(
-      platform->collection);
   for (UINT32 i = 0; i < familyCount && remainingCount; ++i)
   {
     if (i == platform->primaryFamily)
@@ -444,7 +456,7 @@ bool font_platformResolve(FontPlatform * platform,
 
     const bool success = font_platformAddFont(
         font, remaining, &remainingCount, addFace, opaque);
-    IDWriteFont_Release(font);
+    font->Release();
     if (!success)
       goto fail;
   }
