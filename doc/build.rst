@@ -91,12 +91,12 @@ May be disabled
 These dependencies are required by default, but may be omitted if their
 feature is disabled when running :ref:`cmake <client_building>`.
 
--  Disable with ``cmake -DENABLE_BACKTRACE=no ..``
+-  Disable backtrace support with ``cmake -DENABLE_BACKTRACE=no ..``
 
    -  ``libdw-dev``
    -  ``libunwind-dev``
 
--  Disable with ``cmake -DENABLE_X11=no ..``
+-  Disable X11 support with ``cmake -DENABLE_X11=no ..``
 
    -  ``libx11-dev``
    -  ``libxfixes-dev``
@@ -107,7 +107,7 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libxpresent-dev``
    -  ``libxrandr-dev``
 
--  Disable with ``cmake -DENABLE_WAYLAND=no ..``
+-  Disable Wayland support with ``cmake -DENABLE_WAYLAND=no ..``
 
    -  ``libwayland-bin``
    -  ``libwayland-dev``
@@ -117,19 +117,19 @@ feature is disabled when running :ref:`cmake <client_building>`.
 Audio
 /////
 
--  Disable with ``cmake -DENABLE_AUDIO=no ..```, required for any audio support
+-  Disable all audio with ``cmake -DENABLE_AUDIO=no ..```
 
    - ``libsamplerate0-dev``
 
--  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
+-  Disable PipeWire support with ``cmake -DENABLE_PIPEWIRE=no ..``
 
    -  ``libpipewire-0.3-dev``
 
--  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
+-  Disable PulseAudio support with ``cmake -DENABLE_PULSEAUDIO=no ..``
 
    -  ``libpulse-dev``
 
--  Disable USB audio with ``cmake -DENABLE_USB_AUDIO=no ..``
+-  Disable USB audio support with ``cmake -DENABLE_USB_AUDIO=no ..``
 
    -  ``libusbredirparser-dev``
 
