@@ -1529,7 +1529,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   struct DesktopDamage   noDesktopDamage = {};
   struct DesktopDamage * desktopDamage   = NULL;
 
-  struct DamageRects * accumulated = (struct DamageRects *)alloca(
+  struct DamageRects * accumulated = (struct DamageRects *)__builtin_alloca(
     sizeof(struct DamageRects) +
     MAX_ACCUMULATED_DAMAGE * sizeof(struct KVMFRFrameDamageRect)
   );
@@ -1778,7 +1778,7 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   if (linearHDRComposition && encodeDamageCount > 0)
   {
     const int capacity = damageIdx + accumulated->count;
-    encodeDamage       = alloca(capacity * sizeof(*encodeDamage));
+    encodeDamage       = __builtin_alloca(capacity * sizeof(*encodeDamage));
     memcpy(encodeDamage, damage, damageIdx * sizeof(*encodeDamage));
     encodeDamageCount  = damageIdx;
 
