@@ -112,12 +112,14 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libwayland-bin``
    -  ``libwayland-dev``
 
--  Disable all audio support with ``cmake -DENABLE_AUDIO=no ..``
+.. _client_deps_audio:
 
-   -  ``libpipewire-0.3-dev``
-   -  ``libpulse-dev``
-   -  ``libsamplerate0-dev``
-   -  ``libusbredirparser-dev``
+Audio
+/////
+
+-  Disable with ``cmake -DENABLE_AUDIO=no ..```, required for any audio support
+
+   - ``libsamplerate0-dev``
 
 -  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
 
@@ -130,8 +132,6 @@ feature is disabled when running :ref:`cmake <client_building>`.
 -  Disable USB audio with ``cmake -DENABLE_USB_AUDIO=no ..``
 
    -  ``libusbredirparser-dev`` version 0.7.1 or newer
-
-``libsamplerate0-dev`` is required whenever audio support remains enabled.
 
 .. _client_deps_recommended:
 
