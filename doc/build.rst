@@ -68,13 +68,14 @@ Required dependencies
    Depends: or Recommends: from another listed package is not allowed.
    All required packages must be listed.
 
--  ``cmake``
 -  ``binutils``
+-  ``cmake``
 -  ``gcc``, ``g++`` \| ``clang``
 -  ``libegl-dev``
+-  ``libfontconfig-dev``
+-  ``libfuse3-dev``
 -  ``libgl-dev``
 -  ``libgles-dev``
--  ``libfontconfig-dev``
 -  ``libgmp-dev``
 -  ``libspice-protocol-dev``
 -  ``libxkbcommon-dev``
@@ -156,8 +157,8 @@ You can fetch these dependencies with the following command:
 
 .. code:: bash
 
-   apt-get install binutils cmake make fonts-dejavu-core libdw-dev \
-   libfontconfig-dev libgmp-dev libunwind-dev gcc g++ pkg-config \
+   apt-get install binutils cmake make fonts-dejavu-core gcc g++ libdw-dev \
+   libfontconfig-dev libfuse3-dev libgmp-dev libunwind-dev pkg-config \
    libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev \
    libx11-dev libxcursor-dev libxfixes-dev libxi-dev libxinerama-dev \
    libxpresent-dev libxrandr-dev libxss-dev libxkbcommon-dev \
