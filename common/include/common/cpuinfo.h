@@ -23,6 +23,10 @@
 
 #include <stddef.h>
 #include <stdbool.h>
+#include <stdint.h>
+
+void     platform_cpuInfoCPUID(int registers[4], int leaf, int subleaf);
+uint64_t platform_cpuInfoXGETBV(unsigned int index);
 
 bool cpuInfo_get(char * model, size_t modelSize, int * procs, int * cores,
   int * sockets);

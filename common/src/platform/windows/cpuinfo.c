@@ -22,7 +22,18 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 
+#include <intrin.h>
 #include <windows.h>
+
+void platform_cpuInfoCPUID(int registers[4], int leaf, int subleaf)
+{
+  __cpuidex(registers, leaf, subleaf);
+}
+
+uint64_t platform_cpuInfoXGETBV(unsigned int index)
+{
+  return _xgetbv(index);
+}
 
 static bool getCPUModel(char * model, size_t modelSize)
 {

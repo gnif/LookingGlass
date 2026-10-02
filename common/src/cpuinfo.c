@@ -50,15 +50,7 @@ const CPUInfoFeatures * cpuInfo_getFeatures(void)
   int cpuid[4] = {0};
 
   // leaf1
-  asm volatile
-  (
-    "cpuid;"
-    : "=a" (cpuid[0]),
-      "=b" (cpuid[1]),
-      "=c" (cpuid[2]),
-      "=d" (cpuid[3])
-    : "a" (1)
-  );
+  platform_cpuInfoCPUID(cpuid, 1, 0);
 
   features.sse     = cpuid[3] & (1 << 25);
   features.sse2    = cpuid[3] & (1 << 26);
@@ -74,15 +66,7 @@ const CPUInfoFeatures * cpuInfo_getFeatures(void)
   features.avx     = cpuid[2] & (1 << 28);
 
   // leaf7
-  asm volatile
-  (
-    "cpuid;"
-    : "=a" (cpuid[0]),
-      "=b" (cpuid[1]),
-      "=c" (cpuid[2]),
-      "=d" (cpuid[3])
-    : "a" (7), "c" (0)
-  );
+  platform_cpuInfoCPUID(cpuid, 7, 0);
 
   features.avx2 = cpuid[1] & (1 << 5);
   features.bmi1 = cpuid[2] & (1 << 3);
@@ -90,14 +74,7 @@ const CPUInfoFeatures * cpuInfo_getFeatures(void)
 
   if (features.osxsave && features.avx)
   {
-    int xgetbv = 0;
-    asm volatile
-    (
-      "xgetbv;"
-      : "=a" (xgetbv)
-      : "c" (0)
-      : "edx"
-    );
+    const uint64_t xgetbv = platform_cpuInfoXGETBV(0);
 
     if (!(xgetbv & 0x6))
     {

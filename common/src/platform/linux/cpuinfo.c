@@ -27,6 +27,33 @@
 #include <string.h>
 #include <ctype.h>
 
+void platform_cpuInfoCPUID(int registers[4], int leaf, int subleaf)
+{
+  asm volatile
+  (
+    "cpuid;"
+    : "=a" (registers[0]),
+      "=b" (registers[1]),
+      "=c" (registers[2]),
+      "=d" (registers[3])
+    : "a" (leaf), "c" (subleaf)
+  );
+}
+
+uint64_t platform_cpuInfoXGETBV(unsigned int index)
+{
+  uint32_t low;
+  uint32_t high;
+  asm volatile
+  (
+    "xgetbv;"
+    : "=a" (low), "=d" (high)
+    : "c" (index)
+  );
+
+  return ((uint64_t)high << 32) | low;
+}
+
 bool cpuInfo_get(char * model, size_t modelSize, int * procs, int * cores,
   int * sockets)
 {
