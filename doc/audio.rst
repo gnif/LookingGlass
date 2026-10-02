@@ -37,7 +37,7 @@ USB audio setup
 
 USB audio requires:
 
-* a client built with ``libusbredirparser-0.5`` version 0.7.1 or newer;
+* a client built with ``libusbredirparser-0.5``;
 * at least one unused SPICE USB redirection channel in the VM; and
 * a working client playback backend.
 

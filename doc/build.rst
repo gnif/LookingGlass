@@ -131,7 +131,7 @@ Audio
 
 -  Disable USB audio with ``cmake -DENABLE_USB_AUDIO=no ..``
 
-   -  ``libusbredirparser-dev`` version 0.7.1 or newer
+   -  ``libusbredirparser-dev``
 
 .. _client_deps_recommended:
 

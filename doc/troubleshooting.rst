@@ -133,8 +133,6 @@ To verify the permission was set:
 USB audio does not appear or play
 ---------------------------------
 
-* Confirm that the client was built with ``libusbredirparser-0.5`` version
-  0.7.1 or newer.
 * Add an unused SPICE **USB Redirector** device to the VM.
 * Keep ``spice:enable=yes``, ``spice:audio=yes`` and
   ``spice:usbAudio=yes``.
