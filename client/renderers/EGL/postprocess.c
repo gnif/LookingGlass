@@ -214,8 +214,9 @@ static bool savePreset(struct EGL_PostProcess * this, const char * name)
   char * p = order;
   vector_forEach(filter, &this->filters)
   {
-    strcpy(p, filter->ops.id);
-    p += strlen(filter->ops.id);
+    const size_t idLen = strlen(filter->ops.id);
+    memcpy(p, filter->ops.id, idLen);
+    p += idLen;
     *p++ = ';';
   }
   if (p > order)
