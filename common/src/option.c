@@ -65,10 +65,10 @@ static bool int_parser(struct Option * opt, const char * str)
 static bool bool_parser(struct Option * opt, const char * str)
 {
   opt->value.x_bool =
-    strcasecmp(str, "1"   ) == 0 ||
-    strcasecmp(str, "on"  ) == 0 ||
-    strcasecmp(str, "yes" ) == 0 ||
-    strcasecmp(str, "true") == 0;
+    lg_strcasecmp(str, "1"   ) == 0 ||
+    lg_strcasecmp(str, "on"  ) == 0 ||
+    lg_strcasecmp(str, "yes" ) == 0 ||
+    lg_strcasecmp(str, "true") == 0;
   return true;
 }
 
@@ -343,13 +343,14 @@ bool option_parse(int argc, char * argv[])
     // emulate getopt for backwards compatability
     if (argv[a][0] == '-')
     {
-      if (strcasecmp(argv[a], "-h") == 0 || strcasecmp(argv[a], "--help") == 0)
+      if (lg_strcasecmp(argv[a], "-h") == 0 ||
+          lg_strcasecmp(argv[a], "--help") == 0)
       {
         state.doHelp = DOHELP_MODE_YES;
         continue;
       }
 
-      if (strcasecmp(argv[a], "--rst-help") == 0)
+      if (lg_strcasecmp(argv[a], "--rst-help") == 0)
       {
         state.doHelp = DOHELP_MODE_RST;
         continue;
@@ -925,13 +926,14 @@ struct Option * option_get(const char * module, const char * name)
   for(int i = 0; i < state.oCount; ++i)
   {
     struct Option * o = state.options[i];
-    if ((strcasecmp(o->module, module) == 0) && (strcasecmp(o->name, name) == 0))
+    if ((lg_strcasecmp(o->module, module) == 0) &&
+        (lg_strcasecmp(o->name, name) == 0))
       return o;
 
     // check for usage of renamed options
     if (o->old_module && o->old_name &&
-      (strcasecmp(o->old_module, module) == 0) &&
-      (strcasecmp(o->old_name  , name) == 0))
+      (lg_strcasecmp(o->old_module, module) == 0) &&
+      (lg_strcasecmp(o->old_name  , name) == 0))
     {
       // not fatal, but be noisy
       DEBUG_WARN(

@@ -19,6 +19,7 @@
  */
 
 #include <stdbool.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
@@ -92,7 +93,48 @@ bool str_containsValue(const char * list, char delimiter, const char * value)
   return false;
 }
 
-char * lg_strdup(const char *s)
+int lg_strcasecmp(const char * left, const char * right)
+{
+  while (*left && *right)
+  {
+    const int leftChar  = tolower((unsigned char)*left);
+    const int rightChar = tolower((unsigned char)*right);
+    if (leftChar != rightChar)
+      return leftChar - rightChar;
+
+    ++left;
+    ++right;
+  }
+
+  return (unsigned char)*left - (unsigned char)*right;
+}
+
+char * lg_strtok_r(char * str, const char * delimiters, char ** state)
+{
+  char * token = str ? str : *state;
+  if (!token)
+    return NULL;
+
+  token += strspn(token, delimiters);
+  if (!*token)
+  {
+    *state = NULL;
+    return NULL;
+  }
+
+  char * end = token + strcspn(token, delimiters);
+  if (*end)
+  {
+    *end   = '\0';
+    *state = end + 1;
+  }
+  else
+    *state = NULL;
+
+  return token;
+}
+
+char * lg_strdup(const char * s)
 {
   if (!s)
   {
@@ -100,8 +142,8 @@ char * lg_strdup(const char *s)
     return NULL;
   }
 
-  const ssize_t len = strlen(s) + 1;
-  char * out = malloc(len);
+  const size_t len = strlen(s) + 1;
+  char       * out = malloc(len);
   if (!out)
   {
     errno = ENOMEM;

@@ -11,10 +11,13 @@ add_library(audiodev_WASAPI STATIC
 target_link_libraries(audiodev_WASAPI
   avrt
   lg_common
-  m
   ole32
   uuid
 )
+
+if(MINGW)
+  target_link_libraries(audiodev_WASAPI m)
+endif()
 
 target_include_directories(audiodev_WASAPI
   PRIVATE

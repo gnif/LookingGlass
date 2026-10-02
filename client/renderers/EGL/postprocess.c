@@ -154,7 +154,7 @@ static void loadPresetList(struct EGL_PostProcess * this)
       continue;
 
     DEBUG_INFO("Found preset: %s", entry);
-    char * name = strdup(entry);
+    char * name = lg_strdup(entry);
     if (!name)
     {
       DEBUG_ERROR("Failed to allocate memory");
@@ -260,7 +260,7 @@ static void reorderFilters(struct EGL_PostProcess * this)
     return;
   }
 
-  char * orderStr = strdup(option_get_string("eglFilter", "order"));
+  char * orderStr = lg_strdup(option_get_string("eglFilter", "order"));
   if (!orderStr)
   {
     DEBUG_ERROR("Failed to allocate memory");
@@ -339,7 +339,8 @@ static void savePresetAs(struct EGL_PostProcess * this)
     }
   }
 
-  this->activePreset = stringlist_push(this->presets, strdup(this->presetEdit));
+  this->activePreset = stringlist_push(
+      this->presets, lg_strdup(this->presetEdit));
 }
 
 static void deletePreset(struct EGL_PostProcess * this)
@@ -396,7 +397,7 @@ static bool presetsUI(struct EGL_PostProcess * this)
     if (this->activePreset >= 0)
       savePreset(this, stringlist_at(this->presets, this->activePreset));
     else
-      presetError(this, strdup("You must select a preset to save."));
+      presetError(this, lg_strdup("You must select a preset to save."));
   }
 
   if (igIsItemHovered(ImGuiHoveredFlags_None) && this->activePreset >= 0)

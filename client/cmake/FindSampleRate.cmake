@@ -27,6 +27,13 @@ find_package_handle_standard_args(SampleRate
     SampleRate_LIBRARY
 )
 
+if(SampleRate_FOUND AND MSVC AND
+    SampleRate_LIBRARY MATCHES "\\.(a|dll\\.a)$")
+  message(FATAL_ERROR
+    "The clang-cl client requires an MSVC-ABI samplerate .lib; found "
+    "${SampleRate_LIBRARY}")
+endif()
+
 mark_as_advanced(
   SampleRate_INCLUDE_DIR
   SampleRate_LIBRARY

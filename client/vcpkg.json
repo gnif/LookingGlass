@@ -1,0 +1,15 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "name": "looking-glass-client",
+  "version-string": "0",
+  "dependencies": [
+    {
+      "name": "angle",
+      "platform": "windows"
+    },
+    {
+      "name": "libsamplerate",
+      "platform": "windows"
+    }
+  ]
+}

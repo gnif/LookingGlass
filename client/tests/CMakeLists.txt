@@ -11,7 +11,6 @@ add_executable(common-platform-tests
   common_platform_test.c
 )
 target_link_libraries(common-platform-tests
-  ${EXE_FLAGS}
   lg_common
 )
 target_compile_definitions(common-platform-tests PRIVATE
@@ -32,7 +31,6 @@ target_include_directories(event-source-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 target_link_libraries(event-source-tests
-  ${EXE_FLAGS}
   lg_common
 )
 add_test(NAME event-source-tests
@@ -45,9 +43,6 @@ set_tests_properties(event-source-tests PROPERTIES
 add_executable(windows-clipboard-files-tests
   clipboard_files_windows_test.c
   ../platform/Windows/clipboard_files.c
-)
-target_link_libraries(windows-clipboard-files-tests
-  ${EXE_FLAGS}
 )
 add_test(NAME windows-clipboard-files-tests
   COMMAND windows-clipboard-files-tests
@@ -65,7 +60,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   )
   target_link_libraries(config-platform-tests
-    ${EXE_FLAGS}
     lg_common
   )
   add_test(NAME config-platform-tests
@@ -79,7 +73,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     lgmp_platform_test.c
   )
   target_link_libraries(lgmp-platform-tests
-    ${EXE_FLAGS}
     lg_common
   )
   add_test(NAME lgmp-platform-tests
@@ -102,9 +95,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
   add_executable(process-tests
     process_test.c
     ../platform/Linux/process.c
-  )
-  target_link_libraries(process-tests
-    ${EXE_FLAGS}
   )
   add_test(NAME process-tests
     COMMAND process-tests
@@ -147,7 +137,6 @@ if(LG_CLIENT_PLATFORM_WINDOWS)
     common_windows_test.c
   )
   target_link_libraries(common-windows-tests
-    ${EXE_FLAGS}
     lg_common
   )
   add_test(NAME common-windows-tests
@@ -169,7 +158,6 @@ target_include_directories(sw-surface-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 target_link_libraries(sw-surface-tests
-  ${EXE_FLAGS}
   lg_common
 )
 add_test(NAME sw-surface-tests COMMAND sw-surface-tests)
@@ -183,7 +171,6 @@ target_include_directories(font-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 target_link_libraries(font-tests
-  ${EXE_FLAGS}
   lg_common
   lg_gui
 )
@@ -200,7 +187,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     ../src/kb_hid.c
   )
   target_link_libraries(lgmp-transport-tests
-    ${EXE_FLAGS}
     transport_LGMP
     lg_common
     lgmp
@@ -222,7 +208,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     ../src/kb_hid.c
   )
   target_link_libraries(lgmp-frame-tests
-    ${EXE_FLAGS}
     transport_LGMP
     lg_common
     lgmp
@@ -252,7 +237,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   )
   target_link_libraries(lgmp-input-tests
-    ${EXE_FLAGS}
     lg_common
     lgmp
   )
@@ -280,7 +264,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
   )
   target_link_libraries(lgmp-clipboard-tests
-    ${EXE_FLAGS}
     lg_common
     lgmp
   )
@@ -322,7 +305,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
       "${CMAKE_CURRENT_SOURCE_DIR}/../transports/LGMP"
     )
     target_link_libraries(lgmp-audio-tests
-      ${EXE_FLAGS}
       transport_LGMP
       lg_common
       lgmp
@@ -362,7 +344,6 @@ if(LG_CLIENT_PLATFORM_LINUX AND ENABLE_WAYLAND)
     "${CMAKE_BINARY_DIR}/wayland"
   )
   target_link_libraries(wayland-presentation-tests
-    ${EXE_FLAGS}
     lg_common
   )
   set(WAYLAND_PRESENTATION_CASES
@@ -393,7 +374,6 @@ if(LG_CLIENT_PLATFORM_LINUX AND ENABLE_WAYLAND)
     "${CMAKE_BINARY_DIR}/wayland"
   )
   target_link_libraries(wayland-clipboard-tests
-    ${EXE_FLAGS}
     lg_common
   )
   set(WAYLAND_CLIPBOARD_CASES
@@ -441,7 +421,6 @@ if(LG_CLIENT_PLATFORM_LINUX AND ENABLE_X11)
     "${CMAKE_CURRENT_SOURCE_DIR}/../displayservers/X11"
   )
   target_link_libraries(x11-clipboard-tests
-    ${EXE_FLAGS}
     lg_common
     pthread
   )
@@ -561,7 +540,6 @@ target_include_directories(mouse-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(mouse-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(MOUSE_CASES
@@ -603,7 +581,6 @@ target_include_directories(input-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 target_link_libraries(input-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(INPUT_CASES
@@ -636,7 +613,6 @@ target_include_directories(keybind-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(keybind-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(KEYBIND_CASES
@@ -668,7 +644,6 @@ target_include_directories(app-keybind-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(app-keybind-tests
-  ${EXE_FLAGS}
   lg_common
   lg_gui
 )
@@ -705,7 +680,6 @@ target_include_directories(clipboard-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(clipboard-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(CLIPBOARD_CASES
@@ -746,7 +720,6 @@ if(LG_CLIENT_PLATFORM_LINUX)
     "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   )
   target_link_libraries(clipboard-files-tests
-    ${EXE_FLAGS}
     lg_common
     PkgConfig::FUSE3
   )
@@ -789,7 +762,6 @@ if(ENABLE_SPICE)
     "${PROJECT_TOP}/repos/gui/cimgui/imgui"
   )
   target_link_libraries(spice-clipboard-tests
-    ${EXE_FLAGS}
     lg_common
   )
   foreach(name IN ITEMS outbound inbound)
@@ -811,7 +783,6 @@ target_include_directories(transport-fallback-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
 )
 target_link_libraries(transport-fallback-tests
-  ${EXE_FLAGS}
   lg_common
 )
 if(ENABLE_AUDIO)
@@ -861,7 +832,6 @@ if(ENABLE_SPICE)
     "${PROJECT_TOP}/repos/PureSpice/include"
   )
   target_link_libraries(spice-tests
-    ${EXE_FLAGS}
     lg_common
   )
   set(SPICE_CASES
@@ -897,7 +867,6 @@ if(ENABLE_SPICE)
     "$<TARGET_PROPERTY:purespice,INCLUDE_DIRECTORIES>"
   )
   target_link_libraries(purespice-connect-cancel-tests
-    ${EXE_FLAGS}
     purespice
     pthread
   )
@@ -923,7 +892,6 @@ target_include_directories(frame-scheduler-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(frame-scheduler-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(FRAME_SCHEDULER_CASES
@@ -950,17 +918,20 @@ add_executable(frame-timing-tests
 target_compile_definitions(frame-timing-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
 )
-target_compile_options(frame-timing-tests PRIVATE
-  -O1
-  "$<$<C_COMPILER_ID:GNU>:-fwhole-program>"
-)
+if(MSVC)
+  target_compile_options(frame-timing-tests PRIVATE /clang:-O1)
+else()
+  target_compile_options(frame-timing-tests PRIVATE
+    -O1
+    "$<$<C_COMPILER_ID:GNU>:-fwhole-program>"
+  )
+endif()
 target_include_directories(frame-timing-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   "${PROJECT_TOP}/repos/gui/cimgui"
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(frame-timing-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(FRAME_TIMING_CASES
@@ -1005,7 +976,6 @@ target_include_directories(config-message-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(config-message-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(CONFIG_MESSAGE_CASES
@@ -1042,7 +1012,6 @@ if(ENABLE_AUDIO)
     "${PROJECT_TOP}/repos/gui/cimgui/imgui"
   )
   target_link_libraries(audio-tests
-    ${EXE_FLAGS}
     lg_common
     ${SAMPLERATE_TARGET}
   )
@@ -1082,7 +1051,6 @@ target_include_directories(render-queue-tests PRIVATE
   "${PROJECT_TOP}/repos/gui/cimgui/imgui"
 )
 target_link_libraries(render-queue-tests
-  ${EXE_FLAGS}
   lg_common
 )
 set(RENDER_QUEUE_CASES
@@ -1112,7 +1080,6 @@ if(ENABLE_EGL)
     "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
   )
   target_link_libraries(desktop-rects-tests
-    ${EXE_FLAGS}
     renderer_EGL
   )
   set(DESKTOP_RECTS_CASES
@@ -1139,7 +1106,6 @@ if(ENABLE_EGL)
       "${CMAKE_BINARY_DIR}/renderers/EGL/shader"
     )
     target_link_libraries(texture-dmabuf-tests
-      ${EXE_FLAGS}
       lg_common
     )
     set(TEXTURE_DMABUF_CASES
@@ -1167,7 +1133,6 @@ if(ENABLE_EGL)
     "${CMAKE_CURRENT_SOURCE_DIR}/../renderers/EGL"
   )
   target_link_libraries(postprocess-order-tests
-    ${EXE_FLAGS}
     lg_common
     lg_egl_provider
   )
@@ -1188,7 +1153,6 @@ if(ENABLE_EGL)
       "${PROJECT_TOP}/common/include"
     )
     target_link_libraries(texture-upload-tests
-      ${EXE_FLAGS}
       LGProtocol::LGProtocol
       lg_egl_provider
     )

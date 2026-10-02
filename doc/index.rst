@@ -13,6 +13,7 @@ memory for frames, and a native Linux client for display and input.
    quickstart
 
    build
+   build_client_windows
    install
 
    usage

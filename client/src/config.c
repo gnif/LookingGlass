@@ -738,14 +738,14 @@ static bool optRendererParse(struct Option * opt, const char * str)
   if (!str)
     return false;
 
-  if (strcasecmp(str, "auto") == 0)
+  if (lg_strcasecmp(str, "auto") == 0)
   {
     g_params.forceRenderer = false;
     return true;
   }
 
   for(unsigned int i = 0; i < LG_RENDERER_COUNT; ++i)
-    if (strcasecmp(str, LG_Renderers[i]->getName()) == 0)
+    if (lg_strcasecmp(str, LG_Renderers[i]->getName()) == 0)
     {
       g_params.forceRenderer      = true;
       g_params.forceRendererIndex = i;
@@ -771,12 +771,12 @@ static StringList optRendererValues(struct Option * opt)
 static char * optRendererToString(struct Option * opt)
 {
   if (!g_params.forceRenderer)
-    return strdup("auto");
+    return lg_strdup("auto");
 
   if (g_params.forceRendererIndex >= LG_RENDERER_COUNT)
     return NULL;
 
-  return strdup(LG_Renderers[g_params.forceRendererIndex]->getName());
+  return lg_strdup(LG_Renderers[g_params.forceRendererIndex]->getName());
 }
 
 static bool parsePair(const char * str, long long * first, long long * second)
@@ -838,7 +838,7 @@ static StringList optPosValues(struct Option * opt)
 static char * optPosToString(struct Option * opt)
 {
   if (g_params.center)
-    return strdup("center");
+    return lg_strdup("center");
 
   int len = snprintf(NULL, 0, "%dx%d", g_params.x, g_params.y);
   char * str = malloc(len + 1);
@@ -919,7 +919,7 @@ static bool optScancodeParse(struct Option * opt, const char * str)
     if (!lg_keycode_to_name[i])
       continue;
 
-    if (strcasecmp(lg_keycode_to_name[i], str) == 0)
+    if (lg_strcasecmp(lg_keycode_to_name[i], str) == 0)
     {
       opt->value.x_int = i;
       return true;
@@ -981,11 +981,11 @@ static bool optMicDefaultParse(struct Option * opt, const char * str)
   if (!str)
     return false;
 
-  if (strcasecmp(str, "prompt") == 0)
+  if (lg_strcasecmp(str, "prompt") == 0)
     g_params.micDefaultState = MIC_DEFAULT_PROMPT;
-  else if (strcasecmp(str, "allow") == 0)
+  else if (lg_strcasecmp(str, "allow") == 0)
     g_params.micDefaultState = MIC_DEFAULT_ALLOW;
-  else if (strcasecmp(str, "deny") == 0)
+  else if (lg_strcasecmp(str, "deny") == 0)
     g_params.micDefaultState = MIC_DEFAULT_DENY;
   else
     return false;
@@ -1010,11 +1010,11 @@ static char * optMicDefaultToString(struct Option * opt)
   switch (g_params.micDefaultState)
   {
     case MIC_DEFAULT_PROMPT:
-      return strdup("prompt");
+      return lg_strdup("prompt");
     case MIC_DEFAULT_ALLOW:
-      return strdup("allow");
+      return lg_strdup("allow");
     case MIC_DEFAULT_DENY:
-      return strdup("deny");
+      return lg_strdup("deny");
   }
 
   return NULL;
@@ -1026,11 +1026,11 @@ static bool optAudioResamplerParse(
   if (!str)
     return false;
 
-  if (strcasecmp(str, "auto") == 0)
+  if (lg_strcasecmp(str, "auto") == 0)
     g_params.audioResampler = AUDIO_RESAMPLER_AUTO;
-  else if (strcasecmp(str, "libsamplerate") == 0)
+  else if (lg_strcasecmp(str, "libsamplerate") == 0)
     g_params.audioResampler = AUDIO_RESAMPLER_LIBSAMPLERATE;
-  else if (strcasecmp(str, "backend") == 0)
+  else if (lg_strcasecmp(str, "backend") == 0)
     g_params.audioResampler = AUDIO_RESAMPLER_BACKEND;
   else
     return false;
@@ -1055,11 +1055,11 @@ static char * optAudioResamplerToString(struct Option * opt)
   switch (g_params.audioResampler)
   {
     case AUDIO_RESAMPLER_AUTO:
-      return strdup("auto");
+      return lg_strdup("auto");
     case AUDIO_RESAMPLER_LIBSAMPLERATE:
-      return strdup("libsamplerate");
+      return lg_strdup("libsamplerate");
     case AUDIO_RESAMPLER_BACKEND:
-      return strdup("backend");
+      return lg_strdup("backend");
   }
 
   return NULL;

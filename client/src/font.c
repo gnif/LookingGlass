@@ -24,6 +24,7 @@
 #include "common/debug.h"
 #include "common/filesystem.h"
 #include "common/locking.h"
+#include "common/stringutils.h"
 
 #include "cimgui.h"
 
@@ -33,7 +34,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wunused-function"
 #endif
@@ -43,7 +44,7 @@
 #define STBTT_STATIC
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "repos/gui/cimgui/imgui/imstb_truetype.h"
-#if defined(__GNUC__)
+#if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
 
@@ -360,7 +361,7 @@ static FontPlatformFaceResult uiFontAddFace(void * opaque,
     return FONT_PLATFORM_FACE_ERROR;
   }
 
-  char * fileCopy = strdup(file);
+  char * fileCopy = lg_strdup(file);
   if (!fileCopy ||
       !uiFontGlyphReserve(
         &UIFontResolved, UIFontResolved.count + glyphCount))

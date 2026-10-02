@@ -28,6 +28,7 @@
 #include "common/debug.h"
 #include "common/event.h"
 #include "common/locking.h"
+#include "common/stringutils.h"
 #include "common/thread.h"
 #include "common/util.h"
 
@@ -561,7 +562,7 @@ bool lgTransportFallback_start(const char * transportName,
   atomic_init(&fallback->usable, false);
   atomic_init(&fallback->videoAcceptingEvents, false);
 
-  fallback->transportName = strdup(transportName);
+  fallback->transportName = lg_strdup(transportName);
   if (!fallback->transportName)
     goto fail;
 

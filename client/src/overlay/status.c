@@ -38,7 +38,7 @@ static OverlayImage l_image[LG_USER_STATUS_MAX] = { 0 };
 static bool         l_recordToggle;
 static double       l_scale = 1.0;
 
-static void status_loadImage(const char * data, unsigned int size,
+static void status_loadImage(const char * data, size_t size,
     OverlayImage * image, int width, int height)
 {
   overlayFreeImage(image);

@@ -95,7 +95,7 @@ void overlayTextMaybeURL(const char * text, bool wrapped)
     igTextUnformatted(text, NULL);
 }
 
-bool overlayLoadSVG(const char * data, unsigned int size, OverlayImage * image,
+bool overlayLoadSVG(const char * data, size_t size, OverlayImage * image,
     int width, int height)
 {
   image->tex = NULL;

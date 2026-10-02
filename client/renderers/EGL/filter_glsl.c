@@ -18,7 +18,6 @@
  * Temple Place, Suite 330, Boston, MA 02111-1307 USA
  */
 
-#define _GNU_SOURCE
 #include "filter.h"
 #include "effect.h"
 #include "app.h"
@@ -45,7 +44,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <strings.h>
 
 #define GLSL_MAX_TEXTURES 16
 #define GLSL_EXPR_STACK   128
@@ -633,11 +631,11 @@ static bool evaluateExpression(const GLSLContext * context,
   if (!copy)
     return false;
 
-  double stack[GLSL_EXPR_STACK];
+  double       stack[GLSL_EXPR_STACK];
   unsigned int count = 0;
-  char * state;
-  for (char * token = strtok_r(copy, " \t\r\n", &state); token;
-       token = strtok_r(NULL, " \t\r\n", &state))
+  char       * state = NULL;
+  for (char * token = lg_strtok_r(copy, " \t\r\n", &state); token;
+       token = lg_strtok_r(NULL, " \t\r\n", &state))
   {
     if (!strcmp(token, "!"))
     {
@@ -1077,7 +1075,7 @@ static bool createFilter(const char * root, const char * relative,
   if (!this->relative || !this->base.ops.name)
     goto fail;
   char * extension = strrchr((char *)this->base.ops.name, '.');
-  if (extension && !strcasecmp(extension, ".glsl"))
+  if (extension && !lg_strcasecmp(extension, ".glsl"))
     *extension = '\0';
   app_registerImGuiText(this->base.ops.name);
 
@@ -1118,7 +1116,7 @@ static void glslFree(EGL_Filter * filter)
 static bool hasGLSLExtension(const char * name)
 {
   const char * extension = strrchr(name, '.');
-  return extension && !strcasecmp(extension, ".glsl");
+  return extension && !lg_strcasecmp(extension, ".glsl");
 }
 
 static bool scanDirectory(const char * root, const char * relative,

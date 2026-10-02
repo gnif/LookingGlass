@@ -1,0 +1,42 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "windows-clangcl",
+      "displayName": "Windows clang-cl",
+      "description": "Build the Windows client with the MSVC ABI",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/windows-clangcl",
+      "toolchainFile": "$env{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang-cl",
+        "CMAKE_CXX_COMPILER": "clang-cl",
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL",
+        "ENABLE_AUDIO": true,
+        "ENABLE_EGL": true,
+        "ENABLE_NETWORK": true,
+        "ENABLE_WASAPI": true,
+        "OPTIMIZE_FOR_NATIVE": "OFF",
+        "VCPKG_TARGET_TRIPLET": "x64-windows"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "windows-clangcl-release",
+      "displayName": "Windows clang-cl RelWithDebInfo",
+      "configurePreset": "windows-clangcl"
+    }
+  ]
+}

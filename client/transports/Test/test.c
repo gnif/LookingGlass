@@ -29,7 +29,6 @@
 #include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 #define TEST_BUFFER_COUNT 2
 #define TEST_PQ_LUT_SIZE  4096
@@ -610,7 +609,7 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
   {
     if (!this->holdLastFrame)
       return LG_TRANSPORT_END;
-    usleep(1000);
+    nsleep(UINT64_C(1000000));
     return LG_TRANSPORT_TIMEOUT;
   }
 
@@ -620,7 +619,8 @@ static LG_TransportStatus test_nextFrame(LG_Transport * this, bool useDMA,
     if (now < this->nextFrameTime)
     {
       const uint64_t remaining = this->nextFrameTime - now;
-      usleep((remaining > 1000000 ? 1000000 : remaining) / 1000);
+      nsleep(remaining > UINT64_C(1000000) ?
+          UINT64_C(1000000) : remaining);
       return LG_TRANSPORT_TIMEOUT;
     }
   }
@@ -741,7 +741,7 @@ static LG_TransportStatus test_nextPointer(LG_Transport * this,
 {
   if (!this->connected)
     return LG_TRANSPORT_DISCONNECTED;
-  usleep(1000);
+  nsleep(UINT64_C(1000000));
   return LG_TRANSPORT_TIMEOUT;
 }
 

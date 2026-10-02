@@ -7,7 +7,9 @@ include_directories(
   ${PROJECT_SOURCE_DIR}/include
 )
 
-add_definitions(-D_GNU_SOURCE)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_compile_definitions(_GNU_SOURCE)
+endif()
 
 if (CMAKE_C_COMPILER_ID STREQUAL "Clang")
   add_compile_options(

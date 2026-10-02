@@ -42,6 +42,18 @@ find_package_handle_standard_args(ANGLE
     ANGLE_GLESV2_LIBRARY
 )
 
+if(ANGLE_FOUND AND MSVC)
+  foreach(_ANGLE_LIBRARY IN ITEMS
+      "${ANGLE_EGL_LIBRARY}"
+      "${ANGLE_GLESV2_LIBRARY}")
+    if(_ANGLE_LIBRARY MATCHES "\\.(a|dll\\.a)$")
+      message(FATAL_ERROR
+        "The clang-cl client requires MSVC-ABI ANGLE .lib files; found "
+        "${_ANGLE_LIBRARY}")
+    endif()
+  endforeach()
+endif()
+
 mark_as_advanced(
   ANGLE_EGL_INCLUDE_DIR
   ANGLE_GLES_INCLUDE_DIR
@@ -68,3 +80,4 @@ endif()
 
 unset(_ANGLE_HINTS)
 unset(_ANGLE_FIND_POLICY)
+unset(_ANGLE_LIBRARY)

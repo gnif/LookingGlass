@@ -32,7 +32,6 @@
 #include <emmintrin.h>
 #include <smmintrin.h>
 #include <immintrin.h>
-#include <unistd.h>
 
 static bool framebuffer_size_mul(size_t a, size_t b, size_t * result)
 {
@@ -65,7 +64,7 @@ bool framebuffer_wait_timed(const KVMFRFrameBuffer * frame, size_t size,
           *waitTimeNs += nanotime() - waitStart;
         return false;
       }
-      usleep(1);
+      nsleep(1000);
     }
   }
 

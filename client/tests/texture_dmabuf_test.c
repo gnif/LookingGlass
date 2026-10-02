@@ -116,10 +116,10 @@ static void externalFrameInit(struct FakeExternalFrame * external)
 struct EGLDynProcs g_egl_dynProcs;
 _Thread_local EGL_StateCache g_eglState;
 
-const char b_shader_hdr_compose_vert[]          = "";
-const char b_shader_hdr_compose_vert_end[]      = "";
-const char b_shader_downscale_linear_frag[]     = "";
-const char b_shader_downscale_linear_frag_end[] = "";
+const char   b_shader_hdr_compose_vert[]              = "";
+const size_t b_shader_hdr_compose_vert_size           = 1;
+const char   b_shader_downscale_linear_frag[]         = "";
+const size_t b_shader_downscale_linear_frag_size      = 1;
 
 static struct FakeSync * syncPtr(GLsync sync)
 {

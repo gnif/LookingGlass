@@ -22,6 +22,7 @@
 #define _H_LG_OVERLAY_UTILS_
 
 #include <stdbool.h>
+#include <stddef.h>
 
 #include "common/types.h"
 
@@ -41,7 +42,7 @@ void overlayTextURL(const char * url, const char * text);
 void overlayTextMaybeURL(const char * text, bool wrapped);
 
 // create a texture from a SVG and scale it to fit the supplied width & height
-bool overlayLoadSVG(const char * data, unsigned int size, OverlayImage * image,
+bool overlayLoadSVG(const char * data, size_t size, OverlayImage * image,
     int width, int height);
 
 void overlayFreeImage(OverlayImage * image);

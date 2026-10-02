@@ -1,26 +1,23 @@
 cmake_minimum_required(VERSION 3.10)
 project(renderer_EGL LANGUAGES C CXX)
 
-find_program(AWK NAMES gawk mawk original-awk awk)
-
-if(AWK MATCHES ".+-NOTFOUND")
-  message(FATAL_ERROR "FATAL: some known version of awk couldn't be found (${AWK}).")
-else()
-  message(STATUS "Using awk: ${AWK}")
-endif()
-
 include(MakeObject)
 function(build_shaders header_dir)
   file(GLOB headers "${header_dir}/*.h")
   set(EGL_SHADER_PROCESSED)
+  set(include_dir "${CMAKE_CURRENT_SOURCE_DIR}/${header_dir}")
   foreach(shader ${ARGN})
     set(out_f "${CMAKE_CURRENT_BINARY_DIR}/${shader}")
-    add_custom_command(OUTPUT "${out_f}"
-      COMMAND "${AWK}" -f "${CMAKE_CURRENT_SOURCE_DIR}/glsl.include.awk"
-              "${CMAKE_CURRENT_SOURCE_DIR}/${shader}" > "${out_f}"
+    add_custom_command(
+      OUTPUT "${out_f}"
+      COMMAND "${CMAKE_COMMAND}"
+        "-DLG_MAKE_OBJECT_ACTION=PREPROCESS"
+        "-DLG_MAKE_OBJECT_INPUT=${CMAKE_CURRENT_SOURCE_DIR}/${shader}"
+        "-DLG_MAKE_OBJECT_OUTPUT=${out_f}"
+        "-DLG_MAKE_OBJECT_INCLUDE_DIR=${include_dir}"
+        -P "${LG_MAKE_OBJECT_SCRIPT}"
       MAIN_DEPENDENCY "${CMAKE_CURRENT_SOURCE_DIR}/${shader}"
-      DEPENDS ${headers}
-      WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/shader"
+      DEPENDS ${headers} "${LG_MAKE_OBJECT_SCRIPT}"
       COMMENT "Preprocessing shader ${shader}"
       VERBATIM
     )

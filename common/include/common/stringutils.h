@@ -23,6 +23,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdarg.h>
 
 // vsprintf but with buffer allocation
 int valloc_sprintf(char ** str, const char * format, va_list ap)
@@ -35,8 +36,14 @@ int alloc_sprintf(char ** str, const char * format, ...)
 // Find value in a list separated by delimiter.
 bool str_containsValue(const char * list, char delimiter, const char * value);
 
+// Portable case-insensitive string comparison.
+int lg_strcasecmp(const char * left, const char * right);
+
+// Portable reentrant tokenization.
+char * lg_strtok_r(char * str, const char * delimiters, char ** state);
+
 // Local implementation of strdup
-char * lg_strdup(const char *s);
+char * lg_strdup(const char * s);
 
 // copy a potentially unterminated string into a null-terminated buffer
 void str_copy(char * dst, size_t dstSize, const char * src, size_t srcSize);

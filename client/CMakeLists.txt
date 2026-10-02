@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.20)
 project(looking-glass-client C CXX)
 
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
@@ -32,6 +32,14 @@ elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 else()
   message(FATAL_ERROR
     "The Looking Glass client does not support ${CMAKE_SYSTEM_NAME}")
+endif()
+
+if(LG_CLIENT_PLATFORM_WINDOWS AND MSVC AND
+    (NOT CMAKE_C_COMPILER_ID STREQUAL "Clang" OR
+     NOT CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
+  message(FATAL_ERROR
+    "The native Windows client currently requires clang-cl for both C and "
+    "C++; use the windows-clangcl configure preset")
 endif()
 
 set(OPTIMIZE_FOR_NATIVE_DEFAULT ON)
@@ -145,34 +153,67 @@ if(ENABLE_USB_AUDIO)
 endif()
 add_feature_info(ENABLE_USB_AUDIO ENABLE_USB_AUDIO "USB audio support.")
 
-add_compile_options(
-  "-Wall"
-  "-Wextra"
-  "-Wno-sign-compare"
-  "-Wno-unused-parameter"
-  "$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>"
-  "$<$<C_COMPILER_ID:GNU>:-Wimplicit-fallthrough=2>"
-  "-Werror"
-  "-Wfatal-errors"
-  "-g"
-  "-ffast-math"
-  "-fdata-sections"
-  "-ffunction-sections"
-  "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
-)
-
-if(ENABLE_BACKTRACE)
+if(MSVC)
+  foreach(LG_CLIENT_COMPILE_OPTION
+      /W4
+      /WX
+      /utf-8
+      /fp:fast
+      /Gy
+      /Gw
+      /wd4100
+      /clang:-Wno-sign-compare
+      /clang:-Wno-unused-parameter
+      /clang:-Wfatal-errors)
+    add_compile_options(
+      "$<$<COMPILE_LANGUAGE:C>:${LG_CLIENT_COMPILE_OPTION}>"
+      "$<$<COMPILE_LANGUAGE:CXX>:${LG_CLIENT_COMPILE_OPTION}>")
+  endforeach()
   add_compile_options(
-    "-fno-omit-frame-pointer"
-    "-fno-optimize-sibling-calls"
+    "$<$<COMPILE_LANGUAGE:C>:/clang:-Wstrict-prototypes>")
+  add_link_options(/OPT:REF /NXCOMPAT)
+else()
+  add_compile_options(
+    "-Wall"
+    "-Wextra"
+    "-Wno-sign-compare"
+    "-Wno-unused-parameter"
+    "$<$<COMPILE_LANGUAGE:C>:-Wstrict-prototypes>"
+    "$<$<C_COMPILER_ID:GNU>:-Wimplicit-fallthrough=2>"
+    "-Werror"
+    "-Wfatal-errors"
+    "-g"
+    "-ffast-math"
+    "-fdata-sections"
+    "-ffunction-sections"
+    "$<$<CONFIG:DEBUG>:-O0;-g3;-ggdb>"
   )
+
+  if(LG_CLIENT_PLATFORM_WINDOWS)
+    add_link_options("-Wl,--gc-sections" "-Wl,--nxcompat")
+  else()
+    add_link_options("-Wl,--gc-sections" "-z" "noexecstack")
+  endif()
 endif()
 
-set(EXE_FLAGS "-Wl,--gc-sections -z noexecstack")
-set(CMAKE_C_STANDARD 11)
+if(ENABLE_BACKTRACE)
+  if(MSVC)
+    add_compile_options(
+      "$<$<COMPILE_LANGUAGE:C>:/Oy->"
+      "$<$<COMPILE_LANGUAGE:CXX>:/Oy->"
+      "$<$<COMPILE_LANGUAGE:C>:/clang:-fno-optimize-sibling-calls>"
+      "$<$<COMPILE_LANGUAGE:CXX>:/clang:-fno-optimize-sibling-calls>")
+  else()
+    add_compile_options(
+      "-fno-omit-frame-pointer"
+      "-fno-optimize-sibling-calls")
+  endif()
+endif()
 
-if(LG_CLIENT_PLATFORM_WINDOWS)
-  set(EXE_FLAGS "-Wl,--gc-sections -Wl,--nxcompat")
+set(CMAKE_C_STANDARD          11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+if(MINGW)
   add_compile_options("-fdebug-prefix-map=${PROJECT_TOP}/=")
   add_compile_definitions(__USE_MINGW_ANSI_STDIO=0)
 endif()
@@ -186,13 +227,22 @@ if (ENABLE_EGL)
 endif()
 
 if(ENABLE_ASAN)
-  add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
-  set(EXE_FLAGS "${EXE_FLAGS} -fno-omit-frame-pointer -fsanitize=address")
+  if(MSVC)
+    message(FATAL_ERROR
+      "AddressSanitizer is not supported by the clang-cl build")
+  else()
+    add_compile_options("-fno-omit-frame-pointer" "-fsanitize=address")
+    add_link_options("-fno-omit-frame-pointer" "-fsanitize=address")
+  endif()
 endif()
 
 if(ENABLE_UBSAN)
+  if(MSVC)
+    message(FATAL_ERROR
+      "UndefinedBehaviorSanitizer is not supported by the clang-cl build")
+  endif()
   add_compile_options("-fsanitize=undefined")
-  set(EXE_FLAGS "${EXE_FLAGS} -fsanitize=undefined")
+  add_link_options("-fsanitize=undefined")
 endif()
 
 add_definitions(-D ATOMIC_LOCKING)
@@ -266,9 +316,13 @@ if(ENABLE_EGL)
   list(APPEND SOURCES src/egl_dynprocs.c)
 endif()
 
-if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+if(MSVC)
   set_source_files_properties(src/overlay/graphs.c PROPERTIES
-    COMPILE_FLAGS "-fno-fast-math"
+    COMPILE_OPTIONS "/fp:precise"
+  )
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  set_source_files_properties(src/overlay/graphs.c PROPERTIES
+    COMPILE_OPTIONS "-fno-fast-math"
   )
 endif()
 
@@ -406,8 +460,6 @@ target_link_libraries(looking-glass-client
   audiodevs
   lg_gui
 )
-
-set_target_properties(looking-glass-client PROPERTIES LINK_FLAGS "${EXE_FLAGS}")
 
 if(ENABLE_TESTS AND LG_CLIENT_PLATFORM_WINDOWS)
   add_library(client_test_version OBJECT

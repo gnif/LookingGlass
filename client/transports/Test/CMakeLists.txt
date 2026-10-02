@@ -5,9 +5,11 @@ add_library(transport_Test STATIC
   test.c
 )
 
-target_compile_options(transport_Test PRIVATE
-  -fno-fast-math
-)
+if(MSVC)
+  target_compile_options(transport_Test PRIVATE /fp:precise)
+else()
+  target_compile_options(transport_Test PRIVATE -fno-fast-math)
+endif()
 
 target_link_libraries(transport_Test
   lg_common

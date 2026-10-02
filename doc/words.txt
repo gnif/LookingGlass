@@ -1,3 +1,5 @@
+ABI
+ANGLE
 Anime4K
 backend
 backends
@@ -9,6 +11,7 @@ cadence
 cgroups
 checkboxes
 clang
+clang-cl
 cmake
 codec
 compositor
@@ -53,6 +56,7 @@ lexically
 libdecor
 libpipewire
 libpulse
+libsamplerate
 libvirt
 linux
 LookingGlass
@@ -65,9 +69,12 @@ mingw
 mipmapping
 modprobe
 mpv
+MsQuic
+MSVC
 msys
 multisampling
 namespace
+NASM
 Navi
 NvFBC
 Nvidia
@@ -123,6 +130,7 @@ upscaled
 upscaler
 upscales
 upscaling
+vcpkg
 viewport
 virt
 VirtIO

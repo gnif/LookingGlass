@@ -77,7 +77,6 @@ function(lg_add_static_msquic)
   set(LG_MSQUIC_BINARY_DIR "${CMAKE_BINARY_DIR}/MsQuic")
   set(LG_MSQUIC_SYSTEM_LIBRARIES
     ws2_32
-    schannel
     ntdll
     bcrypt
     ncrypt
@@ -106,8 +105,41 @@ function(lg_add_static_msquic)
   endif()
 
   if(MSVC)
+    if(NOT CMAKE_GENERATOR MATCHES "^Ninja")
+      message(FATAL_ERROR
+        "The native Windows MsQuic build requires Ninja or Ninja "
+        "Multi-Config")
+    endif()
+    if(NOT EXISTS
+        "${LG_MSQUIC_SOURCE_DIR}/submodules/openssl/Configure")
+      message(FATAL_ERROR
+        "The MsQuic OpenSSL submodule is not initialized; run "
+        "git submodule update --init --recursive")
+    endif()
+
+    find_program(LG_MSQUIC_CL    NAMES cl      REQUIRED)
+    find_program(LG_MSQUIC_NMAKE NAMES nmake   REQUIRED)
+    find_program(LG_MSQUIC_NASM  NAMES nasm    REQUIRED)
+    find_program(LG_MSQUIC_PERL  NAMES perl    REQUIRED)
+
     list(APPEND LG_MSQUIC_CMAKE_ARGS
-      "-DQUIC_TLS_LIB=schannel")
+      "-DQUIC_TLS_LIB=openssl"
+      "-DQUIC_USE_EXTERNAL_OPENSSL=OFF"
+      "-DQUIC_USE_SYSTEM_LIBCRYPTO=OFF"
+      "-DQUIC_OPENSSL_INCLUDE_DIR="
+      "-DQUIC_OPENSSL_LIB_DIR="
+      "-DQUIC_OPENSSL_ROOT_DIR="
+      "-DCMAKE_C_COMPILER=${LG_MSQUIC_CL}"
+      "-DCMAKE_CXX_COMPILER=${LG_MSQUIC_CL}")
+    if(NOT CMAKE_CONFIGURATION_TYPES)
+      list(APPEND LG_MSQUIC_CMAKE_ARGS
+        "-DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE}")
+    endif()
+    list(APPEND LG_MSQUIC_SYSTEM_LIBRARIES
+      gdi32
+      user32
+      wbemuuid
+      winmm)
     set(LG_MSQUIC_RELEASE_LIBRARY
       "${LG_MSQUIC_BINARY_DIR}/bin/Release/msquic.lib")
   endif()
