@@ -138,8 +138,10 @@ Audio
 Recommended
 <<<<<<<<<<<
 
--  ``fonts-dejavu-core`` (This is the default UI font, but a random font will
-   be chosen if not available).
+-  ``fonts-dejavu-core``
+
+   -  This is the default UI font
+   - A random font will be chosen if not available
 
 .. _client_fetching_with_apt:
 
