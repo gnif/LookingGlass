@@ -11,6 +11,11 @@
     {
       "name": "libsamplerate",
       "platform": "windows"
+    },
+    {
+      "name": "openssl",
+      "default-features": false,
+      "platform": "windows"
     }
   ]
 }

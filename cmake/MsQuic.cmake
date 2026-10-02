@@ -105,30 +105,50 @@ function(lg_add_static_msquic)
   endif()
 
   if(MSVC)
-    if(NOT CMAKE_GENERATOR MATCHES "^Ninja")
+    if(NOT CMAKE_GENERATOR STREQUAL "Ninja")
       message(FATAL_ERROR
-        "The native Windows MsQuic build requires Ninja or Ninja "
-        "Multi-Config")
-    endif()
-    if(NOT EXISTS
-        "${LG_MSQUIC_SOURCE_DIR}/submodules/openssl/Configure")
-      message(FATAL_ERROR
-        "The MsQuic OpenSSL submodule is not initialized; run "
-        "git submodule update --init --recursive")
+        "The native Windows MsQuic build requires Ninja")
     endif()
 
-    find_program(LG_MSQUIC_CL    NAMES cl      REQUIRED)
-    find_program(LG_MSQUIC_NMAKE NAMES nmake   REQUIRED)
-    find_program(LG_MSQUIC_NASM  NAMES nasm    REQUIRED)
-    find_program(LG_MSQUIC_PERL  NAMES perl    REQUIRED)
+    find_program(LG_MSQUIC_CL NAMES cl REQUIRED)
+
+    set(OPENSSL_USE_STATIC_LIBS TRUE)
+    find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
+
+    if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+      set(LG_MSQUIC_OPENSSL_CONFIG DEBUG)
+    else()
+      set(LG_MSQUIC_OPENSSL_CONFIG RELEASE)
+    endif()
+    get_target_property(LG_MSQUIC_OPENSSL_SSL_LIBRARY
+      OpenSSL::SSL "IMPORTED_LOCATION_${LG_MSQUIC_OPENSSL_CONFIG}")
+    get_target_property(LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY
+      OpenSSL::Crypto "IMPORTED_LOCATION_${LG_MSQUIC_OPENSSL_CONFIG}")
+    if(NOT EXISTS "${LG_MSQUIC_OPENSSL_SSL_LIBRARY}" OR
+        NOT EXISTS "${LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY}")
+      message(FATAL_ERROR
+        "Static MSVC OpenSSL libraries were not found")
+    endif()
+
+    get_filename_component(LG_MSQUIC_OPENSSL_SSL_DIR
+      "${LG_MSQUIC_OPENSSL_SSL_LIBRARY}" DIRECTORY)
+    get_filename_component(LG_MSQUIC_OPENSSL_CRYPTO_DIR
+      "${LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY}" DIRECTORY)
+    if(NOT "${LG_MSQUIC_OPENSSL_SSL_DIR}" STREQUAL
+        "${LG_MSQUIC_OPENSSL_CRYPTO_DIR}")
+      message(FATAL_ERROR
+        "The MSVC OpenSSL SSL and Crypto libraries must share a directory")
+    endif()
 
     list(APPEND LG_MSQUIC_CMAKE_ARGS
       "-DQUIC_TLS_LIB=openssl"
-      "-DQUIC_USE_EXTERNAL_OPENSSL=OFF"
+      "-DQUIC_USE_EXTERNAL_OPENSSL=ON"
       "-DQUIC_USE_SYSTEM_LIBCRYPTO=OFF"
-      "-DQUIC_OPENSSL_INCLUDE_DIR="
-      "-DQUIC_OPENSSL_LIB_DIR="
+      "-DQUIC_OPENSSL_INCLUDE_DIR=${OPENSSL_INCLUDE_DIR}"
+      "-DQUIC_OPENSSL_LIB_DIR=${LG_MSQUIC_OPENSSL_SSL_DIR}"
       "-DQUIC_OPENSSL_ROOT_DIR="
+      "-DLIB_SSL=${LG_MSQUIC_OPENSSL_SSL_LIBRARY}"
+      "-DLIB_CRYPTO=${LG_MSQUIC_OPENSSL_CRYPTO_LIBRARY}"
       "-DCMAKE_C_COMPILER=${LG_MSQUIC_CL}"
       "-DCMAKE_CXX_COMPILER=${LG_MSQUIC_CL}")
     if(NOT CMAKE_CONFIGURATION_TYPES)

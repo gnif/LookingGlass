@@ -17,12 +17,11 @@ Install the following tools:
 - CMake 3.21 or newer
 - Ninja, with ``ninja.exe`` available on ``PATH``
 - Git
-- Perl
-- NASM
 - vcpkg
 
 Set ``VCPKG_ROOT`` to the vcpkg checkout. The client manifest installs native
-MSVC-ABI builds of ANGLE and libsamplerate automatically.
+MSVC-ABI builds of ANGLE, libsamplerate, and static OpenSSL automatically.
+Vcpkg also manages the Perl and NASM tools used to build OpenSSL.
 
 Ninja can be installed with ``winget install Ninja-build.Ninja``. Open a new
 Developer PowerShell after installing it and confirm that ``ninja --version``

@@ -28,7 +28,8 @@
         "ENABLE_NETWORK": true,
         "ENABLE_WASAPI": true,
         "OPTIMIZE_FOR_NATIVE": "OFF",
-        "VCPKG_TARGET_TRIPLET": "x64-windows"
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/cmake/vcpkg-triplets",
+        "VCPKG_TARGET_TRIPLET": "x64-windows-lg"
       }
     }
   ],
