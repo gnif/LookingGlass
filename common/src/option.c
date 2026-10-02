@@ -391,10 +391,11 @@ bool option_parse(int argc, char * argv[])
     }
     else
     {
-      char * arg    = lg_strdup(argv[a]);
-      char * module = strtok(arg , ":");
-      char * name   = strtok(NULL, "=");
-      value = strtok(NULL, "" );
+      char * arg        = lg_strdup(argv[a]);
+      char * tokenState = NULL;
+      char * module     = lg_strtok_r(arg, ":", &tokenState);
+      char * name       = lg_strtok_r(NULL, "=", &tokenState);
+      value             = lg_strtok_r(NULL, "", &tokenState);
 
       if (!module || !name)
       {
