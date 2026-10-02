@@ -13,24 +13,14 @@ add_library(lg_gui STATIC
 )
 
 if(MSVC)
-  target_compile_options(lg_gui PRIVATE /fp:precise)
-
-  set_source_files_properties(cimgui/cimgui.cpp PROPERTIES
-    COMPILE_OPTIONS "/clang:-Wno-error=unused-function"
-  )
-  set_source_files_properties(cimplot/cimplot.cpp PROPERTIES
-    COMPILE_OPTIONS
-      "/clang:-Wno-error=array-bounds;/clang:-Wno-error=unused-function"
+  target_compile_options(lg_gui PRIVATE
+    /fp:precise
+    /w
   )
 elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-  target_compile_options(lg_gui PRIVATE "-fno-fast-math")
-
-  set_source_files_properties(cimgui/cimgui.cpp PROPERTIES
-    COMPILE_OPTIONS "-Wno-error=unused-function"
-  )
-  set_source_files_properties(cimplot/cimplot.cpp PROPERTIES
-    COMPILE_OPTIONS
-      "-Wno-error=array-bounds;-Wno-error=unused-function"
+  target_compile_options(lg_gui PRIVATE
+    -fno-fast-math
+    -w
   )
 endif()
 
