@@ -31,6 +31,7 @@
 #include <mutex>
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
@@ -50,9 +51,19 @@ private:
   bool              m_transportOpened = false;
   std::atomic<LONG> m_initInProgress  = 0;
 
-  std::unique_ptr<CTransportManager> m_transport;
-  CDisplayConfiguration       m_displayConfiguration;
-  CMonitorManager             m_monitorManager;
+  struct Head
+  {
+    std::unique_ptr<CTransportManager> transport;
+    CDisplayConfiguration              displayConfiguration;
+    CMonitorManager                    monitorManager;
+    const UINT                         index;
+
+    Head(UINT connectorIndex, CSettings& settings);
+    Head(const Head&) = delete;
+    Head& operator=(const Head&) = delete;
+  };
+
+  std::vector<std::unique_ptr<Head>> m_heads;
 
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
@@ -74,6 +85,8 @@ private:
   bool m_hasIddCx110DDIs = false;
   bool m_canProcessFP16  = false;
   bool m_softwareMode    = true;
+
+  Head& PrimaryHead() { return *m_heads[0]; }
 
   void QueryIddCxCapabilities();
 
@@ -121,12 +134,26 @@ public:
 
   CTransportManager& GetTransport()
   {
-    return *m_transport;
+    return *PrimaryHead().transport;
+  }
+
+  CTransportManager& GetTransport(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return *m_heads[head]->transport;
   }
 
   CDisplayConfiguration& GetDisplayConfiguration()
   {
-    return m_displayConfiguration;
+    return PrimaryHead().displayConfiguration;
+  }
+
+  CDisplayConfiguration& GetDisplayConfiguration(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return m_heads[head]->displayConfiguration;
   }
 };
 

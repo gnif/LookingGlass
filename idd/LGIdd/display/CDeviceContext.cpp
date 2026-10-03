@@ -36,11 +36,19 @@
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
-CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
-  m_wdfDevice(wdfDevice),
-  m_transport(CreateTransport()),
-  m_displayConfiguration(g_settings)
+CDeviceContext::Head::Head(UINT connectorIndex, CSettings& settings) :
+  transport(CreateTransport()),
+  displayConfiguration(settings),
+  index(connectorIndex)
 {
+}
+
+CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
+  m_wdfDevice(wdfDevice)
+{
+  // The adapter exposes a single connector, so there is exactly one head and
+  // its index is the connector the monitor is created on.
+  m_heads.emplace_back(std::unique_ptr<Head>(new Head(0, g_settings)));
 }
 
 CDeviceContext::~CDeviceContext()
@@ -65,8 +73,9 @@ CDeviceContext::~CDeviceContext()
     m_transportTimer = nullptr;
   }
 
-  if (m_transport)
-    m_transport->Stop();
+  Head& head = PrimaryHead();
+  if (head.transport)
+    head.transport->Stop();
 }
 
 void CDeviceContext::QueryIddCxCapabilities()
@@ -159,6 +168,7 @@ void CDeviceContext::StopInitRetry()
 void CDeviceContext::InitAdapter()
 {
   DEBUG_TRACE("InitAdapter");
+  Head& head = PrimaryHead();
 
   // The adapter only needs to be created once. D0Entry and the retry timer can
   // both land here, so guard against re-entrancy and repeated creation.
@@ -180,14 +190,14 @@ void CDeviceContext::InitAdapter()
   // monitor), retry from a timer until it can be opened.
   if (!m_transportOpened)
   {
-    if (!m_transport)
+    if (!head.transport)
     {
       DEBUG_ERROR("Failed to create the frame transport");
       Atomic::Store(m_initInProgress, 0);
       return;
     }
 
-    const ITransport::OpenResult result = m_transport->Open();
+    const ITransport::OpenResult result = head.transport->Open();
     if (result != ITransport::OpenResult::SUCCESS)
     {
       if (result == ITransport::OpenResult::RETRY)
@@ -273,16 +283,16 @@ void CDeviceContext::InitAdapter()
     return;
   }
   DEBUG_TRACE("Loading configured display modes");
-  if (!m_displayConfiguration.Load(*m_transport))
+  if (!head.displayConfiguration.Load(*head.transport))
   {
     Atomic::Store(m_initInProgress, 0);
     return;
   }
   DEBUG_TRACE("Initializing monitor EDID");
-  m_displayConfiguration.InitializeEdid(CanProcessFP16());
+  head.displayConfiguration.InitializeEdid(CanProcessFP16());
 
   const CDisplayConfiguration::Description description =
-    m_displayConfiguration.GetDescription();
+    head.displayConfiguration.GetDescription();
   DEBUG_INFO("Initializing adapter with %llu modes and a %u-byte EDID",
     (unsigned long long)description.modeCount,
     (UINT)description.edid.size());
@@ -339,7 +349,7 @@ void CDeviceContext::InitAdapter()
     m_canProcessFP16 = false;
     // The monitor has not been created yet, so replace the provisional HDR
     // EDID before Windows can observe it.
-    m_displayConfiguration.RebuildEdid(false);
+    head.displayConfiguration.RebuildEdid(false);
     caps.Flags = (IDDCX_ADAPTER_FLAGS)(caps.Flags & ~IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16);
     ZeroMemory(&initOut, sizeof(initOut));
     status = IddCxAdapterInitAsync(&init, &initOut);
@@ -401,38 +411,41 @@ void CDeviceContext::FinishAdapterInit(UINT connectorIndex)
   }
 
   if (arrivalPending)
-    m_monitorManager.Enable();
+    PrimaryHead().monitorManager.Enable();
   else
   {
     // Recovery can intentionally disable the monitor before the adapter's
     // first arrival. This is still a valid synchronization boundary: allow a
     // later NORMAL request to re-enable the monitor instead of waiting for an
     // arrival that ACTIVE deliberately suppressed.
-    m_transport->SyncRecovery();
+    PrimaryHead().transport->SyncRecovery();
   }
 }
 
 void CDeviceContext::FinishInit(UINT connectorIndex)
 {
+  Head& head = PrimaryHead();
   CDisplayConfiguration::Description description =
-    m_displayConfiguration.GetDescription();
-  const bool arrived = m_monitorManager.Create(
+    head.displayConfiguration.GetDescription();
+  const bool arrived = head.monitorManager.Create(
     connectorIndex, m_adapter, std::move(description.edid), this);
   if (arrived)
-    m_transport->SyncRecovery();
+    head.transport->SyncRecovery();
   CompleteRecoveryArrival(arrived);
 }
 
 void CDeviceContext::ReplugMonitor()
 {
-  if (m_monitorManager.Replug() ==
+  Head& head = PrimaryHead();
+  if (head.monitorManager.Replug() ==
       CMonitorManager::ReplugAction::CREATE)
-    FinishInit(0);
+    FinishInit(head.index);
 }
 
 void CDeviceContext::ReloadSettings()
 {
-  if (!m_displayConfiguration.ReloadSettings(*m_transport))
+  Head& head = PrimaryHead();
+  if (!head.displayConfiguration.ReloadSettings(*head.transport))
     return;
 
   ReplugMonitor();
@@ -440,30 +453,30 @@ void CDeviceContext::ReloadSettings()
 
 void CDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
 {
-  m_monitorManager.OnDestroyed(monitor);
+  PrimaryHead().monitorManager.OnDestroyed(monitor);
 }
 
 void CDeviceContext::OnSwapChainAssigned()
 {
-  m_monitorManager.OnSwapChainAssigned();
+  PrimaryHead().monitorManager.OnSwapChainAssigned();
 }
 
 void CDeviceContext::OnSwapChainReleased()
 {
-  m_monitorManager.OnSwapChainReleased();
+  PrimaryHead().monitorManager.OnSwapChainReleased();
 }
 
 void CDeviceContext::OnSwapChainReady()
 {
   const CMonitorManager::ReadyAction action =
-    m_monitorManager.OnSwapChainReady();
+    PrimaryHead().monitorManager.OnSwapChainReady();
 
   // Do not expose the context to pipe reload requests until the initial swap
   // chain has reached the same ready state used by the replug gate.
   g_pipe.SetDeviceContext(this);
 
   if (action.replug)
-    m_monitorManager.QueueReplug();
+    PrimaryHead().monitorManager.QueueReplug();
   else if (action.setMode)
     g_pipe.SetDisplayMode(
       action.mode.width, action.mode.height, action.mode.refresh100uHz);
@@ -474,14 +487,15 @@ void CDeviceContext::OnSwapChainReady()
 InteractionResult CDeviceContext::SetResolution(
   uint32_t width, uint32_t height)
 {
+  Head& head = PrimaryHead();
   const CDisplayConfiguration::ResolutionResult result =
-    m_displayConfiguration.SetResolution(
-      width, height, *m_transport);
+    head.displayConfiguration.SetResolution(
+      width, height, *head.transport);
 
   switch (result.status)
   {
     case CDisplayConfiguration::ResolutionStatus::SUCCESS:
-      m_monitorManager.RequestMode(result.mode);
+      head.monitorManager.RequestMode(result.mode);
       // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode
       // list, so depart and re-arrive the monitor to rebuild the topology.
       ReplugMonitor();
@@ -507,7 +521,8 @@ InteractionResult CDeviceContext::SetResolution(
 
 bool CDeviceContext::InitializeTransport()
 {
-  if (!m_transport)
+  Head& head = PrimaryHead();
+  if (!head.transport)
     return false;
 
   if (m_transportTimer)
@@ -540,7 +555,7 @@ bool CDeviceContext::InitializeTransport()
         }
 
         if (!context->QueueLocalRecovery(action))
-          context->m_transport->RecoveryStatus(
+          context->PrimaryHead().transport->RecoveryStatus(
             route, session, serial, active,
             ITransport::Recovery::FAILED, RPC_S_SERVER_UNAVAILABLE);
         return;
@@ -596,7 +611,7 @@ bool CDeviceContext::InitializeTransport()
           return;
       }
 
-      context->m_transport->RecoveryStatus(
+      context->PrimaryHead().transport->RecoveryStatus(
         route, session, serial, active, state, error);
     },
     this);
@@ -604,7 +619,7 @@ bool CDeviceContext::InitializeTransport()
 
   // Claim the pipe recovery channel before initializing the producer session
   // so no request cached by a prior device context can cross the handoff.
-  if (!m_transport->Initialize())
+  if (!head.transport->Initialize())
   {
     g_pipe.ClearRecoveryHandler(this);
     m_recoveryHandlerSet = false;
@@ -647,15 +662,17 @@ bool CDeviceContext::InitializeTransport()
 
 bool CDeviceContext::SetupTransport(size_t alignSize)
 {
+  Head& head = PrimaryHead();
+
   // Frame buffers cannot be allocated until the GPU-specific alignment is
   // known. The swap-chain path may call this again after setup completed.
-  if (!m_transport->Frames().GetMaxFrameSize())
+  if (!head.transport->Frames().GetMaxFrameSize())
   {
-    if (!InitializeTransport() || !m_transport->Setup(alignSize))
+    if (!InitializeTransport() || !head.transport->Setup(alignSize))
       return false;
   }
 
-  if (!m_transport->Input().Start(g_inputPipeServer))
+  if (!head.transport->Input().Start(g_inputPipeServer))
   {
     DEBUG_ERROR("Failed to start input transport");
     return false;
@@ -668,11 +685,13 @@ void CDeviceContext::TransportTimer()
 {
   ProcessLocalRecovery();
 
+  Head& head = PrimaryHead();
+
   // Monitor work is deferred off IddCx callback threads.
-  switch (m_monitorManager.TakeDeferredAction())
+  switch (head.monitorManager.TakeDeferredAction())
   {
     case CMonitorManager::DeferredAction::CREATE:
-      FinishInit(0);
+      FinishInit(head.index);
       return;
 
     case CMonitorManager::DeferredAction::REPLUG:
@@ -683,7 +702,7 @@ void CDeviceContext::TransportTimer()
       break;
   }
 
-  m_transport->Process(*this);
+  head.transport->Process(*this);
 }
 
 InteractionResult CDeviceContext::OnSetCursorPos(
@@ -793,6 +812,7 @@ void CDeviceContext::RemoveLocalRecovery(const RecoveryAction& action)
 void CDeviceContext::ProcessLocalRecovery()
 {
   std::lock_guard<std::mutex> transitionLock(m_recoveryTransitionMutex);
+  Head& head = PrimaryHead();
 
   RecoveryAction action;
   bool haveAction            = false;
@@ -834,13 +854,13 @@ void CDeviceContext::ProcessLocalRecovery()
   {
     DEBUG_WARN(
       "IDD Helper is unavailable; reconciling the active recovery topology");
-    if (!m_monitorManager.Disable())
+    if (!head.monitorManager.Disable())
     {
       CSRWExclusiveLock lock(m_localRecoveryLock);
       m_recoveryMonitorDisabled = false;
     }
     else if (reconcileAdapterReady)
-      m_transport->SyncRecovery();
+      head.transport->SyncRecovery();
     return;
   }
 
@@ -863,7 +883,7 @@ void CDeviceContext::ProcessLocalRecovery()
       adapterReady                = m_adapterReady;
     }
 
-    const bool disabled = m_monitorManager.Disable();
+    const bool disabled = head.monitorManager.Disable();
     if (!disabled)
     {
       CSRWExclusiveLock lock(m_localRecoveryLock);
@@ -871,9 +891,9 @@ void CDeviceContext::ProcessLocalRecovery()
       m_recoveryMonitorDisabled = oldMonitorDisabled;
     }
     if (disabled && adapterReady)
-      m_transport->SyncRecovery();
-    m_transport->RecoveryStatus(action.route, action.session, action.serial,
-      true, disabled ? ITransport::Recovery::ACTIVE :
+      head.transport->SyncRecovery();
+    head.transport->RecoveryStatus(action.route, action.session,
+      action.serial, true, disabled ? ITransport::Recovery::ACTIVE :
       ITransport::Recovery::FAILED,
       disabled ? ERROR_SUCCESS : ERROR_GEN_FAILURE);
     return;
@@ -891,14 +911,14 @@ void CDeviceContext::ProcessLocalRecovery()
   {
     DEBUG_WARN(
       "IDD Helper disconnected during recovery; cycling the virtual monitor");
-    if (!m_monitorManager.Disable())
+    if (!head.monitorManager.Disable())
     {
       {
         CSRWExclusiveLock lock(m_localRecoveryLock);
         m_recoveryMonitorDisabled = false;
       }
-      m_transport->RecoveryStatus(action.route, action.session, action.serial,
-        false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
+      head.transport->RecoveryStatus(action.route, action.session,
+        action.serial, false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
       return;
     }
   }
@@ -919,7 +939,7 @@ void CDeviceContext::ProcessLocalRecovery()
   }
 
   if (enable)
-    m_monitorManager.Enable();
+    head.monitorManager.Enable();
 
   if (waitArrival)
     return;
@@ -927,12 +947,13 @@ void CDeviceContext::ProcessLocalRecovery()
   // The normal monitor is already present. With no Helper there is no
   // user-session topology work to perform, so monitor presence is the local
   // completion boundary.
-  m_transport->RecoveryStatus(action.route, action.session, action.serial,
+  head.transport->RecoveryStatus(action.route, action.session, action.serial,
     false, ITransport::Recovery::NORMAL, ERROR_SUCCESS);
 }
 
 void CDeviceContext::CompleteRecoveryArrival(bool arrived)
 {
+  Head& head = PrimaryHead();
   RecoveryAction action;
   RecoveryAction latest;
   bool stale         = false;
@@ -1001,7 +1022,7 @@ void CDeviceContext::CompleteRecoveryArrival(bool arrived)
     // The expired/superseded NORMAL operation must not leave the IDD monitor
     // arrived while CPipe still retains the preceding ACTIVE topology. Return
     // to that stable local state before allowing newer work to proceed.
-    const bool disabled = m_monitorManager.Disable();
+    const bool disabled = head.monitorManager.Disable();
     {
       CSRWExclusiveLock lock(m_localRecoveryLock);
       m_recoveryActive          = true;
@@ -1018,7 +1039,7 @@ void CDeviceContext::CompleteRecoveryArrival(bool arrived)
 
   if (!arrived)
   {
-    const bool disabled = m_monitorManager.Disable();
+    const bool disabled = head.monitorManager.Disable();
     {
       CSRWExclusiveLock lock(m_localRecoveryLock);
       if (disabled)
@@ -1028,8 +1049,8 @@ void CDeviceContext::CompleteRecoveryArrival(bool arrived)
       }
     }
     transitionLock.unlock();
-    m_transport->RecoveryStatus(action.route, action.session, action.serial,
-      false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
+    head.transport->RecoveryStatus(action.route, action.session,
+      action.serial, false, ITransport::Recovery::FAILED, ERROR_GEN_FAILURE);
     return;
   }
 
@@ -1051,7 +1072,7 @@ void CDeviceContext::CompleteRecoveryArrival(bool arrived)
   if (dispatch == CPipeServer::RecoveryDispatch::SENT)
     return;
 
-  m_transport->RecoveryStatus(action.route, action.session, action.serial,
+  head.transport->RecoveryStatus(action.route, action.session, action.serial,
     false,
     (dispatch == CPipeServer::RecoveryDispatch::QUEUED ||
      dispatch == CPipeServer::RecoveryDispatch::UNAVAILABLE) ?

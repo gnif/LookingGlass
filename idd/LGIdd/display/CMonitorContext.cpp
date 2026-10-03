@@ -25,9 +25,10 @@
 #include "CDebug.h"
 
 CMonitorContext::CMonitorContext(
-    _In_ IDDCX_MONITOR monitor, CDeviceContext * device) :
+    _In_ IDDCX_MONITOR monitor, CDeviceContext * device, UINT head) :
   m_monitor(monitor),
-  m_devContext(device)
+  m_devContext(device),
+  m_head(head)
 {
 }
 
@@ -76,7 +77,7 @@ NTSTATUS CMonitorContext::AssignSwapChain(
   m_devContext->OnSwapChainAssigned();
   m_dx11Device = std::move(dx11Device);
   m_swapChain.reset(new CSwapChainProcessor(
-    this, assignmentGeneration, m_monitor, m_devContext, swapChain,
+    this, assignmentGeneration, m_monitor, m_devContext, m_head, swapChain,
     renderAdapter, m_dx11Device, newFrameEvent));
   if (!m_swapChain->Start())
   {
