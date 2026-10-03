@@ -27,6 +27,7 @@ author = 'Geoffrey McRae and the Looking Glass team'
 
 rst_prolog = """
 .. |license| replace:: GPLv2
+.. |debian_stable| replace:: trixie
 """
 
 # -- General configuration ---------------------------------------------------

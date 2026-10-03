@@ -90,9 +90,8 @@ protocol. Build Looking Glass with libdecor support:
 
    cmake -DENABLE_LIBDECOR=ON ../
 
-Install ``libdecor-0-dev`` first on Debian-based systems. Alternatively, hold
-the Super key and right-click the window to use the compositor's move and
-resize menu.
+Install ``libdecor-0-dev`` first. Alternatively, hold the Super key and 
+right-click the window to use the compositor's move and resize menu.
 
 .. _the_mouse_is_jumpy_slow_laggy_when_using_spice:
 
