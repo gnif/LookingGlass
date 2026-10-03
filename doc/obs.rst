@@ -18,7 +18,7 @@ connect.
 Build and install
 -----------------
 
-On Debian-based systems, install the OBS headers and the small set of build
+Install the OBS headers and the small set of build
 dependencies used by the plugin:
 
 .. code:: bash

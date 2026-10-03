@@ -9,7 +9,30 @@ compressed video over a network. The current IDD provides video and direct
 input through LGMP, while SPICE normally provides audio, clipboard and fallback
 services.
 
-The names used throughout this guide are:
+.. _documentation:
+
+Documentation
+-------------
+
+.. _docs_distro:
+
+Linux distribution
+~~~~~~~~~~~~~~~~~~
+
+The documentation is targeted at Debian users on the stable release channel
+(currently |debian_stable|). Newer unstable release channels and
+Debian-derivative distributions should also be well served, but some specifics
+may be different. Looking Glass is supported on any distribution that provides
+the :ref:`required dependencies <client_dependencies>` and meets the
+:ref:`minimum requirements <requirements>`, but specific package names within
+the documentation may not apply.
+
+.. _docs_terms:
+
+Terms
+~~~~~
+
+The terms used throughout the documentation are:
 
 Linux host
    The physical machine running KVM/QEMU and the Looking Glass Client.
