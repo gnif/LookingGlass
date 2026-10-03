@@ -23,6 +23,10 @@
 
 #include "interface/clipboard.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 bool clipboardFiles_init(void);
 void clipboardFiles_free(void);
 
@@ -81,6 +85,10 @@ bool clipboardFiles_testRemoteRead(uint64_t presentation,
 void clipboardFiles_testForceLocalEof(void);
 bool clipboardFiles_testLocalRequest(
     const LG_ClipboardFileRequest * request);
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif

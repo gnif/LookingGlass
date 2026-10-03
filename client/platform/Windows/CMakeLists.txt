@@ -3,6 +3,7 @@ project(client_platform_Windows LANGUAGES C CXX)
 
 add_library(client_platform_Windows STATIC
   clipboard_files.c
+  clipboard_files_win32.c
   config.c
   font.cpp
   input.c
@@ -16,6 +17,7 @@ target_link_libraries(client_platform_Windows
     ole32
     shell32
     shlwapi
+    user32
     uuid
 )
 

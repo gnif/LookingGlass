@@ -27,6 +27,7 @@ target_link_libraries(displayserver_Windows
   lg_common
   user32
   gdi32
+  ole32
 )
 
 if(ENABLE_EGL)

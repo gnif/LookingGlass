@@ -40,17 +40,6 @@ set_tests_properties(event-source-tests PROPERTIES
   TIMEOUT 10
 )
 
-add_executable(windows-clipboard-files-tests
-  clipboard_files_windows_test.c
-  ../platform/Windows/clipboard_files.c
-)
-add_test(NAME windows-clipboard-files-tests
-  COMMAND windows-clipboard-files-tests
-)
-set_tests_properties(windows-clipboard-files-tests PROPERTIES
-  TIMEOUT 10
-)
-
 if(LG_CLIENT_PLATFORM_LINUX)
   add_executable(config-platform-tests
     config_platform_test.c

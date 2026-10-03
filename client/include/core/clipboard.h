@@ -61,7 +61,7 @@ bool clipboard_requestCancel(LG_ClipboardRequest request,
 bool clipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque);
 
-/* File-dataset transport entry points used by clipboard_files.c. */
+/* File-dataset transport entry points used by platform clipboard backends. */
 bool clipboard_fileAcquire(uint64_t dataset, uint64_t acquisition);
 bool clipboard_fileAcquired(uint64_t dataset, uint64_t acquisition,
     LG_ClipboardFileError error);

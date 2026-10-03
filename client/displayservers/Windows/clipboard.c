@@ -29,9 +29,14 @@
 #include "common/debug.h"
 #include "common/windebug.h"
 #include "core/clipboard.h"
+#include "core/clipboard_files.h"
 #include "platform.h"
+#include "platform/windows/clipboard_files.h"
 
-#define WINDOWS_CB_OPEN_ATTEMPTS 8
+#define WINDOWS_CB_OPEN_ATTEMPTS     8
+#define WINDOWS_CB_RETRY_INTERVAL_MS 50
+#define WINDOWS_CB_RETRY_TIMEOUT_MS  5000
+#define WINDOWS_CB_RETRY_TIMER_ID    ((UINT_PTR)0x4C47)
 
 enum WindowsClipboardMessage
 {
@@ -45,6 +50,13 @@ enum WindowsClipboardOperationType
   WINDOWS_CB_OPERATION_RELEASE,
   WINDOWS_CB_OPERATION_REQUEST,
   WINDOWS_CB_OPERATION_DATA,
+};
+
+enum WindowsClipboardCaptureResult
+{
+  WINDOWS_CB_CAPTURE_RETRY,
+  WINDOWS_CB_CAPTURE_TYPES,
+  WINDOWS_CB_CAPTURE_FILES,
 };
 
 struct WindowsClipboardOperation
@@ -79,14 +91,22 @@ struct WindowsClipboardState
   UINT                               pngFormat;
   UINT                               jfifFormat;
   UINT                               jpegFormat;
+  IDataObject                      * remoteFiles;
   LG_ClipboardRequest                canceledRequest;
+  ULONGLONG                          retryDeadline;
+  DWORD                              retrySequence;
   bool                               listener;
   bool                               accepting;
+  bool                               oleInitialized;
+  bool                               applyingRemote;
+  bool                               pendingUpdate;
 };
 
 static SRWLOCK                      windowsCBQueueLock = SRWLOCK_INIT;
 static struct WindowsClipboardState windowsCB;
 static _Atomic(uint64_t)            windowsCBGeneration;
+
+static void updateLocalClipboard(void);
 
 static uint16_t readLE16(const uint8_t * data)
 {
@@ -557,6 +577,8 @@ static bool localTypeAvailable(LG_ClipboardData type)
           IsClipboardFormatAvailable(windowsCB.jpegFormat));
 
     case LG_CLIPBOARD_DATA_FILES:
+      return IsClipboardFormatAvailable(CF_HDROP);
+
     case LG_CLIPBOARD_DATA_NONE:
       return false;
   }
@@ -649,36 +671,294 @@ static bool readLocalClipboard(LG_ClipboardData type,
   return true;
 }
 
+static void releaseRemoteFilesReference(void)
+{
+  if (!windowsCB.remoteFiles)
+    return;
+
+  windowsCB.remoteFiles->lpVtbl->Release(windowsCB.remoteFiles);
+  windowsCB.remoteFiles = NULL;
+}
+
+static bool remoteFilesAreCurrent(void)
+{
+  return windowsCB.oleInitialized && windowsCB.remoteFiles &&
+    OleIsCurrentClipboard(windowsCB.remoteFiles) == S_OK;
+}
+
+static HRESULT setOleClipboard(IDataObject * object)
+{
+  HRESULT status = E_FAIL;
+  DWORD   delay  = 1;
+  // OleSetClipboard can synchronously dispatch a clipboard notification.
+  windowsCB.applyingRemote = true;
+  for (unsigned int attempt = 0;
+      attempt < WINDOWS_CB_OPEN_ATTEMPTS; ++attempt)
+  {
+    status = OleSetClipboard(object);
+    if (SUCCEEDED(status))
+      break;
+    if (attempt + 1U < WINDOWS_CB_OPEN_ATTEMPTS)
+    {
+      Sleep(delay);
+      delay *= 2U;
+    }
+  }
+  windowsCB.applyingRemote = false;
+  if (windowsCB.pendingUpdate && windowsCB.accepting && windowsCB.window)
+  {
+    windowsCB.pendingUpdate = false;
+    if (!PostMessageW(windowsCB.window, WM_CLIPBOARDUPDATE, 0, 0))
+      DEBUG_WINERROR("Failed to replay a Windows clipboard update",
+          GetLastError());
+  }
+  return status;
+}
+
+static bool clearRemoteFilesClipboard(void)
+{
+  if (!windowsCB.remoteFiles)
+    return true;
+
+  if (remoteFilesAreCurrent())
+  {
+    const HRESULT status = setOleClipboard(NULL);
+    if (FAILED(status))
+    {
+      DEBUG_WINERROR("Failed to clear the Windows file clipboard", status);
+      return false;
+    }
+  }
+
+  releaseRemoteFilesReference();
+  return true;
+}
+
+struct WindowsClipboardCapture
+{
+  LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
+  size_t           count;
+  uint32_t         mask;
+  uint8_t        * fileData;
+  size_t           fileSize;
+  HWND             owner;
+  DWORD            sequence;
+};
+
+static enum WindowsClipboardCaptureResult captureLocalClipboard(
+    HWND owner, DWORD sequence, struct WindowsClipboardCapture * capture)
+{
+  memset(capture, 0, sizeof(*capture));
+  // Explorer can still own the clipboard when WM_CLIPBOARDUPDATE arrives.
+  // Acquire it before probing formats so that generation is retried instead
+  // of being recorded as an empty clipboard.
+  if (!openClipboard())
+    return WINDOWS_CB_CAPTURE_RETRY;
+
+  if (owner != GetClipboardOwner() ||
+      sequence != GetClipboardSequenceNumber())
+  {
+    CloseClipboard();
+    return WINDOWS_CB_CAPTURE_RETRY;
+  }
+
+  const bool files  = localTypeAvailable(LG_CLIPBOARD_DATA_FILES);
+  bool       copied = false;
+  if (files)
+  {
+    HANDLE handle = GetClipboardData(CF_HDROP);
+    copied = handle && copyGlobalData(handle,
+        &capture->fileData, &capture->fileSize);
+  }
+  else
+  {
+    for (LG_ClipboardData type = LG_CLIPBOARD_DATA_TEXT;
+        type < LG_CLIPBOARD_DATA_FILES; ++type)
+    {
+      if (!localTypeAvailable(type))
+        continue;
+
+      capture->types[capture->count++] = type;
+      capture->mask                   |= UINT32_C(1) << type;
+    }
+  }
+
+  capture->owner              = GetClipboardOwner();
+  capture->sequence           = GetClipboardSequenceNumber();
+  const bool sequenceChanged  = capture->sequence != sequence;
+  const BOOL closed           = CloseClipboard();
+  const DWORD closeError      = closed ? ERROR_SUCCESS : GetLastError();
+  const HWND currentOwner     = GetClipboardOwner();
+  const DWORD currentSequence = GetClipboardSequenceNumber();
+  const bool stable           = closed && capture->owner == currentOwner &&
+    capture->sequence == currentSequence && capture->owner == owner &&
+    (!sequenceChanged || (files && owner));
+  if (!stable || (files && !copied))
+  {
+    if (!closed)
+      DEBUG_WINERROR("Failed to close the Windows clipboard", closeError);
+    free(capture->fileData);
+    capture->fileData = NULL;
+    return WINDOWS_CB_CAPTURE_RETRY;
+  }
+
+  return files ? WINDOWS_CB_CAPTURE_FILES : WINDOWS_CB_CAPTURE_TYPES;
+}
+
+static void clearLocalRetry(void)
+{
+  if (windowsCB.window && windowsCB.retryDeadline)
+    KillTimer(windowsCB.window, WINDOWS_CB_RETRY_TIMER_ID);
+  windowsCB.retryDeadline = 0;
+  windowsCB.retrySequence = 0;
+}
+
+static void expireLocalRetry(DWORD sequence)
+{
+  clearLocalRetry();
+  if (!windowsCB.accepting || remoteFilesAreCurrent())
+    return;
+  if (sequence != GetClipboardSequenceNumber())
+  {
+    PostMessageW(windowsCB.window, WM_CLIPBOARDUPDATE, 0, 0);
+    return;
+  }
+
+  windowsCB.localOwner    = GetClipboardOwner();
+  windowsCB.localSequence = sequence;
+  windowsCB.localTypes    = 0;
+  clipboardFiles_clearLocal();
+  clipboard_release();
+}
+
+static void deferLocalClipboard(DWORD sequence)
+{
+  const ULONGLONG now = GetTickCount64();
+  if (!windowsCB.retryDeadline || windowsCB.retrySequence != sequence)
+  {
+    clearLocalRetry();
+    windowsCB.retrySequence = sequence;
+    windowsCB.retryDeadline = now + WINDOWS_CB_RETRY_TIMEOUT_MS;
+  }
+
+  if (now < windowsCB.retryDeadline &&
+      SetTimer(windowsCB.window, WINDOWS_CB_RETRY_TIMER_ID,
+        WINDOWS_CB_RETRY_INTERVAL_MS, NULL))
+    return;
+
+  if (now >= windowsCB.retryDeadline)
+    DEBUG_WARN("Timed out waiting for the Windows clipboard");
+  else
+    DEBUG_WINERROR("Failed to schedule a Windows clipboard retry",
+        GetLastError());
+  expireLocalRetry(sequence);
+}
+
+static void retryLocalClipboard(void)
+{
+  if (windowsCB.window)
+    KillTimer(windowsCB.window, WINDOWS_CB_RETRY_TIMER_ID);
+  if (!windowsCB.retryDeadline)
+    return;
+  if (!windowsCB.accepting || remoteFilesAreCurrent())
+  {
+    clearLocalRetry();
+    return;
+  }
+
+  const DWORD sequence = GetClipboardSequenceNumber();
+  if (sequence != windowsCB.retrySequence)
+  {
+    clearLocalRetry();
+    PostMessageW(windowsCB.window, WM_CLIPBOARDUPDATE, 0, 0);
+    return;
+  }
+  if (GetTickCount64() >= windowsCB.retryDeadline)
+  {
+    DEBUG_WARN("Timed out waiting for the Windows clipboard");
+    expireLocalRetry(sequence);
+    return;
+  }
+
+  updateLocalClipboard();
+}
+
 static void updateLocalClipboard(void)
 {
+  if (windowsCB.applyingRemote)
+  {
+    windowsCB.pendingUpdate = true;
+    return;
+  }
+
   const HWND  owner    = GetClipboardOwner();
   const DWORD sequence = GetClipboardSequenceNumber();
+  if (remoteFilesAreCurrent())
+  {
+    clearLocalRetry();
+    return;
+  }
+  releaseRemoteFilesReference();
   if (owner == windowsCB.window)
     return;
   if (owner == windowsCB.localOwner &&
       sequence == windowsCB.localSequence)
     return;
 
-  LG_ClipboardData types[LG_CLIPBOARD_DATA_NONE];
-  size_t           count = 0;
-  uint32_t         mask  = 0;
-  for (LG_ClipboardData type = LG_CLIPBOARD_DATA_TEXT;
-      type < LG_CLIPBOARD_DATA_FILES; ++type)
-  {
-    if (!localTypeAvailable(type))
-      continue;
+  if (!windowsCB.retryDeadline || windowsCB.retrySequence != sequence)
+    atomic_fetch_add_explicit(
+        &windowsCBGeneration, 1, memory_order_acq_rel);
 
-    types[count++] = type;
-    mask          |= UINT32_C(1) << type;
+  struct WindowsClipboardCapture capture;
+  const enum WindowsClipboardCaptureResult result =
+    captureLocalClipboard(owner, sequence, &capture);
+  if (result == WINDOWS_CB_CAPTURE_RETRY)
+  {
+    if (owner != GetClipboardOwner() ||
+        sequence != GetClipboardSequenceNumber())
+    {
+      clearLocalRetry();
+      PostMessageW(windowsCB.window, WM_CLIPBOARDUPDATE, 0, 0);
+    }
+    else
+      deferLocalClipboard(sequence);
+    return;
   }
 
-  windowsCB.localOwner    = owner;
-  windowsCB.localSequence = sequence;
-  windowsCB.localTypes    = mask;
-  atomic_fetch_add_explicit(
-      &windowsCBGeneration, 1, memory_order_acq_rel);
-  if (count)
-    clipboard_notifyTypes(types, count);
+  if (result == WINDOWS_CB_CAPTURE_FILES)
+  {
+    HGLOBAL duplicate = makeGlobalData(capture.fileData, capture.fileSize);
+    free(capture.fileData);
+    if (!duplicate)
+    {
+      deferLocalClipboard(capture.sequence);
+      return;
+    }
+
+    const bool published = windowsClipboardFiles_setLocalDrop(
+        (HDROP)duplicate);
+    GlobalFree(duplicate);
+    if (!published)
+    {
+      DEBUG_WARN("Failed to capture the Windows file clipboard");
+      deferLocalClipboard(capture.sequence);
+      return;
+    }
+
+    clearLocalRetry();
+    windowsCB.localOwner    = capture.owner;
+    windowsCB.localSequence = capture.sequence;
+    windowsCB.localTypes    = UINT32_C(1) << LG_CLIPBOARD_DATA_FILES;
+    return;
+  }
+
+  clearLocalRetry();
+  windowsCB.localOwner    = capture.owner;
+  windowsCB.localSequence = capture.sequence;
+  windowsCB.localTypes    = capture.mask;
+  clipboardFiles_clearLocal();
+  if (capture.count)
+    clipboard_notifyTypes(capture.types, capture.count);
   else
     clipboard_release();
 }
@@ -827,7 +1107,8 @@ static void handleRemoteData(
   }
 
   if (operation->generation != atomic_load_explicit(
-        &windowsCBGeneration, memory_order_acquire) || !openClipboard())
+        &windowsCBGeneration, memory_order_acquire) ||
+      !clearRemoteFilesClipboard() || !openClipboard())
     goto fail;
   if (operation->generation != atomic_load_explicit(
         &windowsCBGeneration, memory_order_acquire) || !EmptyClipboard())
@@ -835,7 +1116,6 @@ static void handleRemoteData(
     CloseClipboard();
     goto fail;
   }
-
   bool published = false;
   for (size_t i = 0; i < count; ++i)
   {
@@ -853,6 +1133,7 @@ static void handleRemoteData(
           GetLastError());
   }
   CloseClipboard();
+  clipboardFiles_clearLocal();
   windowsCB.localOwner    = GetClipboardOwner();
   windowsCB.localSequence = GetClipboardSequenceNumber();
   windowsCB.localTypes    = 0;
@@ -865,12 +1146,96 @@ fail:
       GlobalFree(handles[i]);
 }
 
+static void handleRemoteFiles(
+    const struct WindowsClipboardOperation * operation)
+{
+  if (!windowsCB.oleInitialized)
+  {
+    DEBUG_WARN("OLE is unavailable; cannot publish guest clipboard files");
+    return;
+  }
+
+  const uint64_t presentation =
+    clipboardFiles_remotePresentationAcquire();
+  if (!presentation)
+  {
+    DEBUG_WARN("Failed to acquire the guest clipboard file offer");
+    return;
+  }
+
+  IDataObject * object = NULL;
+  if (!windowsClipboardFiles_createRemoteDataObject(
+        presentation, &object) || !object)
+  {
+    clipboardFiles_remotePresentationRelease(presentation);
+    DEBUG_WARN("Failed to create the guest clipboard file object");
+    return;
+  }
+
+  if (operation->generation != atomic_load_explicit(
+        &windowsCBGeneration, memory_order_acquire))
+  {
+    object->lpVtbl->Release(object);
+    return;
+  }
+
+  const HRESULT status = setOleClipboard(object);
+  if (FAILED(status))
+  {
+    DEBUG_WINERROR("Failed to publish guest clipboard files", status);
+    object->lpVtbl->Release(object);
+    return;
+  }
+
+  if (operation->generation != atomic_load_explicit(
+        &windowsCBGeneration, memory_order_acquire))
+  {
+    const HRESULT clearStatus = OleIsCurrentClipboard(object) == S_OK ?
+      setOleClipboard(NULL) : S_OK;
+    releaseRemoteFilesReference();
+    if (FAILED(clearStatus) && OleIsCurrentClipboard(object) == S_OK)
+    {
+      DEBUG_WINERROR("Failed to withdraw stale guest clipboard files",
+          clearStatus);
+      windowsCB.remoteFiles = object;
+    }
+    else
+      object->lpVtbl->Release(object);
+    return;
+  }
+
+  releaseRemoteFilesReference();
+  windowsCB.remoteFiles   = object;
+  windowsCB.localOwner    = GetClipboardOwner();
+  windowsCB.localSequence = GetClipboardSequenceNumber();
+  windowsCB.localTypes    = 0;
+  clipboardFiles_clearLocal();
+  clipboardFiles_remotePresentationDelivered(presentation);
+}
+
 static void handleRemoteRelease(
     const struct WindowsClipboardOperation * operation)
 {
   if (operation->generation != atomic_load_explicit(
-        &windowsCBGeneration, memory_order_acquire) ||
-      GetClipboardOwner() != windowsCB.window || !openClipboard())
+        &windowsCBGeneration, memory_order_acquire))
+    return;
+
+  if (windowsCB.remoteFiles)
+  {
+    const bool current = remoteFilesAreCurrent();
+    if (!clearRemoteFilesClipboard())
+      return;
+    if (current)
+    {
+      windowsCB.localOwner    = GetClipboardOwner();
+      windowsCB.localSequence = GetClipboardSequenceNumber();
+      windowsCB.localTypes    = 0;
+      clipboardFiles_clearLocal();
+    }
+    return;
+  }
+
+  if (GetClipboardOwner() != windowsCB.window || !openClipboard())
     return;
 
   bool released = false;
@@ -884,6 +1249,7 @@ static void handleRemoteRelease(
     windowsCB.localOwner    = GetClipboardOwner();
     windowsCB.localSequence = GetClipboardSequenceNumber();
     windowsCB.localTypes    = 0;
+    clipboardFiles_clearLocal();
   }
 }
 
@@ -997,7 +1363,7 @@ static void handleRemoteNotice(
     return;
   if (operation->dataType == LG_CLIPBOARD_DATA_FILES)
   {
-    handleRemoteRelease(operation);
+    handleRemoteFiles(operation);
     return;
   }
   if (operation->dataType >= LG_CLIPBOARD_DATA_NONE)
@@ -1052,6 +1418,13 @@ static bool eventInit(HWND window)
   if (!window)
     return false;
 
+  const HRESULT oleStatus = OleInitialize(NULL);
+  if (SUCCEEDED(oleStatus))
+    windowsCB.oleInitialized = true;
+  else
+    DEBUG_WINERROR("Failed to initialize OLE for clipboard files",
+        oleStatus);
+
   windowsCB.pngFormat  = RegisterClipboardFormatW(L"PNG");
   windowsCB.jfifFormat = RegisterClipboardFormatW(L"JFIF");
   windowsCB.jpegFormat = RegisterClipboardFormatW(L"JPEG");
@@ -1060,6 +1433,11 @@ static bool eventInit(HWND window)
   {
     DEBUG_WINERROR("Failed to register Windows clipboard formats",
         GetLastError());
+    if (windowsCB.oleInitialized)
+    {
+      OleUninitialize();
+      windowsCB.oleInitialized = false;
+    }
     return false;
   }
 
@@ -1067,6 +1445,11 @@ static bool eventInit(HWND window)
   {
     DEBUG_WINERROR("Failed to register the Windows clipboard listener",
         GetLastError());
+    if (windowsCB.oleInitialized)
+    {
+      OleUninitialize();
+      windowsCB.oleInitialized = false;
+    }
     return false;
   }
 
@@ -1083,7 +1466,6 @@ static bool eventInit(HWND window)
 bool windowsCBHandleMessage(HWND window, UINT message,
     WPARAM wParam, LPARAM lParam, LRESULT * result)
 {
-  (void)wParam;
   (void)lParam;
 
   switch (message)
@@ -1102,6 +1484,13 @@ bool windowsCBHandleMessage(HWND window, UINT message,
         updateLocalClipboard();
       *result = 0;
       return true;
+
+    case WM_TIMER:
+      if ((UINT_PTR)wParam != WINDOWS_CB_RETRY_TIMER_ID)
+        return false;
+      retryLocalClipboard();
+      *result = 0;
+      return true;
   }
 
   return false;
@@ -1113,6 +1502,7 @@ void windowsCBEventShutdown(void)
   bool                               listener;
   struct WindowsClipboardOperation * operations;
 
+  clearLocalRetry();
   AcquireSRWLockExclusive(&windowsCBQueueLock);
   window              = windowsCB.window;
   listener            = windowsCB.listener;
@@ -1129,6 +1519,13 @@ void windowsCBEventShutdown(void)
   if (listener && window && !RemoveClipboardFormatListener(window))
     DEBUG_WINERROR("Failed to remove the Windows clipboard listener",
         GetLastError());
+  if (!clearRemoteFilesClipboard())
+    releaseRemoteFilesReference();
+  if (windowsCB.oleInitialized)
+  {
+    OleUninitialize();
+    windowsCB.oleInitialized = false;
+  }
   freeOperations(operations);
 }
 
