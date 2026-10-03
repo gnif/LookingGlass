@@ -39,12 +39,13 @@ enum TransportService : uint32_t
 
 struct TransportInstance
 {
-  BackendId   id       = 0;
+  BackendId   id        = 0;
   std::wstring kind;
-  bool         enabled  = true;
-  bool         required = false;
-  uint32_t     services = TRANSPORT_SERVICE_ALL;
-  int32_t      priority = 0;
+  bool         enabled   = true;
+  bool         required  = false;
+  uint32_t     services  = TRANSPORT_SERVICE_ALL;
+  int32_t      priority  = 0;
+  unsigned     connector = 0;
   std::wstring settings;
 };
 
@@ -74,6 +75,7 @@ bool ParseTransportInstances(const std::vector<std::wstring>& entries,
 bool ResolveTransportInstances(const TransportInstances& configured,
   const TransportKind * kinds, unsigned kindCount,
   ResolvedTransportInstances& resolved, bool& usedDefaults);
+unsigned TransportConnectorCount(const ResolvedTransportInstances& resolved);
 
 bool GetTransportSetting(const std::wstring& settings, const wchar_t * key,
   std::wstring& value);

@@ -35,7 +35,7 @@ CMonitorContext::CMonitorContext(
 CMonitorContext::~CMonitorContext()
 {
   UnassignSwapChain();
-  m_devContext->OnMonitorDestroyed(m_monitor);
+  m_devContext->OnMonitorDestroyed(m_head, m_monitor);
 }
 
 NTSTATUS CMonitorContext::AssignSwapChain(
@@ -74,7 +74,7 @@ NTSTATUS CMonitorContext::AssignSwapChain(
   // Publish the assignment atomically with starting its worker. An unassign
   // now blocks on m_lock until m_swapChain exists, at which point it can
   // signal and join the processor normally.
-  m_devContext->OnSwapChainAssigned();
+  m_devContext->OnSwapChainAssigned(m_head);
   m_dx11Device = std::move(dx11Device);
   m_swapChain.reset(new CSwapChainProcessor(
     this, assignmentGeneration, m_monitor, m_devContext, m_head, swapChain,
@@ -86,7 +86,7 @@ NTSTATUS CMonitorContext::AssignSwapChain(
     lock.Unlock();
     processor.reset();
     dx11Device.reset();
-    m_devContext->OnSwapChainReleased();
+    m_devContext->OnSwapChainReleased(m_head);
     return STATUS_GRAPHICS_INDIRECT_DISPLAY_ABANDON_SWAPCHAIN;
   }
   return STATUS_SUCCESS;
@@ -117,7 +117,7 @@ void CMonitorContext::DetachSwapChain()
   dx11Device.reset();
 
   if (hadSwapChain)
-    m_devContext->OnSwapChainReleased();
+    m_devContext->OnSwapChainReleased(m_head);
 }
 
 void CMonitorContext::UnassignSwapChain()

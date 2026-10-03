@@ -147,7 +147,7 @@ bool CSwapChainProcessor::InitializePipeline()
     if (result == CD3D12Device::FAILURE)
       return false;
 
-    if (!m_devContext->SetupTransport(alignSize))
+    if (!m_devContext->SetupTransport(m_head, alignSize))
     {
       DEBUG_ERROR("Transport setup failed");
       return false;
@@ -353,7 +353,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
 
   // The replacement swap chain is fully initialized and no frame has been
   // acquired yet, so a coalesced follow-up replug may now proceed safely.
-  m_devContext->OnSwapChainReady();
+  m_devContext->OnSwapChainReady(m_head);
 
   // postpone sending this to ensure we dont spam messages if we end up in a
   // restart loop while waiting for a valid configuration

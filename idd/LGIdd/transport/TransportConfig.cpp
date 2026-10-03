@@ -29,13 +29,14 @@ namespace
 {
   enum Field : unsigned
   {
-    FIELD_ID       = 1U << 0,
-    FIELD_KIND     = 1U << 1,
-    FIELD_ENABLED  = 1U << 2,
-    FIELD_REQUIRED = 1U << 3,
-    FIELD_SERVICES = 1U << 4,
-    FIELD_PRIORITY = 1U << 5,
-    FIELD_SETTINGS = 1U << 6,
+    FIELD_ID        = 1U << 0,
+    FIELD_KIND      = 1U << 1,
+    FIELD_ENABLED   = 1U << 2,
+    FIELD_REQUIRED  = 1U << 3,
+    FIELD_SERVICES  = 1U << 4,
+    FIELD_PRIORITY  = 1U << 5,
+    FIELD_SETTINGS  = 1U << 6,
+    FIELD_CONNECTOR = 1U << 7,
   };
 
   std::wstring Trim(const std::wstring& value)
@@ -102,6 +103,20 @@ namespace
         parsed > INT32_MAX)
       return false;
     result = static_cast<int32_t>(parsed);
+    return true;
+  }
+
+  bool ParseConnector(const std::wstring& value, unsigned& result)
+  {
+    if (value.empty() || value[0] == L'-')
+      return false;
+
+    wchar_t * end = nullptr;
+    errno = 0;
+    const unsigned long long parsed = wcstoull(value.c_str(), &end, 10);
+    if (errno == ERANGE || !end || *end || parsed >= TRANSPORT_MAX_INSTANCES)
+      return false;
+    result = static_cast<unsigned>(parsed);
     return true;
   }
 
@@ -200,6 +215,11 @@ namespace
       field = FIELD_PRIORITY;
       valid = ParsePriority(Trim(value), instance.priority);
     }
+    else if (Equal(key, L"connector"))
+    {
+      field = FIELD_CONNECTOR;
+      valid = ParseConnector(Trim(value), instance.connector);
+    }
 
     if (!field || (fields & field) || !valid)
       return false;
@@ -268,11 +288,19 @@ namespace
       return false;
 
     ResolvedTransportInstances result;
-    int primary = -1;
+    std::vector<int> primary(TRANSPORT_MAX_INSTANCES, -1);
+    unsigned connectors = 0;
     for (const TransportInstance& instance : instances)
     {
       if (!instance.id || instance.kind.empty() ||
-          (instance.services & ~TRANSPORT_SERVICE_ALL))
+          (instance.services & ~TRANSPORT_SERVICE_ALL) ||
+          instance.connector >= TRANSPORT_MAX_INSTANCES)
+        return false;
+
+      // Input and the clipboard are delivered through the primary monitor's
+      // transport, so other connectors carry only frames and control.
+      if (instance.connector && (instance.services &
+          ~(TRANSPORT_SERVICE_FRAME | TRANSPORT_SERVICE_CONTROL)))
         return false;
 
       for (const TransportInstance& other : instances)
@@ -287,7 +315,8 @@ namespace
 
       unsigned active = 0;
       for (const ResolvedTransportInstance& existing : result)
-        if (existing.kindIndex == static_cast<unsigned>(kindIndex))
+        if (existing.kindIndex == static_cast<unsigned>(kindIndex) &&
+            existing.config.connector == instance.connector)
           ++active;
       if (active == kinds[kindIndex].activeLimit ||
           result.size() == TRANSPORT_MAX_INSTANCES)
@@ -296,17 +325,25 @@ namespace
       ResolvedTransportInstance selected;
       selected.config    = instance;
       selected.kindIndex = static_cast<unsigned>(kindIndex);
+      int& connectorPrimary = primary[instance.connector];
       if (instance.required &&
           (instance.services & TRANSPORT_SERVICE_FRAME) &&
-          (primary < 0 || instance.priority >
-            result[primary].config.priority))
-        primary = static_cast<int>(result.size());
+          (connectorPrimary < 0 || instance.priority >
+            result[connectorPrimary].config.priority))
+        connectorPrimary = static_cast<int>(result.size());
+      if (instance.connector >= connectors)
+        connectors = instance.connector + 1;
       result.push_back(selected);
     }
 
-    if (primary < 0)
+    if (!connectors)
       return false;
-    result[primary].primary = true;
+    for (unsigned connector = 0; connector < connectors; ++connector)
+    {
+      if (primary[connector] < 0)
+        return false;
+      result[primary[connector]].primary = true;
+    }
     resolved.swap(result);
     return true;
   }
@@ -372,6 +409,15 @@ bool ResolveTransportInstances(const TransportInstances& configured,
 
   resolved.clear();
   return false;
+}
+
+unsigned TransportConnectorCount(const ResolvedTransportInstances& resolved)
+{
+  unsigned count = 0;
+  for (const ResolvedTransportInstance& instance : resolved)
+    if (instance.config.connector >= count)
+      count = instance.config.connector + 1;
+  return count;
 }
 
 bool GetTransportSetting(const std::wstring& settings, const wchar_t * key,

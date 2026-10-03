@@ -898,6 +898,8 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
     paths.resize(pathCount);
     modes.resize(modeCount);
 
+    std::vector<DISPLAYCONFIG_PATH_INFO> lgPaths;
+    std::vector<DISPLAYCONFIG_MODE_INFO> lgModes;
     for (size_t i = 0; i < paths.size(); ++i)
     {
       DISPLAYCONFIG_SOURCE_DEVICE_NAME sourceName = {};
@@ -910,8 +912,12 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
       if (result != ERROR_SUCCESS)
         continue;
 
-      if (_tcsicmp(sourceName.viewGdiDeviceName,
-        displays[lgIndex].device.DeviceName) != 0)
+      bool lg = false;
+      for (const DisplayState& display : displays)
+        if (display.isLG && _tcsicmp(sourceName.viewGdiDeviceName,
+            display.device.DeviceName) == 0)
+          lg = true;
+      if (!lg)
         continue;
 
       const UINT32 sourceModeIndex = paths[i].sourceInfo.modeInfoIdx;
@@ -931,15 +937,30 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
       }
 
       DISPLAYCONFIG_PATH_INFO path = paths[i];
-      DISPLAYCONFIG_MODE_INFO selectedModes[2] = {
-        modes[sourceModeIndex], modes[targetModeIndex]
-      };
-
-      selectedModes[0].sourceMode.position.x = 0;
-      selectedModes[0].sourceMode.position.y = 0;
-      path.sourceInfo.modeInfoIdx = 0;
-      path.targetInfo.modeInfoIdx = 1;
+      path.sourceInfo.modeInfoIdx = static_cast<UINT32>(lgModes.size());
+      path.targetInfo.modeInfoIdx = static_cast<UINT32>(lgModes.size() + 1);
       path.flags |= DISPLAYCONFIG_PATH_ACTIVE;
+      lgModes.push_back(modes[sourceModeIndex]);
+      lgModes.push_back(modes[targetModeIndex]);
+      lgPaths.push_back(path);
+    }
+
+    if (!lgPaths.empty())
+    {
+      POINTL origin = lgModes[0].sourceMode.position;
+      for (size_t i = 2; i < lgModes.size(); i += 2)
+      {
+        const POINTL& position = lgModes[i].sourceMode.position;
+        if (position.x < origin.x)
+          origin.x = position.x;
+        if (position.y < origin.y)
+          origin.y = position.y;
+      }
+      for (size_t i = 0; i < lgModes.size(); i += 2)
+      {
+        lgModes[i].sourceMode.position.x -= origin.x;
+        lgModes[i].sourceMode.position.y -= origin.y;
+      }
 
       // Keep a bootable physical-display topology in the persistence
       // database. Persisting an LG-only topology creates a dependency cycle
@@ -947,7 +968,8 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
       // initialization while the saved topology waits for this IDD adapter.
       // The helper reapplies this temporary topology on startup, display
       // changes and periodically, so it remains enforced for the session.
-      result = SetDisplayConfig(1, &path, 2, selectedModes,
+      result = SetDisplayConfig(static_cast<UINT32>(lgPaths.size()),
+        lgPaths.data(), static_cast<UINT32>(lgModes.size()), lgModes.data(),
         SDC_APPLY | SDC_USE_SUPPLIED_DISPLAY_CONFIG | SDC_ALLOW_CHANGES);
       if (result != ERROR_SUCCESS)
       {
@@ -959,8 +981,10 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
         return false;
       }
 
-      if (logResult)
+      if (logResult && lgPaths.size() == 1)
         DEBUG_INFO("Looking Glass display set as the only active display");
+      else if (logResult)
+        DEBUG_INFO("Looking Glass displays set as the only active displays");
       return true;
     }
 

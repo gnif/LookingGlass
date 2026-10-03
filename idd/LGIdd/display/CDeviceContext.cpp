@@ -36,8 +36,9 @@
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
-CDeviceContext::Head::Head(UINT connectorIndex, CSettings& settings) :
-  transport(CreateTransport()),
+CDeviceContext::Head::Head(UINT connectorIndex,
+  std::unique_ptr<CTransportManager> manager, CSettings& settings) :
+  transport(std::move(manager)),
   displayConfiguration(settings),
   index(connectorIndex)
 {
@@ -46,9 +47,20 @@ CDeviceContext::Head::Head(UINT connectorIndex, CSettings& settings) :
 CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
   m_wdfDevice(wdfDevice)
 {
-  // The adapter exposes a single connector, so there is exactly one head and
-  // its index is the connector the monitor is created on.
-  m_heads.emplace_back(std::unique_ptr<Head>(new Head(0, g_settings)));
+  // Every configured connector is a head, and its index is the connector the
+  // monitor is created on.
+  ResolvedTransportInstances resolved;
+  if (!ResolveTransports(resolved))
+  {
+    m_heads.emplace_back(std::unique_ptr<Head>(
+      new Head(0, std::unique_ptr<CTransportManager>(), g_settings)));
+    return;
+  }
+
+  const unsigned connectors = TransportConnectorCount(resolved);
+  for (unsigned i = 0; i < connectors; ++i)
+    m_heads.emplace_back(std::unique_ptr<Head>(
+      new Head(i, CreateTransport(resolved, i), g_settings)));
 }
 
 CDeviceContext::~CDeviceContext()
@@ -73,9 +85,9 @@ CDeviceContext::~CDeviceContext()
     m_transportTimer = nullptr;
   }
 
-  Head& head = PrimaryHead();
-  if (head.transport)
-    head.transport->Stop();
+  for (auto& head : m_heads)
+    if (head->transport)
+      head->transport->Stop();
 }
 
 void CDeviceContext::QueryIddCxCapabilities()
@@ -168,7 +180,6 @@ void CDeviceContext::StopInitRetry()
 void CDeviceContext::InitAdapter()
 {
   DEBUG_TRACE("InitAdapter");
-  Head& head = PrimaryHead();
 
   // The adapter only needs to be created once. D0Entry and the retry timer can
   // both land here, so guard against re-entrancy and repeated creation.
@@ -188,16 +199,19 @@ void CDeviceContext::InitAdapter()
   // At boot the selected transport may not be available yet. Rather than
   // silently abandoning the adapter (leaving the device loaded but with no
   // monitor), retry from a timer until it can be opened.
-  if (!m_transportOpened)
+  for (auto& head : m_heads)
   {
-    if (!head.transport)
+    if (head->transportOpened)
+      continue;
+
+    if (!head->transport)
     {
       DEBUG_ERROR("Failed to create the frame transport");
       Atomic::Store(m_initInProgress, 0);
       return;
     }
 
-    const ITransport::OpenResult result = head.transport->Open();
+    const ITransport::OpenResult result = head->transport->Open();
     if (result != ITransport::OpenResult::SUCCESS)
     {
       if (result == ITransport::OpenResult::RETRY)
@@ -210,7 +224,7 @@ void CDeviceContext::InitAdapter()
       Atomic::Store(m_initInProgress, 0);
       return;
     }
-    m_transportOpened = true;
+    head->transportOpened = true;
   }
 
   // Select the render adapter before advertising capabilities. If no hardware
@@ -283,16 +297,18 @@ void CDeviceContext::InitAdapter()
     return;
   }
   DEBUG_TRACE("Loading configured display modes");
-  if (!head.displayConfiguration.Load(*head.transport))
-  {
-    Atomic::Store(m_initInProgress, 0);
-    return;
-  }
+  for (auto& head : m_heads)
+    if (!head->displayConfiguration.Load(*head->transport))
+    {
+      Atomic::Store(m_initInProgress, 0);
+      return;
+    }
   DEBUG_TRACE("Initializing monitor EDID");
-  head.displayConfiguration.InitializeEdid(CanProcessFP16());
+  for (auto& head : m_heads)
+    head->displayConfiguration.InitializeEdid(CanProcessFP16());
 
   const CDisplayConfiguration::Description description =
-    head.displayConfiguration.GetDescription();
+    PrimaryHead().displayConfiguration.GetDescription();
   DEBUG_INFO("Initializing adapter with %llu modes and a %u-byte EDID",
     (unsigned long long)description.modeCount,
     (UINT)description.edid.size());
@@ -312,7 +328,7 @@ void CDeviceContext::InitAdapter()
     caps.Flags |= IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16;
 #endif
 
-  caps.MaxMonitorsSupported            = 1;
+  caps.MaxMonitorsSupported            = (UINT)m_heads.size();
   caps.StaticDesktopReencodeFrameCount = 1;
 
   caps.EndPointDiagnostics.Size             = sizeof(caps.EndPointDiagnostics);
@@ -349,7 +365,8 @@ void CDeviceContext::InitAdapter()
     m_canProcessFP16 = false;
     // The monitor has not been created yet, so replace the provisional HDR
     // EDID before Windows can observe it.
-    head.displayConfiguration.RebuildEdid(false);
+    for (auto& head : m_heads)
+      head->displayConfiguration.RebuildEdid(false);
     caps.Flags = (IDDCX_ADAPTER_FLAGS)(caps.Flags & ~IDDCX_ADAPTER_FLAGS_CAN_PROCESS_FP16);
     ZeroMemory(&initOut, sizeof(initOut));
     status = IddCxAdapterInitAsync(&init, &initOut);
@@ -405,12 +422,8 @@ void CDeviceContext::FinishAdapterInit(UINT connectorIndex)
   }
 
   if (!monitorDisabled)
-  {
     FinishInit(connectorIndex);
-    return;
-  }
-
-  if (arrivalPending)
+  else if (arrivalPending)
     PrimaryHead().monitorManager.Enable();
   else
   {
@@ -420,85 +433,91 @@ void CDeviceContext::FinishAdapterInit(UINT connectorIndex)
     // arrival that ACTIVE deliberately suppressed.
     PrimaryHead().transport->SyncRecovery();
   }
+
+  for (auto& head : m_heads)
+    if (head->index != connectorIndex)
+      FinishInit(head->index);
 }
 
 void CDeviceContext::FinishInit(UINT connectorIndex)
 {
-  Head& head = PrimaryHead();
+  Head& head = HeadAt(connectorIndex);
   CDisplayConfiguration::Description description =
     head.displayConfiguration.GetDescription();
   const bool arrived = head.monitorManager.Create(
-    connectorIndex, m_adapter, std::move(description.edid), this);
+    head.index, m_adapter, std::move(description.edid), this);
   if (arrived)
     head.transport->SyncRecovery();
-  CompleteRecoveryArrival(arrived);
+  if (head.index == 0)
+    CompleteRecoveryArrival(arrived);
 }
 
-void CDeviceContext::ReplugMonitor()
+void CDeviceContext::ReplugMonitor(UINT head)
 {
-  Head& head = PrimaryHead();
-  if (head.monitorManager.Replug() ==
+  if (HeadAt(head).monitorManager.Replug() ==
       CMonitorManager::ReplugAction::CREATE)
-    FinishInit(head.index);
+    FinishInit(head);
 }
 
 void CDeviceContext::ReloadSettings()
 {
-  Head& head = PrimaryHead();
-  if (!head.displayConfiguration.ReloadSettings(*head.transport))
-    return;
-
-  ReplugMonitor();
+  for (auto& head : m_heads)
+    if (head->displayConfiguration.ReloadSettings(*head->transport))
+      ReplugMonitor(head->index);
 }
 
-void CDeviceContext::OnMonitorDestroyed(IDDCX_MONITOR monitor)
+void CDeviceContext::OnMonitorDestroyed(UINT head, IDDCX_MONITOR monitor)
 {
-  PrimaryHead().monitorManager.OnDestroyed(monitor);
+  HeadAt(head).monitorManager.OnDestroyed(monitor);
 }
 
-void CDeviceContext::OnSwapChainAssigned()
+void CDeviceContext::OnSwapChainAssigned(UINT head)
 {
-  PrimaryHead().monitorManager.OnSwapChainAssigned();
+  HeadAt(head).monitorManager.OnSwapChainAssigned();
 }
 
-void CDeviceContext::OnSwapChainReleased()
+void CDeviceContext::OnSwapChainReleased(UINT head)
 {
-  PrimaryHead().monitorManager.OnSwapChainReleased();
+  HeadAt(head).monitorManager.OnSwapChainReleased();
 }
 
-void CDeviceContext::OnSwapChainReady()
+void CDeviceContext::OnSwapChainReady(UINT head)
 {
   const CMonitorManager::ReadyAction action =
-    PrimaryHead().monitorManager.OnSwapChainReady();
+    HeadAt(head).monitorManager.OnSwapChainReady();
 
   // Do not expose the context to pipe reload requests until the initial swap
   // chain has reached the same ready state used by the replug gate.
   g_pipe.SetDeviceContext(this);
 
   if (action.replug)
-    PrimaryHead().monitorManager.QueueReplug();
+    HeadAt(head).monitorManager.QueueReplug();
   else if (action.setMode)
-    g_pipe.SetDisplayMode(
-      action.mode.width, action.mode.height, action.mode.refresh100uHz);
+  {
+    // The helper applies display modes to the primary display.
+    if (head == 0)
+      g_pipe.SetDisplayMode(
+        action.mode.width, action.mode.height, action.mode.refresh100uHz);
+  }
 }
 
 // Display configuration
 
 InteractionResult CDeviceContext::SetResolution(
-  uint32_t width, uint32_t height)
+  UINT head, uint32_t width, uint32_t height)
 {
-  Head& head = PrimaryHead();
+  Head& target = HeadAt(head);
   const CDisplayConfiguration::ResolutionResult result =
-    head.displayConfiguration.SetResolution(
-      width, height, *head.transport);
+    target.displayConfiguration.SetResolution(
+      width, height, *target.transport);
 
   switch (result.status)
   {
     case CDisplayConfiguration::ResolutionStatus::SUCCESS:
-      head.monitorManager.RequestMode(result.mode);
+      target.monitorManager.RequestMode(result.mode);
       // IddCxMonitorUpdateModes[2] does not invalidate Windows' cached mode
       // list, so depart and re-arrive the monitor to rebuild the topology.
-      ReplugMonitor();
+      ReplugMonitor(head);
       return InteractionResult::ACCEPTED;
 
     case CDisplayConfiguration::ResolutionStatus::TOO_LARGE:
@@ -521,9 +540,9 @@ InteractionResult CDeviceContext::SetResolution(
 
 bool CDeviceContext::InitializeTransport()
 {
-  Head& head = PrimaryHead();
-  if (!head.transport)
-    return false;
+  for (auto& head : m_heads)
+    if (!head->transport)
+      return false;
 
   if (m_transportTimer)
     return true;
@@ -619,12 +638,13 @@ bool CDeviceContext::InitializeTransport()
 
   // Claim the pipe recovery channel before initializing the producer session
   // so no request cached by a prior device context can cross the handoff.
-  if (!head.transport->Initialize())
-  {
-    g_pipe.ClearRecoveryHandler(this);
-    m_recoveryHandlerSet = false;
-    return false;
-  }
+  for (auto& head : m_heads)
+    if (!head->transport->Initialize())
+    {
+      g_pipe.ClearRecoveryHandler(this);
+      m_recoveryHandlerSet = false;
+      return false;
+    }
 
   WDF_TIMER_CONFIG config;
   WDF_TIMER_CONFIG_INIT_PERIODIC(&config,
@@ -660,19 +680,19 @@ bool CDeviceContext::InitializeTransport()
   return true;
 }
 
-bool CDeviceContext::SetupTransport(size_t alignSize)
+bool CDeviceContext::SetupTransport(UINT head, size_t alignSize)
 {
-  Head& head = PrimaryHead();
+  Head& target = HeadAt(head);
 
   // Frame buffers cannot be allocated until the GPU-specific alignment is
   // known. The swap-chain path may call this again after setup completed.
-  if (!head.transport->Frames().GetMaxFrameSize())
+  if (!target.transport->Frames().GetMaxFrameSize())
   {
-    if (!InitializeTransport() || !head.transport->Setup(alignSize))
+    if (!InitializeTransport() || !target.transport->Setup(alignSize))
       return false;
   }
 
-  if (!head.transport->Input().Start(g_inputPipeServer))
+  if (!target.transport->Input().Start(g_inputPipeServer))
   {
     DEBUG_ERROR("Failed to start input transport");
     return false;
@@ -685,30 +705,41 @@ void CDeviceContext::TransportTimer()
 {
   ProcessLocalRecovery();
 
-  Head& head = PrimaryHead();
-
   // Monitor work is deferred off IddCx callback threads.
-  switch (head.monitorManager.TakeDeferredAction())
-  {
-    case CMonitorManager::DeferredAction::CREATE:
-      FinishInit(head.index);
-      return;
+  for (auto& head : m_heads)
+    switch (head->monitorManager.TakeDeferredAction())
+    {
+      case CMonitorManager::DeferredAction::CREATE:
+        FinishInit(head->index);
+        return;
 
-    case CMonitorManager::DeferredAction::REPLUG:
-      ReplugMonitor();
-      return;
+      case CMonitorManager::DeferredAction::REPLUG:
+        ReplugMonitor(head->index);
+        return;
 
-    case CMonitorManager::DeferredAction::NONE:
-      break;
-  }
+      case CMonitorManager::DeferredAction::NONE:
+        break;
+    }
 
-  head.transport->Process(*this);
+  for (auto& head : m_heads)
+    head->transport->Process(*this);
+}
+
+UINT CDeviceContext::HeadForBackend(BackendId backend) const
+{
+  for (const auto& head : m_heads)
+    if (head->transport && head->transport->HasBackend(backend))
+      return head->index;
+  return 0;
 }
 
 InteractionResult CDeviceContext::OnSetCursorPos(
   const SourceKey& source, int32_t x, int32_t y)
 {
-  UNREFERENCED_PARAMETER(source);
+  // The helper positions the cursor in the primary display's coordinates.
+  if (HeadForBackend(source.backend) != 0)
+    return InteractionResult::UNAVAILABLE;
+
   return g_pipe.SetCursorPos(x, y) ?
     InteractionResult::ACCEPTED : InteractionResult::UNAVAILABLE;
 }
@@ -716,8 +747,7 @@ InteractionResult CDeviceContext::OnSetCursorPos(
 InteractionResult CDeviceContext::OnSetResolution(const SourceKey& source,
   uint32_t width, uint32_t height)
 {
-  UNREFERENCED_PARAMETER(source);
-  return SetResolution(width, height);
+  return SetResolution(HeadForBackend(source.backend), width, height);
 }
 
 bool CDeviceContext::OnRecoveryAction(const RecoveryAction& action)

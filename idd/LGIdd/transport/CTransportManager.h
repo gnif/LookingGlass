@@ -185,6 +185,7 @@ public:
   CTransportManager& operator=(const CTransportManager&) = delete;
 
   bool Add(TransportInstance config, bool primary, CreateFn create);
+  bool HasBackend(BackendId id) const;
 
   OpenResult Open();
   bool Initialize();
