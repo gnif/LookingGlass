@@ -433,6 +433,10 @@ else()
   add_executable(looking-glass-client ${SOURCES})
 endif()
 
+if(MSVC)
+  target_link_options(looking-glass-client PRIVATE /MANIFEST:NO)
+endif()
+
 target_compile_definitions(looking-glass-client PRIVATE CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1)
 
 if(LG_CLIENT_PLATFORM_LINUX)
