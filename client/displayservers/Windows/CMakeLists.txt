@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(displayserver_Windows LANGUAGES C)
 
 add_library(displayserver_Windows STATIC
+  clipboard.c
   input_event.c
   window_size.c
   windows.c

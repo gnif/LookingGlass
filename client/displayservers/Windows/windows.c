@@ -54,6 +54,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "clipboard.h"
+
 #define LG_WINDOW_CLASS L"LookingGlassClientWindow"
 
 enum WindowsMessage
@@ -849,6 +851,7 @@ static LRESULT handleCustomMessage(UINT message, WPARAM wParam,
   switch (message)
   {
     case WM_LG_SHUTDOWN:
+      windowsCBEventShutdown();
       eventSourceFree();
       setKeyboardGrab(false);
       setPointerGrab(false, false);
@@ -930,6 +933,11 @@ static LRESULT handleCustomMessage(UINT message, WPARAM wParam,
 static LRESULT CALLBACK windowProc(HWND window, UINT message,
     WPARAM wParam, LPARAM lParam)
 {
+  LRESULT clipboardResult;
+  if (windowsCBHandleMessage(
+        window, message, wParam, lParam, &clipboardResult))
+    return clipboardResult;
+
   if (message >= WM_LG_SHUTDOWN && message <= WM_LG_EVENT_SOURCE)
     return handleCustomMessage(message, wParam, lParam);
 
@@ -1887,4 +1895,10 @@ struct LG_DisplayServerOps LGDS_Windows =
   .getFullscreen       = windowsGetFullscreen,
   .setFullscreen       = windowsSetFullscreen,
   .minimize            = windowsMinimize,
+  .cbInit              = windowsCBInit,
+  .cbNotice            = windowsCBNotice,
+  .cbRelease           = windowsCBRelease,
+  .cbRequest           = windowsCBRequest,
+  .cbRequestReady      = windowsCBRequestReady,
+  .cbRequestCancel     = windowsCBRequestCancel,
 };
