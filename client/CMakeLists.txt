@@ -161,6 +161,8 @@ endif()
 add_feature_info(ENABLE_USB_AUDIO ENABLE_USB_AUDIO "USB audio support.")
 
 if(MSVC)
+  add_compile_definitions(_USE_MATH_DEFINES)
+
   foreach(LG_CLIENT_COMPILE_OPTION
       /W4
       /WX
