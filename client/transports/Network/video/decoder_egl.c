@@ -914,7 +914,8 @@ bool networkVideoDecoderAttach(NetworkVideoDecoder * decoder,
   decoder->shareContext = interop->egl.shareContext;
   const EGLint attributes[] =
   {
-    EGL_CONTEXT_CLIENT_VERSION, 3,
+    EGL_CONTEXT_MAJOR_VERSION, 3,
+    EGL_CONTEXT_MINOR_VERSION, 1,
     EGL_NONE,
   };
   if (!eglBindAPI(EGL_OPENGL_ES_API))
@@ -922,7 +923,11 @@ bool networkVideoDecoderAttach(NetworkVideoDecoder * decoder,
   decoder->context = eglCreateContext(decoder->display, decoder->eglConfig,
       decoder->shareContext, attributes);
   if (decoder->context == EGL_NO_CONTEXT)
+  {
+    DEBUG_ERROR("Failed to create the required OpenGL ES 3.1 network "
+        "video context (eglError: 0x%x)", eglGetError());
     goto fail;
+  }
 
   struct NetworkVideoCurrent previous;
   if (!networkVideoMakeCurrent(decoder, &previous))
