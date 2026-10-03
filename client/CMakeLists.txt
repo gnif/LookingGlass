@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.20)
 project(looking-glass-client C CXX)
 
+if(WIN32)
+  set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    "${PROJECT_SOURCE_DIR}/cmake/vcpkg-triplets/x64-windows-lg.cmake")
+endif()
+
 get_filename_component(PROJECT_TOP "${PROJECT_SOURCE_DIR}/.." ABSOLUTE)
 
 if(PROJECT_SOURCE_DIR STREQUAL PROJECT_BINARY_DIR)
