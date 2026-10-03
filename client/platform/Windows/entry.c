@@ -22,9 +22,67 @@
 
 #include "common/win32.h"
 
+#include <fcntl.h>
+#include <io.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include <shellapi.h>
+
+static bool bindStandardStream(FILE * stream, DWORD streamId)
+{
+  const HANDLE handle = GetStdHandle(streamId);
+  if (!handle || handle == INVALID_HANDLE_VALUE)
+    return false;
+
+  HANDLE duplicate = NULL;
+  if (!DuplicateHandle(GetCurrentProcess(), handle, GetCurrentProcess(),
+        &duplicate, 0, FALSE, DUPLICATE_SAME_ACCESS))
+    return false;
+
+  const int sourceFd = _open_osfhandle((intptr_t)duplicate, _O_TEXT);
+  if (sourceFd < 0)
+  {
+    CloseHandle(duplicate);
+    return false;
+  }
+
+  FILE * reopened = NULL;
+  if (freopen_s(&reopened, "NUL", "w", stream))
+  {
+    _close(sourceFd);
+    return false;
+  }
+
+  const int targetFd = _fileno(reopened);
+  if (targetFd < 0 || _dup2(sourceFd, targetFd))
+  {
+    _close(sourceFd);
+    return false;
+  }
+
+  _close(sourceFd);
+  clearerr(reopened);
+  setvbuf(reopened, NULL, _IONBF, 0);
+  return true;
+}
+
+static void bindStandardStreams(void)
+{
+  const bool stdoutBound = bindStandardStream(stdout, STD_OUTPUT_HANDLE);
+  const bool stderrBound = bindStandardStream(stderr, STD_ERROR_HANDLE);
+  if ((stdoutBound && stderrBound) || IsDebuggerPresent())
+    return;
+
+  if (!AttachConsole(ATTACH_PARENT_PROCESS))
+    return;
+
+  if (!stdoutBound)
+    bindStandardStream(stdout, STD_OUTPUT_HANDLE);
+  if (!stderrBound)
+    bindStandardStream(stderr, STD_ERROR_HANDLE);
+}
 
 static void freeArguments(int argc, char * argv[])
 {
@@ -43,6 +101,8 @@ int WINAPI WinMain(HINSTANCE instance, HINSTANCE previousInstance,
   (void)previousInstance;
   (void)commandLine;
   (void)showCommand;
+
+  bindStandardStreams();
 
   int        argc     = 0;
   wchar_t ** wideArgv = CommandLineToArgvW(GetCommandLineW(), &argc);
