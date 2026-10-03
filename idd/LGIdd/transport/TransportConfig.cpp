@@ -373,3 +373,29 @@ bool ResolveTransportInstances(const TransportInstances& configured,
   resolved.clear();
   return false;
 }
+
+bool GetTransportSetting(const std::wstring& settings, const wchar_t * key,
+  std::wstring& value)
+{
+  size_t begin = 0;
+  while (begin < settings.size())
+  {
+    const size_t separator = settings.find(L';', begin);
+    const size_t end = separator == std::wstring::npos ?
+      settings.size() : separator;
+    const std::wstring field = settings.substr(begin, end - begin);
+    const size_t equals = field.find(L'=');
+    if (equals != std::wstring::npos &&
+        Equal(Trim(field.substr(0, equals)), key))
+    {
+      value = Trim(field.substr(equals + 1));
+      return true;
+    }
+
+    if (separator == std::wstring::npos)
+      break;
+    begin = separator + 1;
+  }
+
+  return false;
+}

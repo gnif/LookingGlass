@@ -74,3 +74,6 @@ bool ParseTransportInstances(const std::vector<std::wstring>& entries,
 bool ResolveTransportInstances(const TransportInstances& configured,
   const TransportKind * kinds, unsigned kindCount,
   ResolvedTransportInstances& resolved, bool& usedDefaults);
+
+bool GetTransportSetting(const std::wstring& settings, const wchar_t * key,
+  std::wstring& value);
