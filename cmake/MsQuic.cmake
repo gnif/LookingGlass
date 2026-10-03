@@ -274,7 +274,16 @@ function(lg_add_static_msquic)
     set(LG_MSQUIC_DEBUG_LIBRARY
       "${LG_MSQUIC_BINARY_DIR}/bin/Debug/msquic.lib")
     set(LG_MSQUIC_BUILD_CONFIG "$<CONFIG>")
+    set(LG_MSQUIC_BUILD_LIBRARIES
+      "${LG_MSQUIC_BINARY_DIR}/bin/$<IF:$<CONFIG:Debug>,Debug,Release>/msquic.lib"
+      "${LG_MSQUIC_BINARY_DIR}/obj/$<IF:$<CONFIG:Debug>,Debug,Release>/msquic.lib")
+
+    # The Windows archive step overwrites its intermediate library with the
+    # monolithic result. Recreate both archives before combining dependencies
+    # so a later nested build does not add OpenSSL to the prior result again.
     set(LG_MSQUIC_BUILD_COMMAND
+      "${CMAKE_COMMAND}" -E rm -f ${LG_MSQUIC_BUILD_LIBRARIES}
+      COMMAND
       "${CMAKE_COMMAND}" --build <BINARY_DIR>
       --config ${LG_MSQUIC_BUILD_CONFIG}
       --target msquic_lib
