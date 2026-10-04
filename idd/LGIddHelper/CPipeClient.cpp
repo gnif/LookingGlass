@@ -40,6 +40,7 @@ namespace
   static const DWORD    RECOVERY_ACCESS_DELAY_MS = 250;
   static const unsigned DISPLAY_MODE_ATTEMPTS    = 20;
   static const DWORD    DISPLAY_MODE_DELAY_MS    = 100;
+  static const size_t   DISPLAY_MODE_CONNECTORS  = 16;
 
   struct DisplayState
   {
@@ -146,6 +147,71 @@ namespace
 
       device = {};
       device.cb = sizeof(device);
+    }
+
+    return false;
+  }
+
+  bool FindConnectorDisplay(uint32_t connector, DisplayState& state)
+  {
+    for (unsigned int attempt = 0; attempt < 3; ++attempt)
+    {
+      UINT32 pathCount = 0;
+      UINT32 modeCount = 0;
+      LONG result = GetDisplayConfigBufferSizes(
+        QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount);
+      if (result != ERROR_SUCCESS)
+        return false;
+
+      std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
+      std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
+      result = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
+        &pathCount, paths.data(), &modeCount, modes.data(), NULL);
+      if (result == ERROR_INSUFFICIENT_BUFFER)
+        continue;
+      if (result != ERROR_SUCCESS)
+        return false;
+
+      paths.resize(pathCount);
+
+      // IddCx exposes each monitor's connector index as the target id of
+      // its display path, so the connector identifies the path directly.
+      for (const DISPLAYCONFIG_PATH_INFO& path : paths)
+      {
+        if (path.targetInfo.id != connector || !IsLGPath(path))
+          continue;
+
+        DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
+        source.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+        source.header.size      = sizeof(source);
+        source.header.adapterId = path.sourceInfo.adapterId;
+        source.header.id        = path.sourceInfo.id;
+        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
+            !source.viewGdiDeviceName[0])
+          return false;
+
+        DISPLAY_DEVICE device = {};
+        device.cb = sizeof(device);
+        for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+        {
+          if (_tcsicmp(device.DeviceName, source.viewGdiDeviceName) == 0)
+          {
+            state             = {};
+            state.device      = device;
+            state.mode.dmSize = sizeof(state.mode);
+            state.isLG        = true;
+            return EnumDisplaySettingsEx(device.DeviceName,
+              ENUM_CURRENT_SETTINGS, &state.mode, 0) != FALSE;
+          }
+
+          device = {};
+          device.cb = sizeof(device);
+        }
+
+        return false;
+      }
+
+      return false;
     }
 
     return false;
@@ -618,33 +684,38 @@ void CPipeClient::StopDisplayModeThread()
   m_displayModeStop   = nullptr;
 
   CSRWExclusiveLock lock(m_displayModeLock);
-  m_displayMode       = {};
+  m_displayModes.clear();
   m_displayModeSerial = 0;
-  m_hasDisplayMode    = false;
 }
 
 bool CPipeClient::ApplyDisplayMode(const LGPipeMsg& msg, LONG& result)
 {
   CSRWExclusiveLock lock(m_displayLock);
 
-  std::vector<DisplayState> displays;
-  size_t lgIndex;
-  if (!GetDisplayStates(displays, lgIndex))
+  DisplayState display = {};
+  if (!FindConnectorDisplay(msg.displayMode.connector, display))
   {
-    result = DISP_CHANGE_FAILED;
-    return false;
+    std::vector<DisplayState> displays;
+    size_t lgIndex;
+    if (msg.displayMode.connector != 0 ||
+        !GetDisplayStates(displays, lgIndex))
+    {
+      result = DISP_CHANGE_FAILED;
+      return false;
+    }
+    display = displays[lgIndex];
   }
 
   // Preserve the original mode-application transaction: Windows accepts the
   // requested values before EnumDisplaySettingsEx necessarily lists the new
   // mode after a monitor replug.
-  DEVMODE mode = displays[lgIndex].mode;
+  DEVMODE mode = display.mode;
   mode.dmPelsWidth        = msg.displayMode.width;
   mode.dmPelsHeight       = msg.displayMode.height;
   mode.dmDisplayFrequency = DisplayModeRefresh(msg);
   mode.dmFields =
     DM_PELSWIDTH | DM_PELSHEIGHT | DM_DISPLAYFREQUENCY;
-  result = ChangeDisplaySettingsEx(displays[lgIndex].device.DeviceName,
+  result = ChangeDisplaySettingsEx(display.device.DeviceName,
     &mode, NULL, CDS_UPDATEREGISTRY, NULL);
   return result == DISP_CHANGE_SUCCESSFUL;
 }
@@ -652,9 +723,7 @@ bool CPipeClient::ApplyDisplayMode(const LGPipeMsg& msg, LONG& result)
 void CPipeClient::DisplayModeThread()
 {
   const HANDLE handles[] = { m_displayModeStop, m_displayModeWake };
-  uint64_t serial = 0;
-  unsigned int attempts = 0;
-  bool applied = false;
+  std::vector<DisplayModeProgress> progress;
   bool retryPending = false;
 
   while (true)
@@ -669,95 +738,104 @@ void CPipeClient::DisplayModeThread()
       break;
     }
 
-    LGPipeMsg msg = {};
     {
       CSRWSharedLock lock(m_displayModeLock);
-      if (!m_hasDisplayMode)
-      {
-        attempts     = 0;
-        applied      = false;
-        retryPending = false;
-        continue;
-      }
-
-      if (serial != m_displayModeSerial)
-      {
-        serial   = m_displayModeSerial;
-        attempts = 0;
-        applied  = false;
-      }
-      msg = m_displayMode;
+      progress.resize(m_displayModes.size());
     }
 
-    if (!applied)
-    {
-      LONG result = DISP_CHANGE_FAILED;
-      if (!ApplyDisplayMode(msg, result))
-      {
-        ++attempts;
-        if (attempts < DISPLAY_MODE_ATTEMPTS)
-        {
-          retryPending = true;
-          continue;
-        }
-
-        CSRWExclusiveLock lock(m_displayModeLock);
-        if (serial == m_displayModeSerial)
-        {
-          DEBUG_ERROR("Failed to apply Looking Glass display mode %ux%u@%u (%ld)",
-            msg.displayMode.width,
-            msg.displayMode.height,
-            DisplayModeRefresh(msg),
-            result);
-          m_hasDisplayMode = false;
-        }
-        attempts     = 0;
-        applied      = false;
-        retryPending = false;
-        continue;
-      }
-
-      // ChangeDisplaySettingsEx returning success starts an asynchronous
-      // transition. Do not restart it on the next retry.
-      applied      = true;
-      attempts     = 0;
-      retryPending = true;
-      continue;
-    }
-
-    if (EnsureOnlyDisplay())
-    {
-      CSRWExclusiveLock lock(m_displayModeLock);
-      if (serial == m_displayModeSerial)
-        m_hasDisplayMode = false;
-      attempts     = 0;
-      applied      = false;
-      retryPending = false;
-      continue;
-    }
-
-    ++attempts;
-    if (attempts < DISPLAY_MODE_ATTEMPTS)
-    {
-      retryPending = true;
-      continue;
-    }
-
-    CSRWExclusiveLock lock(m_displayModeLock);
-    if (serial == m_displayModeSerial)
-    {
-      DEBUG_ERROR(
-        "Failed to enforce the Looking Glass-only topology after applying "
-        "display mode %ux%u@%u",
-        msg.displayMode.width,
-        msg.displayMode.height,
-        DisplayModeRefresh(msg));
-      m_hasDisplayMode = false;
-    }
-    attempts     = 0;
-    applied      = false;
     retryPending = false;
+    for (size_t connector = 0; connector < progress.size(); ++connector)
+      if (RetryDisplayMode(static_cast<uint32_t>(connector),
+          progress[connector]))
+        retryPending = true;
   }
+}
+
+bool CPipeClient::RetryDisplayMode(uint32_t connector,
+  DisplayModeProgress& progress)
+{
+  LGPipeMsg msg = {};
+  {
+    CSRWSharedLock lock(m_displayModeLock);
+    const DisplayModeRequest& request = m_displayModes[connector];
+    if (!request.pending)
+    {
+      progress.attempts = 0;
+      progress.applied  = false;
+      return false;
+    }
+
+    if (progress.serial != request.serial)
+    {
+      progress.serial   = request.serial;
+      progress.attempts = 0;
+      progress.applied  = false;
+    }
+    msg = request.msg;
+  }
+
+  if (!progress.applied)
+  {
+    LONG result = DISP_CHANGE_FAILED;
+    if (!ApplyDisplayMode(msg, result))
+    {
+      ++progress.attempts;
+      if (progress.attempts < DISPLAY_MODE_ATTEMPTS)
+        return true;
+
+      CSRWExclusiveLock lock(m_displayModeLock);
+      DisplayModeRequest& request = m_displayModes[connector];
+      if (progress.serial == request.serial)
+      {
+        DEBUG_ERROR("Failed to apply Looking Glass display mode %ux%u@%u (%ld)",
+          msg.displayMode.width,
+          msg.displayMode.height,
+          DisplayModeRefresh(msg),
+          result);
+        request.pending = false;
+      }
+      progress.attempts = 0;
+      progress.applied  = false;
+      return false;
+    }
+
+    // ChangeDisplaySettingsEx returning success starts an asynchronous
+    // transition. Do not restart it on the next retry.
+    progress.applied  = true;
+    progress.attempts = 0;
+    return true;
+  }
+
+  if (EnsureOnlyDisplay())
+  {
+    CSRWExclusiveLock lock(m_displayModeLock);
+    DisplayModeRequest& request = m_displayModes[connector];
+    if (progress.serial == request.serial)
+      request.pending = false;
+    progress.attempts = 0;
+    progress.applied  = false;
+    return false;
+  }
+
+  ++progress.attempts;
+  if (progress.attempts < DISPLAY_MODE_ATTEMPTS)
+    return true;
+
+  CSRWExclusiveLock lock(m_displayModeLock);
+  DisplayModeRequest& request = m_displayModes[connector];
+  if (progress.serial == request.serial)
+  {
+    DEBUG_ERROR(
+      "Failed to enforce the Looking Glass-only topology after applying "
+      "display mode %ux%u@%u",
+      msg.displayMode.width,
+      msg.displayMode.height,
+      DisplayModeRefresh(msg));
+    request.pending = false;
+  }
+  progress.attempts = 0;
+  progress.applied  = false;
+  return false;
 }
 
 bool CPipeClient::PipeServerIsAuthorized(HANDLE pipe)
@@ -1322,19 +1400,39 @@ void CPipeClient::ResetClipboardSetupLocked()
 void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 {
   SetActiveDesktop();
-  SetCursorPos(msg.curorPos.x, msg.curorPos.y);
+
+  DisplayState display = {};
+  if (FindConnectorDisplay(msg.curorPos.connector, display))
+  {
+    SetCursorPos(msg.curorPos.x + display.mode.dmPosition.x,
+      msg.curorPos.y + display.mode.dmPosition.y);
+    return;
+  }
+
+  if (msg.curorPos.connector == 0)
+    SetCursorPos(msg.curorPos.x, msg.curorPos.y);
 }
 
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)
 {
+  const uint32_t connector = msg.displayMode.connector;
+  if (connector >= DISPLAY_MODE_CONNECTORS)
+  {
+    DEBUG_WARN("Ignoring a display mode for unknown connector %u", connector);
+    return;
+  }
+
   // The IDD reaches swap-chain readiness while the replugged monitor can
   // still be settling. Latch the latest request and retry until Windows
   // accepts it; after acceptance, retry only topology enforcement.
   {
     CSRWExclusiveLock lock(m_displayModeLock);
-    m_displayMode       = msg;
-    ++m_displayModeSerial;
-    m_hasDisplayMode    = true;
+    if (m_displayModes.size() <= connector)
+      m_displayModes.resize(connector + 1);
+    DisplayModeRequest& request = m_displayModes[connector];
+    request.msg     = msg;
+    request.serial  = ++m_displayModeSerial;
+    request.pending = true;
   }
 
   SetEvent(m_displayModeWake);

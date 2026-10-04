@@ -493,12 +493,8 @@ void CDeviceContext::OnSwapChainReady(UINT head)
   if (action.replug)
     HeadAt(head).monitorManager.QueueReplug();
   else if (action.setMode)
-  {
-    // The helper applies display modes to the primary display.
-    if (head == 0)
-      g_pipe.SetDisplayMode(
-        action.mode.width, action.mode.height, action.mode.refresh100uHz);
-  }
+    g_pipe.SetDisplayMode(head,
+      action.mode.width, action.mode.height, action.mode.refresh100uHz);
 }
 
 // Display configuration
@@ -521,11 +517,11 @@ InteractionResult CDeviceContext::SetResolution(
       return InteractionResult::ACCEPTED;
 
     case CDisplayConfiguration::ResolutionStatus::TOO_LARGE:
-      g_pipe.ResolutionRejected(width, height, result.requiredMiB);
+      g_pipe.ResolutionRejected(head, width, height, result.requiredMiB);
       return InteractionResult::REJECTED;
 
     case CDisplayConfiguration::ResolutionStatus::UNSUPPORTED:
-      g_pipe.ResolutionRejected(width, height, 0);
+      g_pipe.ResolutionRejected(head, width, height, 0);
       return InteractionResult::REJECTED;
 
     case CDisplayConfiguration::ResolutionStatus::INVALID:
@@ -736,11 +732,7 @@ UINT CDeviceContext::HeadForBackend(BackendId backend) const
 InteractionResult CDeviceContext::OnSetCursorPos(
   const SourceKey& source, int32_t x, int32_t y)
 {
-  // The helper positions the cursor in the primary display's coordinates.
-  if (HeadForBackend(source.backend) != 0)
-    return InteractionResult::UNAVAILABLE;
-
-  return g_pipe.SetCursorPos(x, y) ?
+  return g_pipe.SetCursorPos(HeadForBackend(source.backend), x, y) ?
     InteractionResult::ACCEPTED : InteractionResult::UNAVAILABLE;
 }
 
