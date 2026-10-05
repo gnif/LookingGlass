@@ -1029,15 +1029,22 @@ bool CPipeClient::EnsureOnlyDisplayLocked(uint32_t * error, bool logResult)
 
     if (!lgPaths.empty())
     {
-      POINTL origin = lgModes[0].sourceMode.position;
-      for (size_t i = 2; i < lgModes.size(); i += 2)
+      // A supplied topology must keep its primary display at the origin, so
+      // anchor on the display already there, else on the lowest target.
+      size_t anchor = 0;
+      for (size_t i = 0; i < lgPaths.size(); ++i)
       {
-        const POINTL& position = lgModes[i].sourceMode.position;
-        if (position.x < origin.x)
-          origin.x = position.x;
-        if (position.y < origin.y)
-          origin.y = position.y;
+        const POINTL& position = lgModes[i * 2].sourceMode.position;
+        if (position.x == 0 && position.y == 0)
+        {
+          anchor = i;
+          break;
+        }
+        if (lgPaths[i].targetInfo.id < lgPaths[anchor].targetInfo.id)
+          anchor = i;
       }
+
+      const POINTL origin = lgModes[anchor * 2].sourceMode.position;
       for (size_t i = 0; i < lgModes.size(); i += 2)
       {
         lgModes[i].sourceMode.position.x -= origin.x;
