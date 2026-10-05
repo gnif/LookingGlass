@@ -26,6 +26,7 @@
 #include "CRegistrySettings.h"
 #include "RefreshRate.h"
 
+#include <algorithm>
 #include <setupapi.h>
 #include <tchar.h>
 #include <vector>
@@ -152,71 +153,6 @@ namespace
     return false;
   }
 
-  bool FindConnectorDisplay(uint32_t connector, DisplayState& state)
-  {
-    for (unsigned int attempt = 0; attempt < 3; ++attempt)
-    {
-      UINT32 pathCount = 0;
-      UINT32 modeCount = 0;
-      LONG result = GetDisplayConfigBufferSizes(
-        QDC_ONLY_ACTIVE_PATHS, &pathCount, &modeCount);
-      if (result != ERROR_SUCCESS)
-        return false;
-
-      std::vector<DISPLAYCONFIG_PATH_INFO> paths(pathCount);
-      std::vector<DISPLAYCONFIG_MODE_INFO> modes(modeCount);
-      result = QueryDisplayConfig(QDC_ONLY_ACTIVE_PATHS,
-        &pathCount, paths.data(), &modeCount, modes.data(), NULL);
-      if (result == ERROR_INSUFFICIENT_BUFFER)
-        continue;
-      if (result != ERROR_SUCCESS)
-        return false;
-
-      paths.resize(pathCount);
-
-      // IddCx exposes each monitor's connector index as the target id of
-      // its display path, so the connector identifies the path directly.
-      for (const DISPLAYCONFIG_PATH_INFO& path : paths)
-      {
-        if (path.targetInfo.id != connector || !IsLGPath(path))
-          continue;
-
-        DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
-        source.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
-        source.header.size      = sizeof(source);
-        source.header.adapterId = path.sourceInfo.adapterId;
-        source.header.id        = path.sourceInfo.id;
-        if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
-            !source.viewGdiDeviceName[0])
-          return false;
-
-        DISPLAY_DEVICE device = {};
-        device.cb = sizeof(device);
-        for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
-        {
-          if (_tcsicmp(device.DeviceName, source.viewGdiDeviceName) == 0)
-          {
-            state             = {};
-            state.device      = device;
-            state.mode.dmSize = sizeof(state.mode);
-            state.isLG        = true;
-            return EnumDisplaySettingsEx(device.DeviceName,
-              ENUM_CURRENT_SETTINGS, &state.mode, 0) != FALSE;
-          }
-
-          device = {};
-          device.cb = sizeof(device);
-        }
-
-        return false;
-      }
-
-      return false;
-    }
-
-    return false;
-  }
-
   bool SameTarget(const DISPLAYCONFIG_PATH_INFO& a,
     const DISPLAYCONFIG_PATH_INFO& b)
   {
@@ -252,6 +188,81 @@ namespace
     }
 
     return ERROR_INSUFFICIENT_BUFFER;
+  }
+
+  bool SameAdapter(const LUID& a, const LUID& b)
+  {
+    return a.HighPart == b.HighPart && a.LowPart == b.LowPart;
+  }
+
+  bool FindConnectorDisplay(uint32_t connector, DisplayState& state)
+  {
+    std::vector<DISPLAYCONFIG_PATH_INFO> paths;
+    if (QueryAllPaths(paths) != ERROR_SUCCESS)
+      return false;
+
+    const DISPLAYCONFIG_PATH_INFO * lgPath = nullptr;
+    for (const DISPLAYCONFIG_PATH_INFO& path : paths)
+      if (IsLGPath(path))
+      {
+        lgPath = &path;
+        break;
+      }
+    if (!lgPath)
+      return false;
+
+    // IddCx numbers display targets in connector order, so ordering the
+    // Looking Glass targets by target id places connector N at index N.
+    const LUID adapterId = lgPath->targetInfo.adapterId;
+    std::vector<UINT32> targets;
+    for (const DISPLAYCONFIG_PATH_INFO& path : paths)
+      if (SameAdapter(path.targetInfo.adapterId, adapterId) &&
+          std::find(targets.begin(), targets.end(),
+            path.targetInfo.id) == targets.end())
+        targets.push_back(path.targetInfo.id);
+
+    std::sort(targets.begin(), targets.end());
+    if (connector >= targets.size())
+      return false;
+
+    for (const DISPLAYCONFIG_PATH_INFO& path : paths)
+    {
+      if (!(path.flags & DISPLAYCONFIG_PATH_ACTIVE) ||
+          !SameAdapter(path.targetInfo.adapterId, adapterId) ||
+          path.targetInfo.id != targets[connector])
+        continue;
+
+      DISPLAYCONFIG_SOURCE_DEVICE_NAME source = {};
+      source.header.type      = DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME;
+      source.header.size      = sizeof(source);
+      source.header.adapterId = path.sourceInfo.adapterId;
+      source.header.id        = path.sourceInfo.id;
+      if (DisplayConfigGetDeviceInfo(&source.header) != ERROR_SUCCESS ||
+          !source.viewGdiDeviceName[0])
+        return false;
+
+      DISPLAY_DEVICE device = {};
+      device.cb = sizeof(device);
+      for (DWORD i = 0; EnumDisplayDevices(NULL, i, &device, 0); ++i)
+      {
+        if (_tcsicmp(device.DeviceName, source.viewGdiDeviceName) == 0)
+        {
+          state             = {};
+          state.device      = device;
+          state.mode.dmSize = sizeof(state.mode);
+          state.isLG        = true;
+          return EnumDisplaySettingsEx(device.DeviceName,
+            ENUM_CURRENT_SETTINGS, &state.mode, 0) != FALSE;
+        }
+
+        device = {};
+        device.cb = sizeof(device);
+      }
+
+      return false;
+    }
+
+    return false;
   }
 
   bool GetDisplayStates(std::vector<DisplayState>& displays, size_t& lgIndex)
@@ -695,15 +706,8 @@ bool CPipeClient::ApplyDisplayMode(const LGPipeMsg& msg, LONG& result)
   DisplayState display = {};
   if (!FindConnectorDisplay(msg.displayMode.connector, display))
   {
-    std::vector<DisplayState> displays;
-    size_t lgIndex;
-    if (msg.displayMode.connector != 0 ||
-        !GetDisplayStates(displays, lgIndex))
-    {
-      result = DISP_CHANGE_FAILED;
-      return false;
-    }
-    display = displays[lgIndex];
+    result = DISP_CHANGE_FAILED;
+    return false;
   }
 
   // Preserve the original mode-application transaction: Windows accepts the
