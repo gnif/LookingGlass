@@ -308,8 +308,14 @@ NTSTATUS CDisplayConfiguration::ParseMonitorDescription(
   const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
   IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const
 {
-  const CSettings::DisplayModes modes = SnapshotModes();
+  return ParseMonitorDescription(SnapshotModes(), inArgs, outArgs);
+}
 
+NTSTATUS CDisplayConfiguration::ParseMonitorDescription(
+  const CSettings::DisplayModes& modes,
+  const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs)
+{
   outArgs->MonitorModeBufferOutputCount = (UINT)modes.size();
   outArgs->PreferredMonitorModeIdx = 0;
   if (inArgs->MonitorModeBufferInputCount < (UINT)modes.size())
@@ -387,7 +393,14 @@ NTSTATUS CDisplayConfiguration::ParseMonitorDescription2(
 {
   bool hdrEnabled = false;
   const CSettings::DisplayModes modes = SnapshotModes(&hdrEnabled);
+  return ParseMonitorDescription2(modes, hdrEnabled, inArgs, outArgs);
+}
 
+NTSTATUS CDisplayConfiguration::ParseMonitorDescription2(
+  const CSettings::DisplayModes& modes, bool hdrEnabled,
+  const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs)
+{
   outArgs->MonitorModeBufferOutputCount = (UINT)modes.size();
   outArgs->PreferredMonitorModeIdx = 0;
   if (inArgs->MonitorModeBufferInputCount < (UINT)modes.size())

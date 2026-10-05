@@ -97,6 +97,7 @@ private:
   }
 
   UINT HeadForBackend(BackendId backend) const;
+  CSettings::DisplayModes MonitorModes(bool * hdrEnabled) const;
 
   void QueryIddCxCapabilities();
 
@@ -139,6 +140,15 @@ public:
   void OnSwapChainReleased(UINT head);
   void OnSwapChainReady(UINT head);
 
+  NTSTATUS ParseMonitorDescription(
+    const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#ifdef HAS_IDDCX_110
+  NTSTATUS ParseMonitorDescription2(
+    const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#endif
+
   bool HasIddCx110DDIs() const { return m_hasIddCx110DDIs; }
   bool CanProcessFP16 () const { return m_canProcessFP16;  }
   bool IsSoftwareMode () const { return m_softwareMode;    }
@@ -153,11 +163,6 @@ public:
     if (head >= m_heads.size())
       head = 0;
     return *m_heads[head]->transport;
-  }
-
-  CDisplayConfiguration& GetDisplayConfiguration()
-  {
-    return PrimaryHead().displayConfiguration;
   }
 
   CDisplayConfiguration& GetDisplayConfiguration(UINT head)

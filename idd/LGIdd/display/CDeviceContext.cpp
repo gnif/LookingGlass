@@ -532,6 +532,69 @@ InteractionResult CDeviceContext::SetResolution(
   }
 }
 
+static bool HasMode(const CSettings::DisplayModes& modes,
+  const CSettings::DisplayMode& mode)
+{
+  for (const auto& existing : modes)
+    if (existing.width         == mode.width  &&
+        existing.height        == mode.height &&
+        existing.refresh100uHz == mode.refresh100uHz)
+      return true;
+  return false;
+}
+
+CSettings::DisplayModes CDeviceContext::MonitorModes(bool * hdrEnabled) const
+{
+  // The monitor description is shared by every connector as they all present
+  // the same EDID, so it carries the modes of every connector and the target
+  // modes select which of them each monitor may use.
+  CSettings::DisplayModes modes;
+  bool hdr = false;
+  for (size_t i = 0; i < m_heads.size(); ++i)
+  {
+    bool headHdr = false;
+    CSettings::DisplayModes headModes =
+      m_heads[i]->displayConfiguration.SnapshotModes(&headHdr);
+    hdr = hdr || headHdr;
+    if (i == 0)
+    {
+      modes = std::move(headModes);
+      continue;
+    }
+
+    for (const auto& mode : headModes)
+      if (!HasMode(modes, mode))
+      {
+        modes.push_back(mode);
+        modes.back().preferred = false;
+      }
+  }
+
+  if (hdrEnabled)
+    *hdrEnabled = hdr;
+  return modes;
+}
+
+NTSTATUS CDeviceContext::ParseMonitorDescription(
+  const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const
+{
+  return CDisplayConfiguration::ParseMonitorDescription(
+    MonitorModes(nullptr), inArgs, outArgs);
+}
+
+#ifdef HAS_IDDCX_110
+NTSTATUS CDeviceContext::ParseMonitorDescription2(
+  const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+  IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const
+{
+  bool hdrEnabled = false;
+  const CSettings::DisplayModes modes = MonitorModes(&hdrEnabled);
+  return CDisplayConfiguration::ParseMonitorDescription2(
+    modes, hdrEnabled, inArgs, outArgs);
+}
+#endif
+
 // Frame transport
 
 bool CDeviceContext::InitializeTransport()

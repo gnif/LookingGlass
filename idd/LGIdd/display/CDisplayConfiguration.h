@@ -71,7 +71,6 @@ private:
   bool                    m_hdrEnabled = false;
 
   bool LoadModes(const FrameCaps& caps);
-  CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
 
 public:
   CDisplayConfiguration(CSettings& settings, UINT connector);
@@ -87,7 +86,12 @@ public:
   void InitializeEdid(bool hdr);
   void RebuildEdid(bool hdr);
   Description GetDescription() const;
+  CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
 
+  static NTSTATUS ParseMonitorDescription(
+    const CSettings::DisplayModes& modes,
+    const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs);
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
     IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
@@ -99,6 +103,10 @@ public:
     IDARG_OUT_QUERYTARGETMODES * outArgs) const;
 
 #ifdef HAS_IDDCX_110
+  static NTSTATUS ParseMonitorDescription2(
+    const CSettings::DisplayModes& modes, bool hdrEnabled,
+    const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs);
   NTSTATUS ParseMonitorDescription2(
     const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
     IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;

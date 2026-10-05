@@ -385,8 +385,7 @@ NTSTATUS LGIddParseMonitorDescription(const IDARG_IN_PARSEMONITORDESCRIPTION* in
     return STATUS_INVALID_PARAMETER;
 
   auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription(
-    inArgs, outArgs);
+  return wrapper->context->ParseMonitorDescription(inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorGetDefaultModes(IDDCX_MONITOR monitor, const IDARG_IN_GETDEFAULTDESCRIPTIONMODES * inArgs,
@@ -418,8 +417,7 @@ NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* 
     return STATUS_INVALID_PARAMETER;
 
   auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription2(
-    inArgs, outArgs);
+  return wrapper->context->ParseMonitorDescription2(inArgs, outArgs);
 }
 
 NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
