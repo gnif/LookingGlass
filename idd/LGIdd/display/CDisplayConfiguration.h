@@ -59,6 +59,7 @@ public:
 
 private:
   CSettings& m_settings;
+  const UINT m_connector;
 
   // Registry-backed changes are serialized before publishing a replacement
   // mode list. Readers only hold m_modeLock long enough to take a snapshot.
@@ -73,7 +74,7 @@ private:
   CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
 
 public:
-  explicit CDisplayConfiguration(CSettings& settings);
+  CDisplayConfiguration(CSettings& settings, UINT connector);
 
   CDisplayConfiguration(const CDisplayConfiguration&) = delete;
   CDisplayConfiguration& operator=(const CDisplayConfiguration&) = delete;

@@ -45,15 +45,17 @@ static inline IDDCX_WIRE_BITS_PER_COMPONENT GetWireBitsPerComponent(bool hdr)
 }
 #endif
 
-CDisplayConfiguration::CDisplayConfiguration(CSettings& settings) :
-  m_settings(settings)
+CDisplayConfiguration::CDisplayConfiguration(CSettings& settings,
+  UINT connector) :
+  m_settings(settings),
+  m_connector(connector)
 {
 }
 
 bool CDisplayConfiguration::LoadModes(const FrameCaps& caps)
 {
   const CSettings::DisplayModes configuredModes =
-    m_settings.LoadModes();
+    m_settings.LoadModes(m_connector);
 
   // Build the new mode list into a local first so readers never observe a
   // reallocation of the live container. Publishing it is a pointer swap.
@@ -129,14 +131,14 @@ bool CDisplayConfiguration::ReloadSettings(
 
     bool settingsUpdated = true;
     CSettings::DisplayMode extraMode = {};
-    if (m_settings.GetExtraMode(extraMode))
+    if (m_settings.GetExtraMode(extraMode, m_connector))
     {
       const unsigned refresh100uHz =
         m_settings.GetDefaultRefresh100uHz();
       if (extraMode.refresh100uHz != refresh100uHz)
       {
         extraMode.refresh100uHz = refresh100uHz;
-        settingsUpdated = m_settings.SetExtraMode(extraMode);
+        settingsUpdated = m_settings.SetExtraMode(extraMode, m_connector);
       }
     }
 
@@ -194,7 +196,7 @@ CDisplayConfiguration::SetResolution(
 
   {
     CSRWExclusiveLock reloadLock(m_reloadLock);
-    if (!m_settings.SetExtraMode(mode))
+    if (!m_settings.SetExtraMode(mode, m_connector))
       result.status = ResolutionStatus::SETTINGS_FAILED;
     else if (!LoadModes(caps))
       result.status = ResolutionStatus::MODES_FAILED;

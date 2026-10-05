@@ -39,7 +39,7 @@ static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 CDeviceContext::Head::Head(UINT connectorIndex,
   std::unique_ptr<CTransportManager> manager, CSettings& settings) :
   transport(std::move(manager)),
-  displayConfiguration(settings),
+  displayConfiguration(settings, connectorIndex),
   index(connectorIndex)
 {
 }
