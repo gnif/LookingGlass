@@ -128,7 +128,7 @@ bool CIVSHMEM::Init()
     return false;
   }
 
-  if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
+  if (SetupDiEnumDeviceInterfaces(devInfoSet, &device->devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
   {
     DEBUG_ERROR_HR(GetLastError(), "SetupDiEnumDeviceInterfaces");
     SetupDiDestroyDeviceInfoList(devInfoSet);
