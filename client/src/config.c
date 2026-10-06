@@ -462,6 +462,14 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "idleCursorTimeout",
+    .description    = "With alwaysShowCursor, hide the cursor when unfocused "
+                      "and idle for this many milliseconds (0 = disable)",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = 0
+  },
+  {
+    .module         = "input",
     .name           = "showCursorDot",
     .old_module     = "spice",
     .old_name       = "showCursorDot",
@@ -716,6 +724,8 @@ bool config_load(int argc, char * argv[])
   }
 
   g_params.helpMenuDelayUs = option_get_int("input", "helpMenuDelay") * (uint64_t) 1000;
+  g_params.idleCursorTimeoutUs =
+    option_get_int("input", "idleCursorTimeout") * (uint64_t) 1000;
 
   g_params.scaleMouseInput  = option_get_bool("input", "scaleCursor");
   g_params.captureOnStart   = option_get_bool("input", "captureOnStart");

@@ -184,6 +184,7 @@ static void lgInit(void)
   g_cursor.scale.x       = 1.0;
   g_cursor.scale.y       = 1.0;
   g_cursor.draw          = false;
+  g_cursor.moveTime      = microtime();
   g_cursor.inView        = false;
   g_cursor.viewReq       = false;
   g_cursor.exit          = false;
@@ -251,6 +252,19 @@ static bool tickTimerFn(void * unused)
       needsRender = true;
   }
   ll_unlock(g_state.overlays);
+
+  if (g_params.alwaysShowCursor && g_params.idleCursorTimeoutUs)
+  {
+    const uint64_t moveTime = g_cursor.moveTime;
+    const bool draw = g_cursor.inWindow ||
+      microtime() - moveTime < g_params.idleCursorTimeoutUs;
+    if (g_cursor.draw != draw)
+    {
+      g_cursor.draw = draw;
+      atomic_store_explicit(&g_cursor.redraw, true, memory_order_release);
+      needsRender = true;
+    }
+  }
 
   if (needsRender)
     app_invalidateWindow(false);
@@ -1298,6 +1312,9 @@ int main_cursorThread(void * unused)
 
     if (pointer.flags & LG_TRANSPORT_POINTER_POSITION)
     {
+      if (!source->cursorStateValid ||
+          source->cursorX != pointer.x || source->cursorY != pointer.y)
+        g_cursor.moveTime = microtime();
       source->cursorX          = pointer.x;
       source->cursorY          = pointer.y;
       source->cursorStateValid = true;
@@ -2436,6 +2453,9 @@ static void swSurfacePointer(LG_VideoSource source,
 
   if (pointer->flags & LG_TRANSPORT_POINTER_POSITION)
   {
+    if (source == LG_VIDEO_SOURCE_PRIMARY && (!state->cursorStateValid ||
+          state->cursorX != pointer->x || state->cursorY != pointer->y))
+      g_cursor.moveTime = microtime();
     state->cursorX          = pointer->x;
     state->cursorY          = pointer->y;
     state->cursorStateValid = true;
