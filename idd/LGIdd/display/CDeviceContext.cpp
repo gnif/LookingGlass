@@ -792,6 +792,35 @@ UINT CDeviceContext::HeadForBackend(BackendId backend) const
   return 0;
 }
 
+void CDeviceContext::SetDisplayRect(uint32_t connector, int32_t x, int32_t y,
+  uint32_t width, uint32_t height)
+{
+  DisplayRect * rect = nullptr;
+  if (connector == LGPipeMsg::DESKTOP_RECT)
+    rect = &m_desktopRect;
+  else if (connector < m_heads.size())
+    rect = &m_heads[connector]->displayRect;
+  else
+    return;
+
+  {
+    CSRWExclusiveLock lock(m_displayRectLock);
+    if (rect->x == x && rect->y == y &&
+        rect->width == width && rect->height == height)
+      return;
+    rect->x      = x;
+    rect->y      = y;
+    rect->width  = width;
+    rect->height = height;
+  }
+
+  if (connector == LGPipeMsg::DESKTOP_RECT)
+    DEBUG_INFO("Virtual desktop is %ux%u at %d,%d", width, height, x, y);
+  else
+    DEBUG_INFO("Connector %u display is %ux%u at %d,%d",
+      connector, width, height, x, y);
+}
+
 InteractionResult CDeviceContext::OnSetCursorPos(
   const SourceKey& source, int32_t x, int32_t y)
 {

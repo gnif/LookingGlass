@@ -84,6 +84,8 @@ class CPipeServer : private IPipeEndpointHandler,
     CSRWLock         m_deviceContextLock;
     CDeviceContext * m_deviceContext = nullptr;
 
+    std::vector<LGPipeMsg> m_displayRects;
+
     CSRWLock        m_recoveryLock;
     RecoveryHandler m_recoveryHandler = nullptr;
     void *          m_recoveryOpaque  = nullptr;
@@ -106,6 +108,7 @@ class CPipeServer : private IPipeEndpointHandler,
     void QueueMsgLocked(const LGPipeMsg & msg);
 
     void HandleReloadSettings();
+    void HandleDisplayRect(const LGPipeMsg & msg);
     void HandleRecovery(const LGPipeMsg & msg);
     bool ClearClipboardAuthorityInternal(
       WDFFILEOBJECT owner, bool closing);

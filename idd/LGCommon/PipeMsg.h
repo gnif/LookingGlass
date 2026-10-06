@@ -44,14 +44,16 @@ struct LGPipeMsg
     CLIPBOARD_READY,
     CLIPBOARD_KICK,
     CLIPBOARD_RESET,
-    HELLO
+    HELLO,
+    DISPLAY_RECT
   }
   type;
 
   enum : uint32_t
   {
     RECOVERY_ACTIVE  = 0x1U,
-    PROTOCOL_VERSION = 3U
+    PROTOCOL_VERSION = 4U,
+    DESKTOP_RECT     = 0xFFFFFFFFU
   };
 
   union
@@ -130,6 +132,17 @@ struct LGPipeMsg
       uint64_t authorityId[2];
     }
     hello;
+
+    struct
+    {
+      // DESKTOP_RECT for the virtual desktop, zero size if not displayed.
+      uint32_t connector;
+      int32_t x;
+      int32_t y;
+      uint32_t width;
+      uint32_t height;
+    }
+    displayRect;
   };
 };
 #pragma pack(pop)

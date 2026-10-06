@@ -195,8 +195,12 @@ namespace
     return a.HighPart == b.HighPart && a.LowPart == b.LowPart;
   }
 
-  bool FindConnectorDisplay(uint32_t connector, DisplayState& state)
+  bool FindConnectorDisplay(uint32_t connector, DisplayState& state,
+    size_t * connectors = nullptr)
   {
+    if (connectors)
+      *connectors = 0;
+
     std::vector<DISPLAYCONFIG_PATH_INFO> paths;
     if (QueryAllPaths(paths) != ERROR_SUCCESS)
       return false;
@@ -222,6 +226,8 @@ namespace
         targets.push_back(path.targetInfo.id);
 
     std::sort(targets.begin(), targets.end());
+    if (connectors)
+      *connectors = targets.size();
     if (connector >= targets.size())
       return false;
 
@@ -892,6 +898,9 @@ void CPipeClient::OnPipeConnected()
 
   if (hasStatus)
     WriteMsg(status);
+
+  CSRWExclusiveLock lock(m_displayLock);
+  SendDisplayRectsLocked();
 }
 
 void CPipeClient::OnPipeDisconnected()
@@ -1188,7 +1197,49 @@ uint32_t CPipeClient::RestoreLGTopologyLocked(bool logResult)
 bool CPipeClient::EnsureOnlyDisplay()
 {
   CSRWExclusiveLock lock(m_displayLock);
-  return EnsureOnlyDisplayLocked();
+  const bool result = EnsureOnlyDisplayLocked();
+  SendDisplayRectsLocked();
+  return result;
+}
+
+void CPipeClient::SendDisplayRects()
+{
+  CSRWExclusiveLock lock(m_displayLock);
+  SendDisplayRectsLocked();
+}
+
+void CPipeClient::SendDisplayRectsLocked()
+{
+  if (!m_endpoint.IsConnected())
+    return;
+
+  LGPipeMsg msg = {};
+  msg.size = sizeof(msg);
+  msg.type = LGPipeMsg::DISPLAY_RECT;
+
+  size_t connectors = 1;
+  for (size_t connector = 0; connector < connectors &&
+      connector < DISPLAY_MODE_CONNECTORS; ++connector)
+  {
+    DisplayState display = {};
+    const bool found = FindConnectorDisplay(
+      static_cast<uint32_t>(connector), display, &connectors);
+    msg.displayRect.connector = static_cast<uint32_t>(connector);
+    msg.displayRect.x         = found ? display.mode.dmPosition.x : 0;
+    msg.displayRect.y         = found ? display.mode.dmPosition.y : 0;
+    msg.displayRect.width     = found ? display.mode.dmPelsWidth  : 0;
+    msg.displayRect.height    = found ? display.mode.dmPelsHeight : 0;
+    WriteMsg(msg);
+  }
+
+  msg.displayRect.connector = LGPipeMsg::DESKTOP_RECT;
+  msg.displayRect.x         = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  msg.displayRect.y         = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  msg.displayRect.width     =
+    static_cast<uint32_t>(GetSystemMetrics(SM_CXVIRTUALSCREEN));
+  msg.displayRect.height    =
+    static_cast<uint32_t>(GetSystemMetrics(SM_CYVIRTUALSCREEN));
+  WriteMsg(msg);
 }
 
 bool CPipeClient::OnPipeMessage(const void * message, size_t size)

@@ -84,6 +84,7 @@ private:
     bool logResult = true);
   uint32_t RestoreSavedTopologyLocked() const;
   uint32_t RestoreLGTopologyLocked(bool logResult = true);
+  void SendDisplayRectsLocked();
 
   void HandleSetCursorPos(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
@@ -122,6 +123,7 @@ public:
 
   void ReloadSettings();
   bool EnsureOnlyDisplay();
+  void SendDisplayRects();
 };
 
 extern CPipeClient g_pipe;

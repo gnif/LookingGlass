@@ -470,6 +470,10 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
         msg.clipboardReset.epoch, msg.clipboardReset.reason);
       return true;
 
+    case LGPipeMsg::DISPLAY_RECT:
+      HandleDisplayRect(msg);
+      return true;
+
     default:
       DEBUG_ERROR("Unknown message type %d", msg.type);
       return false;
@@ -522,6 +526,36 @@ void CPipeServer::HandleReloadSettings()
   CSRWSharedLock lock(m_deviceContextLock);
   if (m_deviceContext)
     m_deviceContext->ReloadSettings();
+}
+
+static void ApplyDisplayRect(CDeviceContext & context, const LGPipeMsg & msg)
+{
+  context.SetDisplayRect(msg.displayRect.connector,
+    msg.displayRect.x, msg.displayRect.y,
+    msg.displayRect.width, msg.displayRect.height);
+}
+
+void CPipeServer::HandleDisplayRect(const LGPipeMsg & msg)
+{
+  const uint32_t connector = msg.displayRect.connector;
+  if (connector != LGPipeMsg::DESKTOP_RECT &&
+      connector >= TRANSPORT_MAX_INSTANCES)
+    return;
+
+  CSRWExclusiveLock lock(m_deviceContextLock);
+  bool cached = false;
+  for (LGPipeMsg & rect : m_displayRects)
+    if (rect.displayRect.connector == connector)
+    {
+      rect   = msg;
+      cached = true;
+      break;
+    }
+  if (!cached)
+    m_displayRects.push_back(msg);
+
+  if (m_deviceContext)
+    ApplyDisplayRect(*m_deviceContext, msg);
 }
 
 void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
@@ -581,6 +615,10 @@ void CPipeServer::SetDeviceContext(CDeviceContext * context)
 {
   CSRWExclusiveLock lock(m_deviceContextLock);
   m_deviceContext = context;
+
+  if (context)
+    for (const LGPipeMsg & rect : m_displayRects)
+      ApplyDisplayRect(*context, rect);
 }
 
 void CPipeServer::SetRecoveryHandler(

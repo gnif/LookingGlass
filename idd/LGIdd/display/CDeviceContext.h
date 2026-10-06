@@ -50,6 +50,17 @@ private:
   WDFTIMER          m_initTimer      = nullptr;
   std::atomic<LONG> m_initInProgress = 0;
 
+  struct DisplayRect
+  {
+    int32_t  x      = 0;
+    int32_t  y      = 0;
+    uint32_t width  = 0;
+    uint32_t height = 0;
+  };
+
+  CSRWLock    m_displayRectLock;
+  DisplayRect m_desktopRect;
+
   struct Head
   {
     std::unique_ptr<CTransportManager> transport;
@@ -57,6 +68,7 @@ private:
     CMonitorManager                    monitorManager;
     const UINT                         index;
     bool                               transportOpened = false;
+    DisplayRect                        displayRect;
 
     Head(UINT connectorIndex, std::unique_ptr<CTransportManager> manager,
       CSettings& settings);
@@ -134,6 +146,8 @@ public:
   void FinishInit(UINT connectorIndex);
   void ReloadSettings();
   void ReplugMonitor(UINT head);
+  void SetDisplayRect(uint32_t connector, int32_t x, int32_t y,
+    uint32_t width, uint32_t height);
 
   void OnMonitorDestroyed(UINT head, IDDCX_MONITOR monitor);
   void OnSwapChainAssigned(UINT head);

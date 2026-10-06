@@ -37,6 +37,7 @@
 #define ID_MENU_SHOW_CONFIG 3001
 
 #define ID_DISPLAY_CHECK_TIMER 1
+#define ID_DISPLAY_RECT_TIMER  2
 #define DISPLAY_SETTLE_DELAY   250
 #define DISPLAY_RETRY_DELAY    1000
 #define DISPLAY_CHECK_INTERVAL 5000
@@ -130,20 +131,31 @@ LRESULT CNotifyWindow::handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam)
   case WM_RECOVERY_STATE:
     m_recoveryActive = wParam;
     KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+    KillTimer(m_hwnd, ID_DISPLAY_RECT_TIMER);
     if (!m_recoveryActive)
+    {
       scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+      scheduleDisplayRects();
+    }
     return 0;
 
   case WM_DISPLAYCHANGE:
     if (!m_recoveryActive)
     {
       scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+      scheduleDisplayRects();
     }
     return 0;
 
   case WM_TIMER:
     switch (wParam)
     {
+    case ID_DISPLAY_RECT_TIMER:
+      KillTimer(m_hwnd, ID_DISPLAY_RECT_TIMER);
+      if (!m_recoveryActive && m_onDisplayChange)
+        m_onDisplayChange();
+      break;
+
     case ID_DISPLAY_CHECK_TIMER:
       KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
       if (m_recoveryActive)
@@ -196,6 +208,7 @@ LRESULT CNotifyWindow::onDestroy()
   if (m_clipboard)
     m_clipboard->Shutdown();
   KillTimer(m_hwnd, ID_DISPLAY_CHECK_TIMER);
+  KillTimer(m_hwnd, ID_DISPLAY_RECT_TIMER);
   Shell_NotifyIcon(NIM_DELETE, &m_iconData);
   return 0;
 }
@@ -426,8 +439,21 @@ void CNotifyWindow::scheduleDisplayCheck(UINT delay)
     DEBUG_ERROR_HR(GetLastError(), "Failed to schedule primary display check");
 }
 
+void CNotifyWindow::scheduleDisplayRects()
+{
+  // Not gated on the exclusive display setting, absolute input needs it.
+  if (m_onDisplayChange &&
+      !SetTimer(m_hwnd, ID_DISPLAY_RECT_TIMER, DISPLAY_SETTLE_DELAY, NULL))
+    DEBUG_ERROR_HR(GetLastError(), "Failed to schedule display layout update");
+}
+
 void CNotifyWindow::onEnsureOnlyDisplay(std::function<bool()> func)
 {
   m_onEnsureOnlyDisplay = std::move(func);
   scheduleDisplayCheck(DISPLAY_SETTLE_DELAY);
+}
+
+void CNotifyWindow::onDisplayChange(std::function<void()> func)
+{
+  m_onDisplayChange = std::move(func);
 }
