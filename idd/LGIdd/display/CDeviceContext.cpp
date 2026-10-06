@@ -893,13 +893,34 @@ bool CDeviceContext::HeadInputSink::SendMouseAbsolute(uint16_t x, uint16_t y,
   if (!g_inputPipeServer.IsDesktopMode())
   {
     if (m_connector != 0)
-      return true;
+      return InjectAbsolute(x, y, wheel, buttons);
   }
   else if (!m_owner.MapAbsolute(m_connector, x, y))
     return true;
 
   return g_inputPipeServer.SendMouseAbsolute(
     m_connector, x, y, wheel, buttons);
+}
+
+bool CDeviceContext::HeadInputSink::InjectAbsolute(uint16_t x, uint16_t y,
+  int32_t wheel, uint32_t buttons)
+{
+  const bool motion = !wheel && buttons == m_injectButtons;
+  if (motion && g_inputPipeServer.IsRelativeHeld(m_connector))
+    return true;
+
+  if (!m_injecting)
+  {
+    DEBUG_INFO("Connector %u absolute input injected by the helper",
+      m_connector);
+    m_injecting = true;
+  }
+
+  m_injectX       = x;
+  m_injectY       = y;
+  m_injectButtons = buttons;
+  g_pipe.InjectPointer(m_connector, x, y, buttons, wheel, motion);
+  return true;
 }
 
 bool CDeviceContext::HeadInputSink::SendKeyboard(uint8_t modifiers,
@@ -910,6 +931,11 @@ bool CDeviceContext::HeadInputSink::SendKeyboard(uint8_t modifiers,
 
 bool CDeviceContext::HeadInputSink::Reset()
 {
+  if (m_injectButtons)
+  {
+    g_pipe.InjectPointer(m_connector, m_injectX, m_injectY, 0, 0, false);
+    m_injectButtons = 0;
+  }
   return g_inputPipeServer.Reset();
 }
 

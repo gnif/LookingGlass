@@ -64,6 +64,13 @@ private:
   private:
     CDeviceContext& m_owner;
     const UINT      m_connector;
+    bool            m_injecting     = false;
+    uint16_t        m_injectX       = 0;
+    uint16_t        m_injectY       = 0;
+    uint32_t        m_injectButtons = 0;
+
+    bool InjectAbsolute(uint16_t x, uint16_t y,
+      int32_t wheel, uint32_t buttons);
 
   public:
     HeadInputSink(CDeviceContext& owner, UINT connector) :

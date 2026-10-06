@@ -45,7 +45,8 @@ struct LGPipeMsg
     CLIPBOARD_KICK,
     CLIPBOARD_RESET,
     HELLO,
-    DISPLAY_RECT
+    DISPLAY_RECT,
+    INJECT_POINTER
   }
   type;
 
@@ -143,6 +144,16 @@ struct LGPipeMsg
       uint32_t height;
     }
     displayRect;
+
+    struct
+    {
+      uint32_t connector;
+      uint16_t x;
+      uint16_t y;
+      uint32_t buttons;
+      int32_t wheel;
+    }
+    injectPointer;
   };
 };
 #pragma pack(pop)

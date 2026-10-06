@@ -141,6 +141,8 @@ public:
     return Atomic::Load(m_desktopMode, std::memory_order_acquire);
   }
 
+  bool IsRelativeHeld(uint32_t connector);
+
   bool SendMouseRelative(
     _In_ int32_t deltaX,
     _In_ int32_t deltaY,

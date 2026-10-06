@@ -24,6 +24,7 @@
 #include "CSRWLock.h"
 #include "CNotifyWindow.h"
 #include "CRegistrySettings.h"
+#include "InputPipeProtocol.h"
 #include "RefreshRate.h"
 
 #include <algorithm>
@@ -42,6 +43,8 @@ namespace
   static const unsigned DISPLAY_MODE_ATTEMPTS    = 20;
   static const DWORD    DISPLAY_MODE_DELAY_MS    = 100;
   static const size_t   DISPLAY_MODE_CONNECTORS  = 16;
+  static const int64_t  POINTER_ABSOLUTE_MAX     = LG_INPUT_MOUSE_ABSOLUTE_MAX;
+  static const int64_t  POINTER_NORMALIZED_MAX   = 65535;
 
   struct DisplayState
   {
@@ -49,6 +52,55 @@ namespace
     DEVMODE mode;
     bool isLG;
   };
+
+  struct PointerButton
+  {
+    uint32_t bit;
+    DWORD    down;
+    DWORD    up;
+    DWORD    data;
+  };
+
+  static const PointerButton POINTER_BUTTONS[] =
+  {
+    { LG_INPUT_MOUSE_BUTTON_LEFT,
+      MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, 0 },
+    { LG_INPUT_MOUSE_BUTTON_RIGHT,
+      MOUSEEVENTF_RIGHTDOWN, MOUSEEVENTF_RIGHTUP, 0 },
+    { LG_INPUT_MOUSE_BUTTON_MIDDLE,
+      MOUSEEVENTF_MIDDLEDOWN, MOUSEEVENTF_MIDDLEUP, 0 },
+    { LG_INPUT_MOUSE_BUTTON_BACK,
+      MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON1 },
+    { LG_INPUT_MOUSE_BUTTON_FORWARD,
+      MOUSEEVENTF_XDOWN, MOUSEEVENTF_XUP, XBUTTON2 },
+  };
+
+  unsigned AppendPointerButtons(INPUT * inputs, uint32_t previous,
+    uint32_t current)
+  {
+    unsigned count = 0;
+    for (const PointerButton& button : POINTER_BUTTONS)
+    {
+      if (!((previous ^ current) & button.bit))
+        continue;
+
+      INPUT& input = inputs[count++];
+      input.type         = INPUT_MOUSE;
+      input.mi.dwFlags   = (current & button.bit) ? button.down : button.up;
+      input.mi.mouseData = button.data;
+    }
+    return count;
+  }
+
+  LONG NormalizePointer(int64_t pixel, int origin, int size)
+  {
+    // Target the pixel center.
+    const int64_t value =
+      ((pixel - origin) * (POINTER_NORMALIZED_MAX + 1) +
+        (POINTER_NORMALIZED_MAX + 1) / 2) / size;
+    return static_cast<LONG>(
+      std::clamp<int64_t>(value, 0, POINTER_NORMALIZED_MAX));
+  }
 
   bool IsLGDisplay(const DISPLAY_DEVICE& device)
   {
@@ -905,6 +957,15 @@ void CPipeClient::OnPipeConnected()
 
 void CPipeClient::OnPipeDisconnected()
 {
+  {
+    CSRWExclusiveLock lock(m_pointerLock);
+    INPUT inputs[_countof(POINTER_BUTTONS)] = {};
+    const unsigned count = AppendPointerButtons(inputs, m_pointerButtons, 0);
+    m_pointerButtons = 0;
+    if (count && SetActiveDesktop(true))
+      SendInput(count, inputs, sizeof(INPUT));
+  }
+
   CSRWExclusiveLock lock(m_clipboardSetupLock);
   ResetClipboardSetupLocked();
 }
@@ -1217,6 +1278,7 @@ void CPipeClient::SendDisplayRectsLocked()
   msg.size = sizeof(msg);
   msg.type = LGPipeMsg::DISPLAY_RECT;
 
+  std::vector<PointerRect> rects;
   size_t connectors = 1;
   for (size_t connector = 0; connector < connectors &&
       connector < DISPLAY_MODE_CONNECTORS; ++connector)
@@ -1230,6 +1292,13 @@ void CPipeClient::SendDisplayRectsLocked()
     msg.displayRect.width     = found ? display.mode.dmPelsWidth  : 0;
     msg.displayRect.height    = found ? display.mode.dmPelsHeight : 0;
     WriteMsg(msg);
+    rects.push_back({ msg.displayRect.x, msg.displayRect.y,
+      msg.displayRect.width, msg.displayRect.height });
+  }
+
+  {
+    CSRWExclusiveLock lock(m_pointerLock);
+    m_pointerRects.swap(rects);
   }
 
   msg.displayRect.connector = LGPipeMsg::DESKTOP_RECT;
@@ -1255,6 +1324,10 @@ bool CPipeClient::OnPipeMessage(const void * message, size_t size)
   {
     case LGPipeMsg::SETCURSORPOS:
       HandleSetCursorPos(msg);
+      return true;
+
+    case LGPipeMsg::INJECT_POINTER:
+      HandleInjectPointer(msg);
       return true;
 
     case LGPipeMsg::SETDISPLAYMODE:
@@ -1473,6 +1546,62 @@ void CPipeClient::HandleSetCursorPos(const LGPipeMsg& msg)
 
   if (msg.curorPos.connector == 0)
     SetCursorPos(msg.curorPos.x, msg.curorPos.y);
+}
+
+void CPipeClient::HandleInjectPointer(const LGPipeMsg& msg)
+{
+  const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+  const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+  const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+  const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+  CSRWExclusiveLock lock(m_pointerLock);
+  INPUT inputs[_countof(POINTER_BUTTONS) + 2] = {};
+  unsigned count = 0;
+
+  // Without a layout only the buttons and the wheel are applied.
+  const uint32_t connector = msg.injectPointer.connector;
+  if (connector < m_pointerRects.size() && vw > 0 && vh > 0 &&
+      m_pointerRects[connector].width && m_pointerRects[connector].height)
+  {
+    const PointerRect& rect = m_pointerRects[connector];
+    const int64_t x = std::min<int64_t>(msg.injectPointer.x,
+      POINTER_ABSOLUTE_MAX);
+    const int64_t y = std::min<int64_t>(msg.injectPointer.y,
+      POINTER_ABSOLUTE_MAX);
+    const int64_t px = rect.x +
+      (x * (rect.width - 1) + POINTER_ABSOLUTE_MAX / 2) /
+      POINTER_ABSOLUTE_MAX;
+    const int64_t py = rect.y +
+      (y * (rect.height - 1) + POINTER_ABSOLUTE_MAX / 2) /
+      POINTER_ABSOLUTE_MAX;
+
+    INPUT& input = inputs[count++];
+    input.type       = INPUT_MOUSE;
+    input.mi.dx      = NormalizePointer(px, vx, vw);
+    input.mi.dy      = NormalizePointer(py, vy, vh);
+    input.mi.dwFlags =
+      MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
+  }
+
+  count += AppendPointerButtons(inputs + count, m_pointerButtons,
+    msg.injectPointer.buttons);
+
+  if (msg.injectPointer.wheel)
+  {
+    INPUT& input = inputs[count++];
+    input.type         = INPUT_MOUSE;
+    input.mi.dwFlags   = MOUSEEVENTF_WHEEL;
+    input.mi.mouseData =
+      static_cast<DWORD>(msg.injectPointer.wheel * WHEEL_DELTA);
+  }
+
+  if (!count)
+    return;
+
+  SetActiveDesktop(true);
+  if (SendInput(count, inputs, sizeof(INPUT)) == count)
+    m_pointerButtons = msg.injectPointer.buttons;
 }
 
 void CPipeClient::HandleSetDisplayMode(const LGPipeMsg& msg)

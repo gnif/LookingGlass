@@ -594,6 +594,12 @@ bool CInputPipeServer::RelativeHeldLocked(uint32_t connector) const
     GetTickCount64() - m_relativeTime < RELATIVE_IDLE_MS;
 }
 
+bool CInputPipeServer::IsRelativeHeld(uint32_t connector)
+{
+  CSRWSharedLock lock(m_queueLock);
+  return RelativeHeldLocked(connector);
+}
+
 void CInputPipeServer::UpdateDesktopMode(bool log)
 {
   const bool desktopMode = IsMouseFilterAttached();

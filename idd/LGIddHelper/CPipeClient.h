@@ -47,6 +47,14 @@ private:
     bool         applied;
   };
 
+  struct PointerRect
+  {
+    int32_t  x;
+    int32_t  y;
+    uint32_t width;
+    uint32_t height;
+  };
+
   CPipeEndpoint      m_endpoint;
   CClipboardChannel  m_clipboard;
   CSRWLock           m_clipboardSetupLock;
@@ -69,6 +77,10 @@ private:
   bool      m_hasRecoveryStatus = false;
   LGPipeMsg m_recoveryStatus    = {};
 
+  CSRWLock                 m_pointerLock;
+  std::vector<PointerRect> m_pointerRects;
+  uint32_t                 m_pointerButtons = 0;
+
   void WriteMsg(const LGPipeMsg& msg);
 
   bool SetActiveDesktop(bool quiet = false);
@@ -87,6 +99,7 @@ private:
   void SendDisplayRectsLocked();
 
   void HandleSetCursorPos(const LGPipeMsg& msg);
+  void HandleInjectPointer(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
