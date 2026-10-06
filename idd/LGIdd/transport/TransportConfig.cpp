@@ -297,10 +297,10 @@ namespace
           instance.connector >= TRANSPORT_MAX_INSTANCES)
         return false;
 
-      // Input and the clipboard are delivered through the primary monitor's
-      // transport, so other connectors carry only frames and control.
-      if (instance.connector && (instance.services &
-          ~(TRANSPORT_SERVICE_FRAME | TRANSPORT_SERVICE_CONTROL)))
+      // The clipboard is delivered through the primary monitor's transport,
+      // so other connectors carry only frames, control and input.
+      if (instance.connector &&
+          (instance.services & TRANSPORT_SERVICE_CLIPBOARD))
         return false;
 
       for (const TransportInstance& other : instances)
