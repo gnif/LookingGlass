@@ -35,6 +35,7 @@ private:
   static constexpr size_t QUEUE_LENGTH              = 128;
   static constexpr size_t MOTION_COALESCE_THRESHOLD = QUEUE_LENGTH / 2;
   static constexpr DWORD  STATISTICS_INTERVAL_MS    = 5000;
+  static constexpr DWORD  RELATIVE_IDLE_MS          = 500;
 
   struct QueueItem
   {
@@ -77,6 +78,8 @@ private:
   uint16_t  m_absoluteY       = 0;
   uint32_t  m_relativeButtons = 0;
   uint32_t  m_absoluteButtons = 0;
+  uint32_t  m_relativeOwner   = 0;
+  ULONGLONG m_relativeTime    = 0;
 
   uint64_t m_statEnqueued          = 0;
   uint64_t m_statRelativeCoalesced = 0;
@@ -103,6 +106,7 @@ private:
   bool Pop(QueueItem& item);
   bool Send(const QueueItem& item);
   void Invalidate(uint64_t state, bool requireMatch);
+  bool RelativeHeldLocked(uint32_t connector) const;
   void UpdateDesktopMode(bool log);
   void LogStatistics();
   void Thread();
@@ -141,12 +145,30 @@ public:
     _In_ int32_t deltaX,
     _In_ int32_t deltaY,
     _In_ int32_t wheel,
-    _In_ uint32_t buttons) override;
+    _In_ uint32_t buttons) override
+  {
+    return SendMouseRelative(0, deltaX, deltaY, wheel, buttons);
+  }
   bool SendMouseAbsolute(
     _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t x,
     _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t y,
     _In_ int32_t wheel,
-    _In_ uint32_t buttons) override;
+    _In_ uint32_t buttons) override
+  {
+    return SendMouseAbsolute(0, x, y, wheel, buttons);
+  }
+  bool SendMouseRelative(
+    _In_ uint32_t connector,
+    _In_ int32_t deltaX,
+    _In_ int32_t deltaY,
+    _In_ int32_t wheel,
+    _In_ uint32_t buttons);
+  bool SendMouseAbsolute(
+    _In_ uint32_t connector,
+    _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t x,
+    _In_range_(0, LG_INPUT_MOUSE_ABSOLUTE_MAX) uint16_t y,
+    _In_ int32_t wheel,
+    _In_ uint32_t buttons);
   bool SendKeyboard(
     _In_ uint8_t modifiers,
     _In_reads_(LG_INPUT_KEYBOARD_KEY_COUNT) const uint8_t * keys) override;

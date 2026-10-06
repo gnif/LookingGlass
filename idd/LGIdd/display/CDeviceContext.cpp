@@ -881,7 +881,8 @@ bool CDeviceContext::HeadInputSink::GetKeyboardLEDs(uint8_t& leds) const
 bool CDeviceContext::HeadInputSink::SendMouseRelative(int32_t deltaX,
   int32_t deltaY, int32_t wheel, uint32_t buttons)
 {
-  return g_inputPipeServer.SendMouseRelative(deltaX, deltaY, wheel, buttons);
+  return g_inputPipeServer.SendMouseRelative(
+    m_connector, deltaX, deltaY, wheel, buttons);
 }
 
 bool CDeviceContext::HeadInputSink::SendMouseAbsolute(uint16_t x, uint16_t y,
@@ -897,7 +898,8 @@ bool CDeviceContext::HeadInputSink::SendMouseAbsolute(uint16_t x, uint16_t y,
   else if (!m_owner.MapAbsolute(m_connector, x, y))
     return true;
 
-  return g_inputPipeServer.SendMouseAbsolute(x, y, wheel, buttons);
+  return g_inputPipeServer.SendMouseAbsolute(
+    m_connector, x, y, wheel, buttons);
 }
 
 bool CDeviceContext::HeadInputSink::SendKeyboard(uint8_t modifiers,

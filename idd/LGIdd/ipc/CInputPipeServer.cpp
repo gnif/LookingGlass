@@ -296,6 +296,7 @@ void CInputPipeServer::ResyncLocked()
 }
 
 bool CInputPipeServer::SendMouseRelative(
+  uint32_t connector,
   int32_t deltaX,
   int32_t deltaY,
   int32_t wheel,
@@ -341,11 +342,14 @@ bool CInputPipeServer::SendMouseRelative(
       m_absoluteButtons = 0;
     m_mouseMode       = MouseMode::RELATIVE_INPUT;
     m_relativeButtons = buttons;
+    m_relativeOwner   = connector;
+    m_relativeTime    = GetTickCount64();
   }
   return queued;
 }
 
 bool CInputPipeServer::SendMouseAbsolute(
+  uint32_t connector,
   uint16_t x,
   uint16_t y,
   int32_t wheel,
@@ -367,6 +371,9 @@ bool CInputPipeServer::SendMouseAbsolute(
   CSRWExclusiveLock lock(m_queueLock);
   const bool pureMotion = wheel == 0 && buttons == m_absoluteButtons;
   const bool switching  = m_mouseMode == MouseMode::RELATIVE_INPUT;
+  if (pureMotion && RelativeHeldLocked(connector))
+    return true;
+
   bool queued =
     (Atomic::Load(m_state, std::memory_order_relaxed) & 1) != 0;
   if (queued && switching && m_relativeButtons)
@@ -577,6 +584,14 @@ void CInputPipeServer::LogStatistics()
     writeMs,
     maxWriteMs,
     static_cast<unsigned long long>(slowWrites));
+}
+
+bool CInputPipeServer::RelativeHeldLocked(uint32_t connector) const
+{
+  // Relative input from another connector owns the pointer until idle.
+  return m_mouseMode == MouseMode::RELATIVE_INPUT &&
+    m_relativeOwner != connector &&
+    GetTickCount64() - m_relativeTime < RELATIVE_IDLE_MS;
 }
 
 void CInputPipeServer::UpdateDesktopMode(bool log)
