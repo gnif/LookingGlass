@@ -254,6 +254,7 @@ struct AppParams
   bool                 autoCapture;
   bool                 captureInputOnly;
   bool                 showCursorDot;
+  bool                 showHostCursor;
   bool                 largeCursorDot;
 
   bool                 audioDebug;

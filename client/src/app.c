@@ -310,7 +310,9 @@ void app_handleFocusEvent(bool focused)
     if (g_params.releaseKeysOnFocusLoss)
       lgInput_releaseKeys();
 
-    if (!g_params.showCursorDot)
+    if (g_params.showHostCursor)
+      g_state.ds->setPointer(LG_POINTER_ARROW);
+    else if (!g_params.showCursorDot)
       g_state.ds->setPointer(LG_POINTER_NONE);
 
     if (g_params.minimizeOnFocusLoss)

@@ -222,7 +222,8 @@ static void applyView(bool active, bool force)
   else
   {
     if (g_params.hideMouse)
-      g_state.ds->setPointer(LG_POINTER_SQUARE);
+      g_state.ds->setPointer(g_params.showHostCursor ?
+          LG_POINTER_ARROW : LG_POINTER_SQUARE);
   }
 
   core_updateKeyboardGrab();
@@ -324,7 +325,8 @@ void core_setGrabQuiet(bool enable)
 
   /* we always do this so that at init the cursor is in the right state */
   if (g_params.captureInputOnly && g_params.hideMouse)
-    g_state.ds->setPointer(enable ? LG_POINTER_NONE : LG_POINTER_SQUARE);
+    g_state.ds->setPointer(enable ? LG_POINTER_NONE :
+        (g_params.showHostCursor ? LG_POINTER_ARROW : LG_POINTER_SQUARE));
 
   if (g_cursor.grab == enable)
     return;

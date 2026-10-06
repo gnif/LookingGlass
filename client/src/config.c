@@ -479,6 +479,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "showHostCursor",
+    .description    = "Use the normal host cursor instead of the \"dot\" cursor",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = false
+  },
+  {
+    .module         = "input",
     .name           = "largeCursorDot",
     .old_module     = "spice",
     .old_name       = "largeCursorDot",
@@ -731,6 +738,7 @@ bool config_load(int argc, char * argv[])
   g_params.captureOnStart   = option_get_bool("input", "captureOnStart");
   g_params.alwaysShowCursor = option_get_bool("input", "alwaysShowCursor");
   g_params.showCursorDot    = option_get_bool("input", "showCursorDot");
+  g_params.showHostCursor   = option_get_bool("input", "showHostCursor");
   g_params.largeCursorDot   = option_get_bool("input", "largeCursorDot");
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");

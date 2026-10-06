@@ -194,7 +194,11 @@ static void lgInit(void)
   g_state.videoGeometryDirty = true;
 
   // if guest input is not in use, hide the local cursor
-  if ((!lgInput_available() && g_params.hideMouse) || !g_params.showCursorDot)
+  if (!lgInput_available() && g_params.hideMouse)
+    g_state.ds->setPointer(LG_POINTER_NONE);
+  else if (g_params.showHostCursor)
+    g_state.ds->setPointer(LG_POINTER_ARROW);
+  else if (!g_params.showCursorDot)
     g_state.ds->setPointer(LG_POINTER_NONE);
   else
     g_state.ds->setPointer(LG_POINTER_SQUARE);
