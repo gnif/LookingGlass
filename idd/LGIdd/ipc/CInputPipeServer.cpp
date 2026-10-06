@@ -22,6 +22,7 @@
 
 #include "ipc/CInputPipeServer.h"
 
+#include <SetupAPI.h>
 #include <wudfwdm.h>
 
 #include "config/CSettings.h"
@@ -32,6 +33,46 @@
 #include <string.h>
 
 CInputPipeServer g_inputPipeServer;
+
+static bool HasMultiSzEntry(HDEVINFO devInfoSet, SP_DEVINFO_DATA& devInfoData,
+  DWORD property, const wchar_t * value)
+{
+  wchar_t buffer[1024] = {};
+  if (!SetupDiGetDeviceRegistryPropertyW(devInfoSet, &devInfoData, property,
+      nullptr, reinterpret_cast<PBYTE>(buffer),
+      // reserve space for null terminating the list
+      sizeof(buffer) - 2 * sizeof(wchar_t), nullptr))
+    return false;
+
+  for (const wchar_t * entry = buffer; *entry; entry += wcslen(entry) + 1)
+    if (_wcsicmp(entry, value) == 0)
+      return true;
+  return false;
+}
+
+static bool IsMouseFilterAttached()
+{
+  static const wchar_t HARDWARE_ID[] = L"HID\\LGInput&Col01";
+  static const wchar_t FILTER[]      = L"LGMouVd";
+
+  HDEVINFO devInfoSet = SetupDiGetClassDevsW(nullptr, L"HID", nullptr,
+    DIGCF_ALLCLASSES | DIGCF_PRESENT);
+  if (devInfoSet == INVALID_HANDLE_VALUE)
+    return false;
+
+  bool attached = false;
+  SP_DEVINFO_DATA devInfoData = {};
+  devInfoData.cbSize = sizeof(devInfoData);
+  for (DWORD i = 0; !attached &&
+      SetupDiEnumDeviceInfo(devInfoSet, i, &devInfoData); ++i)
+    attached =
+      HasMultiSzEntry(devInfoSet, devInfoData, SPDRP_HARDWAREID,
+        HARDWARE_ID) &&
+      HasMultiSzEntry(devInfoSet, devInfoData, SPDRP_UPPERFILTERS, FILTER);
+
+  SetupDiDestroyDeviceInfoList(devInfoSet);
+  return attached;
+}
 
 bool CInputPipeServer::Init()
 {
@@ -44,6 +85,7 @@ bool CInputPipeServer::Init()
   if (!QueryPerformanceFrequency(&m_performanceFrequency))
     m_performanceFrequency.QuadPart = 0;
   m_lastStatistics = GetTickCount64();
+  UpdateDesktopMode(true);
   m_stopEvent  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   m_queueEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   if (!m_stopEvent || !m_queueEvent)
@@ -537,6 +579,14 @@ void CInputPipeServer::LogStatistics()
     static_cast<unsigned long long>(slowWrites));
 }
 
+void CInputPipeServer::UpdateDesktopMode(bool log)
+{
+  const bool desktopMode = IsMouseFilterAttached();
+  if (Atomic::Swap(m_desktopMode, desktopMode) != desktopMode || log)
+    DEBUG_INFO("Absolute input desktop mode is %s",
+      desktopMode ? "on" : "off");
+}
+
 void CInputPipeServer::Invalidate(uint64_t state, bool requireMatch)
 {
   CSRWExclusiveLock connectionLock(m_connectionLock);
@@ -592,6 +642,8 @@ void CInputPipeServer::Thread()
 
 void CInputPipeServer::OnPipeConnected()
 {
+  UpdateDesktopMode(false);
+
   CSRWExclusiveLock connectionLock(m_connectionLock);
   CSRWExclusiveLock queueLock(m_queueLock);
 

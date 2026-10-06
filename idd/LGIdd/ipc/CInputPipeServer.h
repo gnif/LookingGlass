@@ -70,6 +70,7 @@ private:
 
   std::atomic<uint8_t> m_keyboardLEDs      { 0 };
   std::atomic<bool>    m_keyboardLEDsValid { false };
+  std::atomic<bool>    m_desktopMode       { false };
 
   MouseMode m_mouseMode       = MouseMode::NONE;
   uint16_t  m_absoluteX       = 0;
@@ -102,6 +103,7 @@ private:
   bool Pop(QueueItem& item);
   bool Send(const QueueItem& item);
   void Invalidate(uint64_t state, bool requireMatch);
+  void UpdateDesktopMode(bool log);
   void LogStatistics();
   void Thread();
 
@@ -128,6 +130,11 @@ public:
       return false;
     leds = Atomic::Load(m_keyboardLEDs, std::memory_order_acquire);
     return true;
+  }
+
+  bool IsDesktopMode() const
+  {
+    return Atomic::Load(m_desktopMode, std::memory_order_acquire);
   }
 
   bool SendMouseRelative(

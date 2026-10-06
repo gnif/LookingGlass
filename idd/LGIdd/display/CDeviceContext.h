@@ -35,6 +35,7 @@
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
+#include "input/IInputSink.h"
 #include "transport/CTransportManager.h"
 
 class CDeviceContext : private ITransportActions
@@ -58,11 +59,37 @@ private:
     uint32_t height = 0;
   };
 
+  class HeadInputSink final : public IInputSink
+  {
+  private:
+    CDeviceContext& m_owner;
+    const UINT      m_connector;
+
+  public:
+    HeadInputSink(CDeviceContext& owner, UINT connector) :
+      m_owner(owner),
+      m_connector(connector)
+    {
+    }
+
+    uint64_t GetState() const override;
+    bool GetKeyboardLEDs(uint8_t& leds) const override;
+    bool SendMouseRelative(int32_t deltaX, int32_t deltaY,
+      int32_t wheel, uint32_t buttons) override;
+    bool SendMouseAbsolute(uint16_t x, uint16_t y,
+      int32_t wheel, uint32_t buttons) override;
+    bool SendKeyboard(
+      uint8_t modifiers, const uint8_t * keys) override;
+    bool Reset() override;
+  };
+
   CSRWLock    m_displayRectLock;
   DisplayRect m_desktopRect;
 
   struct Head
   {
+    // Declared before transport so it outlives the input hub.
+    HeadInputSink                      inputSink;
     std::unique_ptr<CTransportManager> transport;
     CDisplayConfiguration              displayConfiguration;
     CMonitorManager                    monitorManager;
@@ -70,8 +97,8 @@ private:
     bool                               transportOpened = false;
     DisplayRect                        displayRect;
 
-    Head(UINT connectorIndex, std::unique_ptr<CTransportManager> manager,
-      CSettings& settings);
+    Head(CDeviceContext& owner, UINT connectorIndex,
+      std::unique_ptr<CTransportManager> manager, CSettings& settings);
     Head(const Head&) = delete;
     Head& operator=(const Head&) = delete;
   };
@@ -109,6 +136,7 @@ private:
   }
 
   UINT HeadForBackend(BackendId backend) const;
+  bool MapAbsolute(UINT head, uint16_t& x, uint16_t& y);
   CSettings::DisplayModes MonitorModes(bool * hdrEnabled) const;
 
   void QueryIddCxCapabilities();

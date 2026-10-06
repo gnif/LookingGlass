@@ -36,8 +36,9 @@
 
 static const UINT IDDCX_VERSION_1_10 = 0x1A00;
 
-CDeviceContext::Head::Head(UINT connectorIndex,
+CDeviceContext::Head::Head(CDeviceContext& owner, UINT connectorIndex,
   std::unique_ptr<CTransportManager> manager, CSettings& settings) :
+  inputSink(owner, connectorIndex),
   transport(std::move(manager)),
   displayConfiguration(settings, connectorIndex),
   index(connectorIndex)
@@ -53,14 +54,15 @@ CDeviceContext::CDeviceContext(WDFDEVICE wdfDevice) :
   if (!ResolveTransports(resolved))
   {
     m_heads.emplace_back(std::unique_ptr<Head>(
-      new Head(0, std::unique_ptr<CTransportManager>(), g_settings)));
+      new Head(*this, 0, std::unique_ptr<CTransportManager>(),
+        g_settings)));
     return;
   }
 
   const unsigned connectors = TransportConnectorCount(resolved);
   for (unsigned i = 0; i < connectors; ++i)
     m_heads.emplace_back(std::unique_ptr<Head>(
-      new Head(i, CreateTransport(resolved, i), g_settings)));
+      new Head(*this, i, CreateTransport(resolved, i), g_settings)));
 }
 
 CDeviceContext::~CDeviceContext()
@@ -751,7 +753,7 @@ bool CDeviceContext::SetupTransport(UINT head, size_t alignSize)
       return false;
   }
 
-  if (!target.transport->Input().Start(g_inputPipeServer))
+  if (!target.transport->Input().Start(target.inputSink))
   {
     DEBUG_ERROR("Failed to start input transport");
     return false;
@@ -819,6 +821,94 @@ void CDeviceContext::SetDisplayRect(uint32_t connector, int32_t x, int32_t y,
   else
     DEBUG_INFO("Connector %u display is %ux%u at %d,%d",
       connector, width, height, x, y);
+}
+
+static int64_t ScaleRounded(int64_t value, int64_t numerator,
+  int64_t denominator)
+{
+  const int64_t product = value * numerator;
+  const int64_t half    = denominator / 2;
+  return (product < 0 ? product - half : product + half) / denominator;
+}
+
+bool CDeviceContext::MapAbsolute(UINT head, uint16_t& x, uint16_t& y)
+{
+  static const int64_t ABSOLUTE_MAX = LG_INPUT_MOUSE_ABSOLUTE_MAX;
+
+  DisplayRect display;
+  DisplayRect desktop;
+  {
+    CSRWSharedLock lock(m_displayRectLock);
+    display = HeadAt(head).displayRect;
+    desktop = m_desktopRect;
+  }
+
+  // Without a layout only the primary connector can be placed.
+  if (!display.width || !display.height || !desktop.width || !desktop.height)
+    return head == 0;
+
+  // The client maps the last pixel to ABSOLUTE_MAX.
+  const int64_t px =
+    display.x + ScaleRounded(x, display.width - 1, ABSOLUTE_MAX);
+  const int64_t py =
+    display.y + ScaleRounded(y, display.height - 1, ABSOLUTE_MAX);
+  int64_t mx = ScaleRounded(px - desktop.x, ABSOLUTE_MAX, desktop.width);
+  int64_t my = ScaleRounded(py - desktop.y, ABSOLUTE_MAX, desktop.height);
+  if (mx < 0)
+    mx = 0;
+  else if (mx > ABSOLUTE_MAX)
+    mx = ABSOLUTE_MAX;
+  if (my < 0)
+    my = 0;
+  else if (my > ABSOLUTE_MAX)
+    my = ABSOLUTE_MAX;
+
+  x = static_cast<uint16_t>(mx);
+  y = static_cast<uint16_t>(my);
+  return true;
+}
+
+uint64_t CDeviceContext::HeadInputSink::GetState() const
+{
+  return g_inputPipeServer.GetState();
+}
+
+bool CDeviceContext::HeadInputSink::GetKeyboardLEDs(uint8_t& leds) const
+{
+  return g_inputPipeServer.GetKeyboardLEDs(leds);
+}
+
+bool CDeviceContext::HeadInputSink::SendMouseRelative(int32_t deltaX,
+  int32_t deltaY, int32_t wheel, uint32_t buttons)
+{
+  return g_inputPipeServer.SendMouseRelative(deltaX, deltaY, wheel, buttons);
+}
+
+bool CDeviceContext::HeadInputSink::SendMouseAbsolute(uint16_t x, uint16_t y,
+  int32_t wheel, uint32_t buttons)
+{
+  // Without LGMouVd absolute input only reaches the primary monitor. Drop
+  // what cannot be placed but report success so the input lease survives.
+  if (!g_inputPipeServer.IsDesktopMode())
+  {
+    if (m_connector != 0)
+      return true;
+  }
+  else if (!m_owner.MapAbsolute(m_connector, x, y))
+    return true;
+
+  return g_inputPipeServer.SendMouseAbsolute(x, y, wheel, buttons);
+}
+
+bool CDeviceContext::HeadInputSink::SendKeyboard(uint8_t modifiers,
+  const uint8_t * keys)
+{
+  return g_inputPipeServer.SendKeyboard(modifiers, keys);
+}
+
+bool CDeviceContext::HeadInputSink::Reset()
+{
+  return g_inputPipeServer.Reset();
 }
 
 InteractionResult CDeviceContext::OnSetCursorPos(
