@@ -66,7 +66,7 @@ The IDD does not require a physical display or dummy plug: it creates a virtual
 Windows monitor, including on systems without a passed-through display output.
 
 A physical display, dummy plug or another virtual monitor is only required
-when using the :doc:`Legacy Host Application <legacy_host>`, because that
+when using the :doc:`Legacy Host Application </legacy_host>`, because that
 application captures an existing Windows display.
 
 .. _igpu_kvmfr_recommended:
