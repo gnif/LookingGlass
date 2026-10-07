@@ -150,13 +150,6 @@ Fetching with APT
 
 You can fetch these dependencies with the following command:
 
-.. warning::
-
-   The command below builds both PipeWire and PulseAudio playback backends.
-   Omit one development package only when also disabling its backend in CMake.
-   Microphone recording requires PipeWire; the current PulseAudio backend is
-   playback-only.
-
 .. code:: bash
 
    apt-get install binutils cmake make fonts-dejavu-core gcc g++ libdw-dev \
