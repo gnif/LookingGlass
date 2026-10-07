@@ -586,6 +586,14 @@ bool clipboard_requestReady(LG_ClipboardRequest request)
   return true;
 }
 
+bool clipboard_requestCancel(LG_ClipboardRequest request,
+    LG_ClipboardCancelReason reason)
+{
+  CHECK(request == rec.requestId);
+  (void)reason;
+  return true;
+}
+
 bool clipboardFiles_setLocal(const char * mime,
     const void * data, size_t size)
 {

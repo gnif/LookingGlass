@@ -284,6 +284,21 @@ static bool spiceRequest(void * opaque, LG_ClipboardRequest request,
   return false;
 }
 
+static bool spiceRequestCancel(void * opaque,
+    LG_ClipboardRequest request, LG_ClipboardCancelReason reason)
+{
+  SpiceClipboard * clipboard = opaque;
+  (void)reason;
+
+  LG_LOCK(clipboard->stateLock);
+  const bool valid = clipboard->read.pending &&
+    clipboard->read.request == request;
+  if (valid)
+    clipboard->read = (PendingRequest) { 0 };
+  LG_UNLOCK(clipboard->stateLock);
+  return valid;
+}
+
 static const LG_ClipboardOps l_clipboardOps =
 {
   .name              = "SPICE",
@@ -294,6 +309,7 @@ static const LG_ClipboardOps l_clipboardOps =
   .notifyTypes       = spiceNotifyTypes,
   .data              = spiceData,
   .request           = spiceRequest,
+  .requestCancel     = spiceRequestCancel,
 };
 
 bool spiceClipboard_init(SpiceClipboard ** clipboard)

@@ -22,11 +22,13 @@
 #define _H_X11DS_CLIPBOARD_
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <X11/extensions/Xfixes.h>
 
 #include "interface/displayserver.h"
 
 bool x11CBEventThread(const XEvent * xe);
+void x11CBMaintenance(uint64_t now);
 
 bool x11CBInit(void);
 void x11CBFree(void);

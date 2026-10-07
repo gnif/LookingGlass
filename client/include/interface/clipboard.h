@@ -236,6 +236,10 @@ typedef struct LG_ClipboardOps
    * or release first. */
   bool (*request)(void * opaque, LG_ClipboardRequest request,
       LG_ClipboardData type);
+  /* Best-effort cancellation of a request previously submitted through
+   * request(). The consumer has already made its stream state inactive. */
+  bool (*requestCancel)(void * opaque, LG_ClipboardRequest request,
+      LG_ClipboardCancelReason reason);
 
   bool (*fileAcquire)(void * opaque, uint64_t dataset,
       uint64_t acquisition);

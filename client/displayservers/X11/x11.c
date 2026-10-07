@@ -1133,7 +1133,10 @@ static int x11EventThread(void * unused)
       x11.eventSource.callback(x11.eventSource.opaque);
 
     if (!XPending(x11.display))
+    {
+      x11CBMaintenance(microtime());
       continue;
+    }
 
     XEvent xe;
     XNextEvent(x11.display, &xe);

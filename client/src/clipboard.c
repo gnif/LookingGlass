@@ -2116,6 +2116,35 @@ bool clipboard_requestReady(LG_ClipboardRequest id)
   return result;
 }
 
+bool clipboard_requestCancel(LG_ClipboardRequest id,
+    LG_ClipboardCancelReason reason)
+{
+  if (id == LG_CLIPBOARD_REQUEST_INVALID ||
+      (unsigned int)reason > LG_CLIPBOARD_CANCEL_INVALID ||
+      !clipboard.requests)
+    return false;
+
+  LG_LOCK(clipboard.callbackLock);
+  LG_LOCK(clipboard.requestLock);
+  ClipboardRequest * request = takeRequest(id);
+  LG_UNLOCK(clipboard.requestLock);
+  if (!request)
+  {
+    LG_UNLOCK(clipboard.callbackLock);
+    return false;
+  }
+
+  const ClipboardBinding binding = request->binding;
+  freeRequest(request);
+
+  LG_LOCK_SHARED(clipboard.activeLock);
+  if (bindingActiveNL(&binding) && binding.ops->requestCancel)
+    binding.ops->requestCancel(binding.opaque, id, reason);
+  LG_UNLOCK_SHARED(clipboard.activeLock);
+  LG_UNLOCK(clipboard.callbackLock);
+  return true;
+}
+
 bool clipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque)
 {

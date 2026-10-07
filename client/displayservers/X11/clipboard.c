@@ -34,6 +34,9 @@
 #include "common/debug.h"
 #include <LGProtocol/KVMFRClipboard.h>
 #include "common/locking.h"
+#include "common/time.h"
+
+#define X11_CLIPBOARD_WRITE_TIMEOUT_US UINT64_C(30000000)
 
 struct X11ClipboardRead
 {
@@ -63,6 +66,7 @@ struct X11ClipboardWrite
   LG_ClipboardRequest        request;
   LG_ClipboardData           type;
   uint64_t                   offset;
+  uint64_t                   progressAt;
   bool                       begun;
   bool                       blocked;
   bool                       ready;
@@ -139,9 +143,10 @@ static void writeRemoveNL(struct X11ClipboardWrite * write);
 static bool advanceReadPropertyNL(unsigned long units);
 static void clearTargetsNL(void);
 static void clearFileImportNL(void);
-static struct X11ClipboardWrite * takeFileWritesNL(void);
-static struct X11ClipboardWrite * takeFileWritesForWindowNL(Window window);
-static void cancelFileWrites(
+static struct X11ClipboardWrite * takeWritesNL(void);
+static struct X11ClipboardWrite * takeWritesForWindowNL(Window window);
+static struct X11ClipboardWrite * takeExpiredWritesNL(uint64_t now);
+static void cancelWrites(
     struct X11ClipboardWrite * writes, bool terminate);
 static void x11CBFileImportIncr(const XPropertyEvent e);
 
@@ -187,11 +192,11 @@ bool x11CBEventThread(const XEvent * xe)
     {
       LG_LOCK(x11cb.lock);
       struct X11ClipboardWrite * writes =
-        takeFileWritesForWindowNL(xe->xdestroywindow.window);
+        takeWritesForWindowNL(xe->xdestroywindow.window);
       LG_UNLOCK(x11cb.lock);
       if (!writes)
         return false;
-      cancelFileWrites(writes, false);
+      cancelWrites(writes, false);
       return true;
     }
 
@@ -220,6 +225,7 @@ bool x11CBEventThread(const XEvent * xe)
             break;
         if (write)
         {
+          write->progressAt = microtime();
           if (write->file)
           {
             const size_t remaining = write->fileSize - (size_t)write->offset;
@@ -357,9 +363,10 @@ static LG_ClipboardResult x11CBWriteBegin(void * opaque,
       write->event.xselection.property, x11atoms.INCR, 32,
       PropModeReplace, (const unsigned char *)&hint, 1);
   XSelectInput(x11.display, write->event.xselection.requestor,
-      PropertyChangeMask);
-  write->begun = true;
-  write->ready = false;
+      PropertyChangeMask | StructureNotifyMask);
+  write->progressAt = microtime();
+  write->begun      = true;
+  write->ready      = false;
   XEvent event = write->event;
   LG_UNLOCK(x11cb.lock);
   x11CBWriteSend(&event);
@@ -394,9 +401,10 @@ static LG_ClipboardResult x11CBWriteChunk(void * opaque,
   XChangeProperty(x11.display, write->event.xselection.requestor,
       write->event.xselection.property, write->event.xselection.target,
       8, PropModeReplace, data, (int)size);
-  write->ready   = false;
-  write->blocked = false;
-  write->offset  += size;
+  write->progressAt = microtime();
+  write->ready      = false;
+  write->blocked    = false;
+  write->offset     += size;
   LG_UNLOCK(x11cb.lock);
   XFlush(x11.display);
   return LG_CLIPBOARD_RESULT_ACCEPTED;
@@ -578,6 +586,7 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
     write->fileData         = (uint8_t *)data;
     write->fileSize         = size;
     write->filePresentation = writePresentation;
+    write->progressAt       = microtime();
     write->begun            = true;
 
     LG_LOCK(x11cb.lock);
@@ -632,10 +641,11 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
         DEBUG_ERROR("out of memory");
         goto nodata;
       }
-      write->event    = *s;
-      write->request  = LG_CLIPBOARD_REQUEST_INVALID;
-      write->type     = requestType;
-      write->creating = true;
+      write->event      = *s;
+      write->request    = LG_CLIPBOARD_REQUEST_INVALID;
+      write->type       = requestType;
+      write->creating   = true;
+      write->progressAt = microtime();
 
       LG_LOCK(x11cb.lock);
       bool duplicate = false;
@@ -649,8 +659,11 @@ static void x11CBSelectionRequest(const XSelectionRequestEvent e)
       }
       if (!duplicate)
       {
-        write->next   = x11cb.writes;
+        write->next  = x11cb.writes;
         x11cb.writes = write;
+        XSelectInput(x11.display, e.requestor,
+            PropertyChangeMask | StructureNotifyMask);
+        XFlush(x11.display);
       }
       LG_UNLOCK(x11cb.lock);
       if (duplicate)
@@ -796,49 +809,57 @@ static void clearFileImportNL(void)
 }
 
 /* x11cb.lock must be held. */
-static struct X11ClipboardWrite * takeFileWritesNL(void)
+static struct X11ClipboardWrite * takeWritesNL(void)
+{
+  struct X11ClipboardWrite * result = x11cb.writes;
+  x11cb.writes = NULL;
+  return result;
+}
+
+/* x11cb.lock must be held. */
+static struct X11ClipboardWrite * takeWritesForWindowNL(Window window)
 {
   struct X11ClipboardWrite * result = NULL;
-  struct X11ClipboardWrite ** link = &x11cb.writes;
+  struct X11ClipboardWrite ** link  = &x11cb.writes;
   while (*link)
   {
     struct X11ClipboardWrite * write = *link;
-    if (!write->file)
+    if (write->event.xselection.requestor != window)
     {
       link = &write->next;
       continue;
     }
 
-    *link = write->next;
+    *link       = write->next;
     write->next = result;
-    result = write;
+    result      = write;
   }
   return result;
 }
 
 /* x11cb.lock must be held. */
-static struct X11ClipboardWrite * takeFileWritesForWindowNL(Window window)
+static struct X11ClipboardWrite * takeExpiredWritesNL(uint64_t now)
 {
   struct X11ClipboardWrite * result = NULL;
-  struct X11ClipboardWrite ** link = &x11cb.writes;
+  struct X11ClipboardWrite ** link  = &x11cb.writes;
   while (*link)
   {
     struct X11ClipboardWrite * write = *link;
-    if (!write->file ||
-        write->event.xselection.requestor != window)
+    if (write->file || write->creating || now < write->progressAt ||
+        now - write->progressAt < X11_CLIPBOARD_WRITE_TIMEOUT_US)
     {
       link = &write->next;
       continue;
     }
 
-    *link = write->next;
+    *link       = write->next;
     write->next = result;
-    result = write;
+    result      = write;
   }
   return result;
 }
 
-static void cancelFileWrites(
+static void cancelWrites(
     struct X11ClipboardWrite * writes, bool terminate)
 {
   const bool flush = terminate && writes;
@@ -846,17 +867,49 @@ static void cancelFileWrites(
   {
     struct X11ClipboardWrite * next = writes->next;
     if (terminate)
-      XChangeProperty(x11.display, writes->event.xselection.requestor,
-          writes->event.xselection.property,
-          writes->event.xselection.target, 8, PropModeReplace, NULL, 0);
-    clipboardFiles_remotePresentationRelease(
-        writes->filePresentation);
-    free(writes->fileData);
-    free(writes);
+    {
+      if (writes->begun)
+        XChangeProperty(x11.display, writes->event.xselection.requestor,
+            writes->event.xselection.property,
+            writes->event.xselection.target, 8, PropModeReplace, NULL, 0);
+      else
+      {
+        XEvent reply = writes->event;
+        reply.xselection.property = None;
+        XSendEvent(x11.display, reply.xselection.requestor, 0, 0, &reply);
+      }
+    }
+
+    const LG_ClipboardRequest request = writes->request;
+    if (writes->file)
+    {
+      clipboardFiles_remotePresentationRelease(
+          writes->filePresentation);
+      free(writes->fileData);
+      free(writes);
+    }
+    else
+    {
+      if (request != LG_CLIPBOARD_REQUEST_INVALID)
+        clipboard_requestCancel(request, LG_CLIPBOARD_CANCEL_UNAVAILABLE);
+      free(writes);
+    }
     writes = next;
   }
   if (flush)
     XFlush(x11.display);
+}
+
+void x11CBMaintenance(uint64_t now)
+{
+  LG_LOCK(x11cb.lock);
+  struct X11ClipboardWrite * writes = takeExpiredWritesNL(now);
+  LG_UNLOCK(x11cb.lock);
+  if (!writes)
+    return;
+
+  DEBUG_WARN("Cancelling stalled X11 clipboard transfer");
+  cancelWrites(writes, true);
 }
 
 static bool fileImportGrowNL(size_t wanted)
@@ -1652,12 +1705,12 @@ void x11CBFree(void)
     cancelReadNL(true) : LG_CLIPBOARD_REQUEST_INVALID;
   clearTargetsNL();
   clearFileImportNL();
-  struct X11ClipboardWrite * writes = takeFileWritesNL();
+  struct X11ClipboardWrite * writes = takeWritesNL();
   LG_UNLOCK(x11cb.lock);
 
   if (request != LG_CLIPBOARD_REQUEST_INVALID)
     clipboard_abort(request);
-  cancelFileWrites(writes, true);
+  cancelWrites(writes, true);
   clipboardFiles_clearLocal();
 }
 

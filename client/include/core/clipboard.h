@@ -53,6 +53,11 @@ bool clipboard_requestStream(LG_ClipboardData type,
     const LG_ClipboardStreamOps * stream, void * opaque,
     LG_ClipboardRequest * request);
 bool clipboard_requestReady(LG_ClipboardRequest request);
+/* The consumer must unlink its stream state before cancellation, but retain
+ * its opaque storage until this returns. Success means the local request was
+ * canceled; delivery to the provider is best effort. */
+bool clipboard_requestCancel(LG_ClipboardRequest request,
+    LG_ClipboardCancelReason reason);
 bool clipboard_request(LG_ClipboardData type,
     LG_ClipboardReplyFn replyFn, void * opaque);
 
