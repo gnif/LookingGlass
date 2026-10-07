@@ -59,6 +59,10 @@ public:
     uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength) override;
 
+  bool ClipboardPeerOwnsInput(
+    const NetworkClipboardPeer& peer) override;
+  bool ClipboardWithInputAuthority(const NetworkClipboardPeer& peer,
+    NetworkClipboardInputAction action, void * opaque) override;
   bool ClipboardPeerInfo(const NetworkClipboardPeer& peer,
     NetworkClipboardPeerInfo& info) override;
   NetworkClipboardSendResult SendClipboard(

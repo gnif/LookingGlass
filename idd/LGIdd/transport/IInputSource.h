@@ -38,6 +38,8 @@ struct InputTargetState
   uint8_t       keyboardLEDs      = 0;
 };
 
+using InputAuthorityAction = void (*)(void * opaque);
+
 enum class InputResult
 {
   ACCEPTED,
@@ -52,6 +54,10 @@ public:
   virtual ~IInputTarget() = default;
 
   virtual InputTargetState GetState(const InputSourceId& source) = 0;
+  // The action runs synchronously while input ownership cannot change and
+  // must not call back through this input target.
+  virtual bool WithAuthority(const InputSourceId& source,
+    InputAuthorityAction action, void * opaque) = 0;
   virtual void Failed() = 0;
   virtual InputResult Claim(const InputSourceId& source) = 0;
   virtual InputResult Touch(const InputSourceId& source) = 0;

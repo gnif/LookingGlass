@@ -45,10 +45,13 @@ struct NetworkClipboardPeerInfo
   uint32_t             fileBulkPayload          = 0;
 };
 
+using NetworkClipboardInputAction = void (*)(void * opaque);
+
 enum class NetworkClipboardSendResult
 {
   ACCEPTED,
   BLOCKED,
+  UNAUTHORIZED,
   FAILED,
 };
 
@@ -64,6 +67,10 @@ class INetworkClipboardSender
 public:
   virtual ~INetworkClipboardSender() = default;
 
+  virtual bool ClipboardPeerOwnsInput(
+    const NetworkClipboardPeer& peer) = 0;
+  virtual bool ClipboardWithInputAuthority(const NetworkClipboardPeer& peer,
+    NetworkClipboardInputAction action, void * opaque) = 0;
   virtual bool ClipboardPeerInfo(
     const NetworkClipboardPeer& peer, NetworkClipboardPeerInfo& info) = 0;
   virtual NetworkClipboardSendResult SendClipboard(
@@ -77,6 +84,9 @@ class CNetworkClipboard final : public IClipboardSource
 private:
   struct Impl;
   std::unique_ptr<Impl> m_impl;
+
+  bool PeerOwnsInput(const NetworkClipboardPeer& peer);
+  bool RevokeUnauthorizedOwner();
 
 public:
   CNetworkClipboard();

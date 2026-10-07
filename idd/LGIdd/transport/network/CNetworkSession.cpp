@@ -116,6 +116,13 @@ InputTargetState CNetworkInputSource::GetState(
   return m_target ? m_target->GetState(source) : InputTargetState {};
 }
 
+bool CNetworkInputSource::WithAuthority(const InputSourceId& source,
+  InputAuthorityAction action, void * opaque) const
+{
+  CSRWSharedLock lock(m_lock);
+  return m_target && m_target->WithAuthority(source, action, opaque);
+}
+
 InputResult CNetworkInputSource::Claim(const InputSourceId& source)
 {
   CSRWSharedLock lock(m_lock);
@@ -517,6 +524,13 @@ InputTargetState CNetworkSession::InputState() const
 {
   CSRWSharedLock lock(m_lifecycleLock);
   return m_open ? m_input.GetState(m_source) : InputTargetState {};
+}
+
+bool CNetworkSession::WithInputAuthority(
+  InputAuthorityAction action, void * opaque) const
+{
+  CSRWSharedLock lock(m_lifecycleLock);
+  return m_open && m_input.WithAuthority(m_source, action, opaque);
 }
 
 InputResult CNetworkSession::ClaimInput()

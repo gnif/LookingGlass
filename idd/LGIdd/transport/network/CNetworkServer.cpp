@@ -30,6 +30,7 @@
 #include "platform/CPlatformInfo.h"
 #include "VersionInfo.h"
 #include <LGProtocol/NetworkAuth.h>
+#include <LGProtocol/NetworkClipboard.h>
 #include <LGProtocol/NetworkIdentity.h>
 #include <LGProtocol/NetworkPacket.h>
 #include <LGProtocol/NetworkRoute.h>
@@ -745,6 +746,96 @@ struct CNetworkServer::Impl
     return NetworkAudioSendResult::FAILED;
   }
 
+  std::shared_ptr<CNetworkSession> ClipboardInputSession(
+    const NetworkClipboardPeer& peer)
+  {
+    std::shared_ptr<CNetworkSession> session;
+    {
+      CSRWSharedLock guard(lock);
+      for (Connection * connection : connections)
+      {
+        if (connection->client != peer.client ||
+            connection->generation != peer.generation)
+          continue;
+
+        CSRWSharedLock connectionGuard(connection->lock);
+        const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+        if (connection->closing ||
+            connection->handshake != HandshakeState::READY ||
+            !(connection->selectedServices & inputMask) ||
+            !connection->inputClaimantID || !connection->inputClaimEpoch)
+          return {};
+        session = connection->session;
+        break;
+      }
+    }
+
+    return session;
+  }
+
+  bool ClipboardPeerOwnsInput(const NetworkClipboardPeer& peer)
+  {
+    const std::shared_ptr<CNetworkSession> session =
+      ClipboardInputSession(peer);
+    return session && session->InputState().owned;
+  }
+
+  bool ClipboardWithInputAuthority(const NetworkClipboardPeer& peer,
+    NetworkClipboardInputAction action, void * opaque)
+  {
+    if (!action)
+      return false;
+
+    const std::shared_ptr<CNetworkSession> session =
+      ClipboardInputSession(peer);
+    if (!session)
+      return false;
+
+    struct AuthorityContext
+    {
+      Impl                      * owner   = nullptr;
+      CNetworkSession           * session = nullptr;
+      NetworkClipboardPeer        peer    = {};
+      NetworkClipboardInputAction action  = nullptr;
+      void                      * opaque  = nullptr;
+      bool                        invoked = false;
+    } context;
+    context.owner   = this;
+    context.session = session.get();
+    context.peer    = peer;
+    context.action  = action;
+    context.opaque  = opaque;
+
+    const auto invoke = [](void * value)
+    {
+      AuthorityContext& authorityContext =
+        *static_cast<AuthorityContext *>(value);
+      CSRWSharedLock guard(authorityContext.owner->lock);
+      for (Connection * connection : authorityContext.owner->connections)
+      {
+        if (connection->client != authorityContext.peer.client ||
+            connection->generation != authorityContext.peer.generation)
+          continue;
+
+        {
+          CSRWSharedLock connectionGuard(connection->lock);
+          const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+          if (connection->closing ||
+              connection->handshake != HandshakeState::READY ||
+              !(connection->selectedServices & inputMask) ||
+              !connection->inputClaimantID || !connection->inputClaimEpoch ||
+              connection->session.get() != authorityContext.session)
+            return;
+        }
+
+        authorityContext.action(authorityContext.opaque);
+        authorityContext.invoked = true;
+        return;
+      }
+    };
+    return session->WithInputAuthority(invoke, &context) && context.invoked;
+  }
+
   bool ClipboardPeerInfo(const NetworkClipboardPeer& peer,
     NetworkClipboardPeerInfo& info)
   {
@@ -786,17 +877,12 @@ struct CNetworkServer::Impl
     return false;
   }
 
-  NetworkClipboardSendResult SendClipboard(
+  NetworkClipboardSendResult SendClipboardLocked(
     const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength)
   {
-    if (service != LG_NET_SERVICE_CLIPBOARD &&
-        service != LG_NET_SERVICE_FILE)
-      return NetworkClipboardSendResult::FAILED;
-
-    CSRWSharedLock guard(lock);
     for (Connection * connection : connections)
     {
       if (connection->client != peer.client ||
@@ -821,6 +907,65 @@ struct CNetworkServer::Impl
       }
     }
     return NetworkClipboardSendResult::FAILED;
+  }
+
+  NetworkClipboardSendResult SendClipboard(
+    const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+  {
+    if (service != LG_NET_SERVICE_CLIPBOARD &&
+        service != LG_NET_SERVICE_FILE)
+      return NetworkClipboardSendResult::FAILED;
+
+    const bool claimResult =
+      service == LG_NET_SERVICE_CLIPBOARD &&
+      messageType == LG_NET_CLIPBOARD_MESSAGE_CLAIM_RESULT;
+    if (claimResult)
+    {
+      CSRWSharedLock guard(lock);
+      return SendClipboardLocked(peer, bulk, service, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength);
+    }
+
+    struct SendContext
+    {
+      Impl                       * owner          = nullptr;
+      NetworkClipboardPeer         peer           = {};
+      bool                         bulk           = false;
+      LGNetService                 service        = 0;
+      uint16_t                     messageType    = 0;
+      LGNetEnvelopeFlags           flags          = 0;
+      uint64_t                     componentEpoch = 0;
+      uint64_t                     requestID      = 0;
+      const void                 * payload        = nullptr;
+      uint32_t                     payloadLength  = 0;
+      NetworkClipboardSendResult   result         =
+        NetworkClipboardSendResult::FAILED;
+    } context;
+    context.owner          = this;
+    context.peer           = peer;
+    context.bulk           = bulk;
+    context.service        = service;
+    context.messageType    = messageType;
+    context.flags          = flags;
+    context.componentEpoch = componentEpoch;
+    context.requestID      = requestID;
+    context.payload        = payload;
+    context.payloadLength  = payloadLength;
+
+    const auto send = [](void * value)
+    {
+      SendContext& sendContext = *static_cast<SendContext *>(value);
+      sendContext.result       = sendContext.owner->SendClipboardLocked(
+        sendContext.peer, sendContext.bulk, sendContext.service,
+        sendContext.messageType, sendContext.flags,
+        sendContext.componentEpoch, sendContext.requestID,
+        sendContext.payload, sendContext.payloadLength);
+    };
+    return ClipboardWithInputAuthority(peer, send, &context) ?
+      context.result : NetworkClipboardSendResult::UNAUTHORIZED;
   }
 
   bool VideoPeerInfo(const NetworkVideoPeer& peer,
@@ -3016,12 +3161,15 @@ retry:
     memset(connection.keyboardKeys, 0, sizeof(connection.keyboardKeys));
   }
 
-  static void InvalidateInputClaim(Connection& connection,
+  void InvalidateInputClaim(Connection& connection,
     uint64_t claimEpoch)
   {
-    CSRWExclusiveLock guard(connection.lock);
-    if (connection.inputClaimEpoch == claimEpoch)
-      ClearInputStateLocked(connection, true);
+    {
+      CSRWExclusiveLock guard(connection.lock);
+      if (connection.inputClaimEpoch == claimEpoch)
+        ClearInputStateLocked(connection, true);
+    }
+    clipboard.Process(GetTickCount64());
   }
 
   bool SendInputStatus(Connection& connection, uint16_t messageType,
@@ -3131,6 +3279,7 @@ retry:
       ClearInputStateLocked(connection, false);
     }
 
+    clipboard.Process(GetTickCount64());
     const LGNetInputStatusCode code = InputStatusCode(result);
     return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_CLAIM_RESULT,
         code, claim.claimEpoch, packet.envelope.requestID,
@@ -3233,6 +3382,9 @@ retry:
     if (result == InputResult::ACCEPTED &&
         packet.envelope.messageType == LG_NET_INPUT_MESSAGE_KEEPALIVE)
       return SendInputLEDs(connection);
+    if (result == InputResult::ACCEPTED &&
+        packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE)
+      clipboard.Process(GetTickCount64());
 
     const LGNetInputStatusCode code =
       packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE &&
@@ -5229,6 +5381,20 @@ NetworkAudioSendResult CNetworkServer::SendAudio(
     m_impl->SendAudio(peer, datagram, service, messageType, flags,
       componentEpoch, requestID, payload, payloadLength) :
     NetworkAudioSendResult::FAILED;
+}
+
+bool CNetworkServer::ClipboardPeerOwnsInput(
+  const NetworkClipboardPeer& peer)
+{
+  return m_impl && m_impl->ClipboardPeerOwnsInput(peer);
+}
+
+bool CNetworkServer::ClipboardWithInputAuthority(
+  const NetworkClipboardPeer& peer, NetworkClipboardInputAction action,
+  void * opaque)
+{
+  return m_impl &&
+    m_impl->ClipboardWithInputAuthority(peer, action, opaque);
 }
 
 bool CNetworkServer::ClipboardPeerInfo(

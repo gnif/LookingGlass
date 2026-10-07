@@ -97,6 +97,8 @@ public:
   void Stop() override;
 
   InputTargetState GetState(const InputSourceId& source) const;
+  bool WithAuthority(const InputSourceId& source,
+    InputAuthorityAction action, void * opaque) const;
   InputResult Claim(const InputSourceId& source);
   InputResult Touch(const InputSourceId& source);
   InputResult Release(const InputSourceId& source, bool reset);
@@ -197,6 +199,8 @@ public:
   bool TakeControlStatus(NetworkControlStatus& status);
 
   InputTargetState InputState() const;
+  bool WithInputAuthority(
+    InputAuthorityAction action, void * opaque) const;
   InputResult ClaimInput();
   InputResult TouchInput();
   InputResult ReleaseInput(bool reset);

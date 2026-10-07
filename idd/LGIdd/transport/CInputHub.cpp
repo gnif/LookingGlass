@@ -70,6 +70,12 @@ InputTargetState CInputHub::Source::GetState(
   return owner->GetState(Key(source));
 }
 
+bool CInputHub::Source::WithAuthority(const InputSourceId& source,
+  InputAuthorityAction action, void * opaque)
+{
+  return owner->WithAuthority(Key(source), action, opaque);
+}
+
 void CInputHub::Source::Failed()
 {
   owner->Failed(*this);
@@ -563,6 +569,20 @@ InputTargetState CInputHub::GetState(const SourceKey& source)
     result.owner.generation = m_owner.generation;
   }
   return result;
+}
+
+bool CInputHub::WithAuthority(const SourceKey& source,
+  InputAuthorityAction action, void * opaque)
+{
+  if (!action)
+    return false;
+
+  CSRWExclusiveLock lock(m_lock);
+  if (!SourceValid(source) || !CheckState() || !OwnerValid(source))
+    return false;
+
+  action(opaque);
+  return true;
 }
 
 void CInputHub::Failed(Source& source)

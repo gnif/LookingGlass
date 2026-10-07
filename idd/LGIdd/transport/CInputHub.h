@@ -57,6 +57,8 @@ private:
 
     SourceKey Key(const InputSourceId& source) const;
     InputTargetState GetState(const InputSourceId& source) override;
+    bool WithAuthority(const InputSourceId& source,
+      InputAuthorityAction action, void * opaque) override;
     void Failed() override;
     InputResult Claim(const InputSourceId& source) override;
     InputResult Touch(const InputSourceId& source) override;
@@ -94,6 +96,8 @@ private:
   void AdvanceInteractionSerial();
   bool CheckState();
   InputTargetState GetState(const SourceKey& source);
+  bool WithAuthority(const SourceKey& source,
+    InputAuthorityAction action, void * opaque);
   void Failed(Source& source);
   InputResult Claim(const SourceKey& source);
   InputResult Touch(const SourceKey& source);

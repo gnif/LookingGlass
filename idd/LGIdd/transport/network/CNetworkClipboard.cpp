@@ -20,6 +20,7 @@
 
 #include "transport/network/CNetworkClipboard.h"
 
+#include "CDebug.h"
 #include "CSRWLock.h"
 
 #include <LGProtocol/NetworkClipboard.h>
@@ -48,6 +49,7 @@ namespace
   constexpr uint32_t MAX_FILE_READ_LENGTH  = KVMFR_CLIPBOARD_FILE_READ_BYTES;
   constexpr uint32_t MIN_CHUNK_LENGTH      =
     (MAX_CHUNK_LENGTH + MAX_SEND_COUNT - 3U) / (MAX_SEND_COUNT - 2U);
+  constexpr uint32_t CLAIM_INPUT_REQUIRED  = 4;
 
   constexpr LGNetClipboardClaimFlags CLAIM_FLAGS =
     LG_NET_CLIPBOARD_CLAIM_READ | LG_NET_CLIPBOARD_CLAIM_WRITE;
@@ -247,10 +249,12 @@ struct CNetworkClipboard::Impl
 
   struct TargetItem
   {
-    uint64_t              serial     = 0;
-    KVMFRClipboardMessage record     = {};
-    std::vector<uint8_t>  data       = {};
-    bool                  wasBlocked = false;
+    uint64_t              serial       = 0;
+    NetworkClipboardPeer  peer         = {};
+    uint64_t              claimEpoch   = 0;
+    KVMFRClipboardMessage record       = {};
+    std::vector<uint8_t>  data         = {};
+    bool                  wasBlocked   = false;
   };
 
   CSRWLock m_lifecycleLock;
@@ -388,20 +392,24 @@ struct CNetworkClipboard::Impl
     return nullptr;
   }
 
-  bool QueueSendBatchNL(std::vector<SendItem>& batch);
-  bool QueueTargetNL(TargetItem&& item);
-  bool SelectBulkNL(
+  bool     QueueSendBatchNL(std::vector<SendItem>& batch);
+  bool     QueueTargetNL(TargetItem&& item);
+  bool     QueueOwnerTargetNL(TargetItem&& item);
+  bool     PeerOwnsInput(const NetworkClipboardPeer& peer);
+  bool     WithInputAuthority(const NetworkClipboardPeer& peer,
+    NetworkClipboardInputAction action, void * opaque);
+  bool     SelectBulkNL(
     const PeerState& peer, LGNetService service, uint32_t payloadLength) const;
   bool     PayloadFitsNL(const PeerState& peer, LGNetService service, bool bulk,
     uint32_t payloadLength) const;
   uint32_t ChunkLengthNL(
     const PeerState& peer, LGNetService service, uint32_t headerLength,
     bool bulk) const;
-  bool BuildSendForDeliveryNL(SendItem& item,
+  bool     BuildSendForDeliveryNL(SendItem& item,
     const NetworkClipboardPeer& peer, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags, uint64_t componentEpoch,
     uint64_t requestID, uint32_t payloadLength, bool bulk);
-  bool BuildSendNL(SendItem& item, const NetworkClipboardPeer& peer,
+  bool     BuildSendNL(SendItem& item, const NetworkClipboardPeer& peer,
     LGNetService service, uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, uint32_t payloadLength,
     bool preferBulk);
@@ -412,6 +420,7 @@ struct CNetworkClipboard::Impl
   void NotifyTargetReady();
   void NotifyFailure();
   void DropOwnerNL(bool clearHelper);
+  void ExpireOwnerNL(bool clearHelper, uint32_t detail);
   void ResetTransfersNL();
   void ClearRemoteTransfersNL(uint64_t offerID);
   bool PublishRemoteOfferNL();
@@ -433,13 +442,14 @@ struct CNetworkClipboard::Impl
     std::vector<SendItem>& batch, const KVMFRClipboardMessage& record);
 
   NetworkClipboardPacketResult HandleClaimNL(
-    PeerState& peer, const LGNetPacketView& packet, uint64_t nowMs,
-    CSRWExclusiveLock& stateLock);
+    PeerState& peer, const LGNetPacketView& packet, bool inputOwner,
+    uint64_t nowMs, CSRWExclusiveLock& stateLock);
   NetworkClipboardPacketResult HandleClipboardNL(
-    PeerState& peer, const LGNetPacketView& packet, bool bulk, uint64_t nowMs,
-    CSRWExclusiveLock& stateLock);
+    PeerState& peer, const LGNetPacketView& packet, bool bulk,
+    bool inputOwner, uint64_t nowMs, CSRWExclusiveLock& stateLock);
   NetworkClipboardPacketResult HandleFileNL(
-    PeerState& peer, const LGNetPacketView& packet, bool bulk);
+    PeerState& peer, const LGNetPacketView& packet, bool bulk,
+    bool inputOwner);
 
   ClipboardChannelResult HandleHelperClipboardNL(
     const KVMFRClipboardMessage& record, const uint8_t * data);
@@ -620,6 +630,42 @@ bool CNetworkClipboard::Impl::QueueTargetNL(TargetItem&& item)
   return true;
 }
 
+bool CNetworkClipboard::Impl::QueueOwnerTargetNL(TargetItem&& item)
+{
+  if (!m_claimEpoch || !m_owner.client || !m_owner.generation)
+    return false;
+
+  item.peer       = m_owner;
+  item.claimEpoch = m_claimEpoch;
+  return QueueTargetNL(std::move(item));
+}
+
+bool CNetworkClipboard::Impl::PeerOwnsInput(
+  const NetworkClipboardPeer& peer)
+{
+  CSRWExclusiveLock         callbackLock(m_senderCallbackLock);
+  INetworkClipboardSender * sender;
+  {
+    CSRWSharedLock lock(m_lock);
+    sender = m_sender;
+  }
+  return sender && sender->ClipboardPeerOwnsInput(peer);
+}
+
+bool CNetworkClipboard::Impl::WithInputAuthority(
+  const NetworkClipboardPeer& peer, NetworkClipboardInputAction action,
+  void * opaque)
+{
+  CSRWExclusiveLock         callbackLock(m_senderCallbackLock);
+  INetworkClipboardSender * sender;
+  {
+    CSRWSharedLock lock(m_lock);
+    sender = m_sender;
+  }
+  return sender &&
+    sender->ClipboardWithInputAuthority(peer, action, opaque);
+}
+
 void CNetworkClipboard::Impl::PumpSends()
 {
   struct BlockedRoute
@@ -681,6 +727,25 @@ void CNetworkClipboard::Impl::PumpSends()
 
     {
       CSRWExclusiveLock lock(m_lock);
+      if (result == NetworkClipboardSendResult::UNAUTHORIZED)
+      {
+        if (m_claimEpoch && SamePeer(m_owner, action.peer))
+          ExpireOwnerNL(true, CLAIM_INPUT_REQUIRED);
+        else
+        {
+          const auto pending = std::find_if(
+            m_sends.begin(), m_sends.end(),
+            [&action](const SendItem& item)
+            { return item.serial == action.serial; });
+          if (pending != m_sends.end())
+          {
+            m_sendBytes -= pending->payload.size();
+            m_sends.erase(pending);
+          }
+        }
+        return;
+      }
+
       const auto pending = std::find_if(m_sends.begin(), m_sends.end(),
         [&action](const SendItem& item)
         { return item.serial == action.serial; });
@@ -737,23 +802,62 @@ void CNetworkClipboard::Impl::PumpTargets()
       }
     }
 
-    ClipboardChannelResult result;
+    struct TargetContext
     {
-      CSRWExclusiveLock  callbackLock(m_targetCallbackLock);
+      Impl                   * owner  = nullptr;
+      const TargetItem       * action = nullptr;
+      ClipboardChannelResult   result = ClipboardChannelResult::FAILED;
+    } context;
+    context.owner  = this;
+    context.action = &action;
+
+    const auto deliver = [](void * value)
+    {
+      TargetContext& targetContext = *static_cast<TargetContext *>(value);
+      CSRWExclusiveLock  callbackLock(
+        targetContext.owner->m_targetCallbackLock);
       IClipboardTarget * target;
       {
-        CSRWExclusiveLock lock(m_lock);
-        target                 = m_target;
-        m_targetCallbackActive = target != nullptr;
+        CSRWExclusiveLock lock(targetContext.owner->m_lock);
+        target                                      = targetContext.owner->m_target;
+        targetContext.owner->m_targetCallbackActive = target != nullptr;
       }
-      result = target ? target->SendClipboard(action.record,
-                          action.data.empty() ? nullptr : action.data.data()) :
-                        ClipboardChannelResult::FAILED;
+      targetContext.result = target ?
+        target->SendClipboard(targetContext.action->record,
+          targetContext.action->data.empty() ? nullptr :
+            targetContext.action->data.data()) :
+        ClipboardChannelResult::FAILED;
+      {
+        CSRWExclusiveLock lock(targetContext.owner->m_lock);
+        targetContext.owner->m_targetCallbackActive = false;
+      }
+    };
+
+    const bool authorized = !action.claimEpoch ||
+      WithInputAuthority(action.peer, deliver, &context);
+    if (!authorized)
+    {
       {
         CSRWExclusiveLock lock(m_lock);
-        m_targetCallbackActive = false;
+        if (!m_targets.empty() &&
+            m_targets.front().serial == action.serial)
+        {
+          if (m_claimEpoch == action.claimEpoch &&
+              SamePeer(m_owner, action.peer))
+            ExpireOwnerNL(true, CLAIM_INPUT_REQUIRED);
+          else
+          {
+            const TargetItem& item  = m_targets.front();
+            m_targetBytes          -= sizeof(item.record) + item.data.size();
+            m_targets.pop_front();
+          }
+        }
       }
+      ReleaseHubOwner();
+      continue;
     }
+
+    const ClipboardChannelResult result = context.result;
 
     {
       CSRWExclusiveLock lock(m_lock);
@@ -827,7 +931,7 @@ void CNetworkClipboard::Impl::NotifyTargetReady()
   IClipboardTarget * target = nullptr;
   {
     CSRWExclusiveLock lock(m_lock);
-    if (!m_receiveReadyPending)
+    if (!m_receiveReadyPending || m_hubReleasePending)
       return;
     m_receiveReadyPending  = false;
     target                 = m_started ? m_target : nullptr;
@@ -1128,7 +1232,7 @@ bool CNetworkClipboard::Impl::PublishRemoteOfferNL()
   item.record.type                = KVMFR_CLIPBOARD_MESSAGE_OFFER;
   item.record.clipboardGeneration = m_remoteOffer.offerID;
   item.record.token               = m_remoteOffer.formatMask;
-  if (!QueueTargetNL(std::move(item)))
+  if (!QueueOwnerTargetNL(std::move(item)))
     return false;
   m_remoteOffer.published = true;
   return true;
@@ -1138,6 +1242,12 @@ void CNetworkClipboard::Impl::DropOwnerNL(bool clearHelper)
 {
   if (!m_claimEpoch)
     return;
+
+  if (clearHelper)
+  {
+    m_targets.clear();
+    m_targetBytes = 0;
+  }
 
   bool cleanupQueued = true;
   if (clearHelper && m_remoteOffer.published && m_remoteOffer.offerID)
@@ -1227,11 +1337,34 @@ void CNetworkClipboard::Impl::DropOwnerNL(bool clearHelper)
   m_remoteOfferSerial = 0;
   m_claimDeadline     = 0;
   m_claimLeaseMs      = 0;
+
+  if (m_sourceBlocked)
+    m_receiveReadyPending = true;
+  m_sourceBlocked         = false;
+  m_sourceBlockedService  = 0;
+  m_sourceBlockedTransfer = 0;
+}
+
+void CNetworkClipboard::Impl::ExpireOwnerNL(
+  bool clearHelper, uint32_t detail)
+{
+  if (!m_claimEpoch)
+    return;
+
+  const NetworkClipboardPeer owner  = m_owner;
+  const uint64_t             epoch  = m_claimEpoch;
+  const uint64_t             serial = m_claimSerial;
+  DropOwnerNL(clearHelper);
+  m_claimSerial = serial;
+  if (!QueueClaimStatusNL(
+        owner, epoch, LG_NET_CLIPBOARD_CLAIM_EXPIRED, 0, 0, detail))
+    m_failed = true;
+  m_claimSerial = 0;
 }
 
 NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClaimNL(
-  PeerState& peer, const LGNetPacketView& packet, uint64_t nowMs,
-  CSRWExclusiveLock& stateLock)
+  PeerState& peer, const LGNetPacketView& packet, bool inputOwner,
+  uint64_t nowMs, CSRWExclusiveLock& stateLock)
 {
   if (!DeliveryFlags(
         packet.envelope, LG_NET_ENVELOPE_ACK_REQUIRED, false) ||
@@ -1248,6 +1381,15 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClaimNL(
     peer.lastClaimEpoch = claim.claimEpoch;
     return QueueClaimStatusNL(peer.peer, claim.claimEpoch,
              LG_NET_CLIPBOARD_CLAIM_REJECTED, 0, 0, 3) ?
+      NetworkClipboardPacketResult::HANDLED :
+      NetworkClipboardPacketResult::INVALID;
+  }
+  if (!inputOwner)
+  {
+    peer.lastClaimEpoch = claim.claimEpoch;
+    return QueueClaimStatusNL(peer.peer, claim.claimEpoch,
+             LG_NET_CLIPBOARD_CLAIM_REJECTED, 0, 0,
+             CLAIM_INPUT_REQUIRED) ?
       NetworkClipboardPacketResult::HANDLED :
       NetworkClipboardPacketResult::INVALID;
   }
@@ -1350,16 +1492,19 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClaimNL(
 }
 
 NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
-  PeerState& peer, const LGNetPacketView& packet, bool bulk, uint64_t nowMs,
-  CSRWExclusiveLock& stateLock)
+  PeerState& peer, const LGNetPacketView& packet, bool bulk,
+  bool inputOwner, uint64_t nowMs, CSRWExclusiveLock& stateLock)
 {
   const LGNetEnvelope& envelope = packet.envelope;
   if (envelope.messageType == LG_NET_CLIPBOARD_MESSAGE_CLAIM)
   {
     if (bulk)
       return NetworkClipboardPacketResult::INVALID;
-    return HandleClaimNL(peer, packet, nowMs, stateLock);
+    return HandleClaimNL(peer, packet, inputOwner, nowMs, stateLock);
   }
+
+  if (!inputOwner)
+    return NetworkClipboardPacketResult::IGNORED;
 
   const bool transferData =
     envelope.messageType == LG_NET_CLIPBOARD_MESSAGE_DATA_BEGIN ||
@@ -1418,7 +1563,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
         item.record.version             = KVMFR_CLIPBOARD_VERSION;
         item.record.type                = KVMFR_CLIPBOARD_MESSAGE_CLEAR;
         item.record.clipboardGeneration = m_remoteOffer.offerID;
-        if (!QueueTargetNL(std::move(item)))
+        if (!QueueOwnerTargetNL(std::move(item)))
           return NetworkClipboardPacketResult::INVALID;
       }
       ClearRemoteTransfersNL(m_remoteOffer.offerID);
@@ -1455,7 +1600,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
         clear.record.version             = KVMFR_CLIPBOARD_VERSION;
         clear.record.type                = KVMFR_CLIPBOARD_MESSAGE_CLEAR;
         clear.record.clipboardGeneration = m_remoteOffer.offerID;
-        if (!QueueTargetNL(std::move(clear)))
+        if (!QueueOwnerTargetNL(std::move(clear)))
           return NetworkClipboardPacketResult::INVALID;
       }
       ClearRemoteTransfersNL(m_remoteOffer.offerID);
@@ -1596,7 +1741,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
     item.record.clipboardGeneration = transfer.offerID;
     item.record.transfer            = transfer.localID;
     item.record.format              = transfer.format;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     try
     {
@@ -1673,7 +1818,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
     {
       return NetworkClipboardPacketResult::INVALID;
     }
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
 
     transfer = FindClipboardWireNL(chunkValue.requestID);
@@ -1715,7 +1860,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
     item.record.flags               = KVMFR_CLIPBOARD_FLAG_END;
     if (!transfer->offset)
       item.record.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     m_clipboardTransfers.erase(
       std::remove_if(m_clipboardTransfers.begin(), m_clipboardTransfers.end(),
@@ -1789,7 +1934,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
     item.record.clipboardGeneration = transfer->offerID;
     item.record.transfer            = transfer->localID;
     item.record.format              = transfer->format;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     m_clipboardTransfers.erase(
       std::remove_if(m_clipboardTransfers.begin(), m_clipboardTransfers.end(),
@@ -1806,7 +1951,8 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleClipboardNL(
 }
 
 NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
-  PeerState& peer, const LGNetPacketView& packet, bool bulk)
+  PeerState& peer, const LGNetPacketView& packet, bool bulk,
+  bool inputOwner)
 {
   const LGNetEnvelope& envelope = packet.envelope;
   const bool           transferData =
@@ -1820,7 +1966,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
   else if (envelope.messageType == LG_NET_FILE_MESSAGE_ACQUIRED ||
     envelope.messageType == LG_NET_FILE_MESSAGE_STATUS)
     expected = LG_NET_ENVELOPE_RESPONSE;
-  if (!IsOwnerNL(peer.peer, envelope.componentEpoch))
+  if (!inputOwner || !IsOwnerNL(peer.peer, envelope.componentEpoch))
     return NetworkClipboardPacketResult::IGNORED;
   if ((bulk && !transferData) || !DeliveryFlags(envelope, expected, bulk))
     return NetworkClipboardPacketResult::INVALID;
@@ -1845,7 +1991,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
         clear.record.version             = KVMFR_CLIPBOARD_VERSION;
         clear.record.type                = KVMFR_CLIPBOARD_MESSAGE_CLEAR;
         clear.record.clipboardGeneration = m_remoteOffer.offerID;
-        if (!QueueTargetNL(std::move(clear)))
+        if (!QueueOwnerTargetNL(std::move(clear)))
           return NetworkClipboardPacketResult::INVALID;
       }
       ClearRemoteTransfersNL(m_remoteOffer.offerID);
@@ -1912,7 +2058,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.clipboardGeneration = acquisition.offerID;
     item.record.transfer            = acquisition.localID;
     item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     try
     {
@@ -1951,7 +2097,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.transfer            = acquisition->localID;
     item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
     item.record.token               = KVMFR_CLIPBOARD_FILE_ERROR_NONE;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     acquisition = FindAcquisitionWireNL(lease.clientID);
     if (acquisition)
@@ -1985,7 +2131,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.clipboardGeneration = acquisition->offerID;
     item.record.transfer            = localID;
     item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     const uint64_t offerID = acquisition->offerID;
     m_fileAcquisitions.erase(
@@ -2097,7 +2243,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.flags               =
       transfer.operation == KVMFR_CLIPBOARD_FILE_OP_READ ? transfer.length : 0;
     item.record.token               = transfer.operation;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     try
     {
@@ -2182,7 +2328,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     {
       return NetworkClipboardPacketResult::INVALID;
     }
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
 
     transfer = FindFileWireNL(chunkValue.requestID);
@@ -2227,7 +2373,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     if (!transfer->responseOffset)
       item.record.flags |= KVMFR_CLIPBOARD_FLAG_BEGIN;
     item.record.token               = transfer->operation;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     m_fileTransfers.erase(
       std::remove_if(m_fileTransfers.begin(), m_fileTransfers.end(),
@@ -2282,7 +2428,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.transfer            = localID;
     item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
     item.record.token               = KVMFR_CLIPBOARD_FILE_ERROR_CANCELLED;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     m_fileTransfers.erase(
       std::remove_if(m_fileTransfers.begin(), m_fileTransfers.end(),
@@ -2320,7 +2466,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
       item.record.transfer            = localID;
       item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
       item.record.token               = error;
-      if (!QueueTargetNL(std::move(item)))
+      if (!QueueOwnerTargetNL(std::move(item)))
         return NetworkClipboardPacketResult::INVALID;
       m_fileAcquisitions.erase(
         std::remove_if(m_fileAcquisitions.begin(), m_fileAcquisitions.end(),
@@ -2344,7 +2490,7 @@ NetworkClipboardPacketResult CNetworkClipboard::Impl::HandleFileNL(
     item.record.transfer            = localID;
     item.record.format              = KVMFR_CLIPBOARD_FORMAT_FILES;
     item.record.token               = error;
-    if (!QueueTargetNL(std::move(item)))
+    if (!QueueOwnerTargetNL(std::move(item)))
       return NetworkClipboardPacketResult::INVALID;
     m_fileTransfers.erase(
       std::remove_if(m_fileTransfers.begin(), m_fileTransfers.end(),
@@ -2441,8 +2587,10 @@ ClipboardChannelResult CNetworkClipboard::Impl::HandleHelperClipboardNL(
       QueueTargetNL(std::move(item));
       return ClipboardChannelResult::ACCEPTED;
     }
-    return record.type == KVMFR_CLIPBOARD_MESSAGE_CANCEL &&
-        ValidCancel(record) ?
+    return ((record.type == KVMFR_CLIPBOARD_MESSAGE_CANCEL &&
+          ValidCancel(record)) ||
+        (record.type == KVMFR_CLIPBOARD_MESSAGE_DATA &&
+          ValidData(record))) ?
       ClipboardChannelResult::ACCEPTED :
       ClipboardChannelResult::FAILED;
   }
@@ -3247,6 +3395,40 @@ CNetworkClipboard::~CNetworkClipboard()
   DetachSender();
 }
 
+bool CNetworkClipboard::PeerOwnsInput(
+  const NetworkClipboardPeer& peer)
+{
+  return m_impl->PeerOwnsInput(peer);
+}
+
+bool CNetworkClipboard::RevokeUnauthorizedOwner()
+{
+  NetworkClipboardPeer owner = {};
+  uint64_t             epoch = 0;
+  {
+    CSRWSharedLock lock(m_impl->m_lock);
+    if (!m_impl->m_claimEpoch)
+      return false;
+    owner = m_impl->m_owner;
+    epoch = m_impl->m_claimEpoch;
+  }
+
+  if (PeerOwnsInput(owner))
+    return false;
+
+  CSRWExclusiveLock lock(m_impl->m_lock);
+  if (m_impl->m_claimEpoch != epoch || !SamePeer(m_impl->m_owner, owner))
+    return false;
+
+  DEBUG_INFO("Revoking network clipboard owner without input control: "
+    "client=%u generation=%u claim=%llu",
+    static_cast<unsigned int>(owner.client),
+    static_cast<unsigned int>(owner.generation),
+    static_cast<unsigned long long>(epoch));
+  m_impl->ExpireOwnerNL(true, CLAIM_INPUT_REQUIRED);
+  return true;
+}
+
 bool CNetworkClipboard::AttachSender(INetworkClipboardSender& sender)
 {
   CSRWExclusiveLock lifecycleLock(m_impl->m_lifecycleLock);
@@ -3370,7 +3552,10 @@ NetworkClipboardPacketResult CNetworkClipboard::HandlePacket(
     packet.payloadLength > LG_NET_MAX_PAYLOAD_LENGTH)
     return NetworkClipboardPacketResult::INVALID;
 
-  CSRWExclusiveLock            processLock(m_impl->m_processLock);
+  CSRWExclusiveLock processLock(m_impl->m_processLock);
+  RevokeUnauthorizedOwner();
+  const bool inputOwner = PeerOwnsInput(peer);
+
   NetworkClipboardPacketResult result;
   {
     CSRWExclusiveLock callbackLock(m_impl->m_targetCallbackLock);
@@ -3399,10 +3584,11 @@ NetworkClipboardPacketResult CNetworkClipboard::HandlePacket(
 
     result = packet.envelope.service == LG_NET_SERVICE_CLIPBOARD ?
       m_impl->HandleClipboardNL(
-        *state, packet, bulk, GetTickCount64(), lock) :
-      m_impl->HandleFileNL(*state, packet, bulk);
+        *state, packet, bulk, inputOwner, GetTickCount64(), lock) :
+      m_impl->HandleFileNL(*state, packet, bulk, inputOwner);
   }
 
+  RevokeUnauthorizedOwner();
   m_impl->PumpTargets();
   m_impl->PumpSends();
   processLock.Unlock();
@@ -3417,20 +3603,11 @@ void CNetworkClipboard::Process(uint64_t nowMs)
   if (!processLock)
     return;
 
+  RevokeUnauthorizedOwner();
   {
     CSRWExclusiveLock lock(m_impl->m_lock);
     if (m_impl->m_claimEpoch && DeadlineReached(nowMs, m_impl->m_claimDeadline))
-    {
-      const NetworkClipboardPeer owner  = m_impl->m_owner;
-      const uint64_t             epoch  = m_impl->m_claimEpoch;
-      const uint64_t             serial = m_impl->m_claimSerial;
-      m_impl->DropOwnerNL(true);
-      m_impl->m_claimSerial = serial;
-      if (!m_impl->QueueClaimStatusNL(
-            owner, epoch, LG_NET_CLIPBOARD_CLAIM_EXPIRED, 0, 0, 0))
-        m_impl->m_failed = true;
-      m_impl->m_claimSerial = 0;
-    }
+      m_impl->ExpireOwnerNL(true, 0);
   }
 
   m_impl->PumpTargets();
@@ -3448,6 +3625,7 @@ void CNetworkClipboard::SendReady(
   CSRWExclusiveLock processLock = CSRWExclusiveLock::Try(m_impl->m_processLock);
   if (!processLock)
     return;
+  RevokeUnauthorizedOwner();
   {
     CSRWSharedLock lock(m_impl->m_lock);
     if (!m_impl->FindPeerNL(peer))
@@ -3585,6 +3763,17 @@ ClipboardChannelResult CNetworkClipboard::SendClipboard(
 {
   CSRWExclusiveLock      processLock(m_impl->m_processLock);
   ClipboardChannelResult result;
+  if (RevokeUnauthorizedOwner())
+  {
+    {
+      CSRWExclusiveLock lock(m_impl->m_lock);
+      m_impl->m_receiveReadyPending = true;
+    }
+    m_impl->PumpSends();
+    processLock.Unlock();
+    return ClipboardChannelResult::BUSY;
+  }
+
   {
     CSRWExclusiveLock lock(m_impl->m_lock);
     if (!m_impl->m_started || !m_impl->m_target || !m_impl->m_stateKnown ||
@@ -3592,15 +3781,29 @@ ClipboardChannelResult CNetworkClipboard::SendClipboard(
       record.generation != m_impl->m_generation ||
       record.version != KVMFR_CLIPBOARD_VERSION || (record.length && !data))
       return ClipboardChannelResult::FAILED;
+    if (m_impl->m_hubReleasePending)
+    {
+      m_impl->m_receiveReadyPending = true;
+      return ClipboardChannelResult::BUSY;
+    }
 
     result = kvmfrClipboardFileMessageType(record.type) ?
       m_impl->HandleHelperFileNL(record, data) :
       m_impl->HandleHelperClipboardNL(record, data);
   }
+  RevokeUnauthorizedOwner();
   m_impl->PumpSends();
+  bool deferNotification = false;
+  {
+    CSRWSharedLock lock(m_impl->m_lock);
+    deferNotification = m_impl->m_hubReleasePending;
+  }
   processLock.Unlock();
-  m_impl->NotifyTargetReady();
-  m_impl->NotifyFailure();
+  if (!deferNotification)
+  {
+    m_impl->NotifyTargetReady();
+    m_impl->NotifyFailure();
+  }
   return result;
 }
 
