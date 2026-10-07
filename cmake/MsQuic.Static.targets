@@ -22,7 +22,7 @@
   <Target
     Name="ConfigureLGMsQuic"
     BeforeTargets="ClCompile"
-    Inputs="$(LGMsQuicSourceDir)CMakeLists.txt;$(MSBuildThisFileFullPath)"
+    Inputs="$(LGMsQuicSourceDir)CMakeLists.txt;$(MSBuildThisFileDirectory)MsQuic.cmake;$(MSBuildThisFileFullPath)"
     Outputs="$(LGMsQuicBuildDir)CMakeCache.txt">
     <Error
       Condition="!Exists('$(LGMsQuicSourceDir)CMakeLists.txt')"
@@ -34,7 +34,7 @@
     <!-- NormalizeDirectory adds a trailing slash. The dot prevents that slash
          from escaping the closing quote in the command line. -->
     <Exec
-      Command="cmake -S &quot;$(LGMsQuicSourceDir).&quot; -B &quot;$(LGMsQuicBuildDir).&quot; -G &quot;Visual Studio 17 2022&quot; -A &quot;$(LGMsQuicArchitecture)&quot; -T v143 -DCMAKE_SYSTEM_VERSION=&quot;$(WindowsTargetPlatformVersion)&quot; -DQUIC_BUILD_SHARED=OFF -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF -DQUIC_BUILD_PERF=OFF -DQUIC_TLS_LIB=schannel -DQUIC_ENABLE_LOGGING=OFF -DQUIC_STATIC_LINK_CRT=OFF -DQUIC_STATIC_LINK_PARTIAL_CRT=OFF -DQUIC_SOURCE_LINK=OFF -DQUIC_PDBALTPATH=OFF -DQUIC_EMBED_GIT_HASH=OFF" />
+      Command="cmake -S &quot;$(LGMsQuicSourceDir).&quot; -B &quot;$(LGMsQuicBuildDir).&quot; -G &quot;Visual Studio 17 2022&quot; -A &quot;$(LGMsQuicArchitecture)&quot; -T v143 -DCMAKE_SYSTEM_VERSION=&quot;$(WindowsTargetPlatformVersion)&quot; -DQUIC_BUILD_SHARED=OFF -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF -DQUIC_BUILD_PERF=OFF -DQUIC_TLS_LIB=schannel -DQUIC_ENABLE_LOGGING=OFF -DQUIC_STATIC_LINK_CRT=OFF -DQUIC_STATIC_LINK_PARTIAL_CRT=OFF -DQUIC_SOURCE_LINK=OFF -DQUIC_PDBALTPATH=OFF -DQUIC_EMBED_GIT_HASH=OFF -DCMAKE_PROJECT_INCLUDE=&quot;$(MSBuildThisFileDirectory)MsQuic.cmake&quot; -DLG_MSQUIC_DISABLE_CODE_ANALYSIS=ON" />
   </Target>
   <Target
     Name="BuildLGMsQuic"
