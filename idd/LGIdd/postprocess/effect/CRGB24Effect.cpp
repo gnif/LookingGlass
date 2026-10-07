@@ -280,7 +280,7 @@ struct CRGB24Effect::State
 
 bool CRGB24Effect::Init(const ComPtr<ID3D12Device3>& device)
 {
-  if (!g_settings.ReadBoolValue(L"AllowRGB24", true))
+  if (!g_settings.ReadBoolValue(L"AllowRGB24", false))
     return false;
 
   D3D12_DESCRIPTOR_RANGE ranges[] =
