@@ -4,8 +4,9 @@ Build the Linux client
 ######################
 
 The Looking Glass Client is currently distributed as source code. Building it
-is a normal part of installation, not an optional developer step. These
-instructions require basic familiarity with a Linux shell.
+is a normal part of installation, as no packages are available during the
+development phase. These instructions require basic familiarity with a Linux
+shell.
 
 .. _download_source:
 
