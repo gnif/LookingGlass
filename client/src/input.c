@@ -207,7 +207,7 @@ static bool syncKeyboardLEDsNL(void)
       !l_input.desiredKeyboardLEDsValid)
     return true;
   if (!l_input.active.ops)
-    return false;
+    return true;
   if (!l_input.active.ops->keyboardLEDs)
     return true;
 
