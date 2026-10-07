@@ -1796,6 +1796,19 @@ static void networkClipboardRejectRead(NetworkClipboard * clipboard,
         clipboard, localRequest, reason);
 }
 
+static bool networkClipboardBlockReadNL(NetworkClipboard * clipboard,
+    uint64_t wireRequest, LG_ClipboardRequest localRequest)
+{
+  const struct NetworkClipboardTransfer * transfer =
+    networkClipboardTransferFindWire(
+        clipboard->clipboardReads, wireRequest);
+  if (!transfer || transfer->localRequest != localRequest)
+    return false;
+
+  clipboard->inboundBlockedRequest = localRequest;
+  return true;
+}
+
 static enum NetworkClipboardProcessResult
 networkClipboardProcessDataBegin(NetworkClipboard * clipboard,
     const struct NetworkClipboardInbound * packet)
@@ -1833,9 +1846,11 @@ networkClipboardProcessDataBegin(NetworkClipboard * clipboard,
   if (result == LG_CLIPBOARD_RESULT_BLOCKED)
   {
     LG_LOCK(clipboard->stateLock);
-    clipboard->inboundBlockedRequest = localRequest;
+    const bool blocked = networkClipboardBlockReadNL(
+        clipboard, wire.requestID, localRequest);
     LG_UNLOCK(clipboard->stateLock);
-    return NETWORK_CLIPBOARD_PROCESS_BLOCKED;
+    return blocked ? NETWORK_CLIPBOARD_PROCESS_BLOCKED :
+      NETWORK_CLIPBOARD_PROCESS_CONSUMED;
   }
   if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
   {
@@ -1898,9 +1913,11 @@ networkClipboardProcessDataChunk(NetworkClipboard * clipboard,
   if (result == LG_CLIPBOARD_RESULT_BLOCKED)
   {
     LG_LOCK(clipboard->stateLock);
-    clipboard->inboundBlockedRequest = localRequest;
+    const bool blocked = networkClipboardBlockReadNL(
+        clipboard, chunk.requestID, localRequest);
     LG_UNLOCK(clipboard->stateLock);
-    return NETWORK_CLIPBOARD_PROCESS_BLOCKED;
+    return blocked ? NETWORK_CLIPBOARD_PROCESS_BLOCKED :
+      NETWORK_CLIPBOARD_PROCESS_CONSUMED;
   }
   if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
   {
@@ -1958,9 +1975,11 @@ static enum NetworkClipboardProcessResult networkClipboardProcessDataEnd(
   if (result == LG_CLIPBOARD_RESULT_BLOCKED)
   {
     LG_LOCK(clipboard->stateLock);
-    clipboard->inboundBlockedRequest = localRequest;
+    const bool blocked = networkClipboardBlockReadNL(
+        clipboard, wire.requestID, localRequest);
     LG_UNLOCK(clipboard->stateLock);
-    return NETWORK_CLIPBOARD_PROCESS_BLOCKED;
+    return blocked ? NETWORK_CLIPBOARD_PROCESS_BLOCKED :
+      NETWORK_CLIPBOARD_PROCESS_CONSUMED;
   }
   if (result != LG_CLIPBOARD_RESULT_ACCEPTED)
   {
@@ -3526,6 +3545,43 @@ static bool networkClipboardRequest(void * opaque,
   return true;
 }
 
+static bool networkClipboardRequestCancel(void * opaque,
+    LG_ClipboardRequest request, LG_ClipboardCancelReason reason)
+{
+  NetworkClipboard * clipboard = opaque;
+  if (!request || kvmfrClipboardTransferFromHelper(request) ||
+      reason > LG_CLIPBOARD_CANCEL_INVALID)
+    return false;
+
+  LG_LOCK(clipboard->stateLock);
+  struct NetworkClipboardTransfer * transfer =
+    networkClipboardTransferTake(&clipboard->clipboardReads, request);
+  if (!transfer)
+  {
+    LG_UNLOCK(clipboard->stateLock);
+    return false;
+  }
+
+  const LGNetClipboardTransfer wire =
+  {
+    .requestID       = transfer->wireRequest,
+    .offerID         = transfer->offerID,
+    .totalLength     = transfer->sizeHint,
+    .processedLength = transfer->offset,
+  };
+  const bool queued = networkClipboardQueueSendNL(clipboard,
+      networkClipboardTransferSendNew(clipboard,
+        LG_NET_CLIPBOARD_MESSAGE_CANCEL, &wire, 0));
+  if (clipboard->inboundBlockedRequest == request)
+    clipboard->inboundReady = true;
+  LG_UNLOCK(clipboard->stateLock);
+
+  free(transfer);
+  if (queued)
+    networkClipboardFlushQueued(clipboard);
+  return queued;
+}
+
 static bool networkClipboardFileAcquire(void * opaque, uint64_t dataset,
     uint64_t acquisitionID)
 {
@@ -4432,6 +4488,7 @@ static const LG_ClipboardOps NETWORK_CLIPBOARD_OPS =
   .dataCancel        = networkClipboardDataCancel,
   .dataReady         = networkClipboardDataReady,
   .request           = networkClipboardRequest,
+  .requestCancel     = networkClipboardRequestCancel,
   .fileAcquire       = networkClipboardFileAcquire,
   .fileAcquired      = networkClipboardFileAcquired,
   .fileRelease       = networkClipboardFileRelease,
