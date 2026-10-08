@@ -593,7 +593,7 @@ static void testPlaybackRetry(void)
   atomic_store(&b.setupOK, true);
   uint8_t frames[480 * 2 * 2] = { 0 };
   usleep(10000);
-  p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL);
+  p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL, false);
   waitFor(&b.setupN, failed + 1);
 
   for (unsigned int i = 0; i < WAIT_MS; ++i)
@@ -605,7 +605,7 @@ static void testPlaybackRetry(void)
   }
   CHECK(atomic_load(&audio.playback.streamGeneration) == 11);
   for (unsigned int i = 0; i < 8; ++i)
-    p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL);
+    p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL, false);
   waitFor(&b.playStartN, 1);
 
   LG_AudioFailureFn fail = b.playFail;
@@ -617,7 +617,7 @@ static void testPlaybackRetry(void)
 
   const unsigned int retry = atomic_load(&b.setupN);
   usleep(10000);
-  p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL);
+  p.events->playbackData(p.eventOpaque, 11, frames, 480, NULL, false);
   waitFor(&b.setupN, retry + 1);
 
   p.events->playbackStop(p.eventOpaque, 11);
@@ -679,7 +679,7 @@ static void testPlaybackRecovery(void)
   CHECK(ringbuffer_consume(audio.playback.buffer, NULL, 16) == 16);
   CHECK(ringbuffer_getCount(audio.playback.buffer) == -16);
   uint8_t frames[1200 * 2 * 2] = { 0 };
-  CHECK(playbackData(frames, 1200, NULL, arrival) ==
+  CHECK(playbackData(frames, 1200, NULL, false, arrival) ==
       PLAYBACK_DATA_PROCESSED);
 
   CHECK(source->sourcePacketDurationSec < 0.010);
@@ -690,12 +690,12 @@ static void testPlaybackRecovery(void)
   CHECK(fabs(atomic_load(&audio.playback.backendResampleRatio) -
         source->lastClockRatio) < 0.000001);
 
-  CHECK(playbackData(frames, 1200, NULL, arrival + 1000) ==
+  CHECK(playbackData(frames, 1200, NULL, false, arrival + 1000) ==
       PLAYBACK_DATA_PROCESSED);
   CHECK(source->sourcePacketDurationSec < 0.010);
   CHECK(source->sourcePacketRecovering);
 
-  CHECK(playbackData(frames, 480, NULL,
+  CHECK(playbackData(frames, 480, NULL, false,
         arrival + INT64_C(10000000)) == PLAYBACK_DATA_PROCESSED);
   CHECK(!source->sourcePacketRecovering);
   CHECK(fabs(source->sourcePacketDurationSec - 0.010) < 0.000001);
@@ -733,7 +733,7 @@ static void testPlaybackStableUnderrun(void)
   uint8_t frames[64 * 2 * 2];
   uint8_t output[64 * 2 * 2];
   memset(frames, 0x5a, sizeof(frames));
-  CHECK(playbackData(frames, 64, NULL, arrival) ==
+  CHECK(playbackData(frames, 64, NULL, false, arrival) ==
       PLAYBACK_DATA_PROCESSED);
 
   const int    recoveredOccupancy =
@@ -765,7 +765,7 @@ static void testPlaybackStableUnderrun(void)
     source->devicePositionOffsetFrames;
   const int64_t secondPacketArrival  = arrival +
     llrint(64.0e9 / format.sampleRate);
-  CHECK(playbackData(frames, 64, NULL,
+  CHECK(playbackData(frames, 64, NULL, false,
         secondPacketArrival) == PLAYBACK_DATA_PROCESSED);
   CHECK(source->devicePositionOffsetFrames == recoveredOffset);
   CHECK(ringbuffer_getCount(audio.playback.buffer) ==
@@ -852,7 +852,7 @@ static void testPlaybackResume(void)
   CHECK(atomic_load(&b.setupN) == setupN);
 
   uint8_t input[480 * 2 * 2] = { 0 };
-  p.events->playbackData(p.eventOpaque, 12, input, 480, NULL);
+  p.events->playbackData(p.eventOpaque, 12, input, 480, NULL, false);
   CHECK(atomic_load(&audio.playback.streamGeneration) == 12);
   CHECK(playbackGetState() == STREAM_STATE_RUN);
   CHECK(atomic_load(&audio.playback.underruns) == 0);
@@ -883,7 +883,7 @@ static void testPlaybackResume(void)
 
   p.events->playbackStart(p.eventOpaque, 13, &format, NULL);
   CHECK(atomic_load(&audio.playback.streamGeneration) == 13);
-  p.events->playbackData(p.eventOpaque, 13, input, 480, NULL);
+  p.events->playbackData(p.eventOpaque, 13, input, 480, NULL, false);
   CHECK(playbackGetState() == STREAM_STATE_RUN);
   CHECK(source->deviceClock.time == arrival);
   CHECK(source->deviceClock.position == idleFrames);

@@ -4747,12 +4747,17 @@ retry:
     HandshakeState handshake;
     uint64_t       sessionEpoch;
     uint32_t       maxPayload;
+    bool           closing;
     {
       CSRWSharedLock guard(connection.lock);
       handshake    = connection.handshake;
       sessionEpoch = connection.sessionEpoch;
       maxPayload   = connection.maxPayload;
+      closing      = connection.closing;
     }
+
+    if (closing)
+      return true;
 
     if (handshake == HandshakeState::WAITING_HELLO)
       return packet.envelope.service == LG_NET_SERVICE_CORE &&
@@ -5188,6 +5193,8 @@ retry:
     const uint16_t serviceMask = UINT16_C(1) << packet.envelope.service;
     {
       CSRWExclusiveLock guard(connection.lock);
+      if (connection.closing)
+        return true;
       const bool     serviceReady   = packet.envelope.service ==
         LG_NET_SERVICE_CORE ||
         ((connection.selectedServices & serviceMask) &&

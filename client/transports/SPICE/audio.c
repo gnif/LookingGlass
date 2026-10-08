@@ -845,7 +845,7 @@ void spiceAudio_playbackData(SpiceAudio * audio,
   if (target.events->playbackData &&
       playbackEventCurrent(audio, &target, generation, true))
     target.events->playbackData(target.opaque, generation,
-        data, frames, &clock);
+        data, frames, &clock, false);
   endEvent(audio);
 }
 

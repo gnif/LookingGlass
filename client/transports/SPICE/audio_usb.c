@@ -592,7 +592,7 @@ static void usbPlaybackData(
     {
       const LG_AudioClock clock = makePlaybackClock(state, position);
       events->playbackData(
-          target, generation, data, frames, &clock);
+          target, generation, data, frames, &clock, false);
     }
   }
   endCallback(&frame, &l_playbackFrames,

@@ -1486,13 +1486,15 @@ static void dispatchPlaybackData(LGMPAudio * audio,
     return;
   }
 
-  const uint32_t generation = audio->playback.generation.local;
-  const LG_AudioEventOps * events =
+  const uint32_t           generation    =
+    audio->playback.generation.local;
+  const LG_AudioEventOps * events        =
     audio->attached ? audio->events : NULL;
-  void * opaque = audio->eventOpaque;
-  const bool discontinuity = sequenceGap ||
-    audio->playbackDiscontinuity;
-  const bool clockValid =
+  void                   * opaque        = audio->eventOpaque;
+  const bool               discontinuity = sequenceGap ||
+    audio->playbackDiscontinuity ||
+    (message->flags & KVMFR_AUDIO_MESSAGE_DISCONTINUITY) != 0;
+  const bool               clockValid    =
     (message->flags & KVMFR_AUDIO_MESSAGE_CLOCK_VALID) != 0;
   if (!events || !events->playbackData)
     audio->playbackDiscontinuity = true;
@@ -1506,7 +1508,7 @@ static void dispatchPlaybackData(LGMPAudio * audio,
       clockFromMessage(message, discontinuity);
     events->playbackData(opaque, generation,
         silent ? l_silence : payload, message->frames,
-        clockValid ? &clock : NULL);
+        clockValid ? &clock : NULL, discontinuity);
   }
   LG_UNLOCK(audio->eventLock);
 }

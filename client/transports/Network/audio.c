@@ -46,7 +46,6 @@
 #define NETWORK_AUDIO_CHANNEL_MASK              UINT32_C(0x0003FFFF)
 #define NETWORK_AUDIO_PLAYBACK_STREAM_ID        1U
 #define NETWORK_AUDIO_CAPTURE_STREAM_ID         2U
-#define NETWORK_AUDIO_CLOCK_CACHE_SIZE          16U
 #define NETWORK_AUDIO_DATAGRAM_PAYLOAD          1136U
 #define NETWORK_AUDIO_DATAGRAM_PCM_BYTES        \
   (NETWORK_AUDIO_DATAGRAM_PAYLOAD - LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE)
@@ -55,8 +54,7 @@
   (LG_NET_AUDIO_SUBSCRIBE_LOW_LATENCY       | \
    LG_NET_AUDIO_SUBSCRIBE_EXCLUSIVE_CAPTURE | \
    LG_NET_AUDIO_SUBSCRIBE_CLOCK_FEEDBACK    | \
-   LG_NET_AUDIO_SUBSCRIBE_DATAGRAM_PCM      | \
-   LG_NET_AUDIO_SUBSCRIBE_RELIABLE_PCM)
+   LG_NET_AUDIO_SUBSCRIBE_DATAGRAM_PCM)
 
 #define NETWORK_AUDIO_DIRECTIONS \
   (LG_NET_AUDIO_DIRECTIONS_PLAYBACK | LG_NET_AUDIO_DIRECTIONS_CAPTURE)
@@ -74,12 +72,6 @@ enum NetworkAudioPhase
   NETWORK_AUDIO_WAIT_BARRIER,
   NETWORK_AUDIO_READY,
   NETWORK_AUDIO_RELEASING,
-};
-
-struct NetworkAudioClockEntry
-{
-  bool                 valid;
-  LGNetAudioClockState state;
 };
 
 struct NetworkAudioStream
@@ -110,8 +102,6 @@ struct NetworkAudioStream
   bool     packetKnown;
   uint64_t lastPacketID;
   bool     discontinuity;
-  unsigned clockInsert;
-  struct NetworkAudioClockEntry clocks[NETWORK_AUDIO_CLOCK_CACHE_SIZE];
 };
 
 struct NetworkAudio
@@ -463,12 +453,6 @@ static void networkAudioEndEvents(NetworkAudio * audio)
   LG_UNLOCK(audio->eventLock);
 }
 
-static void networkAudioClearClockNL(struct NetworkAudioStream * stream)
-{
-  stream->clockInsert = 0;
-  memset(stream->clocks, 0, sizeof(stream->clocks));
-}
-
 static void networkAudioClearStreamNL(struct NetworkAudioStream * stream)
 {
   const uint32_t            streamID  = stream->streamID;
@@ -601,7 +585,7 @@ static LG_TransportStatus networkAudioSendDatagramNL(NetworkAudio * audio,
 {
   return networkConnectionSendDatagram(audio->connection,
       LG_NET_SERVICE_AUDIO, messageType, audio->serviceVersion, 0,
-      audio->subscriptionEpoch, requestID, payload, payloadLength, 0, false);
+      audio->subscriptionEpoch, requestID, payload, payloadLength, 0, true);
 }
 
 static bool networkAudioSendSubscribeNL(NetworkAudio * audio)
@@ -962,21 +946,12 @@ static void networkAudioDetach(void * opaque)
   LG_UNLOCK(audio->eventLock);
 }
 
-static bool networkAudioSendClockAndDataNL(NetworkAudio * audio,
-    const uint8_t * clockPayload, const uint8_t * dataPayload,
-    uint32_t dataPayloadLength)
+static LG_TransportStatus networkAudioSendPCMNL(NetworkAudio * audio,
+    uint16_t messageType, const void * payload, uint32_t payloadLength)
 {
-  /* CLOCK_STATE and PCM are an ordered pair. Keep both on the same reliable
-   * stream until a future protocol version provides atomic datagram framing. */
-  if (!(audio->grantedRoles & LG_NET_AUDIO_ROLE_RELIABLE_PCM))
-    return false;
-
-  return networkAudioSendReliableNL(audio,
-      LG_NET_AUDIO_MESSAGE_CLOCK_STATE, 0, 0, clockPayload,
-      LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE) == LG_TRANSPORT_OK &&
-    networkAudioSendReliableNL(audio,
-      LG_NET_AUDIO_MESSAGE_CAPTURE_DATA, 0, 0, dataPayload,
-      dataPayloadLength) == LG_TRANSPORT_OK;
+  return (audio->grantedRoles & LG_NET_AUDIO_ROLE_DATAGRAM_PCM) ?
+    networkAudioSendDatagramNL(audio, messageType, 0,
+      payload, payloadLength) : LG_TRANSPORT_UNAVAILABLE;
 }
 
 static bool networkAudioRecordData(void * opaque, uint32_t generation,
@@ -986,10 +961,9 @@ static bool networkAudioRecordData(void * opaque, uint32_t generation,
   if (!generation || !data || !frames)
     return false;
 
-  uint64_t rateQ32 = 0;
-  if (sourceClock &&
-      !networkAudioRateQ32(sourceClock->rate, true, &rateQ32))
-    return false;
+  uint64_t   rateQ32          = 0;
+  const bool sourceClockValid = sourceClock && sourceClock->time > 0 &&
+    networkAudioRateQ32(sourceClock->rate, false, &rateQ32);
 
   LG_LOCK(audio->stateLock);
   struct NetworkAudioStream * stream = &audio->capture;
@@ -1044,11 +1018,11 @@ static bool networkAudioRecordData(void * opaque, uint32_t generation,
     return false;
   }
 
-  bool         result        = true;
-  bool         discontinuity = stream->discontinuity ||
+  bool            result        = true;
+  bool            discontinuity = stream->discontinuity ||
     (sourceClock && sourceClock->discontinuity);
-  size_t       offset        = 0;
-  const uint8_t * pcm        = data;
+  size_t          offset        = 0;
+  const uint8_t * pcm           = data;
   while (offset < frames)
   {
     size_t chunkFrames = frames - offset;
@@ -1058,10 +1032,11 @@ static bool networkAudioRecordData(void * opaque, uint32_t generation,
 
     audio->capturePacketID = networkAudioNext64(audio->capturePacketID);
 
-    const uint64_t packetID  = audio->capturePacketID;
-    uint64_t       position  = firstPosition + offset;
-    int64_t        timeNs    = sourceClock ? sourceClock->time : 0;
-    if (sourceClock && offset)
+    const uint64_t packetID   = audio->capturePacketID;
+    const uint64_t position   = firstPosition + offset;
+    int64_t        timeNs     = sourceClockValid ? sourceClock->time : 0;
+    bool           clockValid = sourceClockValid;
+    if (clockValid && offset)
     {
       const long double elapsed  =
         (long double)offset * 1000000000.0L /
@@ -1070,29 +1045,13 @@ static bool networkAudioRecordData(void * opaque, uint32_t generation,
       if (adjusted >= (long double)INT64_MIN &&
           adjusted <= (long double)INT64_MAX)
         timeNs = (int64_t)adjusted;
+      else
+      {
+        clockValid = false;
+        timeNs     = 0;
+      }
     }
-    uint64_t timestampNs = timeNs > 0 ? (uint64_t)timeNs : nanotime();
-    if (!timestampNs)
-      timestampNs = 1;
-
-    const LGNetAudioClockState clock =
-    {
-      .streamID          = stream->streamID,
-      .direction         = stream->direction,
-      .flags             = sourceClock ?
-        LG_NET_AUDIO_CLOCK_VALID |
-          (sourceClock->stable ? LG_NET_AUDIO_CLOCK_STABLE : 0) : 0,
-      .formatEpoch       = stream->wireFormat.formatEpoch,
-      .subscriptionEpoch = audio->subscriptionEpoch,
-      .packetID          = packetID,
-      .framePosition     = position,
-      .timeNs            = timeNs,
-      .rateQ32           = rateQ32,
-      .targetRateQ32     = 0,
-      .queuedFrames      = 0,
-      .driftPpm          = 0,
-    };
-    const LGNetAudioData packet =
+    LGNetAudioData packet =
     {
       .streamID    = stream->streamID,
       .direction   = stream->direction,
@@ -1100,31 +1059,50 @@ static bool networkAudioRecordData(void * opaque, uint32_t generation,
         LG_NET_AUDIO_DATA_DISCONTINUITY : 0,
       .formatEpoch = stream->wireFormat.formatEpoch,
       .packetID    = packetID,
-      .timestampNs = timestampNs,
+      .timestampNs = timeNs > 0 ? (uint64_t)timeNs : 0,
       .startFrame  = position,
+      .rateQ32     = clockValid ? rateQ32 : 0,
       .frameCount  = (uint32_t)chunkFrames,
       .dataLength  = (uint32_t)chunkBytes,
       .data        = pcm + offset * frameSize,
     };
-    uint8_t      clockPayload[LG_NET_AUDIO_CLOCK_STATE_WIRE_SIZE];
+    if (clockValid)
+    {
+      packet.flags |= LG_NET_AUDIO_DATA_CLOCK_VALID;
+      if (sourceClock->stable)
+        packet.flags |= LG_NET_AUDIO_DATA_CLOCK_STABLE;
+    }
+
     const size_t dataPayloadLength =
       LG_NET_AUDIO_DATA_HEADER_WIRE_SIZE + chunkBytes;
-    if (!lgNetAudioClockStateEncode(clockPayload,
-          sizeof(clockPayload), &clock) ||
-        !lgNetAudioDataEncode(payload, dataPayloadLength, &packet) ||
-        !networkAudioSendClockAndDataNL(audio, clockPayload, payload,
-          (uint32_t)dataPayloadLength))
+    if (!lgNetAudioDataEncode(payload, dataPayloadLength, &packet))
     {
       result = false;
       break;
     }
 
-    discontinuity = false;
+    const LG_TransportStatus status = networkAudioSendPCMNL(
+        audio, LG_NET_AUDIO_MESSAGE_CAPTURE_DATA,
+        payload, (uint32_t)dataPayloadLength);
+    if (status != LG_TRANSPORT_OK)
+    {
+      if (status == LG_TRANSPORT_UNAVAILABLE)
+      {
+        discontinuity  = true;
+        offset        += chunkFrames;
+        continue;
+      }
+
+      result = false;
+      break;
+    }
+
+    discontinuity  = false;
     offset        += chunkFrames;
   }
 
   audio->captureFramePosition = firstPosition + offset;
-  stream->discontinuity       = !result;
+  stream->discontinuity       = discontinuity || !result;
   free(payload);
   LG_UNLOCK(audio->stateLock);
   return result;
@@ -1173,16 +1151,12 @@ static bool networkAudioClockFeedback(void * opaque, uint32_t generation,
   const bool encoded = lgNetAudioClockStateEncode(
       payload, sizeof(payload), &feedback);
   bool       result  = false;
-  if (encoded &&
-      (audio->grantedRoles & LG_NET_AUDIO_ROLE_DATAGRAM_PCM))
-    result = networkAudioSendDatagramNL(audio,
-        LG_NET_AUDIO_MESSAGE_CLOCK_STATE, 0,
-        payload, sizeof(payload)) == LG_TRANSPORT_OK;
-  if (encoded && !result &&
-      (audio->grantedRoles & LG_NET_AUDIO_ROLE_RELIABLE_PCM))
-    result = networkAudioSendReliableNL(audio,
-        LG_NET_AUDIO_MESSAGE_CLOCK_STATE, 0, 0,
-        payload, sizeof(payload)) == LG_TRANSPORT_OK;
+  if (encoded)
+  {
+    const LG_TransportStatus status = networkAudioSendDatagramNL(audio,
+        LG_NET_AUDIO_MESSAGE_CLOCK_STATE, 0, payload, sizeof(payload));
+    result = status == LG_TRANSPORT_OK;
+  }
   LG_UNLOCK(audio->stateLock);
   return result;
 }
@@ -1322,8 +1296,8 @@ static bool networkAudioHandleGrant(NetworkAudio * audio,
   if (!grant.maxPacketFrames ||
       (grant.grantedRoles & ~audio->requestedRoles) ||
       grant.maxPacketFrames > NETWORK_AUDIO_MAX_PACKET_FRAMES ||
-      (grant.grantedRoles & LG_NET_AUDIO_ROLE_DATAGRAM_PCM &&
-        !datagramAvailable) ||
+      !(grant.grantedRoles & LG_NET_AUDIO_ROLE_DATAGRAM_PCM) ||
+      !datagramAvailable ||
       (grant.grantedRoles & LG_NET_AUDIO_ROLE_CAPTURE &&
         !(grant.grantedRoles & LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE)) ||
       (grant.grantedRoles & LG_NET_AUDIO_ROLE_CLOCK_FEEDBACK &&
@@ -1430,7 +1404,6 @@ static bool networkAudioHandleStart(NetworkAudio * audio,
   stream->packetKnown    = false;
   stream->lastPacketID   = 0;
   stream->discontinuity  = true;
-  networkAudioClearClockNL(stream);
   networkAudioInvalidateBarrierNL(audio, stream);
   const LG_AudioEventOps * events =
     audio->attached ? audio->events : NULL;
@@ -1504,7 +1477,6 @@ static bool networkAudioHandleStop(NetworkAudio * audio,
   stream->volumeValid   = false;
   stream->muteValid     = false;
   stream->discontinuity = true;
-  networkAudioClearClockNL(stream);
   networkAudioInvalidateBarrierNL(audio, stream);
   LG_UNLOCK(audio->stateLock);
   networkAudioCallEventsNL(audio);
@@ -1774,7 +1746,6 @@ static bool networkAudioHandleStatus(NetworkAudio * audio,
     stream->volumeValid   = false;
     stream->muteValid     = false;
     stream->discontinuity = true;
-    networkAudioClearClockNL(stream);
   }
   stream->stateSequence = state.stateSequence;
   networkAudioInvalidateBarrierNL(audio, stream);
@@ -1861,62 +1832,6 @@ static bool networkAudioHandleBarrier(NetworkAudio * audio,
   return true;
 }
 
-static struct NetworkAudioClockEntry * networkAudioFindClockNL(
-    struct NetworkAudioStream * stream, uint64_t packetID)
-{
-  for (unsigned i = 0; i < NETWORK_AUDIO_CLOCK_CACHE_SIZE; ++i)
-    if (stream->clocks[i].valid &&
-        stream->clocks[i].state.packetID == packetID)
-      return &stream->clocks[i];
-  return NULL;
-}
-
-static bool networkAudioHandleClock(NetworkAudio * audio,
-    const LGNetPacketView * packet)
-{
-  LGNetAudioClockState state;
-  if (lgNetAudioClockStateDecode(&state,
-        packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
-    return false;
-
-  LG_LOCK(audio->stateLock);
-  struct NetworkAudioStream * stream = networkAudioStreamNL(
-      audio, state.streamID, state.direction);
-  if (!stream || stream != &audio->playback)
-  {
-    LG_UNLOCK(audio->stateLock);
-    return false;
-  }
-  if (!networkAudioSubscriptionCurrentNL(audio, packet) ||
-      !networkAudioStreamRequiredNL(audio, stream) ||
-      state.subscriptionEpoch != audio->subscriptionEpoch)
-  {
-    LG_UNLOCK(audio->stateLock);
-    return true;
-  }
-  if (!stream->active || !stream->formatValid ||
-      state.formatEpoch != stream->wireFormat.formatEpoch ||
-      (stream->packetKnown && state.packetID <= stream->lastPacketID))
-  {
-    LG_UNLOCK(audio->stateLock);
-    return true;
-  }
-
-  struct NetworkAudioClockEntry * entry = networkAudioFindClockNL(
-      stream, state.packetID);
-  if (!entry)
-  {
-    entry = &stream->clocks[
-      stream->clockInsert++ % NETWORK_AUDIO_CLOCK_CACHE_SIZE];
-    if (entry->valid)
-      stream->discontinuity = true;
-  }
-  entry->valid = true;
-  entry->state = state;
-  LG_UNLOCK(audio->stateLock);
-  return true;
-}
-
 static bool networkAudioHandlePlaybackData(NetworkAudio * audio,
     const LGNetPacketView * packet)
 {
@@ -1971,32 +1886,23 @@ static bool networkAudioHandlePlaybackData(NetworkAudio * audio,
     return true;
   }
 
-  struct NetworkAudioClockEntry * entry    = networkAudioFindClockNL(
-      stream, data.packetID);
-  LG_AudioClock                   clock;
-  const LG_AudioClock           * clockPtr = NULL;
-  if (entry && (entry->state.flags & LG_NET_AUDIO_CLOCK_VALID))
+  const bool            discontinuity = stream->discontinuity || sequenceGap ||
+    (data.flags & LG_NET_AUDIO_DATA_DISCONTINUITY) != 0;
+  LG_AudioClock         clock;
+  const LG_AudioClock * clockPtr      = NULL;
+  if (data.flags & LG_NET_AUDIO_DATA_CLOCK_VALID)
   {
     clock = (LG_AudioClock)
     {
-      .position      = entry->state.framePosition,
-      .time          = entry->state.timeNs,
-      .rate          = networkAudioRate(entry->state.rateQ32),
+      .position      = data.startFrame,
+      .time          = (int64_t)data.timestampNs,
+      .rate          = networkAudioRate(data.rateQ32),
       .stable        =
-        (entry->state.flags & LG_NET_AUDIO_CLOCK_STABLE) != 0,
-      .discontinuity = stream->discontinuity || sequenceGap ||
-        (data.flags & LG_NET_AUDIO_DATA_DISCONTINUITY),
+        (data.flags & LG_NET_AUDIO_DATA_CLOCK_STABLE) != 0,
+      .discontinuity = discontinuity,
     };
-    clockPtr              = &clock;
-    stream->discontinuity = false;
+    clockPtr = &clock;
   }
-  else
-    stream->discontinuity = true;
-  if (entry)
-    entry->valid = false;
-  if (data.flags & LG_NET_AUDIO_DATA_END_OF_STREAM)
-    stream->discontinuity = true;
-
   const size_t frameSize = (size_t)networkAudioSampleSize(
       stream->wireFormat.sampleFormat) * stream->wireFormat.channels;
   const size_t bytes     = frameSize * data.frameCount;
@@ -2013,11 +1919,13 @@ static bool networkAudioHandlePlaybackData(NetworkAudio * audio,
   const LG_AudioEventOps * events     =
     audio->attached ? audio->events : NULL;
   void                   * opaque     = audio->eventOpaque;
+  stream->discontinuity = !events || !events->playbackData ||
+    (data.flags & LG_NET_AUDIO_DATA_END_OF_STREAM) != 0;
   LG_UNLOCK(audio->stateLock);
   networkAudioCallEventsNL(audio);
   if (events && events->playbackData)
     events->playbackData(opaque, generation, pcm,
-        data.frameCount, clockPtr);
+        data.frameCount, clockPtr, discontinuity);
   networkAudioEndEvents(audio);
   return true;
 }
@@ -2078,7 +1986,7 @@ static bool networkAudioHandlePacket(NetworkAudio * audio,
           audio, packet, &audio->playback);
 
     case LG_NET_AUDIO_MESSAGE_PLAYBACK_DATA:
-      return networkAudioHandlePlaybackData(audio, packet);
+      return datagram && networkAudioHandlePlaybackData(audio, packet);
 
     case LG_NET_AUDIO_MESSAGE_PLAYBACK_VOLUME:
       return !datagram && networkAudioHandleVolume(
@@ -2106,9 +2014,6 @@ static bool networkAudioHandlePacket(NetworkAudio * audio,
 
     case LG_NET_AUDIO_MESSAGE_STATE_BARRIER:
       return !datagram && networkAudioHandleBarrier(audio, packet);
-
-    case LG_NET_AUDIO_MESSAGE_CLOCK_STATE:
-      return networkAudioHandleClock(audio, packet);
 
     default:
       return false;
@@ -2149,7 +2054,6 @@ bool networkAudioCreate(NetworkAudio ** result,
     LG_NET_AUDIO_ROLE_CAPTURE           |
     LG_NET_AUDIO_ROLE_CLOCK_FEEDBACK    |
     LG_NET_AUDIO_ROLE_DATAGRAM_PCM      |
-    LG_NET_AUDIO_ROLE_RELIABLE_PCM      |
     LG_NET_AUDIO_ROLE_EXCLUSIVE_CAPTURE;
   audio->endpointGeneration    = 1;
   audio->generationSerial      = 1;
@@ -2191,6 +2095,8 @@ void networkAudioConnectionState(NetworkAudio * audio, bool connected)
   const bool serviceAvailable = connected &&
     networkConnectionServiceAvailable(audio->connection,
       LG_NET_SERVICE_AUDIO, LG_NET_CAPABILITY_RELIABLE) &&
+    networkConnectionServiceAvailable(audio->connection,
+      LG_NET_SERVICE_AUDIO, LG_NET_CAPABILITY_DATAGRAM) &&
     networkConnectionServiceVersion(audio->connection,
       LG_NET_SERVICE_AUDIO, &serviceVersion) &&
     networkAudioVersionSupported(serviceVersion);

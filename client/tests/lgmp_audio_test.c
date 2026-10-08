@@ -150,21 +150,23 @@ static unsigned audioSampleBytes(LG_AudioSampleFormat format)
 }
 
 static void playbackData(void * opaque, uint32_t generation,
-    const void * data, size_t frames, const LG_AudioClock * clock)
+    const void * data, size_t frames, const LG_AudioClock * clock,
+    bool discontinuity)
 {
   struct Trace * trace = opaque;
+  (void)discontinuity;
   pthread_mutex_lock(&trace->mutex);
-  trace->playGeneration = generation;
-  trace->playFrames = frames;
-  const size_t bytes = frames * trace->playFormat.channelCount *
+  trace->playGeneration  = generation;
+  trace->playFrames      = frames;
+  const size_t bytes  = frames * trace->playFormat.channelCount *
     audioSampleBytes(trace->playFormat.sampleFormat);
-  const size_t copy = bytes < sizeof(trace->playData) ?
+  const size_t copy   = bytes < sizeof(trace->playData) ?
     bytes : sizeof(trace->playData);
   memset(trace->playData, 0, sizeof(trace->playData));
   memcpy(trace->playData, data, copy);
-  trace->playClockValid = clock != NULL;
+  trace->playClockValid  = clock != NULL;
   if (clock)
-    trace->playClock = *clock;
+    trace->playClock     = *clock;
   pthread_mutex_unlock(&trace->mutex);
   traceEvent(trace, TRACE_PLAY_DATA, generation);
   atomic_fetch_add_explicit(&trace->playDataCount, 1,

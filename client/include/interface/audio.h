@@ -116,10 +116,11 @@ typedef struct LG_AudioEventOps
       uint8_t channels, const uint16_t volume[]);
   void (*playbackMute)(void * opaque, uint32_t generation, bool mute);
   /* Sample data is borrowed for the duration of the call. When supplied, the
-   * source clock position and time identify the first frame in this packet. */
+   * source clock position and time identify the first frame in this packet.
+   * Discontinuity remains valid when no source clock is available. */
   void (*playbackData)(void * opaque, uint32_t generation,
       const void * data, size_t frames,
-      const LG_AudioClock * sourceClock);
+      const LG_AudioClock * sourceClock, bool discontinuity);
 
   /* May repeat with the same generation to update an active stream format. */
   void (*recordStart)(void * opaque, uint32_t generation,

@@ -2294,7 +2294,8 @@ static void playbackResetRateControl(PlaybackSourceData * sourceData,
 }
 
 static PlaybackDataResult playbackData(const void * data, size_t frameCount,
-    const LG_AudioClock * sourceClock, int64_t arrivalTime)
+    const LG_AudioClock * sourceClock, bool streamDiscontinuity,
+    int64_t arrivalTime)
 {
   StreamState state = playbackGetState();
   if (state == STREAM_STATE_STOP_PENDING)
@@ -2363,8 +2364,9 @@ static PlaybackDataResult playbackData(const void * data, size_t frameCount,
   const bool bufferUnderrun         =
     STREAM_ACTIVE(playbackGetState()) &&
     ringbuffer_getCount(audio.playback.buffer) < 0;
-  bool discontinuity                =
-    bufferUnderrun || (sourceClock && sourceClock->discontinuity);
+  bool discontinuity                = bufferUnderrun ||
+    streamDiscontinuity ||
+    (sourceClock && sourceClock->discontinuity);
   const int64_t previousArrivalTime = sourceData->lastArrivalTime;
   const int64_t packetTime          =
     playbackMapMediaTime(sourceData, sourceClock, frames,
@@ -4039,11 +4041,12 @@ static void eventPlaybackMute(void * opaque, uint32_t generation, bool mute)
 }
 
 static void eventPlaybackData(void * opaque, uint32_t generation,
-    const void * data, size_t frames, const LG_AudioClock * sourceClock)
+    const void * data, size_t frames, const LG_AudioClock * sourceClock,
+    bool discontinuity)
 {
-  const int64_t arrivalTime = nanotime();
-  AudioBinding * binding = opaque;
-  AudioBinding active;
+  const int64_t   arrivalTime = nanotime();
+  AudioBinding  * binding     = opaque;
+  AudioBinding    active;
 
   if (!eventBegin(binding, &active))
     return;
@@ -4057,7 +4060,8 @@ static void eventPlaybackData(void * opaque, uint32_t generation,
     PlaybackDataResult result = PLAYBACK_DATA_DROP;
     if (liveGeneration == generation)
     {
-      result = playbackData(data, frames, sourceClock, arrivalTime);
+      result = playbackData(
+          data, frames, sourceClock, discontinuity, arrivalTime);
 
       if (result == PLAYBACK_DATA_PROCESSED &&
           atomic_load_explicit(&audio.playback.streamGeneration,
