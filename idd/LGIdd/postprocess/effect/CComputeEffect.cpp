@@ -289,7 +289,8 @@ bool CComputeEffect::IsDst(ID3D12Resource * dst) const
   if (!dst)
     return false;
 
-  return D12::Same(dst->GetDesc(), m_outDesc);
+  return D12::Same(
+    dst->GetDesc(), m_outDesc, D12::DescCmp::CREATE);
 }
 
 void CComputeEffect::TransitionDst(
