@@ -44,7 +44,7 @@ public:
   CIVSHMEM();
   ~CIVSHMEM();
 
-  bool Init();
+  bool Init(int shmDevice = -1);
   bool Open();
   void Close();
 

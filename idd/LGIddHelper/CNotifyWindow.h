@@ -48,6 +48,7 @@ class CNotifyWindow : public CWindow
 
   std::function<void()> m_onSettingChange;
   std::function<bool()> m_onEnsureOnlyDisplay;
+  std::function<void()> m_onDisplayChange;
 
   LRESULT onNotifyIcon(UINT uEvent, WORD wIconId, int x, int y);
   void registerIcon();
@@ -56,6 +57,7 @@ class CNotifyWindow : public CWindow
   void handleResolutionRejected(uint32_t width, uint32_t height,
     uint32_t requiredSizeMiB);
   void scheduleDisplayCheck(UINT delay);
+  void scheduleDisplayRects();
 
   virtual LRESULT handleMessage(UINT uMsg, WPARAM wParam, LPARAM lParam) override;
   virtual LRESULT onCreate() override;
@@ -93,4 +95,5 @@ public:
 
   void onSettingChange(std::function<void()> func) { m_onSettingChange = std::move(func); }
   void onEnsureOnlyDisplay(std::function<bool()> func);
+  void onDisplayChange(std::function<void()> func);
 };

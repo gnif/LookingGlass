@@ -231,6 +231,7 @@ struct AppParams
   bool                 quickSplash;
   bool                 overlayDim;
   bool                 alwaysShowCursor;
+  uint64_t             idleCursorTimeoutUs;
   uint64_t             helpMenuDelayUs;
   const char *         uiFont;
   int                  uiSize;
@@ -253,6 +254,7 @@ struct AppParams
   bool                 autoCapture;
   bool                 captureInputOnly;
   bool                 showCursorDot;
+  bool                 showHostCursor;
   bool                 largeCursorDot;
 
   bool                 audioDebug;
@@ -303,6 +305,9 @@ struct CursorState
 
   /* true if we are to draw the cursor on screen */
   bool draw;
+
+  /* the time the guest cursor last moved */
+  uint64_t moveTime;
 
   /* true if the cursor is currently in our window */
   bool inWindow;

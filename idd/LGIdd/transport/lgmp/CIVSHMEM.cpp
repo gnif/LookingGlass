@@ -41,7 +41,7 @@ CIVSHMEM::~CIVSHMEM()
   CloseHandle(m_handle);
 }
 
-bool CIVSHMEM::Init()
+bool CIVSHMEM::Init(int shmDevice)
 {
   // Init may be called more than once (the adapter init is retried at boot
   // until IVSHMEM enumerates). Release any handle from a prior attempt so we
@@ -96,17 +96,20 @@ bool CIVSHMEM::Init()
     { return a.busAddr < b.busAddr; });
 
 
+  // An explicit device index takes precedence over the shmDevice registry
+  // value, which remains the default for callers that do not pass one.
   HKEY hkeyLG;
   IVSHMEMData * device = nullptr;
-  DWORD shmDevice = 0;
+  DWORD selected = shmDevice < 0 ? 0 : (DWORD)shmDevice;
 
-  if (RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Looking Glass", &hkeyLG) == ERROR_SUCCESS)
+  if (shmDevice < 0 &&
+      RegOpenKeyA(HKEY_LOCAL_MACHINE, "SOFTWARE\\Looking Glass", &hkeyLG) == ERROR_SUCCESS)
   {
     DWORD dataType;
-    DWORD dataSize = sizeof(shmDevice);
-    if (RegQueryValueExA(hkeyLG, "shmDevice", nullptr, &dataType, (BYTE*)&shmDevice, &dataSize) != ERROR_SUCCESS ||
+    DWORD dataSize = sizeof(selected);
+    if (RegQueryValueExA(hkeyLG, "shmDevice", nullptr, &dataType, (BYTE*)&selected, &dataSize) != ERROR_SUCCESS ||
         dataType != REG_DWORD)
-      shmDevice = 0;
+      selected = 0;
   }
 
   DWORD i = 0;
@@ -115,9 +118,9 @@ bool CIVSHMEM::Init()
     DWORD bus = it->busAddr >> 32;
     DWORD addr = it->busAddr & 0xFFFFFFFF;
     DEBUG_INFO("IVSHMEM %u%c on bus 0x%lx, device 0x%lx, function 0x%lx",
-      i, i == shmDevice ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
+      i, i == selected ? '*' : ' ', bus, addr >> 16, addr & 0xFFFF);
 
-    if (i == shmDevice)
+    if (i == selected)
       device = &(*it);
   }
 
@@ -128,7 +131,7 @@ bool CIVSHMEM::Init()
     return false;
   }
 
-  if (SetupDiEnumDeviceInterfaces(devInfoSet, &devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
+  if (SetupDiEnumDeviceInterfaces(devInfoSet, &device->devInfoData, &GUID_DEVINTERFACE_IVSHMEM, 0, &devInterfaceData) == FALSE)
   {
     DEBUG_ERROR_HR(GetLastError(), "SetupDiEnumDeviceInterfaces");
     SetupDiDestroyDeviceInfoList(devInfoSet);
