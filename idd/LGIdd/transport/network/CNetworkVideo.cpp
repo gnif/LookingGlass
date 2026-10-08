@@ -95,6 +95,13 @@ namespace
   constexpr uint32_t PYROWAVE_FRAGMENT_MIN      =
     LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE + PYROWAVE_FRAGMENT_DATA_MIN;
   constexpr uint32_t PYROWAVE_PACKET_META_WORDS = 2;
+  constexpr uint32_t PYROWAVE_SEQUENCE_MASK     = 7;
+  constexpr uint32_t PYROWAVE_HEADER_CODE_MASK  =
+    LG_NET_VIDEO_PYROWAVE_MODE_MASK <<
+      LG_NET_VIDEO_PYROWAVE_MODE_SHIFT;
+  constexpr uint32_t PYROWAVE_HEADER_CODE_DELTA =
+    LG_NET_VIDEO_PYROWAVE_MODE_DELTA <<
+      LG_NET_VIDEO_PYROWAVE_MODE_SHIFT;
   constexpr uint32_t PYROWAVE_QUANT_WORDS_8X8   = 40;
   constexpr uint32_t PYROWAVE_STATE_BYTES       = 16;
   constexpr uint32_t PYROWAVE_QUANT_LEVELS      = 19;
@@ -227,6 +234,22 @@ namespace
     return value ? value : 1;
   }
 
+  uint32_t LoadLE32(const uint8_t * data)
+  {
+    return static_cast<uint32_t>(data[0])       |
+      static_cast<uint32_t>(data[1]) << 8U      |
+      static_cast<uint32_t>(data[2]) << 16U     |
+      static_cast<uint32_t>(data[3]) << 24U;
+  }
+
+  void StoreLE32(uint8_t * data, uint32_t value)
+  {
+    data[0] = static_cast<uint8_t>(value);
+    data[1] = static_cast<uint8_t>(value >> 8U);
+    data[2] = static_cast<uint8_t>(value >> 16U);
+    data[3] = static_cast<uint8_t>(value >> 24U);
+  }
+
   LGNetEnvelopeFlags DeliveryFlag(NetworkVideoDelivery delivery)
   {
     switch (delivery)
@@ -241,6 +264,12 @@ namespace
         return 0;
     }
     return 0;
+  }
+
+  bool FragmentMessage(uint16_t messageType)
+  {
+    return messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT ||
+      messageType == LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT;
   }
 
   unsigned DeliveryIndex(NetworkVideoDelivery delivery)
@@ -1384,6 +1413,7 @@ void FinalizeMain()
   {
     uint32_t offset = 0;
     uint32_t length = 0;
+    uint32_t index  = 0;
   };
 
   struct EncodedFrame
@@ -1393,10 +1423,45 @@ void FinalizeMain()
     uint64_t                                    frameID       = 0;
     uint64_t                                    captureTimeNs = 0;
     uint32_t                                    deadlineMs    = 0;
+    uint32_t                                    blockCapacity = 0;
     std::vector<uint8_t>                        data;
     std::vector<EncodedBlock>                   blocks;
     std::shared_ptr<const std::vector<uint8_t>> wholePayload;
   };
+
+  struct EncodedPacket
+  {
+    const uint8_t * data   = nullptr;
+    uint32_t        length = 0;
+  };
+
+  EncodedPacket Packet(const EncodedFrame& frame,
+    const EncodedBlock& block)
+  {
+    const uint32_t prefix = block.offset ? 0U : 8U;
+    if (block.length <= prefix || block.offset > frame.data.size() ||
+        block.length > frame.data.size() - block.offset)
+      return {};
+    return
+    {
+      frame.data.data() + block.offset + prefix,
+      block.length - prefix,
+    };
+  }
+
+  bool SamePacket(const EncodedPacket& left, const EncodedPacket& right)
+  {
+    if (!left.data || !right.data || left.length != right.length ||
+        left.length < 8U)
+      return left.data == right.data && left.length == right.length;
+
+    constexpr uint32_t SEQUENCE_BITS = PYROWAVE_SEQUENCE_MASK << 28U;
+    if ((LoadLE32(left.data) & ~SEQUENCE_BITS) !=
+          (LoadLE32(right.data) & ~SEQUENCE_BITS))
+      return false;
+    return std::equal(left.data + sizeof(uint32_t),
+      left.data + left.length, right.data + sizeof(uint32_t));
+  }
 
   struct ShaderParameters
   {
@@ -2204,14 +2269,6 @@ void FinalizeMain()
         slot.packed.Get(), 0, slot.frameLimit);
     }
 
-    static uint32_t LoadLE32(const uint8_t * data)
-    {
-      return static_cast<uint32_t>(data[0])       |
-        static_cast<uint32_t>(data[1]) << 8U      |
-        static_cast<uint32_t>(data[2]) << 16U     |
-        static_cast<uint32_t>(data[3]) << 24U;
-    }
-
     bool Compact(const Slot& slot, const uint8_t * readback,
       EncodedFrame& output) const
     {
@@ -2279,7 +2336,7 @@ void FinalizeMain()
 
           std::copy_n(packet, length,
             output.data.begin() + outputOffset);
-          output.blocks.push_back({ outputOffset, length });
+          output.blocks.push_back({ outputOffset, length, blockIndex });
           outputOffset += length;
         }
         if (output.blocks.size() != packetCount ||
@@ -2293,6 +2350,7 @@ void FinalizeMain()
 
       output.blocks[0].offset  = 0;
       output.blocks[0].length += 8U;
+      output.blockCapacity     = m_blockCapacity;
 
       return true;
     }
@@ -2651,29 +2709,33 @@ struct CNetworkVideo::Impl
 {
   struct PeerState
   {
-    NetworkVideoPeer     peer                   = {};
-    NetworkVideoPeerInfo info                   = {};
-    LGNetVideoSubscribe  subscription           = {};
-    LGNetVideoFeedback   feedback               = {};
-    LGNetVideoState      lastStatusState        = {};
-    uint64_t             serial                 = 0;
-    uint64_t             componentEpoch         = 0;
-    uint64_t             statusSequence         = 0;
-    uint64_t             statusEpoch            = 0;
-    uint64_t             lastFrameID            = 0;
-    uint64_t             lastCompleteID         = 0;
-    uint64_t             lastCaptureTimeNs      = 0;
-    uint64_t             sendReadyGeneration[3] = {};
-    uint32_t             lastStatusDetail       = 0;
-    uint32_t             lastStatusFlags        = 0;
-    uint32_t             droppedFrames          = 0;
-    uint8_t              blockedDeliveries      = 0;
-    bool                 statusSent             = false;
-    bool                 subscribed             = false;
-    bool                 configured             = false;
-    bool                 congested              = false;
-    bool                 keyframePending        = false;
-    bool                 sendFailed             = false;
+    NetworkVideoPeer                    peer                   = {};
+    NetworkVideoPeerInfo                info                   = {};
+    LGNetVideoSubscribe                 subscription           = {};
+    LGNetVideoFeedback                  feedback               = {};
+    LGNetVideoState                     lastStatusState        = {};
+    uint64_t                            serial                 = 0;
+    uint64_t                            componentEpoch         = 0;
+    uint64_t                            statusSequence         = 0;
+    uint64_t                            statusEpoch            = 0;
+    uint64_t                            lastFrameID            = 0;
+    uint64_t                            lastCompleteID         = 0;
+    uint64_t                            lastCaptureTimeNs      = 0;
+    uint64_t                            referenceFrameID       = 0;
+    uint64_t                            sendReadyGeneration[3] = {};
+    uint32_t                            lastStatusDetail       = 0;
+    uint32_t                            lastStatusFlags        = 0;
+    uint32_t                            droppedFrames          = 0;
+    uint8_t                             blockedDeliveries      = 0;
+    std::shared_ptr<const EncodedFrame> referenceFrame;
+    std::vector<uint8_t>                updateBlocks;
+    bool                                statusSent             = false;
+    bool                                subscribed             = false;
+    bool                                configured             = false;
+    bool                                congested              = false;
+    bool                                keyframePending        = false;
+    bool                                referencePending       = false;
+    bool                                sendFailed             = false;
   };
 
   struct PendingFrame
@@ -2696,6 +2758,7 @@ struct CNetworkVideo::Impl
     uint64_t                                    componentEpoch = 0;
     uint64_t                                    requestID      = 0;
     uint64_t                                    frameID        = 0;
+    uint64_t                                    baseFrameID    = 0;
     std::shared_ptr<const std::vector<uint8_t>> payload;
     std::shared_ptr<const EncodedFrame>         encoded;
     uint32_t                                    fragmentIndex  = 0;
@@ -2847,6 +2910,22 @@ struct CNetworkVideo::Impl
     return false;
   }
 
+  static void ResetPeerReferenceNL(PeerState& peer)
+  {
+    peer.referenceFrame.reset();
+    peer.updateBlocks.clear();
+    peer.referenceFrameID = 0;
+    peer.referencePending = false;
+  }
+
+  static bool PeerNeedsReferenceNL(
+    const PeerState& peer, const EncodedFrame& frame)
+  {
+    return peer.keyframePending || !peer.referenceFrame ||
+      peer.referenceFrame->configEpoch != frame.configEpoch ||
+      peer.referenceFrame->blockCapacity != frame.blockCapacity;
+  }
+
   uint32_t FrameLimitNL(uint64_t captureTimeNs)
   {
     uint64_t period = VIDEO_RATE_DEFAULT_PERIOD_NS;
@@ -2973,6 +3052,131 @@ struct CNetworkVideo::Impl
         encoded.wholePayload->size() : 0, bytes);
   }
 
+  static std::shared_ptr<const EncodedFrame> BuildUpdateFrame(
+    const EncodedFrame& reference, const EncodedFrame& current,
+    const std::vector<uint8_t>& previousBlocks,
+    std::vector<uint8_t>& updateBlocks)
+  {
+    updateBlocks.clear();
+    if (!reference.blockCapacity ||
+        reference.blockCapacity != current.blockCapacity ||
+        reference.configEpoch != current.configEpoch ||
+        reference.data.size() < 8U || current.data.size() < 8U)
+      return {};
+
+    try
+    {
+      updateBlocks = previousBlocks;
+      updateBlocks.resize(current.blockCapacity, 0);
+      size_t referencePosition = 0;
+      size_t currentPosition   = 0;
+      for (uint32_t index = 0; index < current.blockCapacity; ++index)
+      {
+        while (referencePosition < reference.blocks.size() &&
+            reference.blocks[referencePosition].index < index)
+          ++referencePosition;
+        while (currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index < index)
+          ++currentPosition;
+        const EncodedBlock * referenceBlock =
+          referencePosition < reference.blocks.size() &&
+            reference.blocks[referencePosition].index == index ?
+              &reference.blocks[referencePosition] : nullptr;
+        const EncodedBlock * currentBlock   =
+          currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index == index ?
+              &current.blocks[currentPosition] : nullptr;
+        if (!SamePacket(referenceBlock ? Packet(reference, *referenceBlock) :
+              EncodedPacket {},
+            currentBlock ? Packet(current, *currentBlock) :
+              EncodedPacket {}))
+          updateBlocks[index] = 1;
+      }
+
+      uint32_t operationCount = 0;
+      for (uint8_t changed : updateBlocks)
+        operationCount += changed != 0;
+      if (!operationCount || operationCount > UINT32_C(0x00ffffff))
+        return {};
+
+      std::shared_ptr<EncodedFrame> update =
+        std::make_shared<EncodedFrame>();
+      update->configEpoch   = current.configEpoch;
+      update->sourceSerial  = current.sourceSerial;
+      update->frameID       = current.frameID;
+      update->captureTimeNs = current.captureTimeNs;
+      update->deadlineMs    = current.deadlineMs;
+      update->blockCapacity = current.blockCapacity;
+      update->blocks.reserve(operationCount);
+      update->data.reserve(current.data.size());
+      update->data.resize(8U);
+
+      const uint32_t firstWord  = LoadLE32(current.data.data());
+      const uint32_t secondWord =
+        (LoadLE32(current.data.data() + sizeof(uint32_t)) &
+          ~(PYROWAVE_HEADER_CODE_MASK | UINT32_C(0x00ffffff))) |
+        PYROWAVE_HEADER_CODE_DELTA | operationCount;
+      StoreLE32(update->data.data(), firstWord);
+      StoreLE32(update->data.data() + sizeof(uint32_t), secondWord);
+
+      const uint32_t sequence =
+        (firstWord >> 28U) & PYROWAVE_SEQUENCE_MASK;
+      currentPosition = 0;
+      for (uint32_t index = 0; index < current.blockCapacity; ++index)
+      {
+        while (currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index < index)
+          ++currentPosition;
+        if (!updateBlocks[index])
+          continue;
+        const EncodedBlock * block  =
+          currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index == index ?
+              &current.blocks[currentPosition] : nullptr;
+        const uint32_t       offset =
+          static_cast<uint32_t>(update->data.size());
+        if (block)
+        {
+          const EncodedPacket packet = Packet(current, *block);
+          if (!packet.data || packet.length < 8U ||
+              packet.length > LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH -
+                update->data.size())
+            return {};
+          update->data.insert(update->data.end(),
+            packet.data, packet.data + packet.length);
+          update->blocks.push_back({ offset, packet.length, index });
+        }
+        else
+        {
+          if (update->data.size() > LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH -
+              LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_SIZE)
+            return {};
+          update->data.resize(update->data.size() +
+            LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_SIZE);
+          uint8_t * packet = update->data.data() + offset;
+          StoreLE32(packet,
+            (LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_WORDS << 16U) |
+              (sequence << 28U));
+          StoreLE32(packet + sizeof(uint32_t), index << 8U);
+          update->blocks.push_back(
+            { offset, LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_SIZE, index });
+        }
+      }
+      if (update->blocks.size() != operationCount ||
+          update->data.size() > LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH)
+        return {};
+
+      update->blocks[0].offset  = 0;
+      update->blocks[0].length += 8U;
+      return update;
+    }
+    catch (...)
+    {
+      updateBlocks.clear();
+      return {};
+    }
+  }
+
   bool EncodedQueuedNL(const EncodedFrame * encoded,
     uint64_t excludingSerial = 0) const
   {
@@ -3058,7 +3262,9 @@ struct CNetworkVideo::Impl
     peer.componentEpoch    = m_configEpoch;
     peer.configured        = true;
     peer.lastCaptureTimeNs = 0;
+    peer.keyframePending   = true;
     peer.sendFailed        = false;
+    ResetPeerReferenceNL(peer);
     return QueueStatusNL(peer, LG_NET_VIDEO_STATE_CONFIGURED, 0);
   }
 
@@ -3111,8 +3317,11 @@ struct CNetworkVideo::Impl
     m_frames.clear();
     m_latestFrame.reset();
     for (PeerState& peer : m_peers)
+    {
+      ResetPeerReferenceNL(peer);
       if (peer.subscribed)
         QueueStatusNL(peer, LG_NET_VIDEO_STATE_ERROR, detail);
+    }
   }
 
   void DropPeerFramesNL(PeerState& peer)
@@ -3123,7 +3332,7 @@ struct CNetworkVideo::Impl
     uint64_t activeFrame = 0;
     for (const SendItem& item : m_sends)
       if (item.frameID && item.started &&
-          item.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
+          FragmentMessage(item.messageType) &&
           SamePeer(item.peer, peer.peer))
       {
         activeFrame = item.frameID;
@@ -3216,6 +3425,47 @@ struct CNetworkVideo::Impl
     return payload;
   }
 
+  static std::shared_ptr<const std::vector<uint8_t>> BuildUpdatePayload(
+    const EncodedFrame& encoded, uint64_t baseFrameID,
+    uint32_t deadlineMs, uint64_t frameID,
+    uint64_t presentationBaseNs)
+  {
+    LGNetVideoFrameUpdate update = {};
+    update.streamID                = STREAM_ID;
+    update.codec                   = LG_NET_VIDEO_CODEC_PYROWAVE;
+    update.configEpoch             = encoded.configEpoch;
+    update.frameID                 = frameID;
+    update.baseFrameID             = baseFrameID;
+    update.captureTimestampNs      = encoded.captureTimeNs;
+    update.presentationTimestampNs = presentationBaseNs +
+      static_cast<uint64_t>(deadlineMs) * UINT64_C(1000000);
+    update.encodedLength           =
+      static_cast<uint32_t>(encoded.data.size());
+    update.blockCount              =
+      static_cast<uint32_t>(encoded.blocks.size());
+    update.fragmentCount           = 1;
+    update.deadlineMs              = deadlineMs;
+    update.data                    = encoded.data.data();
+
+    const size_t size = lgNetVideoFrameUpdateSize(&update);
+    if (!size || size > UINT32_MAX)
+      return {};
+
+    std::shared_ptr<std::vector<uint8_t>> payload;
+    try
+    {
+      payload = std::make_shared<std::vector<uint8_t>>(size);
+    }
+    catch (...)
+    {
+      return {};
+    }
+    if (!lgNetVideoFrameUpdateEncode(
+          payload->data(), payload->size(), &update))
+      return {};
+    return payload;
+  }
+
   bool QueueWholeFrameNL(PeerState& peer, const EncodedFrame& encoded,
     NetworkVideoDelivery delivery, uint64_t frameID,
     uint64_t presentationBaseNs)
@@ -3236,16 +3486,33 @@ struct CNetworkVideo::Impl
       std::move(payload));
   }
 
+  bool QueueWholeUpdateNL(PeerState& peer, const EncodedFrame& encoded,
+    NetworkVideoDelivery delivery, uint64_t baseFrameID, uint64_t frameID,
+    uint64_t presentationBaseNs)
+  {
+    const uint32_t deadlineMs = (std::min)(
+      encoded.deadlineMs, peer.subscription.maxFrameLatencyMs);
+    std::shared_ptr<const std::vector<uint8_t>> payload =
+      BuildUpdatePayload(encoded, baseFrameID,
+        deadlineMs, frameID, presentationBaseNs);
+    if (!payload)
+      return false;
+    return QueueNL(peer.peer, delivery,
+      LG_NET_VIDEO_MESSAGE_FRAME_UPDATE, LG_NET_ENVELOPE_FINAL,
+      encoded.configEpoch, 0, frameID, std::move(payload));
+  }
+
   static bool FragmentPlan(const EncodedFrame& encoded,
     uint32_t maxPayload, uint32_t firstBlockIndex,
     uint32_t firstFragmentIndex,
-    uint32_t& payloadLimit, uint32_t& fragmentCount)
+    uint32_t& payloadLimit, uint32_t& fragmentCount,
+    uint32_t headerSize = LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE)
   {
-    if (maxPayload <= LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE ||
+    if (maxPayload <= headerSize ||
         firstBlockIndex > encoded.blocks.size())
       return false;
     payloadLimit = (std::min)(
-      maxPayload - LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE,
+      maxPayload - headerSize,
       static_cast<uint32_t>(LG_NET_VIDEO_MAX_FRAGMENT_LENGTH));
     if (!payloadLimit)
       return false;
@@ -3292,16 +3559,22 @@ struct CNetworkVideo::Impl
   bool QueueFragmentsNL(PeerState& peer,
     std::shared_ptr<const EncodedFrame> encoded,
     NetworkVideoDelivery delivery, uint64_t frameID, uint32_t maxPayload,
-    uint32_t firstBlockIndex = 0,
-    uint32_t firstFragmentIndex = 0)
+    uint32_t firstBlockIndex    = 0,
+    uint32_t firstFragmentIndex = 0,
+    uint16_t messageType        = LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT,
+    uint64_t baseFrameID        = 0)
   {
-    if (!encoded)
+    const bool update =
+      messageType == LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT;
+    if (!encoded || (update != (baseFrameID != 0)))
       return false;
     uint32_t payloadLimit;
     uint32_t fragmentCount;
     if (!FragmentPlan(*encoded, maxPayload, firstBlockIndex,
           firstFragmentIndex,
-          payloadLimit, fragmentCount))
+          payloadLimit, fragmentCount,
+          update ? LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE :
+            LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE))
       return false;
     if (firstBlockIndex == encoded->blocks.size())
       return true;
@@ -3318,10 +3591,11 @@ struct CNetworkVideo::Impl
       item.serial         = Next64(m_nextSendSerial);
       item.peer           = peer.peer;
       item.delivery       = delivery;
-      item.messageType    = LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT;
+      item.messageType    = messageType;
       item.flags          = LG_NET_ENVELOPE_FINAL;
       item.componentEpoch = encoded->configEpoch;
       item.frameID        = frameID;
+      item.baseFrameID    = baseFrameID;
       item.encoded        = std::move(encoded);
       item.fragmentIndex  = firstFragmentIndex;
       item.fragmentCount  = fragmentCount;
@@ -3406,6 +3680,51 @@ struct CNetworkVideo::Impl
     const uint32_t length = (std::min)(
       item.payloadLimit, block.length - item.blockOffset);
 
+    if (item.messageType == LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT)
+    {
+      LGNetVideoFrameUpdateFragment fragment = {};
+      fragment.streamID      = STREAM_ID;
+      fragment.configEpoch   = item.encoded->configEpoch;
+      fragment.frameID       = item.frameID;
+      fragment.baseFrameID   = item.baseFrameID;
+      fragment.frameOffset   = block.offset + item.blockOffset;
+      fragment.frameLength   =
+        static_cast<uint32_t>(item.encoded->data.size());
+      fragment.blockIndex    = item.blockIndex;
+      fragment.blockOffset   = item.blockOffset;
+      fragment.blockLength   = block.length;
+      fragment.blockCount    =
+        static_cast<uint32_t>(item.encoded->blocks.size());
+      fragment.fragmentIndex = item.fragmentIndex;
+      fragment.fragmentCount = item.fragmentCount;
+      fragment.payloadLength = length;
+      fragment.payload       =
+        item.encoded->data.data() + fragment.frameOffset;
+      if (!item.blockOffset)
+        fragment.flags |= LG_NET_VIDEO_FRAGMENT_BLOCK_START;
+      if (item.blockOffset + length == block.length)
+        fragment.flags |= LG_NET_VIDEO_FRAGMENT_BLOCK_END;
+      if (static_cast<size_t>(fragment.frameOffset) + length ==
+          item.encoded->data.size())
+        fragment.flags |= LG_NET_VIDEO_FRAGMENT_FRAME_END;
+
+      const size_t size = lgNetVideoFrameUpdateFragmentSize(&fragment);
+      if (!size)
+        return false;
+      try
+      {
+        payload.resize(size);
+      }
+      catch (...)
+      {
+        return false;
+      }
+      return lgNetVideoFrameUpdateFragmentEncode(
+        payload.data(), payload.size(), &fragment);
+    }
+    if (item.messageType != LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT)
+      return false;
+
     LGNetVideoFragment fragment = {};
     fragment.streamID      = STREAM_ID;
     fragment.configEpoch   = item.encoded->configEpoch;
@@ -3465,7 +3784,8 @@ struct CNetworkVideo::Impl
 
   bool QueueFrameNL(PeerState& peer,
     const std::shared_ptr<const EncodedFrame>& frame,
-    uint64_t frameID, uint64_t presentationBaseNs)
+    uint64_t frameID, uint64_t presentationBaseNs,
+    bool establishReference = false)
   {
     if (!frame || !frameID || !presentationBaseNs || !peer.configured ||
         peer.componentEpoch != frame->configEpoch ||
@@ -3473,8 +3793,19 @@ struct CNetworkVideo::Impl
           peer.subscription.maxFrameLength)
       return false;
 
+    std::vector<uint8_t> cleanBlocks;
+    if (establishReference)
+      try
+      {
+        cleanBlocks.assign(frame->blockCapacity, 0);
+      }
+      catch (...)
+      {
+        return false;
+      }
+
     DropPeerFramesNL(peer);
-    const bool     datagrams =
+    const bool     datagrams = !establishReference &&
       (peer.subscription.flags & LG_NET_VIDEO_SUBSCRIBE_ALLOW_DATAGRAMS) &&
       DatagramFragmentsSupported(peer.info);
     const bool     bulk      = BulkFragmentsSupported(peer.info);
@@ -3535,12 +3866,108 @@ struct CNetworkVideo::Impl
     }
     peer.lastFrameID       = frameID;
     peer.lastCaptureTimeNs = frame->captureTimeNs;
-    peer.keyframePending   = false;
+    if (establishReference)
+    {
+      peer.referenceFrame   = frame;
+      peer.referenceFrameID = frameID;
+      peer.referencePending = true;
+      peer.updateBlocks     = std::move(cleanBlocks);
+    }
+    peer.keyframePending = establishReference;
+    return true;
+  }
+
+  bool QueueUpdateNL(PeerState& peer,
+    const std::shared_ptr<const EncodedFrame>& update,
+    uint64_t baseFrameID, uint64_t frameID,
+    uint64_t presentationBaseNs)
+  {
+    if (!update || !baseFrameID || baseFrameID >= frameID ||
+        !presentationBaseNs || !peer.configured ||
+        peer.referencePending || peer.referenceFrameID != baseFrameID ||
+        peer.componentEpoch != update->configEpoch ||
+        update->data.empty() || update->data.size() >
+          peer.subscription.maxFrameLength)
+      return false;
+
+    DropPeerFramesNL(peer);
+    const bool            bulk       = BulkFragmentsSupported(peer.info);
+    NetworkVideoDelivery  delivery   = bulk ?
+      NetworkVideoDelivery::BULK : NetworkVideoDelivery::RELIABLE;
+    const uint32_t        fullSize   =
+      static_cast<uint32_t>(update->data.size()) +
+      LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE;
+    const uint32_t        maxPayload = DeliveryPayload(peer.info, delivery);
+    bool                  result;
+    if (fullSize <= maxPayload)
+      result = QueueWholeUpdateNL(peer, *update, delivery,
+        baseFrameID, frameID, presentationBaseNs);
+    else
+      result = QueueScheduleNL(peer, *update, frameID,
+          presentationBaseNs) &&
+        QueueFragmentsNL(peer, update, delivery, frameID, maxPayload,
+          0, 0, LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT, baseFrameID);
+
+    if (!result)
+    {
+      DropPeerFramesNL(peer);
+      ++peer.droppedFrames;
+      peer.congested = true;
+      return false;
+    }
+    peer.lastFrameID       = frameID;
+    peer.lastCaptureTimeNs = update->captureTimeNs;
+    return true;
+  }
+
+  bool QueueCurrentFrameNL(PeerState& peer,
+    const std::shared_ptr<const EncodedFrame>& current,
+    uint64_t frameID, uint64_t presentationBaseNs)
+  {
+    if (!current)
+      return false;
+    if (peer.referencePending)
+      return true;
+    if (PeerNeedsReferenceNL(peer, *current))
+      return QueueFrameNL(
+        peer, current, frameID, presentationBaseNs, true);
+    std::vector<uint8_t>                      updateBlocks;
+    const std::shared_ptr<const EncodedFrame> update = BuildUpdateFrame(
+      *peer.referenceFrame, *current, peer.updateBlocks,
+      updateBlocks);
+    const bool compared = updateBlocks.size() == current->blockCapacity;
+    const bool changed  = std::any_of(updateBlocks.begin(),
+      updateBlocks.end(), [](uint8_t value) { return value != 0; });
+    if (!update)
+    {
+      if (compared && !changed)
+      {
+        peer.lastCaptureTimeNs = current->captureTimeNs;
+        return true;
+      }
+      return QueueFrameNL(
+        peer, current, frameID, presentationBaseNs, true);
+    }
+
+    const uint64_t fullWireSize   = current->data.size() +
+      LG_NET_VIDEO_FRAME_HEADER_WIRE_SIZE;
+    const uint64_t updateWireSize = update->data.size() +
+      LG_NET_VIDEO_FRAME_UPDATE_HEADER_WIRE_SIZE;
+    if (updateWireSize >= fullWireSize)
+      return QueueFrameNL(
+        peer, current, frameID, presentationBaseNs, true);
+
+    if (!QueueUpdateNL(peer, update, peer.referenceFrameID,
+          frameID, presentationBaseNs))
+      return false;
+    peer.updateBlocks = std::move(updateBlocks);
     return true;
   }
 
   bool ReplayLatestFrameNL(PeerState& peer)
   {
+    if (peer.referencePending)
+      return true;
     if (!m_latestFrame || !m_latestSourceSerial ||
         m_latestFrame->configEpoch != m_configEpoch ||
         m_latestFrame->sourceSerial != m_latestSourceSerial ||
@@ -3548,7 +3975,7 @@ struct CNetworkVideo::Impl
       return false;
 
     const uint64_t frameID = Next64(m_nextFrameID);
-    if (!QueueFrameNL(peer, m_latestFrame, frameID,
+    if (!QueueCurrentFrameNL(peer, m_latestFrame, frameID,
           CFrameScheduler::Nanotime()))
       return false;
 
@@ -3562,7 +3989,10 @@ struct CNetworkVideo::Impl
     bool queued = false;
     CSRWExclusiveLock lock(m_lock);
     for (PeerState& peer : m_peers)
-      if (peer.subscribed && peer.configured && peer.keyframePending)
+      if (peer.subscribed && peer.configured &&
+          (peer.keyframePending ||
+            (!peer.referencePending && peer.referenceFrame && m_latestFrame &&
+              m_latestFrame->captureTimeNs > peer.lastCaptureTimeNs)))
         queued |= ReplayLatestFrameNL(peer);
     return queued;
   }
@@ -3604,6 +4034,8 @@ struct CNetworkVideo::Impl
         return;
       for (const PeerState& peer : m_peers)
         if (peer.subscribed && peer.configured &&
+            !peer.referencePending &&
+            PeerNeedsReferenceNL(peer, frame) &&
             PeerFrameDueNL(peer, frame) &&
             PeerUsesWholeFrameNL(peer, frame))
         {
@@ -3647,7 +4079,7 @@ struct CNetworkVideo::Impl
       if (peer.subscribed && peer.configured &&
           PeerFrameDueNL(peer, *encoded))
       {
-        if (!QueueFrameNL(peer, encoded,
+        if (!QueueCurrentFrameNL(peer, encoded,
               frameID, encoded->captureTimeNs))
           QueueStatusNL(peer, LG_NET_VIDEO_STATE_STALLED, 2);
         else
@@ -3796,11 +4228,10 @@ struct CNetworkVideo::Impl
         }
         return;
       }
-      if (item.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
-          item.frameID)
+      if (FragmentMessage(item.messageType) && item.frameID)
         for (SendItem& queued : m_sends)
           if (queued.frameID == item.frameID &&
-              queued.messageType == LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT &&
+              FragmentMessage(queued.messageType) &&
               SamePeer(queued.peer, item.peer))
             queued.started = true;
       madeProgress = true;
@@ -3962,6 +4393,7 @@ void CNetworkVideo::Stop()
     {
       peer.configured     = false;
       peer.componentEpoch = 0;
+      m_impl->ResetPeerReferenceNL(peer);
     }
   }
   m_impl->m_encoder.Reset();
@@ -4083,6 +4515,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
 
       const bool hadSubscribers = m_impl->HasSubscribersNL();
       m_impl->DropPeerSendsNL(*peer);
+      m_impl->ResetPeerReferenceNL(*peer);
       peer->subscription    = subscribe;
       peer->subscribed      = true;
       peer->configured      = false;
@@ -4128,6 +4561,7 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
       peer->configured      = false;
       peer->componentEpoch  = 0;
       peer->keyframePending = false;
+      m_impl->ResetPeerReferenceNL(*peer);
       if (!m_impl->HasSubscribersNL())
         m_impl->m_lastBudgetCaptureTimeNs = 0;
       break;
@@ -4151,6 +4585,8 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
         return NetworkVideoPacketResult::IGNORED;
       if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
+      m_impl->DropPeerSendsNL(*peer);
+      m_impl->ResetPeerReferenceNL(*peer);
       peer->keyframePending = true;
       m_impl->ReplayLatestFrameNL(*peer);
       break;
@@ -4173,16 +4609,29 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
         return NetworkVideoPacketResult::IGNORED;
       if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
+      bool referenceAccepted = false;
       peer->feedback       = feedback;
       peer->lastCompleteID = feedback.lastCompleteFrameID;
       peer->congested      =
         feedback.flags & LG_NET_VIDEO_FEEDBACK_CONGESTED;
+      if (peer->referencePending && peer->referenceFrameID &&
+          feedback.lastCompleteFrameID >= peer->referenceFrameID &&
+          feedback.lastDecodedFrameID >= peer->referenceFrameID)
+      {
+        peer->referencePending = false;
+        peer->keyframePending  = false;
+        referenceAccepted      = true;
+      }
       if (feedback.flags & (LG_NET_VIDEO_FEEDBACK_REQUEST_KEYFRAME |
             LG_NET_VIDEO_FEEDBACK_DECODER_STALLED))
       {
+        m_impl->DropPeerSendsNL(*peer);
+        m_impl->ResetPeerReferenceNL(*peer);
         peer->keyframePending = true;
         m_impl->ReplayLatestFrameNL(*peer);
       }
+      else if (referenceAccepted)
+        m_impl->QueueStatusNL(*peer, LG_NET_VIDEO_STATE_STREAMING, 0);
       break;
     }
 

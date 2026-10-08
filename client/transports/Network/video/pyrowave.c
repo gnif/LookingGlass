@@ -252,6 +252,7 @@ NetworkPyroWaveResult networkPyroWaveParse(
   uint8_t         frameSequence  = 0;
   bool            haveSequence   = false;
   bool            haveHeader     = false;
+  bool            haveClear      = false;
   bool            valid          = true;
 
   while (valid && size - cursor >= NETWORK_PYROWAVE_HEADER_SIZE)
@@ -273,11 +274,15 @@ NetworkPyroWaveResult networkPyroWaveParse(
 
     if (extended)
     {
-      const uint32_t code   = (second >> 24) & 3U;
+      const uint32_t code   =
+        (second >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
+          LG_NET_VIDEO_PYROWAVE_MODE_MASK;
       const uint32_t width  = (first & UINT32_C(0x00003FFF)) + 1U;
       const uint32_t height = ((first >> 14) & UINT32_C(0x00003FFF)) + 1U;
       const uint32_t blocks = second & UINT32_C(0x00FFFFFF);
-      if (code || width != config->width || height != config->height ||
+      if ((code != LG_NET_VIDEO_PYROWAVE_MODE_FULL &&
+            code != LG_NET_VIDEO_PYROWAVE_MODE_DELTA) ||
+          width != config->width || height != config->height ||
           !blocks || blocks > capacity ||
           !networkPyroWaveSequenceProfile(config, second) ||
           (haveHeader &&
@@ -299,26 +304,38 @@ NetworkPyroWaveResult networkPyroWaveParse(
     const uint32_t payloadWords = (first >> 16) & UINT32_C(0x00000FFF);
     const uint32_t blockIndex   = second >> 8;
     const size_t   packetSize   = (size_t)payloadWords * sizeof(uint32_t);
-    if (!ballot || payloadWords < 2U || packetSize > size - cursor ||
+    const bool     clear        = ballot == 0;
+    if (payloadWords < 2U || packetSize > size - cursor ||
         blockIndex >= capacity || offsets[blockIndex] != UINT32_MAX ||
-        !networkPyroWavePacketValid(
-          bytes + cursor, packetSize, (uint16_t)ballot))
+        (clear ? payloadWords != LG_NET_VIDEO_PYROWAVE_CLEAR_PACKET_WORDS :
+          !networkPyroWavePacketValid(
+            bytes + cursor, packetSize, (uint16_t)ballot)))
     {
       valid = false;
       break;
     }
 
     offsets[blockIndex] = (uint32_t)(cursor / sizeof(uint32_t));
+    if (clear)
+      haveClear = true;
     ++uniqueBlocks;
     cursor += packetSize;
   }
 
   valid = valid && cursor == size && haveHeader && haveSequence &&
-    declaredBlocks == uniqueBlocks && expectedBlocks == uniqueBlocks;
+    declaredBlocks == uniqueBlocks && expectedBlocks == uniqueBlocks &&
+    (!haveClear ||
+      ((headerSecond >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
+        LG_NET_VIDEO_PYROWAVE_MODE_MASK) ==
+          LG_NET_VIDEO_PYROWAVE_MODE_DELTA);
   if (!valid)
     return NETWORK_PYROWAVE_INVALID;
 
   layout->sequence   = frameSequence;
   layout->chromaLeft = (headerSecond >> 31) != 0;
+  layout->delta      =
+    ((headerSecond >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
+      LG_NET_VIDEO_PYROWAVE_MODE_MASK) ==
+        LG_NET_VIDEO_PYROWAVE_MODE_DELTA;
   return NETWORK_PYROWAVE_OK;
 }

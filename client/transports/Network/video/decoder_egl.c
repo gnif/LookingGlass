@@ -125,6 +125,7 @@ struct NetworkVideoUniforms
     GLint outputLayer;
     GLint blockOffset;
     GLint blockStride;
+    GLint preserveMissing;
   }
   dequant;
 
@@ -181,6 +182,7 @@ struct NetworkVideoDecoder
   uint32_t alignedWidth;
   uint32_t alignedHeight;
   uint32_t blockCapacity;
+  uint64_t referenceFrameID;
   unsigned uploadIndex;
   GLint    maxTextureSize;
   GLint    maxArrayLayers;
@@ -188,6 +190,7 @@ struct NetworkVideoDecoder
   GLint64  maxStorageBlockSize;
   bool     attached;
   bool     configured;
+  bool     referenceValid;
 };
 
 struct NetworkVideoExternalFrame
@@ -468,13 +471,15 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
   free(decoder->offsets);
 
   memset(decoder->uploads, 0, sizeof(decoder->uploads));
-  decoder->texturePool   = NULL;
-  decoder->offsets       = NULL;
-  decoder->alignedWidth  = 0;
-  decoder->alignedHeight = 0;
-  decoder->blockCapacity = 0;
-  decoder->uploadIndex   = 0;
-  decoder->configured    = false;
+  decoder->texturePool      = NULL;
+  decoder->offsets          = NULL;
+  decoder->alignedWidth     = 0;
+  decoder->alignedHeight    = 0;
+  decoder->blockCapacity    = 0;
+  decoder->referenceFrameID = 0;
+  decoder->uploadIndex      = 0;
+  decoder->configured       = false;
+  decoder->referenceValid   = false;
   memset(decoder->coefficientTextures, 0,
       sizeof(decoder->coefficientTextures));
   memset(decoder->planeTextures, 0, sizeof(decoder->planeTextures));
@@ -498,14 +503,16 @@ static void networkVideoDeleteProgramsNL(NetworkVideoDecoder * decoder)
 
 static bool networkVideoCacheUniformsNL(NetworkVideoDecoder * decoder)
 {
-  decoder->uniforms.dequant.resolution  = glGetUniformLocation(
+  decoder->uniforms.dequant.resolution      = glGetUniformLocation(
       decoder->dequantProgram, "resolution");
-  decoder->uniforms.dequant.outputLayer = glGetUniformLocation(
+  decoder->uniforms.dequant.outputLayer     = glGetUniformLocation(
       decoder->dequantProgram, "outputLayer");
-  decoder->uniforms.dequant.blockOffset = glGetUniformLocation(
+  decoder->uniforms.dequant.blockOffset     = glGetUniformLocation(
       decoder->dequantProgram, "blockOffset");
-  decoder->uniforms.dequant.blockStride = glGetUniformLocation(
+  decoder->uniforms.dequant.blockStride     = glGetUniformLocation(
       decoder->dequantProgram, "blockStride");
+  decoder->uniforms.dequant.preserveMissing = glGetUniformLocation(
+      decoder->dequantProgram, "preserveMissing");
 
   decoder->uniforms.idwt.coefficients  = glGetUniformLocation(
       decoder->idwtProgram, "coefficients");
@@ -544,6 +551,7 @@ static bool networkVideoCacheUniformsNL(NetworkVideoDecoder * decoder)
       uniforms->dequant.outputLayer < 0 ||
       uniforms->dequant.blockOffset < 0 ||
       uniforms->dequant.blockStride < 0 ||
+      uniforms->dequant.preserveMissing < 0 ||
       uniforms->idwt.coefficients < 0 ||
       uniforms->idwt.resolution < 0 ||
       uniforms->idwt.invResolution < 0 ||
@@ -861,7 +869,9 @@ void networkVideoDecoderDetach(NetworkVideoDecoder * decoder)
   decoder->maxWorkGroupCount[0] = 0;
   decoder->maxWorkGroupCount[1] = 0;
   decoder->maxStorageBlockSize  = 0;
+  decoder->referenceFrameID     = 0;
   decoder->attached             = false;
+  decoder->referenceValid       = false;
   LG_UNLOCK(decoder->lock);
 }
 
@@ -891,6 +901,8 @@ void networkVideoDecoderReset(NetworkVideoDecoder * decoder)
       networkVideoRestoreCurrent(decoder, &previous);
     }
   }
+  decoder->referenceFrameID = 0;
+  decoder->referenceValid   = false;
   LG_UNLOCK(decoder->lock);
 }
 
@@ -1102,11 +1114,12 @@ static struct NetworkVideoUpload * networkVideoUploadNL(
 }
 
 static void networkVideoDequantNL(NetworkVideoDecoder * decoder,
-    const struct NetworkVideoUpload * upload)
+    const struct NetworkVideoUpload * upload, bool preserveMissing)
 {
   glUseProgram(decoder->dequantProgram);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, upload->offsetBuffer);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, upload->payloadBuffer);
+  glUniform1i(decoder->uniforms.dequant.preserveMissing, preserveMissing);
 
   for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
   {
@@ -1284,6 +1297,7 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
 NetworkVideoDecodeResult networkVideoDecoderDecode(
     NetworkVideoDecoder * decoder, const LGNetVideoStreamConfig * config,
     const void * data, size_t size, uint32_t blockCount,
+    bool update, bool complete, uint64_t baseFrameID, uint64_t frameID,
     NetworkVideoDecodedFrame * result)
 {
   if (!decoder || !config || !data || !size || !result)
@@ -1298,11 +1312,19 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     return NETWORK_VIDEO_DECODE_UNSUPPORTED;
   }
 
+  if ((!update && baseFrameID) || (update && !complete) ||
+      (update && (!decoder->referenceValid ||
+        decoder->referenceFrameID != baseFrameID || frameID <= baseFrameID)))
+  {
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_CORRUPT;
+  }
+
   NetworkPyroWaveLayout       layout;
   const NetworkPyroWaveResult parse = networkPyroWaveParse(
       config, data, size, blockCount, decoder->offsets,
       decoder->blockCapacity, &layout);
-  if (parse != NETWORK_PYROWAVE_OK)
+  if (parse != NETWORK_PYROWAVE_OK || layout.delta != update)
   {
     LG_UNLOCK(decoder->lock);
     return parse == NETWORK_PYROWAVE_UNSUPPORTED ?
@@ -1329,7 +1351,7 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
   }
 
   const uint64_t decodeStart = nanotime();
-  networkVideoDequantNL(decoder, upload);
+  networkVideoDequantNL(decoder, upload, update);
   upload->readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   networkVideoIDWTNL(decoder);
   struct NetworkVideoExternalFrame * external =
@@ -1339,10 +1361,18 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
   networkVideoRestoreCurrent(decoder, &previous);
   if (!success)
   {
+    decoder->referenceFrameID = 0;
+    decoder->referenceValid   = false;
     if (external)
       networkVideoExternalRelease(&external->base);
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_ERROR;
+  }
+
+  if (!update)
+  {
+    decoder->referenceFrameID = complete ? frameID : 0;
+    decoder->referenceValid   = complete;
   }
 
   uint32_t formatVersion = (uint32_t)config->configEpoch;

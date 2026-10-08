@@ -63,6 +63,7 @@ NetworkVideoDecodeResult networkVideoDecoderConfigure(
 NetworkVideoDecodeResult networkVideoDecoderDecode(
     NetworkVideoDecoder * decoder, const LGNetVideoStreamConfig * config,
     const void * data, size_t size, uint32_t blockCount,
+    bool update, bool complete, uint64_t baseFrameID, uint64_t frameID,
     NetworkVideoDecodedFrame * frame);
 
 void networkVideoDecoderRelease(NetworkVideoDecodedFrame * frame);

@@ -45,6 +45,8 @@
 #define NETWORK_VIDEO_MAX_HEIGHT               8192U
 #define NETWORK_VIDEO_MAX_FRAME_LENGTH         \
   LG_NET_VIDEO_MAX_FRAME_LENGTH
+#define NETWORK_VIDEO_MAX_FRAME_UPDATE_LENGTH  \
+  LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH
 #define NETWORK_VIDEO_MAX_FRAGMENTS            LG_NET_VIDEO_MAX_FRAGMENTS
 #define NETWORK_VIDEO_MAX_BLOCKS               LG_NET_VIDEO_MAX_BLOCKS
 #define NETWORK_VIDEO_MAX_FRAME_LATENCY_MS     50U
@@ -73,15 +75,18 @@ struct NetworkVideoAssembly
 {
   bool     active;
   bool     sparseAllowed;
+  bool     update;
   uint64_t generation;
   uint64_t configEpoch;
   uint64_t frameID;
+  uint64_t baseFrameID;
   uint64_t firstReceiveNs;
   uint64_t deadlineNs;
   uint32_t frameLength;
   uint32_t fragmentCount;
   uint32_t blockCount;
   uint32_t receivedBytes;
+  uint32_t receivedFragments;
 
   uint8_t  * data;
   uint64_t * coverage;
@@ -127,10 +132,12 @@ struct NetworkVideoEncoded
   uint32_t               blockCount;
   uint64_t               generation;
   uint64_t               frameID;
+  uint64_t               baseFrameID;
   uint64_t               captureTimestampNs;
   uint64_t               presentationTimestampNs;
   uint64_t               receiveTimeNs;
   LGNetVideoFrameFlags   flags;
+  bool                   update;
   bool                   complete;
   bool                   scheduleValid;
   LGNetVideoSchedule     schedule;
@@ -589,11 +596,11 @@ static void networkVideoSendFeedbackNL(NetworkVideo * video, uint64_t now)
   if (!lgNetVideoFeedbackEncode(payload, sizeof(payload), &feedback))
     return;
 
-  const LG_TransportStatus status = video->datagramsAvailable ?
-    networkVideoSendDatagramNL(video, LG_NET_VIDEO_MESSAGE_FEEDBACK,
-      video->config.configEpoch, payload, sizeof(payload)) :
-    networkVideoSendReliableNL(video, LG_NET_VIDEO_MESSAGE_FEEDBACK, 0,
-      video->config.configEpoch, 0, payload, sizeof(payload));
+  /* Feedback acknowledges the reference frame that future cumulative
+   * updates depend on, so it must not be lossy. */
+  const LG_TransportStatus status = networkVideoSendReliableNL(video,
+    LG_NET_VIDEO_MESSAGE_FEEDBACK, 0, video->config.configEpoch, 0,
+    payload, sizeof(payload));
   if (status == LG_TRANSPORT_OK)
   {
     video->feedbackFlags   = 0;
@@ -708,25 +715,30 @@ static bool networkVideoFindScheduleNL(NetworkVideo * video,
 }
 
 static bool networkVideoAllocateAssemblyNL(NetworkVideo * video,
-    const LGNetVideoFragment * fragment, uint64_t now,
+    const LGNetVideoFragment * fragment, bool update, uint64_t baseFrameID,
+    uint64_t now,
     struct NetworkVideoAssembly * failed)
 {
+  const uint32_t maxFrameLength = update ?
+    NETWORK_VIDEO_MAX_FRAME_UPDATE_LENGTH : NETWORK_VIDEO_MAX_FRAME_LENGTH;
   *failed = (struct NetworkVideoAssembly){0};
-  if (fragment->frameLength > NETWORK_VIDEO_MAX_FRAME_LENGTH ||
+  if (fragment->frameLength > maxFrameLength ||
       fragment->frameLength > video->config.maxFrameLength ||
       fragment->fragmentCount > NETWORK_VIDEO_MAX_FRAGMENTS ||
       fragment->blockCount > NETWORK_VIDEO_MAX_BLOCKS)
     return false;
 
   const bool                  sparseAllowed =
-    (video->config.flags & LG_NET_VIDEO_STREAM_DATAGRAMS) != 0;
+    !update && (video->config.flags & LG_NET_VIDEO_STREAM_DATAGRAMS) != 0;
   struct NetworkVideoAssembly assembly      =
   {
     .active         = true,
     .sparseAllowed  = sparseAllowed,
+    .update         = update,
     .generation     = video->decodeGeneration,
     .configEpoch    = fragment->configEpoch,
     .frameID        = fragment->frameID,
+    .baseFrameID    = baseFrameID,
     .firstReceiveNs = now,
     .deadlineNs     = sparseAllowed ?
       now + (uint64_t)video->config.maxFrameLatencyMs * UINT64_C(1000000) :
@@ -775,7 +787,9 @@ static bool networkVideoBlockComplete(
 static bool networkVideoAssemblyComplete(
     const struct NetworkVideoAssembly * assembly)
 {
-  if (assembly->receivedBytes != assembly->frameLength)
+  if (assembly->receivedBytes != assembly->frameLength ||
+      (assembly->update &&
+        assembly->receivedFragments != assembly->fragmentCount))
     return false;
   for (uint32_t index = 0; index < assembly->blockCount; ++index)
     if (!networkVideoBlockComplete(&assembly->blocks[index]))
@@ -790,7 +804,7 @@ static bool networkVideoCompactAssemblyNL(NetworkVideo * video,
   /* Transport block zero contains the sequence header and first codec block.
    * Complete later blocks remain independently decodable; absent codec block
    * indices are zero-filled by the decoder. */
-  if (!assembly->active || !assembly->sparseAllowed ||
+  if (!assembly->active || assembly->update || !assembly->sparseAllowed ||
       networkVideoAssemblyComplete(assembly) || !assembly->blockCount ||
       assembly->blockCount > NETWORK_VIDEO_PYROWAVE_COUNT_MASK)
     return false;
@@ -861,12 +875,14 @@ static bool networkVideoCompactAssemblyNL(NetworkVideo * video,
     .blockCount              = compactBlocks,
     .generation              = assembly->generation,
     .frameID                 = assembly->frameID,
+    .baseFrameID             = 0,
     .captureTimestampNs      = assembly->scheduleValid ?
       assembly->schedule.captureTimestampNs : now,
     .presentationTimestampNs = assembly->scheduleValid ?
       assembly->schedule.presentationTimestampNs : now,
     .receiveTimeNs           = now - assembly->firstReceiveNs,
     .flags                   = LG_NET_VIDEO_FRAME_KEYFRAME,
+    .update                  = false,
     .complete                = false,
     .scheduleValid           = assembly->scheduleValid,
     .schedule                = assembly->schedule,
@@ -875,7 +891,8 @@ static bool networkVideoCompactAssemblyNL(NetworkVideo * video,
 }
 
 static bool networkVideoAddFragmentNL(NetworkVideo * video,
-    const LGNetVideoFragment * fragment, uint64_t now,
+    const LGNetVideoFragment * fragment, bool update, uint64_t baseFrameID,
+    uint64_t now,
     struct NetworkVideoEncoded encoded[2], size_t * encodedCount,
     struct NetworkVideoAssembly retired[2], size_t * retiredCount)
 {
@@ -884,14 +901,18 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
   {
     if (assembly->active)
     {
+      if (assembly->update && update &&
+          assembly->baseFrameID != baseFrameID)
+        return false;
       video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
-      if (*encodedCount < 2U &&
+      if (!assembly->update && !update && *encodedCount < 2U &&
           networkVideoCompactAssemblyNL(video, assembly, now,
             &encoded[*encodedCount]))
         ++*encodedCount;
       retired[(*retiredCount)++] = networkVideoTakeAssemblyNL(video);
     }
-    if (!networkVideoAllocateAssemblyNL(video, fragment, now,
+    if (!networkVideoAllocateAssemblyNL(video, fragment,
+          update, baseFrameID, now,
           &retired[*retiredCount]))
     {
       ++*retiredCount;
@@ -902,7 +923,9 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
   else if (fragment->frameID < assembly->frameID)
     return true;
 
-  if (assembly->configEpoch != fragment->configEpoch ||
+  if (assembly->update != update ||
+      assembly->baseFrameID != baseFrameID ||
+      assembly->configEpoch != fragment->configEpoch ||
       assembly->frameLength != fragment->frameLength ||
       assembly->fragmentCount != fragment->fragmentCount ||
       assembly->blockCount != fragment->blockCount)
@@ -946,6 +969,7 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
           fragment->payload, fragment->payloadLength))
       return false;
     networkVideoSetFragmentSeen(assembly, fragment->fragmentIndex);
+    ++assembly->receivedFragments;
     assembly->fragmentOffsets[fragment->fragmentIndex] =
       fragment->frameOffset;
     assembly->fragmentLengths[fragment->fragmentIndex] =
@@ -960,6 +984,7 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
   networkVideoSetCoverage(assembly,
       fragment->frameOffset, fragment->payloadLength);
   networkVideoSetFragmentSeen(assembly, fragment->fragmentIndex);
+  ++assembly->receivedFragments;
   assembly->fragmentOffsets[fragment->fragmentIndex] = fragment->frameOffset;
   assembly->fragmentLengths[fragment->fragmentIndex] = fragment->payloadLength;
   assembly->fragmentBlocks[fragment->fragmentIndex]  = fragment->blockIndex;
@@ -987,12 +1012,15 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
     .blockCount              = assembly->blockCount,
     .generation              = assembly->generation,
     .frameID                 = assembly->frameID,
+    .baseFrameID             = assembly->baseFrameID,
     .captureTimestampNs      = assembly->scheduleValid ?
       assembly->schedule.captureTimestampNs : now,
     .presentationTimestampNs = assembly->scheduleValid ?
       assembly->schedule.presentationTimestampNs : now,
     .receiveTimeNs           = now - assembly->firstReceiveNs,
-    .flags                   = LG_NET_VIDEO_FRAME_KEYFRAME,
+    .flags                   = assembly->update ?
+      0 : LG_NET_VIDEO_FRAME_KEYFRAME,
+    .update                  = assembly->update,
     .complete                = true,
     .scheduleValid           = assembly->scheduleValid,
     .schedule                = assembly->schedule,
@@ -1055,7 +1083,8 @@ static void networkVideoDecode(NetworkVideo * video,
   NetworkVideoDecodedFrame       decoded;
   const NetworkVideoDecodeResult result = networkVideoDecoderDecode(
       video->decoder, &encoded->config, encoded->data,
-      encoded->length, encoded->blockCount, &decoded);
+      encoded->length, encoded->blockCount, encoded->update,
+      encoded->complete, encoded->baseFrameID, encoded->frameID, &decoded);
   free(encoded->ownedData);
   if (result != NETWORK_VIDEO_DECODE_OK)
   {
@@ -1116,15 +1145,31 @@ static void networkVideoQueueDecode(NetworkVideo * video,
     return;
   }
 
-  struct NetworkVideoEncoded replaced = {0};
-  bool                       queued   = false;
+  struct NetworkVideoEncoded replaced    = {0};
+  bool                       baseMismatch;
+  bool                       queued      = false;
+  bool                       replaceable;
   LG_LOCK(video->stateLock);
+  baseMismatch = encoded->update && video->decodePending &&
+    video->pendingDecode.update &&
+    video->pendingDecode.baseFrameID != encoded->baseFrameID;
+  replaceable  = !video->decodePending ||
+    !encoded->update ||
+    (video->pendingDecode.update &&
+      video->pendingDecode.baseFrameID == encoded->baseFrameID);
+  if (baseMismatch)
+  {
+    video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
+    networkVideoRequestKeyframeNL(video,
+        LG_NET_VIDEO_CONTROL_CORRUPT, encoded->frameID);
+  }
   if (!video->destroying && !video->decodeStopping && video->connected &&
       video->wireConfigured && video->rendererAttached &&
       video->decoderReady &&
       video->decodeGeneration == encoded->generation &&
       video->config.configEpoch == encoded->config.configEpoch &&
       encoded->frameID > video->lastDecodedFrameID &&
+      (!encoded->update || encoded->complete) && replaceable &&
       (!video->decodePending ||
         encoded->frameID > video->pendingDecode.frameID))
   {
@@ -1366,10 +1411,12 @@ static bool networkVideoHandleFrame(NetworkVideo * video,
     .blockCount              = frame.blockCount,
     .generation              = video->decodeGeneration,
     .frameID                 = frame.frameID,
+    .baseFrameID             = 0,
     .captureTimestampNs      = frame.captureTimestampNs,
     .presentationTimestampNs = frame.presentationTimestampNs,
     .receiveTimeNs           = nanotime() - receiveStart,
     .flags                   = frame.flags,
+    .update                  = false,
     .complete                = true,
   };
   encoded.scheduleValid = networkVideoFindScheduleNL(video,
@@ -1390,6 +1437,105 @@ static bool networkVideoHandleFrame(NetworkVideo * video,
   encoded.receiveTimeNs = nanotime() - receiveStart;
   if (recovered.ownedData)
     networkVideoQueueDecode(video, &recovered);
+  networkVideoQueueDecode(video, &encoded);
+  return true;
+}
+
+static bool networkVideoHandleFrameUpdate(NetworkVideo * video,
+    const LGNetPacketView * packet)
+{
+  LGNetVideoFrameUpdate update;
+  if (lgNetVideoFrameUpdateDecode(&update,
+        packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
+    return false;
+
+  if (update.flags & LG_NET_VIDEO_FRAME_UPDATE_HAS_CHECKSUM)
+  {
+    uint32_t checksum;
+    if (!lgNetCRC32C(update.data, update.encodedLength, &checksum) ||
+        checksum != update.checksum)
+    {
+      LG_LOCK(video->stateLock);
+      video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
+      networkVideoRequestKeyframeNL(video,
+          LG_NET_VIDEO_CONTROL_CORRUPT, update.frameID);
+      LG_UNLOCK(video->stateLock);
+      return true;
+    }
+  }
+
+  const uint64_t               receiveStart    = nanotime();
+  struct NetworkVideoAssembly  retiredAssembly = {0};
+  struct NetworkVideoEncoded   encoded;
+  bool                         baseMismatch    = false;
+  LG_LOCK(video->stateLock);
+  if (!video->wireConfigured || update.streamID != video->config.streamID ||
+      update.configEpoch != video->config.configEpoch ||
+      update.codec != video->config.codec ||
+      update.encodedLength > NETWORK_VIDEO_MAX_FRAME_UPDATE_LENGTH ||
+      update.encodedLength > video->config.maxFrameLength ||
+      update.deadlineMs > video->config.maxFrameLatencyMs ||
+      (packet->envelope.componentEpoch &&
+        packet->envelope.componentEpoch != update.configEpoch))
+  {
+    LG_UNLOCK(video->stateLock);
+    return true;
+  }
+  if (update.frameID <= video->lastDecodedFrameID ||
+      update.frameID < video->highestSeenFrameID ||
+      (update.frameID == video->highestSeenFrameID &&
+        (!video->assembly.active ||
+          video->assembly.frameID != update.frameID)))
+  {
+    LG_UNLOCK(video->stateLock);
+    return true;
+  }
+  if (video->assembly.active &&
+      video->assembly.frameID <= update.frameID)
+  {
+    video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
+    baseMismatch      = video->assembly.update &&
+      video->assembly.baseFrameID != update.baseFrameID;
+    retiredAssembly   = networkVideoTakeAssemblyNL(video);
+    if (baseMismatch)
+      networkVideoRequestKeyframeNL(video,
+          LG_NET_VIDEO_CONTROL_CORRUPT, update.frameID);
+  }
+  if (!baseMismatch && update.frameID > video->highestSeenFrameID)
+    video->highestSeenFrameID = update.frameID;
+  encoded = (struct NetworkVideoEncoded)
+  {
+    .config                  = video->config,
+    .data                    = update.data,
+    .length                  = update.encodedLength,
+    .blockCount              = update.blockCount,
+    .generation              = video->decodeGeneration,
+    .frameID                 = update.frameID,
+    .baseFrameID             = update.baseFrameID,
+    .captureTimestampNs      = update.captureTimestampNs,
+    .presentationTimestampNs = update.presentationTimestampNs,
+    .receiveTimeNs           = nanotime() - receiveStart,
+    .update                  = true,
+    .complete                = true,
+  };
+  if (!baseMismatch)
+    encoded.scheduleValid = networkVideoFindScheduleNL(video,
+        update.configEpoch, update.frameID, &encoded.schedule);
+  LG_UNLOCK(video->stateLock);
+
+  networkVideoClearAssembly(&retiredAssembly);
+  if (baseMismatch)
+    return true;
+
+  encoded.ownedData = malloc(encoded.length);
+  if (!encoded.ownedData)
+  {
+    networkVideoDecodeFailure(video, &encoded, NETWORK_VIDEO_DECODE_ERROR);
+    return true;
+  }
+  memcpy(encoded.ownedData, encoded.data, encoded.length);
+  encoded.data          = encoded.ownedData;
+  encoded.receiveTimeNs = nanotime() - receiveStart;
   networkVideoQueueDecode(video, &encoded);
   return true;
 }
@@ -1441,7 +1587,7 @@ static bool networkVideoHandleFragment(NetworkVideo * video,
   }
   if (fragment.frameID > video->highestSeenFrameID)
     video->highestSeenFrameID = fragment.frameID;
-  valid = networkVideoAddFragmentNL(video, &fragment, now,
+  valid = networkVideoAddFragmentNL(video, &fragment, false, 0, now,
       encoded, &encodedCount, retired, &retiredCount);
   if (!valid)
   {
@@ -1451,6 +1597,97 @@ static bool networkVideoHandleFragment(NetworkVideo * video,
       retired[retiredCount++] = networkVideoTakeAssemblyNL(video);
     networkVideoRequestKeyframeNL(video,
         LG_NET_VIDEO_CONTROL_CORRUPT, fragment.frameID);
+  }
+  LG_UNLOCK(video->stateLock);
+  networkVideoClearAssemblies(retired, retiredCount);
+  for (size_t index = 0; index < encodedCount; ++index)
+    networkVideoQueueDecode(video, &encoded[index]);
+  return true;
+}
+
+static bool networkVideoHandleFrameUpdateFragment(NetworkVideo * video,
+    const LGNetPacketView * packet)
+{
+  LGNetVideoFrameUpdateFragment update;
+  if (lgNetVideoFrameUpdateFragmentDecode(&update,
+        packet->payload, packet->payloadLength) != LG_NET_PARSE_OK)
+    return false;
+
+  if (update.flags & LG_NET_VIDEO_FRAGMENT_CHECKSUM)
+  {
+    uint32_t checksum;
+    if (!lgNetCRC32C(update.payload,
+          update.payloadLength, &checksum) || checksum != update.checksum)
+    {
+      LG_LOCK(video->stateLock);
+      video->lostFragments = networkVideoSaturatingIncrement(
+          video->lostFragments);
+      networkVideoRequestKeyframeNL(video,
+          LG_NET_VIDEO_CONTROL_CORRUPT, update.frameID);
+      LG_UNLOCK(video->stateLock);
+      return true;
+    }
+  }
+
+  const LGNetVideoFragment fragment =
+  {
+    .streamID       = update.streamID,
+    .flags          = update.flags,
+    .recoveryType   = update.recoveryType,
+    .configEpoch    = update.configEpoch,
+    .frameID        = update.frameID,
+    .frameOffset    = update.frameOffset,
+    .frameLength    = update.frameLength,
+    .blockIndex     = update.blockIndex,
+    .blockOffset    = update.blockOffset,
+    .blockLength    = update.blockLength,
+    .blockCount     = update.blockCount,
+    .fragmentIndex  = update.fragmentIndex,
+    .fragmentCount  = update.fragmentCount,
+    .recoveryGroup  = update.recoveryGroup,
+    .recoveryIndex  = update.recoveryIndex,
+    .recoveryCount  = update.recoveryCount,
+    .payloadLength  = update.payloadLength,
+    .checksum       = update.checksum,
+    .payload        = update.payload,
+  };
+  struct NetworkVideoAssembly  retired[2]   = {0};
+  struct NetworkVideoEncoded   encoded[2]   = {0};
+  size_t                       retiredCount = 0;
+  size_t                       encodedCount = 0;
+  bool                         valid;
+  const uint64_t               now          = nanotime();
+  LG_LOCK(video->stateLock);
+  if (!video->wireConfigured ||
+      update.streamID != video->config.streamID ||
+      update.configEpoch != video->config.configEpoch ||
+      update.frameLength > NETWORK_VIDEO_MAX_FRAME_UPDATE_LENGTH ||
+      update.frameLength > video->config.maxFrameLength ||
+      update.payloadLength > video->config.maxFragmentLength ||
+      (packet->envelope.componentEpoch &&
+        packet->envelope.componentEpoch != update.configEpoch) ||
+      update.frameID <= video->lastDecodedFrameID ||
+      update.frameID < video->highestSeenFrameID ||
+      (update.frameID == video->highestSeenFrameID &&
+        (!video->assembly.active ||
+          video->assembly.frameID != update.frameID)))
+  {
+    LG_UNLOCK(video->stateLock);
+    return true;
+  }
+  if (update.frameID > video->highestSeenFrameID)
+    video->highestSeenFrameID = update.frameID;
+  valid = networkVideoAddFragmentNL(video, &fragment, true,
+      update.baseFrameID, now,
+      encoded, &encodedCount, retired, &retiredCount);
+  if (!valid)
+  {
+    video->lostFragments = networkVideoSaturatingIncrement(
+        video->lostFragments);
+    if (video->assembly.active)
+      retired[retiredCount++] = networkVideoTakeAssemblyNL(video);
+    networkVideoRequestKeyframeNL(video,
+        LG_NET_VIDEO_CONTROL_CORRUPT, update.frameID);
   }
   LG_UNLOCK(video->stateLock);
   networkVideoClearAssemblies(retired, retiredCount);
@@ -1600,6 +1837,14 @@ static bool networkVideoHandlePacket(NetworkVideo * video,
     case LG_NET_VIDEO_MESSAGE_FRAME_FRAGMENT:
       return networkVideoUnsolicited(packet) &&
         networkVideoHandleFragment(video, packet);
+
+    case LG_NET_VIDEO_MESSAGE_FRAME_UPDATE:
+      return !datagram && networkVideoUnsolicited(packet) &&
+        networkVideoHandleFrameUpdate(video, packet);
+
+    case LG_NET_VIDEO_MESSAGE_FRAME_UPDATE_FRAGMENT:
+      return !datagram && networkVideoUnsolicited(packet) &&
+        networkVideoHandleFrameUpdateFragment(video, packet);
 
     case LG_NET_VIDEO_MESSAGE_SCHEDULE:
       return !datagram && !bulk && networkVideoUnsolicited(packet) &&
