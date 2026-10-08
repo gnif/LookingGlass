@@ -295,29 +295,30 @@ Function customGUIInit
 FunctionEnd
 
 LangString IDD_WARN_TITLE ${LANG_ENGLISH} "Looking Glass Indirect Display Driver"
-LangString IDD_WARN_SUBTITLE ${LANG_ENGLISH} "Are you aware that it exists?"
+LangString IDD_WARN_SUBTITLE ${LANG_ENGLISH} "Are you aware that it exists? The legacy host application is deprecated."
 
 LangString IDD_NOTICE_1 ${LANG_ENGLISH} "\
-  Starting in Looking Glass B8 release candidates, a new Indirect Display Driver (IDD) is now available. \
+  In the lead up to Looking Glass B8, a new Indirect Display Driver (IDD) is now available. \
   Henceforth, this will be the primary way of acquiring video from Windows guests."
 
 LangString IDD_NOTICE_2 ${LANG_ENGLISH} "\
   The IDD supports the following new features absent from the host application:$\n\
-  • Acting as a true display in Windows and rendering directly into shared memory, bypassing    \
-    any need for video capture and the associated overhead;$\n\
+  • Rendering directly into shared memory, bypassing video capture and the overhead;$\n\
   • Running without a display output or a dummy plug attached;$\n\
   • Running on muxless laptops without hacky third-party IDDs;$\n\
   • Automatically resizing the Windows desktop to match the client viewport;$\n\
   • Acting as a display output for virtual machines without a GPU; and$\n\
   • High Dynamic Range (HDR) support."
 
-LangString IDD_NOTICE_3 ${LANG_ENGLISH} "The host application is no longer recommended for users who can use the IDD."
-
-LangString IDD_NOTICE_4 ${LANG_ENGLISH} "Download the Looking Glass IDD here:"
+LangString IDD_NOTICE_3 ${LANG_ENGLISH} "The host application is now deprecated and exists only for troubleshooting."
+LangString IDD_NOTICE_4 ${LANG_ENGLISH} "Features like mouse movement without capturing no longer work."
 
 LangString IDD_NOTICE_5 ${LANG_ENGLISH} "\
-  Only continue installation if the IDD doesn't work or \
-  directed to do so by a developer."
+  If you cannot use the IDD, please consider using the Looking Glass B7 release instead."
+
+LangString IDD_NOTICE_6 ${LANG_ENGLISH} "Download the Looking Glass IDD or the B7 release host application here:"
+
+LangString IDD_NOTICE_7 ${LANG_ENGLISH} "Only continue installation if directed to do so by a developer."
 
 Var IS_IDD_PAGE
 
@@ -333,20 +334,27 @@ Function IddWarningLoad
   ${NSD_CreateLabel} 0 0 100% 20u $(IDD_NOTICE_1)
   Pop $0
 
-  ${NSD_CreateLabel} 0 20u 100% 68u $(IDD_NOTICE_2)
+  ${NSD_CreateLabel} 0 20u 100% 60u $(IDD_NOTICE_2)
   Pop $0
 
-  ${NSD_CreateLabel} 0 88u 100% 12u $(IDD_NOTICE_3)
+  ${NSD_CreateLabel} 0 80u 100% 8u $(IDD_NOTICE_3)
   Pop $0
 
-  ${NSD_CreateLabel} 0 100u 100% 8u $(IDD_NOTICE_4)
+  ${NSD_CreateLabel} 0 88u 100% 12u $(IDD_NOTICE_4)
+  Pop $0
+  SetCtlColors $0 0xFF0000 transparent
+
+  ${NSD_CreateLabel} 0 100u 100% 12u $(IDD_NOTICE_5)
   Pop $0
 
-  ${NSD_CreateLink} 0 108u 100% 12u "https://looking-glass.io/downloads"
+  ${NSD_CreateLabel} 0 112u 100% 8u $(IDD_NOTICE_6)
+  Pop $0
+
+  ${NSD_CreateLink} 0 120u 100% 12u "https://looking-glass.io/downloads"
   Pop $0
   ${NSD_OnClick} $0 OpenDownload
 
-  ${NSD_CreateLabel} 0 120u 100% 12u $(IDD_NOTICE_5)
+  ${NSD_CreateLabel} 0 132u 100% 12u $(IDD_NOTICE_7)
   Pop $0
   SetCtlColors $0 0xFF0000 transparent
 
