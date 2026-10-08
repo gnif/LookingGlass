@@ -80,6 +80,12 @@ public:
     Client,
   };
 
+  enum class ThreadScheduling
+  {
+    Normal,
+    Input,
+  };
+
   CPipeEndpoint() = default;
   ~CPipeEndpoint();
 
@@ -92,7 +98,8 @@ public:
     _In_ size_t messageSize,
     _In_opt_ const SECURITY_ATTRIBUTES * serverSecurity = nullptr,
     _In_ DWORD serverOpenMode = 0,
-    _In_ DWORD serverPipeMode = 0);
+    _In_ DWORD serverPipeMode = 0,
+    _In_ ThreadScheduling threadScheduling = ThreadScheduling::Normal);
   void Stop();
   void DisconnectClient();
 
@@ -158,13 +165,14 @@ private:
   void ClosePipe(_In_ HANDLE pipe);
 
   std::wstring           m_pipeName;
-  size_t                 m_messageSize       = 0;
-  Mode                   m_mode              = Mode::Client;
-  IPipeEndpointHandler * m_handler           = nullptr;
-  SECURITY_ATTRIBUTES    m_serverSecurity    = {};
-  bool                   m_hasServerSecurity = false;
-  DWORD                  m_serverOpenMode    = 0;
-  DWORD                  m_serverPipeMode    = 0;
+  size_t                 m_messageSize        = 0;
+  Mode                   m_mode               = Mode::Client;
+  ThreadScheduling       m_threadScheduling   = ThreadScheduling::Normal;
+  IPipeEndpointHandler * m_handler            = nullptr;
+  SECURITY_ATTRIBUTES    m_serverSecurity     = {};
+  bool                   m_hasServerSecurity  = false;
+  DWORD                  m_serverOpenMode     = 0;
+  DWORD                  m_serverPipeMode     = 0;
 
   std::atomic<bool> m_running { false };
   std::atomic<bool> m_connected { false };

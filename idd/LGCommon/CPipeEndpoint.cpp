@@ -27,8 +27,11 @@
 #include "CDebug.h"
 
 #include <algorithm>
+#include <avrt.h>
 #include <stdint.h>
 #include <vector>
+
+#pragma comment(lib, "avrt.lib")
 
 const DWORD CPipeEndpoint::CLIENT_RETRY_INITIAL_MS   = 100;
 const DWORD CPipeEndpoint::CLIENT_RETRY_MAX_MS       = 2000;
@@ -195,22 +198,24 @@ bool CPipeEndpoint::Start(
   size_t messageSize,
   const SECURITY_ATTRIBUTES * serverSecurity,
   DWORD serverOpenMode,
-  DWORD serverPipeMode)
+  DWORD serverPipeMode,
+  ThreadScheduling threadScheduling)
 {
   Stop();
 
   if (!pipeName || !*pipeName || !messageSize || messageSize > MAXDWORD)
     return false;
 
-  m_pipeName           = pipeName;
-  m_mode               = mode;
-  m_messageSize        = messageSize;
-  m_hasServerSecurity  = serverSecurity != nullptr;
-  m_serverSecurity     = serverSecurity ? *serverSecurity :
+  m_pipeName            = pipeName;
+  m_mode                = mode;
+  m_messageSize         = messageSize;
+  m_threadScheduling    = threadScheduling;
+  m_hasServerSecurity   = serverSecurity != nullptr;
+  m_serverSecurity      = serverSecurity ? *serverSecurity :
     SECURITY_ATTRIBUTES {};
-  m_serverOpenMode     = serverOpenMode;
-  m_serverPipeMode     = serverPipeMode;
-  m_stopEvent          = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  m_serverOpenMode      = serverOpenMode;
+  m_serverPipeMode      = serverPipeMode;
+  m_stopEvent           = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   if (!m_stopEvent)
   {
     const DWORD error = GetLastError();
@@ -362,10 +367,29 @@ DWORD WINAPI CPipeEndpoint::ThreadProc(void * context)
 
 void CPipeEndpoint::Thread()
 {
+  HANDLE avTaskHandle = nullptr;
+  if (m_threadScheduling == ThreadScheduling::Input)
+  {
+    DWORD avTask      = 0;
+    bool  prioritySet = false;
+
+    avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
+    if (avTaskHandle)
+      prioritySet =
+        AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH) != FALSE;
+    if (!prioritySet && !SetThreadPriority(
+        GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL))
+      DEBUG_WARN_HR(GetLastError(),
+        "Failed to raise input pipe thread priority");
+  }
+
   if (m_mode == Mode::Server)
     RunServer();
   else
     RunClient();
+
+  if (avTaskHandle)
+    AvRevertMmThreadCharacteristics(avTaskHandle);
 
   Atomic::Store(m_running, false);
   Atomic::Store(m_connected, false);

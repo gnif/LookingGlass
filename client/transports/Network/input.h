@@ -37,5 +37,9 @@ void networkInputDestroy(NetworkInput ** input);
 const LG_InputOps * networkInputGetOps(void);
 
 void networkInputConnectionState(NetworkInput * input, bool connected);
+void networkInputSendReady(NetworkInput * input,
+    NetworkPacketDelivery delivery);
+void networkInputDatagramLost(NetworkInput * input,
+    uint64_t claimEpoch, uint64_t pointerSequence);
 bool networkInputPacket(NetworkInput * input,
     const LGNetPacketView * packet, bool datagram);

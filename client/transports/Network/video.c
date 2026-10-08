@@ -592,7 +592,7 @@ static LG_TransportStatus networkVideoSendDatagramNL(NetworkVideo * video,
 {
   return networkConnectionSendDatagram(video->connection,
       LG_NET_SERVICE_VIDEO, messageType, video->serviceVersion, 0,
-      componentEpoch, 0, payload, payloadLength, true);
+      componentEpoch, 0, payload, payloadLength, 0, true);
 }
 
 static void networkVideoSendSubscribeNL(NetworkVideo * video, uint64_t now)

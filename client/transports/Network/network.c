@@ -58,6 +58,7 @@
 #define NETWORK_FILE_MAX_PAYLOAD      \
   (LG_NET_FILE_CHUNK_HEADER_WIRE_SIZE + NETWORK_TRANSFER_CHUNK)
 #define NETWORK_VIDEO_MAX_PAYLOAD     LG_NET_MAX_PAYLOAD_LENGTH
+#define NETWORK_INPUT_MAX_PAYLOAD     LG_NET_INPUT_ABSOLUTE_WIRE_SIZE
 
 static const LGNetCapability NETWORK_CAPABILITIES[] =
 {
@@ -91,9 +92,9 @@ static const LGNetCapability NETWORK_CAPABILITIES[] =
     .flags                    = LG_NET_CAPABILITY_RELIABLE |
       LG_NET_CAPABILITY_DATAGRAM,
     .features                 = 0,
-    .maxPayloadLength         = NETWORK_MAX_PAYLOAD,
-    .maxDatagramPayload       = NETWORK_MAX_DATAGRAM,
-    .maxBidirectionalStreams  = 0,
+    .maxPayloadLength         = NETWORK_INPUT_MAX_PAYLOAD,
+    .maxDatagramPayload       = NETWORK_INPUT_MAX_PAYLOAD,
+    .maxBidirectionalStreams  = 1,
     .maxUnidirectionalStreams = 0,
   },
   {
@@ -473,6 +474,8 @@ static void networkSendReady(void * opaque, LGNetService service,
   LG_Transport * this     = opaque;
   const bool     datagram =
     delivery == NETWORK_PACKET_DELIVERY_DATAGRAM;
+  if (service == LG_NET_SERVICE_INPUT)
+    networkInputSendReady(this->input, delivery);
   if (service == LG_NET_SERVICE_AUDIO &&
       delivery != NETWORK_PACKET_DELIVERY_BULK)
     networkAudioSendReady(this->audio, datagram);
@@ -482,6 +485,15 @@ static void networkSendReady(void * opaque, LGNetService service,
   if (service == LG_NET_SERVICE_VIDEO &&
       delivery != NETWORK_PACKET_DELIVERY_BULK)
     networkVideoSendReady(this->video, datagram);
+}
+
+static void networkDatagramLost(void * opaque, LGNetService service,
+    uint64_t componentEpoch, uint64_t applicationSequence)
+{
+  LG_Transport * this = opaque;
+  if (service == LG_NET_SERVICE_INPUT)
+    networkInputDatagramLost(
+        this->input, componentEpoch, applicationSequence);
 }
 
 static bool networkCreate(LG_Transport ** result)
@@ -552,6 +564,7 @@ static bool networkCreate(LG_Transport ** result)
     .packet          = networkPacket,
     .state           = networkConnectionState,
     .sendReady       = networkSendReady,
+    .datagramLost    = networkDatagramLost,
     .capabilities    = NETWORK_CAPABILITIES,
     .capabilityCount = sizeof(NETWORK_CAPABILITIES) /
       sizeof(NETWORK_CAPABILITIES[0]),

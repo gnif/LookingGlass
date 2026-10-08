@@ -51,6 +51,8 @@ typedef void (*NetworkConnectionStateFn)(void * opaque, bool connected,
     LG_TransportStatus reason);
 typedef void (*NetworkSendReadyFn)(void * opaque, LGNetService service,
     NetworkPacketDelivery delivery);
+typedef void (*NetworkDatagramLostFn)(void * opaque, LGNetService service,
+    uint64_t componentEpoch, uint64_t applicationSequence);
 
 typedef struct NetworkConnectionParams
 {
@@ -63,6 +65,7 @@ typedef struct NetworkConnectionParams
   NetworkPacketFn            packet;
   NetworkConnectionStateFn   state;
   NetworkSendReadyFn         sendReady;
+  NetworkDatagramLostFn      datagramLost;
   const LGNetCapability    * capabilities;
   uint32_t                   capabilityCount;
   void                     * opaque;
@@ -92,7 +95,8 @@ LG_TransportStatus networkConnectionSendDatagram(
     NetworkConnection * connection, LGNetService service,
     uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
-    const void * payload, uint32_t payloadLength, bool discardIfBlocked);
+    const void * payload, uint32_t payloadLength,
+    uint64_t applicationSequence, bool discardIfBlocked);
 LG_TransportStatus networkConnectionSendBulk(NetworkConnection * connection,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,

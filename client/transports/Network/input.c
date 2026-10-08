@@ -28,6 +28,7 @@
 
 #include <LGProtocol/NetworkServices.h>
 
+#include <limits.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -41,6 +42,11 @@
 #define NETWORK_INPUT_LED_ACK_TIMEOUT_MS  1000U
 #define NETWORK_INPUT_USAGE_PAGE_KEYBOARD 0x07U
 #define NETWORK_INPUT_KEYBOARD_USAGE_MAX  231U
+#define NETWORK_INPUT_QUEUE_SIZE          128U
+#define NETWORK_INPUT_QUEUE_RESERVE       2U
+#define NETWORK_INPUT_QUEUE_CAPACITY      \
+  (NETWORK_INPUT_QUEUE_SIZE + NETWORK_INPUT_QUEUE_RESERVE)
+#define NETWORK_INPUT_QUEUE_PAYLOAD_MAX   LG_NET_INPUT_ABSOLUTE_WIRE_SIZE
 
 #define NETWORK_INPUT_CLAIM_FLAGS \
   (LG_NET_INPUT_CLAIM_KEYBOARD | LG_NET_INPUT_CLAIM_POINTER | \
@@ -55,6 +61,29 @@ struct NetworkInputLockKey
   uint32_t led;
   uint16_t usage;
 };
+
+typedef struct NetworkInputPkt
+{
+  uint8_t            payload[NETWORK_INPUT_QUEUE_PAYLOAD_MAX];
+  uint64_t           componentEpoch;
+  uint64_t           requestID;
+  uint32_t           payloadLength;
+  LGNetEnvelopeFlags flags;
+  uint16_t           messageType;
+}
+NetworkInputPkt;
+
+_Static_assert(LG_NET_INPUT_CLAIM_WIRE_SIZE <=
+      NETWORK_INPUT_QUEUE_PAYLOAD_MAX &&
+    LG_NET_INPUT_RELATIVE_WIRE_SIZE <=
+      NETWORK_INPUT_QUEUE_PAYLOAD_MAX &&
+    LG_NET_INPUT_ABSOLUTE_WIRE_SIZE <=
+      NETWORK_INPUT_QUEUE_PAYLOAD_MAX &&
+    LG_NET_INPUT_KEYBOARD_WIRE_SIZE <=
+      NETWORK_INPUT_QUEUE_PAYLOAD_MAX &&
+    LG_NET_INPUT_CONTROL_WIRE_SIZE <=
+      NETWORK_INPUT_QUEUE_PAYLOAD_MAX,
+    "Network input reliable queue payloads are too small");
 
 static const struct NetworkInputLockKey NETWORK_INPUT_LOCK_KEYS[] =
 {
@@ -74,12 +103,14 @@ struct NetworkInput
   bool     destroying;
   bool     connected;
   bool     serviceAvailable;
+  bool     datagramAvailable;
   bool     claimPending;
   bool     claimed;
   bool     available;
   uint64_t claimantID;
   uint64_t claimEpoch;
   uint64_t sequence;
+  uint64_t pointerSequence;
   uint64_t nextClaimNs;
   uint64_t nextKeepaliveNs;
 
@@ -91,6 +122,16 @@ struct NetworkInput
   uint32_t         absoluteY;
   uint32_t         absoluteWidth;
   uint32_t         absoluteHeight;
+  int64_t          cumulativeX;
+  int64_t          cumulativeY;
+  bool             pendingRelative;
+  bool             pendingAbsolute;
+  bool             pendingMotionReliable;
+  bool             motionBarrier;
+  uint64_t         reliableBarrierSequence;
+  NetworkInputPkt  reliableQueue[NETWORK_INPUT_QUEUE_CAPACITY];
+  size_t           reliableHead;
+  size_t           reliableCount;
   /* Preserve every held usage. The receiver reconstructs a six-key boot
    * report and emits ErrorRollOver while more than six keys are held. */
   bool             keyState[NETWORK_INPUT_KEYBOARD_USAGE_MAX + 1U];
@@ -112,11 +153,15 @@ struct NetworkInput
   uint32_t         statusGeneration;
   bool             statusNotifyPending;
   bool             statusDispatching;
+  bool             sendReadyPending;
   LG_InputStatusFn statusCallback;
   void           * statusOpaque;
 };
 
 static _Thread_local NetworkInput * l_networkInputCallback;
+static _Thread_local NetworkInput * l_networkInputSending;
+
+static void networkInputResumeSendsNL(NetworkInput * input, bool * notify);
 
 static uint64_t networkInputNext64(uint64_t value)
 {
@@ -316,32 +361,146 @@ static bool networkInputSetAvailableNL(NetworkInput * input, bool available)
 
 static void networkInputClearStateNL(NetworkInput * input)
 {
-  input->mouseButtons   = 0;
-  input->mouseAbsolute  = false;
-  input->absoluteX      = 0;
-  input->absoluteY      = 0;
-  input->absoluteWidth  = 0;
-  input->absoluteHeight = 0;
+  input->mouseButtons            = 0;
+  input->mouseAbsolute           = false;
+  input->absoluteX               = 0;
+  input->absoluteY               = 0;
+  input->absoluteWidth           = 0;
+  input->absoluteHeight          = 0;
+  input->cumulativeX             = 0;
+  input->cumulativeY             = 0;
+  input->pointerSequence         = 0;
+  input->pendingRelative         = false;
+  input->pendingAbsolute         = false;
+  input->pendingMotionReliable   = false;
+  input->motionBarrier           = true;
+  input->reliableBarrierSequence = 0;
+  input->sendReadyPending        = false;
   memset(input->keyState, 0, sizeof(input->keyState));
   input->modifiers      = 0;
   networkInputClearLEDProjectionNL(input);
 }
 
+static void networkInputClearReliableNL(NetworkInput * input)
+{
+  input->reliableHead  = 0;
+  input->reliableCount = 0;
+}
+
 static LG_TransportStatus networkInputSendReliableNL(NetworkInput * input,
+    uint16_t messageType, LGNetEnvelopeFlags flags, uint64_t componentEpoch,
+    uint64_t requestID, const void * payload, uint32_t payloadLength)
+{
+  NetworkInput      * previous;
+  LG_TransportStatus  status;
+
+  previous              = l_networkInputSending;
+  l_networkInputSending = input;
+  status                = networkConnectionSend(
+      input->connection, LG_NET_SERVICE_INPUT,
+      messageType, input->serviceVersion,
+      flags | LG_NET_ENVELOPE_FINAL, componentEpoch, requestID,
+      payload, payloadLength);
+  l_networkInputSending = previous;
+  return status;
+}
+
+static LG_TransportStatus networkInputSendDatagramNL(NetworkInput * input,
+    uint16_t messageType, uint64_t applicationSequence,
+    const void * payload, uint32_t payloadLength)
+{
+  NetworkInput      * previous;
+  LG_TransportStatus  status;
+
+  previous              = l_networkInputSending;
+  l_networkInputSending = input;
+  status                = networkConnectionSendDatagram(
+      input->connection, LG_NET_SERVICE_INPUT, messageType,
+      input->serviceVersion, 0, input->claimEpoch, 0,
+      payload, payloadLength, applicationSequence, true);
+  l_networkInputSending = previous;
+  return status;
+}
+
+static bool networkInputTransportFatal(LG_TransportStatus status)
+{
+  return status != LG_TRANSPORT_OK && status != LG_TRANSPORT_UNAVAILABLE &&
+    status != LG_TRANSPORT_TIMEOUT;
+}
+
+static bool networkInputQueueReliableNL(NetworkInput * input,
     uint16_t messageType, LGNetEnvelopeFlags flags, uint64_t requestID,
     const void * payload, uint32_t payloadLength)
 {
-  return networkConnectionSend(input->connection, LG_NET_SERVICE_INPUT,
-      messageType, input->serviceVersion,
-      flags | LG_NET_ENVELOPE_FINAL, input->claimEpoch, requestID,
-      payload, payloadLength);
+  const bool   emergency = messageType == LG_NET_INPUT_MESSAGE_RESET ||
+    messageType == LG_NET_INPUT_MESSAGE_RELEASE;
+  const size_t limit     = emergency ?
+    NETWORK_INPUT_QUEUE_CAPACITY : NETWORK_INPUT_QUEUE_SIZE;
+  if (input->reliableCount >= limit ||
+      payloadLength > NETWORK_INPUT_QUEUE_PAYLOAD_MAX ||
+      (payloadLength && !payload))
+    return false;
+
+  const size_t      index  =
+    (input->reliableHead + input->reliableCount) %
+      NETWORK_INPUT_QUEUE_CAPACITY;
+  NetworkInputPkt * packet = &input->reliableQueue[index];
+  if (payloadLength)
+    memcpy(packet->payload, payload, payloadLength);
+  packet->componentEpoch = input->claimEpoch;
+  packet->requestID      = requestID;
+  packet->payloadLength  = payloadLength;
+  packet->flags          = flags;
+  packet->messageType    = messageType;
+  ++input->reliableCount;
+  return true;
+}
+
+static LG_TransportStatus networkInputDrainReliableNL(NetworkInput * input)
+{
+  while (input->reliableCount)
+  {
+    const NetworkInputPkt   * packet =
+      &input->reliableQueue[input->reliableHead];
+    const LG_TransportStatus  status = networkInputSendReliableNL(input,
+        packet->messageType, packet->flags, packet->componentEpoch,
+        packet->requestID, packet->payload, packet->payloadLength);
+    if (status != LG_TRANSPORT_OK)
+      return status;
+
+    input->reliableHead =
+      (input->reliableHead + 1U) % NETWORK_INPUT_QUEUE_CAPACITY;
+    --input->reliableCount;
+  }
+
+  input->reliableHead = 0;
+  return LG_TRANSPORT_OK;
+}
+
+static LG_TransportStatus networkInputSubmitReliableNL(NetworkInput * input,
+    uint16_t messageType, LGNetEnvelopeFlags flags, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+{
+  if (!input->reliableCount)
+  {
+    const LG_TransportStatus status = networkInputSendReliableNL(input,
+        messageType, flags, input->claimEpoch, requestID,
+        payload, payloadLength);
+    if (status == LG_TRANSPORT_OK || networkInputTransportFatal(status))
+      return status;
+  }
+
+  return networkInputQueueReliableNL(input, messageType, flags, requestID,
+      payload, payloadLength) ? LG_TRANSPORT_OK : LG_TRANSPORT_ERROR;
 }
 
 static bool networkInputSendClaimNL(NetworkInput * input)
 {
-  if (!input->connected || !input->serviceAvailable || input->destroying)
+  if (!input->connected || !input->serviceAvailable || input->destroying ||
+      input->reliableCount)
     return false;
 
+  networkInputClearReliableNL(input);
   networkInputClearStateNL(input);
   networkInputInvalidateLEDsNL(input);
   const uint64_t        claimEpoch = networkInputNext64(input->claimEpoch);
@@ -358,9 +517,11 @@ static bool networkInputSendClaimNL(NetworkInput * input)
 
   input->claimEpoch = claimEpoch;
   input->sequence   = 0;
-  if (networkInputSendReliableNL(input, LG_NET_INPUT_MESSAGE_CLAIM,
-        LG_NET_ENVELOPE_ACK_REQUIRED, claimEpoch,
-        payload, sizeof(payload)) != LG_TRANSPORT_OK)
+  const LG_TransportStatus status = networkInputSendReliableNL(input,
+      LG_NET_INPUT_MESSAGE_CLAIM,
+      LG_NET_ENVELOPE_ACK_REQUIRED, claimEpoch, claimEpoch,
+      payload, sizeof(payload));
+  if (status != LG_TRANSPORT_OK)
   {
     input->nextClaimNs = networkInputDeadline(
         NETWORK_INPUT_CLAIM_RETRY_MS);
@@ -375,7 +536,7 @@ static bool networkInputSendClaimNL(NetworkInput * input)
   return true;
 }
 
-static bool networkInputSendControlNL(NetworkInput * input,
+static LG_TransportStatus networkInputSendControlNL(NetworkInput * input,
     uint16_t messageType, uint32_t flags, uint32_t leaseMs)
 {
   const uint64_t          sequence = networkInputNext64(input->sequence);
@@ -388,18 +549,24 @@ static bool networkInputSendControlNL(NetworkInput * input,
     .leaseMs    = leaseMs,
   };
   uint8_t payload[LG_NET_INPUT_CONTROL_WIRE_SIZE];
-  if (!lgNetInputControlEncode(payload, sizeof(payload), &control) ||
-      networkInputSendReliableNL(input, messageType,
-        0, 0, payload, sizeof(payload)) != LG_TRANSPORT_OK)
-    return false;
+  if (!lgNetInputControlEncode(payload, sizeof(payload), &control))
+    return LG_TRANSPORT_ERROR;
+
+  const LG_TransportStatus status = networkInputSubmitReliableNL(input,
+      messageType, 0, 0, payload, sizeof(payload));
+  if (status != LG_TRANSPORT_OK)
+    return status;
 
   input->sequence = sequence;
-  return true;
+  return LG_TRANSPORT_OK;
 }
 
 static bool networkInputAbandonClaimNL(NetworkInput * input,
     bool tryReset)
 {
+  networkInputClearReliableNL(input);
+  networkInputClearStateNL(input);
+  networkInputInvalidateLEDsNL(input);
   if (input->claimed && networkConnectionValid(input->connection))
   {
     if (tryReset)
@@ -416,19 +583,28 @@ static bool networkInputAbandonClaimNL(NetworkInput * input,
   input->nextKeepaliveNs = 0;
   input->nextClaimNs     = networkInputDeadline(
       NETWORK_INPUT_CLAIM_RETRY_MS);
-  networkInputClearStateNL(input);
-  networkInputInvalidateLEDsNL(input);
   return networkInputSetAvailableNL(input, false);
 }
 
 static bool networkInputSendResetNL(NetworkInput * input)
 {
-  const bool failed = input->claimed &&
-    (!networkConnectionValid(input->connection) ||
-      !networkInputSendControlNL(input, LG_NET_INPUT_MESSAGE_RESET,
-        LG_NET_INPUT_CLAIM_KEYBOARD | LG_NET_INPUT_CLAIM_POINTER, 0));
-  networkInputClearStateNL(input);
-  return failed && networkInputAbandonClaimNL(input, false);
+  LG_TransportStatus status = LG_TRANSPORT_OK;
+  if (input->claimed)
+  {
+    networkInputClearReliableNL(input);
+    networkInputClearStateNL(input);
+    status = networkConnectionValid(input->connection) ?
+      networkInputSendControlNL(input, LG_NET_INPUT_MESSAGE_RESET,
+        LG_NET_INPUT_CLAIM_KEYBOARD | LG_NET_INPUT_CLAIM_POINTER, 0) :
+      LG_TRANSPORT_DISCONNECTED;
+  }
+  else
+    networkInputClearStateNL(input);
+  if (status == LG_TRANSPORT_DISCONNECTED)
+    networkInputClearReliableNL(input);
+  if (!networkInputTransportFatal(status))
+    return false;
+  return networkInputAbandonClaimNL(input, false);
 }
 
 static bool networkInputSendReleaseNL(NetworkInput * input)
@@ -437,7 +613,7 @@ static bool networkInputSendReleaseNL(NetworkInput * input)
   if ((input->claimed || input->claimPending) &&
       networkConnectionValid(input->connection))
     sent = networkInputSendControlNL(input, LG_NET_INPUT_MESSAGE_RELEASE,
-        input->claimFlags, 0);
+        input->claimFlags, 0) == LG_TRANSPORT_OK;
 
   input->claimPending    = false;
   input->claimed         = false;
@@ -456,12 +632,12 @@ static bool networkInputNextSequenceNL(NetworkInput * input,
   return true;
 }
 
-static bool networkInputSendKeyboardNL(NetworkInput * input,
+static LG_TransportStatus networkInputSendKeyboardNL(NetworkInput * input,
     uint16_t usage, bool down, bool repeat)
 {
   uint64_t sequence;
   if (!networkInputNextSequenceNL(input, &sequence))
-    return false;
+    return LG_TRANSPORT_UNAVAILABLE;
 
   LGNetInputKeyboard keyboard =
   {
@@ -478,13 +654,16 @@ static bool networkInputSendKeyboardNL(NetworkInput * input,
     keyboard.timestampNs = 1;
 
   uint8_t payload[LG_NET_INPUT_KEYBOARD_WIRE_SIZE];
-  if (!lgNetInputKeyboardEncode(payload, sizeof(payload), &keyboard) ||
-      networkInputSendReliableNL(input, LG_NET_INPUT_MESSAGE_KEYBOARD,
-        0, 0, payload, sizeof(payload)) != LG_TRANSPORT_OK)
-    return false;
+  if (!lgNetInputKeyboardEncode(payload, sizeof(payload), &keyboard))
+    return LG_TRANSPORT_ERROR;
+
+  const LG_TransportStatus status = networkInputSubmitReliableNL(input,
+      LG_NET_INPUT_MESSAGE_KEYBOARD, 0, 0, payload, sizeof(payload));
+  if (status != LG_TRANSPORT_OK)
+    return status;
 
   input->sequence = sequence;
-  return true;
+  return LG_TRANSPORT_OK;
 }
 
 static uint32_t networkInputLEDForUsage(uint16_t usage)
@@ -512,10 +691,12 @@ static bool networkInputTapLockKeyNL(NetworkInput * input,
       input->keyState[key->usage])
     return false;
 
-  if (!networkInputSendKeyboardNL(input, key->usage, true, false))
+  if (networkInputSendKeyboardNL(input, key->usage, true, false) !=
+      LG_TRANSPORT_OK)
     return false;
   networkInputRecordLEDToggleNL(input, key->led, false);
-  if (networkInputSendKeyboardNL(input, key->usage, false, false))
+  if (networkInputSendKeyboardNL(input, key->usage, false, false) ==
+      LG_TRANSPORT_OK)
     return true;
 
   *notify |= networkInputSendResetNL(input);
@@ -590,6 +771,9 @@ static bool networkInputTimer(void * opaque)
 
   if (input->connected && input->serviceAvailable)
   {
+    if (input->sendReadyPending || input->reliableCount ||
+        input->pendingRelative || input->pendingAbsolute)
+      networkInputResumeSendsNL(input, &notify);
     if (input->claimPending && now >= input->nextClaimNs)
       input->claimPending = false;
     if (!input->claimPending && !input->claimed &&
@@ -597,12 +781,13 @@ static bool networkInputTimer(void * opaque)
       networkInputSendClaimNL(input);
     else if (input->claimed && now >= input->nextKeepaliveNs)
     {
-      if (networkInputSendControlNL(input,
-            LG_NET_INPUT_MESSAGE_KEEPALIVE,
-            input->claimFlags, NETWORK_INPUT_LEASE_MS))
+      const LG_TransportStatus status = networkInputSendControlNL(input,
+          LG_NET_INPUT_MESSAGE_KEEPALIVE,
+          input->claimFlags, NETWORK_INPUT_LEASE_MS);
+      if (status == LG_TRANSPORT_OK)
         input->nextKeepaliveNs = networkInputDeadline(
             NETWORK_INPUT_KEEPALIVE_MS);
-      else
+      else if (networkInputTransportFatal(status))
         notify |= networkInputAbandonClaimNL(input, true);
     }
 
@@ -705,7 +890,9 @@ static bool networkInputUpdateKey(void * opaque, int key, bool down)
       input->modifiers &= (uint8_t)~mask;
   }
 
-  if (!networkInputSendKeyboardNL(input, usage, down, false))
+  const LG_TransportStatus status =
+    networkInputSendKeyboardNL(input, usage, down, false);
+  if (status != LG_TRANSPORT_OK)
   {
     input->keyState[usage] = previous;
     if (usage >= 224 && usage <= 231)
@@ -716,7 +903,7 @@ static bool networkInputUpdateKey(void * opaque, int key, bool down)
       else
         input->modifiers &= (uint8_t)~mask;
     }
-    if (!down)
+    if (!down && networkInputTransportFatal(status))
       notify = networkInputAbandonClaimNL(input, true);
     LG_UNLOCK(input->stateLock);
     if (notify)
@@ -790,20 +977,30 @@ static void networkInputKeyboardLEDsReset(void * opaque)
   LG_UNLOCK(input->stateLock);
 }
 
-static bool networkInputSendRelativeNL(NetworkInput * input,
-    int32_t x, int32_t y, int32_t wheelX, int32_t wheelY,
-    uint32_t buttons, uint32_t changedButtons, bool motion)
+static int64_t networkInputSaturatingAdd(int64_t value, int32_t delta)
+{
+  if (delta > 0 && value > INT64_MAX - delta)
+    return INT64_MAX;
+  if (delta < 0 && value < INT64_MIN - delta)
+    return INT64_MIN;
+  return value + delta;
+}
+
+static LG_TransportStatus networkInputTransmitRelativeNL(
+    NetworkInput * input, int32_t wheelX, int32_t wheelY,
+    uint32_t buttons, uint32_t changedButtons, bool datagram,
+    bool acknowledge)
 {
   uint64_t sequence;
   if (!networkInputNextSequenceNL(input, &sequence))
-    return false;
+    return LG_TRANSPORT_UNAVAILABLE;
 
   LGNetInputRelative relative =
   {
     .sequence       = sequence,
     .timestampNs    = nanotime(),
-    .deltaX         = x,
-    .deltaY         = y,
+    .cumulativeX    = input->cumulativeX,
+    .cumulativeY    = input->cumulativeY,
     .wheelX         = wheelX,
     .wheelY         = wheelY,
     .buttons        = buttons,
@@ -814,40 +1011,43 @@ static bool networkInputSendRelativeNL(NetworkInput * input,
 
   uint8_t payload[LG_NET_INPUT_RELATIVE_WIRE_SIZE];
   if (!lgNetInputRelativeEncode(payload, sizeof(payload), &relative))
-    return false;
+    return LG_TRANSPORT_ERROR;
 
-  LG_TransportStatus status = LG_TRANSPORT_UNAVAILABLE;
-  if (motion && networkConnectionServiceAvailable(input->connection,
-        LG_NET_SERVICE_INPUT, LG_NET_CAPABILITY_DATAGRAM))
-    status = networkConnectionSendDatagram(input->connection,
-        LG_NET_SERVICE_INPUT, LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE,
-        input->serviceVersion, 0, input->claimEpoch, 0,
-        payload, sizeof(payload), true);
-  if (status != LG_TRANSPORT_OK)
-    status = networkInputSendReliableNL(input,
-        LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE, 0, 0,
+  const LG_TransportStatus status = datagram ?
+    networkInputSendDatagramNL(input,
+        LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE, sequence,
+        payload, sizeof(payload)) :
+    networkInputSubmitReliableNL(input,
+        LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE,
+        acknowledge ? LG_NET_ENVELOPE_ACK_REQUIRED : 0,
+        acknowledge ? sequence : 0,
         payload, sizeof(payload));
   if (status != LG_TRANSPORT_OK)
-    return false;
+    return status;
 
-  input->sequence      = sequence;
-  input->mouseAbsolute = false;
-  return true;
+  input->sequence        = sequence;
+  input->pointerSequence = sequence;
+  if (acknowledge)
+    input->reliableBarrierSequence = sequence;
+  return LG_TRANSPORT_OK;
 }
 
-static bool networkInputSendAbsoluteNL(NetworkInput * input,
-    uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+static LG_TransportStatus networkInputTransmitAbsoluteNL(
+    NetworkInput * input, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height,
     int32_t wheelX, int32_t wheelY, uint32_t buttons,
-    uint32_t changedButtons, bool motion)
+    uint32_t changedButtons, bool datagram, bool acknowledge)
 {
   uint64_t sequence;
   if (!networkInputNextSequenceNL(input, &sequence))
-    return false;
+    return LG_TRANSPORT_UNAVAILABLE;
 
   LGNetInputAbsolute absolute =
   {
     .sequence       = sequence,
     .timestampNs    = nanotime(),
+    .cumulativeX    = input->cumulativeX,
+    .cumulativeY    = input->cumulativeY,
     .x              = (int32_t)x,
     .y              = (int32_t)y,
     .width          = width,
@@ -862,39 +1062,253 @@ static bool networkInputSendAbsoluteNL(NetworkInput * input,
 
   uint8_t payload[LG_NET_INPUT_ABSOLUTE_WIRE_SIZE];
   if (!lgNetInputAbsoluteEncode(payload, sizeof(payload), &absolute))
-    return false;
+    return LG_TRANSPORT_ERROR;
 
-  LG_TransportStatus status = LG_TRANSPORT_UNAVAILABLE;
-  if (motion && networkConnectionServiceAvailable(input->connection,
-        LG_NET_SERVICE_INPUT, LG_NET_CAPABILITY_DATAGRAM))
-    status = networkConnectionSendDatagram(input->connection,
-        LG_NET_SERVICE_INPUT, LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE,
-        input->serviceVersion, 0, input->claimEpoch, 0,
-        payload, sizeof(payload), true);
-  if (status != LG_TRANSPORT_OK)
-    status = networkInputSendReliableNL(input,
-        LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE, 0, 0,
+  const LG_TransportStatus status = datagram ?
+    networkInputSendDatagramNL(input,
+        LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE, sequence,
+        payload, sizeof(payload)) :
+    networkInputSubmitReliableNL(input,
+        LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE,
+        acknowledge ? LG_NET_ENVELOPE_ACK_REQUIRED : 0,
+        acknowledge ? sequence : 0,
         payload, sizeof(payload));
   if (status != LG_TRANSPORT_OK)
-    return false;
+    return status;
 
-  input->sequence       = sequence;
-  input->mouseAbsolute  = true;
+  input->sequence        = sequence;
+  input->pointerSequence = sequence;
+  if (acknowledge)
+    input->reliableBarrierSequence = sequence;
+  return LG_TRANSPORT_OK;
+}
+
+static LG_TransportStatus networkInputFlushMotionNL(NetworkInput * input)
+{
+  if (input->reliableCount)
+    return LG_TRANSPORT_UNAVAILABLE;
+
+  if (input->pendingAbsolute)
+  {
+    const bool               acknowledge = input->motionBarrier ||
+      !input->mouseAbsolute;
+    const bool               datagram    = input->datagramAvailable &&
+      !input->pendingMotionReliable && !input->motionBarrier &&
+      !input->reliableBarrierSequence;
+    const LG_TransportStatus status      = networkInputTransmitAbsoluteNL(input,
+        input->absoluteX, input->absoluteY,
+        input->absoluteWidth, input->absoluteHeight,
+        0, 0, input->mouseButtons, 0, datagram, acknowledge);
+    if (status != LG_TRANSPORT_OK)
+      return status;
+    input->mouseAbsolute         = true;
+    input->pendingRelative       = false;
+    input->pendingAbsolute       = false;
+    input->pendingMotionReliable = false;
+    input->motionBarrier         = false;
+    return LG_TRANSPORT_OK;
+  }
+
+  if (input->pendingRelative)
+  {
+    const bool               acknowledge = input->motionBarrier ||
+      input->mouseAbsolute;
+    const bool               datagram    = input->datagramAvailable &&
+      !input->pendingMotionReliable && !input->motionBarrier &&
+      !input->reliableBarrierSequence;
+    const LG_TransportStatus status      = networkInputTransmitRelativeNL(input,
+        0, 0, input->mouseButtons, 0, datagram, acknowledge);
+    if (status != LG_TRANSPORT_OK)
+      return status;
+    input->mouseAbsolute         = false;
+    input->pendingRelative       = false;
+    input->pendingAbsolute       = false;
+    input->pendingMotionReliable = false;
+    input->motionBarrier         = false;
+  }
+  return LG_TRANSPORT_OK;
+}
+
+static LG_TransportStatus networkInputSendRelativeNL(NetworkInput * input,
+    int32_t x, int32_t y, int32_t wheelX, int32_t wheelY,
+    uint32_t buttons, uint32_t changedButtons, bool motion)
+{
+  if (motion)
+  {
+    const bool preserveReliable = input->pendingRelative &&
+      input->pendingMotionReliable;
+    if (!input->pendingRelative &&
+        (input->mouseAbsolute || input->pendingAbsolute))
+    {
+      const LG_TransportStatus baselineStatus =
+        networkInputTransmitAbsoluteNL(input,
+          input->absoluteX, input->absoluteY,
+          input->absoluteWidth, input->absoluteHeight,
+          0, 0, buttons, 0, false, true);
+      if (baselineStatus != LG_TRANSPORT_OK)
+        return baselineStatus;
+
+      input->pendingAbsolute = false;
+      input->mouseAbsolute   = true;
+    }
+    input->cumulativeX           =
+      networkInputSaturatingAdd(input->cumulativeX, x);
+    input->cumulativeY           =
+      networkInputSaturatingAdd(input->cumulativeY, y);
+    input->pendingRelative       = true;
+    input->pendingAbsolute       = false;
+    input->pendingMotionReliable = preserveReliable || input->mouseAbsolute ||
+      input->motionBarrier || input->reliableCount;
+    return networkInputFlushMotionNL(input);
+  }
+
+  const LG_TransportStatus status = networkInputTransmitRelativeNL(input,
+      wheelX, wheelY, buttons, changedButtons, false, true);
+  if (status == LG_TRANSPORT_OK)
+  {
+    input->mouseAbsolute         = false;
+    input->pendingRelative       = false;
+    input->pendingAbsolute       = false;
+    input->pendingMotionReliable = false;
+    input->motionBarrier         = false;
+  }
+  return status;
+}
+
+static LG_TransportStatus networkInputSendAbsoluteNL(NetworkInput * input,
+    uint32_t x, uint32_t y, uint32_t width, uint32_t height,
+    int32_t wheelX, int32_t wheelY, uint32_t buttons,
+    uint32_t changedButtons, bool motion)
+{
   input->absoluteX      = x;
   input->absoluteY      = y;
   input->absoluteWidth  = width;
   input->absoluteHeight = height;
-  return true;
+
+  if (motion)
+  {
+    const bool preserveReliable = input->pendingAbsolute &&
+      input->pendingMotionReliable;
+    const bool rebaseline        = input->pendingRelative;
+    input->pendingRelative       = false;
+    input->pendingAbsolute       = true;
+    input->pendingMotionReliable = preserveReliable || rebaseline ||
+      !input->mouseAbsolute || input->motionBarrier || input->reliableCount;
+    return networkInputFlushMotionNL(input);
+  }
+
+  const LG_TransportStatus status = networkInputTransmitAbsoluteNL(input,
+      x, y, width, height, wheelX, wheelY,
+      buttons, changedButtons, false, true);
+  if (status == LG_TRANSPORT_OK)
+  {
+    input->mouseAbsolute         = true;
+    input->pendingRelative       = false;
+    input->pendingAbsolute       = false;
+    input->pendingMotionReliable = false;
+    input->motionBarrier         = false;
+  }
+  return status;
+}
+
+static void networkInputResumeSendsNL(NetworkInput * input, bool * notify)
+{
+  input->sendReadyPending = false;
+  if (!input->connected || !input->serviceAvailable || input->destroying)
+    return;
+
+  const LG_TransportStatus reliableStatus =
+    networkInputDrainReliableNL(input);
+  if (networkInputTransportFatal(reliableStatus))
+  {
+    *notify |= networkInputAbandonClaimNL(input, true);
+    return;
+  }
+  if (reliableStatus != LG_TRANSPORT_OK)
+    return;
+
+  if (!input->claimPending && !input->claimed)
+  {
+    networkInputSendClaimNL(input);
+    return;
+  }
+  if (!input->claimed ||
+      (!input->pendingRelative && !input->pendingAbsolute))
+    return;
+
+  const LG_TransportStatus status = networkInputFlushMotionNL(input);
+  if (networkInputTransportFatal(status))
+    *notify |= networkInputAbandonClaimNL(input, true);
+}
+
+void networkInputSendReady(NetworkInput * input,
+    NetworkPacketDelivery delivery)
+{
+  if (!input || delivery == NETWORK_PACKET_DELIVERY_BULK)
+    return;
+  if (l_networkInputSending == input)
+  {
+    input->sendReadyPending = true;
+    return;
+  }
+
+  bool notify = false;
+  LG_LOCK(input->stateLock);
+  const bool motionReliable = input->reliableCount ||
+    input->pendingMotionReliable ||
+    input->motionBarrier || input->reliableBarrierSequence ||
+    !input->datagramAvailable;
+  const bool relevant       = delivery == (motionReliable ?
+    NETWORK_PACKET_DELIVERY_RELIABLE :
+    NETWORK_PACKET_DELIVERY_DATAGRAM);
+  if (relevant || (!input->claimPending && !input->claimed))
+    networkInputResumeSendsNL(input, &notify);
+  LG_UNLOCK(input->stateLock);
+  if (notify)
+    networkInputNotifyStatus(input);
+}
+
+void networkInputDatagramLost(NetworkInput * input,
+    uint64_t claimEpoch, uint64_t pointerSequence)
+{
+  if (!input)
+    return;
+
+  bool notify = false;
+  LG_LOCK(input->stateLock);
+  if (!input->destroying && input->connected &&
+      input->serviceAvailable && input->claimed &&
+      input->claimEpoch == claimEpoch && pointerSequence &&
+      input->pointerSequence == pointerSequence &&
+      !input->motionBarrier && !input->reliableBarrierSequence)
+  {
+    if (!input->pendingRelative && !input->pendingAbsolute)
+    {
+      input->pendingRelative = !input->mouseAbsolute;
+      input->pendingAbsolute = input->mouseAbsolute;
+    }
+    input->pendingMotionReliable = true;
+    input->motionBarrier         = true;
+    networkInputResumeSendsNL(input, &notify);
+  }
+  LG_UNLOCK(input->stateLock);
+
+  if (notify)
+    networkInputNotifyStatus(input);
 }
 
 static bool networkInputMouseMotion(void * opaque, int32_t x, int32_t y)
 {
   NetworkInput * input = opaque;
   LG_LOCK(input->stateLock);
-  const bool result = input->available &&
-    (input->claimFlags & LG_NET_INPUT_CLAIM_POINTER) &&
-    networkInputSendRelativeNL(input, x, y, 0, 0,
+  const bool         eligible = input->available &&
+    (input->claimFlags & LG_NET_INPUT_CLAIM_POINTER);
+  LG_TransportStatus status   = LG_TRANSPORT_UNAVAILABLE;
+  if (eligible)
+    status = networkInputSendRelativeNL(input, x, y, 0, 0,
         input->mouseButtons, 0, true);
+  const bool         result   = eligible &&
+    !networkInputTransportFatal(status);
   LG_UNLOCK(input->stateLock);
   return result;
 }
@@ -910,10 +1324,14 @@ static bool networkInputMousePosition(void * opaque, uint32_t x,
 
   NetworkInput * input = opaque;
   LG_LOCK(input->stateLock);
-  const bool result = input->available &&
-    (input->claimFlags & LG_NET_INPUT_CLAIM_POINTER) &&
-    networkInputSendAbsoluteNL(input, x, y, width, height, 0, 0,
+  const bool         eligible = input->available &&
+    (input->claimFlags & LG_NET_INPUT_CLAIM_POINTER);
+  LG_TransportStatus status   = LG_TRANSPORT_UNAVAILABLE;
+  if (eligible)
+    status = networkInputSendAbsoluteNL(input, x, y, width, height, 0, 0,
         input->mouseButtons, 0, true);
+  const bool         result   = eligible &&
+    !networkInputTransportFatal(status);
   LG_UNLOCK(input->stateLock);
   return result;
 }
@@ -975,26 +1393,28 @@ static bool networkInputUpdateButton(void * opaque,
     return false;
   }
 
-  const uint32_t buttons = down ?
+  const uint32_t     buttons  = down ?
     input->mouseButtons | mask : input->mouseButtons & ~mask;
-  bool result;
-  if (input->mouseAbsolute && input->absoluteWidth &&
+  LG_TransportStatus status;
+  const bool         absolute = input->pendingAbsolute ||
+    (input->mouseAbsolute && !input->pendingRelative);
+  if (absolute && input->absoluteWidth &&
       input->absoluteHeight)
-    result = networkInputSendAbsoluteNL(input,
+    status = networkInputSendAbsoluteNL(input,
         input->absoluteX, input->absoluteY,
         input->absoluteWidth, input->absoluteHeight,
         0, wheelY, buttons, mask, false);
   else
-    result = networkInputSendRelativeNL(input, 0, 0, 0, wheelY,
+    status = networkInputSendRelativeNL(input, 0, 0, 0, wheelY,
         buttons, mask, false);
-  if (result && mask)
+  if (status == LG_TRANSPORT_OK && mask)
     input->mouseButtons = buttons;
-  else if (!result && !down && mask)
+  else if (networkInputTransportFatal(status) && !down && mask)
     notify = networkInputAbandonClaimNL(input, true);
   LG_UNLOCK(input->stateLock);
   if (notify)
     networkInputNotifyStatus(input);
-  return result;
+  return status == LG_TRANSPORT_OK;
 }
 
 static bool networkInputMousePress(void * opaque, unsigned int button)
@@ -1089,8 +1509,10 @@ void networkInputDestroy(NetworkInput ** handle)
   LG_LOCK(input->stateLock);
   networkInputSendResetNL(input);
   networkInputSendReleaseNL(input);
-  input->connected        = false;
-  input->serviceAvailable = false;
+  networkInputClearReliableNL(input);
+  input->connected         = false;
+  input->serviceAvailable  = false;
+  input->datagramAvailable = false;
   networkInputSetAvailableNL(input, false);
   LG_UNLOCK(input->stateLock);
 
@@ -1110,36 +1532,43 @@ void networkInputConnectionState(NetworkInput * input, bool connected)
   if (!input)
     return;
 
-  uint16_t   serviceVersion   = 0;
-  const bool serviceAvailable = connected &&
+  uint16_t   serviceVersion    = 0;
+  const bool serviceAvailable  = connected &&
     networkConnectionServiceAvailable(input->connection,
       LG_NET_SERVICE_INPUT, LG_NET_CAPABILITY_RELIABLE) &&
     networkConnectionServiceVersion(input->connection,
       LG_NET_SERVICE_INPUT, &serviceVersion);
-  bool       notify           = false;
+  const bool datagramAvailable = serviceAvailable &&
+    networkConnectionServiceAvailable(input->connection,
+      LG_NET_SERVICE_INPUT, LG_NET_CAPABILITY_DATAGRAM);
+  bool       notify            = false;
 
   LG_LOCK(input->stateLock);
   if (!connected || !serviceAvailable)
   {
     notify |= networkInputSendResetNL(input);
     networkInputSendReleaseNL(input);
-    input->connected        = connected;
-    input->serviceAvailable = false;
-    input->serviceVersion   = 0;
+    networkInputClearReliableNL(input);
+    input->connected         = connected;
+    input->serviceAvailable  = false;
+    input->datagramAvailable = false;
+    input->serviceVersion    = 0;
     networkInputInvalidateLEDsNL(input);
     notify |=
       networkInputSetAvailableNL(input, false);
   }
   else
   {
-    input->connected        = true;
-    input->serviceAvailable = true;
-    input->serviceVersion   = serviceVersion;
-    input->claimPending     = false;
-    input->claimed          = false;
-    input->claimFlags       = 0;
-    input->sequence         = 0;
-    input->nextClaimNs      = 0;
+    input->connected         = true;
+    input->serviceAvailable  = true;
+    input->datagramAvailable = datagramAvailable;
+    input->serviceVersion    = serviceVersion;
+    input->claimPending      = false;
+    input->claimed           = false;
+    input->claimFlags        = 0;
+    input->sequence          = 0;
+    input->nextClaimNs       = 0;
+    networkInputClearReliableNL(input);
     networkInputClearStateNL(input);
     networkInputInvalidateLEDsNL(input);
     notify |= networkInputSetAvailableNL(input, false);
@@ -1160,6 +1589,11 @@ static bool networkInputHandleStatus(NetworkInput * input,
     return false;
   if (packet->envelope.componentEpoch != status.claimEpoch)
     return false;
+  const bool barrierAck =
+    packet->envelope.messageType == LG_NET_INPUT_MESSAGE_STATUS &&
+    (packet->envelope.flags & LG_NET_ENVELOPE_RESPONSE) &&
+    packet->envelope.requestID &&
+    packet->envelope.requestID <= status.lastSequence;
 
   bool notify = false;
   LG_LOCK(input->stateLock);
@@ -1186,6 +1620,7 @@ static bool networkInputHandleStatus(NetworkInput * input,
       {
         input->nextClaimNs = networkInputDeadline(
             NETWORK_INPUT_CLAIM_RETRY_MS);
+        networkInputClearReliableNL(input);
         networkInputClearStateNL(input);
         networkInputInvalidateLEDsNL(input);
       }
@@ -1193,10 +1628,12 @@ static bool networkInputHandleStatus(NetworkInput * input,
       break;
 
     case LG_NET_INPUT_STATUS_UNSUPPORTED:
-      input->claimPending     = false;
-      input->claimed          = false;
-      input->claimFlags       = 0;
-      input->serviceAvailable = false;
+      input->claimPending      = false;
+      input->claimed           = false;
+      input->claimFlags        = 0;
+      input->serviceAvailable  = false;
+      input->datagramAvailable = false;
+      networkInputClearReliableNL(input);
       networkInputClearStateNL(input);
       networkInputInvalidateLEDsNL(input);
       notify = networkInputSetAvailableNL(input, false);
@@ -1209,12 +1646,20 @@ static bool networkInputHandleStatus(NetworkInput * input,
       input->claimPending = false;
       input->claimed      = false;
       input->claimFlags   = 0;
+      networkInputClearReliableNL(input);
       networkInputClearStateNL(input);
       networkInputInvalidateLEDsNL(input);
       input->nextClaimNs  = networkInputDeadline(
           NETWORK_INPUT_CLAIM_RETRY_MS);
       notify = networkInputSetAvailableNL(input, false);
       break;
+  }
+  if (status.status == LG_NET_INPUT_STATUS_ACCEPTED && barrierAck &&
+      input->reliableBarrierSequence &&
+      packet->envelope.requestID >= input->reliableBarrierSequence)
+  {
+    input->reliableBarrierSequence = 0;
+    networkInputResumeSendsNL(input, &notify);
   }
   LG_UNLOCK(input->stateLock);
 
@@ -1276,18 +1721,30 @@ bool networkInputPacket(NetworkInput * input,
       packet->envelope.service != LG_NET_SERVICE_INPUT)
     return false;
 
+  const LGNetEnvelopeFlags baseFlags =
+    LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
   switch (packet->envelope.messageType)
   {
     case LG_NET_INPUT_MESSAGE_CLAIM_RESULT:
-      if (!(packet->envelope.flags & LG_NET_ENVELOPE_RESPONSE) ||
+      if (packet->envelope.flags !=
+            (baseFlags | LG_NET_ENVELOPE_RESPONSE) ||
           packet->envelope.requestID != packet->envelope.componentEpoch)
         return false;
       return networkInputHandleStatus(input, packet);
 
     case LG_NET_INPUT_MESSAGE_STATUS:
+    {
+      const LGNetEnvelopeFlags expectedFlags = packet->envelope.requestID ?
+        baseFlags | LG_NET_ENVELOPE_RESPONSE : baseFlags;
+      if (packet->envelope.flags != expectedFlags)
+        return false;
       return networkInputHandleStatus(input, packet);
+    }
 
     case LG_NET_INPUT_MESSAGE_KEYBOARD_LEDS:
+      if (packet->envelope.flags != baseFlags ||
+          packet->envelope.requestID)
+        return false;
       return networkInputHandleLEDs(input, packet);
 
     default:

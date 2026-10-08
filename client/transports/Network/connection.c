@@ -58,6 +58,9 @@
   (LG_NET_CURSOR_SHAPE_HEADER_WIRE_SIZE + LG_NET_CURSOR_MAX_SHAPE_LENGTH)
 #define NETWORK_MAX_CONTROL_BUFFER            \
   (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_CONTROL_PAYLOAD))
+#define NETWORK_MAX_INPUT_PAYLOAD             LG_NET_INPUT_ABSOLUTE_WIRE_SIZE
+#define NETWORK_MAX_INPUT_BUFFER              \
+  (2U * (LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_INPUT_PAYLOAD))
 #define NETWORK_MAX_NEGOTIATED_PAYLOAD        LG_NET_MAX_PAYLOAD_LENGTH
 #define NETWORK_MAX_DATAGRAM_PAYLOAD          1136U
 #define NETWORK_HELLO_REQUEST_ID              UINT64_C(1)
@@ -87,18 +90,42 @@
   (UINT64_C(256) * 1024U * 1024U)
 #define NETWORK_SEND_RESUME_NUMERATOR            3U
 #define NETWORK_SEND_RESUME_DENOMINATOR          4U
+#define NETWORK_INPUT_SEND_POOL_COUNT            64U
+#define NETWORK_INPUT_SEND_POOL_DATA_SIZE        256U
 
 _Static_assert(NETWORK_AUTH_SHA256_SIZE == LG_NET_PASSWORD_SHA256_LENGTH,
     "Network authentication SHA-256 sizes differ");
+_Static_assert(LG_NET_INPUT_CLAIM_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_STATUS_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_RELATIVE_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_ABSOLUTE_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_KEYBOARD_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_LEDS_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD &&
+    LG_NET_INPUT_CONTROL_WIRE_SIZE <= NETWORK_MAX_INPUT_PAYLOAD,
+    "Network input receive buffer is too small");
+_Static_assert(NETWORK_INPUT_SEND_POOL_DATA_SIZE >=
+    LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_MAX_INPUT_PAYLOAD,
+    "Network input send pool entries are too small");
 
 struct NetworkSend
 {
+  NetworkConnection    * connection;
+  struct NetworkSend   * next;
   QUIC_BUFFER           buffer;
   LGNetService          service;
   uint32_t              length;
+  uint64_t              componentEpoch;
+  uint64_t              applicationSequence;
   NetworkPacketDelivery delivery;
   bool                  accounted;
-  uint8_t               data[];
+  bool                  lossReported;
+  bool                  pooled;
+};
+
+struct NetworkInputSend
+{
+  struct NetworkSend send;
+  uint8_t            data[NETWORK_INPUT_SEND_POOL_DATA_SIZE];
 };
 
 struct NetworkSendLimits
@@ -158,6 +185,7 @@ struct NetworkConnection
   HQUIC                  configuration;
   HQUIC                  connection;
   HQUIC                  controlStream;
+  HQUIC                  inputStream;
 
   LGEvent  * connectEvent;
   LGEvent  * closeEvent;
@@ -165,6 +193,8 @@ struct NetworkConnection
   LGEvent  * bulkReceiveIdle;
   LGThread * bulkReceiveThread;
   LG_Lock    lock;
+  LG_Lock    inputStreamLock;
+  LG_Lock    inputSendPoolLock;
   LG_Lock    stateCallbackLock;
 
   atomic_bool stopping;
@@ -181,6 +211,7 @@ struct NetworkConnection
   NetworkPacketFn            packet;
   NetworkConnectionStateFn   state;
   NetworkSendReadyFn         sendReady;
+  NetworkDatagramLostFn      datagramLost;
   void                     * opaque;
 
   LGNetCapability  offeredCapabilities[LG_NET_SERVICE_CONTROL + 1U];
@@ -200,6 +231,8 @@ struct NetworkConnection
   LG_TransportSession  session;
   uint64_t             sessionEpoch;
   uint64_t             sendSequence;
+  uint64_t             inputSendSequence;
+  uint64_t             inputReceiveSequence;
   uint64_t             datagramSendSequence;
   uint64_t             receiveSequence;
   LGNetSequenceTracker datagramReceive;
@@ -223,6 +256,8 @@ struct NetworkConnection
   uint16_t             maxPeerBulkStreams;
   uint16_t             peerBulkStreams;
   uint16_t             serviceVersions[LG_NET_SERVICE_CONTROL + 1U];
+  uint16_t             serviceMaxBidirectional
+    [LG_NET_SERVICE_CONTROL + 1U];
   uint16_t             serviceMaxUnidirectional
     [LG_NET_SERVICE_CONTROL + 1U];
   uint16_t             servicePeerBulkStreams
@@ -237,6 +272,10 @@ struct NetworkConnection
   struct NetworkSendAccounting reliableSend;
   struct NetworkSendAccounting datagramSend;
   struct NetworkSendAccounting bulkSend;
+
+  struct NetworkInputSend   inputSendPool[NETWORK_INPUT_SEND_POOL_COUNT];
+  struct NetworkSend      * inputSendFree;
+  bool                      inputStreamBound;
 
   struct NetworkBulkStream * outboundBulk
     [LG_NET_SERVICE_CONTROL + 1U];
@@ -256,16 +295,22 @@ struct NetworkConnection
   LGNetStreamParser   receiveParser;
   uint8_t           * receiveData;
   uint8_t           * receivePayload;
+  LGNetStreamParser   inputReceiveParser;
+  uint8_t           * inputReceiveData;
+  uint8_t           * inputReceivePayload;
 };
 
 static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
     void * opaque, QUIC_CONNECTION_EVENT * event);
 static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
     void * opaque, QUIC_STREAM_EVENT * event);
+static QUIC_STATUS QUIC_API networkInputStreamCallback(HQUIC handle,
+    void * opaque, QUIC_STREAM_EVENT * event);
 static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
     void * opaque, QUIC_STREAM_EVENT * event);
 static QUIC_STATUS QUIC_API networkRejectedStreamCallback(HQUIC handle,
     void * opaque, QUIC_STREAM_EVENT * event);
+static bool networkConnectionOpenInputStream(NetworkConnection * this);
 
 static char * networkDuplicate(const char * value)
 {
@@ -288,6 +333,61 @@ static char * networkEndpoint(const char * address, uint16_t port)
 
   snprintf(endpoint, length, "[%s]:%u", address, port);
   return endpoint;
+}
+
+static uint8_t * networkSendData(struct NetworkSend * send)
+{
+  if (send->pooled)
+    return ((struct NetworkInputSend *)send)->data;
+  return (uint8_t *)(send + 1);
+}
+
+static struct NetworkSend * networkConnectionAllocSend(
+    NetworkConnection * this, LGNetService service, size_t dataSize)
+{
+  struct NetworkSend * send = NULL;
+  if (service == LG_NET_SERVICE_INPUT &&
+      dataSize <= NETWORK_INPUT_SEND_POOL_DATA_SIZE)
+  {
+    LG_LOCK(this->inputSendPoolLock);
+    send = this->inputSendFree;
+    if (send)
+      this->inputSendFree = send->next;
+    LG_UNLOCK(this->inputSendPoolLock);
+  }
+
+  if (!send)
+  {
+    send = malloc(sizeof(*send) + dataSize);
+    if (!send)
+      return NULL;
+    send->pooled = false;
+  }
+
+  send->connection          = this;
+  send->next                = NULL;
+  send->componentEpoch      = 0;
+  send->applicationSequence = 0;
+  send->accounted           = false;
+  send->lossReported        = false;
+  return send;
+}
+
+static void networkConnectionFreeSend(struct NetworkSend * send)
+{
+  if (!send)
+    return;
+  if (!send->pooled)
+  {
+    free(send);
+    return;
+  }
+
+  NetworkConnection * this = send->connection;
+  LG_LOCK(this->inputSendPoolLock);
+  send->next          = this->inputSendFree;
+  this->inputSendFree = send;
+  LG_UNLOCK(this->inputSendPoolLock);
 }
 
 static bool networkGuestText(char * destination, size_t capacity,
@@ -347,7 +447,8 @@ static bool networkCapabilityOfferValid(
       capability->flags & LG_NET_CAPABILITY_SELECTED ||
       capability->versionMin < version->minimum ||
       capability->versionMax > version->maximum ||
-      capability->maxBidirectionalStreams ||
+      capability->maxBidirectionalStreams !=
+        (capability->service == LG_NET_SERVICE_INPUT ? 1U : 0U) ||
       capability->maxUnidirectionalStreams > NETWORK_MAX_PEER_STREAMS ||
       (!!(capability->flags & LG_NET_CAPABILITY_BULK) !=
         !!capability->maxUnidirectionalStreams) ||
@@ -735,7 +836,9 @@ static bool networkConnectionSendCanResumeNL(
   if (atomic_load_explicit(&this->stopping, memory_order_acquire) ||
       !atomic_load_explicit(&this->sessionValid, memory_order_acquire) ||
       (delivery == NETWORK_PACKET_DELIVERY_RELIABLE &&
-        !this->controlStream) ||
+        (service == LG_NET_SERVICE_INPUT ?
+          (!this->inputStream || !this->inputStreamBound) :
+          !this->controlStream)) ||
       (delivery == NETWORK_PACKET_DELIVERY_DATAGRAM &&
         (!this->datagramSendEnabled ||
           blockedBytes > this->maxDatagramSendLength)) ||
@@ -791,10 +894,11 @@ static uint16_t networkConnectionReadyServicesNL(
 }
 
 static uint16_t networkConnectionReleaseSendNL(
-    NetworkConnection * this, const struct NetworkSend * send)
+    NetworkConnection * this, struct NetworkSend * send)
 {
   if (!send->accounted)
     return 0;
+  send->accounted = false;
 
   if (send->service >= NETWORK_SEND_SERVICE_COUNT)
   {
@@ -847,6 +951,115 @@ static void networkConnectionNotifySendReady(NetworkConnection * this,
   }
 }
 
+static LG_TransportStatus networkConnectionSendInputPacket(
+    NetworkConnection * this, uint16_t messageType, uint16_t serviceVersion,
+    LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
+    const void * payload, uint32_t payloadLength)
+{
+  const size_t         packetSize = LG_NET_ENVELOPE_WIRE_SIZE +
+    payloadLength;
+  struct NetworkSend * send       = networkConnectionAllocSend(
+      this, LG_NET_SERVICE_INPUT, packetSize);
+  if (!send)
+    return LG_TRANSPORT_ERROR;
+  uint8_t            * data       = networkSendData(send);
+
+  LGNetPacketParameters parameters;
+  lgNetPacketParametersInit(&parameters, LG_NET_SERVICE_INPUT, messageType,
+      serviceVersion, LG_NET_MESSAGE_VERSION_CURRENT);
+  parameters.flags          = flags | LG_NET_ENVELOPE_RELIABLE;
+  parameters.componentEpoch = componentEpoch;
+  parameters.requestID      = requestID;
+
+  LG_LOCK(this->inputStreamLock);
+  LG_LOCK(this->lock);
+  HQUIC          stream       = this->inputStream;
+  const uint16_t inputMask    = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+  const bool     serviceReady =
+    (this->receivedServices & inputMask) &&
+    (this->reliableServices & inputMask) &&
+    this->serviceVersions[LG_NET_SERVICE_INPUT] == serviceVersion &&
+    this->inputStreamBound;
+  if (!stream ||
+      !atomic_load_explicit(&this->sessionValid, memory_order_acquire))
+  {
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
+    return LG_TRANSPORT_DISCONNECTED;
+  }
+  if (!serviceReady ||
+      payloadLength > this->serviceMaxPayload[LG_NET_SERVICE_INPUT])
+  {
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
+    return LG_TRANSPORT_UNAVAILABLE;
+  }
+  if (this->inputSendSequence == UINT64_MAX)
+  {
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
+    return LG_TRANSPORT_ERROR;
+  }
+
+  const LG_TransportStatus reserveStatus =
+    networkConnectionReserveSendNL(this, LG_NET_SERVICE_INPUT,
+      NETWORK_PACKET_DELIVERY_RELIABLE, packetSize);
+  if (reserveStatus != LG_TRANSPORT_OK)
+  {
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
+    return reserveStatus;
+  }
+
+  parameters.sessionEpoch = this->sessionEpoch;
+  parameters.sequence     = ++this->inputSendSequence;
+  send->service           = LG_NET_SERVICE_INPUT;
+  send->length            = (uint32_t)packetSize;
+  send->delivery          = NETWORK_PACKET_DELIVERY_RELIABLE;
+  send->accounted         = true;
+  LG_UNLOCK(this->lock);
+
+  size_t wireSize;
+  if (!lgNetPacketConstruct(data, packetSize, &wireSize,
+        &parameters, payload, payloadLength) || wireSize != packetSize)
+  {
+    LG_LOCK(this->lock);
+    --this->inputSendSequence;
+    const uint16_t ready = networkConnectionReleaseSendNL(this, send);
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
+    networkConnectionNotifySendReady(this, ready, 0, 0);
+    return LG_TRANSPORT_ERROR;
+  }
+
+  send->buffer.Buffer = data;
+  send->buffer.Length = (uint32_t)packetSize;
+  const QUIC_STATUS status = this->api->StreamSend(stream,
+      &send->buffer, 1, QUIC_SEND_FLAG_PRIORITY_WORK, send);
+  uint16_t          ready  = 0;
+  if (QUIC_FAILED(status))
+  {
+    LG_LOCK(this->lock);
+    --this->inputSendSequence;
+    ready = networkConnectionReleaseSendNL(this, send);
+    LG_UNLOCK(this->lock);
+  }
+  LG_UNLOCK(this->inputStreamLock);
+
+  if (QUIC_FAILED(status))
+  {
+    networkConnectionFreeSend(send);
+    networkConnectionNotifySendReady(this, ready, 0, 0);
+    return LG_TRANSPORT_ERROR;
+  }
+  return LG_TRANSPORT_OK;
+}
+
 static LG_TransportStatus networkConnectionSendPacket(
     NetworkConnection * this,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
@@ -867,6 +1080,11 @@ static LG_TransportStatus networkConnectionSendPacket(
       atomic_load_explicit(&this->stopping, memory_order_acquire))
     return LG_TRANSPORT_ERROR;
 
+  if (service == LG_NET_SERVICE_INPUT && !allowConnecting)
+    return networkConnectionSendInputPacket(this, messageType,
+        serviceVersion, flags, componentEpoch, requestID,
+        payload, payloadLength);
+
   const size_t packetSize = LG_NET_ENVELOPE_WIRE_SIZE +
     payloadLength;
 
@@ -876,6 +1094,12 @@ static LG_TransportStatus networkConnectionSendPacket(
   parameters.flags          = flags | LG_NET_ENVELOPE_RELIABLE;
   parameters.componentEpoch = componentEpoch;
   parameters.requestID      = requestID;
+
+  struct NetworkSend * send = networkConnectionAllocSend(
+      this, service, packetSize);
+  if (!send)
+    return LG_TRANSPORT_ERROR;
+  uint8_t            * data = networkSendData(send);
 
   LG_LOCK(this->lock);
   HQUIC          stream           = this->controlStream;
@@ -892,16 +1116,19 @@ static LG_TransportStatus networkConnectionSendPacket(
         !atomic_load_explicit(&this->sessionValid, memory_order_acquire)))
   {
     LG_UNLOCK(this->lock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_DISCONNECTED;
   }
   if (!serviceReady || payloadLength > maxPayloadLength)
   {
     LG_UNLOCK(this->lock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_UNAVAILABLE;
   }
   if (this->sendSequence == UINT64_MAX)
   {
     LG_UNLOCK(this->lock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_ERROR;
   }
 
@@ -911,23 +1138,8 @@ static LG_TransportStatus networkConnectionSendPacket(
   if (reserveStatus != LG_TRANSPORT_OK)
   {
     LG_UNLOCK(this->lock);
+    networkConnectionFreeSend(send);
     return reserveStatus;
-  }
-
-  struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
-  if (!send)
-  {
-    const struct NetworkSend rollback =
-    {
-      .service   = service,
-      .length    = (uint32_t)packetSize,
-      .delivery  = NETWORK_PACKET_DELIVERY_RELIABLE,
-      .accounted = true,
-    };
-    const uint16_t ready = networkConnectionReleaseSendNL(this, &rollback);
-    LG_UNLOCK(this->lock);
-    networkConnectionNotifySendReady(this, ready, 0, 0);
-    return LG_TRANSPORT_ERROR;
   }
 
   parameters.sessionEpoch = this->sessionEpoch;
@@ -937,18 +1149,18 @@ static LG_TransportStatus networkConnectionSendPacket(
   send->delivery          = NETWORK_PACKET_DELIVERY_RELIABLE;
   send->accounted         = true;
   size_t wireSize;
-  if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
+  if (!lgNetPacketConstruct(data, packetSize, &wireSize,
         &parameters, payload, payloadLength) || wireSize != packetSize)
   {
     --this->sendSequence;
     const uint16_t ready = networkConnectionReleaseSendNL(this, send);
     LG_UNLOCK(this->lock);
-    free(send);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, ready, 0, 0);
     return LG_TRANSPORT_ERROR;
   }
 
-  send->buffer.Buffer = send->data;
+  send->buffer.Buffer = data;
   send->buffer.Length = (uint32_t)packetSize;
 
   const QUIC_STATUS status = this->api->StreamSend(stream,
@@ -963,7 +1175,7 @@ static LG_TransportStatus networkConnectionSendPacket(
 
   if (QUIC_FAILED(status))
   {
-    free(send);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, ready, 0, 0);
     return LG_TRANSPORT_ERROR;
   }
@@ -1096,11 +1308,16 @@ static bool networkConnectionHandleCapability(NetworkConnection * this,
       capability.maxPayloadLength > this->maxPayloadLength ||
       capability.maxDatagramPayload > offered.maxDatagramPayload ||
       capability.maxDatagramPayload > this->maxDatagramPayload ||
+      (capability.service == LG_NET_SERVICE_INPUT &&
+        (capability.maxPayloadLength < NETWORK_MAX_INPUT_PAYLOAD ||
+          ((selectedFlags & LG_NET_CAPABILITY_DATAGRAM) &&
+            capability.maxDatagramPayload < NETWORK_MAX_INPUT_PAYLOAD))) ||
       capability.maxBidirectionalStreams >
         offered.maxBidirectionalStreams ||
       capability.maxUnidirectionalStreams >
         offered.maxUnidirectionalStreams ||
-      capability.maxBidirectionalStreams ||
+      capability.maxBidirectionalStreams !=
+        (capability.service == LG_NET_SERVICE_INPUT ? 1U : 0U) ||
       (!!(selectedFlags & LG_NET_CAPABILITY_BULK) !=
         !!capability.maxUnidirectionalStreams) ||
       capability.maxUnidirectionalStreams >
@@ -1122,11 +1339,13 @@ static bool networkConnectionHandleCapability(NetworkConnection * this,
     this->bulkServices       |= UINT16_C(1) << service;
     this->maxPeerBulkStreams += capability.maxUnidirectionalStreams;
   }
-  this->serviceVersions[service]             = capability.versionMin;
-  this->serviceMaxUnidirectional[service]    =
+  this->serviceVersions[service]          = capability.versionMin;
+  this->serviceMaxBidirectional[service]  =
+    capability.maxBidirectionalStreams;
+  this->serviceMaxUnidirectional[service] =
     capability.maxUnidirectionalStreams;
-  this->serviceMaxPayload[service]           = capability.maxPayloadLength;
-  this->serviceMaxDatagram[service]          =
+  this->serviceMaxPayload[service]        = capability.maxPayloadLength;
+  this->serviceMaxDatagram[service]       =
     capability.maxDatagramPayload;
   ++this->receivedCapabilities;
   LG_UNLOCK(this->lock);
@@ -1154,12 +1373,14 @@ static bool networkConnectionRequiredCapabilitiesSelected(
 static bool networkConnectionReadyToActivateNL(
     const NetworkConnection * this)
 {
+  const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
   return this->helloAcknowledged &&
     this->authenticationComplete &&
     this->capabilitiesComplete &&
     this->guestInfoReceived &&
     this->receivedCapabilities == this->expectedCapabilities &&
-    networkConnectionRequiredCapabilitiesSelected(this);
+    networkConnectionRequiredCapabilitiesSelected(this) &&
+    (!(this->receivedServices & inputMask) || this->inputStreamBound);
 }
 
 static void networkConnectionSetSessionFeatures(NetworkConnection * this)
@@ -1584,6 +1805,7 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
         return false;
 
       bool ready;
+      bool openInput;
       LG_LOCK(this->lock);
       const bool valid = !this->capabilitiesComplete &&
         this->helloAcknowledged &&
@@ -1591,11 +1813,16 @@ static bool networkConnectionHandleCore(NetworkConnection * this,
         this->receivedCapabilities == this->expectedCapabilities &&
         networkConnectionRequiredCapabilitiesSelected(this);
       this->capabilitiesComplete = valid;
+      openInput                  = valid &&
+        (this->receivedServices &
+          (UINT16_C(1) << LG_NET_SERVICE_INPUT));
       ready                      =
         valid && networkConnectionReadyToActivateNL(this);
       if (ready)
         networkConnectionSetSessionFeatures(this);
       LG_UNLOCK(this->lock);
+      if (openInput && !networkConnectionOpenInputStream(this))
+        return false;
       if (ready)
         networkConnectionReady(this);
       return valid;
@@ -1765,7 +1992,9 @@ static bool networkConnectionDrainReceive(NetworkConnection * this)
     if (sequenceValid)
       this->receiveSequence = packet.envelope.sequence;
     LG_UNLOCK(this->lock);
-    if (!sequenceValid || !networkConnectionValidateControl(this, &packet) ||
+    if (!sequenceValid ||
+        packet.envelope.service == LG_NET_SERVICE_INPUT ||
+        !networkConnectionValidateControl(this, &packet) ||
         !networkConnectionHandlePacket(this, &packet,
           NETWORK_PACKET_DELIVERY_RELIABLE) ||
         !lgNetStreamParserConsume(&this->receiveParser))
@@ -1800,6 +2029,80 @@ static bool networkConnectionReceive(NetworkConnection * this,
   }
 
   return networkConnectionDrainReceive(this);
+}
+
+static bool networkInputStreamDrainReceive(NetworkConnection * this)
+{
+  for (;;)
+  {
+    LGNetStreamPacket       streamPacket;
+    const LGNetStreamResult result = lgNetStreamParserNext(
+        &this->inputReceiveParser, &streamPacket, NULL);
+    if (result == LG_NET_STREAM_NEED_DATA)
+      return true;
+    if (result != LG_NET_STREAM_PACKET)
+      return false;
+
+    LGNetPacketView packet =
+    {
+      .envelope      = streamPacket.envelope,
+      .payload       = streamPacket.payload[0].data,
+      .payloadLength = streamPacket.payloadLength,
+      .wireSize      = streamPacket.wireSize,
+    };
+    if (streamPacket.payload[1].size)
+    {
+      memcpy(this->inputReceivePayload, streamPacket.payload[0].data,
+          streamPacket.payload[0].size);
+      memcpy(this->inputReceivePayload + streamPacket.payload[0].size,
+          streamPacket.payload[1].data, streamPacket.payload[1].size);
+      packet.payload = this->inputReceivePayload;
+    }
+
+    LG_LOCK(this->lock);
+    const bool sequenceValid = this->inputStreamBound &&
+      this->inputReceiveSequence != UINT64_MAX &&
+      packet.envelope.sequence == this->inputReceiveSequence + 1U;
+    if (sequenceValid)
+      this->inputReceiveSequence = packet.envelope.sequence;
+    LG_UNLOCK(this->lock);
+    if (!sequenceValid ||
+        packet.envelope.service != LG_NET_SERVICE_INPUT ||
+        !networkConnectionValidateControl(this, &packet) ||
+        !networkConnectionHandlePacket(this, &packet,
+          NETWORK_PACKET_DELIVERY_RELIABLE) ||
+        !lgNetStreamParserConsume(&this->inputReceiveParser))
+      return false;
+  }
+}
+
+static bool networkInputStreamReceive(NetworkConnection * this,
+    const QUIC_BUFFER * buffers, uint32_t count)
+{
+  if (count && !buffers)
+    return false;
+
+  for (uint32_t i = 0; i < count; ++i)
+  {
+    if (buffers[i].Length && !buffers[i].Buffer)
+      return false;
+    size_t offset = 0;
+    while (offset < buffers[i].Length)
+    {
+      size_t accepted;
+      if (!lgNetStreamParserAppend(&this->inputReceiveParser,
+            buffers[i].Buffer + offset, buffers[i].Length - offset,
+            &accepted))
+        return false;
+      offset += accepted;
+      if (!networkInputStreamDrainReceive(this))
+        return false;
+      if (!accepted && offset < buffers[i].Length)
+        return false;
+    }
+  }
+
+  return networkInputStreamDrainReceive(this);
 }
 
 static void networkBulkStreamFree(struct NetworkBulkStream * stream)
@@ -2099,6 +2402,88 @@ static bool networkBulkStreamQueueReceive(struct NetworkBulkStream * stream,
   }
 
   lgSignalEvent(this->bulkReceiveEvent);
+  return true;
+}
+
+static bool networkConnectionOpenInputStream(NetworkConnection * this)
+{
+  LG_LOCK(this->inputStreamLock);
+  LG_LOCK(this->lock);
+  HQUIC          connection = this->connection;
+  const uint16_t inputMask  = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+  const bool     valid      = connection && !this->inputStream &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire) &&
+    this->capabilitiesComplete &&
+    (this->receivedServices & inputMask) &&
+    (this->reliableServices & inputMask) &&
+    this->serviceMaxBidirectional[LG_NET_SERVICE_INPUT] == 1U;
+  LG_UNLOCK(this->lock);
+  if (!valid)
+  {
+    LG_UNLOCK(this->inputStreamLock);
+    return false;
+  }
+
+  HQUIC       stream = NULL;
+  QUIC_STATUS status = this->api->StreamOpen(connection,
+      QUIC_STREAM_OPEN_FLAG_NONE, networkInputStreamCallback, this, &stream);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic input StreamOpen failed: 0x%08x",
+        (unsigned)status);
+    LG_UNLOCK(this->inputStreamLock);
+    return false;
+  }
+
+  const uint16_t priority = UINT16_MAX;
+  status = this->api->SetParam(stream, QUIC_PARAM_STREAM_PRIORITY,
+      sizeof(priority), &priority);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic input stream priority failed: 0x%08x",
+        (unsigned)status);
+    this->api->StreamClose(stream);
+    LG_UNLOCK(this->inputStreamLock);
+    return false;
+  }
+
+  LG_LOCK(this->lock);
+  const bool stateValid = this->connection == connection &&
+    !this->inputStream &&
+    !atomic_load_explicit(&this->stopping, memory_order_acquire);
+  if (stateValid)
+    this->inputStream = stream;
+  LG_UNLOCK(this->lock);
+  LG_UNLOCK(this->inputStreamLock);
+  if (!stateValid)
+  {
+    this->api->StreamClose(stream);
+    return false;
+  }
+
+  status = this->api->StreamStart(stream,
+      QUIC_STREAM_START_FLAG_IMMEDIATE |
+        QUIC_STREAM_START_FLAG_SHUTDOWN_ON_FAIL |
+        QUIC_STREAM_START_FLAG_PRIORITY_WORK);
+  if (QUIC_FAILED(status))
+  {
+    DEBUG_ERROR("MsQuic input StreamStart failed: 0x%08x",
+        (unsigned)status);
+    LG_LOCK(this->inputStreamLock);
+    LG_LOCK(this->lock);
+    const bool closeStream = this->inputStream == stream;
+    if (this->inputStream == stream)
+    {
+      this->inputStream      = NULL;
+      this->inputStreamBound = false;
+    }
+    LG_UNLOCK(this->lock);
+    LG_UNLOCK(this->inputStreamLock);
+    if (closeStream)
+      this->api->StreamClose(stream);
+    return false;
+  }
+
   return true;
 }
 
@@ -2554,19 +2939,38 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
     }
 
     case QUIC_CONNECTION_EVENT_DATAGRAM_SEND_STATE_CHANGED:
-      if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(
-            event->DATAGRAM_SEND_STATE_CHANGED.State))
+    {
+      struct NetworkSend             * send       =
+        event->DATAGRAM_SEND_STATE_CHANGED.ClientContext;
+      const QUIC_DATAGRAM_SEND_STATE   state      =
+        event->DATAGRAM_SEND_STATE_CHANGED.State;
+      const bool                       lost       =
+        state == QUIC_DATAGRAM_SEND_LOST_SUSPECT ||
+        state == QUIC_DATAGRAM_SEND_LOST_DISCARDED ||
+        state == QUIC_DATAGRAM_SEND_CANCELED;
+      const bool                       reportLoss =
+        lost && !send->lossReported;
+      uint16_t                         ready      = 0;
+      if (reportLoss)
+        send->lossReported = true;
+      if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(state) ||
+          (send->service == LG_NET_SERVICE_INPUT &&
+            state == QUIC_DATAGRAM_SEND_SENT))
       {
-        struct NetworkSend * send =
-          event->DATAGRAM_SEND_STATE_CHANGED.ClientContext;
         LG_LOCK(this->lock);
-        const uint16_t ready =
-          networkConnectionReleaseSendNL(this, send);
+        if (send->accounted)
+          ready = networkConnectionReleaseSendNL(this, send);
         LG_UNLOCK(this->lock);
-        free(send);
-        networkConnectionNotifySendReady(this, 0, ready, 0);
       }
+      if (reportLoss && this->datagramLost)
+        this->datagramLost(this->opaque, send->service,
+            send->componentEpoch, send->applicationSequence);
+      if (ready)
+        networkConnectionNotifySendReady(this, 0, ready, 0);
+      if (QUIC_DATAGRAM_SEND_STATE_IS_FINAL(state))
+        networkConnectionFreeSend(send);
       return QUIC_STATUS_SUCCESS;
+    }
 
     case QUIC_CONNECTION_EVENT_PEER_CERTIFICATE_RECEIVED:
       return networkConnectionCertificate(this, event);
@@ -2618,7 +3022,7 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
       LG_LOCK(this->lock);
       const uint16_t ready = networkConnectionReleaseSendNL(this, send);
       LG_UNLOCK(this->lock);
-      free(send);
+      networkConnectionFreeSend(send);
       networkConnectionNotifySendReady(this, ready, 0, 0);
       return QUIC_STATUS_SUCCESS;
     }
@@ -2653,6 +3057,163 @@ static QUIC_STATUS QUIC_API networkStreamCallback(HQUIC handle,
       if (this->controlStream == handle)
         this->controlStream = NULL;
       LG_UNLOCK(this->lock);
+      this->api->StreamClose(handle);
+      return QUIC_STATUS_SUCCESS;
+
+    default:
+      return QUIC_STATUS_SUCCESS;
+  }
+}
+
+static QUIC_STATUS QUIC_API networkInputStreamCallback(HQUIC handle,
+    void * opaque, QUIC_STREAM_EVENT * event)
+{
+  NetworkConnection * this = opaque;
+
+  switch (event->Type)
+  {
+    case QUIC_STREAM_EVENT_START_COMPLETE:
+    {
+      if (QUIC_FAILED(event->START_COMPLETE.Status))
+      {
+        DEBUG_ERROR("MsQuic input stream start failed: 0x%08x",
+            (unsigned)event->START_COMPLETE.Status);
+        LG_LOCK(this->inputStreamLock);
+        LG_LOCK(this->lock);
+        const bool closeStream = this->inputStream == handle;
+        if (closeStream)
+        {
+          this->inputStream      = NULL;
+          this->inputStreamBound = false;
+        }
+        LG_UNLOCK(this->lock);
+        LG_UNLOCK(this->inputStreamLock);
+        if (closeStream)
+          this->api->StreamClose(handle);
+        networkConnectionProtocolFailure(this);
+        return QUIC_STATUS_SUCCESS;
+      }
+      if ((event->START_COMPLETE.ID & 3U) != 0U)
+      {
+        this->api->StreamShutdown(handle,
+            QUIC_STREAM_SHUTDOWN_FLAG_ABORT, 0);
+        networkConnectionProtocolFailure(this);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      uint64_t sessionEpoch;
+      LG_LOCK(this->lock);
+      const bool stateValid = this->inputStream == handle &&
+        !atomic_load_explicit(&this->stopping, memory_order_acquire) &&
+        this->capabilitiesComplete;
+      sessionEpoch = this->sessionEpoch;
+      LG_UNLOCK(this->lock);
+      if (!stateValid)
+      {
+        this->api->StreamShutdown(handle,
+            QUIC_STREAM_SHUTDOWN_FLAG_ABORT, 0);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      LGNetStreamBinding binding;
+      lgNetStreamBindingInit(&binding, LG_NET_SERVICE_INPUT,
+          LG_NET_ROLE_CLIENT, event->START_COMPLETE.ID, sessionEpoch, 0);
+      struct NetworkSend * send = networkConnectionAllocSend(this,
+          LG_NET_SERVICE_INPUT, LG_NET_STREAM_BINDING_WIRE_SIZE);
+      uint8_t            * data = send ? networkSendData(send) : NULL;
+      if (!send || !lgNetStreamBindingEncode(data,
+            LG_NET_STREAM_BINDING_WIRE_SIZE, &binding))
+      {
+        networkConnectionFreeSend(send);
+        networkConnectionProtocolFailure(this);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      send->buffer.Buffer = data;
+      send->buffer.Length = LG_NET_STREAM_BINDING_WIRE_SIZE;
+      send->service       = LG_NET_SERVICE_INPUT;
+      send->length        = LG_NET_STREAM_BINDING_WIRE_SIZE;
+      send->delivery      = NETWORK_PACKET_DELIVERY_RELIABLE;
+      send->accounted     = false;
+
+      LG_LOCK(this->inputStreamLock);
+      LG_LOCK(this->lock);
+      const bool sendValid = this->inputStream == handle &&
+        this->sessionEpoch == sessionEpoch &&
+        !atomic_load_explicit(&this->stopping, memory_order_acquire);
+      LG_UNLOCK(this->lock);
+      const QUIC_STATUS status = sendValid ?
+        this->api->StreamSend(handle, &send->buffer, 1,
+          QUIC_SEND_FLAG_PRIORITY_WORK, send) : QUIC_STATUS_ABORTED;
+      bool              ready  = false;
+      LG_LOCK(this->lock);
+      if (QUIC_SUCCEEDED(status))
+      {
+        const bool stateCurrent = this->inputStream == handle &&
+          this->sessionEpoch == sessionEpoch &&
+          !atomic_load_explicit(&this->stopping, memory_order_acquire);
+        this->inputStreamBound = stateCurrent;
+        ready                  = stateCurrent &&
+          networkConnectionReadyToActivateNL(this);
+        if (ready)
+          networkConnectionSetSessionFeatures(this);
+      }
+      LG_UNLOCK(this->lock);
+      LG_UNLOCK(this->inputStreamLock);
+
+      if (QUIC_FAILED(status))
+      {
+        networkConnectionFreeSend(send);
+        if (sendValid)
+          networkConnectionProtocolFailure(this);
+        else
+          this->api->StreamShutdown(handle,
+              QUIC_STREAM_SHUTDOWN_FLAG_ABORT, 0);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      if (ready)
+        networkConnectionReady(this);
+      return QUIC_STATUS_SUCCESS;
+    }
+
+    case QUIC_STREAM_EVENT_RECEIVE:
+      if (!networkInputStreamReceive(
+            this, event->RECEIVE.Buffers, event->RECEIVE.BufferCount))
+      {
+        DEBUG_ERROR("Failed to process network input stream data");
+        networkConnectionProtocolFailure(this);
+      }
+      return QUIC_STATUS_SUCCESS;
+
+    case QUIC_STREAM_EVENT_SEND_COMPLETE:
+    {
+      struct NetworkSend * send = event->SEND_COMPLETE.ClientContext;
+      LG_LOCK(this->lock);
+      const uint16_t ready = networkConnectionReleaseSendNL(this, send);
+      LG_UNLOCK(this->lock);
+      networkConnectionFreeSend(send);
+      networkConnectionNotifySendReady(this, ready, 0, 0);
+      return QUIC_STATUS_SUCCESS;
+    }
+
+    case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+    case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
+    case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
+      if (!atomic_load_explicit(&this->stopping, memory_order_acquire))
+        networkConnectionProtocolFailure(this);
+      return QUIC_STATUS_SUCCESS;
+
+    case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+      LG_LOCK(this->inputStreamLock);
+      LG_LOCK(this->lock);
+      if (this->inputStream == handle)
+      {
+        this->inputStream      = NULL;
+        this->inputStreamBound = false;
+      }
+      LG_UNLOCK(this->lock);
+      LG_UNLOCK(this->inputStreamLock);
       this->api->StreamClose(handle);
       return QUIC_STATUS_SUCCESS;
 
@@ -2717,17 +3278,18 @@ static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
           event->START_COMPLETE.ID, sessionEpoch,
           LG_NET_STREAM_BINDING_UNIDIRECTIONAL |
             LG_NET_STREAM_BINDING_BULK);
-      struct NetworkSend * send = malloc(
-          sizeof(*send) + LG_NET_STREAM_BINDING_WIRE_SIZE);
-      if (!send || !lgNetStreamBindingEncode(send->data,
+      struct NetworkSend * send = networkConnectionAllocSend(this,
+          stream->service, LG_NET_STREAM_BINDING_WIRE_SIZE);
+      uint8_t            * data = send ? networkSendData(send) : NULL;
+      if (!send || !lgNetStreamBindingEncode(data,
             LG_NET_STREAM_BINDING_WIRE_SIZE, &binding))
       {
-        free(send);
+        networkConnectionFreeSend(send);
         networkConnectionProtocolFailure(this);
         return QUIC_STATUS_SUCCESS;
       }
 
-      send->buffer.Buffer = send->data;
+      send->buffer.Buffer = data;
       send->buffer.Length = LG_NET_STREAM_BINDING_WIRE_SIZE;
       send->service       = stream->service;
       send->length        = LG_NET_STREAM_BINDING_WIRE_SIZE;
@@ -2756,7 +3318,7 @@ static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
 
       if (QUIC_FAILED(status))
       {
-        free(send);
+        networkConnectionFreeSend(send);
         if (sendValid)
           networkConnectionProtocolFailure(this);
         else
@@ -2787,7 +3349,7 @@ static QUIC_STATUS QUIC_API networkBulkStreamCallback(HQUIC handle,
       LG_LOCK(this->lock);
       const uint16_t ready = networkConnectionReleaseSendNL(this, send);
       LG_UNLOCK(this->lock);
-      free(send);
+      networkConnectionFreeSend(send);
       networkConnectionNotifySendReady(this, 0, 0, ready);
       return QUIC_STATUS_SUCCESS;
     }
@@ -2849,9 +3411,19 @@ bool networkConnectionCreate(NetworkConnection ** result,
   }
 
   LG_LOCK_INIT(this->lock);
+  LG_LOCK_INIT(this->inputStreamLock);
+  LG_LOCK_INIT(this->inputSendPoolLock);
   LG_LOCK_INIT(this->stateCallbackLock);
   atomic_init(&this->stopping, false);
   atomic_init(&this->sessionValid, false);
+  for (size_t i = 0; i < NETWORK_INPUT_SEND_POOL_COUNT; ++i)
+  {
+    struct NetworkSend * send = &this->inputSendPool[i].send;
+    send->connection           = this;
+    send->pooled               = true;
+    send->next                 = this->inputSendFree;
+    this->inputSendFree        = send;
+  }
 
   uint16_t offeredBulkStreams = 0;
   for (uint32_t index = 0; index < params->capabilityCount; ++index)
@@ -2889,14 +3461,15 @@ bool networkConnectionCreate(NetworkConnection ** result,
     goto fail;
   }
 
-  this->port        = params->port;
-  this->knownHosts  = params->knownHosts;
-  this->trustPrompt = params->trustPrompt;
-  this->trustCancel = params->trustCancel;
-  this->packet      = params->packet;
-  this->state       = params->state;
-  this->sendReady   = params->sendReady;
-  this->opaque      = params->opaque;
+  this->port         = params->port;
+  this->knownHosts   = params->knownHosts;
+  this->trustPrompt  = params->trustPrompt;
+  this->trustCancel  = params->trustCancel;
+  this->packet       = params->packet;
+  this->state        = params->state;
+  this->sendReady    = params->sendReady;
+  this->datagramLost = params->datagramLost;
+  this->opaque       = params->opaque;
 
   this->connectEvent     = lgCreateEvent(false, 0);
   this->closeEvent       = lgCreateEvent(false, 0);
@@ -2910,11 +3483,17 @@ bool networkConnectionCreate(NetworkConnection ** result,
     goto fail;
   }
 
-  this->receiveData    = malloc(NETWORK_MAX_CONTROL_BUFFER);
-  this->receivePayload = malloc(NETWORK_MAX_CONTROL_PAYLOAD);
+  this->receiveData         = malloc(NETWORK_MAX_CONTROL_BUFFER);
+  this->receivePayload      = malloc(NETWORK_MAX_CONTROL_PAYLOAD);
+  this->inputReceiveData    = malloc(NETWORK_MAX_INPUT_BUFFER);
+  this->inputReceivePayload = malloc(NETWORK_MAX_INPUT_PAYLOAD);
   if (!this->receiveData || !this->receivePayload ||
+      !this->inputReceiveData || !this->inputReceivePayload ||
       !lgNetStreamParserInit(&this->receiveParser, this->receiveData,
-        NETWORK_MAX_CONTROL_BUFFER, NETWORK_MAX_CONTROL_PAYLOAD))
+        NETWORK_MAX_CONTROL_BUFFER, NETWORK_MAX_CONTROL_PAYLOAD) ||
+      !lgNetStreamParserInit(&this->inputReceiveParser,
+        this->inputReceiveData, NETWORK_MAX_INPUT_BUFFER,
+        NETWORK_MAX_INPUT_PAYLOAD))
   {
     DEBUG_ERROR("Failed to initialize the network receive buffers");
     goto fail;
@@ -3059,7 +3638,11 @@ void networkConnectionDestroy(NetworkConnection ** connection)
   if (this->connectEvent)
     lgFreeEvent(this->connectEvent);
   LG_LOCK_FREE(this->stateCallbackLock);
+  LG_LOCK_FREE(this->inputSendPoolLock);
+  LG_LOCK_FREE(this->inputStreamLock);
   LG_LOCK_FREE(this->lock);
+  free(this->inputReceivePayload);
+  free(this->inputReceiveData);
   free(this->receivePayload);
   free(this->receiveData);
   free(this->endpoint);
@@ -3092,6 +3675,8 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->connecting             = true;
   this->sessionEpoch           = 0;
   this->sendSequence           = 0;
+  this->inputSendSequence      = 0;
+  this->inputReceiveSequence   = 0;
   this->datagramSendSequence   = 0;
   this->receiveSequence        = 0;
   this->protocolVersion        = 0;
@@ -3113,9 +3698,12 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   this->maxDatagramPayload     = 0;
   this->maxDatagramSendLength  = 0;
   this->datagramSendEnabled    = false;
+  this->inputStreamBound       = false;
   networkConnectionResetSendAccountingNL(this);
   networkConnectionClearAuthProofNL(this);
   memset(this->serviceVersions, 0, sizeof(this->serviceVersions));
+  memset(this->serviceMaxBidirectional, 0,
+      sizeof(this->serviceMaxBidirectional));
   memset(this->serviceMaxUnidirectional, 0,
       sizeof(this->serviceMaxUnidirectional));
   memset(this->servicePeerBulkStreams, 0,
@@ -3123,6 +3711,7 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
   memset(this->serviceMaxPayload, 0, sizeof(this->serviceMaxPayload));
   memset(this->serviceMaxDatagram, 0, sizeof(this->serviceMaxDatagram));
   lgNetStreamParserReset(&this->receiveParser);
+  lgNetStreamParserReset(&this->inputReceiveParser);
   memset(&this->session, 0, sizeof(this->session));
   snprintf(this->session.name, sizeof(this->session.name),
       "%s", this->endpoint);
@@ -3188,6 +3777,7 @@ void networkConnectionCancel(NetworkConnection * this)
     this->trustCancel(this->opaque);
 
   LG_LOCK(this->stateCallbackLock);
+  LG_LOCK(this->inputStreamLock);
   LG_LOCK(this->lock);
   HQUIC      connection         = this->connection;
   const bool certificatePending =
@@ -3202,6 +3792,7 @@ void networkConnectionCancel(NetworkConnection * this)
     this->connectFailed = true;
   }
   LG_UNLOCK(this->lock);
+  LG_UNLOCK(this->inputStreamLock);
   LG_UNLOCK(this->stateCallbackLock);
   if (certificatePending)
     this->api->ConnectionCertificateValidationComplete(connection, false,
@@ -3229,17 +3820,21 @@ void networkConnectionDisconnect(NetworkConnection * this)
   lgWaitEvent(this->closeEvent, TIMEOUT_INFINITE);
   lgWaitEvent(this->bulkReceiveIdle, TIMEOUT_INFINITE);
   LG_LOCK(this->stateCallbackLock);
+  LG_LOCK(this->inputStreamLock);
   LG_LOCK(this->lock);
   const bool ownsConnection = this->connection == connection;
   if (ownsConnection)
   {
     this->connection         = NULL;
     this->controlStream      = NULL;
+    this->inputStream        = NULL;
+    this->inputStreamBound   = false;
     this->certificatePending = false;
     networkConnectionResetSendAccountingNL(this);
     memset(this->pendingFingerprint, 0, sizeof(this->pendingFingerprint));
   }
   LG_UNLOCK(this->lock);
+  LG_UNLOCK(this->inputStreamLock);
 
   if (ownsConnection)
   {
@@ -3314,7 +3909,8 @@ LG_TransportStatus networkConnectionSend(NetworkConnection * this,
 LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,
     LGNetEnvelopeFlags flags, uint64_t componentEpoch, uint64_t requestID,
-    const void * payload, uint32_t payloadLength, bool discardIfBlocked)
+    const void * payload, uint32_t payloadLength,
+    uint64_t applicationSequence, bool discardIfBlocked)
 {
   if (!this || !networkConnectionValid(this))
     return LG_TRANSPORT_DISCONNECTED;
@@ -3342,6 +3938,15 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
   parameters.componentEpoch = componentEpoch;
   parameters.requestID      = requestID;
 
+  struct NetworkSend * send = networkConnectionAllocSend(
+      this, service, packetSize);
+  if (!send)
+    return LG_TRANSPORT_ERROR;
+  uint8_t            * data          = networkSendData(send);
+  const bool           inputDatagram = service == LG_NET_SERVICE_INPUT;
+
+  if (inputDatagram)
+    LG_LOCK(this->inputStreamLock);
   LG_LOCK(this->lock);
   const uint16_t serviceMask = UINT16_C(1) << service;
   HQUIC          connection  = this->connection;
@@ -3349,6 +3954,9 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
       !atomic_load_explicit(&this->sessionValid, memory_order_acquire))
   {
     LG_UNLOCK(this->lock);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_DISCONNECTED;
   }
   if (!(this->receivedServices & serviceMask) ||
@@ -3357,11 +3965,17 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
       payloadLength > this->serviceMaxDatagram[service])
   {
     LG_UNLOCK(this->lock);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_UNAVAILABLE;
   }
   if (this->datagramSendSequence == UINT64_MAX)
   {
     LG_UNLOCK(this->lock);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_ERROR;
   }
   if (!this->datagramSendEnabled ||
@@ -3379,6 +3993,9 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
           this->datagramSend.serviceBlockedBytes[service] : packetSize;
     }
     LG_UNLOCK(this->lock);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     return LG_TRANSPORT_UNAVAILABLE;
   }
 
@@ -3388,46 +4005,45 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
   if (reserveStatus != LG_TRANSPORT_OK)
   {
     LG_UNLOCK(this->lock);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     return reserveStatus;
-  }
-
-  struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
-  if (!send)
-  {
-    const struct NetworkSend rollback =
-    {
-      .service   = service,
-      .length    = (uint32_t)packetSize,
-      .delivery  = NETWORK_PACKET_DELIVERY_DATAGRAM,
-      .accounted = true,
-    };
-    const uint16_t ready = networkConnectionReleaseSendNL(this, &rollback);
-    LG_UNLOCK(this->lock);
-    networkConnectionNotifySendReady(this, 0, ready, 0);
-    return LG_TRANSPORT_ERROR;
   }
 
   parameters.sessionEpoch = this->sessionEpoch;
   parameters.sequence     = ++this->datagramSendSequence;
-  send->service           = service;
-  send->length            = (uint32_t)packetSize;
-  send->delivery          = NETWORK_PACKET_DELIVERY_DATAGRAM;
-  send->accounted         = true;
+
+  send->service             = service;
+  send->length              = (uint32_t)packetSize;
+  send->componentEpoch      = componentEpoch;
+  send->applicationSequence = applicationSequence;
+  send->delivery            = NETWORK_PACKET_DELIVERY_DATAGRAM;
+  send->accounted           = true;
+  if (inputDatagram)
+    LG_UNLOCK(this->lock);
   size_t wireSize;
-  if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
+  if (!lgNetPacketConstruct(data, packetSize, &wireSize,
         &parameters, payload, payloadLength) || wireSize != packetSize)
   {
-    --this->datagramSendSequence;
+    if (inputDatagram)
+      LG_LOCK(this->lock);
+    if (!inputDatagram)
+      --this->datagramSendSequence;
     const uint16_t ready = networkConnectionReleaseSendNL(this, send);
     LG_UNLOCK(this->lock);
-    free(send);
+    if (inputDatagram)
+      LG_UNLOCK(this->inputStreamLock);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, 0, ready, 0);
     return LG_TRANSPORT_ERROR;
   }
 
-  send->buffer.Buffer = send->data;
+  send->buffer.Buffer = data;
   send->buffer.Length = (uint32_t)packetSize;
   QUIC_SEND_FLAGS sendFlags = QUIC_SEND_FLAG_PRIORITY_WORK;
+  if (service == LG_NET_SERVICE_INPUT)
+    sendFlags |= QUIC_SEND_FLAG_DGRAM_PRIORITY;
   if (discardIfBlocked)
     sendFlags |= QUIC_SEND_FLAG_CANCEL_ON_BLOCKED;
   const QUIC_STATUS status = this->api->DatagramSend(connection,
@@ -3435,14 +4051,26 @@ LG_TransportStatus networkConnectionSendDatagram(NetworkConnection * this,
   uint16_t          ready  = 0;
   if (QUIC_FAILED(status))
   {
-    --this->datagramSendSequence;
+    if (inputDatagram)
+      LG_LOCK(this->lock);
+    if (!inputDatagram)
+      --this->datagramSendSequence;
     ready = networkConnectionReleaseSendNL(this, send);
+    if (inputDatagram)
+      LG_UNLOCK(this->lock);
   }
-  LG_UNLOCK(this->lock);
+  if (inputDatagram)
+  {
+    LG_UNLOCK(this->inputStreamLock);
+  }
+  else
+  {
+    LG_UNLOCK(this->lock);
+  }
 
   if (QUIC_FAILED(status))
   {
-    free(send);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, 0, ready, 0);
     return LG_TRANSPORT_ERROR;
   }
@@ -3537,10 +4165,11 @@ retry:
     return reserveStatus;
   }
 
-  struct NetworkSend * send = malloc(sizeof(*send) + packetSize);
+  struct NetworkSend * send = networkConnectionAllocSend(
+      this, service, packetSize);
   if (!send)
   {
-    const struct NetworkSend rollback =
+    struct NetworkSend rollback =
     {
       .service   = service,
       .length    = (uint32_t)packetSize,
@@ -3559,19 +4188,20 @@ retry:
   send->length            = (uint32_t)packetSize;
   send->delivery          = NETWORK_PACKET_DELIVERY_BULK;
   send->accounted         = true;
-  size_t wireSize;
-  if (!lgNetPacketConstruct(send->data, packetSize, &wireSize,
+  uint8_t * data     = networkSendData(send);
+  size_t    wireSize = 0;
+  if (!lgNetPacketConstruct(data, packetSize, &wireSize,
         &parameters, payload, payloadLength) || wireSize != packetSize)
   {
     --stream->sendSequence;
     const uint16_t ready = networkConnectionReleaseSendNL(this, send);
     LG_UNLOCK(this->lock);
-    free(send);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, 0, 0, ready);
     return LG_TRANSPORT_ERROR;
   }
 
-  send->buffer.Buffer = send->data;
+  send->buffer.Buffer = data;
   send->buffer.Length = (uint32_t)packetSize;
   const QUIC_STATUS status = this->api->StreamSend(stream->handle,
       &send->buffer, 1, QUIC_SEND_FLAG_NONE, send);
@@ -3585,7 +4215,7 @@ retry:
 
   if (QUIC_FAILED(status))
   {
-    free(send);
+    networkConnectionFreeSend(send);
     networkConnectionNotifySendReady(this, 0, 0, ready);
     return LG_TRANSPORT_ERROR;
   }

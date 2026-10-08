@@ -27,6 +27,7 @@
 
 #include "CDebug.h"
 #include "CSRWLock.h"
+#include "InputPipeProtocol.h"
 #include "platform/CPlatformInfo.h"
 #include "VersionInfo.h"
 #include <LGProtocol/NetworkAuth.h>
@@ -74,7 +75,11 @@ namespace
   static constexpr uint32_t NETWORK_MAX_NEGOTIATED_PAYLOAD   =
     LG_NET_MAX_PAYLOAD_LENGTH;
   static constexpr uint32_t NETWORK_MAX_DATAGRAM_PAYLOAD     = 1136;
+  static constexpr uint32_t NETWORK_INPUT_MAX_PAYLOAD        =
+    LG_NET_INPUT_RELATIVE_WIRE_SIZE > LG_NET_INPUT_ABSOLUTE_WIRE_SIZE ?
+      LG_NET_INPUT_RELATIVE_WIRE_SIZE : LG_NET_INPUT_ABSOLUTE_WIRE_SIZE;
   static constexpr uint32_t NETWORK_INPUT_LEASE_MS           = 500;
+  static constexpr uint32_t NETWORK_INPUT_RECOVERY_LIMIT     = 4;
   static constexpr uint8_t  NETWORK_KEYBOARD_ROLLOVER        = 0x01;
   static constexpr uint16_t NETWORK_KEYBOARD_USAGE_PAGE      = 0x07;
   static constexpr size_t   NETWORK_KEYBOARD_KEY_COUNT       = 6;
@@ -110,6 +115,9 @@ namespace
       (LG_NET_ENVELOPE_WIRE_SIZE + LG_NET_MAX_PAYLOAD_LENGTH);
   static constexpr uint32_t NETWORK_SEND_RESUME_NUMERATOR        = 3;
   static constexpr uint32_t NETWORK_SEND_RESUME_DENOMINATOR      = 4;
+  static constexpr uint32_t NETWORK_INPUT_SEND_COUNT_MAX         = 128;
+  static constexpr uint64_t NETWORK_INPUT_SEND_BYTES_MAX         =
+    UINT64_C(1) * 1024U * 1024U;
 
   static constexpr uint32_t NETWORK_KEYBOARD_LED_MASK        =
     LG_NET_KEYBOARD_LED_NUM_LOCK    |
@@ -377,12 +385,26 @@ struct CNetworkServer::Impl
     uint32_t             length      = 0;
     Delivery             delivery    = Delivery::RELIABLE;
     bool                 accounted   = true;
+    bool                 inputAck    = false;
   };
 
   struct SendLimits
   {
     uint32_t count;
     uint64_t bytes;
+  };
+
+  struct InputPointerMotion
+  {
+    uint64_t            claimEpoch      = 0;
+    uint64_t            sequence        = 0;
+    int64_t             cumulativeX     = 0;
+    int64_t             cumulativeY     = 0;
+    uint16_t            absoluteX       = 0;
+    uint16_t            absoluteY       = 0;
+    LGNetPointerButtons previousButtons = 0;
+    bool                apply           = false;
+    bool                useAbsolute     = false;
   };
 
   struct SendAccounting
@@ -462,6 +484,9 @@ struct CNetworkServer::Impl
 
     Impl&                            owner;
     CSRWLock                         lock;
+    CSRWLock                         inputLock;
+    CSRWLock                         inputDispatchLock;
+    CSRWLock                         inputSendLock;
     HQUIC                            handle                       = nullptr;
     HQUIC                            controlStream                = nullptr;
     uint32_t                         client                       = 0;
@@ -499,18 +524,62 @@ struct CNetworkServer::Impl
 
     bool                             datagramSendEnabled          = false;
     bool                             closing                      = false;
+    uint32_t                         pins                         = 0;
+    bool                             detached                     = false;
+    bool                             cleanupComplete              = false;
     HandshakeState                   handshake                    =
       HandshakeState::WAITING_HELLO;
+
+    HQUIC                            inputStream                  = nullptr;
+    uint64_t                         inputStreamID                = 0;
+    uint64_t                         inputStreamSessionEpoch      = 0;
+    uint64_t                         inputStreamSendSequence      = 0;
+    uint64_t                         inputStreamReceiveSequence   = 0;
+    uint32_t                         inputStreamMaxPayload        = 0;
+    uint32_t                         inputDatagramLimit           = 0;
+    uint32_t                         inputStreamSendCount         = 0;
+    uint64_t                         inputStreamSendBytes         = 0;
+    uint16_t                         inputStreamServiceVersion    = 0;
+    bool                             inputStreamBound             = false;
+    bool                             inputClosing                 = false;
+
+    uint8_t                          inputBindingData[LG_NET_STREAM_BINDING_WIRE_SIZE] = {};
+    size_t                           inputBindingLength                                = 0;
+    LGNetStreamParser                inputReceiveParser                                = {};
+
+    std::vector<uint8_t>             inputReceiveData;
+    std::vector<uint8_t>             inputReceivePayload;
+    std::shared_ptr<CNetworkSession> inputSession;
+
+    LGNetSequenceTracker             inputDatagramReceive         = {};
     uint64_t                         inputClaimantID              = 0;
     uint64_t                         inputClaimEpoch              = 0;
     uint64_t                         inputReliableSequence        = 0;
     uint64_t                         inputDatagramSequence        = 0;
+    uint64_t                         inputMotionSequence          = 0;
+    int64_t                          inputCumulativeX             = 0;
+    int64_t                          inputCumulativeY             = 0;
+    uint16_t                         inputAbsoluteX               = 0;
+    uint16_t                         inputAbsoluteY               = 0;
     uint64_t                         inputLEDSequence             = 0;
+    uint64_t                         inputLEDCheckGeneration      = 0;
+    uint64_t                         inputAckClaimEpoch           = 0;
+    uint64_t                         inputAckRequestID            = 0;
     LGNetInputClaimFlags             inputFlags                   = 0;
+    LGNetInputStatusCode             inputAckStatus               =
+      LG_NET_INPUT_STATUS_ERROR;
     LGNetPointerButtons              inputPointerButtons          = 0;
     LGNetKeyboardLEDs                inputLEDState                = 0;
     uint8_t                          keyboardModifiers            = 0;
+    bool                             inputClaimPending            = false;
+    bool                             inputLEDCheckPending         = false;
+    bool                             inputLEDWaitForSendReady     = false;
+    bool                             inputMotionAbsolute          = false;
+    bool                             inputMotionBaseline          = false;
     bool                             inputLEDStateKnown           = false;
+    bool                             inputAckPending              = false;
+    bool                             inputAckSending              = false;
+    bool                             inputAckInFlight             = false;
     bool                             keyboardKeys[256]            = {};
 
     RecoveryRequest                  recoveryRequests[NETWORK_RECOVERY_REQUESTS] = {};
@@ -602,6 +671,7 @@ struct CNetworkServer::Impl
   std::vector<Connection *> connections;
   uint32_t                  nextClient         = 1;
   unsigned                  activeCallbacks    = 0;
+  unsigned                  activePins         = 0;
   bool                      stopping           = true;
   bool                      running            = false;
 
@@ -618,10 +688,119 @@ struct CNetworkServer::Impl
       CSRWExclusiveLock guard(lock);
       if (activeCallbacks)
         --activeCallbacks;
-      drained = stopping && connections.empty() && !activeCallbacks;
+      drained = stopping && connections.empty() && !activeCallbacks &&
+        !activePins;
     }
     if (drained && drainedEvent)
       SetEvent(drainedEvent);
+  }
+
+  void ReleaseConnectionPin(Connection& connection)
+  {
+    Connection * dispose = nullptr;
+    bool         drained = false;
+    {
+      CSRWExclusiveLock guard(lock);
+      if (!connection.pins || !activePins)
+      {
+        DEBUG_ERROR("Network client %u connection pin underflow",
+          connection.client);
+        return;
+      }
+      --connection.pins;
+      --activePins;
+      if (!connection.pins && connection.detached &&
+          connection.cleanupComplete)
+        dispose = &connection;
+      drained = stopping && connections.empty() && !activeCallbacks &&
+        !activePins;
+    }
+    delete dispose;
+    if (drained && drainedEvent)
+      SetEvent(drainedEvent);
+  }
+
+  struct ConnectionPin
+  {
+    ConnectionPin() = default;
+
+    ConnectionPin(Impl& owner, Connection& connection) :
+      owner(&owner), connection(&connection)
+    {
+    }
+
+    ConnectionPin(const ConnectionPin&) = delete;
+    ConnectionPin& operator=(const ConnectionPin&) = delete;
+
+    ConnectionPin(ConnectionPin&& other) noexcept :
+      owner(other.owner), connection(other.connection)
+    {
+      other.owner      = nullptr;
+      other.connection = nullptr;
+    }
+
+    ConnectionPin& operator=(ConnectionPin&& other) noexcept
+    {
+      if (this == &other)
+        return *this;
+      Reset();
+      owner            = other.owner;
+      connection       = other.connection;
+      other.owner      = nullptr;
+      other.connection = nullptr;
+      return *this;
+    }
+
+    ~ConnectionPin()
+    {
+      Reset();
+    }
+
+    explicit operator bool() const
+    {
+      return connection != nullptr;
+    }
+
+    Connection * operator->() const
+    {
+      return connection;
+    }
+
+    Connection& operator*() const
+    {
+      return *connection;
+    }
+
+    void Reset()
+    {
+      if (owner && connection)
+        owner->ReleaseConnectionPin(*connection);
+      owner      = nullptr;
+      connection = nullptr;
+    }
+
+    Impl       * owner      = nullptr;
+    Connection * connection = nullptr;
+  };
+
+  template<typename Peer>
+  ConnectionPin PinConnection(const Peer& peer)
+  {
+    CSRWExclusiveLock guard(lock);
+    if (stopping || !api)
+      return {};
+    for (Connection * connection : connections)
+    {
+      if (connection->client != peer.client ||
+          connection->generation != peer.generation ||
+          connection->detached)
+        continue;
+
+      ++connection->pins;
+      ++activePins;
+      return ConnectionPin(*this, *connection);
+    }
+    return {};
   }
 
   uint32_t AllocateClientLocked()
@@ -684,30 +863,24 @@ struct CNetworkServer::Impl
   bool AudioPeerInfo(const NetworkAudioPeer& peer,
     NetworkAudioPeerInfo& info)
   {
-    CSRWSharedLock guard(lock);
-    for (Connection * connection : connections)
-    {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return false;
 
-      CSRWSharedLock connectionGuard(connection->lock);
-      const uint16_t serviceMask =
-        UINT16_C(1) << LG_NET_SERVICE_AUDIO;
-      if (connection->closing ||
-          !PeerInfoAvailableLocked(*connection) ||
-          !(connection->selectedServices & serviceMask))
-        return false;
+    CSRWSharedLock connectionGuard(connection->lock);
+    const uint16_t serviceMask = UINT16_C(1) << LG_NET_SERVICE_AUDIO;
+    if (connection->closing ||
+        !PeerInfoAvailableLocked(*connection) ||
+        !(connection->selectedServices & serviceMask))
+      return false;
 
-      const LGNetCapability& capability =
-        connection->selectedCapabilities[LG_NET_SERVICE_AUDIO];
-      info.serviceVersion      = capability.versionMin;
-      info.capabilityFlags     = capability.flags;
-      info.maxReliablePayload  = capability.maxPayloadLength;
-      info.maxDatagramPayload  = capability.maxDatagramPayload;
-      return true;
-    }
-    return false;
+    const LGNetCapability& capability =
+      connection->selectedCapabilities[LG_NET_SERVICE_AUDIO];
+    info.serviceVersion     = capability.versionMin;
+    info.capabilityFlags    = capability.flags;
+    info.maxReliablePayload = capability.maxPayloadLength;
+    info.maxDatagramPayload = capability.maxDatagramPayload;
+    return true;
   }
 
   NetworkAudioSendResult SendAudio(
@@ -719,29 +892,25 @@ struct CNetworkServer::Impl
     if (service != LG_NET_SERVICE_AUDIO)
       return NetworkAudioSendResult::FAILED;
 
-    CSRWSharedLock guard(lock);
-    for (Connection * connection : connections)
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return NetworkAudioSendResult::FAILED;
+
+    const SendResult result = datagram ?
+      TrySendDatagram(*connection, service, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength, true) :
+      TrySendPacket(*connection, service, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength);
+    switch (result)
     {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+      case SendResult::SENT:
+        return NetworkAudioSendResult::ACCEPTED;
 
-      const SendResult result = datagram ?
-        TrySendDatagram(*connection, service, messageType, flags,
-          componentEpoch, requestID, payload, payloadLength, true) :
-        TrySendPacket(*connection, service, messageType, flags,
-          componentEpoch, requestID, payload, payloadLength);
-      switch (result)
-      {
-        case SendResult::SENT:
-          return NetworkAudioSendResult::ACCEPTED;
+      case SendResult::BLOCKED:
+        return NetworkAudioSendResult::BLOCKED;
 
-        case SendResult::BLOCKED:
-          return NetworkAudioSendResult::BLOCKED;
-
-        case SendResult::FAILED:
-          return NetworkAudioSendResult::FAILED;
-      }
+      case SendResult::FAILED:
+        return NetworkAudioSendResult::FAILED;
     }
     return NetworkAudioSendResult::FAILED;
   }
@@ -749,25 +918,26 @@ struct CNetworkServer::Impl
   std::shared_ptr<CNetworkSession> ClipboardInputSession(
     const NetworkClipboardPeer& peer)
   {
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return {};
+
     std::shared_ptr<CNetworkSession> session;
     {
-      CSRWSharedLock guard(lock);
-      for (Connection * connection : connections)
-      {
-        if (connection->client != peer.client ||
-            connection->generation != peer.generation)
-          continue;
-
-        CSRWSharedLock connectionGuard(connection->lock);
-        const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
-        if (connection->closing ||
-            connection->handshake != HandshakeState::READY ||
-            !(connection->selectedServices & inputMask) ||
-            !connection->inputClaimantID || !connection->inputClaimEpoch)
-          return {};
-        session = connection->session;
-        break;
-      }
+      CSRWSharedLock connectionGuard(connection->lock);
+      const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+      if (connection->closing ||
+          connection->handshake != HandshakeState::READY ||
+          !(connection->selectedServices & inputMask))
+        return {};
+      session = connection->session;
+    }
+    {
+      CSRWSharedLock inputGuard(connection->inputLock);
+      if (connection->inputClosing || !connection->inputStreamBound ||
+          !connection->inputClaimantID || !connection->inputClaimEpoch ||
+          connection->inputSession != session)
+        return {};
     }
 
     return session;
@@ -810,28 +980,31 @@ struct CNetworkServer::Impl
     {
       AuthorityContext& authorityContext =
         *static_cast<AuthorityContext *>(value);
-      CSRWSharedLock guard(authorityContext.owner->lock);
-      for (Connection * connection : authorityContext.owner->connections)
-      {
-        if (connection->client != authorityContext.peer.client ||
-            connection->generation != authorityContext.peer.generation)
-          continue;
-
-        {
-          CSRWSharedLock connectionGuard(connection->lock);
-          const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
-          if (connection->closing ||
-              connection->handshake != HandshakeState::READY ||
-              !(connection->selectedServices & inputMask) ||
-              !connection->inputClaimantID || !connection->inputClaimEpoch ||
-              connection->session.get() != authorityContext.session)
-            return;
-        }
-
-        authorityContext.action(authorityContext.opaque);
-        authorityContext.invoked = true;
+      ConnectionPin connection = authorityContext.owner->PinConnection(
+        authorityContext.peer);
+      if (!connection)
         return;
+
+      {
+        CSRWSharedLock connectionGuard(connection->lock);
+        const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+        if (connection->closing ||
+            connection->handshake != HandshakeState::READY ||
+            !(connection->selectedServices & inputMask) ||
+            connection->session.get() != authorityContext.session)
+          return;
       }
+      {
+        CSRWSharedLock inputGuard(connection->inputLock);
+        if (connection->inputClosing || !connection->inputStreamBound ||
+            !connection->inputClaimantID ||
+            !connection->inputClaimEpoch ||
+            connection->inputSession.get() != authorityContext.session)
+          return;
+      }
+
+      authorityContext.action(authorityContext.opaque);
+      authorityContext.invoked = true;
     };
     return session->WithInputAuthority(invoke, &context) && context.invoked;
   }
@@ -839,72 +1012,64 @@ struct CNetworkServer::Impl
   bool ClipboardPeerInfo(const NetworkClipboardPeer& peer,
     NetworkClipboardPeerInfo& info)
   {
-    CSRWSharedLock guard(lock);
-    for (Connection * connection : connections)
-    {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return false;
 
-      CSRWSharedLock connectionGuard(connection->lock);
-      const uint16_t clipboardMask =
-        UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD;
-      const uint16_t fileMask      = UINT16_C(1) << LG_NET_SERVICE_FILE;
-      if (connection->closing ||
-          !PeerInfoAvailableLocked(*connection) ||
-          !(connection->selectedServices & clipboardMask) ||
-          !(connection->selectedServices & fileMask))
-        return false;
+    CSRWSharedLock connectionGuard(connection->lock);
+    const uint16_t clipboardMask =
+      UINT16_C(1) << LG_NET_SERVICE_CLIPBOARD;
+    const uint16_t fileMask      = UINT16_C(1) << LG_NET_SERVICE_FILE;
+    if (connection->closing ||
+        !PeerInfoAvailableLocked(*connection) ||
+        !(connection->selectedServices & clipboardMask) ||
+        !(connection->selectedServices & fileMask))
+      return false;
 
-      const LGNetCapability& clipboardCapability =
-        connection->selectedCapabilities[LG_NET_SERVICE_CLIPBOARD];
-      const LGNetCapability& fileCapability =
-        connection->selectedCapabilities[LG_NET_SERVICE_FILE];
-      info.clipboardVersion         = clipboardCapability.versionMin;
-      info.fileVersion              = fileCapability.versionMin;
-      info.clipboardFlags           = clipboardCapability.flags;
-      info.fileFlags                = fileCapability.flags;
-      info.clipboardReliablePayload = clipboardCapability.maxPayloadLength;
-      info.fileReliablePayload      = fileCapability.maxPayloadLength;
-      info.clipboardBulkPayload     =
-        clipboardCapability.flags & LG_NET_CAPABILITY_BULK ?
-          clipboardCapability.maxPayloadLength : 0;
-      info.fileBulkPayload          =
-        fileCapability.flags & LG_NET_CAPABILITY_BULK ?
-          fileCapability.maxPayloadLength : 0;
-      return true;
-    }
-    return false;
+    const LGNetCapability& clipboardCapability =
+      connection->selectedCapabilities[LG_NET_SERVICE_CLIPBOARD];
+    const LGNetCapability& fileCapability      =
+      connection->selectedCapabilities[LG_NET_SERVICE_FILE];
+    info.clipboardVersion         = clipboardCapability.versionMin;
+    info.fileVersion              = fileCapability.versionMin;
+    info.clipboardFlags           = clipboardCapability.flags;
+    info.fileFlags                = fileCapability.flags;
+    info.clipboardReliablePayload = clipboardCapability.maxPayloadLength;
+    info.fileReliablePayload      = fileCapability.maxPayloadLength;
+    info.clipboardBulkPayload     =
+      clipboardCapability.flags & LG_NET_CAPABILITY_BULK ?
+        clipboardCapability.maxPayloadLength : 0;
+    info.fileBulkPayload          =
+      fileCapability.flags & LG_NET_CAPABILITY_BULK ?
+        fileCapability.maxPayloadLength : 0;
+    return true;
   }
 
-  NetworkClipboardSendResult SendClipboardLocked(
+  NetworkClipboardSendResult SendClipboardToPeer(
     const NetworkClipboardPeer& peer, bool bulk, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID,
     const void * payload, uint32_t payloadLength)
   {
-    for (Connection * connection : connections)
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return NetworkClipboardSendResult::FAILED;
+
+    const SendResult result = bulk ?
+      TrySendBulk(*connection, service, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength) :
+      TrySendPacket(*connection, service, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength);
+    switch (result)
     {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+      case SendResult::SENT:
+        return NetworkClipboardSendResult::ACCEPTED;
 
-      const SendResult result = bulk ?
-        TrySendBulk(*connection, service, messageType, flags,
-          componentEpoch, requestID, payload, payloadLength) :
-        TrySendPacket(*connection, service, messageType, flags,
-          componentEpoch, requestID, payload, payloadLength);
-      switch (result)
-      {
-        case SendResult::SENT:
-          return NetworkClipboardSendResult::ACCEPTED;
+      case SendResult::BLOCKED:
+        return NetworkClipboardSendResult::BLOCKED;
 
-        case SendResult::BLOCKED:
-          return NetworkClipboardSendResult::BLOCKED;
-
-        case SendResult::FAILED:
-          return NetworkClipboardSendResult::FAILED;
-      }
+      case SendResult::FAILED:
+        return NetworkClipboardSendResult::FAILED;
     }
     return NetworkClipboardSendResult::FAILED;
   }
@@ -923,11 +1088,8 @@ struct CNetworkServer::Impl
       service == LG_NET_SERVICE_CLIPBOARD &&
       messageType == LG_NET_CLIPBOARD_MESSAGE_CLAIM_RESULT;
     if (claimResult)
-    {
-      CSRWSharedLock guard(lock);
-      return SendClipboardLocked(peer, bulk, service, messageType, flags,
+      return SendClipboardToPeer(peer, bulk, service, messageType, flags,
         componentEpoch, requestID, payload, payloadLength);
-    }
 
     struct SendContext
     {
@@ -958,7 +1120,7 @@ struct CNetworkServer::Impl
     const auto send = [](void * value)
     {
       SendContext& sendContext = *static_cast<SendContext *>(value);
-      sendContext.result       = sendContext.owner->SendClipboardLocked(
+      sendContext.result       = sendContext.owner->SendClipboardToPeer(
         sendContext.peer, sendContext.bulk, sendContext.service,
         sendContext.messageType, sendContext.flags,
         sendContext.componentEpoch, sendContext.requestID,
@@ -971,33 +1133,28 @@ struct CNetworkServer::Impl
   bool VideoPeerInfo(const NetworkVideoPeer& peer,
     NetworkVideoPeerInfo& info)
   {
-    CSRWSharedLock guard(lock);
-    for (Connection * connection : connections)
-    {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return false;
 
-      CSRWSharedLock connectionGuard(connection->lock);
-      const uint16_t serviceMask = UINT16_C(1) << LG_NET_SERVICE_VIDEO;
-      if (connection->closing ||
-          !PeerInfoAvailableLocked(*connection) ||
-          !(connection->selectedServices & serviceMask))
-        return false;
+    CSRWSharedLock connectionGuard(connection->lock);
+    const uint16_t serviceMask = UINT16_C(1) << LG_NET_SERVICE_VIDEO;
+    if (connection->closing ||
+        !PeerInfoAvailableLocked(*connection) ||
+        !(connection->selectedServices & serviceMask))
+      return false;
 
-      const LGNetCapability& capability =
-        connection->selectedCapabilities[LG_NET_SERVICE_VIDEO];
-      info.serviceVersion     = capability.versionMin;
-      info.capabilityFlags    = capability.flags;
-      info.maxReliablePayload = (std::min)(
-        capability.maxPayloadLength, NETWORK_MAX_CONTROL_PAYLOAD);
-      info.maxDatagramPayload = capability.maxDatagramPayload;
-      info.maxBulkPayload     =
-        capability.flags & LG_NET_CAPABILITY_BULK ?
-          capability.maxPayloadLength : 0;
-      return true;
-    }
-    return false;
+    const LGNetCapability& capability =
+      connection->selectedCapabilities[LG_NET_SERVICE_VIDEO];
+    info.serviceVersion     = capability.versionMin;
+    info.capabilityFlags    = capability.flags;
+    info.maxReliablePayload = (std::min)(
+      capability.maxPayloadLength, NETWORK_MAX_CONTROL_PAYLOAD);
+    info.maxDatagramPayload = capability.maxDatagramPayload;
+    info.maxBulkPayload     =
+      capability.flags & LG_NET_CAPABILITY_BULK ?
+        capability.maxPayloadLength : 0;
+    return true;
   }
 
   NetworkVideoSendResult SendVideo(
@@ -1014,46 +1171,42 @@ struct CNetworkServer::Impl
     const auto payloadData   = payloadLength ?
       static_cast<const void *>(payload->data()) : nullptr;
 
-    CSRWSharedLock guard(lock);
-    for (Connection * connection : connections)
+    ConnectionPin connection = PinConnection(peer);
+    if (!connection)
+      return NetworkVideoSendResult::FAILED;
+
+    SendResult result = SendResult::FAILED;
+    switch (delivery)
     {
-      if (connection->client != peer.client ||
-          connection->generation != peer.generation)
-        continue;
+      case NetworkVideoDelivery::RELIABLE:
+        result = TrySendPacket(*connection, LG_NET_SERVICE_VIDEO,
+          messageType, flags, componentEpoch, requestID,
+          payloadData, payloadLength);
+        break;
 
-      SendResult result = SendResult::FAILED;
-      switch (delivery)
-      {
-        case NetworkVideoDelivery::RELIABLE:
-          result = TrySendPacket(*connection, LG_NET_SERVICE_VIDEO,
-            messageType, flags, componentEpoch, requestID,
-            payloadData, payloadLength);
-          break;
+      case NetworkVideoDelivery::DATAGRAM:
+        result = TrySendDatagram(*connection, LG_NET_SERVICE_VIDEO,
+          messageType, flags, componentEpoch, requestID,
+          payloadData, payloadLength, true, std::move(payload));
+        break;
 
-        case NetworkVideoDelivery::DATAGRAM:
-          result = TrySendDatagram(*connection, LG_NET_SERVICE_VIDEO,
-            messageType, flags, componentEpoch, requestID,
-            payloadData, payloadLength, true, std::move(payload));
-          break;
+      case NetworkVideoDelivery::BULK:
+        result = TrySendBulk(*connection, LG_NET_SERVICE_VIDEO,
+          messageType, flags, componentEpoch, requestID,
+          payloadData, payloadLength, std::move(payload));
+        break;
+    }
 
-        case NetworkVideoDelivery::BULK:
-          result = TrySendBulk(*connection, LG_NET_SERVICE_VIDEO,
-            messageType, flags, componentEpoch, requestID,
-            payloadData, payloadLength, std::move(payload));
-          break;
-      }
+    switch (result)
+    {
+      case SendResult::SENT:
+        return NetworkVideoSendResult::ACCEPTED;
 
-      switch (result)
-      {
-        case SendResult::SENT:
-          return NetworkVideoSendResult::ACCEPTED;
+      case SendResult::BLOCKED:
+        return NetworkVideoSendResult::BLOCKED;
 
-        case SendResult::BLOCKED:
-          return NetworkVideoSendResult::BLOCKED;
-
-        case SendResult::FAILED:
-          return NetworkVideoSendResult::FAILED;
-      }
+      case SendResult::FAILED:
+        return NetworkVideoSendResult::FAILED;
     }
     return NetworkVideoSendResult::FAILED;
   }
@@ -1067,6 +1220,10 @@ struct CNetworkServer::Impl
         return;
       connection.closing = true;
       handle             = connection.handle;
+    }
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      connection.inputClosing = true;
     }
     if (handle)
       api->ConnectionShutdown(handle,
@@ -1462,11 +1619,133 @@ struct CNetworkServer::Impl
     video.SendReady(VideoPeer(connection), videoDelivery);
   }
 
+  static void ReleaseInputSendLocked(Connection& connection,
+    const Send& send)
+  {
+    if (!connection.inputStreamSendCount ||
+        connection.inputStreamSendBytes < send.length)
+    {
+      DEBUG_ERROR("Network input send accounting underflow for client %u",
+        connection.client);
+      return;
+    }
+
+    --connection.inputStreamSendCount;
+    connection.inputStreamSendBytes -= send.length;
+  }
+
+  SendResult TrySendInputPacket(Connection& connection,
+    uint16_t messageType, LGNetEnvelopeFlags flags,
+    uint64_t componentEpoch, uint64_t requestID, const void * payload,
+    uint32_t payloadLength, bool inputAck)
+  {
+    const LGNetMessageRoute * route =
+      lgNetMessageRoute(LG_NET_SERVICE_INPUT, messageType);
+    if (!lgNetMessageRouteAllows(route, LG_NET_ROLE_SERVER,
+          LG_NET_ROUTE_DELIVERY_RELIABLE) ||
+        (payloadLength && !payload) ||
+        payloadLength > NETWORK_INPUT_MAX_PAYLOAD ||
+        flags & (LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_DATAGRAM |
+          LG_NET_ENVELOPE_EARLY_DATA))
+      return SendResult::FAILED;
+
+    const size_t          packetSize =
+      LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
+    std::unique_ptr<Send> send(new (std::nothrow) Send());
+    if (!send)
+      return SendResult::FAILED;
+    try
+    {
+      send->data.resize(packetSize);
+    }
+    catch (...)
+    {
+      return SendResult::FAILED;
+    }
+
+    send->service   = LG_NET_SERVICE_INPUT;
+    send->length    = static_cast<uint32_t>(packetSize);
+    send->accounted = false;
+    send->inputAck  = inputAck;
+
+    QUIC_STATUS status = QUIC_STATUS_SUCCESS;
+    {
+      LGNetPacketParameters parameters = {};
+      HQUIC                 stream     = nullptr;
+      CSRWExclusiveLock     sendGuard(connection.inputSendLock);
+      {
+        CSRWExclusiveLock guard(connection.inputLock);
+        if (connection.inputClosing || !connection.inputStreamBound ||
+            !connection.inputStream ||
+            payloadLength > connection.inputStreamMaxPayload ||
+            connection.inputStreamServiceVersion <
+              route->serviceVersionMin ||
+            connection.inputStreamSendSequence == UINT64_MAX)
+          return SendResult::FAILED;
+        if (connection.inputStreamSendCount >= NETWORK_INPUT_SEND_COUNT_MAX ||
+            connection.inputStreamSendBytes >
+              NETWORK_INPUT_SEND_BYTES_MAX - packetSize)
+          return SendResult::BLOCKED;
+
+        ++connection.inputStreamSendCount;
+        connection.inputStreamSendBytes += packetSize;
+
+        lgNetPacketParametersInit(&parameters, LG_NET_SERVICE_INPUT,
+          messageType, connection.inputStreamServiceVersion,
+          route->messageVersion);
+        parameters.flags          = flags | LG_NET_ENVELOPE_RELIABLE;
+        parameters.sessionEpoch   = connection.inputStreamSessionEpoch;
+        parameters.componentEpoch = componentEpoch;
+        parameters.sequence       = ++connection.inputStreamSendSequence;
+        parameters.requestID      = requestID;
+        stream                    = connection.inputStream;
+      }
+
+      size_t wireSize = 0;
+      if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
+            &wireSize, &parameters, payload, payloadLength) ||
+          wireSize != packetSize)
+      {
+        CSRWExclusiveLock guard(connection.inputLock);
+        if (connection.inputStreamSendSequence == parameters.sequence)
+          --connection.inputStreamSendSequence;
+        ReleaseInputSendLocked(connection, *send);
+        return SendResult::FAILED;
+      }
+
+      send->buffers[0].Buffer = send->data.data();
+      send->buffers[0].Length = static_cast<uint32_t>(wireSize);
+      status                  = api->StreamSend(stream,
+        send->buffers, send->bufferCount, QUIC_SEND_FLAG_PRIORITY_WORK,
+        send.get());
+      if (QUIC_FAILED(status))
+      {
+        CSRWExclusiveLock guard(connection.inputLock);
+        if (connection.inputStreamSendSequence == parameters.sequence)
+          --connection.inputStreamSendSequence;
+        ReleaseInputSendLocked(connection, *send);
+      }
+    }
+
+    if (QUIC_FAILED(status))
+      return SendResult::FAILED;
+    send.release();
+    return SendResult::SENT;
+  }
+
   SendResult TrySendPacket(Connection& connection, LGNetService service,
     uint16_t messageType, LGNetEnvelopeFlags flags,
     uint64_t componentEpoch, uint64_t requestID, const void * payload,
     uint32_t payloadLength, bool activateSession = false)
   {
+    if (service == LG_NET_SERVICE_INPUT)
+    {
+      if (activateSession)
+        return SendResult::FAILED;
+      return TrySendInputPacket(connection, messageType, flags,
+        componentEpoch, requestID, payload, payloadLength, false);
+    }
+
     const LGNetServiceVersionInfo * version =
       lgNetServiceVersionInfo(service);
     const LGNetMessageRoute       * route   =
@@ -2144,7 +2423,9 @@ retry:
         capability.service > LG_NET_SERVICE_CONTROL ||
         capability.service == LG_NET_SERVICE_USB ||
         capability.flags & LG_NET_CAPABILITY_SELECTED ||
-        capability.maxBidirectionalStreams ||
+        (capability.service == LG_NET_SERVICE_INPUT ?
+          capability.maxBidirectionalStreams != 1 :
+          capability.maxBidirectionalStreams != 0) ||
         capability.maxUnidirectionalStreams > NETWORK_PEER_UNIDI_STREAMS ||
         (!!(capability.flags & LG_NET_CAPABILITY_BULK) !=
           !!capability.maxUnidirectionalStreams) ||
@@ -2230,7 +2511,9 @@ retry:
           offered.versionMax <
             LG_NET_AUDIO_OWNERSHIP_INTRODUCED_SERVICE_VERSION) ||
         offered.maxPayloadLength < minimumPayload ||
-        connection.maxPayload < minimumPayload)
+        connection.maxPayload < minimumPayload ||
+        (offered.service == LG_NET_SERVICE_INPUT &&
+          offered.maxBidirectionalStreams != 1))
       return false;
 
     const uint16_t selectedVersion = offered.versionMax < version->current ?
@@ -2251,8 +2534,12 @@ retry:
     selected.maxPayloadLength         = offered.maxPayloadLength <
       connection.maxPayload ? offered.maxPayloadLength :
         connection.maxPayload;
+    if (offered.service == LG_NET_SERVICE_INPUT &&
+        selected.maxPayloadLength > NETWORK_INPUT_MAX_PAYLOAD)
+      selected.maxPayloadLength = NETWORK_INPUT_MAX_PAYLOAD;
     selected.maxDatagramPayload       = 0;
-    selected.maxBidirectionalStreams  = 0;
+    selected.maxBidirectionalStreams  = offered.service ==
+      LG_NET_SERVICE_INPUT ? 1 : 0;
     selected.maxUnidirectionalStreams = 0;
     const uint32_t minimumDatagram = offered.service ==
         LG_NET_SERVICE_VIDEO ?
@@ -2272,6 +2559,8 @@ retry:
       selected.maxDatagramPayload   = offered.maxDatagramPayload <
         connection.maxDatagramPayload ? offered.maxDatagramPayload :
           connection.maxDatagramPayload;
+      if (selected.maxDatagramPayload > selected.maxPayloadLength)
+        selected.maxDatagramPayload = selected.maxPayloadLength;
     }
     if (BulkServiceSupported(offered.service) &&
         (offered.flags & LG_NET_CAPABILITY_BULK) &&
@@ -3145,18 +3434,37 @@ retry:
     return LG_NET_INPUT_STATUS_ERROR;
   }
 
+  static void ClearPendingInputAckLocked(Connection& connection)
+  {
+    connection.inputAckClaimEpoch = 0;
+    connection.inputAckRequestID  = 0;
+    connection.inputAckStatus     = LG_NET_INPUT_STATUS_ERROR;
+    connection.inputAckPending    = false;
+  }
+
   static void ClearInputStateLocked(Connection& connection,
     bool clearClaim)
   {
     if (clearClaim)
     {
-      connection.inputClaimantID    = 0;
-      connection.inputClaimEpoch    = 0;
-      connection.inputFlags         = 0;
-      connection.inputLEDState      = 0;
-      connection.inputLEDStateKnown = false;
+      connection.inputClaimantID          = 0;
+      connection.inputClaimEpoch          = 0;
+      connection.inputFlags               = 0;
+      connection.inputLEDState            = 0;
+      connection.inputClaimPending        = false;
+      connection.inputLEDCheckPending     = false;
+      connection.inputLEDWaitForSendReady = false;
+      connection.inputLEDStateKnown       = false;
+      ClearPendingInputAckLocked(connection);
     }
     connection.inputPointerButtons = 0;
+    connection.inputMotionSequence = 0;
+    connection.inputCumulativeX    = 0;
+    connection.inputCumulativeY    = 0;
+    connection.inputAbsoluteX      = 0;
+    connection.inputAbsoluteY      = 0;
+    connection.inputMotionAbsolute = false;
+    connection.inputMotionBaseline = false;
     connection.keyboardModifiers   = 0;
     memset(connection.keyboardKeys, 0, sizeof(connection.keyboardKeys));
   }
@@ -3165,20 +3473,38 @@ retry:
     uint64_t claimEpoch)
   {
     {
-      CSRWExclusiveLock guard(connection.lock);
+      CSRWExclusiveLock guard(connection.inputLock);
       if (connection.inputClaimEpoch == claimEpoch)
         ClearInputStateLocked(connection, true);
     }
     clipboard.Process(GetTickCount64());
   }
 
-  bool SendInputStatus(Connection& connection, uint16_t messageType,
+  static void RequestInputLEDCheckLocked(Connection& connection)
+  {
+    connection.inputLEDCheckPending = true;
+    ++connection.inputLEDCheckGeneration;
+    if (!connection.inputLEDCheckGeneration)
+      ++connection.inputLEDCheckGeneration;
+  }
+
+  static void CompleteInputLEDCheck(Connection& connection,
+    uint64_t claimEpoch, uint64_t checkGeneration)
+  {
+    CSRWExclusiveLock guard(connection.inputLock);
+    if (connection.inputClaimEpoch == claimEpoch &&
+        connection.inputLEDCheckGeneration == checkGeneration)
+      connection.inputLEDCheckPending = false;
+  }
+
+  SendResult TrySendInputStatus(Connection& connection,
+    uint16_t messageType,
     LGNetInputStatusCode code, uint64_t claimEpoch, uint64_t requestID,
-    LGNetEnvelopeFlags flags)
+    LGNetEnvelopeFlags flags, bool inputAck)
   {
     LGNetInputStatus status = {};
     {
-      CSRWSharedLock guard(connection.lock);
+      CSRWSharedLock guard(connection.inputLock);
       status.claimEpoch       = claimEpoch;
       status.lastSequence     = connection.inputReliableSequence >
         connection.inputDatagramSequence ?
@@ -3193,56 +3519,157 @@ retry:
     }
 
     uint8_t payload[LG_NET_INPUT_STATUS_WIRE_SIZE];
-    return lgNetInputStatusEncode(payload, sizeof(payload), &status) &&
-      SendPacket(connection, LG_NET_SERVICE_INPUT, messageType,
-        flags | LG_NET_ENVELOPE_FINAL, claimEpoch, requestID,
-        payload, sizeof(payload));
+    if (!lgNetInputStatusEncode(payload, sizeof(payload), &status))
+      return SendResult::FAILED;
+    return TrySendInputPacket(connection, messageType,
+      flags | LG_NET_ENVELOPE_FINAL, claimEpoch, requestID,
+      payload, sizeof(payload), inputAck);
   }
 
-  bool SendInputLEDs(Connection& connection)
+  bool SendInputStatus(Connection& connection, uint16_t messageType,
+    LGNetInputStatusCode code, uint64_t claimEpoch, uint64_t requestID,
+    LGNetEnvelopeFlags flags)
   {
-    std::shared_ptr<CNetworkSession> session;
-    uint64_t                         claimEpoch;
+    return TrySendInputStatus(connection, messageType, code,
+      claimEpoch, requestID, flags, false) == SendResult::SENT;
+  }
+
+  SendResult TrySendPendingInputAck(Connection& connection)
+  {
+    uint64_t             claimEpoch = 0;
+    uint64_t             requestID  = 0;
+    LGNetInputStatusCode code       = LG_NET_INPUT_STATUS_ERROR;
     {
-      CSRWSharedLock guard(connection.lock);
-      session    = connection.session;
-      claimEpoch = connection.inputClaimEpoch;
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (!connection.inputAckPending || connection.inputAckSending ||
+          connection.inputAckInFlight)
+        return SendResult::SENT;
+
+      claimEpoch                 = connection.inputAckClaimEpoch;
+      requestID                  = connection.inputAckRequestID;
+      code                       = connection.inputAckStatus;
+
+      connection.inputAckSending  = true;
+      connection.inputAckInFlight = true;
+    }
+
+    const SendResult result = TrySendInputStatus(connection,
+      LG_NET_INPUT_MESSAGE_STATUS, code, claimEpoch, requestID,
+      LG_NET_ENVELOPE_RESPONSE, true);
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      connection.inputAckSending = false;
+      if (result != SendResult::SENT)
+        connection.inputAckInFlight = false;
+      if (result == SendResult::SENT && connection.inputAckPending &&
+          connection.inputAckClaimEpoch == claimEpoch &&
+          connection.inputAckRequestID == requestID &&
+          connection.inputAckStatus == code)
+        ClearPendingInputAckLocked(connection);
+    }
+    return result;
+  }
+
+  bool QueueInputAck(Connection& connection, LGNetInputStatusCode code,
+    uint64_t claimEpoch, uint64_t requestID)
+  {
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      connection.inputAckClaimEpoch = claimEpoch;
+      connection.inputAckRequestID  = requestID;
+      connection.inputAckStatus     = code;
+      connection.inputAckPending    = true;
+    }
+    return TrySendPendingInputAck(connection) != SendResult::FAILED;
+  }
+
+  SendResult TrySendInputLEDs(Connection& connection)
+  {
+    std::shared_ptr<CNetworkSession> session         = {};
+    uint64_t                         claimEpoch      = 0;
+    uint64_t                         checkGeneration = 0;
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      if (!connection.inputLEDCheckPending ||
+          connection.inputLEDWaitForSendReady)
+        return SendResult::SENT;
+      session         = connection.inputSession;
+      claimEpoch      = connection.inputClaimEpoch;
+      checkGeneration = connection.inputLEDCheckGeneration;
+      if (connection.inputClaimPending)
+        return SendResult::SENT;
     }
     if (!session || !claimEpoch)
-      return false;
+    {
+      CompleteInputLEDCheck(connection, claimEpoch, checkGeneration);
+      return SendResult::SENT;
+    }
 
     const InputTargetState state = session->InputState();
     if (!state.owned || !state.keyboardLEDsValid)
-      return true;
+    {
+      CompleteInputLEDCheck(connection, claimEpoch, checkGeneration);
+      return SendResult::SENT;
+    }
 
-    LGNetInputLEDs leds = {};
+    LGNetInputLEDs leds  = {};
     leds.state           = state.keyboardLEDs & NETWORK_KEYBOARD_LED_MASK;
     leds.validMask       = NETWORK_KEYBOARD_LED_MASK;
     {
-      CSRWExclusiveLock guard(connection.lock);
-      if (connection.inputClaimEpoch != claimEpoch)
-        return false;
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputClaimEpoch != claimEpoch ||
+          connection.inputLEDCheckGeneration != checkGeneration ||
+          !connection.inputLEDCheckPending)
+        return SendResult::SENT;
       if (connection.inputLEDStateKnown &&
           connection.inputLEDState == leds.state)
-        return true;
+      {
+        connection.inputLEDCheckPending = false;
+        return SendResult::SENT;
+      }
       if (connection.inputLEDSequence == UINT64_MAX)
-        return false;
+        return SendResult::FAILED;
       leds.sequence                 = ++connection.inputLEDSequence;
       connection.inputLEDState      = leds.state;
       connection.inputLEDStateKnown = true;
     }
 
-    uint8_t payload[LG_NET_INPUT_LEDS_WIRE_SIZE];
-    return lgNetInputLEDsEncode(payload, sizeof(payload), &leds) &&
-      SendPacket(connection, LG_NET_SERVICE_INPUT,
+    uint8_t    payload[LG_NET_INPUT_LEDS_WIRE_SIZE];
+    SendResult result = SendResult::FAILED;
+    if (lgNetInputLEDsEncode(payload, sizeof(payload), &leds))
+      result = TrySendInputPacket(connection,
         LG_NET_INPUT_MESSAGE_KEYBOARD_LEDS, LG_NET_ENVELOPE_FINAL,
-        claimEpoch, 0, payload, sizeof(payload));
+        claimEpoch, 0, payload, sizeof(payload), false);
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputClaimEpoch == claimEpoch &&
+          connection.inputLEDSequence == leds.sequence &&
+          connection.inputLEDState == leds.state)
+      {
+        if (result == SendResult::SENT)
+        {
+          connection.inputLEDWaitForSendReady = false;
+          if (connection.inputLEDCheckGeneration == checkGeneration)
+            connection.inputLEDCheckPending = false;
+        }
+        else
+        {
+          --connection.inputLEDSequence;
+          connection.inputLEDStateKnown       = false;
+          connection.inputLEDWaitForSendReady =
+            result == SendResult::BLOCKED &&
+            (connection.inputStreamSendCount ||
+              connection.inputStreamSendBytes);
+        }
+      }
+    }
+    return result;
   }
 
   bool HandleInputClaim(Connection& connection,
     const LGNetPacketView& packet)
   {
-    LGNetInputClaim claim;
+    LGNetInputClaim claim = {};
     if (lgNetInputClaimDecode(&claim, packet.payload,
           packet.payloadLength) != LG_NET_PARSE_OK ||
         packet.envelope.componentEpoch != claim.claimEpoch ||
@@ -3251,15 +3678,15 @@ retry:
 
     std::shared_ptr<CNetworkSession> session;
     {
-      CSRWSharedLock guard(connection.lock);
-      session = connection.session;
+      CSRWSharedLock guard(connection.inputLock);
+      session = connection.inputSession;
     }
     if (!session)
       return false;
 
-    bool hadClaim;
+    bool hadClaim = false;
     {
-      CSRWSharedLock guard(connection.lock);
+      CSRWSharedLock guard(connection.inputLock);
       hadClaim = connection.inputClaimantID != 0;
     }
 
@@ -3267,31 +3694,44 @@ retry:
     if (result == InputResult::ACCEPTED && hadClaim)
       result = session->ResetInput();
     {
-      CSRWExclusiveLock guard(connection.lock);
+      CSRWExclusiveLock guard(connection.inputLock);
       const bool accepted = result == InputResult::ACCEPTED;
-      connection.inputClaimantID       = accepted ? claim.claimantID : 0;
-      connection.inputClaimEpoch       = accepted ? claim.claimEpoch : 0;
-      connection.inputReliableSequence = 0;
-      connection.inputDatagramSequence = 0;
-      connection.inputFlags            = accepted ? claim.flags : 0;
-      connection.inputLEDState         = 0;
-      connection.inputLEDStateKnown    = false;
+      ClearPendingInputAckLocked(connection);
+      connection.inputClaimantID          = accepted ? claim.claimantID : 0;
+      connection.inputClaimEpoch          = accepted ? claim.claimEpoch : 0;
+      connection.inputReliableSequence    = 0;
+      connection.inputDatagramSequence    = 0;
+      connection.inputFlags               = accepted ? claim.flags : 0;
+      connection.inputLEDState            = 0;
+      connection.inputClaimPending        = accepted;
+      connection.inputLEDWaitForSendReady = false;
+      connection.inputLEDStateKnown       = false;
       ClearInputStateLocked(connection, false);
+      if (accepted)
+        RequestInputLEDCheckLocked(connection);
+      else
+        connection.inputLEDCheckPending = false;
     }
 
-    clipboard.Process(GetTickCount64());
     const LGNetInputStatusCode code = InputStatusCode(result);
-    return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_CLAIM_RESULT,
+    const bool                 sent = SendInputStatus(connection,
+        LG_NET_INPUT_MESSAGE_CLAIM_RESULT,
         code, claim.claimEpoch, packet.envelope.requestID,
-        LG_NET_ENVELOPE_RESPONSE) &&
-      (result != InputResult::ACCEPTED || SendInputLEDs(connection));
+        LG_NET_ENVELOPE_RESPONSE);
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (sent && connection.inputClaimEpoch == claim.claimEpoch)
+        connection.inputClaimPending = false;
+    }
+    clipboard.Process(GetTickCount64());
+    return sent;
   }
 
   bool ValidateInputOwner(Connection& connection,
     uint64_t claimEpoch, uint64_t sequence, bool datagram,
     uint64_t claimantID, LGNetInputClaimFlags requiredFlags)
   {
-    CSRWExclusiveLock guard(connection.lock);
+    CSRWExclusiveLock guard(connection.inputLock);
     uint64_t& lastSequence = datagram ?
       connection.inputDatagramSequence :
       connection.inputReliableSequence;
@@ -3307,35 +3747,147 @@ retry:
     return true;
   }
 
-  bool ValidateInputPointer(Connection& connection, uint64_t claimEpoch,
-    uint64_t sequence, bool datagram, LGNetPointerButtons& buttons)
+  static int32_t InputCumulativeStep(int64_t current, int64_t previous,
+    int64_t& next)
   {
-    CSRWExclusiveLock guard(connection.lock);
+    if (current >= previous)
+    {
+      const uint64_t delta = static_cast<uint64_t>(current) -
+        static_cast<uint64_t>(previous);
+      if (delta <= static_cast<uint64_t>(LG_INPUT_MOUSE_DELTA_MAX))
+      {
+        next = current;
+        return static_cast<int32_t>(delta);
+      }
+      next = previous + static_cast<int64_t>(LG_INPUT_MOUSE_DELTA_MAX);
+      return LG_INPUT_MOUSE_DELTA_MAX;
+    }
+
+    const uint64_t delta = static_cast<uint64_t>(previous) -
+      static_cast<uint64_t>(current);
+    const uint64_t limit = static_cast<uint64_t>(
+      -static_cast<int64_t>(LG_INPUT_MOUSE_DELTA_MIN));
+    if (delta <= limit)
+    {
+      next = current;
+      return -static_cast<int32_t>(delta);
+    }
+    next = previous + static_cast<int64_t>(LG_INPUT_MOUSE_DELTA_MIN);
+    return LG_INPUT_MOUSE_DELTA_MIN;
+  }
+
+  bool PrepareInputPointer(Connection& connection, uint64_t claimEpoch,
+    uint64_t sequence, bool datagram, bool relative,
+    int64_t cumulativeX, int64_t cumulativeY,
+    LGNetPointerButtons& buttons, InputPointerMotion& motion)
+  {
+    CSRWExclusiveLock guard(connection.inputLock);
     uint64_t& lastSequence = datagram ?
       connection.inputDatagramSequence :
       connection.inputReliableSequence;
     if (!connection.inputClaimantID ||
         connection.inputClaimEpoch != claimEpoch ||
         !(connection.inputFlags & LG_NET_INPUT_CLAIM_POINTER) ||
-        (datagram && sequence <= connection.inputReliableSequence) ||
         sequence <= lastSequence)
       return false;
 
     lastSequence = sequence;
+    if (!datagram)
+      connection.inputMotionBaseline = true;
+    motion.claimEpoch      = claimEpoch;
+    motion.sequence        = sequence;
+    motion.previousButtons = connection.inputPointerButtons;
     if (datagram)
       buttons = connection.inputPointerButtons;
     else
       connection.inputPointerButtons = buttons;
+
+    motion.apply = sequence > connection.inputMotionSequence;
+    if (motion.apply)
+    {
+      connection.inputMotionSequence = sequence;
+      if (relative)
+      {
+        motion.cumulativeX = cumulativeX;
+        motion.cumulativeY = cumulativeY;
+      }
+      else
+      {
+        connection.inputAbsoluteX   = motion.absoluteX;
+        connection.inputAbsoluteY   = motion.absoluteY;
+        connection.inputCumulativeX = cumulativeX;
+        connection.inputCumulativeY = cumulativeY;
+      }
+      connection.inputMotionAbsolute = !relative;
+    }
+
+    motion.useAbsolute = connection.inputMotionAbsolute;
+    if (motion.useAbsolute)
+    {
+      motion.absoluteX = connection.inputAbsoluteX;
+      motion.absoluteY = connection.inputAbsoluteY;
+    }
     return true;
+  }
+
+  InputResult SendInputRelativeMotion(Connection& connection,
+    const std::shared_ptr<CNetworkSession>& session,
+    const InputPointerMotion& motion, int32_t wheel,
+    LGNetPointerButtons buttons)
+  {
+    int64_t cumulativeX = 0;
+    int64_t cumulativeY = 0;
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      cumulativeX = connection.inputCumulativeX;
+      cumulativeY = connection.inputCumulativeY;
+    }
+
+    InputResult result = InputResult::STALE;
+    for (uint32_t chunk = 0; chunk < NETWORK_INPUT_RECOVERY_LIMIT; ++chunk)
+    {
+      int64_t       nextX  = cumulativeX;
+      int64_t       nextY  = cumulativeY;
+      const int32_t deltaX = InputCumulativeStep(
+        motion.cumulativeX, cumulativeX, nextX);
+      const int32_t deltaY = InputCumulativeStep(
+        motion.cumulativeY, cumulativeY, nextY);
+      const bool    final  =
+        (nextX == motion.cumulativeX && nextY == motion.cumulativeY) ||
+        chunk + 1U == NETWORK_INPUT_RECOVERY_LIMIT;
+
+      result = session->SendMouseRelative(deltaX, deltaY,
+        final ? wheel : 0, final ? buttons : motion.previousButtons);
+      if (result != InputResult::ACCEPTED)
+        break;
+
+      cumulativeX = nextX;
+      cumulativeY = nextY;
+      if (final)
+        break;
+    }
+
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputClaimEpoch == motion.claimEpoch &&
+          connection.inputMotionSequence == motion.sequence &&
+          !connection.inputMotionAbsolute)
+      {
+        connection.inputCumulativeX = cumulativeX;
+        connection.inputCumulativeY = cumulativeY;
+      }
+    }
+    return result;
   }
 
   bool HandleInputControl(Connection& connection,
     const LGNetPacketView& packet, bool datagram)
   {
-    LGNetInputControl control;
+    LGNetInputControl control = {};
     if (lgNetInputControlDecode(&control, packet.payload,
           packet.payloadLength) != LG_NET_PARSE_OK ||
         packet.envelope.componentEpoch != control.claimEpoch ||
+        packet.envelope.requestID ||
         (datagram && packet.envelope.messageType !=
           LG_NET_INPUT_MESSAGE_KEEPALIVE))
       return false;
@@ -3346,31 +3898,50 @@ retry:
 
     std::shared_ptr<CNetworkSession> session;
     {
-      CSRWSharedLock guard(connection.lock);
-      session = connection.session;
+      CSRWSharedLock guard(connection.inputLock);
+      session = connection.inputSession;
     }
     if (!session)
       return false;
 
-    InputResult result;
+    InputResult result = InputResult::STALE;
     switch (packet.envelope.messageType)
     {
       case LG_NET_INPUT_MESSAGE_KEEPALIVE:
         result = session->TouchInput();
+        if (result == InputResult::ACCEPTED)
+        {
+          CSRWExclusiveLock guard(connection.inputLock);
+          if (connection.inputClaimEpoch == control.claimEpoch)
+            RequestInputLEDCheckLocked(connection);
+        }
         break;
 
       case LG_NET_INPUT_MESSAGE_RESET:
         result = session->ResetInput();
         {
-          CSRWExclusiveLock guard(connection.lock);
-          ClearInputStateLocked(connection, false);
+          CSRWExclusiveLock guard(connection.inputLock);
+          connection.inputPointerButtons = 0;
+          connection.keyboardModifiers   = 0;
+          memset(connection.keyboardKeys, 0,
+            sizeof(connection.keyboardKeys));
+          if (connection.inputMotionSequence <= control.sequence)
+          {
+            connection.inputMotionSequence = control.sequence;
+            connection.inputCumulativeX    = 0;
+            connection.inputCumulativeY    = 0;
+            connection.inputAbsoluteX      = 0;
+            connection.inputAbsoluteY      = 0;
+            connection.inputMotionAbsolute = false;
+            connection.inputMotionBaseline = false;
+          }
         }
         break;
 
       case LG_NET_INPUT_MESSAGE_RELEASE:
         result = session->ReleaseInput(false);
         {
-          CSRWExclusiveLock guard(connection.lock);
+          CSRWExclusiveLock guard(connection.inputLock);
           ClearInputStateLocked(connection, true);
         }
         break;
@@ -3381,11 +3952,7 @@ retry:
 
     if (result == InputResult::ACCEPTED &&
         packet.envelope.messageType == LG_NET_INPUT_MESSAGE_KEEPALIVE)
-      return SendInputLEDs(connection);
-    if (result == InputResult::ACCEPTED &&
-        packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE)
-      clipboard.Process(GetTickCount64());
-
+      return true;
     const LGNetInputStatusCode code =
       packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE &&
         result == InputResult::ACCEPTED ?
@@ -3393,19 +3960,24 @@ retry:
           InputStatusCode(result);
     if (result != InputResult::ACCEPTED)
       InvalidateInputClaim(connection, control.claimEpoch);
-    return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_STATUS,
+    const bool sent = SendInputStatus(connection, LG_NET_INPUT_MESSAGE_STATUS,
       code, control.claimEpoch, 0, 0);
+    if (result == InputResult::ACCEPTED &&
+        packet.envelope.messageType == LG_NET_INPUT_MESSAGE_RELEASE)
+      clipboard.Process(GetTickCount64());
+    return sent;
   }
 
   bool HandleInputKeyboard(Connection& connection,
     const LGNetPacketView& packet)
   {
-    LGNetInputKeyboard keyboard;
+    LGNetInputKeyboard keyboard = {};
     if (lgNetInputKeyboardDecode(&keyboard, packet.payload,
         packet.payloadLength) != LG_NET_PARSE_OK ||
         keyboard.usagePage != NETWORK_KEYBOARD_USAGE_PAGE ||
         !keyboard.usage || keyboard.usage >= 256 ||
-        packet.envelope.componentEpoch == 0)
+        packet.envelope.componentEpoch == 0 ||
+        packet.envelope.requestID)
       return false;
 
     if (!ValidateInputOwner(connection, packet.envelope.componentEpoch,
@@ -3414,7 +3986,7 @@ retry:
 
     uint8_t keys[NETWORK_KEYBOARD_KEY_COUNT] = {};
     {
-      CSRWExclusiveLock guard(connection.lock);
+      CSRWExclusiveLock guard(connection.inputLock);
       connection.keyboardModifiers =
         static_cast<uint8_t>(keyboard.modifiers);
       if (keyboard.usage < 224 || keyboard.usage > 231)
@@ -3434,11 +4006,11 @@ retry:
         memset(keys, NETWORK_KEYBOARD_ROLLOVER, sizeof(keys));
     }
 
-    std::shared_ptr<CNetworkSession> session;
-    uint8_t                          modifiers;
+    std::shared_ptr<CNetworkSession> session   = {};
+    uint8_t                          modifiers = 0;
     {
-      CSRWSharedLock guard(connection.lock);
-      session   = connection.session;
+      CSRWSharedLock guard(connection.inputLock);
+      session   = connection.inputSession;
       modifiers = connection.keyboardModifiers;
     }
     if (!session)
@@ -3451,7 +4023,7 @@ retry:
       return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_STATUS,
         InputStatusCode(result), packet.envelope.componentEpoch, 0, 0);
     }
-    return SendInputLEDs(connection);
+    return true;
   }
 
   static uint16_t NormalizeAbsolute(int32_t position, uint32_t extent)
@@ -3463,15 +4035,65 @@ retry:
         (extent - 1U));
   }
 
+  static bool InputPointerEnvelopeValid(Connection& connection,
+    const LGNetPacketView& packet, uint64_t sequence, bool datagram,
+    bool relative, int32_t wheel, LGNetPointerButtons buttons,
+    LGNetPointerButtons changedButtons)
+  {
+    const bool acknowledge =
+      (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED) != 0;
+    if (!sequence)
+      return false;
+    if (datagram)
+    {
+      if (wheel || changedButtons || acknowledge ||
+          packet.envelope.requestID)
+        return false;
+    }
+    else if (acknowledge ? packet.envelope.requestID != sequence :
+        packet.envelope.requestID != 0)
+      return false;
+
+    bool current;
+    bool motionApplies;
+    bool baseline;
+    bool modeChange;
+    bool buttonChange;
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      const uint64_t lastSequence = datagram ?
+        connection.inputDatagramSequence :
+        connection.inputReliableSequence;
+      current       = connection.inputClaimantID &&
+        connection.inputClaimEpoch == packet.envelope.componentEpoch &&
+        (connection.inputFlags & LG_NET_INPUT_CLAIM_POINTER) &&
+        sequence > lastSequence;
+      motionApplies = sequence > connection.inputMotionSequence;
+      baseline      = connection.inputMotionBaseline;
+      modeChange    = motionApplies && baseline &&
+        connection.inputMotionAbsolute == relative;
+      buttonChange  = buttons != connection.inputPointerButtons;
+    }
+    if (!current)
+      return true;
+    if (datagram)
+      return !motionApplies || (baseline && !modeChange);
+
+    const bool transition = wheel || changedButtons || buttonChange ||
+      (motionApplies && (!baseline || modeChange));
+    if (transition && !acknowledge)
+      return false;
+    return true;
+  }
+
   bool HandleInputPointer(Connection& connection,
     const LGNetPacketView& packet, bool datagram)
   {
-    uint64_t                         sequence;
-    InputResult                      result;
-    std::shared_ptr<CNetworkSession> session;
+    InputResult                      result  = InputResult::STALE;
+    std::shared_ptr<CNetworkSession> session = {};
     {
-      CSRWSharedLock guard(connection.lock);
-      session = connection.session;
+      CSRWSharedLock guard(connection.inputLock);
+      session = connection.inputSession;
     }
     if (!session)
       return false;
@@ -3479,38 +4101,69 @@ retry:
     if (packet.envelope.messageType ==
         LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE)
     {
-      LGNetInputRelative relative;
+      LGNetInputRelative relative = {};
       if (lgNetInputRelativeDecode(&relative, packet.payload,
             packet.payloadLength) != LG_NET_PARSE_OK || relative.wheelX ||
-          (datagram && (relative.wheelY || relative.changedButtons)))
+          !InputPointerEnvelopeValid(connection, packet, relative.sequence,
+            datagram, true, relative.wheelY, relative.buttons,
+            relative.changedButtons))
         return false;
-      sequence = relative.sequence;
-      if (!ValidateInputPointer(connection, packet.envelope.componentEpoch,
-            sequence, datagram, relative.buttons))
+      InputPointerMotion motion;
+      if (!PrepareInputPointer(connection,
+            packet.envelope.componentEpoch, relative.sequence, datagram,
+            true, relative.cumulativeX, relative.cumulativeY,
+            relative.buttons, motion))
         return true;
-      result = session->SendMouseRelative(relative.deltaX, relative.deltaY,
-        relative.wheelY, relative.buttons);
+      if (datagram && !motion.apply)
+        return true;
+      if (motion.useAbsolute)
+        result = session->SendMouseAbsolute(
+          motion.absoluteX, motion.absoluteY,
+          relative.wheelY, relative.buttons);
+      else if (motion.apply)
+        result = SendInputRelativeMotion(connection, session, motion,
+          relative.wheelY, relative.buttons);
+      else
+        result = session->SendMouseRelative(0, 0,
+          relative.wheelY, relative.buttons);
     }
     else
     {
-      LGNetInputAbsolute absolute;
+      LGNetInputAbsolute absolute = {};
       if (lgNetInputAbsoluteDecode(&absolute, packet.payload,
             packet.payloadLength) != LG_NET_PARSE_OK || absolute.wheelX ||
-          (datagram && (absolute.wheelY || absolute.changedButtons)))
+          !InputPointerEnvelopeValid(connection, packet, absolute.sequence,
+            datagram, false, absolute.wheelY, absolute.buttons,
+            absolute.changedButtons))
         return false;
-      sequence = absolute.sequence;
-      if (!ValidateInputPointer(connection, packet.envelope.componentEpoch,
-            sequence, datagram, absolute.buttons))
+      InputPointerMotion motion;
+      motion.absoluteX = NormalizeAbsolute(absolute.x, absolute.width);
+      motion.absoluteY = NormalizeAbsolute(absolute.y, absolute.height);
+      if (!PrepareInputPointer(connection,
+            packet.envelope.componentEpoch, absolute.sequence, datagram,
+            false, absolute.cumulativeX, absolute.cumulativeY,
+            absolute.buttons, motion))
         return true;
-      result = session->SendMouseAbsolute(
-        NormalizeAbsolute(absolute.x, absolute.width),
-        NormalizeAbsolute(absolute.y, absolute.height),
-        absolute.wheelY, absolute.buttons);
+      if (datagram && !motion.apply)
+        return true;
+      if (motion.useAbsolute)
+        result = session->SendMouseAbsolute(
+          motion.absoluteX, motion.absoluteY,
+          absolute.wheelY, absolute.buttons);
+      else
+        result = session->SendMouseRelative(
+          0, 0, absolute.wheelY, absolute.buttons);
     }
 
-    if (result == InputResult::ACCEPTED)
+    const bool acknowledge =
+      (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED) != 0;
+    if (result == InputResult::ACCEPTED && !acknowledge)
       return true;
-    InvalidateInputClaim(connection, packet.envelope.componentEpoch);
+    if (result != InputResult::ACCEPTED)
+      InvalidateInputClaim(connection, packet.envelope.componentEpoch);
+    if (acknowledge)
+      return QueueInputAck(connection, InputStatusCode(result),
+        packet.envelope.componentEpoch, packet.envelope.requestID);
     return SendInputStatus(connection, LG_NET_INPUT_MESSAGE_STATUS,
       InputStatusCode(result), packet.envelope.componentEpoch, 0, 0);
   }
@@ -3518,14 +4171,19 @@ retry:
   bool HandleInput(Connection& connection, const LGNetPacketView& packet,
     bool datagram)
   {
-    if (datagram &&
-        packet.envelope.messageType != LG_NET_INPUT_MESSAGE_KEEPALIVE &&
-        packet.envelope.messageType !=
-          LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE &&
-        packet.envelope.messageType !=
-          LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE)
-      return false;
+    if (datagram)
+    {
+      if (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED)
+        return false;
+      if (packet.envelope.messageType != LG_NET_INPUT_MESSAGE_KEEPALIVE &&
+          packet.envelope.messageType !=
+            LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE &&
+          packet.envelope.messageType !=
+            LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE)
+        return false;
+    }
 
+    CSRWExclusiveLock dispatchGuard(connection.inputDispatchLock);
     switch (packet.envelope.messageType)
     {
       case LG_NET_INPUT_MESSAGE_CLAIM:
@@ -4010,6 +4668,10 @@ retry:
             LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL))
         return false;
 
+    if (TrySendPendingInputAck(connection) == SendResult::FAILED ||
+        TrySendInputLEDs(connection) == SendResult::FAILED)
+      return false;
+
     return PublishCursor(connection);
   }
 
@@ -4024,9 +4686,6 @@ retry:
     const bool         videoSubscribe   =
       packet.envelope.service == LG_NET_SERVICE_VIDEO &&
       packet.envelope.messageType == LG_NET_VIDEO_MESSAGE_SUBSCRIBE;
-    const bool         inputClaim       =
-      packet.envelope.service == LG_NET_SERVICE_INPUT &&
-      packet.envelope.messageType == LG_NET_INPUT_MESSAGE_CLAIM;
     const bool         recoveryRequest  =
       packet.envelope.service == LG_NET_SERVICE_RECOVERY &&
       (packet.envelope.messageType == LG_NET_RECOVERY_MESSAGE_GET_INFO ||
@@ -4045,8 +4704,7 @@ retry:
       packet.envelope.service == LG_NET_SERVICE_FILE;
     LGNetEnvelopeFlags expectedFlags    =
       LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
-    if (audioSubscribe || videoSubscribe || inputClaim ||
-        recoveryRequest || controlRequest)
+    if (audioSubscribe || videoSubscribe || recoveryRequest || controlRequest)
       expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
     if (cursorStatus || audioResponse)
       expectedFlags |= LG_NET_ENVELOPE_RESPONSE;
@@ -4154,9 +4812,6 @@ retry:
       case LG_NET_SERVICE_CURSOR:
         return HandleCursorStatus(connection, packet);
 
-      case LG_NET_SERVICE_INPUT:
-        return HandleInput(connection, packet, false);
-
       case LG_NET_SERVICE_AUDIO:
         return audio.HandlePacket(AudioPeer(connection), packet, false) !=
           NetworkAudioPacketResult::INVALID;
@@ -4180,6 +4835,312 @@ retry:
     }
   }
 
+  bool HandleInputStreamPacket(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    LGNetEnvelopeFlags expectedFlags =
+      LG_NET_ENVELOPE_RELIABLE | LG_NET_ENVELOPE_FINAL;
+    if (packet.envelope.messageType == LG_NET_INPUT_MESSAGE_CLAIM ||
+        ((packet.envelope.messageType ==
+            LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE ||
+          packet.envelope.messageType ==
+            LG_NET_INPUT_MESSAGE_MOUSE_ABSOLUTE) &&
+          (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED)))
+      expectedFlags |= LG_NET_ENVELOPE_ACK_REQUIRED;
+    if (packet.envelope.headerSize != LG_NET_ENVELOPE_WIRE_SIZE ||
+        packet.envelope.service != LG_NET_SERVICE_INPUT ||
+        packet.envelope.flags != expectedFlags ||
+        !lgNetEnvelopeRouteValid(&packet.envelope, LG_NET_ROLE_CLIENT,
+          LG_NET_ROUTE_DELIVERY_RELIABLE))
+      return false;
+
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      if (connection.inputClosing || !connection.inputStreamBound ||
+          packet.envelope.sessionEpoch !=
+            connection.inputStreamSessionEpoch ||
+          packet.envelope.serviceVersion !=
+            connection.inputStreamServiceVersion ||
+          packet.envelope.payloadLength > connection.inputStreamMaxPayload)
+        return false;
+    }
+    return HandleInput(connection, packet, false);
+  }
+
+  bool DrainInputReceive(Connection& connection)
+  {
+    for (;;)
+    {
+      LGNetStreamPacket       streamPacket = {};
+      const LGNetStreamResult result       = lgNetStreamParserNext(
+        &connection.inputReceiveParser, &streamPacket, nullptr);
+      if (result == LG_NET_STREAM_NEED_DATA)
+        return true;
+      if (result != LG_NET_STREAM_PACKET)
+        return false;
+
+      LGNetPacketView packet = {};
+      packet.envelope        = streamPacket.envelope;
+      packet.payloadLength   = streamPacket.payloadLength;
+      packet.wireSize        = streamPacket.wireSize;
+      if (!streamPacket.payload[1].size)
+        packet.payload = streamPacket.payload[0].data;
+      else
+      {
+        if (streamPacket.payloadLength >
+            connection.inputReceivePayload.size())
+          return false;
+        memcpy(connection.inputReceivePayload.data(),
+          streamPacket.payload[0].data, streamPacket.payload[0].size);
+        memcpy(connection.inputReceivePayload.data() +
+            streamPacket.payload[0].size, streamPacket.payload[1].data,
+          streamPacket.payload[1].size);
+        packet.payload = connection.inputReceivePayload.data();
+      }
+
+      {
+        CSRWExclusiveLock guard(connection.inputLock);
+        if (!connection.inputStreamBound || !packet.envelope.sequence ||
+            connection.inputStreamReceiveSequence == UINT64_MAX ||
+            packet.envelope.sequence !=
+              connection.inputStreamReceiveSequence + 1)
+          return false;
+        connection.inputStreamReceiveSequence = packet.envelope.sequence;
+      }
+      if (!HandleInputStreamPacket(connection, packet) ||
+          !lgNetStreamParserConsume(&connection.inputReceiveParser))
+        return false;
+
+      if (!lgNetStreamParserBuffered(&connection.inputReceiveParser))
+        lgNetStreamParserReset(&connection.inputReceiveParser);
+    }
+  }
+
+  bool ActivateInputReceive(Connection& connection)
+  {
+    LGNetStreamBinding binding  = {};
+    uint64_t           streamID = 0;
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      if (connection.inputBindingLength !=
+            sizeof(connection.inputBindingData) ||
+          connection.inputStreamBound)
+        return false;
+      streamID = connection.inputStreamID;
+      if (lgNetStreamBindingDecode(&binding, connection.inputBindingData,
+            sizeof(connection.inputBindingData)) != LG_NET_PARSE_OK)
+        return false;
+    }
+    if (binding.service != LG_NET_SERVICE_INPUT ||
+        binding.originRole != LG_NET_ROLE_CLIENT || binding.flags ||
+        binding.streamID != streamID)
+      return false;
+
+    std::shared_ptr<CNetworkSession> session    = {};
+    LGNetCapability                  capability = {};
+    {
+      CSRWSharedLock guard(connection.lock);
+      const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+      if (connection.closing ||
+          connection.handshake != HandshakeState::READY ||
+          binding.sessionEpoch != connection.sessionEpoch ||
+          !(connection.selectedServices & inputMask) ||
+          !(connection.reliableServices & inputMask) ||
+          connection.selectedCapabilities
+            [LG_NET_SERVICE_INPUT].maxBidirectionalStreams != 1 ||
+          !connection.session)
+        return false;
+      capability =
+        connection.selectedCapabilities[LG_NET_SERVICE_INPUT];
+      session    = connection.session;
+    }
+
+    LGNetSequenceTracker datagramReceive = {};
+    if (!lgNetSequenceTrackerInit(&datagramReceive, binding.sessionEpoch,
+          NETWORK_SEQUENCE_COMPONENT, NETWORK_DATAGRAM_WINDOW, false))
+      return false;
+
+    CSRWExclusiveLock guard(connection.inputLock);
+    if (connection.inputClosing || !connection.inputStream ||
+        connection.inputStreamID != streamID ||
+        connection.inputBindingLength !=
+          sizeof(connection.inputBindingData) ||
+        connection.inputStreamBound)
+      return false;
+    connection.inputStreamSessionEpoch       = binding.sessionEpoch;
+    connection.inputStreamServiceVersion     = capability.versionMin;
+    connection.inputStreamMaxPayload         = capability.maxPayloadLength;
+    connection.inputDatagramLimit            =
+      capability.maxDatagramPayload;
+    connection.inputSession                  = std::move(session);
+    connection.inputDatagramReceive          = datagramReceive;
+    connection.inputStreamBound              = true;
+    return true;
+  }
+
+  bool ReceiveInput(Connection& connection, const QUIC_BUFFER * buffers,
+    uint32_t count)
+  {
+    if (count && !buffers)
+      return false;
+
+    for (uint32_t index = 0; index < count; ++index)
+    {
+      if (buffers[index].Length && !buffers[index].Buffer)
+        return false;
+
+      size_t offset = 0;
+      while (offset < buffers[index].Length)
+      {
+        bool bound = false;
+        {
+          CSRWSharedLock guard(connection.inputLock);
+          bound = connection.inputStreamBound;
+        }
+        if (!bound)
+        {
+          bool activate = false;
+          {
+            CSRWExclusiveLock guard(connection.inputLock);
+            const size_t remaining = buffers[index].Length - offset;
+            size_t       length    = sizeof(connection.inputBindingData) -
+              connection.inputBindingLength;
+            if (length > remaining)
+              length = remaining;
+            memcpy(connection.inputBindingData +
+                connection.inputBindingLength,
+              buffers[index].Buffer + offset, length);
+            connection.inputBindingLength += length;
+            offset                        += length;
+            activate = connection.inputBindingLength ==
+              sizeof(connection.inputBindingData);
+          }
+          if (activate && !ActivateInputReceive(connection))
+            return false;
+          continue;
+        }
+
+        size_t accepted = 0;
+        if (!lgNetStreamParserAppend(&connection.inputReceiveParser,
+              buffers[index].Buffer + offset,
+              buffers[index].Length - offset, &accepted))
+          return false;
+        offset += accepted;
+        if (!DrainInputReceive(connection) ||
+            (!accepted &&
+              !lgNetStreamParserWritable(&connection.inputReceiveParser)))
+          return false;
+      }
+    }
+
+    bool bound = false;
+    {
+      CSRWSharedLock guard(connection.inputLock);
+      bound = connection.inputStreamBound;
+    }
+    return !bound || DrainInputReceive(connection);
+  }
+
+  bool AcceptInputStream(Connection& connection, HQUIC handle,
+    QUIC_STREAM_OPEN_FLAGS flags)
+  {
+    if (flags != QUIC_STREAM_OPEN_FLAG_NONE)
+      return false;
+
+    QUIC_UINT62 streamID     = 0;
+    uint32_t    streamIDSize = sizeof(streamID);
+    if (QUIC_FAILED(api->GetParam(handle, QUIC_PARAM_STREAM_ID,
+          &streamIDSize, &streamID)) ||
+        streamIDSize != sizeof(streamID) || (streamID & 3U) != 0U)
+      return false;
+
+    uint32_t maxPayload = 0;
+    {
+      CSRWSharedLock guard(connection.lock);
+      const uint16_t inputMask = UINT16_C(1) << LG_NET_SERVICE_INPUT;
+      if (connection.closing ||
+          connection.handshake != HandshakeState::READY ||
+          !(connection.selectedServices & inputMask) ||
+          !(connection.reliableServices & inputMask) ||
+          connection.selectedCapabilities
+            [LG_NET_SERVICE_INPUT].maxBidirectionalStreams != 1)
+        return false;
+      maxPayload = connection.selectedCapabilities
+        [LG_NET_SERVICE_INPUT].maxPayloadLength;
+    }
+    if (!maxPayload || maxPayload > NETWORK_INPUT_MAX_PAYLOAD)
+      return false;
+
+    const uint16_t priority = UINT16_MAX;
+    if (QUIC_FAILED(api->SetParam(handle, QUIC_PARAM_STREAM_PRIORITY,
+          sizeof(priority), &priority)))
+      return false;
+
+    std::vector<uint8_t> receiveData;
+    std::vector<uint8_t> receivePayload;
+    try
+    {
+      receiveData.resize(LG_NET_ENVELOPE_WIRE_SIZE + maxPayload);
+      receivePayload.resize(maxPayload);
+    }
+    catch (...)
+    {
+      return false;
+    }
+
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputClosing || connection.inputStream)
+        return false;
+      connection.inputReceiveData.swap(receiveData);
+      connection.inputReceivePayload.swap(receivePayload);
+      if (!lgNetStreamParserInit(&connection.inputReceiveParser,
+            connection.inputReceiveData.data(),
+            connection.inputReceiveData.size(), maxPayload))
+      {
+        connection.inputReceiveData.clear();
+        connection.inputReceivePayload.clear();
+        return false;
+      }
+      connection.inputStream        = handle;
+      connection.inputStreamID      = streamID;
+      connection.inputBindingLength = 0;
+      memset(connection.inputBindingData, 0,
+        sizeof(connection.inputBindingData));
+    }
+
+    api->SetCallbackHandler(handle,
+      reinterpret_cast<void *>(InputStreamCallback), &connection);
+    return true;
+  }
+
+  bool HandleInputDatagram(Connection& connection,
+    const LGNetPacketView& packet)
+  {
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputClosing || !connection.inputStreamBound ||
+          packet.envelope.sessionEpoch !=
+            connection.inputStreamSessionEpoch ||
+          packet.envelope.serviceVersion !=
+            connection.inputStreamServiceVersion ||
+          !connection.inputDatagramLimit ||
+          packet.envelope.payloadLength >
+            connection.inputDatagramLimit)
+        return false;
+
+      const LGNetSequenceResult sequenceResult = lgNetSequenceTrackerCheck(
+        &connection.inputDatagramReceive, packet.envelope.sessionEpoch,
+        NETWORK_SEQUENCE_COMPONENT, packet.envelope.sequence);
+      if (sequenceResult == LG_NET_SEQUENCE_DUPLICATE ||
+          sequenceResult == LG_NET_SEQUENCE_TOO_OLD)
+        return true;
+      if (!lgNetSequenceAccepted(sequenceResult))
+        return false;
+    }
+    return HandleInput(connection, packet, true);
+  }
+
   bool HandleDatagram(Connection& connection, const QUIC_BUFFER * buffer)
   {
     LGNetPacketView packet;
@@ -4198,6 +5159,9 @@ retry:
           LG_NET_ENVELOPE_EARLY_DATA) ||
         !packet.envelope.sequence)
       return false;
+
+    if (packet.envelope.service == LG_NET_SERVICE_INPUT)
+      return HandleInputDatagram(connection, packet);
 
     const uint16_t serviceMask = UINT16_C(1) << packet.envelope.service;
     {
@@ -4238,8 +5202,6 @@ retry:
           0, packet.envelope.requestID, packet.payload,
           static_cast<uint32_t>(packet.payloadLength), true);
 
-    if (packet.envelope.service == LG_NET_SERVICE_INPUT)
-      return HandleInput(connection, packet, true);
     if (packet.envelope.service == LG_NET_SERVICE_AUDIO)
       return audio.HandlePacket(AudioPeer(connection), packet, true) !=
         NetworkAudioPacketResult::INVALID;
@@ -4600,6 +5562,7 @@ retry:
         connections.begin(), connections.end(), &connection);
       if (found != connections.end())
         connections.erase(found);
+      connection.detached = true;
     }
 
     {
@@ -4620,13 +5583,29 @@ retry:
             static_cast<unsigned>(service));
       session = std::move(connection.session);
     }
+    {
+      CSRWExclusiveLock guard(connection.inputLock);
+      if (connection.inputStreamSendCount ||
+          connection.inputStreamSendBytes)
+        DEBUG_ERROR("Network client %u closed with input sends in flight",
+          connection.client);
+      connection.inputSession.reset();
+    }
     video.PeerDisconnected(VideoPeer(connection));
     clipboard.PeerDisconnected(ClipboardPeer(connection));
     audio.PeerDisconnected(AudioPeer(connection));
     if (session)
       transport.RemoveSession(client, generation);
     session.reset();
-    delete &connection;
+
+    bool dispose = false;
+    {
+      CSRWExclusiveLock guard(lock);
+      connection.cleanupComplete = true;
+      dispose                    = connection.detached && !connection.pins;
+    }
+    if (dispose)
+      delete &connection;
     DEBUG_INFO("Network client %u disconnected", client);
   }
 
@@ -4739,7 +5718,7 @@ retry:
           return QUIC_STATUS_SUCCESS;
         }
 
-        bool accepted = false;
+        bool controlAccepted = false;
         {
           CSRWExclusiveLock guard(connection.lock);
           if (flags == QUIC_STREAM_OPEN_FLAG_NONE &&
@@ -4747,13 +5726,16 @@ retry:
               !connection.controlStream)
           {
             connection.controlStream = event->PEER_STREAM_STARTED.Stream;
-            accepted                 = true;
+            controlAccepted          = true;
           }
         }
 
-        if (accepted)
+        if (controlAccepted)
           owner.api->SetCallbackHandler(event->PEER_STREAM_STARTED.Stream,
             reinterpret_cast<void *>(StreamCallback), &connection);
+        else if (owner.AcceptInputStream(connection,
+              event->PEER_STREAM_STARTED.Stream, flags))
+          return QUIC_STATUS_SUCCESS;
         else
         {
           owner.api->SetCallbackHandler(event->PEER_STREAM_STARTED.Stream,
@@ -4810,8 +5792,14 @@ retry:
             event->SHUTDOWN_INITIATED_BY_TRANSPORT.Status),
           static_cast<unsigned long long>(
             event->SHUTDOWN_INITIATED_BY_TRANSPORT.ErrorCode));
-        CSRWExclusiveLock guard(connection.lock);
-        connection.closing = true;
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          connection.closing = true;
+        }
+        {
+          CSRWExclusiveLock guard(connection.inputLock);
+          connection.inputClosing = true;
+        }
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -4821,8 +5809,14 @@ retry:
           DEBUG_WARN("Network client %u closed the connection: error 0x%llx",
             connection.client, static_cast<unsigned long long>(
               event->SHUTDOWN_INITIATED_BY_PEER.ErrorCode));
-        CSRWExclusiveLock guard(connection.lock);
-        connection.closing = true;
+        {
+          CSRWExclusiveLock guard(connection.lock);
+          connection.closing = true;
+        }
+        {
+          CSRWExclusiveLock guard(connection.inputLock);
+          connection.inputClosing = true;
+        }
         return QUIC_STATUS_SUCCESS;
       }
 
@@ -4877,6 +5871,69 @@ retry:
           CSRWExclusiveLock guard(connection.lock);
           if (connection.controlStream == handle)
             connection.controlStream = nullptr;
+        }
+        owner.api->StreamClose(handle);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      default:
+        return QUIC_STATUS_SUCCESS;
+    }
+  }
+
+  static QUIC_STATUS QUIC_API InputStreamCallback(HQUIC handle,
+    void * context, QUIC_STREAM_EVENT * event)
+  {
+    Connection& connection = *static_cast<Connection *>(context);
+    Impl&       owner      = connection.owner;
+    CallbackGuard callback(owner);
+
+    switch (event->Type)
+    {
+      case QUIC_STREAM_EVENT_RECEIVE:
+        if (!owner.ReceiveInput(connection, event->RECEIVE.Buffers,
+              event->RECEIVE.BufferCount))
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+        return QUIC_STATUS_SUCCESS;
+
+      case QUIC_STREAM_EVENT_SEND_COMPLETE:
+      {
+        std::unique_ptr<Send> send(
+          static_cast<Send *>(event->SEND_COMPLETE.ClientContext));
+        {
+          CSRWExclusiveLock guard(connection.inputLock);
+          ReleaseInputSendLocked(connection, *send);
+          connection.inputLEDWaitForSendReady = false;
+          if (send->inputAck)
+            connection.inputAckInFlight = false;
+        }
+        if (owner.TrySendPendingInputAck(connection) == SendResult::FAILED ||
+            owner.TrySendInputLEDs(connection) == SendResult::FAILED)
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      case QUIC_STREAM_EVENT_PEER_SEND_SHUTDOWN:
+      case QUIC_STREAM_EVENT_PEER_SEND_ABORTED:
+      case QUIC_STREAM_EVENT_PEER_RECEIVE_ABORTED:
+        owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+        return QUIC_STATUS_SUCCESS;
+
+      case QUIC_STREAM_EVENT_SHUTDOWN_COMPLETE:
+      {
+        CSRWExclusiveLock sendGuard(connection.inputSendLock);
+        {
+          CSRWExclusiveLock guard(connection.inputLock);
+          if (connection.inputStream == handle)
+          {
+            connection.inputStream        = nullptr;
+            connection.inputStreamBound   = false;
+            connection.inputClosing       = true;
+            connection.inputAckSending    = false;
+            connection.inputAckInFlight   = false;
+            ClearPendingInputAckLocked(connection);
+            connection.inputSession.reset();
+          }
         }
         owner.api->StreamClose(handle);
         return QUIC_STATUS_SUCCESS;
@@ -5094,11 +6151,27 @@ retry:
     audio.Process(now);
     video.Process(now);
     clipboard.Process(now);
-    CSRWSharedLock guard(lock);
-    if (stopping || !api)
-      return;
+    std::vector<Connection *> pinned;
+    {
+      CSRWExclusiveLock guard(lock);
+      if (stopping || !api)
+        return;
+      try
+      {
+        pinned = connections;
+      }
+      catch (...)
+      {
+        return;
+      }
+      for (Connection * connection : pinned)
+      {
+        ++connection->pins;
+        ++activePins;
+      }
+    }
 
-    for (Connection * connection : connections)
+    for (Connection * connection : pinned)
     {
       HQUIC    handle = nullptr;
       uint32_t client = 0;
@@ -5117,13 +6190,21 @@ retry:
       {
         if (!PumpSession(*connection, now))
           Shutdown(*connection, NETWORK_ERROR_PROTOCOL);
+        ReleaseConnectionPin(*connection);
         continue;
+      }
+
+      {
+        CSRWExclusiveLock inputGuard(connection->inputLock);
+        connection->inputClosing = true;
       }
 
       DEBUG_WARN("Closing network client %u after an incomplete handshake",
         client);
       api->ConnectionShutdown(handle, QUIC_CONNECTION_SHUTDOWN_FLAG_NONE,
         NETWORK_ERROR_HANDSHAKE_TIMEOUT);
+
+      ReleaseConnectionPin(*connection);
     }
   }
 
@@ -5295,7 +6376,8 @@ retry:
       CSRWExclusiveLock guard(lock);
       stopping = true;
       running  = false;
-      if (connections.empty() && !activeCallbacks && drainedEvent)
+      if (connections.empty() && !activeCallbacks && !activePins &&
+          drainedEvent)
         SetEvent(drainedEvent);
     }
 

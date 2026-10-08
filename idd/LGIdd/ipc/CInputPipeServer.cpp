@@ -29,6 +29,7 @@
 #include "CSRWLock.h"
 #include "InputPipeProtocol.h"
 
+#include <avrt.h>
 #include <string.h>
 
 CInputPipeServer g_inputPipeServer;
@@ -43,9 +44,18 @@ bool CInputPipeServer::Init()
   m_performanceFrequency.QuadPart = 0;
   if (!QueryPerformanceFrequency(&m_performanceFrequency))
     m_performanceFrequency.QuadPart = 0;
-  m_lastStatistics = GetTickCount64();
-  m_stopEvent  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
-  m_queueEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  static_assert(MOTION_AGE_BUDGET_MS &&
+    1000 % MOTION_AGE_BUDGET_MS == 0,
+    "motion age budget must evenly divide one second");
+  const int64_t budgetDivisor = 1000 / MOTION_AGE_BUDGET_MS;
+  m_motionBudgetTicks         =
+    m_performanceFrequency.QuadPart / budgetDivisor;
+  if (m_performanceFrequency.QuadPart % budgetDivisor)
+    ++m_motionBudgetTicks;
+
+  m_lastStatistics  = GetTickCount64();
+  m_stopEvent       = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  m_queueEvent      = CreateEventW(nullptr, FALSE, FALSE, nullptr);
   if (!m_stopEvent || !m_queueEvent)
   {
     DEBUG_ERROR_HR(GetLastError(),
@@ -119,6 +129,89 @@ void CInputPipeServer::DeInit()
   m_statSlowWrites        = 0;
   m_statWriteTicks        = 0;
   m_statMaxWriteTicks     = 0;
+
+  m_motionBudgetTicks             = 0;
+  m_performanceFrequency.QuadPart = 0;
+}
+
+bool CInputPipeServer::MotionBudgetExceededLocked() const
+{
+  if (m_queueCount >= MOTION_EMERGENCY_DEPTH)
+    return true;
+  if (!m_queueCount || !m_motionBudgetTicks)
+    return false;
+
+  LARGE_INTEGER now = {};
+  if (!QueryPerformanceCounter(&now))
+    return false;
+
+  const int64_t oldest = m_queue[m_queueHead].enqueueTicks;
+  return oldest > 0 && now.QuadPart >= oldest &&
+    now.QuadPart - oldest >= m_motionBudgetTicks;
+}
+
+CInputPipeServer::QueueItem& CInputPipeServer::GetQueueItemLocked(
+  size_t position)
+{
+  return m_queue[(m_queueHead + position) % QUEUE_LENGTH];
+}
+
+void CInputPipeServer::RemoveQueueItemLocked(size_t position)
+{
+  for (size_t i = position; i + 1 < m_queueCount; ++i)
+    GetQueueItemLocked(i) = GetQueueItemLocked(i + 1);
+  --m_queueCount;
+}
+
+bool CInputPipeServer::CompactQueuedMotionLocked()
+{
+  for (size_t i = 0; i + 1 < m_queueCount; ++i)
+  {
+    QueueItem& first  = GetQueueItemLocked(i);
+    QueueItem& second = GetQueueItemLocked(i + 1);
+    if (!first.pureMotion || !second.pureMotion ||
+        first.type != second.type || first.state != second.state)
+      continue;
+
+    if (first.type == LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE)
+    {
+      if (first.payload.mouseRelative.buttons !=
+            second.payload.mouseRelative.buttons ||
+          first.payload.mouseRelative.wheel ||
+          second.payload.mouseRelative.wheel)
+        continue;
+
+      const int64_t x = static_cast<int64_t>(
+        first.payload.mouseRelative.deltaX) +
+        second.payload.mouseRelative.deltaX;
+      const int64_t y = static_cast<int64_t>(
+        first.payload.mouseRelative.deltaY) +
+        second.payload.mouseRelative.deltaY;
+      if (x < LG_INPUT_MOUSE_DELTA_MIN || x > LG_INPUT_MOUSE_DELTA_MAX ||
+          y < LG_INPUT_MOUSE_DELTA_MIN || y > LG_INPUT_MOUSE_DELTA_MAX)
+        continue;
+
+      first.payload.mouseRelative.deltaX = static_cast<int32_t>(x);
+      first.payload.mouseRelative.deltaY = static_cast<int32_t>(y);
+      RemoveQueueItemLocked(i + 1);
+      ++m_statRelativeCoalesced;
+      return true;
+    }
+
+    if (first.type != LG_INPUT_PIPE_MESSAGE_MOUSE_ABSOLUTE ||
+        first.payload.mouseAbsolute.buttons !=
+          second.payload.mouseAbsolute.buttons ||
+        first.payload.mouseAbsolute.wheel ||
+        second.payload.mouseAbsolute.wheel)
+      continue;
+
+    first.payload.mouseAbsolute.x = second.payload.mouseAbsolute.x;
+    first.payload.mouseAbsolute.y = second.payload.mouseAbsolute.y;
+    RemoveQueueItemLocked(i + 1);
+    ++m_statAbsoluteCoalesced;
+    return true;
+  }
+  return false;
 }
 
 bool CInputPipeServer::QueueLocked(
@@ -126,20 +219,26 @@ bool CInputPipeServer::QueueLocked(
   const KVMFRInputPayload& payload,
   bool pureMotion)
 {
+  const bool motionBudgetExceeded = MotionBudgetExceededLocked();
+  if (motionBudgetExceeded)
+    while (CompactQueuedMotionLocked())
+    {
+    }
+
   if (m_queueCount)
   {
     const size_t tailIndex =
       (m_queueHead + m_queueCount - 1) % QUEUE_LENGTH;
-    QueueItem& tail = m_queue[tailIndex];
+    QueueItem&   tail      = m_queue[tailIndex];
     if (tail.type == type)
     {
       if (type == LG_INPUT_PIPE_MESSAGE_MOUSE_RELATIVE &&
-          m_queueCount >= MOTION_COALESCE_THRESHOLD &&
           tail.pureMotion && pureMotion &&
           tail.payload.mouseRelative.wheel == 0 &&
           payload.mouseRelative.wheel == 0 &&
           tail.payload.mouseRelative.buttons ==
-            payload.mouseRelative.buttons)
+            payload.mouseRelative.buttons &&
+          motionBudgetExceeded)
       {
         const int64_t x = static_cast<int64_t>(
           tail.payload.mouseRelative.deltaX) +
@@ -181,16 +280,23 @@ bool CInputPipeServer::QueueRawLocked(
   const KVMFRInputPayload& payload,
   bool pureMotion)
 {
+  if (MotionBudgetExceededLocked())
+    while (CompactQueuedMotionLocked())
+    {
+    }
   if (m_queueCount == QUEUE_LENGTH)
     return false;
 
-  const size_t index =
+  const size_t  index       =
     (m_queueHead + m_queueCount) % QUEUE_LENGTH;
-  m_queue[index].type       = type;
-  m_queue[index].state      =
+  LARGE_INTEGER enqueueTime = {};
+  QueryPerformanceCounter(&enqueueTime);
+  m_queue[index].type         = type;
+  m_queue[index].state        =
     Atomic::Load(m_state, std::memory_order_relaxed);
-  m_queue[index].payload    = payload;
-  m_queue[index].pureMotion = pureMotion;
+  m_queue[index].enqueueTicks = enqueueTime.QuadPart;
+  m_queue[index].payload      = payload;
+  m_queue[index].pureMotion   = pureMotion;
   ++m_queueCount;
   ++m_statEnqueued;
   if (m_queueCount > m_statQueueHighWater)
@@ -564,6 +670,19 @@ DWORD WINAPI CInputPipeServer::ThreadProc(void * context)
 
 void CInputPipeServer::Thread()
 {
+  DWORD  avTask       = 0;
+  HANDLE avTaskHandle = nullptr;
+  bool   prioritySet  = false;
+
+  avTaskHandle = AvSetMmThreadCharacteristicsW(L"Distribution", &avTask);
+  if (avTaskHandle)
+    prioritySet =
+      AvSetMmThreadPriority(avTaskHandle, AVRT_PRIORITY_HIGH) != FALSE;
+  if (!prioritySet && !SetThreadPriority(
+      GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL))
+    DEBUG_WARN_HR(GetLastError(),
+      "Failed to raise LGInput sender thread priority");
+
   const HANDLE handles[] = { m_stopEvent, m_queueEvent };
   for (;;)
   {
@@ -588,6 +707,8 @@ void CInputPipeServer::Thread()
   }
 
   Invalidate(0, false);
+  if (avTaskHandle)
+    AvRevertMmThreadCharacteristics(avTaskHandle);
 }
 
 void CInputPipeServer::OnPipeConnected()

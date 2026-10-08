@@ -35,14 +35,15 @@ static constexpr USHORT LG_INPUT_VENDOR_ID          = 0x0000;
 static constexpr USHORT LG_INPUT_PRODUCT_ID         = 0x0000;
 static constexpr USHORT LG_INPUT_VERSION            = 0x0001;
 static constexpr size_t REPORT_QUEUE_LENGTH         = 64;
-static constexpr size_t MOTION_COALESCE_THRESHOLD   =
-  REPORT_QUEUE_LENGTH / 2;
+static constexpr size_t MOTION_EMERGENCY_DEPTH      = 8;
+static constexpr DWORD  MOTION_AGE_BUDGET_MS        = 1;
 
 struct HIDQueuedReport
 {
-  UCHAR  data[HID_MAX_INPUT_REPORT_SIZE];
-  bool   pureMotion;
-  size_t size;
+  UCHAR   data[HID_MAX_INPUT_REPORT_SIZE];
+  int64_t enqueueTicks;
+  size_t  size;
+  bool    pureMotion;
 };
 
 struct HIDStatistics
@@ -77,6 +78,9 @@ struct HIDDeviceContext
   uint16_t              consumerUsage;
   uint16_t              absoluteX;
   uint16_t              absoluteY;
+  int64_t               motionBudgetTicks;
+  HIDKeyboardReport     keyboard;
+  bool                  keyboardValid;
   HIDStatistics         statistics;
   HIDQueuedReport       reports[REPORT_QUEUE_LENGTH];
   CInputPipeClient *    inputPipe;
@@ -200,28 +204,71 @@ static void RemoveQueuedReport(
   --context->reportCount;
 }
 
-static bool CompactStaleMotion(
-  _Inout_ HIDDeviceContext * context,
-  _In_ UCHAR incomingReportId)
+static bool MotionBudgetExceeded(_In_ HIDDeviceContext * context)
 {
-  for (size_t i = 0; i < context->reportCount; ++i)
+  if (context->reportCount >= MOTION_EMERGENCY_DEPTH)
+    return true;
+  if (!context->reportCount || !context->motionBudgetTicks)
+    return false;
+
+  LARGE_INTEGER now = {};
+  if (!QueryPerformanceCounter(&now))
+    return false;
+
+  const int64_t oldest = GetQueuedReport(context, 0).enqueueTicks;
+  return oldest > 0 && now.QuadPart >= oldest &&
+    now.QuadPart - oldest >= context->motionBudgetTicks;
+}
+
+static bool CompactQueuedMotion(_Inout_ HIDDeviceContext * context)
+{
+  for (size_t i = 0; i + 1 < context->reportCount; ++i)
   {
-    HIDQueuedReport& report = GetQueuedReport(context, i);
-    if (!report.pureMotion ||
-        report.data[0] != HID_REPORT_ID_MOUSE_ABSOLUTE)
+    HIDQueuedReport& first  = GetQueuedReport(context, i);
+    HIDQueuedReport& second = GetQueuedReport(context, i + 1);
+    if (!first.pureMotion || !second.pureMotion ||
+        first.data[0] != second.data[0])
       continue;
 
-    bool superseded = incomingReportId == HID_REPORT_ID_MOUSE_ABSOLUTE;
-    for (size_t j = i + 1; !superseded && j < context->reportCount; ++j)
-      superseded = GetQueuedReport(context, j).data[0] ==
-        HID_REPORT_ID_MOUSE_ABSOLUTE;
-
-    if (superseded)
+    if (first.data[0] == HID_REPORT_ID_MOUSE_RELATIVE)
     {
-      RemoveQueuedReport(context, i);
-      ++context->statistics.staleAbsoluteCompacted;
+      HIDMouseRelativeReport       * previous =
+        reinterpret_cast<HIDMouseRelativeReport *>(first.data);
+      const HIDMouseRelativeReport * current  =
+        reinterpret_cast<const HIDMouseRelativeReport *>(second.data);
+      const int32_t                  x        =
+        static_cast<int32_t>(previous->x) + current->x;
+      const int32_t                  y        =
+        static_cast<int32_t>(previous->y) + current->y;
+      if (x < INT16_MIN || x > INT16_MAX ||
+          y < INT16_MIN || y > INT16_MAX ||
+          previous->buttons != current->buttons ||
+          previous->wheel || current->wheel)
+        continue;
+
+      previous->x = static_cast<int16_t>(x);
+      previous->y = static_cast<int16_t>(y);
+      RemoveQueuedReport(context, i + 1);
+      ++context->statistics.relativeCoalesced;
       return true;
     }
+
+    if (first.data[0] != HID_REPORT_ID_MOUSE_ABSOLUTE)
+      continue;
+
+    const HIDMouseAbsoluteReport * previous =
+      reinterpret_cast<const HIDMouseAbsoluteReport *>(first.data);
+    const HIDMouseAbsoluteReport * current  =
+      reinterpret_cast<const HIDMouseAbsoluteReport *>(second.data);
+    if (previous->buttons != current->buttons ||
+        previous->wheel || current->wheel)
+      continue;
+
+    CopyMemory(first.data, second.data, second.size);
+    first.size = second.size;
+    RemoveQueuedReport(context, i + 1);
+    ++context->statistics.staleAbsoluteCompacted;
+    return true;
   }
   return false;
 }
@@ -232,7 +279,13 @@ static NTSTATUS QueueReport(
   _In_ size_t size,
   _In_ bool pureMotion)
 {
-  const UCHAR reportId = *static_cast<const UCHAR *>(data);
+  const UCHAR reportId             = *static_cast<const UCHAR *>(data);
+  const bool  motionBudgetExceeded = MotionBudgetExceeded(context);
+  if (motionBudgetExceeded)
+    while (CompactQueuedMotion(context))
+    {
+    }
+
   if (context->reportCount)
   {
     HIDQueuedReport& tail =
@@ -240,20 +293,21 @@ static NTSTATUS QueueReport(
     if (tail.data[0] == reportId)
     {
       if (reportId == HID_REPORT_ID_MOUSE_RELATIVE &&
-          context->reportCount >= MOTION_COALESCE_THRESHOLD &&
-          tail.pureMotion && pureMotion)
+          tail.pureMotion && pureMotion &&
+          motionBudgetExceeded)
       {
-        HIDMouseRelativeReport * previous =
+        HIDMouseRelativeReport       * previous =
           reinterpret_cast<HIDMouseRelativeReport *>(tail.data);
-        const HIDMouseRelativeReport * current =
+        const HIDMouseRelativeReport * current  =
           static_cast<const HIDMouseRelativeReport *>(data);
-        const int32_t x = static_cast<int32_t>(previous->x) +
-          current->x;
-        const int32_t y = static_cast<int32_t>(previous->y) +
-          current->y;
+        const int32_t                  x        =
+          static_cast<int32_t>(previous->x) + current->x;
+        const int32_t                  y        =
+          static_cast<int32_t>(previous->y) + current->y;
         if (x >= INT16_MIN && x <= INT16_MAX &&
             y >= INT16_MIN && y <= INT16_MAX &&
-            previous->buttons == current->buttons)
+            previous->buttons == current->buttons &&
+            !previous->wheel && !current->wheel)
         {
           previous->x = static_cast<int16_t>(x);
           previous->y = static_cast<int16_t>(y);
@@ -266,9 +320,10 @@ static NTSTATUS QueueReport(
       {
         const HIDMouseAbsoluteReport * previous =
           reinterpret_cast<const HIDMouseAbsoluteReport *>(tail.data);
-        const HIDMouseAbsoluteReport * current =
+        const HIDMouseAbsoluteReport * current  =
           static_cast<const HIDMouseAbsoluteReport *>(data);
-        if (previous->buttons == current->buttons)
+        if (previous->buttons == current->buttons &&
+            !previous->wheel && !current->wheel)
         {
           CopyMemory(tail.data, data, size);
           tail.size = size;
@@ -276,30 +331,24 @@ static NTSTATUS QueueReport(
           return STATUS_SUCCESS;
         }
       }
-      else if (reportId == HID_REPORT_ID_KEYBOARD &&
-          tail.size == size && memcmp(tail.data, data, size) == 0)
-      {
-        ++context->statistics.keyboardDuplicates;
-        return STATUS_SUCCESS;
-      }
     }
   }
 
   if (context->reportCount == REPORT_QUEUE_LENGTH)
   {
-    if (!CompactStaleMotion(context, reportId))
-    {
-      ++context->statistics.overflows;
-      return STATUS_BUFFER_OVERFLOW;
-    }
+    ++context->statistics.overflows;
+    return STATUS_BUFFER_OVERFLOW;
   }
 
-  const size_t index =
+  const size_t      index       =
     (context->reportHead + context->reportCount) % REPORT_QUEUE_LENGTH;
-  HIDQueuedReport * report = &context->reports[index];
+  HIDQueuedReport * report      = &context->reports[index];
+  LARGE_INTEGER     enqueueTime = {};
+  QueryPerformanceCounter(&enqueueTime);
   CopyMemory(report->data, data, size);
-  report->size       = size;
-  report->pureMotion = pureMotion;
+  report->enqueueTicks = enqueueTime.QuadPart;
+  report->size         = size;
+  report->pureMotion   = pureMotion;
   ++context->reportCount;
   ++context->statistics.queued;
   if (context->reportCount > context->statistics.queueHighWater)
@@ -365,10 +414,11 @@ static NTSTATUS DeactivateDevice(
       if (context->deactivateRequest)
         return STATUS_DEVICE_BUSY;
 
-      context->active        = false;
-      context->reportHead    = 0;
-      context->reportCount   = 0;
-      context->consumerUsage = UINT16_MAX;
+      context->active         = false;
+      context->reportHead     = 0;
+      context->reportCount    = 0;
+      context->consumerUsage  = UINT16_MAX;
+      context->keyboardValid  = false;
     }
 
     context->deactivateRequest = request;
@@ -432,10 +482,23 @@ NTSTATUS CHIDDevice::Create(_Inout_ PWDFDEVICE_INIT deviceInit)
   if (!NT_SUCCESS(status))
     return status;
 
-  HIDDeviceContext * context = HIDGetDeviceContext(device);
+  HIDDeviceContext * context              = HIDGetDeviceContext(device);
+  LARGE_INTEGER      performanceFrequency = {};
   new (context) HIDDeviceContext {};
-  context->active    = true;
-  context->inputPipe = new (std::nothrow) CInputPipeClient;
+  if (QueryPerformanceFrequency(&performanceFrequency))
+  {
+    static_assert(MOTION_AGE_BUDGET_MS &&
+      1000 % MOTION_AGE_BUDGET_MS == 0,
+      "motion age budget must evenly divide one second");
+    const int64_t budgetDivisor = 1000 / MOTION_AGE_BUDGET_MS;
+    context->motionBudgetTicks  =
+      performanceFrequency.QuadPart / budgetDivisor;
+    if (performanceFrequency.QuadPart % budgetDivisor)
+      ++context->motionBudgetTicks;
+  }
+  context->active        = true;
+  context->consumerUsage = UINT16_MAX;
+  context->inputPipe     = new (std::nothrow) CInputPipeClient;
   if (!context->inputPipe)
     return STATUS_INSUFFICIENT_RESOURCES;
 
@@ -501,6 +564,13 @@ NTSTATUS CHIDDevice::SubmitReport(
             static_cast<const HIDConsumerReport *>(report)->usage)
       {
         ++context->statistics.consumerDuplicates;
+        return STATUS_SUCCESS;
+      }
+      if (reportId == HID_REPORT_ID_KEYBOARD &&
+          context->keyboardValid &&
+          memcmp(&context->keyboard, report, size) == 0)
+      {
+        ++context->statistics.keyboardDuplicates;
         return STATUS_SUCCESS;
       }
 
@@ -573,6 +643,11 @@ NTSTATUS CHIDDevice::SubmitReport(
               static_cast<const HIDConsumerReport *>(report)->usage;
             break;
 
+          case HID_REPORT_ID_KEYBOARD:
+            CopyMemory(&context->keyboard, report, size);
+            context->keyboardValid = true;
+            break;
+
           default:
             break;
         }
@@ -608,12 +683,13 @@ NTSTATUS CHIDDevice::ResetReports()
     absoluteX                  = context->absoluteX;
     absoluteY                  = context->absoluteY;
     context->statistics.resetDiscarded += context->reportCount;
-    context->reportHead        = 0;
-    context->reportCount       = 0;
-    context->mouseMode         = 0;
-    context->relativeButtons   = 0;
-    context->absoluteButtons   = 0;
-    context->consumerUsage     = UINT16_MAX;
+    context->reportHead                = 0;
+    context->reportCount               = 0;
+    context->mouseMode                 = 0;
+    context->relativeButtons           = 0;
+    context->absoluteButtons           = 0;
+    context->consumerUsage             = UINT16_MAX;
+    context->keyboardValid             = false;
   }
 
   const HIDKeyboardReport keyboard = {
@@ -804,9 +880,10 @@ VOID HIDEvtReportQueueCleanup(_In_ WDFOBJECT object)
     CSRWExclusiveLock lifecycleLock(context->lifecycleLock);
     {
       CSRWExclusiveLock reportLock(context->reportLock);
-      context->stopping    = true;
-      context->reportHead  = 0;
-      context->reportCount = 0;
+      context->stopping      = true;
+      context->reportHead    = 0;
+      context->reportCount   = 0;
+      context->keyboardValid = false;
     }
     deactivateRequest = context->deactivateRequest;
     context->deactivateRequest = nullptr;

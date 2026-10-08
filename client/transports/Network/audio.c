@@ -601,7 +601,7 @@ static LG_TransportStatus networkAudioSendDatagramNL(NetworkAudio * audio,
 {
   return networkConnectionSendDatagram(audio->connection,
       LG_NET_SERVICE_AUDIO, messageType, audio->serviceVersion, 0,
-      audio->subscriptionEpoch, requestID, payload, payloadLength, false);
+      audio->subscriptionEpoch, requestID, payload, payloadLength, 0, false);
 }
 
 static bool networkAudioSendSubscribeNL(NetworkAudio * audio)

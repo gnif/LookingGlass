@@ -32,14 +32,16 @@
 class CInputPipeServer : public IInputSink, private IPipeEndpointHandler
 {
 private:
-  static constexpr size_t QUEUE_LENGTH              = 128;
-  static constexpr size_t MOTION_COALESCE_THRESHOLD = QUEUE_LENGTH / 2;
-  static constexpr DWORD  STATISTICS_INTERVAL_MS    = 5000;
+  static constexpr size_t QUEUE_LENGTH             = 128;
+  static constexpr size_t MOTION_EMERGENCY_DEPTH   = 8;
+  static constexpr DWORD  MOTION_AGE_BUDGET_MS     = 1;
+  static constexpr DWORD  STATISTICS_INTERVAL_MS   = 5000;
 
   struct QueueItem
   {
     KVMFRInputPayload      payload;
     uint64_t               state;
+    int64_t                enqueueTicks;
     LGInputPipeMessageType type;
     bool                   pureMotion;
   };
@@ -84,15 +86,20 @@ private:
   uint64_t m_statResyncDiscarded   = 0;
   size_t   m_statQueueHighWater    = 0;
 
-  uint64_t      m_statSent            = 0;
-  uint64_t      m_statStale           = 0;
-  uint64_t      m_statWriteFailed     = 0;
-  uint64_t      m_statSlowWrites      = 0;
-  int64_t       m_statWriteTicks      = 0;
-  int64_t       m_statMaxWriteTicks   = 0;
-  ULONGLONG     m_lastStatistics      = 0;
+  uint64_t      m_statSent             = 0;
+  uint64_t      m_statStale            = 0;
+  uint64_t      m_statWriteFailed      = 0;
+  uint64_t      m_statSlowWrites       = 0;
+  int64_t       m_statWriteTicks       = 0;
+  int64_t       m_statMaxWriteTicks    = 0;
+  int64_t       m_motionBudgetTicks    = 0;
+  ULONGLONG     m_lastStatistics       = 0;
   LARGE_INTEGER m_performanceFrequency = {};
 
+  bool MotionBudgetExceededLocked() const;
+  QueueItem& GetQueueItemLocked(size_t position);
+  void RemoveQueueItemLocked(size_t position);
+  bool CompactQueuedMotionLocked();
   bool QueueLocked(LGInputPipeMessageType type,
     const KVMFRInputPayload& payload, bool pureMotion);
   bool QueueRawLocked(LGInputPipeMessageType type,

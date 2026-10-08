@@ -207,29 +207,31 @@ bool CInputHub::Bind(
 void CInputHub::Unbind(BackendId backend, uint32_t epoch)
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  Source * selected = nullptr;
-  IInputSource * input = nullptr;
-  bool stop = false;
+  Source       * selected = nullptr;
+  IInputSource * input    = nullptr;
+  bool           stop     = false;
   {
+    CSRWExclusiveLock authorityLock(m_authorityLock);
     CSRWExclusiveLock lock(m_lock);
     for (Source& source : m_sources)
       if ((source.active || source.failed || source.reserved) &&
           source.backend == backend && source.epoch == epoch)
       {
-        source.active   = false;
-        source.failed   = false;
+        source.active         = false;
+        source.failed         = false;
         source.failurePending = false;
-        source.reserved = true;
-        input           = source.endpoint;
-        stop            = source.running;
-        source.running  = false;
-        selected        = &source;
+        source.reserved       = true;
+        input                 = source.endpoint;
+        stop                  = source.running;
+        source.running        = false;
+        selected              = &source;
         if (m_owner.backend == backend && m_owner.epoch == epoch)
         {
           if (m_sink)
             m_sink->Reset();
-          m_owner = {};
+          m_owner         = {};
           m_ownerDeadline = 0;
+          AdvanceAuthorityGeneration();
         }
         if (m_interactionOwner.backend == backend &&
             m_interactionOwner.epoch == epoch)
@@ -246,16 +248,17 @@ void CInputHub::Unbind(BackendId backend, uint32_t epoch)
   if (input && stop)
     input->Stop();
 
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (selected->reserved && selected->backend == backend &&
       selected->epoch == epoch)
   {
-    selected->backend  = 0;
-    selected->epoch    = 0;
-    selected->endpoint = nullptr;
-    selected->running  = false;
-    selected->reserved = false;
-    selected->failed   = false;
+    selected->backend        = 0;
+    selected->epoch          = 0;
+    selected->endpoint       = nullptr;
+    selected->running        = false;
+    selected->reserved       = false;
+    selected->failed         = false;
     selected->failurePending = false;
   }
 }
@@ -267,6 +270,7 @@ InteractionResult CInputHub::CheckInteraction(
   if (!source.backend || !source.epoch || !source.client)
     return InteractionResult::STALE;
 
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (m_started && m_sink)
     CheckState();
@@ -313,6 +317,7 @@ void CInputHub::CommitInteraction(
       source != permit.source)
     return;
 
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (m_started && m_sink)
     CheckState();
@@ -367,9 +372,10 @@ bool CInputHub::TakeFailure(SourceKey& source)
 bool CInputHub::Start(IInputSink& sink)
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  Source * sources[MAX_SOURCES] = {};
-  unsigned count = 0;
+  Source   * sources[MAX_SOURCES] = {};
+  unsigned   count                = 0;
   {
+    CSRWExclusiveLock authorityLock(m_authorityLock);
     CSRWExclusiveLock lock(m_lock);
     if (m_started)
       return m_sink == &sink;
@@ -387,10 +393,11 @@ bool CInputHub::Start(IInputSink& sink)
 
   for (unsigned i = 0; i < count; ++i)
   {
-    Source& source = *sources[i];
+    Source&    source  = *sources[i];
     const bool started = source.endpoint->Start(source);
-    bool stop = !started;
+    bool       stop    = !started;
     {
+      CSRWExclusiveLock authorityLock(m_authorityLock);
       CSRWExclusiveLock lock(m_lock);
       if (!started || source.failed || !source.active || !source.reserved)
       {
@@ -399,8 +406,9 @@ bool CInputHub::Start(IInputSink& sink)
         {
           if (m_sink)
             m_sink->Reset();
-          m_owner = {};
+          m_owner         = {};
           m_ownerDeadline = 0;
+          AdvanceAuthorityGeneration();
         }
         if (m_interactionOwner.backend == source.backend &&
             m_interactionOwner.epoch == source.epoch)
@@ -432,11 +440,12 @@ bool CInputHub::Start(IInputSink& sink)
 void CInputHub::Stop()
 {
   CSRWExclusiveLock lifecycleLock(m_lifecycleLock);
-  Source * sources[MAX_SOURCES] = {};
-  unsigned count = 0;
-  IInputSink * sink = nullptr;
-  bool reset = false;
+  Source     * sources[MAX_SOURCES] = {};
+  unsigned     count                = 0;
+  IInputSink * sink                 = nullptr;
+  bool         reset                = false;
   {
+    CSRWExclusiveLock authorityLock(m_authorityLock);
     CSRWExclusiveLock lock(m_lock);
     if (!m_started)
     {
@@ -450,10 +459,12 @@ void CInputHub::Stop()
         source.running = false;
         sources[count++] = &source;
       }
-    sink  = m_sink;
-    reset = m_owner.backend != 0;
+    sink            = m_sink;
+    reset           = m_owner.backend != 0;
     m_owner         = {};
     m_ownerDeadline = 0;
+    if (reset)
+      AdvanceAuthorityGeneration();
     InvalidateInteraction();
   }
 
@@ -462,6 +473,7 @@ void CInputHub::Stop()
   if (reset && sink)
     sink->Reset();
 
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   m_sink      = nullptr;
   m_sinkState = 0;
@@ -520,6 +532,41 @@ void CInputHub::AdvanceInteractionSerial()
   Seq::Inc(m_interactionSerial);
 }
 
+void CInputHub::AdvanceAuthorityGeneration()
+{
+  Seq::Inc(m_authorityGeneration);
+  AdvanceInputGeneration();
+}
+
+void CInputHub::AdvanceInputGeneration()
+{
+  Seq::Inc(m_inputGeneration);
+}
+
+bool CInputHub::StateAvailable() const
+{
+  if (!m_started || !m_sink)
+    return false;
+
+  const uint64_t state = m_sink->GetState();
+  if (state != m_sinkState || !(state & 1))
+    return false;
+  return !m_owner.backend || GetTickCount64() < m_ownerDeadline;
+}
+
+InputResult CInputHub::ReconcileAuthorityState(const SourceKey& source)
+{
+  CSRWExclusiveLock authorityLock(m_authorityLock);
+  CSRWExclusiveLock lock(m_lock);
+  if (!SourceValid(source))
+    return InputResult::STALE;
+  if (!CheckState())
+    return InputResult::UNAVAILABLE;
+  if (!OwnerValid(source))
+    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+  return InputResult::ACCEPTED;
+}
+
 bool CInputHub::CheckState()
 {
   if (!m_started || !m_sink)
@@ -529,7 +576,10 @@ bool CInputHub::CheckState()
   if (state != m_sinkState)
   {
     if (m_owner.backend)
+    {
       m_sink->Reset();
+      AdvanceAuthorityGeneration();
+    }
     m_owner         = {};
     m_ownerDeadline = 0;
     InvalidateInteraction();
@@ -540,13 +590,31 @@ bool CInputHub::CheckState()
     m_sink->Reset();
     m_owner         = {};
     m_ownerDeadline = 0;
+    AdvanceAuthorityGeneration();
     InvalidateInteraction();
   }
   return (state & 1) != 0;
 }
 
+void CInputHub::HandleSinkFailure(
+  const SourceKey& source, bool reset, uint64_t inputGeneration)
+{
+  CSRWExclusiveLock authorityLock(m_authorityLock);
+  CSRWExclusiveLock lock(m_lock);
+  if (inputGeneration != m_inputGeneration || !OwnerValid(source))
+    return;
+
+  if (reset && m_sink)
+    m_sink->Reset();
+  m_owner         = {};
+  m_ownerDeadline = 0;
+  AdvanceAuthorityGeneration();
+  InvalidateInteraction();
+}
+
 InputTargetState CInputHub::GetState(const SourceKey& source)
 {
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   InputTargetState result;
   if (!BindingPresent(source))
@@ -563,8 +631,8 @@ InputTargetState CInputHub::GetState(const SourceKey& source)
     result.available = true;
   else if (source.client && source.generation && m_owner == source)
   {
-    result.available = true;
-    result.owned     = true;
+    result.available        = true;
+    result.owned            = true;
     result.owner.client     = m_owner.client;
     result.owner.generation = m_owner.generation;
   }
@@ -577,16 +645,43 @@ bool CInputHub::WithAuthority(const SourceKey& source,
   if (!action)
     return false;
 
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source) || !CheckState() || !OwnerValid(source))
-    return false;
+  for (;;)
+  {
+    // Freeze ownership while allowing the input fast path to continue under
+    // the shared authority guard. The action must not hold the state lock.
+    CSRWSharedLock authorityLock(m_authorityLock);
+    uint64_t       generation = 0;
+    {
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return false;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return false;
+        generation = m_authorityGeneration;
+      }
+    }
 
-  action(opaque);
-  return true;
+    if (!generation)
+    {
+      authorityLock.Unlock();
+      if (ReconcileAuthorityState(source) != InputResult::ACCEPTED)
+        return false;
+      continue;
+    }
+
+    action(opaque);
+
+    CSRWExclusiveLock lock(m_lock);
+    return generation == m_authorityGeneration &&
+      SourceValid(source) && OwnerValid(source);
+  }
 }
 
 void CInputHub::Failed(Source& source)
 {
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (!source.active)
     return;
@@ -594,8 +689,9 @@ void CInputHub::Failed(Source& source)
   {
     if (m_sink)
       m_sink->Reset();
-    m_owner = {};
+    m_owner         = {};
     m_ownerDeadline = 0;
+    AdvanceAuthorityGeneration();
   }
   if (m_interactionOwner.backend == source.backend &&
       m_interactionOwner.epoch == source.epoch)
@@ -610,6 +706,7 @@ void CInputHub::Failed(Source& source)
 
 InputResult CInputHub::Claim(const SourceKey& source)
 {
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (!SourceValid(source))
     return InputResult::STALE;
@@ -627,25 +724,38 @@ InputResult CInputHub::Claim(const SourceKey& source)
   }
   m_owner         = source;
   m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+  AdvanceAuthorityGeneration();
   InvalidateInteraction();
   return InputResult::ACCEPTED;
 }
 
 InputResult CInputHub::Touch(const SourceKey& source)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source))
-    return InputResult::STALE;
-  if (!CheckState())
-    return InputResult::UNAVAILABLE;
-  if (!OwnerValid(source))
-    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
-  m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
-  return InputResult::ACCEPTED;
+  for (;;)
+  {
+    {
+      CSRWSharedLock authorityLock(m_authorityLock);
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return InputResult::STALE;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+        m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+        return InputResult::ACCEPTED;
+      }
+    }
+
+    const InputResult result = ReconcileAuthorityState(source);
+    if (result != InputResult::ACCEPTED)
+      return result;
+  }
 }
 
 InputResult CInputHub::Release(const SourceKey& source, bool reset)
 {
+  CSRWExclusiveLock authorityLock(m_authorityLock);
   CSRWExclusiveLock lock(m_lock);
   if (!SourceValid(source))
     return InputResult::STALE;
@@ -656,6 +766,7 @@ InputResult CInputHub::Release(const SourceKey& source, bool reset)
     accepted = m_sink->Reset();
   m_owner         = {};
   m_ownerDeadline = 0;
+  AdvanceAuthorityGeneration();
   InvalidateInteraction();
   return accepted ? InputResult::ACCEPTED : InputResult::UNAVAILABLE;
 }
@@ -663,85 +774,134 @@ InputResult CInputHub::Release(const SourceKey& source, bool reset)
 InputResult CInputHub::SendMouseRelative(const SourceKey& source,
   int32_t deltaX, int32_t deltaY, int32_t wheel, uint32_t buttons)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source))
-    return InputResult::STALE;
-  if (!CheckState())
-    return InputResult::UNAVAILABLE;
-  if (!OwnerValid(source))
-    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
-  if (!m_sink->SendMouseRelative(deltaX, deltaY, wheel, buttons))
+  for (;;)
   {
-    m_sink->Reset();
-    m_owner         = {};
-    m_ownerDeadline = 0;
-    InvalidateInteraction();
-    return InputResult::UNAVAILABLE;
+    {
+      CSRWSharedLock authorityLock(m_authorityLock);
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return InputResult::STALE;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+        const uint64_t inputGeneration = m_inputGeneration;
+        if (!m_sink->SendMouseRelative(deltaX, deltaY, wheel, buttons))
+        {
+          lock.Unlock();
+          authorityLock.Unlock();
+          HandleSinkFailure(source, true, inputGeneration);
+          return InputResult::UNAVAILABLE;
+        }
+        m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+        AdvanceInputGeneration();
+        return InputResult::ACCEPTED;
+      }
+    }
+
+    const InputResult result = ReconcileAuthorityState(source);
+    if (result != InputResult::ACCEPTED)
+      return result;
   }
-  m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
-  return InputResult::ACCEPTED;
 }
 
 InputResult CInputHub::SendMouseAbsolute(const SourceKey& source,
   uint16_t x, uint16_t y, int32_t wheel, uint32_t buttons)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source))
-    return InputResult::STALE;
-  if (!CheckState())
-    return InputResult::UNAVAILABLE;
-  if (!OwnerValid(source))
-    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
-  if (!m_sink->SendMouseAbsolute(x, y, wheel, buttons))
+  for (;;)
   {
-    m_sink->Reset();
-    m_owner         = {};
-    m_ownerDeadline = 0;
-    InvalidateInteraction();
-    return InputResult::UNAVAILABLE;
+    {
+      CSRWSharedLock authorityLock(m_authorityLock);
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return InputResult::STALE;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+        const uint64_t inputGeneration = m_inputGeneration;
+        if (!m_sink->SendMouseAbsolute(x, y, wheel, buttons))
+        {
+          lock.Unlock();
+          authorityLock.Unlock();
+          HandleSinkFailure(source, true, inputGeneration);
+          return InputResult::UNAVAILABLE;
+        }
+        m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+        AdvanceInputGeneration();
+        return InputResult::ACCEPTED;
+      }
+    }
+
+    const InputResult result = ReconcileAuthorityState(source);
+    if (result != InputResult::ACCEPTED)
+      return result;
   }
-  m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
-  return InputResult::ACCEPTED;
 }
 
 InputResult CInputHub::SendKeyboard(const SourceKey& source,
   uint8_t modifiers, const uint8_t * keys)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source))
-    return InputResult::STALE;
-  if (!CheckState())
-    return InputResult::UNAVAILABLE;
-  if (!OwnerValid(source))
-    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
-  if (!m_sink->SendKeyboard(modifiers, keys))
+  for (;;)
   {
-    m_sink->Reset();
-    m_owner         = {};
-    m_ownerDeadline = 0;
-    InvalidateInteraction();
-    return InputResult::UNAVAILABLE;
+    {
+      CSRWSharedLock authorityLock(m_authorityLock);
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return InputResult::STALE;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+        const uint64_t inputGeneration = m_inputGeneration;
+        if (!m_sink->SendKeyboard(modifiers, keys))
+        {
+          lock.Unlock();
+          authorityLock.Unlock();
+          HandleSinkFailure(source, true, inputGeneration);
+          return InputResult::UNAVAILABLE;
+        }
+        m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+        AdvanceInputGeneration();
+        return InputResult::ACCEPTED;
+      }
+    }
+
+    const InputResult result = ReconcileAuthorityState(source);
+    if (result != InputResult::ACCEPTED)
+      return result;
   }
-  m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
-  return InputResult::ACCEPTED;
 }
 
 InputResult CInputHub::Reset(const SourceKey& source)
 {
-  CSRWExclusiveLock lock(m_lock);
-  if (!SourceValid(source))
-    return InputResult::STALE;
-  if (!CheckState())
-    return InputResult::UNAVAILABLE;
-  if (!OwnerValid(source))
-    return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
-  if (!m_sink->Reset())
+  for (;;)
   {
-    m_owner         = {};
-    m_ownerDeadline = 0;
-    InvalidateInteraction();
-    return InputResult::UNAVAILABLE;
+    {
+      CSRWSharedLock authorityLock(m_authorityLock);
+      CSRWExclusiveLock lock(m_lock);
+      if (!SourceValid(source))
+        return InputResult::STALE;
+      if (StateAvailable())
+      {
+        if (!OwnerValid(source))
+          return m_owner.backend ? InputResult::BUSY : InputResult::STALE;
+        const uint64_t inputGeneration = m_inputGeneration;
+        if (!m_sink->Reset())
+        {
+          lock.Unlock();
+          authorityLock.Unlock();
+          HandleSinkFailure(source, false, inputGeneration);
+          return InputResult::UNAVAILABLE;
+        }
+        m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
+        AdvanceInputGeneration();
+        return InputResult::ACCEPTED;
+      }
+    }
+
+    const InputResult result = ReconcileAuthorityState(source);
+    if (result != InputResult::ACCEPTED)
+      return result;
   }
-  m_ownerDeadline = GetTickCount64() + OWNER_LEASE_MS;
-  return InputResult::ACCEPTED;
 }

@@ -77,15 +77,18 @@ private:
 
   mutable CSRWLock m_lock;
   CSRWLock         m_lifecycleLock;
+  CSRWLock         m_authorityLock;
   Source           m_sources[MAX_SOURCES];
-  IInputSink     * m_sink = nullptr;
-  uint64_t         m_sinkState = 0;
+  IInputSink     * m_sink                 = nullptr;
+  uint64_t         m_sinkState            = 0;
   SourceKey        m_owner;
-  uint64_t         m_ownerDeadline = 0;
+  uint64_t         m_ownerDeadline        = 0;
+  uint64_t         m_authorityGeneration  = 1;
+  uint64_t         m_inputGeneration      = 1;
   SourceKey        m_interactionOwner;
-  uint64_t         m_interactionDeadline = 0;
-  uint64_t         m_interactionSerial = 1;
-  bool             m_started = false;
+  uint64_t         m_interactionDeadline  = 0;
+  uint64_t         m_interactionSerial    = 1;
+  bool             m_started              = false;
 
   bool SourceValid(const SourceKey& source) const;
   bool BindingPresent(const SourceKey& source) const;
@@ -94,7 +97,13 @@ private:
   void ClearInteraction();
   void InvalidateInteraction();
   void AdvanceInteractionSerial();
+  void AdvanceAuthorityGeneration();
+  void AdvanceInputGeneration();
+  bool StateAvailable() const;
+  InputResult ReconcileAuthorityState(const SourceKey& source);
   bool CheckState();
+  void HandleSinkFailure(const SourceKey& source, bool reset,
+    uint64_t inputGeneration);
   InputTargetState GetState(const SourceKey& source);
   bool WithAuthority(const SourceKey& source,
     InputAuthorityAction action, void * opaque);

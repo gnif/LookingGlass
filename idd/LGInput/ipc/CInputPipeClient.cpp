@@ -57,7 +57,11 @@ bool CInputPipeClient::Start()
   return m_endpoint.Start(
     LG_INPUT_PIPE_NAME,
     CPipeEndpoint::Mode::Client,
-    sizeof(LGInputPipeMessage));
+    sizeof(LGInputPipeMessage),
+    nullptr,
+    0,
+    0,
+    CPipeEndpoint::ThreadScheduling::Input);
 }
 
 void CInputPipeClient::Stop()
