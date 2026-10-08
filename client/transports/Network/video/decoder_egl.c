@@ -72,6 +72,7 @@
 #define NETWORK_VIDEO_POOL_BYTE_LIMIT        \
   (UINT64_C(192) * 1024U * 1024U)
 #define NETWORK_VIDEO_PIXEL_BYTES            8U
+#define NETWORK_VIDEO_TILE_SIZE              32U
 #define NETWORK_VIDEO_SEQUENCE_BITS          (UINT32_C(7) << 28U)
 
 struct NetworkVideoBlockMeta
@@ -215,6 +216,7 @@ struct NetworkVideoDecoder
   uint8_t                        * dirtyBlocks;
   struct NetworkVideoDirtyGrid
     dirty[NETWORK_VIDEO_COMPONENTS][NETWORK_VIDEO_LEVELS];
+  uint8_t                        * outputDirty;
   struct NetworkVideoDamageHistory
     damageHistory[NETWORK_VIDEO_DAMAGE_HISTORY];
 
@@ -226,6 +228,8 @@ struct NetworkVideoDecoder
   uint32_t alignedWidth;
   uint32_t alignedHeight;
   uint32_t blockCapacity;
+  uint32_t outputTileWidth;
+  uint32_t outputTileHeight;
   uint64_t referenceFrameID;
   uint64_t outputGeneration;
   unsigned uploadIndex;
@@ -554,6 +558,7 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
        component < NETWORK_VIDEO_COMPONENTS; ++component)
     for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
       free(decoder->dirty[component][level].tiles);
+  free(decoder->outputDirty);
   free(decoder->offsets);
 
   memset(decoder->uploads, 0, sizeof(decoder->uploads));
@@ -563,10 +568,13 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
   decoder->packetStates     = NULL;
   decoder->pendingPackets   = NULL;
   decoder->dirtyBlocks      = NULL;
+  decoder->outputDirty      = NULL;
   decoder->canonicalTexture = 0;
   decoder->alignedWidth     = 0;
   decoder->alignedHeight    = 0;
   decoder->blockCapacity    = 0;
+  decoder->outputTileWidth  = 0;
+  decoder->outputTileHeight = 0;
   decoder->referenceFrameID = 0;
   decoder->outputGeneration = 0;
   decoder->uploadIndex      = 0;
@@ -859,18 +867,28 @@ static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
         decoder->config.width, decoder->config.height, GL_LINEAR))
     return false;
 
-  decoder->offsets        = malloc(
+  decoder->offsets          = malloc(
       (size_t)decoder->blockCapacity * sizeof(*decoder->offsets));
-  decoder->packetStates   = calloc(
+  decoder->packetStates     = calloc(
       decoder->blockCapacity, sizeof(*decoder->packetStates));
-  decoder->pendingPackets = calloc(
+  decoder->pendingPackets   = calloc(
       decoder->blockCapacity, sizeof(*decoder->pendingPackets));
-  decoder->dirtyBlocks    = calloc(
+  decoder->dirtyBlocks      = calloc(
       decoder->blockCapacity, sizeof(*decoder->dirtyBlocks));
-  decoder->texturePool    = networkVideoTexturePoolCreate(decoder);
+  decoder->texturePool      = networkVideoTexturePoolCreate(decoder);
+  decoder->outputTileWidth  =
+    (decoder->config.width + NETWORK_VIDEO_TILE_SIZE - 1U) /
+      NETWORK_VIDEO_TILE_SIZE;
+  decoder->outputTileHeight =
+    (decoder->config.height + NETWORK_VIDEO_TILE_SIZE - 1U) /
+      NETWORK_VIDEO_TILE_SIZE;
+  const size_t outputTileCount =
+    (size_t)decoder->outputTileWidth * decoder->outputTileHeight;
+  decoder->outputDirty      = calloc(
+      outputTileCount, sizeof(*decoder->outputDirty));
   if (!decoder->offsets || !decoder->packetStates ||
       !decoder->pendingPackets || !decoder->dirtyBlocks ||
-      !decoder->texturePool)
+      !decoder->texturePool || !decoder->outputDirty)
     return false;
 
   for (unsigned component = 0;
@@ -1330,6 +1348,8 @@ static void networkVideoClearDirtyNL(NetworkVideoDecoder * decoder)
       grid->count = 0;
     }
   }
+  memset(decoder->outputDirty, 0,
+      (size_t)decoder->outputTileWidth * decoder->outputTileHeight);
 }
 
 static uint32_t networkVideoMirrorTexel(
@@ -1405,6 +1425,44 @@ static void networkVideoMarkGridRect(struct NetworkVideoDirtyGrid * grid,
       }
     }
   }
+}
+
+static void networkVideoMarkOutputRect(NetworkVideoDecoder * decoder,
+    unsigned component, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height)
+{
+  uint32_t expansion = component ? 1U : 0U;
+  if (component &&
+      decoder->config.chromaSubsampling == LG_NET_VIDEO_CHROMA_420)
+  {
+    x         *= 2U;
+    y         *= 2U;
+    width     *= 2U;
+    height    *= 2U;
+    expansion  = 2U;
+  }
+
+  const uint32_t startX  = x > expansion ? x - expansion : 0U;
+  const uint32_t startY  = y > expansion ? y - expansion : 0U;
+  const uint64_t rawEndX = (uint64_t)x + width + expansion;
+  const uint64_t rawEndY = (uint64_t)y + height + expansion;
+  const uint32_t endX    = rawEndX < decoder->config.width ?
+    (uint32_t)rawEndX : decoder->config.width;
+  const uint32_t endY    = rawEndY < decoder->config.height ?
+    (uint32_t)rawEndY : decoder->config.height;
+  if (startX >= endX || startY >= endY)
+    return;
+
+  const uint32_t tileStartX = startX / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileStartY = startY / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileEndX   =
+    (endX + NETWORK_VIDEO_TILE_SIZE - 1U) / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileEndY   =
+    (endY + NETWORK_VIDEO_TILE_SIZE - 1U) / NETWORK_VIDEO_TILE_SIZE;
+  for (uint32_t tileY = tileStartY; tileY < tileEndY; ++tileY)
+    for (uint32_t tileX = tileStartX; tileX < tileEndX; ++tileX)
+      decoder->outputDirty[
+        (size_t)tileY * decoder->outputTileWidth + tileX] = 1U;
 }
 
 static void networkVideoPrepareDirtyNL(NetworkVideoDecoder * decoder)
@@ -1559,9 +1617,6 @@ static void networkVideoDequantNL(NetworkVideoDecoder * decoder,
 static void networkVideoPropagateDirtyNL(NetworkVideoDecoder * decoder,
     unsigned component, unsigned level, bool final)
 {
-  if (final)
-    return;
-
   const struct NetworkVideoDirtyGrid * grid =
     &decoder->dirty[component][level];
   const uint32_t outputWidth  = decoder->alignedWidth >> level;
@@ -1578,9 +1633,13 @@ static void networkVideoPropagateDirtyNL(NetworkVideoDecoder * decoder,
         (outputWidth - outputX < 32U ? outputWidth - outputX : 32U) : 0U;
       const uint32_t height  = outputY < outputHeight ?
         (outputHeight - outputY < 32U ? outputHeight - outputY : 32U) : 0U;
-      networkVideoMarkGridRect(&decoder->dirty[component][level - 1U],
-          outputWidth, outputHeight,
-          outputX, outputY, width, height);
+      if (final)
+        networkVideoMarkOutputRect(
+            decoder, component, outputX, outputY, width, height);
+      else
+        networkVideoMarkGridRect(&decoder->dirty[component][level - 1U],
+            outputWidth, outputHeight,
+            outputX, outputY, width, height);
     }
   }
 }
@@ -1661,6 +1720,10 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder, bool update)
           GL_TEXTURE_FETCH_BARRIER_BIT);
     }
   }
+
+  if (!update)
+    memset(decoder->outputDirty, 1,
+        (size_t)decoder->outputTileWidth * decoder->outputTileHeight);
 }
 
 static void networkVideoColorRange(
@@ -1792,6 +1855,205 @@ static void networkVideoCopyCanonicalNL(NetworkVideoDecoder * decoder,
       GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 
+static void networkVideoBuildReconstructionDamageNL(
+    const NetworkVideoDecoder * decoder, bool update,
+    LGNetVideoDamage * damage)
+{
+  memset(damage, 0, sizeof(*damage));
+  if (!update)
+  {
+    damage->flags = (LGNetVideoDamageFlags)LG_NET_VIDEO_DAMAGE_FULL;
+    return;
+  }
+
+  uint32_t count    = 0;
+  bool     overflow = false;
+  for (uint32_t tileY = 0;
+       tileY < decoder->outputTileHeight && !overflow; ++tileY)
+  {
+    uint32_t tileX = 0;
+    while (tileX < decoder->outputTileWidth)
+    {
+      const size_t row = (size_t)tileY * decoder->outputTileWidth;
+      while (tileX < decoder->outputTileWidth &&
+          !decoder->outputDirty[row + tileX])
+        ++tileX;
+      const uint32_t start = tileX;
+      while (tileX < decoder->outputTileWidth &&
+          decoder->outputDirty[row + tileX])
+        ++tileX;
+      if (start == tileX)
+        continue;
+
+      const uint32_t x      = start * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t y      = tileY * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t endX   = tileX * NETWORK_VIDEO_TILE_SIZE <
+        decoder->config.width ?
+          tileX * NETWORK_VIDEO_TILE_SIZE : decoder->config.width;
+      const uint32_t endY   = y + NETWORK_VIDEO_TILE_SIZE <
+        decoder->config.height ?
+          y + NETWORK_VIDEO_TILE_SIZE : decoder->config.height;
+      bool           merged = false;
+      for (uint32_t index = 0; index < count; ++index)
+      {
+        LGNetVideoDamageRect * rect = &damage->rects[index];
+        if (rect->x == x && rect->width == endX - x &&
+            (uint32_t)rect->y + rect->height == y)
+        {
+          rect->height = (uint16_t)(rect->height + endY - y);
+          merged       = true;
+          break;
+        }
+      }
+      if (merged)
+        continue;
+      if (count >= LG_NET_VIDEO_MAX_DAMAGE_RECTS)
+      {
+        overflow = true;
+        break;
+      }
+      damage->rects[count++] = (LGNetVideoDamageRect)
+      {
+        .x      = (uint16_t)x,
+        .y      = (uint16_t)y,
+        .width  = (uint16_t)(endX - x),
+        .height = (uint16_t)(endY - y),
+      };
+    }
+  }
+
+  if (!overflow)
+  {
+    damage->count = (uint16_t)count;
+    return;
+  }
+
+  uint32_t minX = decoder->config.width;
+  uint32_t minY = decoder->config.height;
+  uint32_t maxX = 0;
+  uint32_t maxY = 0;
+  for (uint32_t tileY = 0; tileY < decoder->outputTileHeight; ++tileY)
+  {
+    for (uint32_t tileX = 0; tileX < decoder->outputTileWidth; ++tileX)
+    {
+      if (!decoder->outputDirty[
+            (size_t)tileY * decoder->outputTileWidth + tileX])
+        continue;
+      const uint32_t x = tileX * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t y = tileY * NETWORK_VIDEO_TILE_SIZE;
+      minX = x < minX ? x : minX;
+      minY = y < minY ? y : minY;
+      maxX = x + NETWORK_VIDEO_TILE_SIZE > maxX ?
+        x + NETWORK_VIDEO_TILE_SIZE : maxX;
+      maxY = y + NETWORK_VIDEO_TILE_SIZE > maxY ?
+        y + NETWORK_VIDEO_TILE_SIZE : maxY;
+    }
+  }
+  maxX = maxX < decoder->config.width ? maxX : decoder->config.width;
+  maxY = maxY < decoder->config.height ? maxY : decoder->config.height;
+
+  damage->count    = 1;
+  damage->rects[0] = (LGNetVideoDamageRect)
+  {
+    .x      = (uint16_t)minX,
+    .y      = (uint16_t)minY,
+    .width  = (uint16_t)(maxX - minX),
+    .height = (uint16_t)(maxY - minY),
+  };
+}
+
+static bool networkVideoAppendDamageRect(LGNetVideoDamage * damage,
+    uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+  for (uint16_t index = 0; index < damage->count; ++index)
+  {
+    LGNetVideoDamageRect * rect = &damage->rects[index];
+    if (rect->x == x && rect->width == width &&
+        (uint32_t)rect->y + rect->height == y)
+    {
+      rect->height = (uint16_t)(rect->height + height);
+      return true;
+    }
+    if (rect->y == y && rect->height == height &&
+        (uint32_t)rect->x + rect->width == x)
+    {
+      rect->width = (uint16_t)(rect->width + width);
+      return true;
+    }
+  }
+
+  if (damage->count == LG_NET_VIDEO_MAX_DAMAGE_RECTS)
+    return false;
+  damage->rects[damage->count++] = (LGNetVideoDamageRect)
+  {
+    .x      = (uint16_t)x,
+    .y      = (uint16_t)y,
+    .width  = (uint16_t)width,
+    .height = (uint16_t)height,
+  };
+  return true;
+}
+
+static void networkVideoIntersectDamage(
+    const LGNetVideoDamage * source,
+    const LGNetVideoDamage * reconstruction,
+    LGNetVideoDamage * damage)
+{
+  if (networkVideoDamageFull(source))
+  {
+    *damage = *reconstruction;
+    return;
+  }
+  if (networkVideoDamageFull(reconstruction))
+  {
+    *damage = *source;
+    return;
+  }
+
+  memset(damage, 0, sizeof(*damage));
+  for (uint16_t sourceIndex = 0;
+       sourceIndex < source->count; ++sourceIndex)
+  {
+    const LGNetVideoDamageRect * sourceRect =
+      &source->rects[sourceIndex];
+    const uint32_t               sourceEndX =
+      sourceRect->x + sourceRect->width;
+    const uint32_t               sourceEndY =
+      sourceRect->y + sourceRect->height;
+    for (uint16_t reconstructionIndex = 0;
+         reconstructionIndex < reconstruction->count;
+         ++reconstructionIndex)
+    {
+      const LGNetVideoDamageRect * reconstructionRect =
+        &reconstruction->rects[reconstructionIndex];
+      const uint32_t               reconstructionEndX =
+        reconstructionRect->x + reconstructionRect->width;
+      const uint32_t               reconstructionEndY =
+        reconstructionRect->y + reconstructionRect->height;
+      const uint32_t               x                  =
+        sourceRect->x > reconstructionRect->x ?
+          sourceRect->x : reconstructionRect->x;
+      const uint32_t               y                  =
+        sourceRect->y > reconstructionRect->y ?
+          sourceRect->y : reconstructionRect->y;
+      const uint32_t               endX               =
+        sourceEndX < reconstructionEndX ?
+          sourceEndX : reconstructionEndX;
+      const uint32_t               endY               =
+        sourceEndY < reconstructionEndY ?
+          sourceEndY : reconstructionEndY;
+      if (x >= endX || y >= endY)
+        continue;
+      if (!networkVideoAppendDamageRect(
+            damage, x, y, endX - x, endY - y))
+      {
+        *damage = *source;
+        return;
+      }
+    }
+  }
+}
+
 static void networkVideoBuildDamage(const LGNetVideoDamage * damage,
     NetworkVideoDecodedFrame * result)
 {
@@ -1917,17 +2179,6 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
       NETWORK_VIDEO_DECODE_UNSUPPORTED : NETWORK_VIDEO_DECODE_CORRUPT;
   }
 
-  LGNetVideoDamage damage = layout.damage;
-  if (!update)
-  {
-    damage = (LGNetVideoDamage)
-    {
-      .flags = (LGNetVideoDamageFlags)LG_NET_VIDEO_DAMAGE_FULL,
-    };
-  }
-  const bool hasPresentationDamage =
-    networkVideoDamageFull(&damage) || damage.count;
-
   uint32_t changedCount = 0;
   if (!networkVideoStagePacketsNL(
         decoder, data, size, update, &changedCount))
@@ -1976,6 +2227,20 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
   networkVideoDequantNL(decoder, upload, update);
   upload->readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
   networkVideoIDWTNL(decoder, update);
+  LGNetVideoDamage reconstructionDamage;
+  LGNetVideoDamage damage;
+  networkVideoBuildReconstructionDamageNL(
+      decoder, update, &reconstructionDamage);
+  /* Wire damage accumulates against the sender's acknowledged reference.
+   * Limit it to output reconstructed against the decoder's current state. */
+  if (update)
+    networkVideoIntersectDamage(
+        &layout.damage, &reconstructionDamage, &damage);
+  else
+    damage = reconstructionDamage;
+  const bool hasPresentationDamage =
+    networkVideoDamageFull(&damage) || damage.count;
+
   struct NetworkVideoExternalFrame * external = NULL;
   if (hasPresentationDamage)
     external = networkVideoConvertNL(decoder,
