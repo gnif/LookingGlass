@@ -654,7 +654,7 @@ static void testAutoCapture(void)
 
   reset();
   g_params.grabKeyboard = true;
-  g_state.ignoreInput   = true;
+  g_state.ignoreInput   = INPUT_DISABLED;
 
   core_setGrabQuiet(true);
   CHECK(!g_state.ignoreInput);

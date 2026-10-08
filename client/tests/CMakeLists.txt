@@ -458,6 +458,7 @@ set(APP_KEYBIND_CASES
   release-all
   focus
   reentrant
+  pause
 )
 foreach(name IN LISTS APP_KEYBIND_CASES)
   add_test(NAME app-keybind-${name}

@@ -136,7 +136,8 @@ static void init(void)
   g_state.ds        = &ds;
   g_state.focused   = true;
 
-  g_params.escapeKey = KEY_ESC;
+  g_params.escapeKey     = KEY_ESC;
+  g_params.inputPauseKey = KEY_PAUSE;
   atomic_store(&p_appState, APP_STATE_RUNNING);
 
   CHECK(g_state.bindings);
@@ -191,6 +192,15 @@ void core_resetOverlayInputState(void)
 }
 
 void core_updateOverlayState(void)
+{
+}
+
+void keybind_toggleInput(void)
+{
+  g_state.ignoreInput = g_state.ignoreInput ? INPUT_ENABLED : INPUT_DISABLED;
+}
+
+void overlayAlert_show(LG_MsgAlert type, const char * fmt, va_list args)
 {
 }
 
@@ -421,6 +431,58 @@ static void testReentrant(void)
   fini();
 }
 
+static void testPause(void)
+{
+  init();
+
+  /* input is only paused while the key is held */
+  app_handleKeyPress(KEY_PAUSE);
+  CHECK(g_state.ignoreInput == INPUT_PAUSED);
+  app_handleKeyRelease(KEY_PAUSE);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
+  CHECK(t.keyN == 0);
+
+  /* switching away while held delivers the release elsewhere; input resumes
+   * once the window is refocused */
+  app_handleKeyPress(KEY_PAUSE);
+  app_handleFocusEvent(false);
+  CHECK(g_state.ignoreInput == INPUT_PAUSED);
+  app_handleFocusEvent(true);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
+
+  /* input re-enabled by other means while held is left enabled */
+  app_handleKeyPress(KEY_PAUSE);
+  g_state.ignoreInput = INPUT_ENABLED;
+  app_handleKeyRelease(KEY_PAUSE);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
+
+  /* input disabled by other means is left disabled */
+  g_state.ignoreInput = INPUT_DISABLED;
+  app_handleKeyPress(KEY_PAUSE);
+  CHECK(g_state.ignoreInput == INPUT_DISABLED);
+  app_handleKeyRelease(KEY_PAUSE);
+  CHECK(g_state.ignoreInput == INPUT_DISABLED);
+  app_handleFocusEvent(false);
+  app_handleFocusEvent(true);
+  CHECK(g_state.ignoreInput == INPUT_DISABLED);
+  CHECK(t.keyN == 0);
+
+  /* the pause key is configurable; Pause is then forwarded normally */
+  g_state.ignoreInput    = INPUT_ENABLED;
+  g_params.inputPauseKey = KEY_B;
+  app_handleKeyPress(KEY_PAUSE);
+  app_handleKeyRelease(KEY_PAUSE);
+  CHECK(t.keyN == 2);
+  checkKey(0, true , KEY_PAUSE);
+  checkKey(1, false, KEY_PAUSE);
+  app_handleKeyPress(KEY_B);
+  CHECK(g_state.ignoreInput == INPUT_PAUSED);
+  app_handleKeyRelease(KEY_B);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
+  CHECK(t.keyN == 2);
+  fini();
+}
+
 struct Test
 {
   const char * name;
@@ -437,6 +499,7 @@ static const struct Test tests[] =
   { "release-all"  , testReleaseAll   },
   { "focus"        , testFocus        },
   { "reentrant"    , testReentrant    },
+  { "pause"        , testPause        },
 };
 
 int main(int argc, char ** argv)

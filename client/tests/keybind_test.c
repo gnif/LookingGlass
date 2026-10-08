@@ -414,16 +414,21 @@ static void testActions(void)
   CHECK(!g_state.overlayInput);
   CHECK(t.overlayN == 2);
 
-  g_state.ignoreInput = false;
+  g_state.ignoreInput = INPUT_ENABLED;
   call(KEY_I);
-  CHECK(g_state.ignoreInput);
+  CHECK(g_state.ignoreInput == INPUT_DISABLED);
   CHECK(t.cursorN == 1);
   CHECK(!t.cursorInView);
   CHECK(strcmp(t.alert, "Input Disabled") == 0);
   call(KEY_I);
-  CHECK(!g_state.ignoreInput);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
   CHECK(t.realignN == 1);
   CHECK(strcmp(t.alert, "Input Enabled") == 0);
+
+  /* the toggle also ends a pause */
+  g_state.ignoreInput = INPUT_PAUSED;
+  call(KEY_I);
+  CHECK(g_state.ignoreInput == INPUT_ENABLED);
 
   g_cursor.sens = 8;
   call(KEY_INSERT);

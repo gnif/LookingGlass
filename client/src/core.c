@@ -341,7 +341,7 @@ void core_setGrabQuiet(bool enable)
 
   if (enable)
   {
-    g_state.ignoreInput          = false;
+    g_state.ignoreInput          = INPUT_ENABLED;
     g_cursor.grab                = true;
     g_cursor.autoCaptureActive   = false;
     core_updateKeyboardGrab();

@@ -128,6 +128,10 @@ Common options
    * - ``input:escapeKey``
      - ``KEY_SCROLLLOCK``
      - Set the capture/menu key; use ``help`` to list accepted names
+   * - ``input:inputPauseKey``
+     - ``KEY_PAUSE``
+     - Set the key held to stop sending input to the guest; use ``help`` to
+       list accepted names
    * - ``input:autoCapture``
      - ``no``
      - Grab the keyboard inside the guest view and release it before exit

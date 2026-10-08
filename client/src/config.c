@@ -363,6 +363,17 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "inputPauseKey",
+    .description    = "Specify the key to hold to stop sending input to the guest (use \"help\" to see valid values)",
+    .type           = OPTION_TYPE_INT,
+    .value.x_int    = KEY_PAUSE,
+    .parser         = optScancodeParse,
+    .getValues      = optScancodeValues,
+    .validator      = optScancodeValidate,
+    .toString       = optScancodeToString,
+  },
+  {
+    .module         = "input",
     .name           = "ignoreWindowsKeys",
     .description    = "Do not pass events for the windows keys to the guest",
     .type           = OPTION_TYPE_BOOL,
@@ -699,6 +710,7 @@ bool config_load(int argc, char * argv[])
   g_params.grabKeyboardOnFocus    = option_get_bool("input", "grabKeyboardOnFocus"   );
   g_params.releaseKeysOnFocusLoss = option_get_bool("input", "releaseKeysOnFocusLoss");
   g_params.escapeKey              = option_get_int ("input", "escapeKey"             );
+  g_params.inputPauseKey          = option_get_int ("input", "inputPauseKey"         );
   g_params.ignoreWindowsKeys      = option_get_bool("input", "ignoreWindowsKeys"     );
   g_params.hideMouse              = option_get_bool("input", "hideCursor"            );
   g_params.mouseSens              = option_get_int ("input", "mouseSens"             );

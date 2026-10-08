@@ -45,6 +45,14 @@ enum MicDefaultState {
 };
 #define MIC_DEFAULT_MAX (MIC_DEFAULT_DENY + 1)
 
+/* any value other than INPUT_ENABLED ignores guest input, so the state can be
+ * tested as a bool */
+enum InputState {
+  INPUT_ENABLED = 0,
+  INPUT_DISABLED,  // disabled with the input toggle keybind
+  INPUT_PAUSED     // paused while the input pause key is held
+};
+
 enum AudioResampler {
   AUDIO_RESAMPLER_AUTO,
   AUDIO_RESAMPLER_LIBSAMPLERATE,
@@ -126,7 +134,7 @@ struct AppState
 
   atomic_bool          stopVideo;
   atomic_bool          stopVideoThreads;
-  bool                 ignoreInput;
+  enum InputState      ignoreInput;
   bool                 escapeActive;
   uint64_t             escapeTime;
   int                  escapeAction;
@@ -224,6 +232,7 @@ struct AppParams
   bool                 grabKeyboard;
   bool                 grabKeyboardOnFocus;
   int                  escapeKey;
+  int                  inputPauseKey;
   bool                 ignoreWindowsKeys;
   bool                 releaseKeysOnFocusLoss;
   bool                 showAlerts;

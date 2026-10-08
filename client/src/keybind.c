@@ -55,9 +55,9 @@ static void bind_forceRecovery(int sc, void * opaque)
   atomic_store_explicit(&g_state.forceRecovery, true, memory_order_release);
 }
 
-static void bind_input(int sc, void * opaque)
+void keybind_toggleInput(void)
 {
-  g_state.ignoreInput = !g_state.ignoreInput;
+  g_state.ignoreInput = g_state.ignoreInput ? INPUT_ENABLED : INPUT_DISABLED;
 
   if (g_state.ignoreInput)
     core_setCursorInView(false);
@@ -69,6 +69,11 @@ static void bind_input(int sc, void * opaque)
     LG_ALERT_INFO,
     g_state.ignoreInput ? "Input Disabled" : "Input Enabled"
   );
+}
+
+static void bind_input(int sc, void * opaque)
+{
+  keybind_toggleInput();
 }
 
 static void bind_quit(int sc, void * opaque)

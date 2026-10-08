@@ -26,6 +26,7 @@
 #include "render_queue.h"
 #include "evdev.h"
 #include "input.h"
+#include "keybind.h"
 #include "sw_surface.h"
 
 #include "kb.h"
@@ -290,6 +291,12 @@ void app_handleFocusEvent(bool focused)
   }
   else
   {
+    if (g_state.ignoreInput == INPUT_PAUSED)
+    {
+      g_state.ignoreInput = INPUT_ENABLED;
+      app_alert(LG_ALERT_INFO, "Input Enabled");
+    }
+
     if (g_params.captureOnFocus && !g_state.ignoreInput)
       core_setGrab(true);
     core_updateKeyboardGrab();
@@ -518,6 +525,18 @@ void app_handleKeyPressInternal(int sc)
     return;
   }
 
+  if (sc == g_params.inputPauseKey)
+  {
+    /* while held, stop forwarding input so host shortcuts such as Alt+Tab
+     * reach the compositor; input resumes on release or when refocused */
+    if (!g_state.ignoreInput)
+    {
+      keybind_toggleInput();
+      g_state.ignoreInput = INPUT_PAUSED;
+    }
+    return;
+  }
+
   if (!core_inputEnabled())
     return;
 
@@ -561,6 +580,13 @@ void app_handleKeyReleaseInternal(int sc)
   {
     if (linux_to_imgui[sc])
       ImGuiIO_AddKeyEvent(g_state.io, linux_to_imgui[sc], false);
+    return;
+  }
+
+  if (sc == g_params.inputPauseKey)
+  {
+    if (g_state.ignoreInput == INPUT_PAUSED)
+      keybind_toggleInput();
     return;
   }
 

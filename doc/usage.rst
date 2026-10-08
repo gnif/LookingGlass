@@ -38,6 +38,9 @@ not have :kbd:`ScrLk`.
      - Action
    * - :kbd:`ScrLk`
      - Enter or leave capture mode
+   * - :kbd:`Pause`
+     - While held, stop sending input to the guest so host shortcuts such as
+       :kbd:`Alt` + :kbd:`Tab` work; change with ``input:inputPauseKey``
    * - :kbd:`ScrLk` + :kbd:`Q`
      - Quit
    * - :kbd:`ScrLk` + :kbd:`F`

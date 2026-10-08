@@ -23,5 +23,6 @@
 
 void keybind_commonRegister(void);
 void keybind_inputRegister(void);
+void keybind_toggleInput(void);
 
 #endif
