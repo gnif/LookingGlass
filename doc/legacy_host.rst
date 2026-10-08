@@ -6,9 +6,10 @@ Legacy Host Application
 .. warning::
 
    The Host Application is a legacy server application. New installations should
-   use the prebuilt :doc:`Looking Glass IDD <install_idd>`. These build
-   instructions are retained for the complete matching B7 stack described in
-   :ref:`legacy_host_policy`.
+   use the prebuilt :doc:`Looking Glass IDD <install_idd>`. The IDD and Legacy
+   Host should not be installed together on the same virtual machine. These
+   build instructions are retained for the complete matching B7 stack described
+   in :ref:`legacy_host_policy`.
 
 .. note::
 
