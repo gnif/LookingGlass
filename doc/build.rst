@@ -4,8 +4,9 @@ Build the Linux client
 ######################
 
 The Looking Glass Client is currently distributed as source code. Building it
-is a normal part of installation, not an optional developer step. These
-instructions require basic familiarity with a Linux shell.
+is a normal part of installation, as no packages are available during the
+development phase. These instructions require basic familiarity with a Linux
+shell.
 
 .. _download_source:
 
@@ -32,10 +33,10 @@ Developers can clone the source code repo with ``git``.
 
 .. note::
 
-   The current client, IDD and OBS plugin must come from the same Looking Glass
-   release. Bleeding-edge builds must be paired with their matching
-   bleeding-edge components. Legacy Host users must instead use the complete
-   matching B7 stack described in :ref:`legacy_host_policy`.
+   The Looking Glass client, IDD and OBS plugin (if used) must be of the same version.
+   Bleeding-edge builds must be paired with bleeding-edge components of the same
+   version. Legacy Host users must instead use the complete matching B7 stack
+   described in :ref:`legacy_host_policy`.
 
 .. _build_client_section:
 
@@ -68,13 +69,14 @@ Required dependencies
    Depends: or Recommends: from another listed package is not allowed.
    All required packages must be listed.
 
--  ``cmake``
 -  ``binutils``
+-  ``cmake``
 -  ``gcc``, ``g++`` \| ``clang``
 -  ``libegl-dev``
+-  ``libfontconfig-dev``
+-  ``libfuse3-dev``
 -  ``libgl-dev``
 -  ``libgles-dev``
--  ``libfontconfig-dev``
 -  ``libgmp-dev``
 -  ``libspice-protocol-dev``
 -  ``libxkbcommon-dev``
@@ -90,12 +92,12 @@ May be disabled
 These dependencies are required by default, but may be omitted if their
 feature is disabled when running :ref:`cmake <client_building>`.
 
--  Disable with ``cmake -DENABLE_BACKTRACE=no ..``
+-  Disable backtrace support with ``cmake -DENABLE_BACKTRACE=no ..``
 
    -  ``libdw-dev``
    -  ``libunwind-dev``
 
--  Disable with ``cmake -DENABLE_X11=no ..``
+-  Disable X11 support with ``cmake -DENABLE_X11=no ..``
 
    -  ``libx11-dev``
    -  ``libxfixes-dev``
@@ -106,39 +108,41 @@ feature is disabled when running :ref:`cmake <client_building>`.
    -  ``libxpresent-dev``
    -  ``libxrandr-dev``
 
--  Disable with ``cmake -DENABLE_WAYLAND=no ..``
+-  Disable Wayland support with ``cmake -DENABLE_WAYLAND=no ..``
 
    -  ``libwayland-bin``
    -  ``libwayland-dev``
 
--  Disable all audio support with ``cmake -DENABLE_AUDIO=no ..``
+.. _client_deps_audio:
+
+Audio
+/////
+
+-  Disable all audio with ``cmake -DENABLE_AUDIO=no ..```
+
+   - ``libsamplerate0-dev``
+
+-  Disable PipeWire support with ``cmake -DENABLE_PIPEWIRE=no ..``
 
    -  ``libpipewire-0.3-dev``
+
+-  Disable PulseAudio support with ``cmake -DENABLE_PULSEAUDIO=no ..``
+
    -  ``libpulse-dev``
-   -  ``libsamplerate0-dev``
+
+-  Disable USB audio support with ``cmake -DENABLE_USB_AUDIO=no ..``
+
    -  ``libusbredirparser-dev``
-
--  Disable with ``cmake -DENABLE_PIPEWIRE=no ..``
-
-   -  ``libpipewire-0.3-dev``
-
--  Disable with ``cmake -DENABLE_PULSEAUDIO=no ..``
-
-   -  ``libpulse-dev``
-
--  Disable USB audio with ``cmake -DENABLE_USB_AUDIO=no ..``
-
-   -  ``libusbredirparser-dev`` version 0.7.1 or newer
-
-``libsamplerate0-dev`` is required whenever audio support remains enabled.
 
 .. _client_deps_recommended:
 
 Recommended
 <<<<<<<<<<<
 
--  ``fonts-dejavu-core`` (This is the default UI font, but a random font will
-   be chosen if not available).
+-  ``fonts-dejavu-core``
+
+   -  This is the default UI font
+   - A random font will be chosen if not available
 
 .. _client_fetching_with_apt:
 
@@ -147,17 +151,10 @@ Fetching with APT
 
 You can fetch these dependencies with the following command:
 
-.. warning::
-
-   The command below builds both PipeWire and PulseAudio playback backends.
-   Omit one development package only when also disabling its backend in CMake.
-   Microphone recording requires PipeWire; the current PulseAudio backend is
-   playback-only.
-
 .. code:: bash
 
-   apt-get install binutils cmake make fonts-dejavu-core libdw-dev \
-   libfontconfig-dev libgmp-dev libunwind-dev gcc g++ pkg-config \
+   apt-get install binutils cmake make fonts-dejavu-core gcc g++ libdw-dev \
+   libfontconfig-dev libfuse3-dev libgmp-dev libunwind-dev pkg-config \
    libegl-dev libgl-dev libgles-dev libspice-protocol-dev nettle-dev \
    libx11-dev libxcursor-dev libxfixes-dev libxi-dev libxinerama-dev \
    libxpresent-dev libxrandr-dev libxss-dev libxkbcommon-dev \
@@ -176,7 +173,7 @@ Building
 
 If you've downloaded the source code as a zip file, simply unzip and ``cd``
 into the new directory. If you've cloned the repo with ``git``, then ``cd``
-into the *LookingGlass* directory.
+into the *LookingGlass* directory. Run these commands in a terminal:
 
 .. code:: bash
 
