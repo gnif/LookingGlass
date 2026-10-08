@@ -44,8 +44,11 @@ typedef struct LibDecorState
   struct libdecor_frame * libdecorFrame;
 
   int32_t width, height;
+  int32_t floatingWidth, floatingHeight;
   bool     needsResize;
   bool     fullscreen;
+  bool     floating;
+  bool     restoreFloatingSize;
   bool     borderless;
   uint32_t resizeSerial;
 }
@@ -77,20 +80,44 @@ static void libdecorFrameConfigure(struct libdecor_frame * frame,
   if (!state.configured)
     xdg_surface_ack_configure(libdecor_frame_get_xdg_surface(frame), configuration->serial);
 
+  enum libdecor_window_state windowState;
+  if (libdecor_configuration_get_window_state(configuration, &windowState))
+  {
+    state.fullscreen = windowState & LIBDECOR_WINDOW_STATE_FULLSCREEN;
+    state.floating = !(windowState &
+      (LIBDECOR_WINDOW_STATE_FULLSCREEN |
+       LIBDECOR_WINDOW_STATE_MAXIMIZED  |
+       LIBDECOR_WINDOW_STATE_TILED_LEFT |
+       LIBDECOR_WINDOW_STATE_TILED_RIGHT |
+       LIBDECOR_WINDOW_STATE_TILED_TOP  |
+       LIBDECOR_WINDOW_STATE_TILED_BOTTOM));
+  }
+
   int width, height;
-  if (libdecor_configuration_get_content_size(configuration, frame, &width, &height))
+  bool hasSize = libdecor_configuration_get_content_size(
+      configuration, frame, &width, &height);
+  if (state.restoreFloatingSize && state.floating)
+  {
+    width                     = state.floatingWidth;
+    height                    = state.floatingHeight;
+    hasSize                   = true;
+    state.restoreFloatingSize = false;
+  }
+
+  if (hasSize)
   {
     state.width  = width;
     state.height = height;
+    if (state.floating)
+    {
+      state.floatingWidth  = width;
+      state.floatingHeight = height;
+    }
 
     struct libdecor_state * s = libdecor_state_new(width, height);
     libdecor_frame_commit(state.libdecorFrame, s, NULL);
     libdecor_state_free(s);
   }
-
-  enum libdecor_window_state windowState;
-  if (libdecor_configuration_get_window_state(configuration, &windowState))
-    state.fullscreen = windowState & LIBDECOR_WINDOW_STATE_FULLSCREEN;
 
   if (!state.configured)
   {
@@ -136,6 +163,7 @@ static bool libdecor_shellInit(
     const char * title, const char * appId, bool fullscreen,
     bool maximize, bool borderless, bool resizable)
 {
+  state.floating = true;
   state.libdecor = libdecor_new(display, &libdecorListener);
   state.libdecorFrame = libdecor_decorate(state.libdecor, surface,
       &libdecorFrameListener, NULL);
@@ -189,9 +217,20 @@ static void libdecor_shellAckConfigureIfNeeded(void)
 static void libdecor_setFullscreen(bool fs)
 {
   if (fs)
+  {
+    if (!state.fullscreen && state.floating)
+    {
+      state.floatingWidth  = state.width;
+      state.floatingHeight = state.height;
+    }
     libdecor_frame_set_fullscreen(state.libdecorFrame, NULL);
+  }
   else
+  {
+    state.restoreFloatingSize =
+      state.floatingWidth > 0 && state.floatingHeight > 0;
     libdecor_frame_unset_fullscreen(state.libdecorFrame);
+  }
 
   if (!state.borderless)
     libdecor_frame_set_visibility(state.libdecorFrame, !fs);
@@ -212,8 +251,10 @@ static void libdecor_shellResize(int w, int h)
   if (!libdecor_frame_is_floating(state.libdecorFrame))
     return;
 
-  state.width  = w;
-  state.height = h;
+  state.width          = w;
+  state.height         = h;
+  state.floatingWidth  = w;
+  state.floatingHeight = h;
 
   struct libdecor_state * s = libdecor_state_new(w, h);
   libdecor_frame_commit(state.libdecorFrame, s, NULL);
@@ -224,8 +265,10 @@ static void libdecor_shellResize(int w, int h)
 
 static void libdecor_setSize(int w, int h)
 {
-  state.width  = w;
-  state.height = h;
+  state.width          = w;
+  state.height         = h;
+  state.floatingWidth  = w;
+  state.floatingHeight = h;
 }
 
 static void libdecor_getSize(int * w, int * h)
