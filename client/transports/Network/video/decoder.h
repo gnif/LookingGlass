@@ -35,6 +35,7 @@ typedef struct NetworkVideoDecoder NetworkVideoDecoder;
 typedef enum NetworkVideoDecodeResult
 {
   NETWORK_VIDEO_DECODE_OK,
+  NETWORK_VIDEO_DECODE_NO_FRAME,
   NETWORK_VIDEO_DECODE_UNSUPPORTED,
   NETWORK_VIDEO_DECODE_CORRUPT,
   NETWORK_VIDEO_DECODE_ERROR,
@@ -43,10 +44,12 @@ NetworkVideoDecodeResult;
 
 typedef struct NetworkVideoDecodedFrame
 {
-  LG_ExternalFrame          * externalFrame;
-  LG_TransportFrameFormat     format;
-  LG_TransportFrameTiming     timing;
-  uint64_t                    decodeTimeNs;
+  LG_ExternalFrame         * externalFrame;
+  LG_TransportFrameFormat    format;
+  LG_TransportFrameTiming    timing;
+  KVMFRFrameDamageRect       damageRects[LG_TRANSPORT_MAX_DAMAGE_RECTS];
+  uint32_t                   damageRectsCount;
+  uint64_t                   decodeTimeNs;
 }
 NetworkVideoDecodedFrame;
 

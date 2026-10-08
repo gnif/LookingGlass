@@ -71,12 +71,28 @@
 #define NETWORK_VIDEO_POOL_BYTE_LIMIT        \
   (UINT64_C(192) * 1024U * 1024U)
 #define NETWORK_VIDEO_PIXEL_BYTES            8U
+#define NETWORK_VIDEO_TILE_SIZE              32U
+#define NETWORK_VIDEO_SEQUENCE_BITS          (UINT32_C(7) << 28U)
 
 struct NetworkVideoBlockMeta
 {
   uint32_t offset;
   uint32_t stride;
   uint32_t count;
+};
+
+struct NetworkVideoPacketState
+{
+  uint8_t * data;
+  uint32_t  length;
+};
+
+struct NetworkVideoDirtyGrid
+{
+  uint8_t * tiles;
+  uint32_t  width;
+  uint32_t  height;
+  uint32_t  count;
 };
 
 struct NetworkVideoCurrent
@@ -98,8 +114,9 @@ struct NetworkVideoUpload
 
 struct NetworkVideoTexture
 {
-  GLuint texture;
-  GLsync readySync;
+  GLuint   texture;
+  GLsync   readySync;
+  uint64_t generation;
 };
 
 struct NetworkVideoTexturePool
@@ -125,6 +142,7 @@ struct NetworkVideoUniforms
     GLint outputLayer;
     GLint blockOffset;
     GLint blockStride;
+    GLint workGroupOffset;
     GLint preserveMissing;
   }
   dequant;
@@ -135,6 +153,7 @@ struct NetworkVideoUniforms
     GLint resolution;
     GLint invResolution;
     GLint baseLayer;
+    GLint workGroupOffset;
     GLint dcShift;
   }
   idwt;
@@ -145,6 +164,7 @@ struct NetworkVideoUniforms
     GLint cbPlane;
     GLint crPlane;
     GLint outputSize;
+    GLint outputOffset;
     GLint bt2020;
     GLint chromaLeft;
     GLint lumaOffset;
@@ -173,6 +193,13 @@ struct NetworkVideoDecoder
   struct NetworkVideoTexturePool * texturePool;
   struct NetworkVideoUniforms      uniforms;
   uint32_t                       * offsets;
+  struct NetworkVideoPacketState * packetStates;
+  struct NetworkVideoPacketState * pendingPackets;
+  uint8_t                        * dirtyBlocks;
+  struct NetworkVideoDirtyGrid
+    dirty[NETWORK_VIDEO_COMPONENTS][NETWORK_VIDEO_LEVELS];
+  uint8_t                        * outputDirty;
+  uint64_t                       * outputTileGenerations;
 
   LGNetVideoStreamConfig config;
   struct NetworkVideoBlockMeta
@@ -182,7 +209,10 @@ struct NetworkVideoDecoder
   uint32_t alignedWidth;
   uint32_t alignedHeight;
   uint32_t blockCapacity;
+  uint32_t outputTileWidth;
+  uint32_t outputTileHeight;
   uint64_t referenceFrameID;
+  uint64_t outputGeneration;
   unsigned uploadIndex;
   GLint    maxTextureSize;
   GLint    maxArrayLayers;
@@ -200,11 +230,38 @@ struct NetworkVideoExternalFrame
   struct NetworkVideoTexturePool * pool;
   GLuint                           texture;
   GLsync                           readySync;
+  uint64_t                         generation;
 };
 
 static uint32_t networkVideoAlign(uint32_t value, uint32_t alignment)
 {
   return (value + alignment - 1U) & ~(alignment - 1U);
+}
+
+static uint32_t networkVideoReadU32(const uint8_t * data)
+{
+  return (uint32_t)data[0]       |
+    (uint32_t)data[1] << 8U      |
+    (uint32_t)data[2] << 16U     |
+    (uint32_t)data[3] << 24U;
+}
+
+static void networkVideoWriteU32(uint8_t * data, uint32_t value)
+{
+  data[0] = (uint8_t)value;
+  data[1] = (uint8_t)(value >> 8U);
+  data[2] = (uint8_t)(value >> 16U);
+  data[3] = (uint8_t)(value >> 24U);
+}
+
+static void networkVideoFreePacketStates(
+    struct NetworkVideoPacketState * states, uint32_t count)
+{
+  if (!states)
+    return;
+  for (uint32_t index = 0; index < count; ++index)
+    free(states[index].data);
+  free(states);
 }
 
 static void networkVideoSaveCurrent(struct NetworkVideoCurrent * current)
@@ -368,7 +425,8 @@ static void networkVideoTexturePoolRelease(
 }
 
 static bool networkVideoTexturePoolReturn(
-    struct NetworkVideoTexturePool * pool, GLuint texture, GLsync readySync)
+    struct NetworkVideoTexturePool * pool, GLuint texture, GLsync readySync,
+    uint64_t generation)
 {
   if (!pool || !texture)
     return false;
@@ -379,18 +437,21 @@ static bool networkVideoTexturePoolReturn(
   {
     struct NetworkVideoTexture * pooled =
       &pool->textures[pool->textureCount++];
-    pooled->texture   = texture;
-    pooled->readySync = readySync;
-    retained          = true;
+    pooled->texture    = texture;
+    pooled->readySync  = readySync;
+    pooled->generation = generation;
+    retained           = true;
   }
   LG_UNLOCK(pool->lock);
   return retained;
 }
 
 static void networkVideoTexturePoolRecycleCurrent(
-    struct NetworkVideoTexturePool * pool, GLuint texture, GLsync readySync)
+    struct NetworkVideoTexturePool * pool, GLuint texture, GLsync readySync,
+    uint64_t generation)
 {
-  if (networkVideoTexturePoolReturn(pool, texture, readySync))
+  if (networkVideoTexturePoolReturn(
+        pool, texture, readySync, generation))
     return;
 
   if (readySync)
@@ -468,21 +529,40 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
       glDeleteBuffers(1, &upload->payloadBuffer);
   }
   networkVideoTexturePoolRelease(decoder->texturePool, true);
+  networkVideoFreePacketStates(
+      decoder->packetStates, decoder->blockCapacity);
+  free(decoder->pendingPackets);
+  free(decoder->dirtyBlocks);
+  for (unsigned component = 0;
+       component < NETWORK_VIDEO_COMPONENTS; ++component)
+    for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
+      free(decoder->dirty[component][level].tiles);
+  free(decoder->outputDirty);
+  free(decoder->outputTileGenerations);
   free(decoder->offsets);
 
   memset(decoder->uploads, 0, sizeof(decoder->uploads));
-  decoder->texturePool      = NULL;
-  decoder->offsets          = NULL;
-  decoder->alignedWidth     = 0;
-  decoder->alignedHeight    = 0;
-  decoder->blockCapacity    = 0;
-  decoder->referenceFrameID = 0;
-  decoder->uploadIndex      = 0;
-  decoder->configured       = false;
-  decoder->referenceValid   = false;
+  decoder->texturePool           = NULL;
+  decoder->offsets               = NULL;
+  decoder->packetStates          = NULL;
+  decoder->pendingPackets        = NULL;
+  decoder->dirtyBlocks           = NULL;
+  decoder->outputDirty           = NULL;
+  decoder->outputTileGenerations = NULL;
+  decoder->alignedWidth          = 0;
+  decoder->alignedHeight         = 0;
+  decoder->blockCapacity         = 0;
+  decoder->outputTileWidth       = 0;
+  decoder->outputTileHeight      = 0;
+  decoder->referenceFrameID      = 0;
+  decoder->outputGeneration      = 0;
+  decoder->uploadIndex           = 0;
+  decoder->configured            = false;
+  decoder->referenceValid        = false;
   memset(decoder->coefficientTextures, 0,
       sizeof(decoder->coefficientTextures));
   memset(decoder->planeTextures, 0, sizeof(decoder->planeTextures));
+  memset(decoder->dirty, 0, sizeof(decoder->dirty));
   memset(&decoder->config, 0, sizeof(decoder->config));
   memset(decoder->blocks, 0, sizeof(decoder->blocks));
 }
@@ -511,18 +591,22 @@ static bool networkVideoCacheUniformsNL(NetworkVideoDecoder * decoder)
       decoder->dequantProgram, "blockOffset");
   decoder->uniforms.dequant.blockStride     = glGetUniformLocation(
       decoder->dequantProgram, "blockStride");
+  decoder->uniforms.dequant.workGroupOffset = glGetUniformLocation(
+      decoder->dequantProgram, "workGroupOffset");
   decoder->uniforms.dequant.preserveMissing = glGetUniformLocation(
       decoder->dequantProgram, "preserveMissing");
 
-  decoder->uniforms.idwt.coefficients  = glGetUniformLocation(
+  decoder->uniforms.idwt.coefficients        = glGetUniformLocation(
       decoder->idwtProgram, "coefficients");
-  decoder->uniforms.idwt.resolution    = glGetUniformLocation(
+  decoder->uniforms.idwt.resolution          = glGetUniformLocation(
       decoder->idwtProgram, "resolution");
-  decoder->uniforms.idwt.invResolution = glGetUniformLocation(
+  decoder->uniforms.idwt.invResolution       = glGetUniformLocation(
       decoder->idwtProgram, "invResolution");
-  decoder->uniforms.idwt.baseLayer     = glGetUniformLocation(
+  decoder->uniforms.idwt.baseLayer           = glGetUniformLocation(
       decoder->idwtProgram, "baseLayer");
-  decoder->uniforms.idwt.dcShift       = glGetUniformLocation(
+  decoder->uniforms.idwt.workGroupOffset     = glGetUniformLocation(
+      decoder->idwtProgram, "workGroupOffset");
+  decoder->uniforms.idwt.dcShift             = glGetUniformLocation(
       decoder->idwtProgram, "dcShift");
 
   decoder->uniforms.yuv.lumaPlane      = glGetUniformLocation(
@@ -533,6 +617,8 @@ static bool networkVideoCacheUniformsNL(NetworkVideoDecoder * decoder)
       decoder->yuvProgram, "crPlane");
   decoder->uniforms.yuv.outputSize     = glGetUniformLocation(
       decoder->yuvProgram, "outputSize");
+  decoder->uniforms.yuv.outputOffset   = glGetUniformLocation(
+      decoder->yuvProgram, "outputOffset");
   decoder->uniforms.yuv.bt2020         = glGetUniformLocation(
       decoder->yuvProgram, "bt2020");
   decoder->uniforms.yuv.chromaLeft     = glGetUniformLocation(
@@ -551,15 +637,18 @@ static bool networkVideoCacheUniformsNL(NetworkVideoDecoder * decoder)
       uniforms->dequant.outputLayer < 0 ||
       uniforms->dequant.blockOffset < 0 ||
       uniforms->dequant.blockStride < 0 ||
+      uniforms->dequant.workGroupOffset < 0 ||
       uniforms->dequant.preserveMissing < 0 ||
       uniforms->idwt.coefficients < 0 ||
       uniforms->idwt.resolution < 0 ||
       uniforms->idwt.invResolution < 0 ||
       uniforms->idwt.baseLayer < 0 ||
+      uniforms->idwt.workGroupOffset < 0 ||
       uniforms->idwt.dcShift < 0 ||
       uniforms->yuv.lumaPlane < 0 ||
       uniforms->yuv.cbPlane < 0 || uniforms->yuv.crPlane < 0 ||
-      uniforms->yuv.outputSize < 0 || uniforms->yuv.bt2020 < 0 ||
+      uniforms->yuv.outputSize < 0 || uniforms->yuv.outputOffset < 0 ||
+      uniforms->yuv.bt2020 < 0 ||
       uniforms->yuv.chromaLeft < 0 || uniforms->yuv.lumaOffset < 0 ||
       uniforms->yuv.lumaScale < 0 ||
       uniforms->yuv.chromaMidpoint < 0 ||
@@ -672,7 +761,7 @@ static bool networkVideoCreateTexture2D(GLuint * texture, GLenum format,
   return false;
 }
 
-static GLuint networkVideoTexturePoolAcquire(
+static struct NetworkVideoTexture networkVideoTexturePoolAcquire(
     struct NetworkVideoTexturePool * pool)
 {
   struct NetworkVideoTexture pooled = { 0 };
@@ -687,13 +776,12 @@ static GLuint networkVideoTexturePoolAcquire(
   if (pooled.readySync)
     glDeleteSync(pooled.readySync);
   if (pooled.texture)
-    return pooled.texture;
+    return pooled;
 
-  GLuint texture = 0;
-  if (!networkVideoCreateTexture2D(&texture, GL_RGBA16F,
+  if (!networkVideoCreateTexture2D(&pooled.texture, GL_RGBA16F,
         pool->width, pool->height, GL_LINEAR))
-    return 0;
-  return texture;
+    pooled.texture = 0;
+  return pooled;
 }
 
 static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
@@ -736,11 +824,50 @@ static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
       return false;
   }
 
-  decoder->offsets     = malloc(
+  decoder->offsets               = malloc(
       (size_t)decoder->blockCapacity * sizeof(*decoder->offsets));
-  decoder->texturePool = networkVideoTexturePoolCreate(decoder);
-  if (!decoder->offsets || !decoder->texturePool)
+  decoder->packetStates          = calloc(
+      decoder->blockCapacity, sizeof(*decoder->packetStates));
+  decoder->pendingPackets        = calloc(
+      decoder->blockCapacity, sizeof(*decoder->pendingPackets));
+  decoder->dirtyBlocks           = calloc(
+      decoder->blockCapacity, sizeof(*decoder->dirtyBlocks));
+  decoder->texturePool           = networkVideoTexturePoolCreate(decoder);
+  decoder->outputTileWidth       =
+    (decoder->config.width + NETWORK_VIDEO_TILE_SIZE - 1U) /
+      NETWORK_VIDEO_TILE_SIZE;
+  decoder->outputTileHeight      =
+    (decoder->config.height + NETWORK_VIDEO_TILE_SIZE - 1U) /
+      NETWORK_VIDEO_TILE_SIZE;
+  const size_t outputTileCount   =
+    (size_t)decoder->outputTileWidth * decoder->outputTileHeight;
+  decoder->outputDirty           = calloc(
+      outputTileCount, sizeof(*decoder->outputDirty));
+  decoder->outputTileGenerations = calloc(
+      outputTileCount, sizeof(*decoder->outputTileGenerations));
+  if (!decoder->offsets || !decoder->packetStates ||
+      !decoder->pendingPackets || !decoder->dirtyBlocks ||
+      !decoder->texturePool || !decoder->outputDirty ||
+      !decoder->outputTileGenerations)
     return false;
+
+  for (unsigned component = 0;
+       component < NETWORK_VIDEO_COMPONENTS; ++component)
+  {
+    for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
+    {
+      const uint32_t inputWidth  = decoder->alignedWidth >> (level + 1U);
+      const uint32_t inputHeight = decoder->alignedHeight >> (level + 1U);
+      struct NetworkVideoDirtyGrid * grid =
+        &decoder->dirty[component][level];
+      grid->width  = (inputWidth + 15U) / 16U;
+      grid->height = (inputHeight + 15U) / 16U;
+      grid->tiles  = calloc(
+          (size_t)grid->width * grid->height, sizeof(*grid->tiles));
+      if (!grid->tiles)
+        return false;
+    }
+  }
 
   for (unsigned index = 0; index < NETWORK_VIDEO_UPLOADS; ++index)
   {
@@ -771,7 +898,7 @@ static void networkVideoExternalDelete(
 {
   struct NetworkVideoTexturePool * pool      = frame->pool;
   const bool                       retained  = networkVideoTexturePoolReturn(
-      pool, frame->texture, frame->readySync);
+      pool, frame->texture, frame->readySync, frame->generation);
   if (!retained)
   {
     struct NetworkVideoCurrent previous;
@@ -1066,6 +1193,269 @@ static bool networkVideoConfigMatches(
     left->bitDepth == right->bitDepth && left->flags == right->flags;
 }
 
+static bool networkVideoPacketMatches(
+    const struct NetworkVideoPacketState * state,
+    const uint8_t * packet, uint32_t length)
+{
+  if (!state->data || state->length != length || length < 8U)
+    return !state->data && !packet;
+  if (!packet ||
+      networkVideoReadU32(state->data) !=
+        (networkVideoReadU32(packet) & ~NETWORK_VIDEO_SEQUENCE_BITS))
+    return false;
+  return memcmp(state->data + sizeof(uint32_t),
+      packet + sizeof(uint32_t), length - sizeof(uint32_t)) == 0;
+}
+
+static void networkVideoDiscardPendingPacketsNL(
+    NetworkVideoDecoder * decoder)
+{
+  for (uint32_t index = 0; index < decoder->blockCapacity; ++index)
+    if (decoder->dirtyBlocks[index] &&
+        decoder->pendingPackets[index].data !=
+          decoder->packetStates[index].data)
+      free(decoder->pendingPackets[index].data);
+}
+
+static void networkVideoCommitPendingPacketsNL(
+    NetworkVideoDecoder * decoder)
+{
+  for (uint32_t index = 0; index < decoder->blockCapacity; ++index)
+  {
+    if (!decoder->dirtyBlocks[index])
+      continue;
+    free(decoder->packetStates[index].data);
+    decoder->packetStates[index] = decoder->pendingPackets[index];
+  }
+}
+
+static bool networkVideoStagePacketsNL(NetworkVideoDecoder * decoder,
+    const void * data, size_t size, bool update, uint32_t * changedCount)
+{
+  const uint8_t * bytes = data;
+  memcpy(decoder->pendingPackets, decoder->packetStates,
+      (size_t)decoder->blockCapacity * sizeof(*decoder->pendingPackets));
+  memset(decoder->dirtyBlocks, 0, decoder->blockCapacity);
+  *changedCount = 0;
+
+  for (uint32_t index = 0; index < decoder->blockCapacity; ++index)
+  {
+    const bool present = decoder->offsets[index] != UINT32_MAX;
+    if (update && !present)
+      continue;
+
+    const uint8_t * packet = NULL;
+    uint32_t        length = 0;
+    if (present)
+    {
+      const size_t   offset =
+        (size_t)decoder->offsets[index] * sizeof(uint32_t);
+      if (offset > size - 8U)
+        goto fail;
+      const uint32_t first  = networkVideoReadU32(bytes + offset);
+      length = ((first >> 16U) & UINT32_C(0x00000fff)) *
+        sizeof(uint32_t);
+      if (length < 8U || length > size - offset)
+        goto fail;
+      if (first & UINT32_C(0x0000ffff))
+        packet = bytes + offset;
+    }
+
+    if (networkVideoPacketMatches(
+          &decoder->packetStates[index], packet, length))
+    {
+      if (update)
+        decoder->offsets[index] = UINT32_MAX;
+      continue;
+    }
+
+    struct NetworkVideoPacketState pending = { 0 };
+    if (packet)
+    {
+      pending.data = malloc(length);
+      if (!pending.data)
+        goto fail;
+      memcpy(pending.data, packet, length);
+      networkVideoWriteU32(pending.data,
+          networkVideoReadU32(pending.data) & ~NETWORK_VIDEO_SEQUENCE_BITS);
+      pending.length = length;
+    }
+    decoder->pendingPackets[index] = pending;
+    decoder->dirtyBlocks[index]    = 1U;
+    ++*changedCount;
+  }
+  return true;
+
+fail:
+  networkVideoDiscardPendingPacketsNL(decoder);
+  return false;
+}
+
+static void networkVideoClearDirtyNL(NetworkVideoDecoder * decoder)
+{
+  for (unsigned component = 0;
+       component < NETWORK_VIDEO_COMPONENTS; ++component)
+  {
+    for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
+    {
+      struct NetworkVideoDirtyGrid * grid =
+        &decoder->dirty[component][level];
+      memset(grid->tiles, 0, (size_t)grid->width * grid->height);
+      grid->count = 0;
+    }
+  }
+  memset(decoder->outputDirty, 0,
+      (size_t)decoder->outputTileWidth * decoder->outputTileHeight);
+}
+
+static uint32_t networkVideoMirrorTexel(
+    int32_t coordinate, uint32_t length)
+{
+  const int32_t period  = (int32_t)(2U * length);
+  int32_t       wrapped = coordinate % period;
+  if (wrapped < 0)
+    wrapped += period;
+  return (uint32_t)wrapped < length ? (uint32_t)wrapped :
+    (uint32_t)(period - wrapped - 1);
+}
+
+static bool networkVideoIDWTGroupReads(uint32_t group, uint32_t length,
+    uint32_t begin, uint32_t end)
+{
+  const int32_t base  = (int32_t)(group * 16U) - 2;
+  const int32_t limit = (int32_t)length;
+  for (int32_t local = 0; local <= 18; local += 2)
+  {
+    const int32_t coordinate = base + local;
+    for (unsigned parity = 0; parity < 2U; ++parity)
+    {
+      int32_t first = coordinate;
+      if (parity && coordinate < 0)
+        --first;
+      else if (!parity && coordinate + 1 >= limit)
+        ++first;
+      for (int32_t sample = 0; sample < 2; ++sample)
+      {
+        const uint32_t texel = networkVideoMirrorTexel(
+            first + sample, length);
+        if (texel >= begin && texel < end)
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+static void networkVideoMarkGridRect(struct NetworkVideoDirtyGrid * grid,
+    uint32_t inputWidth, uint32_t inputHeight,
+    uint32_t x, uint32_t y, uint32_t width, uint32_t height)
+{
+  if (!width || !height)
+    return;
+
+  const uint32_t endX      = x + width;
+  const uint32_t endY      = y + height;
+  const uint32_t startX    = x < 18U ? 0U : (x - 18U) / 16U + 1U;
+  const uint32_t startY    = y < 18U ? 0U : (y - 18U) / 16U + 1U;
+  uint32_t       groupEndX = (endX + 17U) / 16U < grid->width ?
+    (endX + 17U) / 16U : grid->width;
+  uint32_t       groupEndY = (endY + 17U) / 16U < grid->height ?
+    (endY + 17U) / 16U : grid->height;
+  if (groupEndX < grid->width && networkVideoIDWTGroupReads(
+        grid->width - 1U, inputWidth, x, endX))
+    groupEndX = grid->width;
+  if (groupEndY < grid->height && networkVideoIDWTGroupReads(
+        grid->height - 1U, inputHeight, y, endY))
+    groupEndY = grid->height;
+
+  for (uint32_t groupY = startY; groupY < groupEndY; ++groupY)
+  {
+    for (uint32_t groupX = startX; groupX < groupEndX; ++groupX)
+    {
+      uint8_t * dirty = &grid->tiles[
+        (size_t)groupY * grid->width + groupX];
+      if (!*dirty)
+      {
+        *dirty = 1U;
+        ++grid->count;
+      }
+    }
+  }
+}
+
+static void networkVideoMarkOutputRect(NetworkVideoDecoder * decoder,
+    unsigned component, uint32_t x, uint32_t y,
+    uint32_t width, uint32_t height)
+{
+  uint32_t expansion = component ? 1U : 0U;
+  if (component &&
+      decoder->config.chromaSubsampling == LG_NET_VIDEO_CHROMA_420)
+  {
+    x         *= 2U;
+    y         *= 2U;
+    width     *= 2U;
+    height    *= 2U;
+    expansion  = 2U;
+  }
+
+  const uint32_t startX  = x > expansion ? x - expansion : 0U;
+  const uint32_t startY  = y > expansion ? y - expansion : 0U;
+  const uint64_t rawEndX = (uint64_t)x + width + expansion;
+  const uint64_t rawEndY = (uint64_t)y + height + expansion;
+  const uint32_t endX    = rawEndX < decoder->config.width ?
+    (uint32_t)rawEndX : decoder->config.width;
+  const uint32_t endY    = rawEndY < decoder->config.height ?
+    (uint32_t)rawEndY : decoder->config.height;
+  if (startX >= endX || startY >= endY)
+    return;
+
+  const uint32_t tileStartX = startX / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileStartY = startY / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileEndX   =
+    (endX + NETWORK_VIDEO_TILE_SIZE - 1U) / NETWORK_VIDEO_TILE_SIZE;
+  const uint32_t tileEndY   =
+    (endY + NETWORK_VIDEO_TILE_SIZE - 1U) / NETWORK_VIDEO_TILE_SIZE;
+  for (uint32_t tileY = tileStartY; tileY < tileEndY; ++tileY)
+    for (uint32_t tileX = tileStartX; tileX < tileEndX; ++tileX)
+      decoder->outputDirty[
+        (size_t)tileY * decoder->outputTileWidth + tileX] = 1U;
+}
+
+static void networkVideoPrepareDirtyNL(NetworkVideoDecoder * decoder)
+{
+  networkVideoClearDirtyNL(decoder);
+  for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
+  {
+    const uint32_t width  = decoder->alignedWidth >> (level + 1U);
+    const uint32_t height = decoder->alignedHeight >> (level + 1U);
+    for (unsigned component = 0;
+         component < NETWORK_VIDEO_COMPONENTS; ++component)
+    {
+      if (!level && component &&
+          decoder->config.chromaSubsampling == LG_NET_VIDEO_CHROMA_420)
+        continue;
+      const unsigned firstBand =
+        level == NETWORK_VIDEO_LEVELS - 1U ? 0U : 1U;
+      for (unsigned band = firstBand; band < NETWORK_VIDEO_BANDS; ++band)
+      {
+        const struct NetworkVideoBlockMeta * meta =
+          &decoder->blocks[component][level][band];
+        for (uint32_t local = 0; local < meta->count; ++local)
+        {
+          if (!decoder->dirtyBlocks[meta->offset + local])
+            continue;
+          const uint32_t x = local % meta->stride * 32U;
+          const uint32_t y = local / meta->stride * 32U;
+          networkVideoMarkGridRect(&decoder->dirty[component][level],
+              width, height, x, y,
+              x < width ? (width - x < 32U ? width - x : 32U) : 0U,
+              y < height ? (height - y < 32U ? height - y : 32U) : 0U);
+        }
+      }
+    }
+  }
+}
+
 static size_t networkVideoPayloadCapacity(size_t size)
 {
   size_t capacity = 64U * 1024U;
@@ -1114,12 +1504,12 @@ static struct NetworkVideoUpload * networkVideoUploadNL(
 }
 
 static void networkVideoDequantNL(NetworkVideoDecoder * decoder,
-    const struct NetworkVideoUpload * upload, bool preserveMissing)
+    const struct NetworkVideoUpload * upload, bool update)
 {
   glUseProgram(decoder->dequantProgram);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, upload->offsetBuffer);
   glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, upload->payloadBuffer);
-  glUniform1i(decoder->uniforms.dequant.preserveMissing, preserveMissing);
+  glUniform1i(decoder->uniforms.dequant.preserveMissing, update);
 
   for (unsigned level = 0; level < NETWORK_VIDEO_LEVELS; ++level)
   {
@@ -1145,7 +1535,34 @@ static void networkVideoDequantNL(NetworkVideoDecoder * decoder,
             component * NETWORK_VIDEO_BANDS + band);
         glUniform1i(decoder->uniforms.dequant.blockOffset, meta->offset);
         glUniform1i(decoder->uniforms.dequant.blockStride, meta->stride);
-        glDispatchCompute((width + 31U) / 32U, (height + 31U) / 32U, 1);
+        if (!update)
+        {
+          glUniform2i(decoder->uniforms.dequant.workGroupOffset, 0, 0);
+          glDispatchCompute(
+              (width + 31U) / 32U, (height + 31U) / 32U, 1);
+          continue;
+        }
+
+        const uint32_t rows = meta->count / meta->stride;
+        for (uint32_t y = 0; y < rows; ++y)
+        {
+          uint32_t x = 0;
+          while (x < meta->stride)
+          {
+            const size_t row = (size_t)meta->offset +
+              (size_t)y * meta->stride;
+            while (x < meta->stride && !decoder->dirtyBlocks[row + x])
+              ++x;
+            const uint32_t start = x;
+            while (x < meta->stride && decoder->dirtyBlocks[row + x])
+              ++x;
+            if (start == x)
+              continue;
+            glUniform2i(decoder->uniforms.dequant.workGroupOffset,
+                (GLint)start, (GLint)y);
+            glDispatchCompute(x - start, 1, 1);
+          }
+        }
       }
     }
   }
@@ -1153,7 +1570,37 @@ static void networkVideoDequantNL(NetworkVideoDecoder * decoder,
       GL_TEXTURE_FETCH_BARRIER_BIT);
 }
 
-static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
+static void networkVideoPropagateDirtyNL(NetworkVideoDecoder * decoder,
+    unsigned component, unsigned level, bool final)
+{
+  const struct NetworkVideoDirtyGrid * grid =
+    &decoder->dirty[component][level];
+  const uint32_t outputWidth  = decoder->alignedWidth >> level;
+  const uint32_t outputHeight = decoder->alignedHeight >> level;
+  for (uint32_t y = 0; y < grid->height; ++y)
+  {
+    for (uint32_t x = 0; x < grid->width; ++x)
+    {
+      if (!grid->tiles[(size_t)y * grid->width + x])
+        continue;
+      const uint32_t outputX = x * 32U;
+      const uint32_t outputY = y * 32U;
+      const uint32_t width   = outputX < outputWidth ?
+        (outputWidth - outputX < 32U ? outputWidth - outputX : 32U) : 0U;
+      const uint32_t height  = outputY < outputHeight ?
+        (outputHeight - outputY < 32U ? outputHeight - outputY : 32U) : 0U;
+      if (final)
+        networkVideoMarkOutputRect(
+            decoder, component, outputX, outputY, width, height);
+      else
+        networkVideoMarkGridRect(&decoder->dirty[component][level - 1U],
+            outputWidth, outputHeight,
+            outputX, outputY, width, height);
+    }
+  }
+}
+
+static void networkVideoIDWTNL(NetworkVideoDecoder * decoder, bool update)
 {
   glUseProgram(decoder->idwtProgram);
   glActiveTexture(GL_TEXTURE0);
@@ -1180,6 +1627,11 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
       glUniform1i(decoder->uniforms.idwt.dcShift,
           final ? GL_TRUE : GL_FALSE);
 
+      struct NetworkVideoDirtyGrid * grid =
+        &decoder->dirty[component][level];
+      if (update && !grid->count)
+        continue;
+
       if (final)
       {
         glBindImageTexture(1, decoder->planeTextures[component], 0,
@@ -1191,12 +1643,43 @@ static void networkVideoIDWTNL(NetworkVideoDecoder * decoder)
             GL_FALSE, component * NETWORK_VIDEO_BANDS,
             GL_WRITE_ONLY, GL_R32F);
       }
-      glDispatchCompute(
-          (inputHeight + 15U) / 16U, (inputWidth + 15U) / 16U, 1);
+      if (!update)
+      {
+        glUniform2i(decoder->uniforms.idwt.workGroupOffset, 0, 0);
+        glDispatchCompute(
+            (inputHeight + 15U) / 16U, (inputWidth + 15U) / 16U, 1);
+      }
+      else
+      {
+        for (uint32_t y = 0; y < grid->height; ++y)
+        {
+          uint32_t x = 0;
+          while (x < grid->width)
+          {
+            const size_t row = (size_t)y * grid->width;
+            while (x < grid->width && !grid->tiles[row + x])
+              ++x;
+            const uint32_t start = x;
+            while (x < grid->width && grid->tiles[row + x])
+              ++x;
+            if (start == x)
+              continue;
+            glUniform2i(decoder->uniforms.idwt.workGroupOffset,
+                (GLint)y, (GLint)start);
+            glDispatchCompute(1, x - start, 1);
+          }
+        }
+        networkVideoPropagateDirtyNL(
+            decoder, component, (unsigned)level, final);
+      }
       glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
           GL_TEXTURE_FETCH_BARRIER_BIT);
     }
   }
+
+  if (!update)
+    memset(decoder->outputDirty, 1,
+        (size_t)decoder->outputTileWidth * decoder->outputTileHeight);
 }
 
 static void networkVideoColorRange(
@@ -1233,11 +1716,118 @@ static void networkVideoColorRange(
   }
 }
 
-static struct NetworkVideoExternalFrame * networkVideoConvertNL(
-    NetworkVideoDecoder * decoder, bool chromaLeft)
+static bool networkVideoTextureTileDirty(
+    const NetworkVideoDecoder * decoder, size_t index,
+    uint64_t textureGeneration)
 {
-  GLuint texture = networkVideoTexturePoolAcquire(decoder->texturePool);
-  if (!texture)
+  return decoder->outputDirty[index] ||
+    decoder->outputTileGenerations[index] > textureGeneration;
+}
+
+static void networkVideoBuildDamageNL(NetworkVideoDecoder * decoder,
+    NetworkVideoDecodedFrame * result)
+{
+  uint32_t count    = 0;
+  bool     overflow = false;
+  for (uint32_t tileY = 0;
+       tileY < decoder->outputTileHeight && !overflow; ++tileY)
+  {
+    uint32_t tileX = 0;
+    while (tileX < decoder->outputTileWidth)
+    {
+      const size_t row = (size_t)tileY * decoder->outputTileWidth;
+      while (tileX < decoder->outputTileWidth &&
+          !decoder->outputDirty[row + tileX])
+        ++tileX;
+      const uint32_t start = tileX;
+      while (tileX < decoder->outputTileWidth &&
+          decoder->outputDirty[row + tileX])
+        ++tileX;
+      if (start == tileX)
+        continue;
+
+      const uint32_t x      = start * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t y      = tileY * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t endX   = tileX * NETWORK_VIDEO_TILE_SIZE <
+        decoder->config.width ?
+          tileX * NETWORK_VIDEO_TILE_SIZE : decoder->config.width;
+      const uint32_t endY   = y + NETWORK_VIDEO_TILE_SIZE <
+        decoder->config.height ?
+          y + NETWORK_VIDEO_TILE_SIZE : decoder->config.height;
+      bool           merged = false;
+      for (uint32_t index = 0; index < count; ++index)
+      {
+        KVMFRFrameDamageRect * rect = &result->damageRects[index];
+        if (rect->x == x && rect->width == endX - x &&
+            rect->y + rect->height == y)
+        {
+          rect->height += endY - y;
+          merged        = true;
+          break;
+        }
+      }
+      if (merged)
+        continue;
+      if (count + 1U >= LG_TRANSPORT_MAX_DAMAGE_RECTS)
+      {
+        overflow = true;
+        break;
+      }
+      result->damageRects[count++] = (KVMFRFrameDamageRect)
+      {
+        .x      = x,
+        .y      = y,
+        .width  = endX - x,
+        .height = endY - y,
+      };
+    }
+  }
+
+  if (!overflow)
+  {
+    result->damageRectsCount = count;
+    return;
+  }
+
+  uint32_t minX = decoder->config.width;
+  uint32_t minY = decoder->config.height;
+  uint32_t maxX = 0;
+  uint32_t maxY = 0;
+  for (uint32_t tileY = 0; tileY < decoder->outputTileHeight; ++tileY)
+  {
+    for (uint32_t tileX = 0; tileX < decoder->outputTileWidth; ++tileX)
+    {
+      if (!decoder->outputDirty[
+            (size_t)tileY * decoder->outputTileWidth + tileX])
+        continue;
+      const uint32_t x = tileX * NETWORK_VIDEO_TILE_SIZE;
+      const uint32_t y = tileY * NETWORK_VIDEO_TILE_SIZE;
+      minX = x < minX ? x : minX;
+      minY = y < minY ? y : minY;
+      maxX = x + NETWORK_VIDEO_TILE_SIZE > maxX ?
+        x + NETWORK_VIDEO_TILE_SIZE : maxX;
+      maxY = y + NETWORK_VIDEO_TILE_SIZE > maxY ?
+        y + NETWORK_VIDEO_TILE_SIZE : maxY;
+    }
+  }
+  maxX = maxX < decoder->config.width ? maxX : decoder->config.width;
+  maxY = maxY < decoder->config.height ? maxY : decoder->config.height;
+  result->damageRects[0] = (KVMFRFrameDamageRect)
+  {
+    .x      = minX,
+    .y      = minY,
+    .width  = maxX - minX,
+    .height = maxY - minY,
+  };
+  result->damageRectsCount = 1;
+}
+
+static struct NetworkVideoExternalFrame * networkVideoConvertNL(
+    NetworkVideoDecoder * decoder, bool chromaLeft, uint64_t generation)
+{
+  struct NetworkVideoTexture pooled =
+    networkVideoTexturePoolAcquire(decoder->texturePool);
+  if (!pooled.texture)
     return NULL;
 
   glUseProgram(decoder->yuvProgram);
@@ -1262,10 +1852,43 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
   glUniform1f(decoder->uniforms.yuv.lumaScale, lumaScale);
   glUniform1f(decoder->uniforms.yuv.chromaMidpoint, chromaMidpoint);
   glUniform1f(decoder->uniforms.yuv.chromaScale, chromaScale);
-  glBindImageTexture(0, texture, 0, GL_FALSE, 0,
+  glBindImageTexture(0, pooled.texture, 0, GL_FALSE, 0,
       GL_WRITE_ONLY, GL_RGBA16F);
-  glDispatchCompute((decoder->config.width + 7U) / 8U,
-      (decoder->config.height + 7U) / 8U, 1);
+  if (!pooled.generation)
+  {
+    glUniform2i(decoder->uniforms.yuv.outputOffset, 0, 0);
+    glDispatchCompute((decoder->config.width + 7U) / 8U,
+        (decoder->config.height + 7U) / 8U, 1);
+  }
+  else
+  {
+    for (uint32_t tileY = 0; tileY < decoder->outputTileHeight; ++tileY)
+    {
+      uint32_t tileX = 0;
+      while (tileX < decoder->outputTileWidth)
+      {
+        const size_t row = (size_t)tileY * decoder->outputTileWidth;
+        while (tileX < decoder->outputTileWidth &&
+            !networkVideoTextureTileDirty(
+              decoder, row + tileX, pooled.generation))
+          ++tileX;
+        const uint32_t start = tileX;
+        while (tileX < decoder->outputTileWidth &&
+            networkVideoTextureTileDirty(
+              decoder, row + tileX, pooled.generation))
+          ++tileX;
+        if (start == tileX)
+          continue;
+        const uint32_t pixelWidth =
+          (tileX - start) * NETWORK_VIDEO_TILE_SIZE;
+        glUniform2i(decoder->uniforms.yuv.outputOffset,
+            (GLint)(start * NETWORK_VIDEO_TILE_SIZE),
+            (GLint)(tileY * NETWORK_VIDEO_TILE_SIZE));
+        glDispatchCompute((pixelWidth + 7U) / 8U,
+            NETWORK_VIDEO_TILE_SIZE / 8U, 1);
+      }
+    }
+  }
   glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
       GL_TEXTURE_FETCH_BARRIER_BIT);
 
@@ -1274,7 +1897,7 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
   if (!readySync || glGetError() != GL_NO_ERROR)
   {
     networkVideoTexturePoolRecycleCurrent(
-        decoder->texturePool, texture, readySync);
+        decoder->texturePool, pooled.texture, readySync, 0);
     return NULL;
   }
 
@@ -1282,13 +1905,14 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
   if (!frame)
   {
     networkVideoTexturePoolRecycleCurrent(
-        decoder->texturePool, texture, readySync);
+        decoder->texturePool, pooled.texture, readySync, 0);
     return NULL;
   }
-  frame->base.ops     = &NETWORK_VIDEO_EXTERNAL_OPS;
-  frame->pool         = decoder->texturePool;
-  frame->texture      = texture;
-  frame->readySync    = readySync;
+  frame->base.ops      = &NETWORK_VIDEO_EXTERNAL_OPS;
+  frame->pool          = decoder->texturePool;
+  frame->texture       = pooled.texture;
+  frame->readySync     = readySync;
+  frame->generation    = generation;
   networkVideoTexturePoolRetain(frame->pool);
   atomic_init(&frame->references, 1U);
   return frame;
@@ -1314,7 +1938,8 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
 
   if ((!update && baseFrameID) || (update && !complete) ||
       (update && (!decoder->referenceValid ||
-        decoder->referenceFrameID != baseFrameID || frameID <= baseFrameID)))
+        !baseFrameID || baseFrameID > decoder->referenceFrameID ||
+        frameID <= decoder->referenceFrameID)))
   {
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_CORRUPT;
@@ -1331,9 +1956,30 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
       NETWORK_VIDEO_DECODE_UNSUPPORTED : NETWORK_VIDEO_DECODE_CORRUPT;
   }
 
+  uint32_t changedCount = 0;
+  if (!networkVideoStagePacketsNL(
+        decoder, data, size, update, &changedCount))
+  {
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_ERROR;
+  }
+  if (update && !changedCount)
+  {
+    networkVideoCommitPendingPacketsNL(decoder);
+    decoder->referenceFrameID = frameID;
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_NO_FRAME;
+  }
+
+  if (update)
+    networkVideoPrepareDirtyNL(decoder);
+  else
+    networkVideoClearDirtyNL(decoder);
+
   struct NetworkVideoCurrent previous;
   if (!networkVideoMakeCurrent(decoder, &previous))
   {
+    networkVideoDiscardPendingPacketsNL(decoder);
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_ERROR;
   }
@@ -1345,22 +1991,27 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
       decoder, data, size);
   if (!upload)
   {
+    networkVideoDiscardPendingPacketsNL(decoder);
     networkVideoRestoreCurrent(decoder, &previous);
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_ERROR;
   }
 
   const uint64_t decodeStart = nanotime();
+  uint64_t       generation  = decoder->outputGeneration + 1U;
+  if (!generation)
+    generation = 1U;
   networkVideoDequantNL(decoder, upload, update);
   upload->readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  networkVideoIDWTNL(decoder);
+  networkVideoIDWTNL(decoder, update);
   struct NetworkVideoExternalFrame * external =
-    networkVideoConvertNL(decoder, layout.chromaLeft);
+    networkVideoConvertNL(decoder, layout.chromaLeft, generation);
   const uint64_t decodeTime = nanotime() - decodeStart;
   const bool     success    = external && glGetError() == GL_NO_ERROR;
   networkVideoRestoreCurrent(decoder, &previous);
   if (!success)
   {
+    networkVideoDiscardPendingPacketsNL(decoder);
     decoder->referenceFrameID = 0;
     decoder->referenceValid   = false;
     if (external)
@@ -1369,11 +2020,15 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     return NETWORK_VIDEO_DECODE_ERROR;
   }
 
-  if (!update)
-  {
-    decoder->referenceFrameID = complete ? frameID : 0;
-    decoder->referenceValid   = complete;
-  }
+  networkVideoCommitPendingPacketsNL(decoder);
+  const size_t outputTileCount =
+    (size_t)decoder->outputTileWidth * decoder->outputTileHeight;
+  for (size_t index = 0; index < outputTileCount; ++index)
+    if (decoder->outputDirty[index])
+      decoder->outputTileGenerations[index] = generation;
+  decoder->outputGeneration = generation;
+  decoder->referenceFrameID = complete ? frameID : 0;
+  decoder->referenceValid   = complete;
 
   uint32_t formatVersion = (uint32_t)config->configEpoch;
   if (!formatVersion)
@@ -1381,6 +2036,8 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
 
   result->externalFrame = &external->base;
   result->decodeTimeNs  = decodeTime;
+  if (update)
+    networkVideoBuildDamageNL(decoder, result);
   result->format        = (LG_TransportFrameFormat)
   {
     .version       = formatVersion,

@@ -207,6 +207,55 @@ namespace
     return Frame::Same(left, right);
   }
 
+  void MergeFrameDamage(FrameDesc& current, const FrameDesc& skipped)
+  {
+    if (skipped.damage == FrameDamage::NONE ||
+        current.damage == FrameDamage::FULL)
+      return;
+    if (skipped.damage == FrameDamage::FULL)
+    {
+      current.damage = FrameDamage::FULL;
+      current.count  = 0;
+      return;
+    }
+    if (current.damage == FrameDamage::NONE)
+    {
+      current.damage = skipped.damage;
+      current.count  = skipped.count;
+      for (unsigned index = 0; index < skipped.count; ++index)
+        current.rects[index] = skipped.rects[index];
+      return;
+    }
+
+    if (current.count <= FRAME_DAMAGE_MAX - skipped.count)
+    {
+      for (unsigned index = 0; index < skipped.count; ++index)
+        current.rects[current.count + index] = skipped.rects[index];
+      current.count += skipped.count;
+      return;
+    }
+
+    RECT bounds = current.rects[0];
+    for (unsigned index = 1; index < current.count; ++index)
+    {
+      const RECT& rect = current.rects[index];
+      bounds.left      = (std::min)(bounds.left, rect.left);
+      bounds.top       = (std::min)(bounds.top, rect.top);
+      bounds.right     = (std::max)(bounds.right, rect.right);
+      bounds.bottom    = (std::max)(bounds.bottom, rect.bottom);
+    }
+    for (unsigned index = 0; index < skipped.count; ++index)
+    {
+      const RECT& rect = skipped.rects[index];
+      bounds.left      = (std::min)(bounds.left, rect.left);
+      bounds.top       = (std::min)(bounds.top, rect.top);
+      bounds.right     = (std::max)(bounds.right, rect.right);
+      bounds.bottom    = (std::max)(bounds.bottom, rect.bottom);
+    }
+    current.rects[0] = bounds;
+    current.count    = 1;
+  }
+
   bool SupportedProfile(const FrameProfile& profile)
   {
     for (const FrameProfile& supported : VIDEO_PROFILES)
@@ -403,6 +452,8 @@ cbuffer Parameters : register(b0)
   uint4  Op0;
   uint4  Op1;
   uint4  AuxBase;
+  uint4  Work;
+  uint4  State;
   float4 Values;
 };
 
@@ -447,16 +498,17 @@ float chromaValue(float value)
 [numthreads(8, 8, 1)]
 void ColorMain(uint3 tid : SV_DispatchThreadID)
 {
-  const bool subsampled = Op0.w != 0u;
-  const bool bt2020     = Op1.x != 0u;
+  const uint2 pixel      = tid.xy + Work.xy * 8u;
+  const bool  subsampled = Op0.w != 0u;
+  const bool  bt2020     = Op1.x != 0u;
   if (subsampled)
   {
     const uint chromaWidth  = Dim0.z >> 1u;
     const uint chromaHeight = Dim0.w >> 1u;
-    if (tid.x >= chromaWidth || tid.y >= chromaHeight)
+    if (pixel.x >= chromaWidth || pixel.y >= chromaHeight)
       return;
     const uint2  chromaLimit = Dim0.xy >> 1u;
-    const uint2  chromaCoord = min(tid.xy, chromaLimit - 1u);
+    const uint2  chromaCoord = min(pixel, chromaLimit - 1u);
     const int2   chromaSrc   = int2(chromaCoord * 2u);
     const float3 a           = loadSourceYCbCr(chromaSrc, bt2020);
     const float3 b           = loadSourceYCbCr(
@@ -469,21 +521,21 @@ void ColorMain(uint3 tid : SV_DispatchThreadID)
     float3       yb          = b;
     float3       yc          = c;
     float3       yd          = d;
-    const int2   lumaSrc     = int2(tid.xy * 2u);
-    if (any(tid.xy != chromaCoord))
+    const int2   lumaSrc     = int2(pixel * 2u);
+    if (any(pixel != chromaCoord))
     {
       ya = loadSourceYCbCr(lumaSrc, bt2020);
       yb = loadSourceYCbCr(lumaSrc + int2(1, 0), bt2020);
       yc = loadSourceYCbCr(lumaSrc + int2(0, 1), bt2020);
       yd = loadSourceYCbCr(lumaSrc + int2(1, 1), bt2020);
     }
-    const uint   y0  = (tid.y * 2u) * Dim0.z + tid.x * 2u;
+    const uint   y0  = (pixel.y * 2u) * Dim0.z + pixel.x * 2u;
     const uint   y1  = y0 + Dim0.z;
     Planes[Op0.x + y0]      = lumaValue(ya.x);
     Planes[Op0.x + y0 + 1u] = lumaValue(yb.x);
     Planes[Op0.x + y1]      = lumaValue(yc.x);
     Planes[Op0.x + y1 + 1u] = lumaValue(yd.x);
-    const uint chroma = tid.y * chromaWidth + tid.x;
+    const uint chroma = pixel.y * chromaWidth + pixel.x;
     Planes[Op0.y + chroma] = chromaValue(
       (a.y + b.y + c.y + d.y) * 0.25);
     Planes[Op0.z + chroma] = chromaValue(
@@ -491,10 +543,10 @@ void ColorMain(uint3 tid : SV_DispatchThreadID)
     return;
   }
 
-  if (tid.x >= Dim0.z || tid.y >= Dim0.w)
+  if (pixel.x >= Dim0.z || pixel.y >= Dim0.w)
     return;
-  const float3 yuv   = loadSourceYCbCr(int2(tid.xy), bt2020);
-  const uint   index = tid.y * Dim0.z + tid.x;
+  const float3 yuv   = loadSourceYCbCr(int2(pixel), bt2020);
+  const uint   index = pixel.y * Dim0.z + pixel.x;
   Planes[Op0.x + index] = lumaValue(yuv.x);
   Planes[Op0.y + index] = chromaValue(yuv.y);
   Planes[Op0.z + index] = chromaValue(yuv.z);
@@ -513,12 +565,12 @@ uint2 unswizzle8x8(uint index)
 
 float loadPlaneValue(int2 coord)
 {
-  const uint x     = mirrorCoord(coord.x, Op0.x);
-  const uint y     = mirrorCoord(coord.y, Op0.y);
-  const uint index = Op1.w + y * Dim0.z + x;
+  const uint x = mirrorCoord(coord.x, Op0.x);
+  const uint y = mirrorCoord(coord.y, Op0.y);
   if (Op1.x == 0u)
-    return Planes[index];
-  return Op1.y != 0u ? Scratch[index] : Wave[index];
+    return Planes[Op1.w + y * Dim0.z + x];
+  const uint index = Op1.y + y * Dim0.z + x;
+  return (Op1.x & 1u) != 0u ? Wave[index] : Scratch[index];
 }
 
 void storeDWTValue(uint x, uint y, float value, bool low)
@@ -526,13 +578,17 @@ void storeDWTValue(uint x, uint y, float value, bool low)
   if (x >= Op0.x || y >= Op0.y)
     return;
   const uint index = Op1.w + y * Dim0.z + x;
-  Atlas[index] = value;
+  // Intermediate low-pass values feed the next level while their atlas
+  // region retains the deeper-level coefficients from the prior frame.
+  if (!low || Work.z != 0u)
+    Atlas[index] = value;
   if (!low)
     return;
-  if (Op1.z != 0u)
-    Scratch[index] = value;
+  const uint lowIndex = Op1.z + y * Dim0.z + x;
+  if ((Op1.x & 1u) != 0u)
+    Scratch[lowIndex] = value;
   else
-    Wave[index] = value;
+    Wave[lowIndex] = value;
 }
 
 float2 loadDWTShared(uint y, uint x)
@@ -642,25 +698,26 @@ void forwardTransform4x2(uint lane, bool active, uint yOffset)
 [numthreads(64, 1, 1)]
 void DWTMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 {
-  const uint2 local = 2u * unswizzle8x8(lane);
-  loadDWTQuad(groupID.xy, local);
-  loadDWTQuad(groupID.xy, local + uint2(16u, 0u));
-  loadDWTQuad(groupID.xy, local + uint2(0u, 16u));
-  loadDWTQuad(groupID.xy, local + uint2(16u, 16u));
+  const uint2 workGroup = groupID.xy + Work.xy;
+  const uint2 local     = 2u * unswizzle8x8(lane);
+  loadDWTQuad(workGroup, local);
+  loadDWTQuad(workGroup, local + uint2(16u, 0u));
+  loadDWTQuad(workGroup, local + uint2(0u, 16u));
+  loadDWTQuad(workGroup, local + uint2(16u, 16u));
 
   const uint2 right = uint2(32u + 2u * (lane & 3u),
     2u * (lane >> 2u));
-  loadDWTQuad(groupID.xy, right);
+  loadDWTQuad(workGroup, right);
 
   const uint2 bottom = uint2(2u * (lane & 15u),
     32u + 2u * (lane >> 4u));
-  loadDWTQuad(groupID.xy, bottom);
+  loadDWTQuad(workGroup, bottom);
 
   if (lane < 16u)
   {
     const uint2 corner = uint2(32u + 2u * (lane & 3u),
       32u + 2u * (lane >> 2u));
-    loadDWTQuad(groupID.xy, corner);
+    loadDWTQuad(workGroup, corner);
   }
   GroupMemoryBarrierWithGroupSync();
 
@@ -680,8 +737,8 @@ void DWTMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
     {
       const float2 v0   = loadDWTShared(y, x);
       const float2 v1   = loadDWTShared(y, x + 1u);
-      const uint   outX = groupID.x * 16u + (x >> 1u);
-      const uint   outY = groupID.y * 16u + y;
+      const uint   outX = workGroup.x * 16u + (x >> 1u);
+      const uint   outY = workGroup.y * 16u + y;
       if (outX < bandWidth && outY < bandHeight)
       {
         storeDWTValue(outX, outY, v0.x, true);
@@ -735,9 +792,9 @@ void ClearMain(uint3 tid : SV_DispatchThreadID)
   if (tid.x == 0u)
     QuantPayload[0] = 1u;
   if (tid.x < Dim0.x)
-    Aux[AuxBase.w + RDOStateWords + tid.x] = 0u;
-  if (tid.x < Dim0.y)
     Aux[AuxBase.w + tid.x] = 0u;
+  if (Work.x != 0u && tid.x < Dim0.y)
+    QuantPayload[State.x + tid.x] = 0u;
 }
 )hlsl"
 R"hlsl(
@@ -755,15 +812,16 @@ groupshared uint  QuantPayloadValid[16];
 [numthreads(128, 1, 1)]
 void QuantMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 {
-  const uint block    = lane >> 3u;
-  const uint subblock = lane & 7u;
-  const uint blockX   = groupID.x * 4u + (block & 3u);
-  const uint blockY   = groupID.y * 4u + (block >> 2u);
-  const bool valid    = blockX < Op0.z && blockY < Op0.w;
-  const uint baseX    = blockX * 8u + (subblock >> 2u) * 4u;
-  const uint baseY    = blockY * 8u + (subblock & 3u) * 2u;
-  float      values  [8];
-  float      localMax = 0.0;
+  const uint2 workGroup = groupID.xy + Work.xy;
+  const uint  block     = lane >> 3u;
+  const uint  subblock  = lane & 7u;
+  const uint  blockX    = workGroup.x * 4u + (block & 3u);
+  const uint  blockY    = workGroup.y * 4u + (block >> 2u);
+  const bool  valid     = blockX < Op0.z && blockY < Op0.w;
+  const uint  baseX     = blockX * 8u + (subblock >> 2u) * 4u;
+  const uint  baseY     = blockY * 8u + (subblock & 3u) * 2u;
+  float       values   [8];
+  float       localMax  = 0.0;
   for (uint x = 0u; x < 4u; ++x)
   {
     const uint xCoord = baseX + x;
@@ -972,12 +1030,13 @@ groupshared float AnalyzeDistortion     [QuantLevels];
 [numthreads(64, 1, 1)]
 void AnalyzeMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 {
-  const uint blockSlot   = lane & 15u;
-  const uint quantGroup  = lane >> 4u;
-  const uint blockX      = groupID.x * 4u + (blockSlot & 3u);
-  const uint blockY      = groupID.y * 4u + (blockSlot >> 2u);
-  const bool valid       = blockX < Op0.z && blockY < Op0.w;
-  const uint blockIndex8 = Op1.z + blockY * Op0.z + blockX;
+  const uint2 workGroup   = groupID.xy + Work.xy;
+  const uint  blockSlot   = lane & 15u;
+  const uint  quantGroup  = lane >> 4u;
+  const uint  blockX      = workGroup.x * 4u + (blockSlot & 3u);
+  const uint  blockY      = workGroup.y * 4u + (blockSlot >> 2u);
+  const bool  valid       = blockX < Op0.z && blockY < Op0.w;
+  const uint  blockIndex8 = Op1.z + blockY * Op0.z + blockX;
 
   for (uint round = 0u; round < (QuantLevels + 3u) / 4u; ++round)
   {
@@ -1017,12 +1076,14 @@ void AnalyzeMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 
   if (lane == 0u)
   {
-    const uint blockIndex  = Op1.y + groupID.y * Op1.x + groupID.x;
+    const uint blockIndex  = Op1.y + workGroup.y * Op1.x + workGroup.x;
     const uint perDivision = max(uint(Values.w), 1u);
     const uint division    = min(
       blockIndex / perDivision, RDODivisions - 1u);
     uint       ignored;
     InterlockedAdd(Aux[AuxBase.w], AnalyzeCost[0], ignored);
+    InterlockedAdd(Aux[AuxBase.w + 2u],
+      QuantPayload[State.x + blockIndex + 1u], ignored);
 
     uint previous = 0u;
     for (uint quant = 1u; quant < QuantLevels; ++quant)
@@ -1077,18 +1138,23 @@ void FinalizeRDOMain(uint lane : SV_GroupIndex)
 [numthreads(64, 1, 1)]
 void ResolveMain(uint3 tid : SV_DispatchThreadID)
 {
-  const uint blockIndex = tid.x;
-  if (blockIndex >= Dim0.y)
+  if (tid.x >= Work.y)
     return;
+  const uint blockIndex = Work.x + tid.x;
 
-  const uint consumed = Aux[AuxBase.w];
-  if (consumed <= Dim0.x)
+  const uint canonicalTotal = QuantPayload[State.x];
+  const uint oldDirty       = Aux[AuxBase.w + 2u];
+  const uint fixed          = canonicalTotal >= oldDirty ?
+    canonicalTotal - oldDirty : 0u;
+  const uint consumed       = fixed + Aux[AuxBase.w];
+  const uint target         = min(Work.z, fixed + Work.w);
+  if (consumed <= target)
   {
     Aux[AuxBase.w + RDOStateWords + blockIndex] = 0u;
     return;
   }
 
-  const uint required    = consumed - Dim0.x;
+  const uint required    = consumed - target;
   const uint subdivision = min(
     blockIndex / max(Dim0.z, 1u), RDODivisions - 1u);
   uint       selected    = 0u;
@@ -1206,12 +1272,14 @@ uint quantPayloadSubblockOffset(
 [numthreads(64, 1, 1)]
 void PackMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 {
+  const uint2 workGroup   = groupID.xy + Work.xy;
   const uint  record      = lane >> 4u;
   const uint  block       = lane & 15u;
-  const uint  packetX     = groupID.x * 2u + (record & 1u);
-  const uint  packetY     = groupID.y * 2u + (record >> 1u);
+  const uint  packetX     = workGroup.x * 2u + (record & 1u);
+  const uint  packetY     = workGroup.y * 2u + (record >> 1u);
   const uint  blocksY     = (Dim0.w + 31u) / 32u;
-  const bool  packetLive  = packetX < Op1.x && packetY < blocksY;
+  const bool  packetLive  = (Work.z & (1u << record)) != 0u &&
+    packetX < Op1.x && packetY < blocksY;
   const uint  blockIndex  = Op1.y + packetY * Op1.x + packetX;
   const uint  quant       = packetLive ? min(
     Aux[AuxBase.w + RDOStateWords + blockIndex], QuantLevels - 1u) : 0u;
@@ -1313,6 +1381,19 @@ void PackMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
   }
   GroupMemoryBarrierWithGroupSync();
 
+  if (block == 0u && packetLive &&
+      (PackBallot[record] == 0u || PackValid[record] != 0u))
+  {
+    const uint packetWords = PackBallot[record] != 0u ?
+      PackSize[record] / 4u : 0u;
+    uint       oldWords;
+    uint       ignored;
+    InterlockedExchange(
+      QuantPayload[State.x + blockIndex + 1u], packetWords, oldWords);
+    InterlockedAdd(QuantPayload[State.x], packetWords - oldWords, ignored);
+  }
+  GroupMemoryBarrierWithGroupSync();
+
   const uint ballot = PackBallot[record];
   const bool active = PackValid[record] != 0u &&
     (ballot & (1u << block)) != 0u;
@@ -1386,17 +1467,22 @@ void PackMain(uint3 groupID : SV_GroupID, uint lane : SV_GroupIndex)
 void FinalizeMain()
 {
   uint packetCount = PackState.Load(4u);
-  if (packetCount == 0u)
+  if (packetCount == 0u && QuantPayload[State.x] == 0u)
   {
-    const uint packetWord0 = 1u | (3u << 16u) | (Op0.x << 28u);
-    Packed.Store(8u, packetWord0);
-    Packed.Store(12u, Op0.w);
-    Packed.Store(16u, 6u << 20u);
-    Aux[AuxBase.z]      = 8u;
-    Aux[AuxBase.z + 1u] = 12u;
-    PackState.Store(0u, 12u);
-    PackState.Store(4u, 1u);
-    packetCount = 1u;
+    QuantPayload[State.x]      = 3u;
+    QuantPayload[State.x + 1u] = 3u;
+    if (Work.x != 0u)
+    {
+      const uint packetWord0 = 1u | (3u << 16u) | (Op0.x << 28u);
+      Packed.Store(8u, packetWord0);
+      Packed.Store(12u, Op0.w);
+      Packed.Store(16u, 6u << 20u);
+      Aux[AuxBase.z]      = 8u;
+      Aux[AuxBase.z + 1u] = 12u;
+      PackState.Store(0u, 12u);
+      PackState.Store(4u, 1u);
+      packetCount = 1u;
+    }
   }
   const uint hdr         = Op0.z != 0u ? 1u : 0u;
   const uint word0       = (Dim0.x - 1u) |
@@ -1424,6 +1510,8 @@ void FinalizeMain()
     uint64_t                                    captureTimeNs = 0;
     uint32_t                                    deadlineMs    = 0;
     uint32_t                                    blockCapacity = 0;
+    uint32_t                                    hardLimit     = 0;
+    std::vector<uint8_t>                        damagedBlocks;
     std::vector<uint8_t>                        data;
     std::vector<EncodedBlock>                   blocks;
     std::shared_ptr<const std::vector<uint8_t>> wholePayload;
@@ -1469,10 +1557,12 @@ void FinalizeMain()
     uint32_t op0    [4] = {};
     uint32_t op1    [4] = {};
     uint32_t auxBase[4] = {};
+    uint32_t work   [4] = {};
+    uint32_t state  [4] = {};
     float    values [4] = {};
   };
 
-  static_assert(sizeof(ShaderParameters) == 20U * sizeof(uint32_t),
+  static_assert(sizeof(ShaderParameters) == 28U * sizeof(uint32_t),
     "Unexpected shader parameter layout");
   constexpr UINT SHADER_PARAMETER_DWORDS = static_cast<UINT>(
     sizeof(ShaderParameters) / sizeof(uint32_t));
@@ -1496,34 +1586,82 @@ void FinalizeMain()
 
     struct Plane
     {
+      uint32_t width                          = 0;
+      uint32_t height                         = 0;
+      uint32_t levels                         = 0;
+      uint32_t offset                         = 0;
+      uint32_t lowpassOffset[PYROWAVE_LEVELS] = {};
+    };
+
+    struct PlaneRect
+    {
+      uint32_t left   = 0;
+      uint32_t top    = 0;
+      uint32_t right  = 0;
+      uint32_t bottom = 0;
+    };
+
+    struct GroupRange
+    {
+      uint32_t begin = 0;
+      uint32_t end   = 0;
+    };
+
+    struct RowRun
+    {
+      uint32_t x      = 0;
+      uint32_t y      = 0;
       uint32_t width  = 0;
       uint32_t height = 0;
-      uint32_t levels = 0;
-      uint32_t offset = 0;
+    };
+
+    struct PackRun
+    {
+      uint32_t x          = 0;
+      uint32_t y          = 0;
+      uint32_t width      = 0;
+      uint32_t height     = 0;
+      uint32_t activeMask = 0;
+    };
+
+    struct BandWork
+    {
+      uint32_t             blockBase  = 0;
+      uint32_t             block8Base = 0;
+      uint32_t             blocksX    = 0;
+      uint32_t             blocksY    = 0;
+      std::vector<RowRun>  blockRuns;
+      std::vector<PackRun> packRuns;
+    };
+
+    struct FrameWork
+    {
+      std::vector<uint8_t> damagedBlocks;
+      std::vector<RowRun>  colorRuns;
+      std::vector<RowRun>  dwtRuns[3][PYROWAVE_LEVELS];
+      std::vector<BandWork> bands;
+      bool                  full = false;
     };
 
     struct Slot
     {
       ComPtr<ID3D12DescriptorHeap> descriptors;
       ComPtr<ID3D12DescriptorHeap> clearDescriptors;
-      ComPtr<ID3D12Resource>       wave;
-      ComPtr<ID3D12Resource>       scratch;
-      ComPtr<ID3D12Resource>       atlas;
-      ComPtr<ID3D12Resource>       planes;
       ComPtr<ID3D12Resource>       packed;
       ComPtr<ID3D12Resource>       packState;
       ComPtr<ID3D12Resource>       aux;
-      ComPtr<ID3D12Resource>       quantPayload;
       ComPtr<ID3D12Resource>       readback;
       D12Sync                      computeSync;
       D12Sync                      sync;
       TexLease                     lease;
       FrameIn                      frame;
+      FrameWork                    work;
       const uint8_t              * mapped      = nullptr;
       uint64_t                     captureTime = 0;
       uint64_t                     order       = 0;
       uint32_t                     sequence    = 0;
       uint32_t                     frameLimit  = 0;
+      uint32_t                     hardLimit   = 0;
       bool                         inFlight    = false;
       bool                         used        = false;
     };
@@ -1533,6 +1671,11 @@ void FinalizeMain()
     CD3D12CommandQueue          m_copyQueue;
     ComPtr<ID3D12RootSignature> m_rootSignature;
     ComPtr<ID3D12PipelineState> m_pipelines[PIPELINE_COUNT];
+    ComPtr<ID3D12Resource>      m_wave;
+    ComPtr<ID3D12Resource>      m_scratch;
+    ComPtr<ID3D12Resource>      m_atlas;
+    ComPtr<ID3D12Resource>      m_planeData;
+    ComPtr<ID3D12Resource>      m_quantPayload;
     Slot                        m_slots    [ENCODER_SLOT_COUNT];
     FrameCfg                    m_cfg;
     Plane                       m_planes   [3]    = {};
@@ -1548,6 +1691,8 @@ void FinalizeMain()
     uint32_t                    m_auxWords        = 0;
     uint32_t                    m_payloadWords    = 0;
     uint32_t                    m_sequence        = 0;
+    uint32_t                    m_hardLimit       = 0;
+    bool                        m_persistentValid = false;
     bool                        m_ready           = false;
     HANDLE                      m_wakeEvent       = nullptr;
 
@@ -1761,25 +1906,25 @@ void FinalizeMain()
     {
       ID3D12Resource * resources[] =
       {
-        slot.wave.Get(),
-        slot.scratch.Get(),
-        slot.atlas.Get(),
-        slot.planes.Get(),
+        m_wave.Get(),
+        m_scratch.Get(),
+        m_atlas.Get(),
+        m_planeData.Get(),
         slot.packed.Get(),
         slot.packState.Get(),
         slot.aux.Get(),
-        slot.quantPayload.Get(),
+        m_quantPayload.Get(),
       };
       const uint64_t elements[] =
       {
-        slot.wave->GetDesc().Width / sizeof(float),
-        slot.scratch->GetDesc().Width / sizeof(float),
-        slot.atlas->GetDesc().Width / sizeof(float),
-        slot.planes->GetDesc().Width / sizeof(float),
+        m_wave->GetDesc().Width / sizeof(float),
+        m_scratch->GetDesc().Width / sizeof(float),
+        m_atlas->GetDesc().Width / sizeof(float),
+        m_planeData->GetDesc().Width / sizeof(float),
         slot.packed->GetDesc().Width / sizeof(uint32_t),
         slot.packState->GetDesc().Width / sizeof(uint32_t),
         slot.aux->GetDesc().Width / sizeof(uint32_t),
-        slot.quantPayload->GetDesc().Width / sizeof(uint32_t),
+        m_quantPayload->GetDesc().Width / sizeof(uint32_t),
       };
       constexpr uint64_t MAX_ELEMENTS =
         1ULL << D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP;
@@ -1841,6 +1986,7 @@ void FinalizeMain()
       ShaderParameters values = parameters;
       std::copy(std::begin(m_auxBase), std::end(m_auxBase),
         std::begin(values.auxBase));
+      values.state[0] = m_payloadWords;
       list->SetPipelineState(m_pipelines[pipeline].Get());
       list->SetComputeRoot32BitConstants(1,
         SHADER_PARAMETER_DWORDS, &values, 0);
@@ -1888,7 +2034,7 @@ void FinalizeMain()
       return true;
     }
 
-    bool CreateSlot(Slot& slot, uint64_t planePixels)
+    bool CreateSlot(Slot& slot)
     {
       D3D12_DESCRIPTOR_HEAP_DESC heap = {};
 
@@ -1918,23 +2064,7 @@ void FinalizeMain()
         return false;
       }
 
-      if (!CreateBuffer(m_device.Get(), planePixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.wave) ||
-          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.scratch) ||
-          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.atlas) ||
-          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.planes) ||
-          !CreateBuffer(m_device.Get(), m_packedCapacity,
+      if (!CreateBuffer(m_device.Get(), m_packedCapacity,
             D3D12_HEAP_TYPE_DEFAULT,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.packed) ||
@@ -1947,12 +2077,6 @@ void FinalizeMain()
             D3D12_HEAP_TYPE_DEFAULT,
             D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
             D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, slot.aux) ||
-          !CreateBuffer(m_device.Get(),
-            static_cast<uint64_t>(m_payloadWords) * sizeof(uint32_t),
-            D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
-            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS,
-            slot.quantPayload) ||
           !CreateBuffer(m_device.Get(), m_readbackBytes,
             D3D12_HEAP_TYPE_READBACK,
             D3D12_RESOURCE_STATE_COPY_DEST,
@@ -2004,7 +2128,26 @@ void FinalizeMain()
         if (planePixels > UINT32_MAX || pixels > UINT32_MAX - planePixels)
           return false;
         planes[i].offset = static_cast<uint32_t>(planePixels);
-        planePixels     += pixels;
+        // Sparse transforms retain untouched LL samples between frames, so
+        // every level needs a disjoint row range in its parity buffer.
+        uint32_t levelHeight    = planes[i].height;
+        uint32_t lowpassRows[2] = {};
+        for (uint32_t level = 0; level < planes[i].levels; ++level)
+        {
+          levelHeight >>= 1U;
+          const unsigned buffer = level & 1U;
+          if (lowpassRows[buffer] > planes[i].height ||
+              levelHeight > planes[i].height - lowpassRows[buffer])
+            return false;
+          const uint64_t lowpassOffset = planePixels +
+            static_cast<uint64_t>(lowpassRows[buffer]) * planes[i].width;
+          if (lowpassOffset > UINT32_MAX)
+            return false;
+          planes[i].lowpassOffset[level] =
+            static_cast<uint32_t>(lowpassOffset);
+          lowpassRows[buffer] += levelHeight;
+        }
+        planePixels += pixels;
       }
       constexpr uint64_t MAX_ELEMENTS =
         1ULL << D3D12_REQ_BUFFER_RESOURCE_TEXEL_COUNT_2_TO_EXP;
@@ -2030,7 +2173,10 @@ void FinalizeMain()
       const uint64_t payloadWords =
         1U + static_cast<uint64_t>(block8Capacity) *
           PYROWAVE_QUANT_WORDS_8X8;
-      if (auxWords > MAX_ELEMENTS || payloadWords > MAX_ELEMENTS ||
+      const uint64_t payloadTotal =
+        payloadWords + static_cast<uint64_t>(blockCapacity) + 1U;
+      if (auxWords > MAX_ELEMENTS || payloadWords > UINT32_MAX ||
+          payloadTotal > MAX_ELEMENTS ||
           rdoStateBase > UINT32_MAX)
         return false;
 
@@ -2081,8 +2227,33 @@ void FinalizeMain()
         Reset();
         return false;
       }
+      if (!CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_wave) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_scratch) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_atlas) ||
+          !CreateBuffer(m_device.Get(), planePixels * sizeof(float),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_planeData) ||
+          !CreateBuffer(m_device.Get(),
+            payloadTotal * sizeof(uint32_t),
+            D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_RESOURCE_STATE_UNORDERED_ACCESS,
+            D3D12_RESOURCE_FLAG_ALLOW_UNORDERED_ACCESS, m_quantPayload))
+      {
+        Reset();
+        return false;
+      }
       for (Slot& slot : m_slots)
-        if (!CreateSlot(slot, planePixels))
+        if (!CreateSlot(slot))
         {
           Reset();
           return false;
@@ -2135,10 +2306,11 @@ void FinalizeMain()
     }
 
     bool RecordBands(ID3D12GraphicsCommandList * list, Pipeline pipeline,
-      uint32_t sequence, uint32_t packedLimit)
+      const FrameWork& work, uint32_t sequence, uint32_t packedLimit)
     {
       uint32_t blockBase  = 0;
       uint32_t blockBase8 = 0;
+      size_t   bandIndex  = 0;
       for (int level = static_cast<int>(PYROWAVE_LEVELS) - 1;
            level >= 0; --level)
         for (unsigned component = 0; component < 3; ++component)
@@ -2161,8 +2333,15 @@ void FinalizeMain()
             level == static_cast<int>(PYROWAVE_LEVELS) - 1 ? 0 : 1;
           for (unsigned band = firstBand; band < 4; ++band)
           {
-            const uint32_t   quantBits  =
+            if (bandIndex >= work.bands.size())
+              return false;
+            const BandWork& bandWork  = work.bands[bandIndex++];
+            const uint32_t  quantBits =
               QuantBits(level, component, band);
+            if (bandWork.blockBase != blockBase ||
+                bandWork.block8Base != blockBase8 ||
+                bandWork.blocksX != blocksX || bandWork.blocksY != blocksY)
+              return false;
             ShaderParameters parameters = {};
             parameters.dim0[0]   = m_planes[component].width;
             parameters.dim0[1]   = m_planes[component].offset;
@@ -2187,10 +2366,36 @@ void FinalizeMain()
                 m_blocksPerRDO);
 
             if (pipeline == PIPELINE_QUANT || pipeline == PIPELINE_ANALYZE)
-              Dispatch(list, pipeline, parameters, blocksX, blocksY);
+            {
+              if (work.full)
+                Dispatch(list, pipeline, parameters, blocksX, blocksY);
+              else
+                for (const RowRun& run : bandWork.blockRuns)
+                {
+                  parameters.work[0] = run.x;
+                  parameters.work[1] = run.y;
+                  Dispatch(list, pipeline, parameters,
+                    run.width, run.height);
+                }
+            }
             else if (pipeline == PIPELINE_PACK)
-              Dispatch(list, pipeline, parameters,
-                (blocksX + 1U) / 2U, (blocksY + 1U) / 2U);
+            {
+              if (work.full)
+              {
+                parameters.work[2] = 0xfU;
+                Dispatch(list, pipeline, parameters,
+                  (blocksX + 1U) / 2U, (blocksY + 1U) / 2U);
+              }
+              else
+                for (const PackRun& run : bandWork.packRuns)
+                {
+                  parameters.work[0] = run.x;
+                  parameters.work[1] = run.y;
+                  parameters.work[2] = run.activeMask;
+                  Dispatch(list, pipeline, parameters,
+                    run.width, run.height);
+                }
+            }
             else
               return false;
 
@@ -2198,11 +2403,13 @@ void FinalizeMain()
             blockBase8 += blocks8X * blocks8Y;
           }
         }
-      return blockBase == m_blockCapacity &&
+      return bandIndex == work.bands.size() &&
+        blockBase == m_blockCapacity &&
         blockBase8 == m_block8Capacity;
     }
 
-    void RecordTransforms(ID3D12GraphicsCommandList * list)
+    void RecordTransforms(ID3D12GraphicsCommandList * list,
+      const FrameWork& work)
     {
       uint32_t activeWidth [3] = {};
       uint32_t activeHeight[3] = {};
@@ -2226,12 +2433,23 @@ void FinalizeMain()
           transform.op0[0]  = activeWidth [component];
           transform.op0[1]  = activeHeight[component];
           transform.op1[0]  = level;
-          transform.op1[1]  = level ? ((level - 1U) & 1U) : 0U;
-          transform.op1[2]  = level & 1U;
+          transform.op1[1]  = level ?
+            plane.lowpassOffset[level - 1U] : 0U;
+          transform.op1[2]  = plane.lowpassOffset[level];
           transform.op1[3]  = plane.offset;
-          Dispatch(list, PIPELINE_DWT, transform,
-            (activeWidth[component] + 31U) / 32U,
-            (activeHeight[component] + 31U) / 32U);
+          transform.work[2] = level + 1U == plane.levels ? 1U : 0U;
+          if (work.full)
+            Dispatch(list, PIPELINE_DWT, transform,
+              (activeWidth[component] + 31U) / 32U,
+              (activeHeight[component] + 31U) / 32U);
+          else
+            for (const RowRun& run : work.dwtRuns[component][level])
+            {
+              transform.work[0] = run.x;
+              transform.work[1] = run.y;
+              Dispatch(list, PIPELINE_DWT, transform,
+                run.width, run.height);
+            }
           activeWidth [component] >>= 1;
           activeHeight[component] >>= 1;
         }
@@ -2269,13 +2487,402 @@ void FinalizeMain()
         slot.packed.Get(), 0, slot.frameLimit);
     }
 
-    bool Compact(const Slot& slot, const uint8_t * readback,
+    static GroupRange AffectedGroups(
+      uint32_t begin, uint32_t end, uint32_t length,
+      uint32_t groupCount)
+    {
+      GroupRange result;
+      begin = (std::min)(begin, length);
+      end   = (std::min)(end, length);
+      if (begin >= end || !length || !groupCount)
+        return result;
+      result.begin = begin < 36U ? 0U : (begin - 36U) / 32U + 1U;
+      result.end   = (std::min)(groupCount, (end + 35U) / 32U);
+      const uint32_t mirroredEdge = length > 36U ? length - 36U : 0U;
+      if (end > mirroredEdge)
+      {
+        result.begin = (std::min)(result.begin, groupCount - 1U);
+        result.end   = groupCount;
+      }
+      result.begin = (std::min)(result.begin, result.end);
+      return result;
+    }
+
+    static bool BuildRowRuns(const std::vector<uint8_t>& mask,
+      size_t base, uint32_t width, uint32_t height,
+      std::vector<RowRun>& runs)
+    {
+      const size_t count = static_cast<size_t>(width) * height;
+      if (base > mask.size() || count > mask.size() - base)
+        return false;
+
+      runs.clear();
+      std::vector<size_t> previous;
+      std::vector<size_t> current;
+      for (uint32_t y = 0; y < height; ++y)
+      {
+        current.clear();
+        size_t   previousPosition = 0;
+        uint32_t x                = 0;
+        while (x < width)
+        {
+          while (x < width && !mask[base + y * width + x])
+            ++x;
+          const uint32_t begin = x;
+          while (x < width && mask[base + y * width + x])
+            ++x;
+          if (begin != x)
+          {
+            const uint32_t runWidth = x - begin;
+            while (previousPosition < previous.size() &&
+                runs[previous[previousPosition]].x < begin)
+              ++previousPosition;
+            if (previousPosition < previous.size())
+            {
+              RowRun& run = runs[previous[previousPosition]];
+              if (run.x == begin && run.width == runWidth &&
+                  run.y + run.height == y)
+              {
+                ++run.height;
+                current.push_back(previous[previousPosition]);
+                ++previousPosition;
+                continue;
+              }
+            }
+            runs.push_back({ begin, y, runWidth, 1U });
+            current.push_back(runs.size() - 1U);
+          }
+        }
+        previous.swap(current);
+      }
+      return true;
+    }
+
+    static void MarkGroups(std::vector<uint8_t>& mask,
+      uint32_t width, const GroupRange& x, const GroupRange& y)
+    {
+      for (uint32_t row = y.begin; row < y.end; ++row)
+        std::fill(mask.begin() + static_cast<size_t>(row) * width + x.begin,
+          mask.begin() + static_cast<size_t>(row) * width + x.end,
+          static_cast<uint8_t>(1U));
+    }
+
+    bool BuildFrameWork(const FrameDesc& frame, bool forceFull,
+      FrameWork& work) const
+    {
+      work      = {};
+      work.full = forceFull || frame.damage == FrameDamage::FULL;
+      work.damagedBlocks.assign(
+        m_blockCapacity, static_cast<uint8_t>(work.full));
+      if (!work.full && frame.damage != FrameDamage::NONE &&
+          (frame.damage != FrameDamage::RECTS || !frame.count ||
+           frame.count > FRAME_DAMAGE_MAX))
+        return false;
+
+      constexpr size_t INVALID_BAND =
+        (std::numeric_limits<size_t>::max)();
+      size_t           bandIndices[PYROWAVE_LEVELS][3][4];
+      uint32_t         blockBase    = 0;
+      uint32_t         blockBase8   = 0;
+      for (auto& levelBands : bandIndices)
+        for (auto& componentBands : levelBands)
+          std::fill(std::begin(componentBands), std::end(componentBands),
+            INVALID_BAND);
+      for (int level = static_cast<int>(PYROWAVE_LEVELS) - 1;
+           level >= 0; --level)
+        for (unsigned component = 0; component < 3; ++component)
+        {
+          if (m_chroma == CHROMA_420 && component && !level)
+            continue;
+          const uint32_t localLevel =
+            m_chroma == CHROMA_420 && component ?
+              static_cast<uint32_t>(level - 1) :
+              static_cast<uint32_t>(level);
+          const uint32_t bandWidth  =
+            m_planes[component].width >> (localLevel + 1U);
+          const uint32_t bandHeight =
+            m_planes[component].height >> (localLevel + 1U);
+          const uint32_t blocksX    = (bandWidth + 31U) / 32U;
+          const uint32_t blocksY    = (bandHeight + 31U) / 32U;
+          const uint32_t blocks8X   = (bandWidth + 7U) / 8U;
+          const uint32_t blocks8Y   = (bandHeight + 7U) / 8U;
+          const unsigned firstBand  =
+            level == static_cast<int>(PYROWAVE_LEVELS) - 1 ? 0U : 1U;
+          for (unsigned band = firstBand; band < 4; ++band)
+          {
+            bandIndices[level][component][band] = work.bands.size();
+            work.bands.push_back(
+            {
+              blockBase,
+              blockBase8,
+              blocksX,
+              blocksY,
+              {},
+              {},
+            });
+            blockBase  += blocksX * blocksY;
+            blockBase8 += blocks8X * blocks8Y;
+          }
+        }
+      if (blockBase != m_blockCapacity ||
+          blockBase8 != m_block8Capacity)
+        return false;
+
+      if (!work.full && frame.damage == FrameDamage::RECTS)
+      {
+        for (unsigned index = 0; index < frame.count; ++index)
+        {
+          const RECT& rect = frame.rects[index];
+          if (rect.left < 0 || rect.top < 0 ||
+              rect.right <= rect.left || rect.bottom <= rect.top ||
+              rect.right > static_cast<LONG>(m_cfg.width) ||
+              rect.bottom > static_cast<LONG>(m_cfg.height))
+          {
+            work.full = true;
+            std::fill(work.damagedBlocks.begin(),
+              work.damagedBlocks.end(), static_cast<uint8_t>(1U));
+            return true;
+          }
+        }
+
+        const uint32_t colorDivisor = m_chroma == CHROMA_420 ? 2U : 1U;
+        const uint32_t colorWidth   = m_planes[0].width / colorDivisor;
+        const uint32_t colorHeight  = m_planes[0].height / colorDivisor;
+        const uint32_t colorGroupsX = (colorWidth + 7U) / 8U;
+        const uint32_t colorGroupsY = (colorHeight + 7U) / 8U;
+        std::vector<uint8_t> colorMask(
+          static_cast<size_t>(colorGroupsX) * colorGroupsY);
+        for (unsigned index = 0; index < frame.count; ++index)
+        {
+          const RECT& source = frame.rects[index];
+          uint32_t    left   =
+            static_cast<uint32_t>(source.left) / colorDivisor;
+          uint32_t    top    =
+            static_cast<uint32_t>(source.top) / colorDivisor;
+          uint32_t    right  =
+            (static_cast<uint32_t>(source.right) + colorDivisor - 1U) /
+              colorDivisor;
+          uint32_t    bottom =
+            (static_cast<uint32_t>(source.bottom) + colorDivisor - 1U) /
+              colorDivisor;
+          if (source.right == static_cast<LONG>(m_cfg.width))
+            right = colorWidth;
+          if (source.bottom == static_cast<LONG>(m_cfg.height))
+            bottom = colorHeight;
+          const GroupRange x =
+          {
+            left / 8U,
+            (std::min)(colorGroupsX, (right + 7U) / 8U),
+          };
+          const GroupRange y =
+          {
+            top / 8U,
+            (std::min)(colorGroupsY, (bottom + 7U) / 8U),
+          };
+          MarkGroups(colorMask, colorGroupsX, x, y);
+        }
+        if (!BuildRowRuns(colorMask, 0, colorGroupsX, colorGroupsY,
+              work.colorRuns))
+          return false;
+        bool completeWork = std::all_of(colorMask.begin(), colorMask.end(),
+          [](uint8_t active) { return active != 0; });
+
+        std::vector<uint8_t> dwtMasks[3][PYROWAVE_LEVELS];
+        for (unsigned component = 0; component < 3; ++component)
+        {
+          const Plane&   plane        = m_planes[component];
+          const bool     subsampled   =
+            m_chroma == CHROMA_420 && component;
+          const uint32_t divisor      = subsampled ? 2U : 1U;
+          const uint32_t sourceWidth  =
+            (m_cfg.width + divisor - 1U) / divisor;
+          const uint32_t sourceHeight =
+            (m_cfg.height + divisor - 1U) / divisor;
+
+          std::vector<PlaneRect> currentRects;
+          currentRects.reserve(frame.count);
+          for (unsigned index = 0; index < frame.count; ++index)
+          {
+            const RECT& source = frame.rects[index];
+            PlaneRect   rect;
+            rect.left   = static_cast<uint32_t>(source.left) / divisor;
+            rect.top    = static_cast<uint32_t>(source.top) / divisor;
+            rect.right  =
+              (static_cast<uint32_t>(source.right) + divisor - 1U) /
+                divisor;
+            rect.bottom =
+              (static_cast<uint32_t>(source.bottom) + divisor - 1U) /
+                divisor;
+            if (rect.right == sourceWidth)
+              rect.right = plane.width;
+            if (rect.bottom == sourceHeight)
+              rect.bottom = plane.height;
+            currentRects.push_back(rect);
+          }
+
+          uint32_t activeWidth  = plane.width;
+          uint32_t activeHeight = plane.height;
+          for (uint32_t localLevel = 0; localLevel < plane.levels;
+               ++localLevel)
+          {
+            const uint32_t globalLevel = localLevel +
+              (subsampled ? 1U : 0U);
+            const uint32_t bandWidth   = activeWidth / 2U;
+            const uint32_t bandHeight  = activeHeight / 2U;
+            const uint32_t groupCountX = (activeWidth + 31U) / 32U;
+            const uint32_t groupCountY = (activeHeight + 31U) / 32U;
+            const uint32_t blocksX     = (bandWidth + 31U) / 32U;
+            const uint32_t blocksY     = (bandHeight + 31U) / 32U;
+            const unsigned firstBand   =
+              localLevel + 1U == plane.levels ? 0U : 1U;
+            std::vector<uint8_t>& dwtMask =
+              dwtMasks[component][localLevel];
+            dwtMask.assign(
+              static_cast<size_t>(groupCountX) * groupCountY,
+              static_cast<uint8_t>(0U));
+
+            std::vector<PlaneRect> nextRects;
+            nextRects.reserve(currentRects.size());
+            for (const PlaneRect& rect : currentRects)
+            {
+              const GroupRange x = AffectedGroups(
+                rect.left, rect.right, activeWidth, groupCountX);
+              const GroupRange y = AffectedGroups(
+                rect.top, rect.bottom, activeHeight, groupCountY);
+              if (x.begin == x.end || y.begin == y.end)
+                continue;
+              MarkGroups(dwtMask, groupCountX, x, y);
+
+              const uint32_t blockBeginX = x.begin / 2U;
+              const uint32_t blockBeginY = y.begin / 2U;
+              const uint32_t blockEndX   = (x.end + 1U) / 2U;
+              const uint32_t blockEndY   = (y.end + 1U) / 2U;
+              for (unsigned band = firstBand; band < 4; ++band)
+              {
+                const size_t    bandIndex =
+                  bandIndices[globalLevel][component][band];
+                if (bandIndex == INVALID_BAND ||
+                    bandIndex >= work.bands.size())
+                  return false;
+                const BandWork& bandWork = work.bands[bandIndex];
+                for (uint32_t blockY = blockBeginY;
+                     blockY < blockEndY; ++blockY)
+                  for (uint32_t blockX = blockBeginX;
+                       blockX < blockEndX; ++blockX)
+                  {
+                    if (blockX >= blocksX || blockY >= blocksY)
+                      return false;
+                    work.damagedBlocks[bandWork.blockBase +
+                      blockY * blocksX + blockX] =
+                        static_cast<uint8_t>(1U);
+                  }
+              }
+
+              nextRects.push_back(
+              {
+                x.begin * 16U,
+                y.begin * 16U,
+                (std::min)(bandWidth, x.end * 16U),
+                (std::min)(bandHeight, y.end * 16U),
+              });
+            }
+            if (!BuildRowRuns(dwtMask, 0, groupCountX, groupCountY,
+                  work.dwtRuns[component][localLevel]))
+              return false;
+            completeWork = completeWork &&
+              std::all_of(dwtMask.begin(), dwtMask.end(),
+                [](uint8_t active) { return active != 0; });
+            currentRects = std::move(nextRects);
+            activeWidth  = bandWidth;
+            activeHeight = bandHeight;
+          }
+        }
+        if (completeWork &&
+            std::all_of(work.damagedBlocks.begin(),
+              work.damagedBlocks.end(),
+              [](uint8_t damaged) { return damaged != 0; }))
+        {
+          work.full = true;
+          return true;
+        }
+      }
+
+      for (BandWork& band : work.bands)
+      {
+        if (work.full)
+          continue;
+        if (!BuildRowRuns(work.damagedBlocks, band.blockBase,
+              band.blocksX, band.blocksY, band.blockRuns))
+          return false;
+
+        const uint32_t packWidth  = (band.blocksX + 1U) / 2U;
+        const uint32_t packHeight = (band.blocksY + 1U) / 2U;
+        std::vector<size_t> previous;
+        std::vector<size_t> current;
+        for (uint32_t y = 0; y < packHeight; ++y)
+        {
+          current.clear();
+          size_t   previousPosition = 0;
+          uint32_t x                = 0;
+          while (x < packWidth)
+          {
+            const auto activeMask = [&](uint32_t groupX)
+            {
+              uint32_t result = 0;
+              for (uint32_t record = 0; record < 4U; ++record)
+              {
+                const uint32_t blockX = groupX * 2U + (record & 1U);
+                const uint32_t blockY = y * 2U + (record >> 1U);
+                if (blockX < band.blocksX && blockY < band.blocksY &&
+                    work.damagedBlocks[band.blockBase +
+                      blockY * band.blocksX + blockX])
+                  result |= 1U << record;
+              }
+              return result;
+            };
+
+            const uint32_t mask = activeMask(x);
+            if (!mask)
+            {
+              ++x;
+              continue;
+            }
+            const uint32_t begin = x++;
+            while (x < packWidth && activeMask(x) == mask)
+              ++x;
+            const uint32_t runWidth = x - begin;
+            while (previousPosition < previous.size() &&
+                band.packRuns[previous[previousPosition]].x < begin)
+              ++previousPosition;
+            if (previousPosition < previous.size())
+            {
+              PackRun& run = band.packRuns[previous[previousPosition]];
+              if (run.x == begin && run.width == runWidth &&
+                  run.activeMask == mask && run.y + run.height == y)
+              {
+                ++run.height;
+                current.push_back(previous[previousPosition]);
+                ++previousPosition;
+                continue;
+              }
+            }
+            band.packRuns.push_back(
+              { begin, y, runWidth, 1U, mask });
+            current.push_back(band.packRuns.size() - 1U);
+          }
+          previous.swap(current);
+        }
+      }
+      return true;
+    }
+
+    bool Compact(Slot& slot, const uint8_t * readback,
       EncodedFrame& output) const
     {
       const uint32_t packedBytes = LoadLE32(readback);
       const uint32_t packetCount = LoadLE32(readback + 4U);
       const uint32_t overflow    = LoadLE32(readback + 8U);
-      if (overflow || !packetCount || packetCount > m_blockCapacity ||
+      if (overflow || packetCount > m_blockCapacity ||
           packedBytes < 8U || packedBytes > m_packedCapacity ||
           packedBytes > slot.frameLimit ||
           packedBytes > MAX_FRAME_LENGTH)
@@ -2308,11 +2915,23 @@ void FinalizeMain()
         for (uint32_t blockIndex = 0;
              blockIndex < m_blockCapacity; ++blockIndex)
         {
+          if (blockIndex >= slot.work.damagedBlocks.size())
+            return false;
           const uint8_t * meta = packetMeta +
             static_cast<size_t>(blockIndex) *
               PYROWAVE_PACKET_META_WORDS * sizeof(uint32_t);
           const uint32_t sourceOffset = LoadLE32(meta);
           const uint32_t length       = LoadLE32(meta + sizeof(uint32_t));
+          const bool     damaged      = slot.work.damagedBlocks[blockIndex];
+          const bool     dummy        = !damaged && blockIndex == 0U &&
+            packetCount == 1U && packedBytes >= 20U &&
+            sourceOffset == 8U && length == 12U &&
+            LoadLE32(packed + 8U) ==
+              (1U | (3U << 16U) | (slot.sequence << 28U)) &&
+            LoadLE32(packed + 12U) == 8U * (4U + 12U) &&
+            LoadLE32(packed + 16U) == 6U << 20U;
+          if (!damaged && !dummy)
+            continue;
           if (!length)
           {
             if (sourceOffset)
@@ -2348,11 +2967,14 @@ void FinalizeMain()
         return false;
       }
 
-      output.blocks[0].offset  = 0;
-      output.blocks[0].length += 8U;
+      if (!output.blocks.empty())
+      {
+        output.blocks[0].offset  = 0;
+        output.blocks[0].length += 8U;
+      }
       output.blockCapacity     = m_blockCapacity;
-
-      return true;
+      output.damagedBlocks     = std::move(slot.work.damagedBlocks);
+      return output.damagedBlocks.size() == output.blockCapacity;
     }
 
     Slot * OldestSlot()
@@ -2381,7 +3003,9 @@ void FinalizeMain()
       slot.captureTime = 0;
       slot.order       = 0;
       slot.frameLimit  = 0;
+      slot.hardLimit   = 0;
       slot.frame       = {};
+      slot.work        = {};
 
       slot.lease.Reset();
     }
@@ -2431,11 +3055,13 @@ void FinalizeMain()
     }
 
     bool Submit(FrameIn frame, TexLease lease, const FrameCfg& cfg,
-      LGNetVideoChromaSubsampling chroma, uint32_t frameLimit)
+      LGNetVideoChromaSubsampling chroma, uint32_t hardFrameLimit,
+      uint32_t updateFrameLimit)
     {
       if (!lease || !lease.Get() ||
           lease->State() != D3D12_RESOURCE_STATE_COMMON ||
-          frameLimit < PYROWAVE_MIN_FRAME_BYTES)
+          hardFrameLimit < PYROWAVE_MIN_FRAME_BYTES ||
+          updateFrameLimit < PYROWAVE_MIN_FRAME_BYTES)
         return false;
       ID3D12Resource * source = lease->Get();
       if (!m_ready || !SameCfg(m_cfg, cfg) || m_chroma != chroma ||
@@ -2443,10 +3069,25 @@ void FinalizeMain()
         if (!Configure(cfg, chroma, source))
           return false;
 
-      const uint32_t packedLimit = (std::min)(
-        m_packedCapacity, frameLimit & ~UINT32_C(3));
-      if (packedLimit < PYROWAVE_MIN_FRAME_BYTES)
+      const uint32_t hardLimit   = (std::min)(
+        m_packedCapacity, hardFrameLimit & ~UINT32_C(3));
+      const uint32_t packedLimit = (std::min)(hardLimit,
+        updateFrameLimit & ~UINT32_C(3));
+      if (hardLimit < PYROWAVE_MIN_FRAME_BYTES ||
+          packedLimit < PYROWAVE_MIN_FRAME_BYTES)
         return false;
+
+      FrameWork work;
+      try
+      {
+        if (!BuildFrameWork(frame.desc.frame,
+              !m_persistentValid || hardLimit != m_hardLimit, work))
+          return false;
+      }
+      catch (...)
+      {
+        return false;
+      }
 
       unsigned slotIndex = 0;
       while (slotIndex < ENCODER_SLOT_COUNT && m_slots[slotIndex].inFlight)
@@ -2472,9 +3113,11 @@ void FinalizeMain()
         return false;
       }
 
-      slot.captureTime = lease->time.postStart;
-      slot.sequence    = m_sequence;
-      slot.frameLimit  = packedLimit;
+      slot.captureTime   = lease->time.postStart;
+      slot.sequence      = m_sequence;
+      slot.frameLimit    = packedLimit;
+      slot.hardLimit     = hardLimit;
+      slot.work          = std::move(work);
       CreateSourceDescriptor(slot, source);
       ID3D12DescriptorHeap * heaps[] = { slot.descriptors.Get() };
 
@@ -2486,6 +3129,7 @@ void FinalizeMain()
       computeList->SetComputeRootSignature(m_rootSignature.Get());
       computeList->SetComputeRootDescriptorTable(
         0, slot.descriptors->GetGPUDescriptorHandleForHeapStart());
+      UAVBarrier(computeList.Get(), nullptr);
       if (slot.used)
       {
         Transition(computeList.Get(), slot.packed.Get(),
@@ -2504,13 +3148,16 @@ void FinalizeMain()
       UAVBarrier(computeList.Get(), slot.packState.Get());
 
       ShaderParameters clearState = {};
-      clearState.dim0[0] = m_blockCapacity;
-      clearState.dim0[1] = PYROWAVE_RDO_WORDS;
+      clearState.dim0[0] = PYROWAVE_RDO_WORDS;
+      clearState.dim0[1] = m_blockCapacity + 1U;
+      clearState.work[0] = slot.work.full;
+      const uint32_t clearWords = slot.work.full ?
+        (std::max)(PYROWAVE_RDO_WORDS, m_blockCapacity + 1U) :
+        PYROWAVE_RDO_WORDS;
       Dispatch(computeList.Get(), PIPELINE_CLEAR, clearState,
-        ((std::max)(m_blockCapacity, PYROWAVE_RDO_WORDS) + 255U) / 256U,
-        1);
+        (clearWords + 255U) / 256U, 1);
       UAVBarrier(computeList.Get(), slot.aux.Get());
-      UAVBarrier(computeList.Get(), slot.quantPayload.Get());
+      UAVBarrier(computeList.Get(), m_quantPayload.Get());
 
       ShaderParameters color = {};
       color.dim0[0] = m_cfg.width;
@@ -2526,23 +3173,32 @@ void FinalizeMain()
         m_planes[0].width / 2U : m_planes[0].width;
       const uint32_t colorHeight = m_chroma == CHROMA_420 ?
         m_planes[0].height / 2U : m_planes[0].height;
-      Dispatch(computeList.Get(), PIPELINE_COLOR, color,
-        (colorWidth + 7U) / 8U, (colorHeight + 7U) / 8U);
-      UAVBarrier(computeList.Get(), slot.planes.Get());
+      if (slot.work.full)
+        Dispatch(computeList.Get(), PIPELINE_COLOR, color,
+          (colorWidth + 7U) / 8U, (colorHeight + 7U) / 8U);
+      else
+        for (const RowRun& run : slot.work.colorRuns)
+        {
+          color.work[0] = run.x;
+          color.work[1] = run.y;
+          Dispatch(computeList.Get(), PIPELINE_COLOR, color,
+            run.width, run.height);
+        }
+      UAVBarrier(computeList.Get(), m_planeData.Get());
 
-      RecordTransforms(computeList.Get());
+      RecordTransforms(computeList.Get(), slot.work);
       if (!RecordBands(computeList.Get(), PIPELINE_QUANT,
-            slot.sequence, m_packedCapacity))
+            slot.work, slot.sequence, m_packedCapacity))
       {
         copyCommand->Cancel();
         computeCommand->Cancel();
         return false;
       }
       UAVBarrier(computeList.Get(), slot.aux.Get());
-      UAVBarrier(computeList.Get(), slot.quantPayload.Get());
+      UAVBarrier(computeList.Get(), m_quantPayload.Get());
       UAVBarrier(computeList.Get(), slot.packState.Get());
       if (!RecordBands(computeList.Get(), PIPELINE_ANALYZE,
-            slot.sequence, m_packedCapacity))
+            slot.work, slot.sequence, m_packedCapacity))
       {
         copyCommand->Cancel();
         computeCommand->Cancel();
@@ -2558,12 +3214,29 @@ void FinalizeMain()
       resolve.dim0[0] = (packedLimit - 8U) / UINT32_C(4);
       resolve.dim0[1] = m_blockCapacity;
       resolve.dim0[2] = m_blocksPerRDO;
-      Dispatch(computeList.Get(), PIPELINE_RESOLVE, resolve,
-        (m_blockCapacity + 63U) / 64U, 1);
+      resolve.work[2] = (hardLimit - 8U) / UINT32_C(4);
+      resolve.work[3] = (packedLimit - 8U) / UINT32_C(4);
+      if (slot.work.full)
+      {
+        resolve.work[1] = m_blockCapacity;
+        Dispatch(computeList.Get(), PIPELINE_RESOLVE, resolve,
+          (m_blockCapacity + 63U) / 64U, 1);
+      }
+      else
+        for (const BandWork& band : slot.work.bands)
+          for (const RowRun& run : band.blockRuns)
+            for (uint32_t row = 0; row < run.height; ++row)
+            {
+              resolve.work[0] = band.blockBase +
+                (run.y + row) * band.blocksX + run.x;
+              resolve.work[1] = run.width;
+              Dispatch(computeList.Get(), PIPELINE_RESOLVE, resolve,
+                (run.width + 63U) / 64U, 1);
+            }
       UAVBarrier(computeList.Get(), slot.aux.Get());
 
       if (!RecordBands(computeList.Get(), PIPELINE_PACK,
-            slot.sequence, packedLimit))
+            slot.work, slot.sequence, packedLimit))
       {
         copyCommand->Cancel();
         computeCommand->Cancel();
@@ -2572,6 +3245,7 @@ void FinalizeMain()
       UAVBarrier(computeList.Get(), slot.packed.Get());
       UAVBarrier(computeList.Get(), slot.packState.Get());
       UAVBarrier(computeList.Get(), slot.aux.Get());
+      UAVBarrier(computeList.Get(), m_quantPayload.Get());
       ShaderParameters finalize = {};
       finalize.dim0[0] = m_cfg.width;
       finalize.dim0[1] = m_cfg.height;
@@ -2581,6 +3255,7 @@ void FinalizeMain()
         m_cfg.profile.signal == FrameSignal::PQ_BT2020;
       finalize.op0[3]  = 8U * (4U + QuantBits(
         static_cast<int>(PYROWAVE_LEVELS) - 1, 0, 0));
+      finalize.work[0] = slot.work.full;
       Dispatch(computeList.Get(), PIPELINE_FINALIZE, finalize, 1, 1);
       PrepareReadback(computeList.Get(), slot);
       RecordReadback(copyList.Get(), slot);
@@ -2593,7 +3268,9 @@ void FinalizeMain()
         Reset();
         return false;
       }
-      slot.used = true;
+      m_persistentValid = true;
+      m_hardLimit       = hardLimit;
+      slot.used         = true;
       if (!copyCommand->WaitFor(
             slot.computeSync.fence.Get(), slot.computeSync.value))
       {
@@ -2650,6 +3327,7 @@ void FinalizeMain()
         output.frameID       = frameID;
         output.captureTimeNs = slot->captureTime;
         output.deadlineMs    = MAX_FRAME_LATENCY_MS;
+        output.hardLimit     = slot->hardLimit;
       }
       ReleaseSlot(*slot);
       return result;
@@ -2670,18 +3348,18 @@ void FinalizeMain()
           slot.mapped = nullptr;
         }
         slot.readback.Reset();
-        slot.quantPayload.Reset();
         slot.aux.Reset();
         slot.packState.Reset();
         slot.packed.Reset();
-        slot.planes.Reset();
-        slot.atlas.Reset();
-        slot.scratch.Reset();
-        slot.wave.Reset();
         slot.clearDescriptors.Reset();
         slot.descriptors.Reset();
         slot.used = false;
       }
+      m_planeData.Reset();
+      m_atlas.Reset();
+      m_scratch.Reset();
+      m_wave.Reset();
+      m_quantPayload.Reset();
       for (ComPtr<ID3D12PipelineState>& pipeline : m_pipelines)
         pipeline.Reset();
       m_rootSignature.Reset();
@@ -2699,6 +3377,8 @@ void FinalizeMain()
       m_packedCapacity  = 0;
       m_auxWords        = 0;
       m_payloadWords    = 0;
+      m_hardLimit       = 0;
+      m_persistentValid = false;
       std::fill(std::begin(m_auxBase), std::end(m_auxBase), 0U);
       std::fill(std::begin(m_planes), std::end(m_planes), Plane {});
     }
@@ -2707,6 +3387,13 @@ void FinalizeMain()
 
 struct CNetworkVideo::Impl
 {
+  struct ReferenceFrame
+  {
+    uint64_t                            frameID = 0;
+    std::shared_ptr<const EncodedFrame> frame;
+    std::vector<uint8_t>                subsequentBlocks;
+  };
+
   struct PeerState
   {
     NetworkVideoPeer                    peer                   = {};
@@ -2728,6 +3415,7 @@ struct CNetworkVideo::Impl
     uint32_t                            droppedFrames          = 0;
     uint8_t                             blockedDeliveries      = 0;
     std::shared_ptr<const EncodedFrame> referenceFrame;
+    std::deque<ReferenceFrame>          referenceHistory;
     std::vector<uint8_t>                updateBlocks;
     bool                                statusSent             = false;
     bool                                subscribed             = false;
@@ -2801,6 +3489,7 @@ struct CNetworkVideo::Impl
   std::vector<PeerState>                m_peers;
   std::deque<PendingFrame>              m_frames;
   std::deque<SendItem>                  m_sends;
+  std::shared_ptr<const EncodedFrame>   m_canonicalFrame;
   std::shared_ptr<const EncodedFrame>   m_latestFrame;
   size_t                                m_sendBytes = 0;
 
@@ -2913,6 +3602,7 @@ struct CNetworkVideo::Impl
   static void ResetPeerReferenceNL(PeerState& peer)
   {
     peer.referenceFrame.reset();
+    peer.referenceHistory.clear();
     peer.updateBlocks.clear();
     peer.referenceFrameID = 0;
     peer.referencePending = false;
@@ -3045,28 +3735,152 @@ struct CNetworkVideo::Impl
     const EncodedFrame& encoded, size_t& bytes)
   {
     size_t blockBytes;
+    size_t frameBytes;
     size_t encodedBytes;
     return Multiply(encoded.blocks.size(), sizeof(EncodedBlock), blockBytes) &&
-      Add(encoded.data.size(), blockBytes, encodedBytes) &&
+      Add(encoded.data.size(), encoded.damagedBlocks.size(), frameBytes) &&
+      Add(frameBytes, blockBytes, encodedBytes) &&
       Add(encodedBytes, encoded.wholePayload ?
         encoded.wholePayload->size() : 0, bytes);
   }
 
-  static std::shared_ptr<const EncodedFrame> BuildUpdateFrame(
-    const EncodedFrame& reference, const EncodedFrame& current,
-    const std::vector<uint8_t>& previousBlocks,
-    std::vector<uint8_t>& updateBlocks)
+  static std::shared_ptr<EncodedFrame> BuildCanonicalFrame(
+    const std::shared_ptr<const EncodedFrame>& previous,
+    EncodedFrame&& current)
   {
-    updateBlocks.clear();
+    if (!current.blockCapacity || current.data.size() < 8U ||
+        current.damagedBlocks.size() != current.blockCapacity ||
+        current.hardLimit < 20U || current.data.size() > current.hardLimit)
+      return {};
+    if (!previous || previous->configEpoch != current.configEpoch ||
+        previous->blockCapacity != current.blockCapacity ||
+        previous->data.size() < 8U ||
+        std::all_of(current.damagedBlocks.begin(),
+          current.damagedBlocks.end(),
+          [](uint8_t damaged) { return damaged != 0; }))
+    {
+      try
+      {
+        return std::make_shared<EncodedFrame>(std::move(current));
+      }
+      catch (...)
+      {
+        return {};
+      }
+    }
+
+    try
+    {
+      std::shared_ptr<EncodedFrame> result =
+        std::make_shared<EncodedFrame>();
+      result->configEpoch   = current.configEpoch;
+      result->sourceSerial  = current.sourceSerial;
+      result->frameID       = current.frameID;
+      result->captureTimeNs = current.captureTimeNs;
+      result->deadlineMs    = current.deadlineMs;
+      result->blockCapacity = current.blockCapacity;
+      result->hardLimit     = current.hardLimit;
+      result->damagedBlocks = std::move(current.damagedBlocks);
+      result->blocks.reserve((std::max)(
+        previous->blocks.size(), current.blocks.size()));
+      result->data.reserve((std::max)(
+        previous->data.size(), current.data.size()));
+      result->data.resize(8U);
+
+      constexpr uint32_t SEQUENCE_BITS    = PYROWAVE_SEQUENCE_MASK << 28U;
+      const uint32_t     firstWord        = LoadLE32(current.data.data());
+      const uint32_t     sequence         =
+        (firstWord >> 28U) & PYROWAVE_SEQUENCE_MASK;
+      size_t             previousPosition = 0;
+      size_t             currentPosition  = 0;
+      for (uint32_t index = 0; index < current.blockCapacity; ++index)
+      {
+        while (previousPosition < previous->blocks.size() &&
+            previous->blocks[previousPosition].index < index)
+          ++previousPosition;
+        while (currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index < index)
+          ++currentPosition;
+        const EncodedBlock * previousBlock =
+          previousPosition < previous->blocks.size() &&
+            previous->blocks[previousPosition].index == index ?
+              &previous->blocks[previousPosition] : nullptr;
+        const EncodedBlock * currentBlock  =
+          currentPosition < current.blocks.size() &&
+            current.blocks[currentPosition].index == index ?
+              &current.blocks[currentPosition] : nullptr;
+        const bool           damaged       =
+          result->damagedBlocks[index] != 0;
+        const EncodedFrame&  sourceFrame   = damaged ? current : *previous;
+        const EncodedBlock * sourceBlock   = damaged ?
+          currentBlock : previousBlock;
+        if (!sourceBlock)
+          continue;
+
+        const EncodedPacket packet = Packet(sourceFrame, *sourceBlock);
+        if (!packet.data || packet.length < 8U ||
+            packet.length > PYROWAVE_PACKET_BYTES ||
+            result->data.size() > current.hardLimit ||
+            packet.length > current.hardLimit - result->data.size() ||
+            (LoadLE32(packet.data + sizeof(uint32_t)) >> 8U) != index)
+          return {};
+        const uint32_t offset = static_cast<uint32_t>(result->data.size());
+        result->data.insert(result->data.end(),
+          packet.data, packet.data + packet.length);
+        const uint32_t packetFirst =
+          (LoadLE32(result->data.data() + offset) & ~SEQUENCE_BITS) |
+          (sequence << 28U);
+        StoreLE32(result->data.data() + offset, packetFirst);
+        result->blocks.push_back({ offset, packet.length, index });
+      }
+      if (result->blocks.empty())
+      {
+        constexpr uint32_t DUMMY_PACKET_BYTES = 12U;
+        constexpr uint32_t DUMMY_QUANT_CODE   = 8U * (4U + 12U);
+        if (result->data.size() > current.hardLimit ||
+            DUMMY_PACKET_BYTES > current.hardLimit - result->data.size())
+          return {};
+        const uint32_t offset = static_cast<uint32_t>(result->data.size());
+        result->data.resize(result->data.size() + DUMMY_PACKET_BYTES);
+        StoreLE32(result->data.data() + offset,
+          1U | (3U << 16U) | (sequence << 28U));
+        StoreLE32(result->data.data() + offset + sizeof(uint32_t),
+          DUMMY_QUANT_CODE);
+        StoreLE32(result->data.data() + offset + 2U * sizeof(uint32_t),
+          6U << 20U);
+        result->blocks.push_back({ offset, DUMMY_PACKET_BYTES, 0U });
+      }
+      if (result->blocks.size() > UINT32_C(0x00ffffff) ||
+          result->data.size() > current.hardLimit)
+        return {};
+
+      const uint32_t secondWord =
+        (LoadLE32(current.data.data() + sizeof(uint32_t)) &
+          ~(PYROWAVE_HEADER_CODE_MASK | UINT32_C(0x00ffffff))) |
+        static_cast<uint32_t>(result->blocks.size());
+      StoreLE32(result->data.data(), firstWord);
+      StoreLE32(result->data.data() + sizeof(uint32_t), secondWord);
+      result->blocks[0].offset  = 0;
+      result->blocks[0].length += 8U;
+      return result;
+    }
+    catch (...)
+    {
+      return {};
+    }
+  }
+
+  static bool AccumulateUpdateBlocks(const EncodedFrame& reference,
+    const EncodedFrame& current, std::vector<uint8_t>& updateBlocks)
+  {
     if (!reference.blockCapacity ||
         reference.blockCapacity != current.blockCapacity ||
         reference.configEpoch != current.configEpoch ||
         reference.data.size() < 8U || current.data.size() < 8U)
-      return {};
+      return false;
 
     try
     {
-      updateBlocks = previousBlocks;
       updateBlocks.resize(current.blockCapacity, 0);
       size_t referencePosition = 0;
       size_t currentPosition   = 0;
@@ -3092,7 +3906,33 @@ struct CNetworkVideo::Impl
               EncodedPacket {}))
           updateBlocks[index] = 1;
       }
+    }
+    catch (...)
+    {
+      return false;
+    }
+    return true;
+  }
 
+  static std::shared_ptr<const EncodedFrame> BuildUpdateFrame(
+    const EncodedFrame& reference, const EncodedFrame& current,
+    const std::vector<uint8_t>& previousBlocks,
+    std::vector<uint8_t>& updateBlocks)
+  {
+    try
+    {
+      updateBlocks = previousBlocks;
+    }
+    catch (...)
+    {
+      updateBlocks.clear();
+      return {};
+    }
+    if (!AccumulateUpdateBlocks(reference, current, updateBlocks))
+      return {};
+
+    try
+    {
       uint32_t operationCount = 0;
       for (uint8_t changed : updateBlocks)
         operationCount += changed != 0;
@@ -3119,9 +3959,9 @@ struct CNetworkVideo::Impl
       StoreLE32(update->data.data(), firstWord);
       StoreLE32(update->data.data() + sizeof(uint32_t), secondWord);
 
-      const uint32_t sequence =
+      const uint32_t sequence        =
         (firstWord >> 28U) & PYROWAVE_SEQUENCE_MASK;
-      currentPosition = 0;
+      size_t         currentPosition = 0;
       for (uint32_t index = 0; index < current.blockCapacity; ++index)
       {
         while (currentPosition < current.blocks.size() &&
@@ -3175,6 +4015,99 @@ struct CNetworkVideo::Impl
       updateBlocks.clear();
       return {};
     }
+  }
+
+  static void RecordReferenceFrameNL(PeerState& peer, uint64_t frameID,
+    const std::shared_ptr<const EncodedFrame>& frame)
+  {
+    if (!frameID || !frame)
+      return;
+
+    if (!peer.referenceHistory.empty())
+    {
+      ReferenceFrame& candidate = peer.referenceHistory.front();
+      if (frameID <= candidate.frameID)
+        return;
+      if (candidate.frame && AccumulateUpdateBlocks(
+            *candidate.frame, *frame, candidate.subsequentBlocks))
+        return;
+      if (candidate.subsequentBlocks.size() == frame->blockCapacity)
+        std::fill(candidate.subsequentBlocks.begin(),
+          candidate.subsequentBlocks.end(), static_cast<uint8_t>(1U));
+      return;
+    }
+
+    try
+    {
+      ReferenceFrame candidate;
+      candidate.frameID = frameID;
+      candidate.frame   = frame;
+      candidate.subsequentBlocks.assign(
+        frame->blockCapacity, static_cast<uint8_t>(0U));
+      peer.referenceHistory.push_back(std::move(candidate));
+    }
+    catch (...)
+    {
+    }
+  }
+
+  static void RemoveReferenceFrameNL(PeerState& peer, uint64_t frameID)
+  {
+    peer.referenceHistory.erase(std::remove_if(
+      peer.referenceHistory.begin(), peer.referenceHistory.end(),
+      [frameID](const ReferenceFrame& retained)
+      {
+        return retained.frameID == frameID;
+      }), peer.referenceHistory.end());
+  }
+
+  static bool AdvancePeerReferenceNL(PeerState& peer,
+    uint64_t lastCompleteFrameID, uint64_t lastDecodedFrameID)
+  {
+    const uint64_t   acknowledgedID = (std::min)(
+      lastCompleteFrameID, lastDecodedFrameID);
+    ReferenceFrame * candidate      = nullptr;
+    for (auto retained = peer.referenceHistory.rbegin();
+         retained != peer.referenceHistory.rend(); ++retained)
+      if (retained->frameID >= peer.referenceFrameID &&
+          retained->frameID <= acknowledgedID)
+      {
+        candidate = &*retained;
+        break;
+      }
+
+    if (!candidate)
+    {
+      if (!peer.referencePending || !peer.referenceFrameID ||
+          peer.referenceFrameID > acknowledgedID)
+        return false;
+      peer.referencePending = false;
+      peer.keyframePending  = false;
+      return true;
+    }
+
+    const uint64_t                            promotedID    =
+      candidate->frameID;
+    const std::shared_ptr<const EncodedFrame> promotedFrame =
+      candidate->frame;
+    if (!promotedFrame)
+      return false;
+
+    if (candidate->subsequentBlocks.size() != promotedFrame->blockCapacity)
+      return false;
+
+    std::vector<uint8_t> subsequentBlocks =
+      std::move(candidate->subsequentBlocks);
+
+    peer.referenceFrame   = promotedFrame;
+    peer.referenceFrameID = promotedID;
+    peer.referencePending = false;
+    peer.keyframePending  = false;
+    peer.updateBlocks     = std::move(subsequentBlocks);
+    while (!peer.referenceHistory.empty() &&
+        peer.referenceHistory.front().frameID <= promotedID)
+      peer.referenceHistory.pop_front();
+    return true;
   }
 
   bool EncodedQueuedNL(const EncodedFrame * encoded,
@@ -3315,6 +4248,7 @@ struct CNetworkVideo::Impl
     m_failed             = true;
     m_latestSourceSerial = 0;
     m_frames.clear();
+    m_canonicalFrame.reset();
     m_latestFrame.reset();
     for (PeerState& peer : m_peers)
     {
@@ -3343,6 +4277,7 @@ struct CNetworkVideo::Impl
       if (item->frameID && item->frameID != activeFrame &&
           SamePeer(item->peer, peer.peer))
       {
+        RemoveReferenceFrameNL(peer, item->frameID);
         ReleaseSendAccountingNL(*item);
         item = m_sends.erase(item);
       }
@@ -3355,6 +4290,7 @@ struct CNetworkVideo::Impl
     for (auto item = m_sends.begin(); item != m_sends.end();)
       if (SamePeer(item->peer, peer.peer))
       {
+        RemoveReferenceFrameNL(peer, item->frameID);
         ReleaseSendAccountingNL(*item);
         item = m_sends.erase(item);
       }
@@ -3868,10 +4804,12 @@ struct CNetworkVideo::Impl
     peer.lastCaptureTimeNs = frame->captureTimeNs;
     if (establishReference)
     {
+      peer.referenceHistory.clear();
       peer.referenceFrame   = frame;
       peer.referenceFrameID = frameID;
       peer.referencePending = true;
       peer.updateBlocks     = std::move(cleanBlocks);
+      RecordReferenceFrameNL(peer, frameID, frame);
     }
     peer.keyframePending = establishReference;
     return true;
@@ -3931,6 +4869,7 @@ struct CNetworkVideo::Impl
     if (PeerNeedsReferenceNL(peer, *current))
       return QueueFrameNL(
         peer, current, frameID, presentationBaseNs, true);
+    DropPeerFramesNL(peer);
     std::vector<uint8_t>                      updateBlocks;
     const std::shared_ptr<const EncodedFrame> update = BuildUpdateFrame(
       *peer.referenceFrame, *current, peer.updateBlocks,
@@ -3961,6 +4900,7 @@ struct CNetworkVideo::Impl
           frameID, presentationBaseNs))
       return false;
     peer.updateBlocks = std::move(updateBlocks);
+    RecordReferenceFrameNL(peer, frameID, current);
     return true;
   }
 
@@ -4026,51 +4966,49 @@ struct CNetworkVideo::Impl
 
   void PublishFrame(EncodedFrame&& frame)
   {
-    bool buildWholePayload = false;
-    {
-      CSRWSharedLock lock(m_lock);
-      if (!m_started || m_stopped || m_failed || !m_active ||
-          frame.configEpoch != m_configEpoch)
-        return;
-      for (const PeerState& peer : m_peers)
-        if (peer.subscribed && peer.configured &&
-            !peer.referencePending &&
-            PeerNeedsReferenceNL(peer, frame) &&
-            PeerFrameDueNL(peer, frame) &&
-            PeerUsesWholeFrameNL(peer, frame))
-        {
-          buildWholePayload = true;
-          break;
-        }
-    }
-    if (buildWholePayload)
-    {
-      frame.wholePayload = BuildWholeFramePayload(frame, frame.deadlineMs,
-        frame.frameID, frame.captureTimeNs);
-      if (!frame.wholePayload)
-        return;
-    }
-
-    std::shared_ptr<const EncodedFrame> encoded;
-    try
-    {
-      encoded = std::make_shared<EncodedFrame>(std::move(frame));
-    }
-    catch (...)
-    {
-      return;
-    }
-
     CSRWExclusiveLock lock(m_lock);
     if (!m_started || m_stopped || m_failed || !m_active ||
-        encoded->configEpoch != m_configEpoch)
+        frame.configEpoch != m_configEpoch)
       return;
-    uint64_t frameID = encoded->frameID;
+    std::shared_ptr<EncodedFrame> canonical = BuildCanonicalFrame(
+      m_canonicalFrame, std::move(frame));
+    if (!canonical)
+    {
+      FailNL(4);
+      return;
+    }
+
+    uint64_t frameID = canonical->frameID;
     if (frameID != m_nextFrameID)
     {
-      frameID        = Next64(m_nextFrameID);
-      m_nextFrameID  = frameID;
+      frameID            = Next64(m_nextFrameID);
+      m_nextFrameID      = frameID;
+      canonical->frameID = frameID;
     }
+    bool buildWholePayload = false;
+    for (const PeerState& peer : m_peers)
+      if (peer.subscribed && peer.configured &&
+          !peer.referencePending &&
+          PeerNeedsReferenceNL(peer, *canonical) &&
+          PeerFrameDueNL(peer, *canonical) &&
+          PeerUsesWholeFrameNL(peer, *canonical))
+      {
+        buildWholePayload = true;
+        break;
+      }
+    if (buildWholePayload)
+    {
+      canonical->wholePayload = BuildWholeFramePayload(*canonical,
+        canonical->deadlineMs, frameID, canonical->captureTimeNs);
+      if (!canonical->wholePayload)
+      {
+        FailNL(4);
+        return;
+      }
+    }
+
+    const std::shared_ptr<const EncodedFrame> encoded = canonical;
+    m_canonicalFrame = encoded;
     // An older in-flight encode must not replace a newer retained source.
     if (encoded->sourceSerial &&
         encoded->sourceSerial == m_latestSourceSerial)
@@ -4090,8 +5028,9 @@ struct CNetworkVideo::Impl
   bool SubmitPending()
   {
     PendingFrame                  pending;
-    LGNetVideoChromaSubsampling   chroma     = CHROMA_444;
-    uint32_t                      frameLimit = MAX_FRAME_LENGTH;
+    LGNetVideoChromaSubsampling   chroma      = CHROMA_444;
+    uint32_t                      hardLimit   = MAX_FRAME_LENGTH;
+    uint32_t                      updateLimit = MAX_FRAME_LENGTH;
     {
       CSRWExclusiveLock lock(m_lock);
       if (m_encoder.Busy() || m_frames.empty() || !m_started ||
@@ -4101,8 +5040,8 @@ struct CNetworkVideo::Impl
       for (const PeerState& peer : m_peers)
         if (peer.subscribed && peer.configured)
         {
-          frameLimit = (std::min)(
-            frameLimit, peer.subscription.maxFrameLength);
+          hardLimit  = (std::min)(
+            hardLimit, peer.subscription.maxFrameLength);
           configured = true;
         }
       if (!configured)
@@ -4112,15 +5051,15 @@ struct CNetworkVideo::Impl
       if (pending.configEpoch != m_configEpoch ||
           !SameCfg(pending.cfg, m_activeCfg))
         return true;
-      frameLimit = (std::min)(
-        frameLimit, FrameLimitNL(pending.lease->time.postStart));
-      chroma     = m_videoChroma;
+      updateLimit = (std::min)(
+        hardLimit, FrameLimitNL(pending.lease->time.postStart));
+      chroma      = m_videoChroma;
     }
 
     if (m_encoder.Submit(std::move(pending.frame),
           std::move(pending.lease), pending.cfg,
           chroma,
-          frameLimit))
+          hardLimit, updateLimit))
       return true;
 
     CSRWExclusiveLock lock(m_lock);
@@ -4337,15 +5276,19 @@ void CNetworkVideo::DetachSender()
   if (!m_impl)
     return;
   CSRWExclusiveLock processLock(m_impl->m_processLock);
-  CSRWExclusiveLock callbackLock(m_impl->m_senderCallbackLock);
-  CSRWExclusiveLock lock(m_impl->m_lock);
-  m_impl->m_sender             = nullptr;
-  m_impl->m_latestSourceSerial = 0;
-  m_impl->m_sendBytes          = 0;
-  m_impl->m_frames.clear();
-  m_impl->m_sends.clear();
-  m_impl->m_peers.clear();
-  m_impl->m_latestFrame.reset();
+  {
+    CSRWExclusiveLock callbackLock(m_impl->m_senderCallbackLock);
+    CSRWExclusiveLock lock(m_impl->m_lock);
+    m_impl->m_sender             = nullptr;
+    m_impl->m_latestSourceSerial = 0;
+    m_impl->m_sendBytes          = 0;
+    m_impl->m_frames.clear();
+    m_impl->m_sends.clear();
+    m_impl->m_peers.clear();
+    m_impl->m_canonicalFrame.reset();
+    m_impl->m_latestFrame.reset();
+  }
+  m_impl->m_encoder.Reset();
 }
 
 bool CNetworkVideo::Start(uint32_t videoBitrateMbps,
@@ -4388,6 +5331,7 @@ void CNetworkVideo::Stop()
     m_impl->m_latestSourceSerial      = 0;
     m_impl->m_frames.clear();
     m_impl->m_sends.clear();
+    m_impl->m_canonicalFrame.reset();
     m_impl->m_latestFrame.reset();
     for (Impl::PeerState& peer : m_impl->m_peers)
     {
@@ -4609,19 +5553,13 @@ NetworkVideoPacketResult CNetworkVideo::HandlePacket(
         return NetworkVideoPacketResult::IGNORED;
       if (!peer->subscribed)
         return NetworkVideoPacketResult::INVALID;
-      bool referenceAccepted = false;
       peer->feedback       = feedback;
       peer->lastCompleteID = feedback.lastCompleteFrameID;
       peer->congested      =
         feedback.flags & LG_NET_VIDEO_FEEDBACK_CONGESTED;
-      if (peer->referencePending && peer->referenceFrameID &&
-          feedback.lastCompleteFrameID >= peer->referenceFrameID &&
-          feedback.lastDecodedFrameID >= peer->referenceFrameID)
-      {
-        peer->referencePending = false;
-        peer->keyframePending  = false;
-        referenceAccepted      = true;
-      }
+      const bool referenceAccepted =
+        m_impl->AdvancePeerReferenceNL(*peer,
+          feedback.lastCompleteFrameID, feedback.lastDecodedFrameID);
       if (feedback.flags & (LG_NET_VIDEO_FEEDBACK_REQUEST_KEYFRAME |
             LG_NET_VIDEO_FEEDBACK_DECODER_STALLED))
       {
@@ -4742,6 +5680,7 @@ void CNetworkVideo::Commit()
     m_impl->m_lastBudgetCaptureTimeNs = 0;
     m_impl->m_latestSourceSerial      = 0;
     m_impl->m_frames.clear();
+    m_impl->m_canonicalFrame.reset();
     m_impl->m_latestFrame.reset();
     for (Impl::PeerState& peer : m_impl->m_peers)
       if (peer.subscribed)
@@ -4798,7 +5737,11 @@ PushResult CNetworkVideo::Push(FrameIn frame, TexLease lease) noexcept
   {
     // Keep the newest source available until a subscriber can encode it.
     if (m_impl->m_frames.size() >= MAX_PENDING_FRAMES)
+    {
+      MergeFrameDamage(frame.desc.frame,
+        m_impl->m_frames.front().frame.desc.frame);
       m_impl->m_frames.pop_front();
+    }
     Impl::PendingFrame pending;
     pending.frame       = std::move(frame);
     pending.lease       = std::move(lease);

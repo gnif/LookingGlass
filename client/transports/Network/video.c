@@ -286,6 +286,66 @@ static void networkVideoFreeOutput(struct NetworkVideoOutput ** output)
   *output = NULL;
 }
 
+static void networkVideoMergeDamage(NetworkVideoDecodedFrame * destination,
+    const NetworkVideoDecodedFrame * source)
+{
+  if (!destination || !source)
+    return;
+
+  if (!destination->damageRectsCount || !source->damageRectsCount ||
+      destination->damageRectsCount > LG_TRANSPORT_MAX_DAMAGE_RECTS ||
+      source->damageRectsCount > LG_TRANSPORT_MAX_DAMAGE_RECTS)
+  {
+    destination->damageRectsCount = 0;
+    return;
+  }
+
+  if (destination->damageRectsCount >=
+      LG_TRANSPORT_MAX_DAMAGE_RECTS - source->damageRectsCount)
+  {
+    uint32_t left   = UINT32_MAX;
+    uint32_t top    = UINT32_MAX;
+    uint64_t right  = 0;
+    uint64_t bottom = 0;
+    for (unsigned set = 0; set < 2; ++set)
+    {
+      const KVMFRFrameDamageRect * rects = set ?
+        source->damageRects : destination->damageRects;
+      const uint32_t               count = set ?
+        source->damageRectsCount : destination->damageRectsCount;
+      for (uint32_t index = 0; index < count; ++index)
+      {
+        left   = rects[index].x < left ? rects[index].x : left;
+        top    = rects[index].y < top ? rects[index].y : top;
+        right  = (uint64_t)rects[index].x + rects[index].width > right ?
+          (uint64_t)rects[index].x + rects[index].width : right;
+        bottom = (uint64_t)rects[index].y + rects[index].height > bottom ?
+          (uint64_t)rects[index].y + rects[index].height : bottom;
+      }
+    }
+    if (right <= left || bottom <= top || right - left > UINT32_MAX ||
+        bottom - top > UINT32_MAX)
+    {
+      destination->damageRectsCount = 0;
+      return;
+    }
+    destination->damageRects[0] = (KVMFRFrameDamageRect)
+    {
+      .x      = left,
+      .y      = top,
+      .width  = (uint32_t)(right - left),
+      .height = (uint32_t)(bottom - top),
+    };
+    destination->damageRectsCount = 1;
+    return;
+  }
+
+  memcpy(destination->damageRects + destination->damageRectsCount,
+      source->damageRects,
+      source->damageRectsCount * sizeof(*source->damageRects));
+  destination->damageRectsCount += source->damageRectsCount;
+}
+
 static void networkVideoClearEncoded(struct NetworkVideoEncoded * encoded)
 {
   if (!encoded)
@@ -902,7 +962,8 @@ static bool networkVideoAddFragmentNL(NetworkVideo * video,
     if (assembly->active)
     {
       if (assembly->update && update &&
-          assembly->baseFrameID != baseFrameID)
+          assembly->baseFrameID != baseFrameID &&
+          (!baseFrameID || baseFrameID > video->lastDecodedFrameID))
         return false;
       video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
       if (!assembly->update && !update && *encodedCount < 2U &&
@@ -1080,26 +1141,47 @@ static void networkVideoDecode(NetworkVideo * video,
     return;
   }
 
-  NetworkVideoDecodedFrame       decoded;
-  const NetworkVideoDecodeResult result = networkVideoDecoderDecode(
+  struct NetworkVideoOutput * output = calloc(1, sizeof(*output));
+  if (!output)
+  {
+    free(encoded->ownedData);
+    networkVideoDecodeFailure(
+        video, encoded, NETWORK_VIDEO_DECODE_ERROR);
+    return;
+  }
+
+  NetworkVideoDecodedFrame       decoded = {0};
+  const NetworkVideoDecodeResult result  = networkVideoDecoderDecode(
       video->decoder, &encoded->config, encoded->data,
       encoded->length, encoded->blockCount, encoded->update,
       encoded->complete, encoded->baseFrameID, encoded->frameID, &decoded);
   free(encoded->ownedData);
+  if (result == NETWORK_VIDEO_DECODE_NO_FRAME)
+  {
+    free(output);
+    LG_LOCK(video->stateLock);
+    if (video->decodeGeneration == encoded->generation &&
+        video->wireConfigured &&
+        video->config.configEpoch == encoded->config.configEpoch &&
+        video->rendererAttached && video->decoderReady &&
+        encoded->frameID > video->lastDecodedFrameID)
+    {
+      if (encoded->complete)
+        video->lastCompleteFrameID = encoded->frameID;
+      video->lastDecodedFrameID    = encoded->frameID;
+      networkVideoQueueFeedbackNL(video, 0);
+    }
+    LG_UNLOCK(video->stateLock);
+    return;
+  }
   if (result != NETWORK_VIDEO_DECODE_OK)
   {
+    free(output);
     networkVideoDecodeFailure(video, encoded, result);
     return;
   }
 
-  struct NetworkVideoOutput * output   = calloc(1, sizeof(*output));
   struct NetworkVideoOutput * replaced = NULL;
-  if (!output)
-  {
-    networkVideoDecoderRelease(&decoded);
-    networkVideoDecodeFailure(video, encoded, NETWORK_VIDEO_DECODE_ERROR);
-    return;
-  }
   output->decoded                 = decoded;
   output->frameID                 = encoded->frameID;
   output->timestamp               = encoded->presentationTimestampNs;
@@ -1122,6 +1204,7 @@ static void networkVideoDecode(NetworkVideo * video,
   {
     video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
     replaced          = video->output;
+    networkVideoMergeDamage(&output->decoded, &replaced->decoded);
   }
   if (encoded->complete)
     video->lastCompleteFrameID   = output->frameID;
@@ -1150,13 +1233,12 @@ static void networkVideoQueueDecode(NetworkVideo * video,
   bool                       queued      = false;
   bool                       replaceable;
   LG_LOCK(video->stateLock);
-  baseMismatch = encoded->update && video->decodePending &&
-    video->pendingDecode.update &&
-    video->pendingDecode.baseFrameID != encoded->baseFrameID;
+  baseMismatch = encoded->update &&
+    (!encoded->baseFrameID ||
+      encoded->baseFrameID > video->lastDecodedFrameID);
   replaceable  = !video->decodePending ||
     !encoded->update ||
-    (video->pendingDecode.update &&
-      video->pendingDecode.baseFrameID == encoded->baseFrameID);
+    (video->pendingDecode.update && !baseMismatch);
   if (baseMismatch)
   {
     video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
@@ -1494,8 +1576,8 @@ static bool networkVideoHandleFrameUpdate(NetworkVideo * video,
       video->assembly.frameID <= update.frameID)
   {
     video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
-    baseMismatch      = video->assembly.update &&
-      video->assembly.baseFrameID != update.baseFrameID;
+    baseMismatch      = !update.baseFrameID ||
+      update.baseFrameID > video->lastDecodedFrameID;
     retiredAssembly   = networkVideoTakeAssemblyNL(video);
     if (baseMismatch)
       networkVideoRequestKeyframeNL(video,
@@ -2234,6 +2316,9 @@ LG_TransportStatus networkVideoNextFrame(NetworkVideo * video, bool useDMA,
         frame->format                 = &output->decoded.format;
         frame->externalFrame          =
           lgExternalFrameRetain(output->decoded.externalFrame);
+        frame->damageRects            = output->decoded.damageRectsCount ?
+          output->decoded.damageRects : NULL;
+        frame->damageRectsCount       = output->decoded.damageRectsCount;
         frame->releaseFn              = networkVideoReleaseLease;
         frame->releaseOpaque          = video;
         frame->releaseHandle          = output->handle;
