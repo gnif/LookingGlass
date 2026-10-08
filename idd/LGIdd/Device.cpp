@@ -385,8 +385,7 @@ NTSTATUS LGIddParseMonitorDescription(const IDARG_IN_PARSEMONITORDESCRIPTION* in
     return STATUS_INVALID_PARAMETER;
 
   auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription(
-    inArgs, outArgs);
+  return wrapper->context->ParseMonitorDescription(inArgs, outArgs);
 }
 
 NTSTATUS LGIddMonitorGetDefaultModes(IDDCX_MONITOR monitor, const IDARG_IN_GETDEFAULTDESCRIPTIONMODES * inArgs,
@@ -394,7 +393,8 @@ NTSTATUS LGIddMonitorGetDefaultModes(IDDCX_MONITOR monitor, const IDARG_IN_GETDE
 {
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   auto * context = wrapper->context->GetDeviceContext();
-  return context->GetDisplayConfiguration().MonitorGetDefaultModes(
+  const UINT head = wrapper->context->GetHead();
+  return context->GetDisplayConfiguration(head).MonitorGetDefaultModes(
     inArgs, outArgs);
 }
 
@@ -403,7 +403,8 @@ NTSTATUS LGIddMonitorQueryTargetModes(IDDCX_MONITOR monitor, const IDARG_IN_QUER
 {
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   auto * context = wrapper->context->GetDeviceContext();
-  return context->GetDisplayConfiguration().MonitorQueryTargetModes(
+  const UINT head = wrapper->context->GetHead();
+  return context->GetDisplayConfiguration(head).MonitorQueryTargetModes(
     inArgs, outArgs);
 }
 
@@ -416,8 +417,7 @@ NTSTATUS LGIddParseMonitorDescription2(const IDARG_IN_PARSEMONITORDESCRIPTION2* 
     return STATUS_INVALID_PARAMETER;
 
   auto * wrapper = WdfObjectGet_CDeviceContextWrapper(l_wdfDevice);
-  return wrapper->context->GetDisplayConfiguration().ParseMonitorDescription2(
-    inArgs, outArgs);
+  return wrapper->context->ParseMonitorDescription2(inArgs, outArgs);
 }
 
 NTSTATUS LGIddAdapterQueryTargetInfo(IDDCX_ADAPTER adapter,
@@ -464,7 +464,7 @@ NTSTATUS LGIddMonitorSetGammaRamp(IDDCX_MONITOR monitor, const IDARG_IN_SET_GAMM
 {
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   auto * ctx     = wrapper->context->GetDeviceContext();
-  auto & control = ctx->GetTransport().Control();
+  auto & control = ctx->GetTransport(wrapper->context->GetHead()).Control();
 
   if (ctx->IsSoftwareMode())
   {
@@ -530,7 +530,8 @@ NTSTATUS LGIddMonitorQueryTargetModes2(IDDCX_MONITOR monitor, const IDARG_IN_QUE
 {
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
   auto * context = wrapper->context->GetDeviceContext();
-  return context->GetDisplayConfiguration().MonitorQueryTargetModes2(
+  const UINT head = wrapper->context->GetHead();
+  return context->GetDisplayConfiguration(head).MonitorQueryTargetModes2(
     inArgs, outArgs);
 }
 #endif

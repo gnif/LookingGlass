@@ -31,6 +31,7 @@
 #include <mutex>
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
@@ -46,13 +47,24 @@ private:
 
   // At boot the selected transport may not be available yet. The retry timer
   // and atomic gate keep adapter creation single-threaded until it is ready.
-  WDFTIMER          m_initTimer       = nullptr;
-  bool              m_transportOpened = false;
-  std::atomic<LONG> m_initInProgress  = 0;
+  WDFTIMER          m_initTimer      = nullptr;
+  std::atomic<LONG> m_initInProgress = 0;
 
-  std::unique_ptr<CTransportManager> m_transport;
-  CDisplayConfiguration       m_displayConfiguration;
-  CMonitorManager             m_monitorManager;
+  struct Head
+  {
+    std::unique_ptr<CTransportManager> transport;
+    CDisplayConfiguration              displayConfiguration;
+    CMonitorManager                    monitorManager;
+    const UINT                         index;
+    bool                               transportOpened = false;
+
+    Head(UINT connectorIndex, std::unique_ptr<CTransportManager> manager,
+      CSettings& settings);
+    Head(const Head&) = delete;
+    Head& operator=(const Head&) = delete;
+  };
+
+  std::vector<std::unique_ptr<Head>> m_heads;
 
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
@@ -75,6 +87,18 @@ private:
   bool m_canProcessFP16  = false;
   bool m_softwareMode    = true;
 
+  Head& PrimaryHead() { return *m_heads[0]; }
+
+  Head& HeadAt(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return *m_heads[head];
+  }
+
+  UINT HeadForBackend(BackendId backend) const;
+  CSettings::DisplayModes MonitorModes(bool * hdrEnabled) const;
+
   void QueryIddCxCapabilities();
 
   void ScheduleInitRetry();
@@ -93,7 +117,8 @@ private:
   InteractionResult OnSetResolution(const SourceKey& source,
     uint32_t width, uint32_t height) override;
   bool OnRecoveryAction(const RecoveryAction& action) override;
-  InteractionResult SetResolution(uint32_t width, uint32_t height);
+  InteractionResult SetResolution(
+    UINT head, uint32_t width, uint32_t height);
 
 public:
   explicit CDeviceContext(_In_ WDFDEVICE wdfDevice);
@@ -102,18 +127,27 @@ public:
   CDeviceContext(const CDeviceContext&) = delete;
   CDeviceContext& operator=(const CDeviceContext&) = delete;
 
-  bool SetupTransport(size_t alignSize);
+  bool SetupTransport(UINT head, size_t alignSize);
 
   void InitAdapter();
   void FinishAdapterInit(UINT connectorIndex);
   void FinishInit(UINT connectorIndex);
   void ReloadSettings();
-  void ReplugMonitor();
+  void ReplugMonitor(UINT head);
 
-  void OnMonitorDestroyed(IDDCX_MONITOR monitor);
-  void OnSwapChainAssigned();
-  void OnSwapChainReleased();
-  void OnSwapChainReady();
+  void OnMonitorDestroyed(UINT head, IDDCX_MONITOR monitor);
+  void OnSwapChainAssigned(UINT head);
+  void OnSwapChainReleased(UINT head);
+  void OnSwapChainReady(UINT head);
+
+  NTSTATUS ParseMonitorDescription(
+    const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#ifdef HAS_IDDCX_110
+  NTSTATUS ParseMonitorDescription2(
+    const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#endif
 
   bool HasIddCx110DDIs() const { return m_hasIddCx110DDIs; }
   bool CanProcessFP16 () const { return m_canProcessFP16;  }
@@ -121,12 +155,21 @@ public:
 
   CTransportManager& GetTransport()
   {
-    return *m_transport;
+    return *PrimaryHead().transport;
   }
 
-  CDisplayConfiguration& GetDisplayConfiguration()
+  CTransportManager& GetTransport(UINT head)
   {
-    return m_displayConfiguration;
+    if (head >= m_heads.size())
+      head = 0;
+    return *m_heads[head]->transport;
+  }
+
+  CDisplayConfiguration& GetDisplayConfiguration(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return m_heads[head]->displayConfiguration;
   }
 };
 

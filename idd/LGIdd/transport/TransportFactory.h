@@ -20,8 +20,12 @@
 
 #pragma once
 
+#include "transport/TransportConfig.h"
+
 #include <memory>
 
 class CTransportManager;
 
-std::unique_ptr<CTransportManager> CreateTransport();
+bool ResolveTransports(ResolvedTransportInstances& resolved);
+std::unique_ptr<CTransportManager> CreateTransport(
+  const ResolvedTransportInstances& resolved, unsigned connector);

@@ -51,6 +51,7 @@ private:
   std::shared_ptr<CD3D11Device> m_dx11Device;
 
   CDeviceContext * m_devContext;
+  UINT             m_head;
   std::unique_ptr<CSwapChainProcessor> m_swapChain;
 
   // Incremented whenever the current assignment is replaced or unassigned.
@@ -62,7 +63,7 @@ private:
 
 public:
   CMonitorContext(
-    _In_ IDDCX_MONITOR monitor, CDeviceContext * device);
+    _In_ IDDCX_MONITOR monitor, CDeviceContext * device, UINT head);
 
   virtual ~CMonitorContext();
 
@@ -76,6 +77,7 @@ public:
   }
 
   CDeviceContext * GetDeviceContext() { return m_devContext; }
+  UINT GetHead() const { return m_head; }
 };
 
 struct CMonitorContextWrapper

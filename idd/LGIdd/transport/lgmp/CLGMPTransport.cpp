@@ -25,6 +25,10 @@
 #include <LGProtocol/KVMFR.h>
 #include <LGProtocol/KVMFRRecovery.h>
 
+#include <errno.h>
+#include <limits.h>
+#include <stdlib.h>
+
 static bool TranslateFrameScheduleFlags(
   uint32_t source, uint32_t& destination)
 {
@@ -77,7 +81,24 @@ ITransport::OpenResult CLGMPTransport::Open()
   if (m_ivshmem.GetMem())
     return OpenResult::SUCCESS;
 
-  if (!m_ivshmem.Init() || !m_ivshmem.Open())
+  // An instance may select its own IVSHMEM device through its settings.
+  // Without one, CIVSHMEM falls back to the registry value as before.
+  int shmDevice = -1;
+  std::wstring setting;
+  if (GetTransportSetting(m_config.settings, L"shmDevice", setting))
+  {
+    wchar_t * end = nullptr;
+    errno = 0;
+    const unsigned long value = wcstoul(setting.c_str(), &end, 10);
+    if (setting.empty() || setting[0] == L'-' || errno == ERANGE ||
+        !end || *end || value > INT_MAX)
+      DEBUG_WARN("Ignoring invalid shmDevice setting for transport %u",
+        m_config.id);
+    else
+      shmDevice = static_cast<int>(value);
+  }
+
+  if (!m_ivshmem.Init(shmDevice) || !m_ivshmem.Open())
     return OpenResult::RETRY;
 
   return OpenResult::SUCCESS;
