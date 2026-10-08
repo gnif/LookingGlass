@@ -143,6 +143,21 @@ struct NetworkVideoEncoded
   LGNetVideoSchedule     schedule;
 };
 
+struct NetworkVideoDeferred
+{
+  uint64_t decodeGeneration;
+  uint64_t configEpoch;
+  uint64_t frameID;
+  uint64_t epoch;
+  uint64_t timestamp;
+  uint64_t captureTimestampNs;
+  uint64_t presentationTimestampNs;
+  uint64_t receiveTimeNs;
+  uint32_t formatVersion;
+  bool     complete;
+  bool     valid;
+};
+
 struct NetworkVideo
 {
   NetworkConnection   * connection;
@@ -165,6 +180,7 @@ struct NetworkVideo
   bool     waitCancelled;
   bool     decodeStopping;
   bool     decodePending;
+  bool     framePollPending;
   uint16_t serviceVersion;
 
   uint64_t subscriberID;
@@ -192,6 +208,7 @@ struct NetworkVideo
 
   struct NetworkVideoAssembly      assembly;
   struct NetworkVideoEncoded       pendingDecode;
+  struct NetworkVideoDeferred      deferred;
   struct NetworkVideoScheduleEntry schedules[NETWORK_VIDEO_SCHEDULE_CACHE];
   struct NetworkVideoOutput      * output;
   struct NetworkVideoOutput      * leases;
@@ -354,6 +371,39 @@ static void networkVideoClearEncoded(struct NetworkVideoEncoded * encoded)
   memset(encoded, 0, sizeof(*encoded));
 }
 
+static void networkVideoDeferNL(NetworkVideo * video,
+    const struct NetworkVideoEncoded * encoded)
+{
+  video->deferred = (struct NetworkVideoDeferred)
+  {
+    .decodeGeneration        = encoded->generation,
+    .configEpoch             = encoded->config.configEpoch,
+    .frameID                 = encoded->frameID,
+    .epoch                   = video->status.epoch,
+    .timestamp               = encoded->presentationTimestampNs,
+    .captureTimestampNs      = encoded->captureTimestampNs,
+    .presentationTimestampNs = encoded->presentationTimestampNs,
+    .receiveTimeNs           = encoded->receiveTimeNs,
+    .formatVersion           = video->localConfigGeneration,
+    .complete                = encoded->complete,
+    .valid                   = true,
+  };
+  video->framePollPending = true;
+}
+
+static bool networkVideoDeferredCurrentNL(
+    const NetworkVideo * video, const struct NetworkVideoDeferred * deferred)
+{
+  return deferred->valid && video->deferred.valid &&
+    deferred->decodeGeneration == video->deferred.decodeGeneration &&
+    deferred->configEpoch == video->deferred.configEpoch &&
+    deferred->frameID == video->deferred.frameID &&
+    deferred->epoch == video->deferred.epoch &&
+    video->decodeGeneration == deferred->decodeGeneration &&
+    video->config.configEpoch == deferred->configEpoch &&
+    video->status.epoch == deferred->epoch;
+}
+
 static void networkVideoInvalidateDecodeNL(NetworkVideo * video,
     struct NetworkVideoEncoded * pending)
 {
@@ -361,6 +411,8 @@ static void networkVideoInvalidateDecodeNL(NetworkVideo * video,
   *pending                = video->pendingDecode;
   video->pendingDecode    = (struct NetworkVideoEncoded){0};
   video->decodePending    = false;
+  video->framePollPending = false;
+  memset(&video->deferred, 0, sizeof(video->deferred));
 }
 
 static struct NetworkVideoOutput * networkVideoFindLeaseNL(
@@ -1102,7 +1154,10 @@ static void networkVideoDecodeFailure(NetworkVideo * video,
       video->wireConfigured &&
       video->config.configEpoch == encoded->config.configEpoch)
   {
-    video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
+    video->lostFrames       = networkVideoSaturatingIncrement(
+        video->lostFrames);
+    video->framePollPending = false;
+    memset(&video->deferred, 0, sizeof(video->deferred));
 
     const LGNetVideoFeedbackFlags flags = result ==
       NETWORK_VIDEO_DECODE_ERROR ?
@@ -1141,24 +1196,18 @@ static void networkVideoDecode(NetworkVideo * video,
     return;
   }
 
-  struct NetworkVideoOutput * output = calloc(1, sizeof(*output));
-  if (!output)
-  {
-    free(encoded->ownedData);
-    networkVideoDecodeFailure(
-        video, encoded, NETWORK_VIDEO_DECODE_ERROR);
-    return;
-  }
-
   NetworkVideoDecodedFrame       decoded = {0};
   const NetworkVideoDecodeResult result  = networkVideoDecoderDecode(
       video->decoder, &encoded->config, encoded->data,
       encoded->length, encoded->blockCount, encoded->update,
       encoded->complete, encoded->baseFrameID, encoded->frameID, &decoded);
   free(encoded->ownedData);
-  if (result == NETWORK_VIDEO_DECODE_NO_FRAME)
+  encoded->ownedData = NULL;
+  encoded->data      = NULL;
+  if (result == NETWORK_VIDEO_DECODE_NO_FRAME ||
+      result == NETWORK_VIDEO_DECODE_DEFERRED)
   {
-    free(output);
+    bool pollFrame = false;
     LG_LOCK(video->stateLock);
     if (video->decodeGeneration == encoded->generation &&
         video->wireConfigured &&
@@ -1169,15 +1218,30 @@ static void networkVideoDecode(NetworkVideo * video,
       if (encoded->complete)
         video->lastCompleteFrameID = encoded->frameID;
       video->lastDecodedFrameID    = encoded->frameID;
+      if (result == NETWORK_VIDEO_DECODE_DEFERRED)
+      {
+        networkVideoDeferNL(video, encoded);
+        pollFrame = true;
+      }
       networkVideoQueueFeedbackNL(video, 0);
     }
     LG_UNLOCK(video->stateLock);
+    if (pollFrame)
+      lgSignalEvent(video->frameEvent);
     return;
   }
   if (result != NETWORK_VIDEO_DECODE_OK)
   {
-    free(output);
     networkVideoDecodeFailure(video, encoded, result);
+    return;
+  }
+
+  struct NetworkVideoOutput * output = calloc(1, sizeof(*output));
+  if (!output)
+  {
+    networkVideoDecoderRelease(&decoded);
+    networkVideoDecodeFailure(
+        video, encoded, NETWORK_VIDEO_DECODE_ERROR);
     return;
   }
 
@@ -1209,6 +1273,8 @@ static void networkVideoDecode(NetworkVideo * video,
   if (encoded->complete)
     video->lastCompleteFrameID   = output->frameID;
   video->lastDecodedFrameID      = output->frameID;
+  video->framePollPending        = false;
+  memset(&video->deferred, 0, sizeof(video->deferred));
   output->decoded.format.version = video->localConfigGeneration;
   output->epoch                  = video->status.epoch;
   video->output                  = output;
@@ -1216,6 +1282,101 @@ static void networkVideoDecode(NetworkVideo * video,
   LG_UNLOCK(video->stateLock);
   networkVideoFreeOutput(&replaced);
   lgSignalEvent(video->frameEvent);
+}
+
+static bool networkVideoPresentDeferred(NetworkVideo * video,
+    const struct NetworkVideoDeferred * deferred)
+{
+  LG_LOCK(video->stateLock);
+  const bool current = !video->destroying && !video->decodeStopping &&
+    video->connected && video->wireConfigured && video->rendererAttached &&
+    video->decoderReady && networkVideoDeferredCurrentNL(video, deferred);
+  LG_UNLOCK(video->stateLock);
+  if (!current)
+    return false;
+
+  NetworkVideoDecodedFrame       decoded = {0};
+  const NetworkVideoDecodeResult result  =
+    networkVideoDecoderPresentPending(video->decoder, &decoded);
+  if (result == NETWORK_VIDEO_DECODE_DEFERRED)
+    return false;
+  if (result == NETWORK_VIDEO_DECODE_NO_FRAME)
+  {
+    LG_LOCK(video->stateLock);
+    if (networkVideoDeferredCurrentNL(video, deferred))
+    {
+      video->framePollPending = false;
+      memset(&video->deferred, 0, sizeof(video->deferred));
+    }
+    LG_UNLOCK(video->stateLock);
+    return true;
+  }
+
+  if (result != NETWORK_VIDEO_DECODE_OK)
+  {
+    struct NetworkVideoEncoded encoded = {0};
+    encoded.config.configEpoch = deferred->configEpoch;
+    encoded.generation         = deferred->decodeGeneration;
+    encoded.frameID            = deferred->frameID;
+    encoded.complete           = deferred->complete;
+    LG_LOCK(video->stateLock);
+    if (networkVideoDeferredCurrentNL(video, deferred))
+    {
+      video->framePollPending = false;
+      memset(&video->deferred, 0, sizeof(video->deferred));
+    }
+    LG_UNLOCK(video->stateLock);
+    networkVideoDecodeFailure(video, &encoded, result);
+    return true;
+  }
+
+  struct NetworkVideoOutput * output = calloc(1, sizeof(*output));
+  if (!output)
+  {
+    struct NetworkVideoEncoded encoded = {0};
+    encoded.config.configEpoch = deferred->configEpoch;
+    encoded.generation         = deferred->decodeGeneration;
+    encoded.frameID            = deferred->frameID;
+    encoded.complete           = deferred->complete;
+    networkVideoDecoderRelease(&decoded);
+    networkVideoDecodeFailure(
+        video, &encoded, NETWORK_VIDEO_DECODE_ERROR);
+    return true;
+  }
+
+  struct NetworkVideoOutput * replaced = NULL;
+  output->decoded                 = decoded;
+  output->frameID                 = deferred->frameID;
+  output->timestamp               = deferred->timestamp;
+  output->captureTimestampNs      = deferred->captureTimestampNs;
+  output->presentationTimestampNs = deferred->presentationTimestampNs;
+  output->receiveTimeNs           = deferred->receiveTimeNs;
+  LG_LOCK(video->stateLock);
+  if (!networkVideoDeferredCurrentNL(video, deferred) ||
+      output->frameID != video->lastDecodedFrameID ||
+      !video->rendererAttached || !video->decoderReady)
+  {
+    LG_UNLOCK(video->stateLock);
+    networkVideoFreeOutput(&output);
+    return true;
+  }
+
+  if (video->output)
+  {
+    video->lostFrames = networkVideoSaturatingIncrement(video->lostFrames);
+    replaced          = video->output;
+    networkVideoMergeDamage(&output->decoded, &replaced->decoded);
+  }
+  output->decoded.format.version = deferred->formatVersion;
+  output->epoch                  = deferred->epoch;
+  video->output                  = output;
+  video->framePollPending        = false;
+  memset(&video->deferred, 0, sizeof(video->deferred));
+  networkVideoQueueFeedbackNL(video, 0);
+  LG_UNLOCK(video->stateLock);
+  networkVideoFreeOutput(&replaced);
+  lgSignalEvent(video->frameEvent);
+  return true;
 }
 
 static void networkVideoQueueDecode(NetworkVideo * video,
@@ -1283,7 +1444,8 @@ static int networkVideoDecodeThread(void * opaque)
     lgWaitEvent(video->decodeEvent, TIMEOUT_INFINITE);
     for (;;)
     {
-      struct NetworkVideoEncoded encoded = {0};
+      struct NetworkVideoEncoded  encoded  = {0};
+      struct NetworkVideoDeferred deferred = {0};
       LG_LOCK(video->stateLock);
       if (video->decodeStopping)
       {
@@ -1300,11 +1462,18 @@ static int networkVideoDecodeThread(void * opaque)
         video->pendingDecode = (struct NetworkVideoEncoded){0};
         video->decodePending = false;
       }
+      else if (video->deferred.valid)
+        deferred = video->deferred;
       LG_UNLOCK(video->stateLock);
 
-      if (!encoded.ownedData)
+      if (encoded.ownedData)
+      {
+        networkVideoDecode(video, &encoded);
+        continue;
+      }
+      if (!deferred.valid ||
+          !networkVideoPresentDeferred(video, &deferred))
         break;
-      networkVideoDecode(video, &encoded);
     }
   }
 }
@@ -1960,6 +2129,7 @@ void networkVideoProcess(NetworkVideo * video)
   const uint64_t               now             = nanotime();
   struct NetworkVideoAssembly  retiredAssembly = {0};
   struct NetworkVideoEncoded   recovered       = {0};
+  bool                         pollFrame        = false;
   LG_LOCK(video->stateLock);
   if (video->destroying)
   {
@@ -1978,10 +2148,17 @@ void networkVideoProcess(NetworkVideo * video)
   networkVideoSendSubscribeNL(video, now);
   networkVideoSendKeyframeNL(video, now);
   networkVideoSendFeedbackNL(video, now);
+  if (video->deferred.valid && !video->framePollPending)
+  {
+    video->framePollPending = true;
+    pollFrame               = true;
+  }
   LG_UNLOCK(video->stateLock);
   networkVideoClearAssembly(&retiredAssembly);
   if (recovered.ownedData)
     networkVideoQueueDecode(video, &recovered);
+  if (pollFrame)
+    lgSignalEvent(video->frameEvent);
 }
 
 static bool networkVideoTimer(void * opaque)
@@ -2032,7 +2209,7 @@ bool networkVideoCreate(NetworkVideo ** result,
   video->frameEvent  = lgCreateEvent(true, 0);
   video->decodeEvent = lgCreateEvent(true, 0);
   if (!video->frameEvent || !video->decodeEvent ||
-      !networkVideoDecoderCreate(&video->decoder) ||
+      !networkVideoDecoderCreate(&video->decoder, video->decodeEvent) ||
       !lgCreateThread("networkDecode", networkVideoDecodeThread,
         video, &video->decodeThread))
   {
@@ -2323,6 +2500,12 @@ LG_TransportStatus networkVideoNextFrame(NetworkVideo * video, bool useDMA,
         frame->releaseOpaque          = video;
         frame->releaseHandle          = output->handle;
         ready                         = true;
+      }
+      else if (video->framePollPending)
+      {
+        video->framePollPending = false;
+        status                  = LG_TRANSPORT_TIMEOUT;
+        ready                   = true;
       }
     }
     LG_UNLOCK(video->stateLock);

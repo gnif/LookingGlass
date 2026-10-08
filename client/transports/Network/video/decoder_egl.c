@@ -50,6 +50,7 @@
 #include "shaders.h"
 
 #include "common/debug.h"
+#include "common/event.h"
 #include "common/locking.h"
 #include "common/time.h"
 
@@ -67,6 +68,7 @@
 #define NETWORK_VIDEO_ALIGNMENT              (1U << NETWORK_VIDEO_LEVELS)
 #define NETWORK_VIDEO_MIN_SIZE               (4U << NETWORK_VIDEO_LEVELS)
 #define NETWORK_VIDEO_UPLOADS                3U
+#define NETWORK_VIDEO_POOL_MIN_SIZE          2U
 #define NETWORK_VIDEO_POOL_SIZE              3U
 #define NETWORK_VIDEO_DAMAGE_HISTORY         64U
 #define NETWORK_VIDEO_POOL_BYTE_LIMIT        \
@@ -131,11 +133,13 @@ struct NetworkVideoTexturePool
   LG_Lock lock;
 
   atomic_uint                references;
+  LGEvent                  * presentEvent;
   EGLDisplay                 display;
   EGLConfig                  eglConfig;
   EGLContext                 shareContext;
   struct NetworkVideoTexture textures[NETWORK_VIDEO_POOL_SIZE];
   unsigned                   textureCount;
+  unsigned                   textureAllocated;
   unsigned                   textureLimit;
   uint32_t                   width;
   uint32_t                   height;
@@ -219,6 +223,8 @@ struct NetworkVideoDecoder
   uint8_t                        * outputDirty;
   struct NetworkVideoDamageHistory
     damageHistory[NETWORK_VIDEO_DAMAGE_HISTORY];
+  LGNetVideoDamage                 pendingDamage;
+  LGEvent                        * presentEvent;
 
   LGNetVideoStreamConfig config;
   struct NetworkVideoBlockMeta
@@ -232,6 +238,7 @@ struct NetworkVideoDecoder
   uint32_t outputTileHeight;
   uint64_t referenceFrameID;
   uint64_t outputGeneration;
+  uint64_t pendingDecodeTimeNs;
   unsigned uploadIndex;
   GLint    maxTextureSize;
   GLint    maxArrayLayers;
@@ -240,6 +247,7 @@ struct NetworkVideoDecoder
   bool     attached;
   bool     configured;
   bool     referenceValid;
+  bool     pendingChromaLeft;
 };
 
 struct NetworkVideoExternalFrame
@@ -255,6 +263,12 @@ struct NetworkVideoExternalFrame
 static uint32_t networkVideoAlign(uint32_t value, uint32_t alignment)
 {
   return (value + alignment - 1U) & ~(alignment - 1U);
+}
+
+static uint64_t networkVideoSaturatingAdd(
+    uint64_t left, uint64_t right)
+{
+  return left > UINT64_MAX - right ? UINT64_MAX : left + right;
 }
 
 static uint32_t networkVideoReadU32(const uint8_t * data)
@@ -384,21 +398,24 @@ static struct NetworkVideoTexturePool * networkVideoTexturePoolCreate(
   if (!pool)
     return NULL;
 
-  const uint64_t width        = decoder->config.width;
-  const uint64_t height       = decoder->config.height;
-  const uint64_t textureBytes = width * height * NETWORK_VIDEO_PIXEL_BYTES;
-  const uint64_t textureLimit = textureBytes ?
+  const uint64_t width         = decoder->config.width;
+  const uint64_t height        = decoder->config.height;
+  const uint64_t textureBytes  = width * height * NETWORK_VIDEO_PIXEL_BYTES;
+  const uint64_t textureLimit  = textureBytes ?
     NETWORK_VIDEO_POOL_BYTE_LIMIT / textureBytes : 0U;
+  const uint64_t boundedLimit  = textureLimit < NETWORK_VIDEO_POOL_MIN_SIZE ?
+    NETWORK_VIDEO_POOL_MIN_SIZE : textureLimit;
 
   LG_LOCK_INIT(pool->lock);
   atomic_init(&pool->references, 1U);
+  pool->presentEvent = decoder->presentEvent;
   pool->display      = decoder->display;
   pool->eglConfig    = decoder->eglConfig;
   pool->shareContext = decoder->shareContext;
   pool->width        = decoder->config.width;
   pool->height       = decoder->config.height;
-  pool->textureLimit = textureLimit < NETWORK_VIDEO_POOL_SIZE ?
-    (unsigned)textureLimit : NETWORK_VIDEO_POOL_SIZE;
+  pool->textureLimit = boundedLimit < NETWORK_VIDEO_POOL_SIZE ?
+    (unsigned)boundedLimit : NETWORK_VIDEO_POOL_SIZE;
   return pool;
 }
 
@@ -406,6 +423,17 @@ static void networkVideoTexturePoolRetain(
     struct NetworkVideoTexturePool * pool)
 {
   atomic_fetch_add_explicit(&pool->references, 1U, memory_order_relaxed);
+}
+
+static void networkVideoTexturePoolDetachEvent(
+    struct NetworkVideoTexturePool * pool)
+{
+  if (!pool)
+    return;
+
+  LG_LOCK(pool->lock);
+  pool->presentEvent = NULL;
+  LG_UNLOCK(pool->lock);
 }
 
 static void networkVideoTexturePoolRelease(
@@ -452,7 +480,7 @@ static bool networkVideoTexturePoolReturn(
 
   bool retained = false;
   LG_LOCK(pool->lock);
-  if (pool->textureCount < pool->textureLimit)
+  if (pool->textureCount < pool->textureAllocated)
   {
     struct NetworkVideoTexture * pooled =
       &pool->textures[pool->textureCount++];
@@ -460,6 +488,8 @@ static bool networkVideoTexturePoolReturn(
     pooled->readySync  = readySync;
     pooled->generation = generation;
     retained           = true;
+    if (pool->presentEvent)
+      lgSignalEvent(pool->presentEvent);
   }
   LG_UNLOCK(pool->lock);
   return retained;
@@ -549,6 +579,7 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
     if (upload->payloadBuffer)
       glDeleteBuffers(1, &upload->payloadBuffer);
   }
+  networkVideoTexturePoolDetachEvent(decoder->texturePool);
   networkVideoTexturePoolRelease(decoder->texturePool, true);
   networkVideoFreePacketStates(
       decoder->packetStates, decoder->blockCapacity);
@@ -563,23 +594,26 @@ static void networkVideoDeleteConfigurationNL(NetworkVideoDecoder * decoder)
 
   memset(decoder->uploads, 0, sizeof(decoder->uploads));
   memset(decoder->damageHistory, 0, sizeof(decoder->damageHistory));
-  decoder->texturePool      = NULL;
-  decoder->offsets          = NULL;
-  decoder->packetStates     = NULL;
-  decoder->pendingPackets   = NULL;
-  decoder->dirtyBlocks      = NULL;
-  decoder->outputDirty      = NULL;
-  decoder->canonicalTexture = 0;
-  decoder->alignedWidth     = 0;
-  decoder->alignedHeight    = 0;
-  decoder->blockCapacity    = 0;
-  decoder->outputTileWidth  = 0;
-  decoder->outputTileHeight = 0;
-  decoder->referenceFrameID = 0;
-  decoder->outputGeneration = 0;
-  decoder->uploadIndex      = 0;
-  decoder->configured       = false;
-  decoder->referenceValid   = false;
+  memset(&decoder->pendingDamage, 0, sizeof(decoder->pendingDamage));
+  decoder->texturePool         = NULL;
+  decoder->offsets             = NULL;
+  decoder->packetStates        = NULL;
+  decoder->pendingPackets      = NULL;
+  decoder->dirtyBlocks         = NULL;
+  decoder->outputDirty         = NULL;
+  decoder->canonicalTexture    = 0;
+  decoder->alignedWidth        = 0;
+  decoder->alignedHeight       = 0;
+  decoder->blockCapacity       = 0;
+  decoder->outputTileWidth     = 0;
+  decoder->outputTileHeight    = 0;
+  decoder->referenceFrameID    = 0;
+  decoder->outputGeneration    = 0;
+  decoder->pendingDecodeTimeNs = 0;
+  decoder->uploadIndex         = 0;
+  decoder->configured          = false;
+  decoder->referenceValid      = false;
+  decoder->pendingChromaLeft   = false;
   memset(decoder->coefficientTextures, 0,
       sizeof(decoder->coefficientTextures));
   memset(decoder->planeTextures, 0, sizeof(decoder->planeTextures));
@@ -800,10 +834,32 @@ static bool networkVideoCreateTexture2D(GLuint * texture, GLenum format,
   return false;
 }
 
+static bool networkVideoTexturePoolAllocateNL(
+    struct NetworkVideoTexturePool * pool)
+{
+  while (pool->textureAllocated < NETWORK_VIDEO_POOL_MIN_SIZE)
+  {
+    struct NetworkVideoTexture * pooled =
+      &pool->textures[pool->textureCount];
+    if (!networkVideoCreateTexture2D(&pooled->texture, GL_RGBA16F,
+          pool->width, pool->height, GL_LINEAR))
+    {
+      while (glGetError() != GL_NO_ERROR)
+      {
+      }
+      return false;
+    }
+    ++pool->textureCount;
+    ++pool->textureAllocated;
+  }
+  return true;
+}
+
 static struct NetworkVideoTexture networkVideoTexturePoolAcquire(
     struct NetworkVideoTexturePool * pool)
 {
-  struct NetworkVideoTexture pooled = { 0 };
+  struct NetworkVideoTexture pooled   = { 0 };
+  bool                       allocate = false;
   LG_LOCK(pool->lock);
   if (pool->textureCount)
   {
@@ -811,15 +867,26 @@ static struct NetworkVideoTexture networkVideoTexturePoolAcquire(
     memset(&pool->textures[pool->textureCount], 0,
         sizeof(pool->textures[pool->textureCount]));
   }
+  else if (pool->textureAllocated < pool->textureLimit)
+  {
+    ++pool->textureAllocated;
+    allocate = true;
+  }
   LG_UNLOCK(pool->lock);
+
+  if (allocate && !networkVideoCreateTexture2D(&pooled.texture, GL_RGBA16F,
+        pool->width, pool->height, GL_LINEAR))
+  {
+    while (glGetError() != GL_NO_ERROR)
+    {
+    }
+    LG_LOCK(pool->lock);
+    --pool->textureAllocated;
+    pool->textureLimit = pool->textureAllocated;
+    LG_UNLOCK(pool->lock);
+  }
   if (pooled.readySync)
     glDeleteSync(pooled.readySync);
-  if (pooled.texture)
-    return pooled;
-
-  if (!networkVideoCreateTexture2D(&pooled.texture, GL_RGBA16F,
-        pool->width, pool->height, GL_LINEAR))
-    pooled.texture = 0;
   return pooled;
 }
 
@@ -888,7 +955,8 @@ static bool networkVideoAllocateNL(NetworkVideoDecoder * decoder)
       outputTileCount, sizeof(*decoder->outputDirty));
   if (!decoder->offsets || !decoder->packetStates ||
       !decoder->pendingPackets || !decoder->dirtyBlocks ||
-      !decoder->texturePool || !decoder->outputDirty)
+      !decoder->texturePool || !decoder->outputDirty ||
+      !networkVideoTexturePoolAllocateNL(decoder->texturePool))
     return false;
 
   for (unsigned component = 0;
@@ -997,16 +1065,18 @@ static const LG_ExternalFrameOps NETWORK_VIDEO_EXTERNAL_OPS =
   .query   = networkVideoExternalQuery,
 };
 
-bool networkVideoDecoderCreate(NetworkVideoDecoder ** result)
+bool networkVideoDecoderCreate(NetworkVideoDecoder ** result,
+    LGEvent * presentEvent)
 {
-  if (!result)
+  if (!result || !presentEvent)
     return false;
 
   NetworkVideoDecoder * decoder = calloc(1, sizeof(*decoder));
   if (!decoder)
     return false;
   LG_LOCK_INIT(decoder->lock);
-  *result = decoder;
+  decoder->presentEvent = presentEvent;
+  *result               = decoder;
   return true;
 }
 
@@ -1027,6 +1097,12 @@ void networkVideoDecoderDetach(NetworkVideoDecoder * decoder)
     }
     eglDestroyContext(decoder->display, decoder->context);
   }
+  if (decoder->texturePool)
+  {
+    networkVideoTexturePoolDetachEvent(decoder->texturePool);
+    networkVideoTexturePoolRelease(decoder->texturePool, false);
+    decoder->texturePool = NULL;
+  }
   decoder->display              = EGL_NO_DISPLAY;
   decoder->eglConfig            = NULL;
   decoder->shareContext         = EGL_NO_CONTEXT;
@@ -1037,8 +1113,11 @@ void networkVideoDecoderDetach(NetworkVideoDecoder * decoder)
   decoder->maxWorkGroupCount[1] = 0;
   decoder->maxStorageBlockSize  = 0;
   decoder->referenceFrameID     = 0;
+  decoder->pendingDecodeTimeNs  = 0;
   decoder->attached             = false;
   decoder->referenceValid       = false;
+  decoder->pendingChromaLeft    = false;
+  memset(&decoder->pendingDamage, 0, sizeof(decoder->pendingDamage));
   LG_UNLOCK(decoder->lock);
 }
 
@@ -1068,8 +1147,11 @@ void networkVideoDecoderReset(NetworkVideoDecoder * decoder)
       networkVideoRestoreCurrent(decoder, &previous);
     }
   }
-  decoder->referenceFrameID = 0;
-  decoder->referenceValid   = false;
+  decoder->referenceFrameID    = 0;
+  decoder->pendingDecodeTimeNs = 0;
+  decoder->referenceValid      = false;
+  decoder->pendingChromaLeft   = false;
+  memset(&decoder->pendingDamage, 0, sizeof(decoder->pendingDamage));
   LG_UNLOCK(decoder->lock);
 }
 
@@ -1765,6 +1847,11 @@ static bool networkVideoDamageFull(const LGNetVideoDamage * damage)
   return (damage->flags & LG_NET_VIDEO_DAMAGE_FULL) != 0;
 }
 
+static bool networkVideoDamagePresent(const LGNetVideoDamage * damage)
+{
+  return networkVideoDamageFull(damage) || damage->count;
+}
+
 static void networkVideoDispatchRect(GLint offsetUniform,
     GLint extentUniform, uint32_t x, uint32_t y,
     uint32_t width, uint32_t height)
@@ -1994,6 +2081,95 @@ static bool networkVideoAppendDamageRect(LGNetVideoDamage * damage,
   return true;
 }
 
+static bool networkVideoUnionDamageRect(LGNetVideoDamage * damage,
+    const LGNetVideoDamageRect * source)
+{
+  uint32_t x    = source->x;
+  uint32_t y    = source->y;
+  uint32_t endX = source->x + source->width;
+  uint32_t endY = source->y + source->height;
+  for (uint16_t index = 0; index < damage->count;)
+  {
+    const LGNetVideoDamageRect * current = &damage->rects[index];
+    const uint32_t               currentEndX =
+      current->x + current->width;
+    const uint32_t               currentEndY =
+      current->y + current->height;
+    if (endX < current->x || currentEndX < x ||
+        endY < current->y || currentEndY < y)
+    {
+      ++index;
+      continue;
+    }
+
+    x    = current->x < x ? current->x : x;
+    y    = current->y < y ? current->y : y;
+    endX = currentEndX > endX ? currentEndX : endX;
+    endY = currentEndY > endY ? currentEndY : endY;
+    damage->rects[index] = damage->rects[--damage->count];
+  }
+  return networkVideoAppendDamageRect(
+      damage, x, y, endX - x, endY - y);
+}
+
+static void networkVideoMergeDamage(LGNetVideoDamage * destination,
+    const LGNetVideoDamage * source)
+{
+  if (!networkVideoDamagePresent(source) ||
+      networkVideoDamageFull(destination))
+    return;
+
+  if (networkVideoDamageFull(source))
+  {
+    memset(destination, 0, sizeof(*destination));
+    destination->flags =
+      (LGNetVideoDamageFlags)LG_NET_VIDEO_DAMAGE_FULL;
+    return;
+  }
+
+  for (uint16_t index = 0; index < source->count; ++index)
+  {
+    const LGNetVideoDamageRect * rect = &source->rects[index];
+    if (networkVideoUnionDamageRect(destination, rect))
+      continue;
+
+    uint32_t left   = UINT32_MAX;
+    uint32_t top    = UINT32_MAX;
+    uint32_t right  = 0;
+    uint32_t bottom = 0;
+    for (unsigned set = 0; set < 2; ++set)
+    {
+      const LGNetVideoDamageRect * rects = set ?
+        source->rects : destination->rects;
+      const uint16_t               count = set ?
+        source->count : destination->count;
+      for (uint16_t rectIndex = 0; rectIndex < count; ++rectIndex)
+      {
+        const LGNetVideoDamageRect * current       = &rects[rectIndex];
+        const uint32_t               currentRight  =
+          current->x + current->width;
+        const uint32_t               currentBottom =
+          current->y + current->height;
+        left   = current->x < left ? current->x : left;
+        top    = current->y < top ? current->y : top;
+        right  = currentRight > right ? currentRight : right;
+        bottom = currentBottom > bottom ? currentBottom : bottom;
+      }
+    }
+
+    memset(destination, 0, sizeof(*destination));
+    destination->count    = 1;
+    destination->rects[0] = (LGNetVideoDamageRect)
+    {
+      .x      = (uint16_t)left,
+      .y      = (uint16_t)top,
+      .width  = (uint16_t)(right - left),
+      .height = (uint16_t)(bottom - top),
+    };
+    return;
+  }
+}
+
 static void networkVideoIntersectDamage(
     const LGNetVideoDamage * source,
     const LGNetVideoDamage * reconstruction,
@@ -2074,10 +2250,20 @@ static void networkVideoBuildDamage(const LGNetVideoDamage * damage,
   result->damageRectsCount = damage->count;
 }
 
-static struct NetworkVideoExternalFrame * networkVideoConvertNL(
-    NetworkVideoDecoder * decoder, bool chromaLeft, uint64_t generation,
-    const LGNetVideoDamage * damage)
+static bool networkVideoPresentNL(NetworkVideoDecoder * decoder,
+    struct NetworkVideoTexture pooled, bool chromaLeft, uint64_t generation,
+    const LGNetVideoDamage * damage,
+    struct NetworkVideoExternalFrame ** result)
 {
+  *result = NULL;
+  struct NetworkVideoExternalFrame * frame = calloc(1, sizeof(*frame));
+  if (!frame)
+  {
+    networkVideoTexturePoolRecycleCurrent(decoder->texturePool,
+        pooled.texture, pooled.readySync, pooled.generation);
+    return false;
+  }
+
   glUseProgram(decoder->yuvProgram);
   for (unsigned component = 0;
        component < NETWORK_VIDEO_COMPONENTS; ++component)
@@ -2108,28 +2294,16 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
   glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT |
       GL_TEXTURE_FETCH_BARRIER_BIT);
 
-  struct NetworkVideoTexture pooled =
-    networkVideoTexturePoolAcquire(decoder->texturePool);
-  if (!pooled.texture)
-    return NULL;
   networkVideoCopyCanonicalNL(decoder, pooled.texture,
       pooled.generation, generation, damage);
 
   GLsync readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  glFlush();
   if (!readySync || glGetError() != GL_NO_ERROR)
   {
+    free(frame);
     networkVideoTexturePoolRecycleCurrent(
         decoder->texturePool, pooled.texture, readySync, 0);
-    return NULL;
-  }
-
-  struct NetworkVideoExternalFrame * frame = calloc(1, sizeof(*frame));
-  if (!frame)
-  {
-    networkVideoTexturePoolRecycleCurrent(
-        decoder->texturePool, pooled.texture, readySync, 0);
-    return NULL;
+    return false;
   }
   frame->base.ops      = &NETWORK_VIDEO_EXTERNAL_OPS;
   frame->pool          = decoder->texturePool;
@@ -2138,7 +2312,43 @@ static struct NetworkVideoExternalFrame * networkVideoConvertNL(
   frame->generation    = generation;
   networkVideoTexturePoolRetain(frame->pool);
   atomic_init(&frame->references, 1U);
-  return frame;
+  *result = frame;
+  return true;
+}
+
+static void networkVideoBuildFrameNL(NetworkVideoDecoder * decoder,
+    struct NetworkVideoExternalFrame * external,
+    const LGNetVideoDamage * damage, uint64_t decodeTime,
+    NetworkVideoDecodedFrame * result)
+{
+  uint32_t formatVersion = (uint32_t)decoder->config.configEpoch;
+  if (!formatVersion)
+    formatVersion = 1;
+
+  result->externalFrame = &external->base;
+  result->decodeTimeNs  = decodeTime;
+  networkVideoBuildDamage(damage, result);
+  result->format        = (LG_TransportFrameFormat)
+  {
+    .version       = formatVersion,
+    .type          = FRAME_TYPE_RGBA16F,
+    .screenWidth   = decoder->config.width,
+    .screenHeight  = decoder->config.height,
+    .dataWidth     = decoder->config.width,
+    .dataHeight    = decoder->config.height,
+    .frameWidth    = decoder->config.width,
+    .frameHeight   = decoder->config.height,
+    .rotation      = FRAME_ROT_0,
+    .stride        = decoder->config.width,
+    .pitch         = decoder->config.width * 8U,
+    .hdr           = (decoder->config.flags & LG_NET_VIDEO_STREAM_HDR) != 0,
+    .hdrPQ         = decoder->config.colorTransfer ==
+      LG_NET_COLOR_TRANSFER_PQ,
+    .hdrMetadata   = false,
+    .sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT,
+  };
+  result->timing.providerValid = true;
+  result->timing.prepareTime   = decodeTime;
 }
 
 NetworkVideoDecodeResult networkVideoDecoderDecode(
@@ -2186,7 +2396,9 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_ERROR;
   }
-  if (update && !changedCount)
+  const bool codecChanges = !update || changedCount;
+  if (!codecChanges &&
+      !networkVideoDamagePresent(&decoder->pendingDamage))
   {
     networkVideoCommitPendingPacketsNL(decoder);
     decoder->referenceFrameID = frameID;
@@ -2194,10 +2406,13 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     return NETWORK_VIDEO_DECODE_NO_FRAME;
   }
 
-  if (update)
-    networkVideoPrepareDirtyNL(decoder);
-  else
-    networkVideoClearDirtyNL(decoder);
+  if (codecChanges)
+  {
+    if (update)
+      networkVideoPrepareDirtyNL(decoder);
+    else
+      networkVideoClearDirtyNL(decoder);
+  }
 
   struct NetworkVideoCurrent previous;
   if (!networkVideoMakeCurrent(decoder, &previous))
@@ -2210,52 +2425,71 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
   while (glGetError() != GL_NO_ERROR)
   {
   }
-  struct NetworkVideoUpload * upload = networkVideoUploadNL(
-      decoder, data, size);
-  if (!upload)
+  struct NetworkVideoUpload * upload = NULL;
+  if (codecChanges)
   {
-    networkVideoDiscardPendingPacketsNL(decoder);
-    networkVideoRestoreCurrent(decoder, &previous);
-    LG_UNLOCK(decoder->lock);
-    return NETWORK_VIDEO_DECODE_ERROR;
+    upload = networkVideoUploadNL(decoder, data, size);
+    if (!upload)
+    {
+      networkVideoDiscardPendingPacketsNL(decoder);
+      networkVideoRestoreCurrent(decoder, &previous);
+      LG_UNLOCK(decoder->lock);
+      return NETWORK_VIDEO_DECODE_ERROR;
+    }
   }
 
-  const uint64_t decodeStart = nanotime();
-  uint64_t       generation  = decoder->outputGeneration + 1U;
+  const uint64_t   decodeStart = nanotime();
+  uint64_t         generation  = decoder->outputGeneration + 1U;
+  LGNetVideoDamage damage      = { 0 };
   if (!generation)
     generation = 1U;
-  networkVideoDequantNL(decoder, upload, update);
-  upload->readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-  networkVideoIDWTNL(decoder, update);
-  LGNetVideoDamage reconstructionDamage;
-  LGNetVideoDamage damage;
-  networkVideoBuildReconstructionDamageNL(
-      decoder, update, &reconstructionDamage);
-  /* Wire damage accumulates against the sender's acknowledged reference.
-   * Limit it to output reconstructed against the decoder's current state. */
-  if (update)
-    networkVideoIntersectDamage(
-        &layout.damage, &reconstructionDamage, &damage);
-  else
-    damage = reconstructionDamage;
-  const bool hasPresentationDamage =
-    networkVideoDamageFull(&damage) || damage.count;
+  if (codecChanges)
+  {
+    networkVideoDequantNL(decoder, upload, update);
+    networkVideoIDWTNL(decoder, update);
+    LGNetVideoDamage reconstructionDamage;
+    networkVideoBuildReconstructionDamageNL(
+        decoder, update, &reconstructionDamage);
+    /* Wire damage accumulates against the sender's acknowledged reference.
+     * Limit it to output reconstructed against the decoder's current state. */
+    if (update)
+      networkVideoIntersectDamage(
+          &layout.damage, &reconstructionDamage, &damage);
+    else
+      damage = reconstructionDamage;
+  }
 
-  struct NetworkVideoExternalFrame * external = NULL;
+  LGNetVideoDamage presentationDamage    = decoder->pendingDamage;
+  networkVideoMergeDamage(&presentationDamage, &damage);
+  const bool       hasPresentationDamage =
+    networkVideoDamagePresent(&presentationDamage);
+
+  struct NetworkVideoTexture         pooled    = { 0 };
+  struct NetworkVideoExternalFrame * external  = NULL;
+  bool                               presented = true;
   if (hasPresentationDamage)
-    external = networkVideoConvertNL(decoder,
-        layout.chromaLeft, generation, &damage);
-  else
-    glFlush();
+  {
+    pooled = networkVideoTexturePoolAcquire(decoder->texturePool);
+    if (pooled.texture)
+      presented = networkVideoPresentNL(decoder, pooled,
+          layout.chromaLeft, generation, &presentationDamage, &external);
+  }
+  if (upload)
+    upload->readySync = glFenceSync(GL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+  glFlush();
   const uint64_t decodeTime = nanotime() - decodeStart;
-  const bool     success    =
-    (!hasPresentationDamage || external) && glGetError() == GL_NO_ERROR;
+  const bool     success    = presented &&
+    (!upload || upload->readySync) && glGetError() == GL_NO_ERROR;
   networkVideoRestoreCurrent(decoder, &previous);
   if (!success)
   {
     networkVideoDiscardPendingPacketsNL(decoder);
-    decoder->referenceFrameID = 0;
-    decoder->referenceValid   = false;
+    decoder->referenceFrameID    = 0;
+    decoder->referenceValid      = false;
+    decoder->pendingDecodeTimeNs = 0;
+    decoder->pendingChromaLeft   = false;
+    memset(&decoder->pendingDamage, 0,
+        sizeof(decoder->pendingDamage));
     if (external)
       networkVideoExternalRelease(&external->base);
     LG_UNLOCK(decoder->lock);
@@ -2270,41 +2504,111 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     LG_UNLOCK(decoder->lock);
     return NETWORK_VIDEO_DECODE_NO_FRAME;
   }
+  if (!pooled.texture)
+  {
+    decoder->pendingDamage       = presentationDamage;
+    decoder->pendingDecodeTimeNs = networkVideoSaturatingAdd(
+        decoder->pendingDecodeTimeNs, decodeTime);
+    decoder->pendingChromaLeft   = layout.chromaLeft;
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_DEFERRED;
+  }
+  const uint64_t totalDecodeTime = networkVideoSaturatingAdd(
+      decoder->pendingDecodeTimeNs, decodeTime);
+  memset(&decoder->pendingDamage, 0, sizeof(decoder->pendingDamage));
+  decoder->pendingDecodeTimeNs = 0;
+  decoder->pendingChromaLeft   = false;
 
   struct NetworkVideoDamageHistory * history =
     &decoder->damageHistory[generation % NETWORK_VIDEO_DAMAGE_HISTORY];
   history->generation       = generation;
-  history->damage           = damage;
+  history->damage           = presentationDamage;
   decoder->outputGeneration = generation;
 
-  uint32_t formatVersion = (uint32_t)config->configEpoch;
-  if (!formatVersion)
-    formatVersion = 1;
+  networkVideoBuildFrameNL(
+      decoder, external, &presentationDamage, totalDecodeTime, result);
+  LG_UNLOCK(decoder->lock);
+  return NETWORK_VIDEO_DECODE_OK;
+}
 
-  result->externalFrame = &external->base;
-  result->decodeTimeNs  = decodeTime;
-  if (update)
-    networkVideoBuildDamage(&damage, result);
-  result->format        = (LG_TransportFrameFormat)
+NetworkVideoDecodeResult networkVideoDecoderPresentPending(
+    NetworkVideoDecoder * decoder, NetworkVideoDecodedFrame * result)
+{
+  if (!decoder || !result)
+    return NETWORK_VIDEO_DECODE_ERROR;
+  memset(result, 0, sizeof(*result));
+
+  LG_LOCK(decoder->lock);
+  if (!decoder->configured)
   {
-    .version       = formatVersion,
-    .type          = FRAME_TYPE_RGBA16F,
-    .screenWidth   = config->width,
-    .screenHeight  = config->height,
-    .dataWidth     = config->width,
-    .dataHeight    = config->height,
-    .frameWidth    = config->width,
-    .frameHeight   = config->height,
-    .rotation      = FRAME_ROT_0,
-    .stride        = config->width,
-    .pitch         = config->width * 8U,
-    .hdr           = (config->flags & LG_NET_VIDEO_STREAM_HDR) != 0,
-    .hdrPQ         = config->colorTransfer == LG_NET_COLOR_TRANSFER_PQ,
-    .hdrMetadata   = false,
-    .sdrWhiteLevel = LG_SDR_WHITE_LEVEL_DEFAULT,
-  };
-  result->timing.providerValid = true;
-  result->timing.prepareTime   = decodeTime;
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_UNSUPPORTED;
+  }
+  if (!networkVideoDamagePresent(&decoder->pendingDamage))
+  {
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_NO_FRAME;
+  }
+
+  struct NetworkVideoCurrent previous;
+  if (!networkVideoMakeCurrent(decoder, &previous))
+  {
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_ERROR;
+  }
+
+  while (glGetError() != GL_NO_ERROR)
+  {
+  }
+  struct NetworkVideoTexture pooled =
+    networkVideoTexturePoolAcquire(decoder->texturePool);
+  if (!pooled.texture)
+  {
+    networkVideoRestoreCurrent(decoder, &previous);
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_DEFERRED;
+  }
+
+  uint64_t generation = decoder->outputGeneration + 1U;
+  if (!generation)
+    generation = 1U;
+  const uint64_t                     presentStart = nanotime();
+  struct NetworkVideoExternalFrame * external     = NULL;
+  const bool                         presented    = networkVideoPresentNL(
+      decoder, pooled,
+      decoder->pendingChromaLeft, generation, &decoder->pendingDamage,
+      &external);
+  glFlush();
+  const uint64_t presentTime = nanotime() - presentStart;
+  const bool     success     = presented && glGetError() == GL_NO_ERROR;
+  networkVideoRestoreCurrent(decoder, &previous);
+  if (!success)
+  {
+    decoder->referenceFrameID    = 0;
+    decoder->referenceValid      = false;
+    decoder->pendingDecodeTimeNs = 0;
+    decoder->pendingChromaLeft   = false;
+    memset(&decoder->pendingDamage, 0,
+        sizeof(decoder->pendingDamage));
+    if (external)
+      networkVideoExternalRelease(&external->base);
+    LG_UNLOCK(decoder->lock);
+    return NETWORK_VIDEO_DECODE_ERROR;
+  }
+
+  const LGNetVideoDamage             damage     = decoder->pendingDamage;
+  const uint64_t                     decodeTime = networkVideoSaturatingAdd(
+      decoder->pendingDecodeTimeNs, presentTime);
+  struct NetworkVideoDamageHistory * history    =
+    &decoder->damageHistory[generation % NETWORK_VIDEO_DAMAGE_HISTORY];
+  history->generation       = generation;
+  history->damage           = damage;
+  decoder->outputGeneration = generation;
+  memset(&decoder->pendingDamage, 0, sizeof(decoder->pendingDamage));
+  decoder->pendingDecodeTimeNs = 0;
+  decoder->pendingChromaLeft   = false;
+  networkVideoBuildFrameNL(
+      decoder, external, &damage, decodeTime, result);
   LG_UNLOCK(decoder->lock);
   return NETWORK_VIDEO_DECODE_OK;
 }

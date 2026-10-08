@@ -24,6 +24,8 @@
 #include "interface/renderer.h"
 #include "interface/transport.h"
 
+#include "common/event.h"
+
 #include <LGProtocol/NetworkServices.h>
 
 #include <stdbool.h>
@@ -36,6 +38,7 @@ typedef enum NetworkVideoDecodeResult
 {
   NETWORK_VIDEO_DECODE_OK,
   NETWORK_VIDEO_DECODE_NO_FRAME,
+  NETWORK_VIDEO_DECODE_DEFERRED,
   NETWORK_VIDEO_DECODE_UNSUPPORTED,
   NETWORK_VIDEO_DECODE_CORRUPT,
   NETWORK_VIDEO_DECODE_ERROR,
@@ -53,7 +56,8 @@ typedef struct NetworkVideoDecodedFrame
 }
 NetworkVideoDecodedFrame;
 
-bool networkVideoDecoderCreate(NetworkVideoDecoder ** decoder);
+bool networkVideoDecoderCreate(NetworkVideoDecoder ** decoder,
+    LGEvent * presentEvent);
 void networkVideoDecoderDestroy(NetworkVideoDecoder ** decoder);
 
 bool networkVideoDecoderAttach(NetworkVideoDecoder * decoder,
@@ -68,5 +72,7 @@ NetworkVideoDecodeResult networkVideoDecoderDecode(
     const void * data, size_t size, uint32_t blockCount,
     bool update, bool complete, uint64_t baseFrameID, uint64_t frameID,
     NetworkVideoDecodedFrame * frame);
+NetworkVideoDecodeResult networkVideoDecoderPresentPending(
+    NetworkVideoDecoder * decoder, NetworkVideoDecodedFrame * frame);
 
 void networkVideoDecoderRelease(NetworkVideoDecodedFrame * frame);
