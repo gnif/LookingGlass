@@ -38,7 +38,7 @@ const DWORD CPipeEndpoint::CLIENT_RETRY_MAX_MS       = 2000;
 const DWORD CPipeEndpoint::SERVER_RETRY_MS           = 1000;
 const DWORD CPipeEndpoint::AUTHENTICATION_TIMEOUT_MS = 2000;
 const DWORD CPipeEndpoint::AUTHORIZATION_POLL_MS     = 1000;
-const DWORD CPipeEndpoint::WRITE_TIMEOUT_MS          = 250;
+const DWORD CPipeEndpoint::DEFAULT_WRITE_TIMEOUT_MS  = 250;
 
 bool CPipeEndpoint::IsDisconnectedError(DWORD error)
 {
@@ -159,7 +159,7 @@ CPipeEndpoint::PipeIoResult CPipeEndpoint::WriteMessage(
         m_writeEvent,
         &overlapped,
         &bytesWritten,
-        WRITE_TIMEOUT_MS);
+        m_writeTimeoutMs);
     else if (IsDisconnectedError(error))
       result = PipeIoResult::Disconnected;
     else if (error == ERROR_OPERATION_ABORTED &&
@@ -199,7 +199,8 @@ bool CPipeEndpoint::Start(
   const SECURITY_ATTRIBUTES * serverSecurity,
   DWORD serverOpenMode,
   DWORD serverPipeMode,
-  ThreadScheduling threadScheduling)
+  ThreadScheduling threadScheduling,
+  DWORD writeTimeoutMs)
 {
   Stop();
 
@@ -215,6 +216,7 @@ bool CPipeEndpoint::Start(
     SECURITY_ATTRIBUTES {};
   m_serverOpenMode      = serverOpenMode;
   m_serverPipeMode      = serverPipeMode;
+  m_writeTimeoutMs      = writeTimeoutMs;
   m_stopEvent           = CreateEventW(nullptr, TRUE, FALSE, nullptr);
   if (!m_stopEvent)
   {

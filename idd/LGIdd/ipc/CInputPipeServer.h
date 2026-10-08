@@ -35,6 +35,7 @@ private:
   static constexpr size_t QUEUE_LENGTH             = 128;
   static constexpr size_t MOTION_EMERGENCY_DEPTH   = 8;
   static constexpr DWORD  MOTION_AGE_BUDGET_MS     = 1;
+  static constexpr DWORD  PIPE_WRITE_TIMEOUT_MS    = 4;
   static constexpr DWORD  STATISTICS_INTERVAL_MS   = 5000;
 
   struct QueueItem

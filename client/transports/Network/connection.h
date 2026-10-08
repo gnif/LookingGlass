@@ -86,6 +86,8 @@ bool networkConnectionServiceAvailable(NetworkConnection * connection,
     LGNetService service, LGNetCapabilityFlags required);
 bool networkConnectionServiceVersion(NetworkConnection * connection,
     LGNetService service, uint16_t * version);
+bool networkConnectionAwaitInputSend(NetworkConnection * connection,
+    NetworkPacketDelivery delivery);
 
 LG_TransportStatus networkConnectionSend(NetworkConnection * connection,
     LGNetService service, uint16_t messageType, uint16_t serviceVersion,

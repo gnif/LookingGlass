@@ -76,7 +76,12 @@ bool CInputPipeServer::Init()
   if (!m_endpoint.Start(
       LG_INPUT_PIPE_NAME,
       CPipeEndpoint::Mode::Server,
-      sizeof(LGInputPipeMessage)))
+      sizeof(LGInputPipeMessage),
+      nullptr,
+      0,
+      0,
+      CPipeEndpoint::ThreadScheduling::Normal,
+      PIPE_WRITE_TIMEOUT_MS))
   {
     DeInit();
     return false;
@@ -193,6 +198,8 @@ bool CInputPipeServer::CompactQueuedMotionLocked()
 
       first.payload.mouseRelative.deltaX = static_cast<int32_t>(x);
       first.payload.mouseRelative.deltaY = static_cast<int32_t>(y);
+      if (second.enqueueTicks)
+        first.enqueueTicks = second.enqueueTicks;
       RemoveQueueItemLocked(i + 1);
       ++m_statRelativeCoalesced;
       return true;
@@ -207,6 +214,8 @@ bool CInputPipeServer::CompactQueuedMotionLocked()
 
     first.payload.mouseAbsolute.x = second.payload.mouseAbsolute.x;
     first.payload.mouseAbsolute.y = second.payload.mouseAbsolute.y;
+    if (second.enqueueTicks)
+      first.enqueueTicks = second.enqueueTicks;
     RemoveQueueItemLocked(i + 1);
     ++m_statAbsoluteCoalesced;
     return true;
@@ -253,6 +262,9 @@ bool CInputPipeServer::QueueLocked(
         {
           tail.payload.mouseRelative.deltaX = static_cast<int32_t>(x);
           tail.payload.mouseRelative.deltaY = static_cast<int32_t>(y);
+          LARGE_INTEGER enqueueTime = {};
+          if (QueryPerformanceCounter(&enqueueTime))
+            tail.enqueueTicks = enqueueTime.QuadPart;
           ++m_statRelativeCoalesced;
           return true;
         }
@@ -266,6 +278,9 @@ bool CInputPipeServer::QueueLocked(
       {
         tail.payload.mouseAbsolute.x = payload.mouseAbsolute.x;
         tail.payload.mouseAbsolute.y = payload.mouseAbsolute.y;
+        LARGE_INTEGER enqueueTime = {};
+        if (QueryPerformanceCounter(&enqueueTime))
+          tail.enqueueTicks = enqueueTime.QuadPart;
         ++m_statAbsoluteCoalesced;
         return true;
       }
@@ -503,7 +518,14 @@ bool CInputPipeServer::Pop(QueueItem& item)
   if (!m_queueCount)
     return false;
 
-  item = m_queue[m_queueHead];
+  // A blocked pipe write can leave a run of stale motion queued behind it.
+  // Collapse that run before the next write without combining fresh motion.
+  if (MotionBudgetExceededLocked())
+    while (CompactQueuedMotionLocked())
+    {
+    }
+
+  item        = m_queue[m_queueHead];
   m_queueHead = (m_queueHead + 1) % QUEUE_LENGTH;
   --m_queueCount;
   if (m_queueCount)

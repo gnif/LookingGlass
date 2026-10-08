@@ -248,6 +248,8 @@ static bool CompactQueuedMotion(_Inout_ HIDDeviceContext * context)
 
       previous->x = static_cast<int16_t>(x);
       previous->y = static_cast<int16_t>(y);
+      if (second.enqueueTicks)
+        first.enqueueTicks = second.enqueueTicks;
       RemoveQueuedReport(context, i + 1);
       ++context->statistics.relativeCoalesced;
       return true;
@@ -265,6 +267,8 @@ static bool CompactQueuedMotion(_Inout_ HIDDeviceContext * context)
       continue;
 
     CopyMemory(first.data, second.data, second.size);
+    if (second.enqueueTicks)
+      first.enqueueTicks = second.enqueueTicks;
     first.size = second.size;
     RemoveQueuedReport(context, i + 1);
     ++context->statistics.staleAbsoluteCompacted;
@@ -311,6 +315,9 @@ static NTSTATUS QueueReport(
         {
           previous->x = static_cast<int16_t>(x);
           previous->y = static_cast<int16_t>(y);
+          LARGE_INTEGER enqueueTime = {};
+          if (QueryPerformanceCounter(&enqueueTime))
+            tail.enqueueTicks = enqueueTime.QuadPart;
           ++context->statistics.relativeCoalesced;
           return STATUS_SUCCESS;
         }
@@ -326,6 +333,9 @@ static NTSTATUS QueueReport(
             !previous->wheel && !current->wheel)
         {
           CopyMemory(tail.data, data, size);
+          LARGE_INTEGER enqueueTime = {};
+          if (QueryPerformanceCounter(&enqueueTime))
+            tail.enqueueTicks = enqueueTime.QuadPart;
           tail.size = size;
           ++context->statistics.absoluteCoalesced;
           return STATUS_SUCCESS;
@@ -361,9 +371,9 @@ static NTSTATUS ReadReport(
   _In_ WDFREQUEST request,
   _Out_ bool * complete)
 {
-  HIDQueuedReport report = {};
+  HIDQueuedReport report     = {};
   bool            haveReport = false;
-  *complete = true;
+  *complete                  = true;
 
   NTSTATUS status;
   {
@@ -372,13 +382,22 @@ static NTSTATUS ReadReport(
       status = STATUS_DEVICE_NOT_READY;
     else if (context->reportCount)
     {
+      // If Windows stopped issuing reads temporarily, deliver one current
+      // aggregate instead of replaying every stale motion report accumulated
+      // while it was stalled. Transitions remain ordered and are never
+      // compacted.
+      if (MotionBudgetExceeded(context))
+        while (CompactQueuedMotion(context))
+        {
+        }
+
       PopReport(context, &report);
       haveReport = true;
-      status = STATUS_SUCCESS;
+      status     = STATUS_SUCCESS;
     }
     else
     {
-      status = WdfRequestForwardToIoQueue(request, context->reportQueue);
+      status    = WdfRequestForwardToIoQueue(request, context->reportQueue);
       *complete = !NT_SUCCESS(status);
     }
   }

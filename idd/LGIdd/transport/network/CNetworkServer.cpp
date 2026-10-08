@@ -385,7 +385,6 @@ struct CNetworkServer::Impl
     uint32_t             length      = 0;
     Delivery             delivery    = Delivery::RELIABLE;
     bool                 accounted   = true;
-    bool                 inputAck    = false;
   };
 
   struct SendLimits
@@ -398,6 +397,8 @@ struct CNetworkServer::Impl
   {
     uint64_t            claimEpoch      = 0;
     uint64_t            sequence        = 0;
+    int64_t             previousX       = 0;
+    int64_t             previousY       = 0;
     int64_t             cumulativeX     = 0;
     int64_t             cumulativeY     = 0;
     uint16_t            absoluteX       = 0;
@@ -405,6 +406,18 @@ struct CNetworkServer::Impl
     LGNetPointerButtons previousButtons = 0;
     bool                apply           = false;
     bool                useAbsolute     = false;
+  };
+
+  struct InputSend
+  {
+    static constexpr size_t CAPACITY =
+      LG_NET_ENVELOPE_WIRE_SIZE + NETWORK_INPUT_MAX_PAYLOAD;
+
+    QUIC_BUFFER buffer         = {};
+    uint8_t     data[CAPACITY] = {};
+    uint32_t    length         = 0;
+    bool        active         = false;
+    bool        inputAck       = false;
   };
 
   struct SendAccounting
@@ -448,6 +461,13 @@ struct CNetworkServer::Impl
     FAILED,
   };
 
+  enum class InputPrepareResult
+  {
+    READY,
+    STALE,
+    INVALID,
+  };
+
   enum class HandshakeState
   {
     WAITING_HELLO,
@@ -485,7 +505,6 @@ struct CNetworkServer::Impl
     Impl&                            owner;
     CSRWLock                         lock;
     CSRWLock                         inputLock;
-    CSRWLock                         inputDispatchLock;
     CSRWLock                         inputSendLock;
     HQUIC                            handle                       = nullptr;
     HQUIC                            controlStream                = nullptr;
@@ -539,6 +558,7 @@ struct CNetworkServer::Impl
     uint32_t                         inputDatagramLimit           = 0;
     uint32_t                         inputStreamSendCount         = 0;
     uint64_t                         inputStreamSendBytes         = 0;
+    uint32_t                         inputSendNext                = 0;
     uint16_t                         inputStreamServiceVersion    = 0;
     bool                             inputStreamBound             = false;
     bool                             inputClosing                 = false;
@@ -550,6 +570,7 @@ struct CNetworkServer::Impl
     std::vector<uint8_t>             inputReceiveData;
     std::vector<uint8_t>             inputReceivePayload;
     std::shared_ptr<CNetworkSession> inputSession;
+    InputSend                        inputSends[NETWORK_INPUT_SEND_COUNT_MAX] = {};
 
     LGNetSequenceTracker             inputDatagramReceive         = {};
     uint64_t                         inputClaimantID              = 0;
@@ -1619,19 +1640,44 @@ struct CNetworkServer::Impl
     video.SendReady(VideoPeer(connection), videoDelivery);
   }
 
-  static void ReleaseInputSendLocked(Connection& connection,
-    const Send& send)
+  static InputSend * AcquireInputSendLocked(Connection& connection)
   {
-    if (!connection.inputStreamSendCount ||
+    for (uint32_t offset = 0; offset < NETWORK_INPUT_SEND_COUNT_MAX;
+        ++offset)
+    {
+      const uint32_t index =
+        (connection.inputSendNext + offset) % NETWORK_INPUT_SEND_COUNT_MAX;
+      InputSend&     send  = connection.inputSends[index];
+      if (send.active)
+        continue;
+
+      send.active              = true;
+      connection.inputSendNext =
+        (index + 1U) % NETWORK_INPUT_SEND_COUNT_MAX;
+      return &send;
+    }
+
+    return nullptr;
+  }
+
+  static void ReleaseInputSendLocked(Connection& connection,
+    InputSend& send)
+  {
+    if (!send.active || !connection.inputStreamSendCount ||
         connection.inputStreamSendBytes < send.length)
     {
       DEBUG_ERROR("Network input send accounting underflow for client %u",
         connection.client);
-      return;
     }
-
-    --connection.inputStreamSendCount;
-    connection.inputStreamSendBytes -= send.length;
+    else
+    {
+      --connection.inputStreamSendCount;
+      connection.inputStreamSendBytes -= send.length;
+    }
+    send.buffer   = {};
+    send.length   = 0;
+    send.active   = false;
+    send.inputAck = false;
   }
 
   SendResult TrySendInputPacket(Connection& connection,
@@ -1649,26 +1695,13 @@ struct CNetworkServer::Impl
           LG_NET_ENVELOPE_EARLY_DATA))
       return SendResult::FAILED;
 
-    const size_t          packetSize =
+    const size_t packetSize =
       LG_NET_ENVELOPE_WIRE_SIZE + payloadLength;
-    std::unique_ptr<Send> send(new (std::nothrow) Send());
-    if (!send)
+    if (packetSize > InputSend::CAPACITY)
       return SendResult::FAILED;
-    try
-    {
-      send->data.resize(packetSize);
-    }
-    catch (...)
-    {
-      return SendResult::FAILED;
-    }
 
-    send->service   = LG_NET_SERVICE_INPUT;
-    send->length    = static_cast<uint32_t>(packetSize);
-    send->accounted = false;
-    send->inputAck  = inputAck;
-
-    QUIC_STATUS status = QUIC_STATUS_SUCCESS;
+    InputSend   * send   = nullptr;
+    QUIC_STATUS   status = QUIC_STATUS_SUCCESS;
     {
       LGNetPacketParameters parameters = {};
       HQUIC                 stream     = nullptr;
@@ -1687,6 +1720,12 @@ struct CNetworkServer::Impl
               NETWORK_INPUT_SEND_BYTES_MAX - packetSize)
           return SendResult::BLOCKED;
 
+        send = AcquireInputSendLocked(connection);
+        if (!send)
+          return SendResult::BLOCKED;
+
+        send->length   = static_cast<uint32_t>(packetSize);
+        send->inputAck = inputAck;
         ++connection.inputStreamSendCount;
         connection.inputStreamSendBytes += packetSize;
 
@@ -1702,7 +1741,7 @@ struct CNetworkServer::Impl
       }
 
       size_t wireSize = 0;
-      if (!lgNetPacketConstruct(send->data.data(), send->data.size(),
+      if (!lgNetPacketConstruct(send->data, sizeof(send->data),
             &wireSize, &parameters, payload, payloadLength) ||
           wireSize != packetSize)
       {
@@ -1713,11 +1752,10 @@ struct CNetworkServer::Impl
         return SendResult::FAILED;
       }
 
-      send->buffers[0].Buffer = send->data.data();
-      send->buffers[0].Length = static_cast<uint32_t>(wireSize);
-      status                  = api->StreamSend(stream,
-        send->buffers, send->bufferCount, QUIC_SEND_FLAG_PRIORITY_WORK,
-        send.get());
+      send->buffer.Buffer = send->data;
+      send->buffer.Length = static_cast<uint32_t>(wireSize);
+      status              = api->StreamSend(stream,
+        &send->buffer, 1, QUIC_SEND_FLAG_PRIORITY_WORK, send);
       if (QUIC_FAILED(status))
       {
         CSRWExclusiveLock guard(connection.inputLock);
@@ -1729,7 +1767,6 @@ struct CNetworkServer::Impl
 
     if (QUIC_FAILED(status))
       return SendResult::FAILED;
-    send.release();
     return SendResult::SENT;
   }
 
@@ -3732,7 +3769,7 @@ retry:
     uint64_t claimantID, LGNetInputClaimFlags requiredFlags)
   {
     CSRWExclusiveLock guard(connection.inputLock);
-    uint64_t& lastSequence = datagram ?
+    uint64_t&         lastSequence = datagram ?
       connection.inputDatagramSequence :
       connection.inputReliableSequence;
     if (!connection.inputClaimantID ||
@@ -3776,33 +3813,73 @@ retry:
     return LG_INPUT_MOUSE_DELTA_MIN;
   }
 
-  bool PrepareInputPointer(Connection& connection, uint64_t claimEpoch,
-    uint64_t sequence, bool datagram, bool relative,
+  InputPrepareResult PrepareInputPointer(Connection& connection,
+    const LGNetPacketView& packet, uint64_t sequence, bool datagram,
+    bool relative, int32_t wheel, LGNetPointerButtons changedButtons,
     int64_t cumulativeX, int64_t cumulativeY,
-    LGNetPointerButtons& buttons, InputPointerMotion& motion)
+    LGNetPointerButtons& buttons, InputPointerMotion& motion,
+    std::shared_ptr<CNetworkSession>& session)
   {
+    const bool acknowledge =
+      (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED) != 0;
+    if (!sequence)
+      return InputPrepareResult::INVALID;
+    if (datagram)
+    {
+      if (wheel || changedButtons || acknowledge ||
+          packet.envelope.requestID)
+        return InputPrepareResult::INVALID;
+    }
+    else if (acknowledge ? packet.envelope.requestID != sequence :
+        packet.envelope.requestID != 0)
+      return InputPrepareResult::INVALID;
+
     CSRWExclusiveLock guard(connection.inputLock);
-    uint64_t& lastSequence = datagram ?
+    uint64_t&         lastSequence = datagram ?
       connection.inputDatagramSequence :
       connection.inputReliableSequence;
+    session = connection.inputSession;
+    if (!session)
+      return InputPrepareResult::INVALID;
     if (!connection.inputClaimantID ||
-        connection.inputClaimEpoch != claimEpoch ||
+        connection.inputClaimEpoch != packet.envelope.componentEpoch ||
         !(connection.inputFlags & LG_NET_INPUT_CLAIM_POINTER) ||
         sequence <= lastSequence)
-      return false;
+      return InputPrepareResult::STALE;
+
+    const bool motionApplies  =
+      sequence > connection.inputMotionSequence;
+    const bool baseline       = connection.inputMotionBaseline;
+    const bool modeChange     = motionApplies && baseline &&
+      connection.inputMotionAbsolute == relative;
+    const bool buttonChange   = buttons != connection.inputPointerButtons;
+    if (datagram)
+    {
+      if (motionApplies && (!baseline || modeChange))
+        return InputPrepareResult::INVALID;
+    }
+    else
+    {
+      const bool transition = wheel || changedButtons || buttonChange ||
+        (motionApplies && (!baseline || modeChange));
+      if (transition && !acknowledge)
+        return InputPrepareResult::INVALID;
+    }
 
     lastSequence = sequence;
     if (!datagram)
       connection.inputMotionBaseline = true;
-    motion.claimEpoch      = claimEpoch;
+    motion.claimEpoch      = packet.envelope.componentEpoch;
     motion.sequence        = sequence;
+    motion.previousX       = connection.inputCumulativeX;
+    motion.previousY       = connection.inputCumulativeY;
     motion.previousButtons = connection.inputPointerButtons;
     if (datagram)
       buttons = connection.inputPointerButtons;
     else
       connection.inputPointerButtons = buttons;
 
-    motion.apply = sequence > connection.inputMotionSequence;
+    motion.apply = motionApplies;
     if (motion.apply)
     {
       connection.inputMotionSequence = sequence;
@@ -3827,7 +3904,7 @@ retry:
       motion.absoluteX = connection.inputAbsoluteX;
       motion.absoluteY = connection.inputAbsoluteY;
     }
-    return true;
+    return InputPrepareResult::READY;
   }
 
   InputResult SendInputRelativeMotion(Connection& connection,
@@ -3835,26 +3912,22 @@ retry:
     const InputPointerMotion& motion, int32_t wheel,
     LGNetPointerButtons buttons)
   {
-    int64_t cumulativeX = 0;
-    int64_t cumulativeY = 0;
-    {
-      CSRWSharedLock guard(connection.inputLock);
-      cumulativeX = connection.inputCumulativeX;
-      cumulativeY = connection.inputCumulativeY;
-    }
+    int64_t cumulativeX = motion.previousX;
+    int64_t cumulativeY = motion.previousY;
 
     InputResult result = InputResult::STALE;
     for (uint32_t chunk = 0; chunk < NETWORK_INPUT_RECOVERY_LIMIT; ++chunk)
     {
-      int64_t       nextX  = cumulativeX;
-      int64_t       nextY  = cumulativeY;
-      const int32_t deltaX = InputCumulativeStep(
+      int64_t       nextX   = cumulativeX;
+      int64_t       nextY   = cumulativeY;
+      const int32_t deltaX  = InputCumulativeStep(
         motion.cumulativeX, cumulativeX, nextX);
-      const int32_t deltaY = InputCumulativeStep(
+      const int32_t deltaY  = InputCumulativeStep(
         motion.cumulativeY, cumulativeY, nextY);
-      const bool    final  =
-        (nextX == motion.cumulativeX && nextY == motion.cumulativeY) ||
-        chunk + 1U == NETWORK_INPUT_RECOVERY_LIMIT;
+      const bool    reached =
+        nextX == motion.cumulativeX && nextY == motion.cumulativeY;
+      const bool    final   =
+        reached || chunk + 1U == NETWORK_INPUT_RECOVERY_LIMIT;
 
       result = session->SendMouseRelative(deltaX, deltaY,
         final ? wheel : 0, final ? buttons : motion.previousButtons);
@@ -3864,7 +3937,14 @@ retry:
       cumulativeX = nextX;
       cumulativeY = nextY;
       if (final)
+      {
+        if (!reached)
+        {
+          cumulativeX = motion.cumulativeX;
+          cumulativeY = motion.cumulativeY;
+        }
         break;
+      }
     }
 
     {
@@ -3980,14 +4060,20 @@ retry:
         packet.envelope.requestID)
       return false;
 
-    if (!ValidateInputOwner(connection, packet.envelope.componentEpoch,
-          keyboard.sequence, false, 0, LG_NET_INPUT_CLAIM_KEYBOARD))
-      return true;
-
-    uint8_t keys[NETWORK_KEYBOARD_KEY_COUNT] = {};
+    uint8_t                          keys[NETWORK_KEYBOARD_KEY_COUNT] = {};
+    std::shared_ptr<CNetworkSession> session                         = {};
+    uint8_t                          modifiers                       = 0;
     {
       CSRWExclusiveLock guard(connection.inputLock);
-      connection.keyboardModifiers =
+      if (!connection.inputClaimantID ||
+          connection.inputClaimEpoch !=
+            packet.envelope.componentEpoch ||
+          !(connection.inputFlags & LG_NET_INPUT_CLAIM_KEYBOARD) ||
+          keyboard.sequence <= connection.inputReliableSequence)
+        return true;
+
+      connection.inputReliableSequence = keyboard.sequence;
+      connection.keyboardModifiers     =
         static_cast<uint8_t>(keyboard.modifiers);
       if (keyboard.usage < 224 || keyboard.usage > 231)
         connection.keyboardKeys[keyboard.usage] =
@@ -4004,12 +4090,6 @@ retry:
       }
       if (count > NETWORK_KEYBOARD_KEY_COUNT)
         memset(keys, NETWORK_KEYBOARD_ROLLOVER, sizeof(keys));
-    }
-
-    std::shared_ptr<CNetworkSession> session   = {};
-    uint8_t                          modifiers = 0;
-    {
-      CSRWSharedLock guard(connection.inputLock);
       session   = connection.inputSession;
       modifiers = connection.keyboardModifiers;
     }
@@ -4035,84 +4115,27 @@ retry:
         (extent - 1U));
   }
 
-  static bool InputPointerEnvelopeValid(Connection& connection,
-    const LGNetPacketView& packet, uint64_t sequence, bool datagram,
-    bool relative, int32_t wheel, LGNetPointerButtons buttons,
-    LGNetPointerButtons changedButtons)
-  {
-    const bool acknowledge =
-      (packet.envelope.flags & LG_NET_ENVELOPE_ACK_REQUIRED) != 0;
-    if (!sequence)
-      return false;
-    if (datagram)
-    {
-      if (wheel || changedButtons || acknowledge ||
-          packet.envelope.requestID)
-        return false;
-    }
-    else if (acknowledge ? packet.envelope.requestID != sequence :
-        packet.envelope.requestID != 0)
-      return false;
-
-    bool current;
-    bool motionApplies;
-    bool baseline;
-    bool modeChange;
-    bool buttonChange;
-    {
-      CSRWSharedLock guard(connection.inputLock);
-      const uint64_t lastSequence = datagram ?
-        connection.inputDatagramSequence :
-        connection.inputReliableSequence;
-      current       = connection.inputClaimantID &&
-        connection.inputClaimEpoch == packet.envelope.componentEpoch &&
-        (connection.inputFlags & LG_NET_INPUT_CLAIM_POINTER) &&
-        sequence > lastSequence;
-      motionApplies = sequence > connection.inputMotionSequence;
-      baseline      = connection.inputMotionBaseline;
-      modeChange    = motionApplies && baseline &&
-        connection.inputMotionAbsolute == relative;
-      buttonChange  = buttons != connection.inputPointerButtons;
-    }
-    if (!current)
-      return true;
-    if (datagram)
-      return !motionApplies || (baseline && !modeChange);
-
-    const bool transition = wheel || changedButtons || buttonChange ||
-      (motionApplies && (!baseline || modeChange));
-    if (transition && !acknowledge)
-      return false;
-    return true;
-  }
-
   bool HandleInputPointer(Connection& connection,
     const LGNetPacketView& packet, bool datagram)
   {
     InputResult                      result  = InputResult::STALE;
     std::shared_ptr<CNetworkSession> session = {};
-    {
-      CSRWSharedLock guard(connection.inputLock);
-      session = connection.inputSession;
-    }
-    if (!session)
-      return false;
 
     if (packet.envelope.messageType ==
         LG_NET_INPUT_MESSAGE_MOUSE_RELATIVE)
     {
       LGNetInputRelative relative = {};
       if (lgNetInputRelativeDecode(&relative, packet.payload,
-            packet.payloadLength) != LG_NET_PARSE_OK || relative.wheelX ||
-          !InputPointerEnvelopeValid(connection, packet, relative.sequence,
-            datagram, true, relative.wheelY, relative.buttons,
-            relative.changedButtons))
+            packet.payloadLength) != LG_NET_PARSE_OK || relative.wheelX)
         return false;
-      InputPointerMotion motion;
-      if (!PrepareInputPointer(connection,
-            packet.envelope.componentEpoch, relative.sequence, datagram,
-            true, relative.cumulativeX, relative.cumulativeY,
-            relative.buttons, motion))
+      InputPointerMotion       motion   = {};
+      const InputPrepareResult prepared = PrepareInputPointer(connection,
+        packet, relative.sequence, datagram, true, relative.wheelY,
+        relative.changedButtons, relative.cumulativeX,
+        relative.cumulativeY, relative.buttons, motion, session);
+      if (prepared == InputPrepareResult::INVALID)
+        return false;
+      if (prepared == InputPrepareResult::STALE)
         return true;
       if (datagram && !motion.apply)
         return true;
@@ -4131,18 +4154,18 @@ retry:
     {
       LGNetInputAbsolute absolute = {};
       if (lgNetInputAbsoluteDecode(&absolute, packet.payload,
-            packet.payloadLength) != LG_NET_PARSE_OK || absolute.wheelX ||
-          !InputPointerEnvelopeValid(connection, packet, absolute.sequence,
-            datagram, false, absolute.wheelY, absolute.buttons,
-            absolute.changedButtons))
+            packet.payloadLength) != LG_NET_PARSE_OK || absolute.wheelX)
         return false;
-      InputPointerMotion motion;
+      InputPointerMotion       motion   = {};
       motion.absoluteX = NormalizeAbsolute(absolute.x, absolute.width);
       motion.absoluteY = NormalizeAbsolute(absolute.y, absolute.height);
-      if (!PrepareInputPointer(connection,
-            packet.envelope.componentEpoch, absolute.sequence, datagram,
-            false, absolute.cumulativeX, absolute.cumulativeY,
-            absolute.buttons, motion))
+      const InputPrepareResult prepared = PrepareInputPointer(connection,
+        packet, absolute.sequence, datagram, false, absolute.wheelY,
+        absolute.changedButtons, absolute.cumulativeX,
+        absolute.cumulativeY, absolute.buttons, motion, session);
+      if (prepared == InputPrepareResult::INVALID)
+        return false;
+      if (prepared == InputPrepareResult::STALE)
         return true;
       if (datagram && !motion.apply)
         return true;
@@ -4183,7 +4206,6 @@ retry:
         return false;
     }
 
-    CSRWExclusiveLock dispatchGuard(connection.inputDispatchLock);
     switch (packet.envelope.messageType)
     {
       case LG_NET_INPUT_MESSAGE_CLAIM:
@@ -5898,13 +5920,15 @@ retry:
 
       case QUIC_STREAM_EVENT_SEND_COMPLETE:
       {
-        std::unique_ptr<Send> send(
-          static_cast<Send *>(event->SEND_COMPLETE.ClientContext));
+        InputSend& send     = *static_cast<InputSend *>(
+          event->SEND_COMPLETE.ClientContext);
+        bool       inputAck = false;
         {
           CSRWExclusiveLock guard(connection.inputLock);
-          ReleaseInputSendLocked(connection, *send);
+          inputAck = send.inputAck;
+          ReleaseInputSendLocked(connection, send);
           connection.inputLEDWaitForSendReady = false;
-          if (send->inputAck)
+          if (inputAck)
             connection.inputAckInFlight = false;
         }
         if (owner.TrySendPendingInputAck(connection) == SendResult::FAILED ||
@@ -6253,7 +6277,8 @@ retry:
 
     QUIC_REGISTRATION_CONFIG registrationConfig = {};
     registrationConfig.AppName          = "looking-glass-idd";
-    registrationConfig.ExecutionProfile = QUIC_EXECUTION_PROFILE_LOW_LATENCY;
+    registrationConfig.ExecutionProfile =
+      QUIC_EXECUTION_PROFILE_TYPE_REAL_TIME;
     QUIC_STATUS status = api->RegistrationOpen(
       &registrationConfig, &registration);
     if (QUIC_FAILED(status))

@@ -458,22 +458,21 @@ static bool networkInputQueueReliableNL(NetworkInput * input,
 
 static LG_TransportStatus networkInputDrainReliableNL(NetworkInput * input)
 {
-  while (input->reliableCount)
-  {
-    const NetworkInputPkt   * packet =
-      &input->reliableQueue[input->reliableHead];
-    const LG_TransportStatus  status = networkInputSendReliableNL(input,
-        packet->messageType, packet->flags, packet->componentEpoch,
-        packet->requestID, packet->payload, packet->payloadLength);
-    if (status != LG_TRANSPORT_OK)
-      return status;
+  if (!input->reliableCount)
+    return LG_TRANSPORT_OK;
 
-    input->reliableHead =
-      (input->reliableHead + 1U) % NETWORK_INPUT_QUEUE_CAPACITY;
-    --input->reliableCount;
-  }
+  const NetworkInputPkt   * packet =
+    &input->reliableQueue[input->reliableHead];
+  const LG_TransportStatus  status = networkInputSendReliableNL(input,
+      packet->messageType, packet->flags, packet->componentEpoch,
+      packet->requestID, packet->payload, packet->payloadLength);
+  if (status != LG_TRANSPORT_OK)
+    return status;
 
-  input->reliableHead = 0;
+  input->reliableHead =
+    (input->reliableHead + 1U) % NETWORK_INPUT_QUEUE_CAPACITY;
+  if (!--input->reliableCount)
+    input->reliableHead = 0;
   return LG_TRANSPORT_OK;
 }
 
@@ -792,6 +791,8 @@ static bool networkInputTimer(void * opaque)
     }
 
     networkInputSyncKeyboardLEDsNL(input, &notify);
+    if (input->sendReadyPending)
+      networkInputResumeSendsNL(input, &notify);
   }
   LG_UNLOCK(input->stateLock);
 
@@ -905,6 +906,8 @@ static bool networkInputUpdateKey(void * opaque, int key, bool down)
     }
     if (!down && networkInputTransportFatal(status))
       notify = networkInputAbandonClaimNL(input, true);
+    if (input->sendReadyPending)
+      networkInputResumeSendsNL(input, &notify);
     LG_UNLOCK(input->stateLock);
     if (notify)
       networkInputNotifyStatus(input);
@@ -923,7 +926,11 @@ static bool networkInputUpdateKey(void * opaque, int key, bool down)
           NETWORK_INPUT_LED_SYNC_DELAY_MS);
     }
   }
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   LG_UNLOCK(input->stateLock);
+  if (notify)
+    networkInputNotifyStatus(input);
   return true;
 }
 
@@ -959,6 +966,8 @@ static bool networkInputKeyboardLEDs(void * opaque, bool numLock,
   if (input->keyboardLEDsSyncAfter < syncAfter)
     input->keyboardLEDsSyncAfter = syncAfter;
   networkInputSyncKeyboardLEDsNL(input, &notify);
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   const bool available = input->available;
   LG_UNLOCK(input->stateLock);
   if (notify)
@@ -1213,32 +1222,51 @@ static LG_TransportStatus networkInputSendAbsoluteNL(NetworkInput * input,
 
 static void networkInputResumeSendsNL(NetworkInput * input, bool * notify)
 {
-  input->sendReadyPending = false;
-  if (!input->connected || !input->serviceAvailable || input->destroying)
-    return;
-
-  const LG_TransportStatus reliableStatus =
-    networkInputDrainReliableNL(input);
-  if (networkInputTransportFatal(reliableStatus))
+  do
   {
-    *notify |= networkInputAbandonClaimNL(input, true);
-    return;
-  }
-  if (reliableStatus != LG_TRANSPORT_OK)
-    return;
+    input->sendReadyPending = false;
+    if (!input->connected || !input->serviceAvailable || input->destroying)
+      return;
 
-  if (!input->claimPending && !input->claimed)
-  {
-    networkInputSendClaimNL(input);
-    return;
-  }
-  if (!input->claimed ||
-      (!input->pendingRelative && !input->pendingAbsolute))
-    return;
+    const LG_TransportStatus reliableStatus =
+      networkInputDrainReliableNL(input);
+    if (networkInputTransportFatal(reliableStatus))
+    {
+      *notify |= networkInputAbandonClaimNL(input, true);
+      return;
+    }
+    if (reliableStatus != LG_TRANSPORT_OK)
+      return;
+    if (input->reliableCount)
+    {
+      if (input->sendReadyPending)
+        continue;
+      if (networkConnectionAwaitInputSend(input->connection,
+            NETWORK_PACKET_DELIVERY_RELIABLE))
+      {
+        input->sendReadyPending = true;
+        continue;
+      }
+      return;
+    }
 
-  const LG_TransportStatus status = networkInputFlushMotionNL(input);
-  if (networkInputTransportFatal(status))
-    *notify |= networkInputAbandonClaimNL(input, true);
+    if (!input->claimPending && !input->claimed)
+    {
+      networkInputSendClaimNL(input);
+      continue;
+    }
+    if (!input->claimed ||
+        (!input->pendingRelative && !input->pendingAbsolute))
+      continue;
+
+    const LG_TransportStatus status = networkInputFlushMotionNL(input);
+    if (networkInputTransportFatal(status))
+    {
+      *notify |= networkInputAbandonClaimNL(input, true);
+      return;
+    }
+  }
+  while (input->sendReadyPending);
 }
 
 void networkInputSendReady(NetworkInput * input,
@@ -1307,9 +1335,15 @@ static bool networkInputMouseMotion(void * opaque, int32_t x, int32_t y)
   if (eligible)
     status = networkInputSendRelativeNL(input, x, y, 0, 0,
         input->mouseButtons, 0, true);
-  const bool         result   = eligible &&
+  bool               result   = eligible &&
     !networkInputTransportFatal(status);
+  bool               notify   = false;
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
+  result &= input->available;
   LG_UNLOCK(input->stateLock);
+  if (notify)
+    networkInputNotifyStatus(input);
   return result;
 }
 
@@ -1330,9 +1364,15 @@ static bool networkInputMousePosition(void * opaque, uint32_t x,
   if (eligible)
     status = networkInputSendAbsoluteNL(input, x, y, width, height, 0, 0,
         input->mouseButtons, 0, true);
-  const bool         result   = eligible &&
+  bool               result   = eligible &&
     !networkInputTransportFatal(status);
+  bool               notify   = false;
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
+  result &= input->available;
   LG_UNLOCK(input->stateLock);
+  if (notify)
+    networkInputNotifyStatus(input);
   return result;
 }
 
@@ -1411,6 +1451,8 @@ static bool networkInputUpdateButton(void * opaque,
     input->mouseButtons = buttons;
   else if (networkInputTransportFatal(status) && !down && mask)
     notify = networkInputAbandonClaimNL(input, true);
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   LG_UNLOCK(input->stateLock);
   if (notify)
     networkInputNotifyStatus(input);
@@ -1433,6 +1475,8 @@ static void networkInputReset(void * opaque)
   bool           notify = false;
   LG_LOCK(input->stateLock);
   notify = networkInputSendResetNL(input);
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   LG_UNLOCK(input->stateLock);
   if (notify)
     networkInputNotifyStatus(input);
@@ -1574,6 +1618,8 @@ void networkInputConnectionState(NetworkInput * input, bool connected)
     notify |= networkInputSetAvailableNL(input, false);
     networkInputSendClaimNL(input);
   }
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   LG_UNLOCK(input->stateLock);
 
   if (notify)
@@ -1661,6 +1707,8 @@ static bool networkInputHandleStatus(NetworkInput * input,
     input->reliableBarrierSequence = 0;
     networkInputResumeSendsNL(input, &notify);
   }
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   LG_UNLOCK(input->stateLock);
 
   if (notify)
@@ -1703,6 +1751,8 @@ static bool networkInputHandleLEDs(NetworkInput * input,
       NETWORK_INPUT_LED_MASK;
   networkInputAcknowledgeLEDsNL(input, changed);
   networkInputSyncKeyboardLEDsNL(input, &notify);
+  if (input->sendReadyPending)
+    networkInputResumeSendsNL(input, &notify);
   notify |= oldValid != input->keyboardLEDsValid ||
     oldState != input->keyboardLEDs;
   if (notify)

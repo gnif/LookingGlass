@@ -74,6 +74,8 @@ public:
 class CPipeEndpoint
 {
 public:
+  static const DWORD DEFAULT_WRITE_TIMEOUT_MS;
+
   enum class Mode
   {
     Server,
@@ -99,7 +101,8 @@ public:
     _In_opt_ const SECURITY_ATTRIBUTES * serverSecurity = nullptr,
     _In_ DWORD serverOpenMode = 0,
     _In_ DWORD serverPipeMode = 0,
-    _In_ ThreadScheduling threadScheduling = ThreadScheduling::Normal);
+    _In_ ThreadScheduling threadScheduling = ThreadScheduling::Normal,
+    _In_ DWORD writeTimeoutMs = DEFAULT_WRITE_TIMEOUT_MS);
   void Stop();
   void DisconnectClient();
 
@@ -132,7 +135,6 @@ private:
   static const DWORD SERVER_RETRY_MS;
   static const DWORD AUTHENTICATION_TIMEOUT_MS;
   static const DWORD AUTHORIZATION_POLL_MS;
-  static const DWORD WRITE_TIMEOUT_MS;
 
   static bool IsDisconnectedError(_In_ DWORD error);
   PipeIoResult WaitForOverlapped(
@@ -173,6 +175,7 @@ private:
   bool                   m_hasServerSecurity  = false;
   DWORD                  m_serverOpenMode     = 0;
   DWORD                  m_serverPipeMode     = 0;
+  DWORD                  m_writeTimeoutMs     = DEFAULT_WRITE_TIMEOUT_MS;
 
   std::atomic<bool> m_running { false };
   std::atomic<bool> m_connected { false };
