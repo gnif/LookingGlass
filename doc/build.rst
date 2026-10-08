@@ -33,10 +33,10 @@ Developers can clone the source code repo with ``git``.
 
 .. note::
 
-   The current client, IDD and OBS plugin must come from the same Looking Glass
-   release. Bleeding-edge builds must be paired with their matching
-   bleeding-edge components. Legacy Host users must instead use the complete
-   matching B7 stack described in :ref:`legacy_host_policy`.
+   The Looking Glass client, IDD and OBS plugin (if used) must be of the same version.
+   Bleeding-edge builds must be paired with bleeding-edge components of the same
+   version. Legacy Host users must instead use the complete matching B7 stack
+   described in :ref:`legacy_host_policy`.
 
 .. _build_client_section:
 
@@ -173,7 +173,7 @@ Building
 
 If you've downloaded the source code as a zip file, simply unzip and ``cd``
 into the new directory. If you've cloned the repo with ``git``, then ``cd``
-into the *LookingGlass* directory.
+into the *LookingGlass* directory. Run these commands in a terminal:
 
 .. code:: bash
 
