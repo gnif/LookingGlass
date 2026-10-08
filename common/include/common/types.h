@@ -25,6 +25,8 @@
 
 #include <LGProtocol/KVMFRTypes.h>
 
+#define LG_MAX_RUNTIME_DAMAGE_RECTS 256
+
 typedef void (*LG_FrameReleaseFn)(void * opaque, uint64_t handle);
 
 struct Point

@@ -33,7 +33,7 @@
 #include "interface/external_frame.h"
 #include "interface/input.h"
 
-#define LG_TRANSPORT_MAX_DAMAGE_RECTS LG_MAX_FRAME_DAMAGE_RECTS
+#define LG_TRANSPORT_MAX_DAMAGE_RECTS LG_MAX_RUNTIME_DAMAGE_RECTS
 
 typedef struct LG_Transport LG_Transport;
 typedef struct LG_RendererInterop LG_RendererInterop;

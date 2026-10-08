@@ -27,7 +27,7 @@
 struct TexDamage
 {
   int                  count;
-  KVMFRFrameDamageRect rects[LG_MAX_FRAME_DAMAGE_RECTS];
+  KVMFRFrameDamageRect rects[LG_MAX_RUNTIME_DAMAGE_RECTS];
 };
 
 typedef struct TexFB
@@ -87,10 +87,11 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
   if (!egl_texBufferStreamLock(parent))
     return false;
 
-  struct TexDamage * damage = this->damage + parent->bufIndex;
-  bool damageAll = !update->rects || update->rectCount == 0 || damage->count < 0 ||
-    damage->count + update->rectCount > LG_MAX_FRAME_DAMAGE_RECTS;
-  bool complete;
+  struct TexDamage * damage    = this->damage + parent->bufIndex;
+  bool               damageAll =
+    !update->rects || update->rectCount == 0 || damage->count < 0 ||
+    damage->count + update->rectCount > LG_MAX_RUNTIME_DAMAGE_RECTS;
+  bool               complete;
 
   if (damageAll)
   {
@@ -172,7 +173,7 @@ static bool egl_texFBUpdate(EGL_Texture * texture, const EGL_TexUpdate * update)
     if (i == parent->bufIndex)
       damage->count = 0;
     else if (update->rects && update->rectCount > 0 && damage->count >= 0 &&
-             damage->count + update->rectCount <= LG_MAX_FRAME_DAMAGE_RECTS)
+             damage->count + update->rectCount <= LG_MAX_RUNTIME_DAMAGE_RECTS)
     {
       memcpy(damage->rects + damage->count, update->rects,
         update->rectCount * sizeof(KVMFRFrameDamageRect));

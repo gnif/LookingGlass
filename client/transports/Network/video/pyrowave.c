@@ -247,11 +247,11 @@ NetworkPyroWaveResult networkPyroWaveParse(
   size_t          cursor         = 0;
   uint32_t        uniqueBlocks   = 0;
   uint32_t        declaredBlocks = 0;
-  uint32_t        headerFirst    = 0;
   uint32_t        headerSecond   = 0;
   uint8_t         frameSequence  = 0;
   bool            haveSequence   = false;
   bool            haveHeader     = false;
+  bool            haveDamage     = false;
   bool            haveClear      = false;
   bool            valid          = true;
 
@@ -285,19 +285,37 @@ NetworkPyroWaveResult networkPyroWaveParse(
           width != config->width || height != config->height ||
           !blocks || blocks > capacity ||
           !networkPyroWaveSequenceProfile(config, second) ||
-          (haveHeader &&
-            (first != headerFirst || second != headerSecond)))
+          haveHeader)
       {
         valid = false;
         break;
       }
 
       declaredBlocks = blocks;
-      headerFirst    = first;
       headerSecond   = second;
       haveHeader     = true;
       cursor         += NETWORK_PYROWAVE_HEADER_SIZE;
+
+      if (code == LG_NET_VIDEO_PYROWAVE_MODE_DELTA)
+      {
+        size_t damageSize = 0;
+        if (lgNetVideoDamageDecode(&layout->damage,
+              bytes + cursor, size - cursor,
+              config->width, config->height, &damageSize) != LG_NET_PARSE_OK)
+        {
+          valid = false;
+          break;
+        }
+        cursor     += damageSize;
+        haveDamage  = true;
+      }
       continue;
+    }
+
+    if (!haveHeader)
+    {
+      valid = false;
+      break;
     }
 
     const uint32_t ballot       = first & UINT32_C(0x0000FFFF);
@@ -322,20 +340,19 @@ NetworkPyroWaveResult networkPyroWaveParse(
     cursor += packetSize;
   }
 
+  const bool delta =
+    ((headerSecond >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
+      LG_NET_VIDEO_PYROWAVE_MODE_MASK) ==
+        LG_NET_VIDEO_PYROWAVE_MODE_DELTA;
   valid = valid && cursor == size && haveHeader && haveSequence &&
+    haveDamage == delta &&
     declaredBlocks == uniqueBlocks && expectedBlocks == uniqueBlocks &&
-    (!haveClear ||
-      ((headerSecond >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
-        LG_NET_VIDEO_PYROWAVE_MODE_MASK) ==
-          LG_NET_VIDEO_PYROWAVE_MODE_DELTA);
+    (!haveClear || delta);
   if (!valid)
     return NETWORK_PYROWAVE_INVALID;
 
   layout->sequence   = frameSequence;
   layout->chromaLeft = (headerSecond >> 31) != 0;
-  layout->delta      =
-    ((headerSecond >> LG_NET_VIDEO_PYROWAVE_MODE_SHIFT) &
-      LG_NET_VIDEO_PYROWAVE_MODE_MASK) ==
-        LG_NET_VIDEO_PYROWAVE_MODE_DELTA;
+  layout->delta      = delta;
   return NETWORK_PYROWAVE_OK;
 }

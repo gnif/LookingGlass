@@ -58,10 +58,11 @@
 #include "postprocess.h"
 #include "util.h"
 
-#define MAX_BUFFER_AGE        3
-#define DESKTOP_DAMAGE_COUNT  4
-#define DESKTOP_DAMAGE_MARGIN 1
-#define MAX_ACCUMULATED_DAMAGE ((LG_MAX_FRAME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
+#define MAX_BUFFER_AGE          3
+#define DESKTOP_DAMAGE_COUNT    4
+#define DESKTOP_DAMAGE_MARGIN   1
+#define MAX_ACCUMULATED_DAMAGE  \
+  ((LG_MAX_RUNTIME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2) * MAX_BUFFER_AGE)
 #define IDX_AGO(counter, i, total) (((counter) + (total) - (i)) % (total))
 
 struct Options
@@ -474,7 +475,7 @@ static void egl_addSwSurfaceDamage(
       damage->frameToken = LG_RENDERER_FRAME_TOKEN_NONE;
       if (damage->count >= 0)
       {
-        if (damage->count + 1 >= LG_MAX_FRAME_DAMAGE_RECTS)
+        if (damage->count + 1 > LG_MAX_RUNTIME_DAMAGE_RECTS)
           damage->count = -1;
         else
           damage->rects[damage->count++] = rect;
@@ -880,7 +881,7 @@ static bool egl_onFrame(LG_Renderer * renderer,
       if (unlikely(
           damage->count                    == -1 ||
           damageRectsCount                 == 0 ||
-          damage->count + damageRectsCount >= LG_MAX_FRAME_DAMAGE_RECTS))
+          damage->count + damageRectsCount > LG_MAX_RUNTIME_DAMAGE_RECTS))
       {
         damage->count = -1;
       }
@@ -1443,7 +1444,7 @@ static void egl_requeueDesktopDamage(
       this->desktopDamage + this->desktopDamageIdx;
 
     if (damage->count < 0 || pending->count < 0 ||
-        damage->count + pending->count >= LG_MAX_FRAME_DAMAGE_RECTS)
+        damage->count + pending->count > LG_MAX_RUNTIME_DAMAGE_RECTS)
       pending->count = -1;
     else
     {
@@ -1698,8 +1699,8 @@ static bool egl_render(LG_Renderer * renderer, LG_RendererRotate rotate,
   /* The diagnostics being displayed must not contribute to Compose. */
   timing->composeTime = nanotime() - composeStart;
 
-  struct Rect damage[LG_MAX_FRAME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
-  int damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
+  struct Rect damage[LG_MAX_RUNTIME_DAMAGE_RECTS + MAX_OVERLAY_RECTS + 2];
+  int         damageIdx = app_renderOverlay(damage, MAX_OVERLAY_RECTS);
   if (unlikely(damageIdx != 0))
   {
     if (damageIdx == -1)

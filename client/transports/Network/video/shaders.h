@@ -308,6 +308,7 @@ static const char NETWORK_VIDEO_YUV_SHADER[] =
   "layout(rgba16f,binding=0) writeonly uniform highp image2D outputImage;\n"
   "uniform ivec2 outputSize;\n"
   "uniform ivec2 outputOffset;\n"
+  "uniform ivec2 outputExtent;\n"
   "uniform bool bt2020;\n"
   "uniform bool chromaLeft;\n"
   "uniform float lumaOffset;\n"
@@ -315,7 +316,9 @@ static const char NETWORK_VIDEO_YUV_SHADER[] =
   "uniform float chromaMidpoint;\n"
   "uniform float chromaScale;\n"
   "void main(){\n"
-  "  ivec2 pixel     = ivec2(gl_GlobalInvocationID.xy)+outputOffset;\n"
+  "  ivec2 local     = ivec2(gl_GlobalInvocationID.xy);\n"
+  "  if(any(greaterThanEqual(local,outputExtent)))return;\n"
+  "  ivec2 pixel     = local+outputOffset;\n"
   "  if(any(greaterThanEqual(pixel,outputSize)))return;\n"
   "  ivec2 planeSize = textureSize(lumaPlane,0);\n"
   "  vec2  uv        = (vec2(pixel)+0.5)/vec2(planeSize);\n"
@@ -335,6 +338,21 @@ static const char NETWORK_VIDEO_YUV_SHADER[] =
   "  vec3  rgb       = clamp(m*vec3(y,cb,cr),vec3(0.0),vec3(1.0));\n"
   "  imageStore(outputImage,pixel,vec4(rgb,1.0));}\n";
 
+static const char NETWORK_VIDEO_COPY_SHADER[] =
+  "#version 310 es\n"
+  "precision highp float;\n"
+  "precision highp int;\n"
+  "layout(local_size_x=8,local_size_y=8) in;\n"
+  "layout(binding=0) uniform highp sampler2D inputImage;\n"
+  "layout(rgba16f,binding=0) writeonly uniform highp image2D outputImage;\n"
+  "uniform ivec2 outputOffset;\n"
+  "uniform ivec2 outputExtent;\n"
+  "void main(){\n"
+  "  ivec2 local = ivec2(gl_GlobalInvocationID.xy);\n"
+  "  if(any(greaterThanEqual(local,outputExtent)))return;\n"
+  "  ivec2 pixel = local+outputOffset;\n"
+  "  imageStore(outputImage,pixel,texelFetch(inputImage,pixel,0));}\n";
+
 static const char * const NETWORK_VIDEO_DEQUANT_SOURCES[] =
 {
   NETWORK_VIDEO_DEQUANT_SHADER_0,
@@ -350,4 +368,9 @@ static const char * const NETWORK_VIDEO_IDWT_SOURCES[] =
 static const char * const NETWORK_VIDEO_YUV_SOURCES[] =
 {
   NETWORK_VIDEO_YUV_SHADER,
+};
+
+static const char * const NETWORK_VIDEO_COPY_SOURCES[] =
+{
+  NETWORK_VIDEO_COPY_SHADER,
 };

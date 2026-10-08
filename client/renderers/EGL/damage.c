@@ -88,7 +88,8 @@ bool egl_damageInit(EGL_Damage ** damage)
     return false;
   }
 
-  if (!egl_desktopRectsInit(&(*damage)->mesh, LG_MAX_FRAME_DAMAGE_RECTS))
+  if (!egl_desktopRectsInit(&(*damage)->mesh,
+        LG_MAX_RUNTIME_DAMAGE_RECTS))
   {
     DEBUG_ERROR("Failed to initialize the mesh");
     return false;

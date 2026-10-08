@@ -83,8 +83,11 @@ namespace
   constexpr uint32_t PYROWAVE_ALIGNMENT         = 1U << PYROWAVE_LEVELS;
   constexpr uint32_t PYROWAVE_MIN_DIMENSION     = 4U << PYROWAVE_LEVELS;
   constexpr uint32_t PYROWAVE_PACKET_BYTES      = 2488;
+  constexpr uint32_t PYROWAVE_DAMAGE_BYTES_MAX  =
+    LG_NET_VIDEO_DAMAGE_HEADER_WIRE_SIZE +
+      LG_NET_VIDEO_MAX_DAMAGE_RECTS * LG_NET_VIDEO_DAMAGE_RECT_WIRE_SIZE;
   constexpr uint32_t PYROWAVE_BLOCK_BYTES_MAX   =
-    PYROWAVE_PACKET_BYTES + 8U;
+    PYROWAVE_PACKET_BYTES + 8U + PYROWAVE_DAMAGE_BYTES_MAX;
   // Reserve an equal fragment budget for every possible codec block so a
   // negotiated delivery path can always represent the encoded frame.
   constexpr uint32_t PYROWAVE_FRAGS_PER_BLOCK   =
@@ -93,7 +96,8 @@ namespace
     (PYROWAVE_BLOCK_BYTES_MAX + PYROWAVE_FRAGS_PER_BLOCK - 1U) /
       PYROWAVE_FRAGS_PER_BLOCK;
   constexpr uint32_t PYROWAVE_FRAGMENT_MIN      =
-    LG_NET_VIDEO_FRAGMENT_HEADER_WIRE_SIZE + PYROWAVE_FRAGMENT_DATA_MIN;
+    LG_NET_VIDEO_FRAME_UPDATE_FRAGMENT_HEADER_WIRE_SIZE +
+      PYROWAVE_FRAGMENT_DATA_MIN;
   constexpr uint32_t PYROWAVE_PACKET_META_WORDS = 2;
   constexpr uint32_t PYROWAVE_SEQUENCE_MASK     = 7;
   constexpr uint32_t PYROWAVE_HEADER_CODE_MASK  =
@@ -135,6 +139,8 @@ namespace
   static_assert(PYROWAVE_BLOCK_BYTES_MAX <=
       PYROWAVE_FRAGS_PER_BLOCK * LG_NET_VIDEO_MAX_FRAGMENT_LENGTH,
     "The fragment payload limit must represent every codec block");
+  static_assert(LG_NET_VIDEO_MAX_DAMAGE_RECTS >= FRAME_DAMAGE_MAX,
+    "The network protocol must represent every capture damage rectangle");
 
   constexpr LGNetEnvelopeFlags DELIVERY_MASK    =
     LG_NET_ENVELOPE_RESPONSE | LG_NET_ENVELOPE_FINAL |
@@ -1502,6 +1508,155 @@ void FinalizeMain()
     uint32_t index  = 0;
   };
 
+  bool VideoDamageContains(const LGNetVideoDamageRect& outer,
+    const LGNetVideoDamageRect& inner)
+  {
+    return outer.x <= inner.x && outer.y <= inner.y &&
+      static_cast<uint32_t>(outer.x) + outer.width >=
+        static_cast<uint32_t>(inner.x) + inner.width &&
+      static_cast<uint32_t>(outer.y) + outer.height >=
+        static_cast<uint32_t>(inner.y) + inner.height;
+  }
+
+  bool MergeVideoDamageRect(const LGNetVideoDamageRect& first,
+    const LGNetVideoDamageRect& second, LGNetVideoDamageRect& merged)
+  {
+    const uint32_t firstRight   =
+      static_cast<uint32_t>(first.x) + first.width;
+    const uint32_t secondRight  =
+      static_cast<uint32_t>(second.x) + second.width;
+    const uint32_t firstBottom  =
+      static_cast<uint32_t>(first.y) + first.height;
+    const uint32_t secondBottom =
+      static_cast<uint32_t>(second.y) + second.height;
+    if (first.y == second.y && first.height == second.height &&
+        first.x <= secondRight && second.x <= firstRight)
+    {
+      const uint32_t left  = (std::min)(first.x, second.x);
+      const uint32_t right = (std::max)(firstRight, secondRight);
+      merged.x      = static_cast<uint16_t>(left);
+      merged.y      = first.y;
+      merged.width  = static_cast<uint16_t>(right - left);
+      merged.height = first.height;
+      return true;
+    }
+    if (first.x == second.x && first.width == second.width &&
+        first.y <= secondBottom && second.y <= firstBottom)
+    {
+      const uint32_t top    = (std::min)(first.y, second.y);
+      const uint32_t bottom = (std::max)(firstBottom, secondBottom);
+      merged.x      = first.x;
+      merged.y      = static_cast<uint16_t>(top);
+      merged.width  = first.width;
+      merged.height = static_cast<uint16_t>(bottom - top);
+      return true;
+    }
+    return false;
+  }
+
+  bool AddVideoDamageRect(LGNetVideoDamage& damage,
+    const LGNetVideoDamageRect& rect)
+  {
+    LGNetVideoDamageRect current = rect;
+    for (uint16_t index = 0; index < damage.count;)
+    {
+      const LGNetVideoDamageRect existing = damage.rects[index];
+      if (VideoDamageContains(existing, current))
+        return true;
+      LGNetVideoDamageRect merged = {};
+      if (!VideoDamageContains(current, existing) &&
+          !MergeVideoDamageRect(existing, current, merged))
+      {
+        ++index;
+        continue;
+      }
+      if (VideoDamageContains(current, existing))
+        merged = current;
+      current             = merged;
+      --damage.count;
+      damage.rects[index] = damage.rects[damage.count];
+      index               = 0;
+    }
+
+    if (damage.count == LG_NET_VIDEO_MAX_DAMAGE_RECTS)
+      return false;
+    damage.rects[damage.count++] = current;
+    return true;
+  }
+
+  void SetFullVideoDamage(LGNetVideoDamage& damage)
+  {
+    damage       = {};
+    damage.flags = static_cast<LGNetVideoDamageFlags>(
+      LG_NET_VIDEO_DAMAGE_FULL);
+  }
+
+  bool SetVideoDamage(const FrameDesc& frame, uint32_t width,
+    uint32_t height, LGNetVideoDamage& damage)
+  {
+    damage = {};
+    if (frame.damage == FrameDamage::NONE)
+      return true;
+    if (frame.damage == FrameDamage::FULL)
+    {
+      SetFullVideoDamage(damage);
+      return true;
+    }
+    if (frame.damage != FrameDamage::RECTS || !frame.count ||
+        frame.count > FRAME_DAMAGE_MAX)
+      return false;
+
+    for (unsigned index = 0; index < frame.count; ++index)
+    {
+      const RECT& rect = frame.rects[index];
+      if (rect.left < 0 || rect.top < 0 || rect.right <= rect.left ||
+          rect.bottom <= rect.top ||
+          static_cast<uint32_t>(rect.right) > width ||
+          static_cast<uint32_t>(rect.bottom) > height)
+      {
+        SetFullVideoDamage(damage);
+        return true;
+      }
+      const LGNetVideoDamageRect output =
+      {
+        static_cast<uint16_t>(rect.left),
+        static_cast<uint16_t>(rect.top),
+        static_cast<uint16_t>(rect.right - rect.left),
+        static_cast<uint16_t>(rect.bottom - rect.top),
+      };
+      if (!AddVideoDamageRect(damage, output))
+      {
+        SetFullVideoDamage(damage);
+        return true;
+      }
+    }
+    return lgNetVideoDamageValid(&damage, width, height);
+  }
+
+  void MergeVideoDamage(LGNetVideoDamage& destination,
+    const LGNetVideoDamage& source)
+  {
+    if ((destination.flags & LG_NET_VIDEO_DAMAGE_FULL) ||
+        (!source.flags && !source.count))
+      return;
+    if (source.flags & LG_NET_VIDEO_DAMAGE_FULL)
+    {
+      SetFullVideoDamage(destination);
+      return;
+    }
+
+    bool complete = true;
+    for (uint16_t index = 0; index < source.count; ++index)
+      if (!AddVideoDamageRect(destination, source.rects[index]))
+      {
+        complete = false;
+        break;
+      }
+    if (complete)
+      return;
+    SetFullVideoDamage(destination);
+  }
+
   struct EncodedFrame
   {
     uint64_t                                    configEpoch   = 0;
@@ -1511,6 +1666,7 @@ void FinalizeMain()
     uint32_t                                    deadlineMs    = 0;
     uint32_t                                    blockCapacity = 0;
     uint32_t                                    hardLimit     = 0;
+    LGNetVideoDamage                            damage         = {};
     std::vector<uint8_t>                        damagedBlocks;
     std::vector<uint8_t>                        data;
     std::vector<EncodedBlock>                   blocks;
@@ -3317,7 +3473,11 @@ void FinalizeMain()
 
       output = {};
 
-      const bool result = Compact(*slot, slot->mapped, output);
+      bool result = Compact(*slot, slot->mapped, output);
+
+      if (result)
+        result = SetVideoDamage(slot->frame.desc.frame,
+          m_cfg.width, m_cfg.height, output.damage);
 
       if (result)
       {
@@ -3389,8 +3549,9 @@ struct CNetworkVideo::Impl
 {
   struct ReferenceFrame
   {
-    uint64_t                            frameID = 0;
+    uint64_t                            frameID          = 0;
     std::shared_ptr<const EncodedFrame> frame;
+    LGNetVideoDamage                    subsequentDamage = {};
     std::vector<uint8_t>                subsequentBlocks;
   };
 
@@ -3416,6 +3577,7 @@ struct CNetworkVideo::Impl
     uint8_t                             blockedDeliveries      = 0;
     std::shared_ptr<const EncodedFrame> referenceFrame;
     std::deque<ReferenceFrame>          referenceHistory;
+    LGNetVideoDamage                    updateDamage           = {};
     std::vector<uint8_t>                updateBlocks;
     bool                                statusSent             = false;
     bool                                subscribed             = false;
@@ -3604,8 +3766,19 @@ struct CNetworkVideo::Impl
     peer.referenceFrame.reset();
     peer.referenceHistory.clear();
     peer.updateBlocks.clear();
+    peer.updateDamage     = {};
     peer.referenceFrameID = 0;
     peer.referencePending = false;
+  }
+
+  static void AccumulatePeerDamageNL(PeerState& peer,
+    const LGNetVideoDamage& damage)
+  {
+    if (!peer.referenceFrame)
+      return;
+    MergeVideoDamage(peer.updateDamage, damage);
+    for (ReferenceFrame& reference : peer.referenceHistory)
+      MergeVideoDamage(reference.subsequentDamage, damage);
   }
 
   static bool PeerNeedsReferenceNL(
@@ -3780,6 +3953,7 @@ struct CNetworkVideo::Impl
       result->deadlineMs    = current.deadlineMs;
       result->blockCapacity = current.blockCapacity;
       result->hardLimit     = current.hardLimit;
+      result->damage        = current.damage;
       result->damagedBlocks = std::move(current.damagedBlocks);
       result->blocks.reserve((std::max)(
         previous->blocks.size(), current.blocks.size()));
@@ -3917,6 +4091,7 @@ struct CNetworkVideo::Impl
   static std::shared_ptr<const EncodedFrame> BuildUpdateFrame(
     const EncodedFrame& reference, const EncodedFrame& current,
     const std::vector<uint8_t>& previousBlocks,
+    const LGNetVideoDamage& damage, uint32_t width, uint32_t height,
     std::vector<uint8_t>& updateBlocks)
   {
     try
@@ -3947,9 +4122,14 @@ struct CNetworkVideo::Impl
       update->captureTimeNs = current.captureTimeNs;
       update->deadlineMs    = current.deadlineMs;
       update->blockCapacity = current.blockCapacity;
+      update->damage        = damage;
       update->blocks.reserve(operationCount);
-      update->data.reserve(current.data.size());
-      update->data.resize(8U);
+      const size_t damageSize = lgNetVideoDamageSize(&damage);
+      if (!damageSize ||
+          damageSize > LG_NET_VIDEO_MAX_FRAME_UPDATE_LENGTH - 8U)
+        return {};
+      update->data.reserve(current.data.size() + damageSize);
+      update->data.resize(8U + damageSize);
 
       const uint32_t firstWord  = LoadLE32(current.data.data());
       const uint32_t secondWord =
@@ -3958,6 +4138,9 @@ struct CNetworkVideo::Impl
         PYROWAVE_HEADER_CODE_DELTA | operationCount;
       StoreLE32(update->data.data(), firstWord);
       StoreLE32(update->data.data() + sizeof(uint32_t), secondWord);
+      if (!lgNetVideoDamageEncode(update->data.data() + 8U,
+            damageSize, &damage, width, height))
+        return {};
 
       const uint32_t sequence        =
         (firstWord >> 28U) & PYROWAVE_SEQUENCE_MASK;
@@ -4007,7 +4190,7 @@ struct CNetworkVideo::Impl
         return {};
 
       update->blocks[0].offset  = 0;
-      update->blocks[0].length += 8U;
+      update->blocks[0].length += static_cast<uint32_t>(8U + damageSize);
       return update;
     }
     catch (...)
@@ -4096,14 +4279,20 @@ struct CNetworkVideo::Impl
     if (candidate->subsequentBlocks.size() != promotedFrame->blockCapacity)
       return false;
 
-    std::vector<uint8_t> subsequentBlocks =
+    std::vector<uint8_t>   subsequentBlocks =
       std::move(candidate->subsequentBlocks);
+    const LGNetVideoDamage subsequentDamage = candidate->subsequentDamage;
 
     peer.referenceFrame   = promotedFrame;
     peer.referenceFrameID = promotedID;
     peer.referencePending = false;
     peer.keyframePending  = false;
+    peer.updateDamage     = subsequentDamage;
     peer.updateBlocks     = std::move(subsequentBlocks);
+    // Damage also accumulates across frames intentionally skipped while the
+    // reference is pending, even though no block comparison is done for them.
+    // BuildUpdateFrame will authoritatively compare against the promoted
+    // reference and clear the damage if the encoded state did not change.
     while (!peer.referenceHistory.empty() &&
         peer.referenceHistory.front().frameID <= promotedID)
       peer.referenceHistory.pop_front();
@@ -4808,6 +4997,7 @@ struct CNetworkVideo::Impl
       peer.referenceFrame   = frame;
       peer.referenceFrameID = frameID;
       peer.referencePending = true;
+      peer.updateDamage     = {};
       peer.updateBlocks     = std::move(cleanBlocks);
       RecordReferenceFrameNL(peer, frameID, frame);
     }
@@ -4869,10 +5059,14 @@ struct CNetworkVideo::Impl
     if (PeerNeedsReferenceNL(peer, *current))
       return QueueFrameNL(
         peer, current, frameID, presentationBaseNs, true);
+    if (peer.updateDamage.flags & LG_NET_VIDEO_DAMAGE_FULL)
+      return QueueFrameNL(
+        peer, current, frameID, presentationBaseNs, true);
     DropPeerFramesNL(peer);
     std::vector<uint8_t>                      updateBlocks;
     const std::shared_ptr<const EncodedFrame> update = BuildUpdateFrame(
       *peer.referenceFrame, *current, peer.updateBlocks,
+      peer.updateDamage, m_activeCfg.width, m_activeCfg.height,
       updateBlocks);
     const bool compared = updateBlocks.size() == current->blockCapacity;
     const bool changed  = std::any_of(updateBlocks.begin(),
@@ -4882,6 +5076,7 @@ struct CNetworkVideo::Impl
       if (compared && !changed)
       {
         peer.lastCaptureTimeNs = current->captureTimeNs;
+        peer.updateDamage      = {};
         return true;
       }
       return QueueFrameNL(
@@ -5014,14 +5209,17 @@ struct CNetworkVideo::Impl
         encoded->sourceSerial == m_latestSourceSerial)
       m_latestFrame = encoded;
     for (PeerState& peer : m_peers)
-      if (peer.subscribed && peer.configured &&
-          PeerFrameDueNL(peer, *encoded))
+      if (peer.subscribed && peer.configured)
       {
-        if (!QueueCurrentFrameNL(peer, encoded,
-              frameID, encoded->captureTimeNs))
-          QueueStatusNL(peer, LG_NET_VIDEO_STATE_STALLED, 2);
-        else
-          QueueStatusNL(peer, LG_NET_VIDEO_STATE_STREAMING, 0);
+        AccumulatePeerDamageNL(peer, encoded->damage);
+        if (PeerFrameDueNL(peer, *encoded))
+        {
+          if (!QueueCurrentFrameNL(peer, encoded,
+                frameID, encoded->captureTimeNs))
+            QueueStatusNL(peer, LG_NET_VIDEO_STATE_STALLED, 2);
+          else
+            QueueStatusNL(peer, LG_NET_VIDEO_STATE_STREAMING, 0);
+        }
       }
   }
 

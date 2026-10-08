@@ -300,7 +300,7 @@ static void networkVideoMergeDamage(NetworkVideoDecodedFrame * destination,
     return;
   }
 
-  if (destination->damageRectsCount >=
+  if (destination->damageRectsCount >
       LG_TRANSPORT_MAX_DAMAGE_RECTS - source->damageRectsCount)
   {
     uint32_t left   = UINT32_MAX;

@@ -147,7 +147,7 @@ typedef struct RenderQueueSwSurface
 
   bool                 damageFull;
   int                  damageCount;
-  KVMFRFrameDamageRect damage[LG_MAX_FRAME_DAMAGE_RECTS];
+  KVMFRFrameDamageRect damage[LG_MAX_RUNTIME_DAMAGE_RECTS];
 
   bool          updateQueued;
   RenderCommand updateCommand;
@@ -361,7 +361,7 @@ static void swSurfaceDamageAdd(RenderQueueSwSurface * surface,
       i = 0;
     }
 
-    if (surface->damageCount < LG_MAX_FRAME_DAMAGE_RECTS)
+    if (surface->damageCount < LG_MAX_RUNTIME_DAMAGE_RECTS)
       break;
 
     int      best     = 0;

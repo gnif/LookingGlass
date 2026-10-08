@@ -36,9 +36,10 @@ NetworkPyroWaveResult;
 
 typedef struct NetworkPyroWaveLayout
 {
-  uint8_t sequence;
-  bool    chromaLeft;
-  bool    delta;
+  uint8_t          sequence;
+  bool             chromaLeft;
+  bool             delta;
+  LGNetVideoDamage damage;
 }
 NetworkPyroWaveLayout;
 
