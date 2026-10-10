@@ -35,6 +35,28 @@ All working automation scripts, libvirt hooks, domain XMLs, and Windows provisio
 
 ---
 
+## ⚡ Quick Start: Automated Setup Script
+
+An interactive setup script is provided to detect your specific hardware and Linux distribution automatically:
+
+```bash
+git clone https://github.com/julsanjh/LookingGlass-fordualGPU-Laptop.git
+cd LookingGlass-fordualGPU-Laptop
+chmod +x setup.sh
+./setup.sh
+```
+
+**What `setup.sh` does automatically:**
+1. Detects your distribution (`Fedora`, `Arch`, `Ubuntu/Debian`, `openSUSE`) and package manager.
+2. Identifies your CPU vendor and checks IOMMU boot parameters.
+3. Scans PCI devices, detects your dedicated GPU & Audio IDs, and verifies IOMMU group isolation.
+4. Adds your user account to the `libvirt` and `kvm` groups.
+5. Configures `/dev/shm/looking-glass` tmpfiles and applies SELinux (`svirt_image_t`) or AppArmor rules.
+6. Generates a customized `/etc/libvirt/hooks/qemu` GPU switcher hook matching your hardware PCI bus.
+7. Installs the Looking Glass client configuration and application launcher.
+
+---
+
 ## 1. Hardware Adaptation
 
 Dual-GPU laptops route internal display panels through the integrated GPU (iGPU). When the dedicated GPU (dGPU) is passed to a VM, it has no physical display attached. Looking Glass uses an Indirect Display Driver (IDD) on the dGPU to capture frames directly into shared memory.
