@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Libvirt QEMU Hook: Dynamic GPU Switcher for Windows 11 Passthrough
+# Path install: /etc/libvirt/hooks/qemu (chmod +x)
+# Hardware: Lenovo Laptop (Intel iGPU + NVIDIA RTX 4060 Mobile)
+# ==============================================================================
+
+GUEST_NAME="$1"
+OPERATION="$2"
+SUB_OPERATION="$3"
+
+# PCI ID NVIDIA RTX 4060 Laptop GPU & Audio
+GPU_PCI="0000:01:00.0"
+AUDIO_PCI="0000:01:00.1"
+
+# Vendor & Device ID
+GPU_DEV="10de 28e0"
+AUDIO_DEV="10de 22be"
+
+if [ "$GUEST_NAME" = "win11" ]; then
+    case "$OPERATION" in
+        "prepare")
+            if [ "$SUB_OPERATION" = "begin" ]; then
+                # 1. Pastikan modul vfio-pci dimuat
+                modprobe vfio-pci
+
+                # 2. Lepas driver NVIDIA dari dGPU host
+                if [ -d "/sys/bus/pci/devices/$GPU_PCI/driver" ]; then
+                    echo "$GPU_PCI" > "/sys/bus/pci/devices/$GPU_PCI/driver/unbind" 2>/dev/null
+                fi
+                if [ -d "/sys/bus/pci/devices/$AUDIO_PCI/driver" ]; then
+                    echo "$AUDIO_PCI" > "/sys/bus/pci/devices/$AUDIO_PCI/driver/unbind" 2>/dev/null
+                fi
+
+                # 3. Daftarkan dan pasang ke driver vfio-pci
+                echo "$GPU_DEV" > /sys/bus/pci/drivers/vfio-pci/new_id 2>/dev/null
+                echo "$AUDIO_DEV" > /sys/bus/pci/drivers/vfio-pci/new_id 2>/dev/null
+                echo "$GPU_PCI" > /sys/bus/pci/drivers/vfio-pci/bind 2>/dev/null
+                echo "$AUDIO_PCI" > /sys/bus/pci/drivers/vfio-pci/bind 2>/dev/null
+            fi
+            ;;
+        "release")
+            if [ "$SUB_OPERATION" = "end" ]; then
+                # 1. Lepas dari driver vfio-pci
+                echo "$GPU_PCI" > /sys/bus/pci/drivers/vfio-pci/unbind 2>/dev/null
+                echo "$AUDIO_PCI" > /sys/bus/pci/drivers/vfio-pci/unbind 2>/dev/null
+
+                # 2. Pasang kembali ke driver host Linux (NVIDIA & HD Audio)
+                modprobe nvidia
+                modprobe nvidia_drm
+                modprobe snd_hda_intel
+                echo "$GPU_PCI" > /sys/bus/pci/drivers/nvidia/bind 2>/dev/null
+                echo "$AUDIO_PCI" > /sys/bus/pci/drivers/snd_hda_intel/bind 2>/dev/null
+            fi
+            ;;
+    esac
+fi

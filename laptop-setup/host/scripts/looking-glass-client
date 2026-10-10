@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+VM="win11"
+STATE=$(virsh -c qemu:///system domstate "$VM" 2>/dev/null)
+
+if [ "$STATE" != "running" ]; then
+    virsh -c qemu:///system start "$VM" >/dev/null 2>&1 &
+fi
+
+exec /home/julian/.local/bin/looking-glass-client.bin "$@"
