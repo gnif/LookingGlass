@@ -164,16 +164,13 @@ required to obtain optimal performance.
 3. If you are on a NUMA architecture (dual CPU, or early Threadripper) be sure
    that you pin the vCPU threads to the physical CPU/die attached to your GPU.
 
-4. Just because your GPU is in a slot that is physically x16 in size, does not
-   mean your GPU is running at x16, this is dependent on how your motherboard
-   is physically wired and the physical slot may be limited to x4 or x8.
+4. Get familiar with your specific motherboard's PCIe slots. Larger physical
+   slots (for example x16) may only operate at a slower speed (like x8),
+   depending on your motherboard's layout.
 
 5. Be sure to set your CPU model type to `host-passthrough` so that your guest
    operating system is aware of the acceleration features of your CPU and can
    make full use of them.
 
-6. AMD users be sure that you have the CPU feature flag `topoext` enabled or
-   your guest operating system will not be aware of which CPU cores are
-   hyper-thread pairs.
-
-How to perform these changes is left as an exercise to the reader.
+6. For users of AMD CPUS, enable the `topoext` feature flag to inform the guest
+   operating system of your CPU's hyper-threading core pairs.
