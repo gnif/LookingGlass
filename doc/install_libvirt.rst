@@ -4,9 +4,9 @@ libvirt/QEMU Installation
 #########################
 
 This article assumes you already have a working `libvirt` Windows virtual
-machine. If you use `virt-manager`, this guide also applies because
-`virt-manager` uses `libvirt` as its back end. A passed-through or virtual GPU
-is strongly recommended, but the IDD can start in software mode without one.
+machine. It also applies to users of `virt-manager`, because `virt-manager` uses
+`libvirt` as its back end. A passed-through or virtual GPU is strongly
+recommended, but the IDD can start in software mode without one.
 
 .. _libvirt_determining_memory:
 
@@ -22,13 +22,13 @@ Calculate the IVSHMEM requirement as:
   \times 256\right) \times \text{HEIGHT} \times 3
   + (4 \times 1024 \times 1024)
 
-Convert the result to MiB and round it up to the next power of two. The common
-values below have already been rounded.
+Convert the result to MiB and round it up to the next power of two. Common
+values listed below have already been rounded.
 
 If a configured mode does not fit, the IDD omits it from the Windows mode list.
 If a client-requested dynamic resolution does not fit, the helper refuses it
-and reports the minimum power-of-two size to configure. The current IDD does
-not publish a truncated frame.
+and reports the minimum power-of-two size to configure. The IDD will not serve a
+truncated frame.
 
 .. note::
    Increasing this value beyond what you need does not improve performance. It
@@ -59,9 +59,11 @@ not publish a truncated frame.
 
 .. _libvirt_determining_memory_hdr:
 
-HDR uses the same 32-bit IDD transport allocation as SDR, so it does not double
-the IVSHMEM requirement. Native Linux HDR presentation has separate compositor
-and display requirements; see :ref:`client_hdr`.
+.. admonition:: HDR Requirements
+
+   HDR uses the same 32-bit IDD transport allocation as SDR, so it does not
+   double the IVSHMEM requirement. Native Linux HDR presentation has separate
+   compositor and display requirements; see :ref:`client_hdr`.
 
 .. _libvirt_ivshmem:
 
