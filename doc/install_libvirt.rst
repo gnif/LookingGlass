@@ -106,36 +106,15 @@ To enable SPICE support, add a SPICE graphics server to your virtual machine:
 
 .. code:: xml
 
-.. _libvirt_clipboard_synchronization:
+  <graphics type='spice'/>
 
-Clipboard synchronization
-^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Looking Glass can synchronize the clipboard between the host and guest using
-the SPICE guest agent.
-
-1. Install the SPICE guest tools from
-https://www.spice-space.org/download.html#windows-binaries.
-
-2. Configure your VM to enable the SPICE guest agent:
-
--  QEMU
-
-.. code:: bash
-
-   -device virtio-serial-pci \
-   -chardev spicevmc,id=vdagent,name=vdagent \
-   -device virtserialport,chardev=vdagent,name=com.redhat.spice.0
-
--  libvirt
+For a fallback display, set up your video device to use VGA:
 
 .. code:: xml
 
-     <channel type="spicevmc">
-       <target type="virtio" name="com.redhat.spice.0"/>
-       <address type="virtio-serial" controller="0" bus="0" port="1"/>
-     </channel>
-     <!-- No need to add a VirtIO Serial device, it will be added automatically -->
+   <video>
+     <model type="vga"/>
+   </video>
 
 .. _libvirt_apparmor:
 
