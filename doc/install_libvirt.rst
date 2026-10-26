@@ -88,39 +88,23 @@ Looking Glass to use your GPUs DMA engine to transfer the frame data.
 
 .. _libvirt_spice_server:
 
-Keyboard/mouse/display/audio
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+SPICE fallback server
+^^^^^^^^^^^^^^^^^^^^^
 
-The IDD provides the primary video, keyboard and mouse paths directly over
-LGMP. SPICE is optional, but is recommended for display fallback, clipboard
-and audio services.
+The Looking Glass client also supports SPICE for video, audio, and input if
+there is a problem with the Looking Glass IDD. However, this is no faster than
+other SPICE clients like virt-viewer, and should not normally be used.
 
 .. note::
-  The current client owns its SPICE connection and service settings. The
-  canonical options are ``spice:enable``, ``spice:input``,
-  ``spice:clipboard``, ``spice:audio`` and ``spice:usbAudio``.
 
-Keep a ``<graphics type='spice'>`` device if you want these services. For a
-usable display fallback, set the VM's ``<video>`` model to ``vga``.
+  The SPICE server is required for the USB audio device, as it uses
+  SPICE USB redirection channels.
 
-The direct IDD input path supports absolute desktop positioning, relative
-capture-mode input, keyboards, media keys and extended mouse buttons. SPICE
-fallback uses the VM's default PS/2 keyboard and mouse. Looking Glass does not
-require additional virtio keyboard, mouse or tablet devices for either path.
+  See :ref:`client_usb_audio` for more information.
 
-For classic SPICE audio, add a standard Intel HDA audio device:
+To enable SPICE support, add a SPICE graphics server to your virtual machine:
 
 .. code:: xml
-
-  <sound model='ich9'>
-    <audio id='1'/>
-  </sound>
-  <audio id='1' type='spice'/>
-
-The recommended emulated USB audio path does not need this HDA device. It
-requires a SPICE USB channel and is covered in :ref:`client_usb_audio`. For
-clipboard synchronization, continue with
-:ref:`libvirt_clipboard_synchronization`.
 
 .. _libvirt_clipboard_synchronization:
 
