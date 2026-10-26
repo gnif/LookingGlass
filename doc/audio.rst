@@ -38,18 +38,26 @@ USB audio setup
 USB audio requires:
 
 * a client built with ``libusbredirparser-0.5``;
-* at least one unused SPICE USB redirection channel in the VM; and
+* a SPICE server
+* at least one unused SPICE USB redirection channel; and
 * a working client playback backend.
 
-For libvirt, add a USB redirection device:
+For libvirt, add a SPICE server:
 
 .. code:: xml
 
-   <redirdev bus='usb' type='spicevmc'/>
+   <graphics type='spice'/>
 
-In virt-manager, this is a **USB Redirector** device using the SPICE channel.
-It is dedicated to the virtual Looking Glass audio device while USB audio is
-active.
+and a USB redirection device:
+
+.. code:: xml
+
+   <devices>
+      <redirdev bus='usb' type='spicevmc'/>
+   </devices>
+
+The USB redirection device is dedicated to the virtual Looking Glass audio
+device while USB audio is active.
 
 The emulated USB audio device is enabled by default. Its settings are:
 
