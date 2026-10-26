@@ -116,23 +116,14 @@ For a fallback display, set up your video device to use VGA:
      <model type="vga"/>
    </video>
 
-.. _libvirt_apparmor:
+For fallback audio support, add a standard Intel HDA audio device:
 
-AppArmor
-^^^^^^^^
+.. code:: xml
 
-For libvirt versions before **5.10.0**, if you are using AppArmor, you
-need to add permissions for QEMU to access the shared memory file. This
-can be done by adding the following to
-``/etc/apparmor.d/local/abstractions/libvirt-qemu``::
-
-   /dev/shm/looking-glass rw,
-
-then, restart AppArmor.
-
-.. code:: bash
-
-   sudo systemctl restart apparmor
+  <sound model='ich9'>
+    <audio id='1'/>
+  </sound>
+  <audio id='1' type='spice'/>
 
 .. _libvirt_memballoon_tweak:
 
