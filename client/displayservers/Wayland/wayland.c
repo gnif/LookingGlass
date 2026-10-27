@@ -158,6 +158,7 @@ static bool waylandInit(const LG_DSInitParams params)
 
   wlWm.warpSupport        = option_get_bool("wayland", "warpSupport");
   wlWm.useFractionalScale = option_get_bool("wayland", "fractionScale");
+  wlWm.replayKeysOnFocus  = params.replayKeysOnFocus;
 
   if (!waylandPollInit())
     return false;

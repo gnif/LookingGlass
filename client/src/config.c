@@ -351,6 +351,13 @@ static struct Option options[] =
   },
   {
     .module         = "input",
+    .name           = "replayKeysOnFocus",
+    .description    = "On focus gain, send key down events to guest for all held keys",
+    .type           = OPTION_TYPE_BOOL,
+    .value.x_bool   = true
+  },
+  {
+    .module         = "input",
     .name           = "escapeKey",
     .description    = "Specify the escape/menu key to use (use \"help\" to see valid values)",
     .shortopt       = 'm',
@@ -698,6 +705,7 @@ bool config_load(int argc, char * argv[])
   g_params.grabKeyboard           = option_get_bool("input", "grabKeyboard"          );
   g_params.grabKeyboardOnFocus    = option_get_bool("input", "grabKeyboardOnFocus"   );
   g_params.releaseKeysOnFocusLoss = option_get_bool("input", "releaseKeysOnFocusLoss");
+  g_params.replayKeysOnFocus      = option_get_bool("input", "replayKeysOnFocus"     );
   g_params.escapeKey              = option_get_int ("input", "escapeKey"             );
   g_params.ignoreWindowsKeys      = option_get_bool("input", "ignoreWindowsKeys"     );
   g_params.hideMouse              = option_get_bool("input", "hideCursor"            );

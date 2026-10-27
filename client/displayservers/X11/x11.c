@@ -452,6 +452,7 @@ static bool x11Init(const LG_DSInitParams params)
   x11.xkbEvent            = -1;
   x11.display             = XOpenDisplay(NULL);
   x11.jitRender           = params.jitRender;
+  x11.replayKeysOnFocus   = params.replayKeysOnFocus;
   x11.wm                  = &X11WM_Default;
   x11.rect                = (struct Rect) {
     .x = params.x,
@@ -1417,6 +1418,9 @@ static void setFocus(bool focused)
         x11.modifiers[modifier] = true;
     }
   }
+
+  if (!x11.replayKeysOnFocus)
+    count = 0;
 
   x11InputFocus(&x11.input, focused, focused ? keys : NULL, count);
   if (focused)

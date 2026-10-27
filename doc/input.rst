@@ -74,6 +74,12 @@ mouse input.
 guest view is active. ``input:grabKeyboard`` controls whether full capture
 mode grabs the keyboard.
 
+When the client window gains focus, keys that are already held are sent to the
+guest as new key presses. Some desktop shortcuts, such as a screenshot tool
+bound to :kbd:`Shift+Super+S`, briefly take the keyboard and return it while
+the keys are still held, so the guest receives a stray key press. Set
+``input:replayKeysOnFocus=no`` to keep such shortcuts on the host.
+
 SPICE fallback
 --------------
 

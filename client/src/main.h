@@ -226,6 +226,7 @@ struct AppParams
   int                  escapeKey;
   bool                 ignoreWindowsKeys;
   bool                 releaseKeysOnFocusLoss;
+  bool                 replayKeysOnFocus;
   bool                 showAlerts;
   bool                 captureOnStart;
   bool                 quickSplash;

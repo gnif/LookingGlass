@@ -343,6 +343,12 @@ static void keyboardEnterHandler(void * data, struct wl_keyboard * keyboard,
   }
 
   wlWm.keyboardEnterSerial = serial;
+  if (!wlWm.replayKeysOnFocus)
+  {
+    wlInputKeyboardEnter(&wlWm.input, true, NULL, 0);
+    return;
+  }
+
   wlInputKeyboardEnter(&wlWm.input, true, keys->data,
       keys->size / sizeof(uint32_t));
 }

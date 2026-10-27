@@ -147,6 +147,7 @@ struct WaylandDSState
   bool needsResize;
   bool configured;
   bool warpSupport;
+  bool replayKeysOnFocus;
   struct WlMotion motion;
 
   _Atomic(uint64_t) pendingResize; // 0 = none, else (width << 32) | height

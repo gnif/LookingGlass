@@ -128,6 +128,9 @@ typedef struct LG_DSInitParams
   bool largeCursorDot;
   bool allowNoInput;
 
+  // if true keys already held when the window gains focus are sent to the guest
+  bool replayKeysOnFocus;
+
   // if true the renderer requires an OpenGL context
   bool opengl;
 

@@ -3765,6 +3765,7 @@ static int lg_run(void)
     .maximize            = g_params.maximize,
     .largeCursorDot      = g_params.largeCursorDot,
     .allowNoInput        = strcmp(g_params.transport, "test") == 0,
+    .replayKeysOnFocus   = g_params.replayKeysOnFocus,
     .opengl              = needsOpenGL,
     .jitRender           = g_params.jitRender,
     .eventSource         =

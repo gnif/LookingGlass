@@ -80,6 +80,7 @@ struct X11DSState
 
   int               xpresentOp;
   bool              jitRender;
+  bool              replayKeysOnFocus;
   _Atomic(uint64_t) presentMsc, presentUst;
   _Atomic(uint64_t) presentPeriod;
   _Atomic(uint64_t) nominalPeriod;
