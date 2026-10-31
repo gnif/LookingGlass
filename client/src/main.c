@@ -773,6 +773,37 @@ static void cursorRepaintRequest(void)
     lgSignalEvent(e_cursorRepaint);
 }
 
+/* With absolute input the local pointer is authoritative, so the cursor can be
+ * drawn where the pointer is now instead of where the guest last reported it.
+ * Returns false when the guest-reported position must be used. */
+bool main_localCursorPos(int hx, int hy, int * x, int * y)
+{
+  if (!g_params.localCursor || g_cursor.grab || g_cursor.realigning ||
+      !g_cursor.inView || !g_cursor.valid || !g_state.focused ||
+      !g_state.haveSrcSize || !g_state.posInfoValid ||
+      app_isOverlayMode() || !core_inputEnabled() ||
+      !lgInput_supports(LG_INPUT_SUPPORT_MOUSE_ABSOLUTE))
+    return false;
+
+  struct DoublePoint guest;
+  util_localCurToGuest(&guest);
+
+  *x = round(util_clamp(guest.x, 0, g_state.srcSize.x - 1)) - hx;
+  *y = round(util_clamp(guest.y, 0, g_state.srcSize.y - 1)) - hy;
+  return true;
+}
+
+void main_localCursorMoved(void)
+{
+  if (!g_params.localCursor)
+    return;
+
+  atomic_store_explicit(&g_cursor.redraw, true, memory_order_release);
+  cursorRepaintRequest();
+  if (g_state.jitRender)
+    app_invalidateWindow(false);
+}
+
 static bool queueCursorRedraw(void)
 {
   if (!atomic_load_explicit(&g_cursor.redraw, memory_order_acquire))
@@ -804,10 +835,12 @@ static bool queueCursorRedraw(void)
   const bool visible = state->cursorVisible &&
     (source == LG_VIDEO_SOURCE_FALLBACK ||
       g_cursor.draw || !inputAvailable);
-  const int x  = state->cursorX;
-  const int y  = state->cursorY;
   const int hx = state->cursorHX;
   const int hy = state->cursorHY;
+  int x = state->cursorX;
+  int y = state->cursorY;
+  if (source == LG_VIDEO_SOURCE_PRIMARY)
+    main_localCursorPos(hx, hy, &x, &y);
   if (!valid)
   {
     LG_UNLOCK(g_state.videoSourceLock);
@@ -1344,8 +1377,15 @@ int main_cursorThread(void * unused)
           sourceGeneration, pointer.sdrWhiteLevel);
 
     if (valid)
+    {
+      int drawX = x;
+      int drawY = y;
+      if (sourceApplied)
+        main_localCursorPos(hx, hy, &drawX, &drawY);
+
       renderQueue_sourceCursorState(RENDER_QUEUE_SOURCE_PRIMARY,
-          sourceGeneration, visible, x, y, hx, hy);
+          sourceGeneration, visible, drawX, drawY, hx, hy);
+    }
     LG_UNLOCK(g_state.videoSourceLock);
 
     if (sourceApplied)

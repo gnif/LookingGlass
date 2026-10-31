@@ -809,6 +809,8 @@ void core_handleMousePosition(double x, double y)
   }
 
   handleMouseAbsolute(inputEnabled, absolute);
+  if (absolute && canTrack)
+    main_localCursorMoved();
 
   if (!canTrack)
   {

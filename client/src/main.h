@@ -246,6 +246,7 @@ struct AppParams
   const char *         windowTitle;
   const char *         appId;
   bool                 mouseRedraw;
+  bool                 localCursor;
   bool                 mouseTrace;
   int                  mouseSens;
   bool                 mouseSmoothing;
@@ -370,6 +371,8 @@ extern struct AppState    g_state;
 extern struct CursorState g_cursor;
 extern struct AppParams   g_params;
 
+bool main_localCursorPos(int hx, int hy, int * x, int * y);
+void main_localCursorMoved(void);
 int main_cursorThread(void * unused);
 int main_frameThread(void * unused);
 void main_videoStreamEnabled(void);
