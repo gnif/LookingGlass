@@ -7,9 +7,8 @@ The IDD helper in the Windows notification area is the first place to check
 when the virtual display is missing or slow. Its icon and tooltip report
 whether the driver is using GPU acceleration or software processing.
 
-Right-click the helper and open the log directory. The files are stored in:
-
-``C:\ProgramData\Looking Glass (IDD)``
+Right-click the helper and open the log directory. In case this is not
+available, manually navigate to ``C:\ProgramData\Looking Glass (IDD)``.
 
 Collect these files when reporting an IDD fault:
 
