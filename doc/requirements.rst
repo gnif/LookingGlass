@@ -15,7 +15,7 @@ Linux host
    with twelve hardware threads are required.
 
 Windows guest
-   A Windows 10 version 1803 or newer, or Windows 11, virtual machine. Looking
+   A Windows 10 version 1903 or newer, or Windows 11, virtual machine. Looking
    Glass can create its own virtual monitor and does not require a physical
    monitor or dummy plug.
 
@@ -29,8 +29,9 @@ Matching components
    version. Legacy Host users must use the B7 stack described below.
 
 The IDD can fall back to software processing if the Windows guest has no
-suitable render GPU. This is useful for compatibility, but hardware processing
-is strongly recommended for lower latency and higher frame rates. Software
+suitable render GPU. This is useful for compatibility and basic applications,
+such as word processing and spreadsheets, but hardware processing is strongly
+recommended for lower latency and higher frame rates, especially games. Software
 mode is SDR-only and does not provide the same performance as the GPU path.
 
 .. seealso::
@@ -86,10 +87,11 @@ Looking Glass still works, but uses more CPU and memory bandwidth.
 Windows and HDR
 ---------------
 
-Windows 10 remains supported. Current HDR and wide-color-gamut display features
-depend on newer IddCx interfaces that the driver checks at runtime, so they are
-normally available only on a compatible Windows 11 installation. The IDD
-continues to use its SDR-compatible path when those interfaces are unavailable.
+Windows 10 (version 1903 or newer) remains supported. Current HDR and
+wide-color-gamut display features depend on newer IddCx interfaces that the
+driver checks at runtime, so they are normally available only on a compatible
+Windows 11 installation. The IDD continues to use its SDR-compatible path when
+those interfaces are unavailable.
 
 Native HDR presentation on Linux requires the EGL renderer, Wayland
 ``color-management-v1`` support in the compositor, and an HDR-capable output.
