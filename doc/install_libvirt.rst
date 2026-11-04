@@ -17,13 +17,33 @@ Calculate the IVSHMEM requirement as:
 
 .. math::
 
-  \text{REQUIRED BYTES} =
-  \left(\left\lceil\frac{\text{WIDTH} \times 4}{256}\right\rceil
-  \times 256\right) \times \text{HEIGHT} \times 3
-  + (4 \times 1024 \times 1024)
+  \begin{align*}
+    B &= 3h\left(256\left\lceil\frac{4w}{256}\right\rceil\right)
+       + (4 \cdot {1024}^2) \\
+    M &= 2^{\left\lceil\log_2 B\right\rceil - 20}
+  \end{align*}
 
-Convert the result to MiB and round it up to the next power of two. Common
-values listed below have already been rounded.
+where
+
+* :math:`w` is the desired resolution width;
+* :math:`h` is the desired resolution height;
+* :math:`B` is the required amount of bytes; and
+* :math:`M` is the required amount of bytes in MiB, rounded up to a power of
+  two.
+
+You may use the following Python script as a substitute:
+
+.. code-block:: python
+
+  import math
+
+  w = int(input("Width: "))
+  h = int(input("Height: "))
+
+  B = 3 * h * (256 * math.ceil(4 * w / 256)) + 4 * 1024**2
+  M = 2 ** (math.ceil(math.log2(B)) - 20)
+
+  print(f"IVSHMEM size should be set to {M} MiB")
 
 If a configured mode does not fit, the IDD omits it from the Windows mode list.
 If a client-requested dynamic resolution does not fit, the helper refuses it
@@ -34,8 +54,8 @@ truncated frame.
    Increasing this value beyond what you need does not improve performance. It
    only reserves more host RAM for the VM.
 
-.. list-table:: Common IDD values
-   :widths: 60 40
+.. list-table:: Common IDD values (already rounded)
+   :widths: 50 50
    :header-rows: 1
 
    * - Maximum resolution
