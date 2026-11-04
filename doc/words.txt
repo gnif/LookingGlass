@@ -27,11 +27,13 @@ downsample
 downsampling
 downscaler
 downscaling
+durations
 EGL
 evdev
 ExtraMode
 Flatpak
 framebuffer
+framerate
 fullscreen
 gcc
 globalFullScreen
@@ -44,6 +46,7 @@ IddCx
 ie
 imgui
 ini
+jitter
 kvmfr
 laggy
 lexically
@@ -89,6 +92,7 @@ repo
 resampler
 Rubenstein
 runtime
+sawtooth
 scanout
 Scream
 scRGB
@@ -104,6 +108,7 @@ Threadripper
 toolchain
 tooltip
 tritanope
+trixie
 tunable
 uaccess
 udev
@@ -119,6 +124,7 @@ upscaler
 upscales
 upscaling
 viewport
+virt
 VirtIO
 virtio
 VM
