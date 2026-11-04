@@ -167,10 +167,10 @@ Additional tuning
 ^^^^^^^^^^^^^^^^^
 
 Looking Glass is latency sensitive and as such it may suffer microstutters if
-you have not properly tuned your virtual machine. The physical display output
-of your GPU will usually not show such issues due to the nature of the hardware
-but be sure that if you are experiencing issues the following tuning is
-required to obtain optimal performance.
+you have not properly tuned your virtual machine. The physical display output of
+your GPU will usually not show such issues due to the nature of the hardware.
+However, if you are experiencing issues, the following tuning is required to
+obtain optimal performance.
 
 1. Do not assign all your CPU cores to your guest VM, you must at minimum
    reserve two CPU cores (4 threads) for your host system to use. For example,
@@ -190,5 +190,5 @@ required to obtain optimal performance.
    operating system is aware of the acceleration features of your CPU and can
    make full use of them.
 
-6. For users of AMD CPUS, enable the `topoext` feature flag to inform the guest
+6. For users of AMD CPUs, enable the `topoext` feature flag to inform the guest
    operating system of your CPU's hyper-threading core pairs.
