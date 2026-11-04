@@ -15,7 +15,7 @@ pass.
 The Looking Glass monitor is missing in Windows
 -----------------------------------------------
 
-1. Confirm that the guest runs Windows 10 version 1803 or newer, or Windows 11.
+1. Confirm that the guest runs Windows 10 version 1903 or newer, or Windows 11.
 2. Confirm that the IDD installer completed and restart Windows if requested.
 3. Open the IDD helper and its log directory. See :ref:`idd_diagnostics`.
 4. In ``looking-glass-idd.txt``, confirm that IVSHMEM opened with the expected
@@ -92,7 +92,8 @@ Keyboard shortcuts are not captured on GNOME Wayland
 -----------------------------------------------------
 
 Capture mode may fail to capture compositor shortcuts like
-ALT+Tab or ALT+Middle Mouse - they go to GNOME instead of the guest VM.
+:kbd:`Alt` + :kbd:`Tab` or :kbd:`Alt` + Middle Click—they go to GNOME instead of
+the guest VM.
 
 When Looking Glass first requests to inhibit shortcuts, GNOME shows a
 dialog asking for permission. If you clicked "Deny" (or dismissed the dialog),
