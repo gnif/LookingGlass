@@ -40,9 +40,10 @@ input package to install.
 Upgrade
 -------
 
-Close active clients and OBS sources, then run the new matching IDD installer
-over the existing installation. Upgrade the Linux client and OBS plugin to the
-same release before using them again.
+Download the desired version of the IDD installer and run it over the existing
+installation. Close all active clients and OBS sources, then upgrade the Linux
+client and OBS plugin to the same version as the installed IDD before launching
+them again.
 
 Windows may briefly remove and recreate the virtual display. Restart Windows
 when the installer reports that a restart is required.
