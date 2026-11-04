@@ -47,7 +47,9 @@ Is a passed-through GPU required?
 
 No. The IDD can create an SDR display using software processing when it cannot
 use a Windows render adapter. A hardware adapter is strongly recommended for
-lower latency, higher refresh rates, HDR, and cadence scheduling.
+lower latency, higher refresh rates, HDR, and cadence scheduling. However,
+software rendering is sufficient for less demanding applications, such as
+basic word processing or spreadsheets.
 
 The Linux client still needs an EGL-capable host graphics driver. Direct
 DMA-BUF import depends on the host GPU and driver; the client falls back to a
@@ -58,9 +60,9 @@ copy when it is unavailable.
 Do I need SPICE?
 ~~~~~~~~~~~~~~~~
 
-SPICE is not required for the primary IDD video or direct input paths. It is
-still useful for clipboard, audio, input fallback and automatic video fallback.
-These services are selected independently.
+SPICE is not required for the primary IDD video, direct input paths, or IDD
+clipboard support. It is still useful for audio, input and clipboard fallback,
+and automatic video fallback. These services are selected independently.
 
 Set ``spice:enable=no`` or use ``-s`` to disable SPICE completely. Disable an
 individual service with ``spice:input``, ``spice:clipboard`` or
