@@ -2,7 +2,7 @@ Looking Glass |release| documentation
 =====================================
 
 Looking Glass is an open-source, low-latency way to use a Windows virtual
-machine from Linux; it utilises a virtual display in the Windows guest, shared
+machine from Linux; it utilizes a virtual display in the Windows guest, shared
 memory for frames, and a native Linux client for display and input.
 
 .. toctree::
