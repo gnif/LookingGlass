@@ -3,11 +3,10 @@
 Overview
 ########
 
-Looking Glass displays a Windows virtual machine in a low-latency Linux
-window. It transfers completed frames through shared memory instead of sending
-compressed video over a network. The IDD provides video and direct
-input through LGMP, while SPICE provides audio, clipboard, and fallback
-services.
+Looking Glass displays a Windows virtual machine in a low-latency Linux window.
+It transfers completed frames through shared memory instead of sending
+compressed video over a network. The IDD provides video, direct input, and
+clipboard through LGMP, while SPICE provides audio and fallback services.
 
 .. _documentation:
 
@@ -52,12 +51,13 @@ Looking Glass Server
 Looking Glass IDD
    The recommended Windows Indirect Display Driver. It creates a virtual
    monitor, sends its frames to the client and provides direct keyboard and
-   mouse input.
+   mouse input, as well as clipboard synchronization.
 
 Legacy Host Application
    The older Windows capture application. It captures an existing display
    rather than creating a virtual one. It is documented for existing B7
-   workflows, but is no longer recommended for current installations.
+   workflows, but is no longer recommended for current installations, and does
+   not provide services like clipboard synchronization, which uses SPICE.
 
 KVMFR and IVSHMEM
    The shared-memory path between the Windows guest and Linux host. KVMFR is
@@ -70,7 +70,7 @@ LGMP
 SPICE
    Remote communications protocol for virtual machines. Used by Looking Glass
    for its emulated USB audio device. Also serves as an optional fallback
-   transport for video, input, audio and clipboard services.
+   transport for video, input, audio, and clipboard services.
 
 .. _recommended_setup:
 
@@ -82,7 +82,7 @@ For a new installation, use:
 * the current Looking Glass Client on the Linux host;
 * KVMFR shared memory attached to the Windows guest;
 * the current Looking Glass IDD in the Windows guest; and
-* SPICE installed on the Linux host
+* SPICE server configured in QEMU or a wrapper, e.g. libvirt.
 
 Make sure to use the same version of Looking Glass for the client, IDD, and OBS
 plugin. The shared-memory protocol changes between releases and incompatible
@@ -105,4 +105,3 @@ releases.
 
 Download the complete B7 release from https://looking-glass.io/downloads and see
 the :ref:`legacy_host` section.
-
