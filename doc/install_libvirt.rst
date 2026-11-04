@@ -108,19 +108,17 @@ Looking Glass to use your GPUs DMA engine to transfer the frame data.
 
 .. _libvirt_spice_server:
 
-SPICE fallback server
-^^^^^^^^^^^^^^^^^^^^^
+SPICE server
+^^^^^^^^^^^^
+
+The Looking Glass client presents a USB audio device to the guest through SPICE
+USB redirection, and SPICE is therefore required. See :ref:`client_usb_audio`
+for more information.
 
 The Looking Glass client also supports SPICE for video, audio, and input if
 there is a problem with the Looking Glass IDD. However, this is no faster than
-other SPICE clients like virt-viewer, and should not normally be used.
-
-.. note::
-
-  The SPICE server is required for the USB audio device, as it uses
-  SPICE USB redirection channels.
-
-  See :ref:`client_usb_audio` for more information.
+other SPICE clients like virt-viewer, and should only be used for fallback when
+troubleshooting, not daily use.
 
 To enable SPICE support, add a SPICE graphics server to your virtual machine:
 
