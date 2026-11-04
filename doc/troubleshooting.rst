@@ -82,27 +82,9 @@ The clipboard is not working
 -  **Is clipboard synchronization enabled?**
 
    -  Before you can copy or paste content between the guest and host,
-      :ref:`clipboard
-      synchronization <libvirt_clipboard_synchronization>`
-      must be enabled.
-
--  **Did you install the Spice Guest Tools?**
-
-   -  The `SPICE Guest Tools
-      driver <https://www.spice-space.org/download.html>`_ must be installed
-      inside the Windows guest to synchronize the clipboard.
-      The download is labeled "spice-guest-tools".
-
-      .. warning::
-
-         Do **NOT** install the QEMU Guest Tools driver.
-         These are not the same.
-
-   -  **Is it installed twice?**
-
-      -  The Spice VDAgent is available in both Spice Guest Tools, and
-         standalone as a separate installer. Check your installed programs
-         and uninstall the VDAgent if it's installed separately.
+      clipboard synchronization must be enabled through the ``clipboard:toVM``
+      and ``clipboard:fromVM`` options. These default to on, but check that
+      you haven't disabled them.
 
 .. _keyboard_shortcuts_not_captured_on_gnome_wayland:
 
