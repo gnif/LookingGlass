@@ -4,7 +4,7 @@ Audio and microphone
 ####################
 
 The client selects audio independently from video and input. The current LGMP
-transport does not provide audio, so SPICE normally supplies it in an IDD
+transport does not provide audio, so SPICE is used to deliver audio in an IDD
 setup. Selecting SPICE as the primary video transport also uses its audio
 provider.
 
