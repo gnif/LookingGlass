@@ -6,8 +6,8 @@ Installation
 The Linux client must be built from source before it can be installed. Follow
 the instructions below for a new setup:
 
-1. Configure the VM and shared memory
-2. Install the IDD in Windows
+1. Configure the VM and shared memory;
+2. Install the IDD in Windows; and
 3. Install the Linux client.
 
 .. tip::
