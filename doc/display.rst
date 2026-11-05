@@ -99,3 +99,7 @@ should only be used when necessary.
 ``win:jitRender`` delays rendering toward the expected presentation deadline.
 It can reduce the age of a frame at display time, but depends on stable timing.
 Leave it disabled while diagnosing stalls or an unstable refresh cadence.
+
+.. seealso::
+
+   :ref:`client_performance`
