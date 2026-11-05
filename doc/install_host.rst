@@ -11,8 +11,8 @@ Legacy Host Application installation
    <install_idd>`.
 
    B7 is the last recommended release when non-capture mouse input through the
-   Host Application is required. Use the matching B7 client and documentation
-   for that workflow. Do not combine a B7 Host with current components.
+   Host Application is required. Mismatched versions will cause issues, please
+   make sure all components are using verison B7.
 
 The legacy Looking Glass Host Application captures frames from the guest using a
 capture API, and sends them to the
@@ -21,7 +21,7 @@ Virtual Machine—through a low-latency transfer protocol over shared memory.
 
 You can get the host program in two ways:
 
--  Download a matching legacy binary from https://looking-glass.io/downloads
+-  Download from https://looking-glass.io/downloads
 
 -  Download the source code as described in :ref:`building`, then
    :ref:`build the host <host_building>`.
@@ -57,10 +57,8 @@ To begin, you must first run the Windows VM with the changes noted in the
 Installing the IVSHMEM driver
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since B6 the host installer available on the official Looking Glass website
-comes with the IVSHMEM driver and will install this for you. If you are running
-an older version of Looking Glass please refer to the documentation for your
-version.
+The host installer available on the official Looking Glass website comes with
+the IVSHMEM driver and will install this for you.
 
 .. _host_install_service:
 
