@@ -13,6 +13,8 @@ when ``WAYLAND_DISPLAY`` is set, then X11 when ``DISPLAY`` is set. To force X11
 from a Wayland session for diagnosis, preserve ``DISPLAY`` and unset
 ``WAYLAND_DISPLAY`` for the client process.
 
+.. _client_resolution:
+
 Window and guest resolution
 ---------------------------
 
@@ -38,12 +40,15 @@ Useful window options include:
 ``win:rotate``
    Rotate the image by 0, 90, 180 or 270 degrees.
 
+.. _client_scaling_filters:
+
 Scaling and filters
 -------------------
 
-The overlay's **EGL filters** page controls scaling, sharpening and custom
-processing. Filters run from top to bottom and can be reordered. Save useful
-combinations as named presets, then select one at startup with ``egl:preset``.
+The overlay (enabled with :kbd:`ScrLk` + :kbd:`O`) has an **EGL filters** page,
+which controls scaling, sharpening and custom processing. Filters run from top
+to bottom and can be reordered. Save useful combinations as named presets, then
+select one at startup with ``egl:preset``.
 
 The built-in filters include:
 
@@ -62,10 +67,10 @@ GLSL filters.
 HDR
 ---
 
-The IDD exposes HDR only when the Windows runtime provides the required IddCx
-interfaces and the IDD is using a hardware render adapter. This normally means
-a compatible Windows 11 guest. Windows 10 and IDD software processing remain
-on the SDR path.
+The IDD exposes HDR when the Windows runtime provides the required IddCx
+interfaces and the IDD is using a hardware render adapter. This normally means a
+compatible Windows 11 guest. Windows 10 and IDD software processing still use
+SDR.
 
 Native HDR output on Linux requires all of the following:
 
@@ -78,17 +83,18 @@ With ``egl:mapHDRtoSDR=yes`` the client tone-maps HDR frames for an SDR desktop.
 Use ``egl:peakLuminance`` to describe the SDR display target and
 ``egl:maxCLL`` to limit the assumed content light level.
 
-X11 presentation is SDR. The EGL renderer tone-maps HDR to SDR there by
+X11 presentation uses SDR, and the EGL renderer tone-maps HDR to SDR there by
 default. Native Wayland PQ output also requires compositor support for ST 2084
 and BT.2020, while scRGB requires compositor scRGB support.
+
+.. _client_display_latency:
 
 Presentation latency
 --------------------
 
-The defaults favor low latency rather than conventional buffered rendering.
-Do not enable ``egl:vsync`` or ``egl:doubleBuffer`` merely to chase a reported
-frame-rate number; either can add presentation delay. Use the timing graphs to
-confirm the result on the actual compositor and GPU.
+The Looking Glass client defaults favor low latency rather than conventional
+buffered rendering. ``egl:vsync`` and ``egl:doubleBuffer`` can add latency and
+should only be used when necessary.
 
 ``win:jitRender`` delays rendering toward the expected presentation deadline.
 It can reduce the age of a frame at display time, but depends on stable timing.
