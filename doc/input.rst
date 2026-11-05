@@ -7,13 +7,14 @@ The current IDD provides keyboard and mouse input directly over LGMP. It uses
 absolute positioning for normal desktop use and relative movement in capture
 mode. SPICE remains available as a fallback when direct input is unavailable.
 
-The client changes input provider automatically. If the displayed video has
-fallen back to SPICE, the client also uses SPICE input so that the picture and
-pointer always refer to the same guest.
+The client changes input provider automatically. If the displayed video falls
+back to SPICE, the client also uses SPICE input.
 
 Only one LGMP client controls direct input at a time. Starting another client
 does not give both clients simultaneous control. Disconnecting or restarting
 the IDD releases held keys and buttons before ownership changes.
+
+.. _client_input_normal:
 
 Normal input
 ------------
@@ -21,14 +22,17 @@ Normal input
 Move the pointer into the guest view to use absolute desktop input. This keeps
 the guest pointer aligned without requiring capture.
 
-Direct IDD input supports the keyboard, media keys and up to 32 mouse buttons.
-SPICE fallback uses relative mouse input and supports fewer extra buttons.
+Direct IDD input supports keyboard input, media keys, and up to 32 mouse
+buttons. SPICE fallback uses relative mouse input and supports fewer extra
+buttons.
+
+.. _client_capture_mode:
 
 Capture mode
 ------------
 
-Press the escape key, :kbd:`ScrLk` by default, to capture the mouse. Capture
-mode confines the pointer and sends relative motion, which is appropriate for
+Press the escape key (:kbd:`ScrLk` by default) to capture the mouse. Capture
+mode confines the pointer and uses relative movement, which is appropriate for
 games and applications that lock the cursor. Press the escape key again to
 leave capture mode.
 
@@ -53,6 +57,8 @@ Common capture options are:
 ``input:hideCursor``
    Hide the host cursor while Looking Glass renders the guest cursor.
 
+.. _client_autocapture:
+
 Automatic keyboard capture
 --------------------------
 
@@ -74,6 +80,8 @@ mouse input.
 guest view is active. ``input:grabKeyboard`` controls whether full capture
 mode grabs the keyboard.
 
+.. _client_input_spice:
+
 SPICE fallback
 --------------
 
@@ -90,6 +98,8 @@ To disable all SPICE input while keeping SPICE audio or clipboard services:
 
 If direct input is also unavailable, the client will display video without
 being able to control the guest.
+
+.. _client_input_evdev:
 
 Evdev capture
 -------------
