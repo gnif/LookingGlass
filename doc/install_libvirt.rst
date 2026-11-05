@@ -17,11 +17,9 @@ Calculate the IVSHMEM requirement as:
 
 .. math::
 
-  \begin{align*}
-    B &= 3h\left(256\left\lceil\frac{4w}{256}\right\rceil\right)
-       + (4 \cdot {1024}^2) \\
-    M &= 2^{\left\lceil\log_2 B\right\rceil - 20}
-  \end{align*}
+  B &= 3h\left(256\left\lceil\frac{4w}{256}\right\rceil\right)
+     + (4 \cdot {1024}^2) \\
+  M &= 2^{\left\lceil\log_2 B\right\rceil - 20}
 
 where
 
