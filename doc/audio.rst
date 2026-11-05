@@ -25,7 +25,7 @@ USB audio (recommended)
 
 Classic SPICE audio
    Uses a virtual guest sound card and SPICE playback and record channels.
-   QEMU limits it to stereo, 16-bit samples at 48 kHz. Use it as a compatibility
+   QEMU limits it to stereo, 16-bit samples at 48 kHz. Use as a compatibility
    fallback when the emulated USB audio device is not available.
 
 Set ``spice:audio=no`` to disable both paths.
@@ -37,7 +37,7 @@ USB audio setup
 
 USB audio requires:
 
-* a client built with ``libusbredirparser-0.5``;
+* a client built with ``libusbredirparser-dev`` (see :ref:`Installing build dependencies -> Audio <client_deps_audio>`);
 * a SPICE server
 * at least one unused SPICE USB redirection channel; and
 * a working client playback backend.
@@ -93,10 +93,10 @@ Playback supports stereo, quadraphonic, 5.1 and 7.1 speaker layouts using
 After the device connects, select the Looking Glass USB Audio speakers as the
 Windows output device.
 
-If USB audio could not be created at startup, the client falls back to classic
-SPICE audio and logs the reason. A working USB audio device also requires the
-SPICE USB redirection channel to connect; if the channel is absent, add it to
-the VM rather than reinstalling the Windows endpoint.
+If USB audio cannot not be created at startup, the client will fall back to
+classic SPICE audio and log the reason. A working USB audio device also requires
+the SPICE USB redirection channel to connect; if there are not enough channels,
+add a new one rather than reinstalling the Windows endpoint.
 
 Classic SPICE setup
 -------------------
