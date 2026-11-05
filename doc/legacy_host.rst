@@ -6,18 +6,19 @@ Legacy Host Application
 .. warning::
 
    The Host Application is a legacy server application. New installations should
-   use the prebuilt :doc:`Looking Glass IDD <install_idd>`. The IDD and Legacy
-   Host should not be installed together on the same virtual machine. These
-   build instructions are retained for the complete matching B7 stack described
-   in :ref:`legacy_host_policy`.
+   use the :doc:`Looking Glass IDD <install_idd>`. The IDD and legacy host
+   should not be installed together on the same virtual machine. These build
+   instructions are retained for the B7 stack described in
+   :ref:`legacy_host_policy`.
 
 .. note::
 
-   `Host` in this context refers to the `Looking Glass (LG) host server application`,
-   to which the LG client connects to, it thus does not refer to the `host OS`!
+   `Host` in this context refers to the `Looking Glass (LG) host server
+   application`, which the LG client connects to, it thus does not refer to the
+   `host OS`.
 
    A common setup is to have a `host OS` running a `guest VM`. In such a setup
-   the `client application` runs on the `host OS`; and the `host application`
+   the `client application` runs on the `host OS`, and the `host application`
    on the `guest VM`.
 
    The term `Host application` was chosen over `Guest application`, because LG
@@ -34,8 +35,8 @@ It is missing many of the features available in the Looking Glass IDD, such as:
 * Usage in virtual machines without GPU acceleration.
 
 B7 is the last recommended version of the legacy host application for users who
-require its non-capture mouse input workflow. Use the complete matching B7 stack
-for that workflow rather than mixing B7 and current components.
+require its non-capture mouse input workflow. Mismatched versions will cause
+issues, please make sure all components are using verison B7.
 
 The documentation is included here for completeness.
 
