@@ -1,5 +1,9 @@
+.. _frequently_asked_questions:
+
 Frequently asked questions
 ##########################
+
+.. _faq_general:
 
 General
 -------
@@ -47,7 +51,7 @@ Is a passed-through GPU required?
 
 No. The IDD can create an SDR display using software processing when it cannot
 use a Windows render adapter. A hardware adapter is strongly recommended for
-lower latency, higher refresh rates, HDR, and cadence scheduling. However,
+lower latency, higher refresh rates, HDR, and cadence scheduling; however,
 software rendering is sufficient for less demanding applications, such as
 basic word processing or spreadsheets.
 
@@ -55,7 +59,7 @@ The Linux client still needs an EGL-capable host graphics driver. Direct
 DMA-BUF import depends on the host GPU and driver; the client falls back to a
 copy when it is unavailable.
 
-.. _why_do_i_need_spice_if_i_dont_want_a_spice_display_device:
+.. _do_i_need_spice:
 
 Do I need SPICE?
 ~~~~~~~~~~~~~~~~
@@ -68,7 +72,7 @@ Set ``spice:enable=no`` or use ``-s`` to disable SPICE completely. Disable an
 individual service with ``spice:input``, ``spice:clipboard`` or
 ``spice:audio`` instead when the other services are still wanted.
 
-.. _where_is_the_host_application_for_linux:
+.. _which_app_runs_on_linux:
 
 Which application runs on Linux?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -76,6 +80,8 @@ Which application runs on Linux?
 The Looking Glass Client runs on the Linux host operating system. The IDD runs
 inside the Windows guest. The older product named the **Host Application** is a
 legacy Windows server; “Host” in that name does not mean the Linux host OS.
+
+.. _faq_input_and_window_system:
 
 Input and window system
 -----------------------
@@ -107,7 +113,7 @@ mouse acceleration can change its feel or cause temporary position error.
 Use the direct IDD input path when available. For a game, use capture mode and
 consider ``input:rawMouse=yes``.
 
-.. _the_cursor_position_doesnt_update_until_i_click:
+.. _should_i_add_a_tablet_device:
 
 Should I add a virtual tablet?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -115,6 +121,8 @@ Should I add a virtual tablet?
 No. Looking Glass does not require an additional virtio tablet, mouse or
 keyboard. Direct IDD input provides its own absolute and relative devices, and
 SPICE fallback uses the VM's default PS/2 input devices.
+
+.. _faq_audio:
 
 Audio
 -----
@@ -125,8 +133,9 @@ Does Looking Glass support microphone input and surround sound?
 Yes. The recommended emulated USB Audio 2.0 device provides stereo,
 quadraphonic, 5.1 and 7.1 playback plus stereo recording at rates up to
 192 kHz. Classic SPICE audio also provides playback and recording. Client
-microphone recording currently requires the PipeWire backend. See
-:doc:`audio`.
+microphone recording currently requires the PipeWire backend. See :doc:`audio`.
+
+.. _faq_host:
 
 Legacy Host Application
 -----------------------
@@ -134,16 +143,16 @@ Legacy Host Application
 The sections below apply only to the legacy Windows Host Application. New
 installations should use the IDD. See :ref:`legacy_host_policy`.
 
-.. _faq_host:
+.. _faq_host_log:
 
-Where is the legacy Host log?
+Where is the legacy host log?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The application log is:
+The application log is found at:
 
 ``%ProgramData%\Looking Glass (host)\looking-glass-host.txt``
 
-The service log is:
+The service log is found at:
 
 ``%ProgramData%\Looking Glass (host)\looking-glass-host-service.txt``
 
@@ -154,7 +163,7 @@ Why does the legacy Host require administrator privileges?
 
 The legacy capture APIs use privileged functions for GPU scheduling, NvFBC
 setup and secure-desktop capture. The installer runs it as a Windows service
-under the SYSTEM account. This is not how the current IDD is configured.
+under the SYSTEM account. This is not how the IDD is configured.
 
 .. _nvfbc_nvidia_capture_api_doesnt_work:
 
@@ -162,7 +171,7 @@ Why does NvFBC not work?
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 NvFBC is a legacy Host capture method and requires supported NVIDIA hardware
-and SDK licensing. It is not part of the IDD path.
+and SDK licensing. The IDD does not support it.
 
 .. _the_screen_stops_updating_when_left_idle_for_a_time:
 
@@ -170,17 +179,17 @@ Why does a legacy captured display stop when idle?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Windows may turn off the physical or dummy display captured by the legacy
-Host. Disable display sleep for that monitor. The IDD virtual-monitor path does
-not require a physical display.
+Host. Disable display sleep for that monitor. The IDD virtual monitor does not
+require a physical display.
 
 .. _a_note_about_ivshmem_and_scream_audio:
 
-Can Scream and Looking Glass share IVSHMEM?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Can Scream and Looking Glass share an IVSHMEM device?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Do not use Scream with Looking Glass. Use the built-in classic SPICE or USB
-audio path instead. In particular, Scream's IVSHMEM transport can select or
-interfere with the shared device used for Looking Glass frames.
+Scream and Looking Glass should not be used at the same time, use the built-in
+classic SPICE or USB audio path instead. In particular, Scream's IVSHMEM
+transport can select or interfere with the shared device used by Looking Glass.
 
 Technical details
 -----------------
