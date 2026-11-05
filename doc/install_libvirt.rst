@@ -115,7 +115,7 @@ for more information.
 
 The Looking Glass client also supports SPICE for video, audio, and input if
 there is a problem with the Looking Glass IDD. However, this is no faster than
-other SPICE clients like virt-viewer, and should only be used for fallback when
+other SPICE clients like virt-viewer, and should only be used as a fallback when
 troubleshooting, not daily use.
 
 To enable SPICE support, add a SPICE graphics server to your virtual machine:

@@ -40,7 +40,7 @@ input package to install.
 Upgrade
 -------
 
-Download the desired version of the IDD installer and run it over the existing
+Download the correct version of the IDD installer and run it over the existing
 installation. Close all active clients and OBS sources, then upgrade the Linux
 client and OBS plugin to the same version as the installed IDD before launching
 them again.

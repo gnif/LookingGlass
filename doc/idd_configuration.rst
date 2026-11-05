@@ -60,9 +60,9 @@ Make LG the only monitor
 
 Disable no GPU warning
    Suppresses the notification shown when the IDD has fallen back to software
-   processing. This is intended to be used for virtual machines that do not
-   require 3D acceleration only. It does not enable GPU acceleration or change
-   the active adapter.
+   processing. This is only intended to be used for virtual machines that do not
+   require 3D acceleration. It does not enable GPU acceleration or change the
+   active adapter.
 
 Force full direct frame copies
    Works around GPU drivers that corrupt partial D3D12 copies into the shared
