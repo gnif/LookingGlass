@@ -122,24 +122,30 @@ To enable SPICE support, add a SPICE graphics server to your virtual machine:
 
 .. code:: xml
 
-  <graphics type='spice'/>
+   <devices>
+     <graphics type='spice'/>
+   </devices>
 
 For a fallback display, set up your video device to use VGA:
 
 .. code:: xml
 
-   <video>
-     <model type="vga"/>
-   </video>
+   <devices>
+     <video>
+       <model type="vga"/>
+     </video>
+   </devices>
 
 For fallback audio support, add a standard Intel HDA audio device:
 
 .. code:: xml
 
-  <sound model='ich9'>
-    <audio id='1'/>
-  </sound>
-  <audio id='1' type='spice'/>
+   <devices>
+     <sound model='ich9'>
+        <audio id='1'/>
+     </sound>
+     <audio id='1' type='spice'/>
+   </devices>
 
 .. _libvirt_memballoon_tweak:
 
@@ -157,7 +163,9 @@ Find the ``<memballoon>`` tag and set its type to ``none``:
 
 .. code:: xml
 
-   <memballoon model="none"/>
+   <devices>
+     <memballoon model="none"/>
+   </devices>
 
 .. _libvirt_additional_tuning:
 
