@@ -1,4 +1,3 @@
-:orphan:
 .. _ivshmem_kvmfr:
 
 IVSHMEM with the KVMFR module (Recommended)
@@ -28,7 +27,7 @@ Then switch to the ``module/`` directory
 .. _ivshmem_kvmfr_dkms:
 
 Installing
-~~~~~~~~~~
+----------
 
 To install the module into DKMS, run
 
@@ -39,11 +38,11 @@ To install the module into DKMS, run
 .. _ivshmem_kvmfr_loading:
 
 Loading
-~~~~~~~
+-------
 
-Using the value you should have already calculated as per
-:ref:`Determining Memory <libvirt_determining_memory>`, simply use
-``modprobe`` with the parameter ``static_size_mb``, for example:
+Using the IVSHMEM size from :ref:`Determining Memory
+<libvirt_determining_memory>`, simply use ``modprobe`` with the parameter
+``static_size_mb``, for example:
 
 .. code:: bash
 
@@ -68,8 +67,8 @@ required.
 systemd-modules-load
 ~~~~~~~~~~~~~~~~~~~~
 
-For convenience, you may load the KVMFR module when starting your computer.
-We can use the ``systemd-modules-load.service(8)`` service for this task.
+You can use the ``systemd-modules-load.service(8)`` service to load KVMFR when
+you start your computer.
 
 Create the file ``/etc/modules-load.d/kvmfr.conf`` with the following
 contents::
@@ -82,7 +81,7 @@ This will now run the next time you start your machine.
 .. _ivshmem_kvmfr_verification:
 
 Verification
-~~~~~~~~~~~~
+------------
 
 If everything has been done correctly you should see the following output in
 dmesg:
@@ -141,7 +140,7 @@ with the following contents::
 .. _ivshmem_kvmfr_libvirt:
 
 libvirt
-~~~~~~~
+-------
 
 Using the module in libvirt requires adding a ``<qemu:commandline>`` block to
 your libvirt XML configuration. That block, in turn, requires modifying the
@@ -188,7 +187,7 @@ to start.
    and configured by default by most distributions when you install libvirt.
 
 AppArmor
-^^^^^^^^
+~~~~~~~~
 
 Create ``/etc/apparmor.d/local/abstractions/libvirt-qemu`` if it doesn't exist
 and add the following:
@@ -199,7 +198,7 @@ and add the following:
    /dev/kvmfr0 rw,
 
 cgroups
-^^^^^^^
+~~~~~~~
 
 Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the
 ``cgroup_device_acl`` block, adding ``/dev/kvmfr0`` to the list. Restart
@@ -212,7 +211,7 @@ Edit the file ``/etc/libvirt/qemu.conf`` and uncomment the
 .. _ivshmem_kvmfr_qemu:
 
 QEMU
-~~~~
+----
 
 If you are using QEMU directly without libvirt, add the following arguments to your
 ``qemu`` command line::
