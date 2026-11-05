@@ -152,18 +152,13 @@ the top of your XML config to:
 
    <domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
 
-then add one of the ``<qemu:commandline>`` blocks below based on your
-QEMU/libvirt versions.
-
 .. note::
 
    Make sure to add both the block and the domain namespace change in a
    single editing session prior to saving it. Failure to do so will cause
    libvirt to reject the changes.
 
-Starting with QEMU 6.2 and libvirt 7.9, JSON style QEMU configuration is the
-default syntax. Users running QEMU 6.2 or later **and** libvirt 7.9 or later,
-should use this XML block to configure their VM for kvmfr:
+then the ``<qemu:commandline>`` block below to your domain XML:
 
 .. code:: xml
 
@@ -182,24 +177,6 @@ should use this XML block to configure their VM for kvmfr:
       got to calculate the size in bytes:
 
      ``size_in_MB x 1024 x 1024 = size_in_bytes``
-
-If you are running QEMU older than 6.2 or libvirt older than 7.9, please use
-legacy syntax for IVSHMEM setup:
-
-.. code:: xml
-
-   <qemu:commandline>
-     <qemu:arg value="-device"/>
-     <qemu:arg value="ivshmem-plain,id=shmem0,memdev=looking-glass"/>
-     <qemu:arg value="-object"/>
-     <qemu:arg value="memory-backend-file,id=looking-glass,mem-path=/dev/kvmfr0,size=64M,share=yes"/>
-   </qemu:commandline>
-
-.. note::
-
-   Using the legacy syntax on QEMU 6.2/libvirt 7.9 may cause QEMU to
-   abort with the following error message:
-   "``error: internal error: ... PCI: slot 1 function 0 not available for pcie-root-port, in use by ivshmem-plain``"
 
 Running libvirt this way violates AppArmor and cgroups policies, which will
 block the VM from running. These policies must be amended to allow the VM
