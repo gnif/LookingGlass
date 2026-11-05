@@ -6,9 +6,7 @@ Legacy Host Application build
 .. warning::
 
    The Host Application is a legacy server application. New installations should
-   use the prebuilt :doc:`Looking Glass IDD <install_idd>`. These build
-   instructions are retained for the complete matching B7 stack described in
-   :ref:`legacy_host_policy`.
+   use the :doc:`Looking Glass IDD <install_idd>`.
 
 .. note::
 
@@ -29,10 +27,10 @@ These instructions help you build the host yourself from the
 .. warning::
    :name: dont-build-the-host
 
-   Building the host from source code is not recommended for most purposes,
-   and should only be attempted by users who are prepared to handle issues
-   on their own. Please download the pre-built binary installers from
-   https://looking-glass.io/downloads for stability, and increased support.
+   Building the legacy host from source code is not recommended for most
+   purposes, and should only be attempted by users who are prepared to handle
+   issues on their own. Please download the pre-built binary installers from
+   https://looking-glass.io/downloads for stability.
 
    .. note::
 
