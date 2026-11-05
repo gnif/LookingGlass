@@ -36,7 +36,7 @@ It is missing many of the features available in the Looking Glass IDD, such as:
 
 B7 is the last recommended version of the legacy host application for users who
 require its non-capture mouse input workflow. Mismatched versions will cause
-issues, please make sure all components are using verison B7.
+issues, please make sure all components are using version B7.
 
 The documentation is included here for completeness.
 

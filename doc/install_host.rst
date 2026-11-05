@@ -12,7 +12,7 @@ Legacy Host Application installation
 
    B7 is the last recommended release when non-capture mouse input through the
    Host Application is required. Mismatched versions will cause issues, please
-   make sure all components are using verison B7.
+   make sure all components are using version B7.
 
 The legacy Looking Glass Host Application captures frames from the guest using a
 capture API, and sends them to the
