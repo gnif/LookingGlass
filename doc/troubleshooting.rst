@@ -1,9 +1,9 @@
 Troubleshooting
 ###############
 
-Start with the symptom below. Avoid changing polling, synchronization or
-renderer options until the basic server, shared-memory and version checks
-pass.
+When diagnosing issues, start with the guide below. Avoid changing polling,
+synchronization or renderer options until the basic server, shared-memory and
+version checks pass.
 
 .. toctree::
    :maxdepth: 1
@@ -32,7 +32,7 @@ When asking for help, it is important to include the following:
 
 All of this information is helpful, and should not be excluded.
 
-.. _when_launching_looking_glass_the_desktop_doesnt_appear:
+.. _issue_monitor_missing:
 
 The Looking Glass monitor is missing in Windows
 -----------------------------------------------
@@ -42,33 +42,37 @@ The Looking Glass monitor is missing in Windows
 3. Open the IDD helper and its log directory. See :ref:`idd_diagnostics`.
 4. In ``looking-glass-idd.txt``, confirm that IVSHMEM opened with the expected
    size and that at least one configured display mode fits.
-5. Increase IVSHMEM if every suitable mode was filtered. Restart the VM after
-   changing its size.
-6. Ensure the legacy Host service is disabled. Only one Looking Glass Server
-   implementation should use the Looking Glass IVSHMEM device.
+5. Increase the IVSHMEM size and restart the VM if every suitable mode was
+   filtered.
+   - See :ref:`libvirt_determining_memory`
+6. Ensure the legacy host service is disabled. Only one Looking Glass Server
+   implementation should use the IVSHMEM device.
 
 A missing passed-through GPU does not by itself prevent the IDD display from
 appearing. The IDD can start in software mode, although that mode is slower and
 SDR-only.
 
+.. _issue_stuck_on_loading:
+
 The client remains on the waiting screen
 ----------------------------------------
 
-* Confirm that the Windows Looking Glass monitor is active and producing a
-  desktop.
-* Check that the client selected the same KVMFR device or shared-memory file as
-  the VM.
+* Confirm that the Windows Looking Glass monitor is active.
+* Check that the client has selected the same KVMFR device or shared-memory file
+  as the VM, if you have more than one.
 * Confirm that the Linux user has read and write access to that device.
-* Use matching client and IDD releases. A KVMFR or LGMP protocol mismatch is a
-  hard incompatibility.
+* Make sure you are using the same Looking Glass client version as the IDD.
 * If ``/dev/kvmfr0`` is a regular file instead of a character device, stop the
   VM, remove that accidental file and load KVMFR before starting the VM again.
+  See :ref:`KVMFR device verification <ivshmem_kvmfr_verification>`
+
+.. _issue_image_slow:
 
 The image is slow or stutters
 -----------------------------
 
 Open the timing graphs with :kbd:`ScrLk` + :kbd:`T` and follow
-:ref:`client_performance`. Also check:
+:ref:`client_performance`. Also check that:
 
 * the IDD helper reports GPU acceleration rather than software processing;
 * ``lgmp:allowDMA=yes`` is using a direct import when the host driver supports
@@ -78,9 +82,11 @@ Open the timing graphs with :kbd:`ScrLk` + :kbd:`T` and follow
 * the compositor is not adding an unexpected frame queue; and
 * the fastest active client or OBS source is requesting the intended cadence.
 
-Do not set the guest to an extreme refresh rate merely to raise UPS. The IDD
+Do not set the guest to an extreme refresh rate attempting to raise UPS. The IDD
 can acquire newer frames and skip superseded ones before transport, but the
 guest still pays the cost of rendering them.
+
+.. _issue_keyboard_mouse_input:
 
 Keyboard or mouse input does not work
 -------------------------------------
@@ -90,8 +96,8 @@ Keyboard or mouse input does not work
 * Only one LGMP client owns direct input. Close another controlling client if
   necessary.
 * If SPICE video fallback is active, keep ``spice:input=yes``. The client uses
-  the VM's default PS/2 keyboard and mouse and intentionally switches input
-  with the video source.
+  the VM's default PS/2 keyboard and mouse, and switches input to follow the
+  video source.
 * If ``input:captureOnly=yes``, press :kbd:`ScrLk` to enter capture mode.
 
 See :ref:`client_input` for normal, automatic keyboard and capture modes.
@@ -114,7 +120,7 @@ Keyboard shortcuts are not captured on GNOME Wayland
 -----------------------------------------------------
 
 Capture mode may fail to capture compositor shortcuts like
-:kbd:`Alt` + :kbd:`Tab` or :kbd:`Alt` + Middle Click—they go to GNOME instead of
+:kbd:`Alt` + :kbd:`Tab` or :kbd:`Alt` + :kbd:`Mouse3`—they go to GNOME instead of
 the guest VM.
 
 When Looking Glass first requests to inhibit shortcuts, GNOME shows a
@@ -135,6 +141,8 @@ To verify the permission was set:
 
    flatpak permissions gnome shortcuts-inhibitor
 
+.. _issue_usb_audio_not_playing:
+
 USB audio does not appear or play
 ---------------------------------
 
@@ -146,10 +154,17 @@ USB audio does not appear or play
 * Check the client startup log. If USB audio creation failed before
   connection, Looking Glass falls back to classic SPICE audio and reports why.
 
+.. seealso::
+
+   :ref:`client_usb_audio`
+
+.. _issue_microphone_missing:
+
 The microphone is unavailable
 ------------------------------
 
-The current PipeWire backend supports recording; the PulseAudio backend does
-not. Ensure the client selected PipeWire, then check ``audio:micDefault`` and
-the microphone indicator. Press :kbd:`ScrLk` + :kbd:`C` to change the default
-permission and :kbd:`ScrLk` + :kbd:`E` to toggle recording.
+The PipeWire audio backend supports recording from the microphone, but the
+PulseAudio backend does not. Ensure the client has selected the PipeWire
+backend, then check ``audio:micDefault`` and the microphone indicator. Press
+:kbd:`ScrLk` + :kbd:`C` to change the default permission and :kbd:`ScrLk` +
+:kbd:`E` to toggle recording.
