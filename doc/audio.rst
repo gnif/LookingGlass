@@ -61,6 +61,23 @@ and a USB redirection device:
 The USB redirection device is dedicated to the virtual Looking Glass audio
 device while USB audio is active.
 
+For QEMU:
+
+.. code:: bash
+
+   -chardev spicevmc,name=usbredir,id=usbredirchar1 \
+   -device usb-redir,chardev=usbredirchar1,id=usbredirdev1,bus=xhci.0
+
+.. note::
+
+   This redirection channel is dedicated to the virtual Looking Glass audio
+   device while USB audio is active. If you want to redirect another USB device
+   at the same time, you must create another channel.
+
+   When creating an extra USB redirection channel, you have to choose a new
+   ``port`` (for libvirt) or ``id`` (for QEMU), as they must be unique.
+   Incrementing the number to the lowest one available is enough.
+
 The emulated USB audio device is enabled by default. Its settings are:
 
 .. code-block:: ini
