@@ -7,7 +7,7 @@ OBS plugin
 The Looking Glass OBS plugin reads video from LGMP directly instead of
 capturing the client window. The client can stay hidden or show overlays
 without adding them to the OBS source. This source does not provide audio or
-input; add the required audio source separately in OBS.
+input, so add any required audio source separately in OBS.
 
 Use an OBS plugin from the same Looking Glass release as the IDD and client.
 The shared-memory protocol is versioned and mismatched components will not
@@ -26,7 +26,7 @@ dependencies used by the plugin:
    apt-get install cmake gcc libobs-dev libdw-dev libunwind-dev make pkg-config
 
 Use ``-DENABLE_BACKTRACE=no`` when configuring if ``libdw-dev`` and
-``libunwind-dev`` are intentionally omitted.
+``libunwind-dev`` are left out.
 
 From the Looking Glass source directory, build the plugin for the current
 user:
@@ -42,6 +42,8 @@ user:
 For a system-wide installation, omit ``-DUSER_INSTALL=1`` and run
 ``sudo make install``.
 
+.. _obs_add_source:
+
 Add the source
 --------------
 
@@ -49,7 +51,8 @@ Add the source
 2. In **Sources**, select **Add** and then **Looking Glass Client**.
 3. Set **SHM File** to the same KVMFR device or shared-memory file used by the
    VM.
-4. Enable **Hide mouse cursor** if OBS should omit the guest pointer.
+4. Enable **Hide mouse cursor** if OBS should hide the guest pointer from the
+   video.
 5. Leave **Use DMABUF import** enabled with KVMFR unless the OBS log reports
    that the host graphics driver cannot import it.
 
@@ -61,26 +64,32 @@ udev rule as the Looking Glass client; see :ref:`ivhsmem_kvmfr_permissions`.
 
    Adding the Looking Glass source
 
+.. _obs_dmabuf:
+
 DMA-BUF and CPU copy
 --------------------
 
-DMA-BUF import is available with OBS 27 or newer and is enabled by default.
-It imports KVMFR into the GPU and makes a full-frame GPU snapshot into
-OBS-owned storage before releasing the shared frame. It avoids the CPU upload,
-but it is not a zero-copy path to the final OBS texture. If import or the
-snapshot fails, the plugin falls back to a CPU copy and records the failure in
-the OBS log. A plain POSIX shared-memory file always uses the CPU path.
+DMA-BUF import is available and is enabled by default. It imports KVMFR into the
+GPU and makes a full-frame GPU snapshot into OBS-owned storage before releasing
+the shared frame. It avoids the CPU upload, but is not a zero-copy path to
+the final OBS texture. If import or the snapshot fails, the plugin falls back to
+a CPU copy and records the failure in the OBS log. A plain POSIX shared-memory
+file always uses the CPU path.
 
 Disabling DMA-BUF is useful for diagnosis, but it increases CPU and memory
 bandwidth use at high resolutions.
 
+.. _obs_hdr:
+
 HDR
 ---
 
-HDR-aware OBS color-space support requires OBS 28 or newer. The plugin reports
-the source color space from the IDD frame, but OBS must also be configured with
-an HDR canvas and a suitable recording or streaming output. An SDR OBS project
-will not become HDR merely because the guest frame is HDR.
+HDR-aware OBS color-space support is also available. The plugin reports the
+source color space from the IDD frame, but OBS must also be configured with an
+HDR canvas and a suitable recording or streaming output. An SDR OBS project will
+not become HDR merely because the guest frame is HDR.
+
+.. _obs_framerate_many_clients:
 
 Frame rate and multiple clients
 -------------------------------
@@ -96,6 +105,8 @@ IDD log lines that report acquired, skipped and published frames are expected:
 frames newer than the previous publication may be acquired and superseded
 without copying all of them through IVSHMEM.
 
+.. _obs_troubleshooting:
+
 Troubleshooting
 ---------------
 
@@ -104,17 +115,16 @@ No source image
    OBS log reports both expected protocol versions when they do not match.
 
 High CPU use
-   Confirm that DMA-BUF stayed enabled and that import succeeded. Also check
-   whether OBS and the client are both performing expensive scaling.
+   Confirm that DMA-BUF remains enabled and that import succeeded. Also check
+   whether OBS and the client are both performing expensive image scaling.
 
 Jitter when another client starts
-   Confirm OBS is using a current matching plugin. Current cadence support
-   allows consumers with different refresh rates without forcing OBS to
-   display every frame requested by the fastest client.
+   Confirm the plugin and the IDD are using the same version. LGMP allows
+   consumers to have different refresh rates without forcing OBS to display
+   every frame requested by the fastest client.
 
 HDR looks washed out
    Check the OBS canvas color space, output format and the guest HDR state. Do
    not apply the client's HDR-to-SDR settings to the independent OBS source.
 
-OBS is available from https://obsproject.com/ and is packaged by most Linux
-distributions as ``obs-studio`` or ``obs``.
+OBS is available from https://obsproject.com/ and is packaged as ``obs-studio``.
