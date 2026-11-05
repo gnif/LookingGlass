@@ -14,10 +14,12 @@ your virtual machine.
 
 .. code:: xml
 
-   <shmem name='looking-glass'>
-     <model type='ivshmem-plain'/>
-     <size unit='M'>64</size>
-   </shmem>
+   <devices>
+     <shmem name='looking-glass'>
+       <model type='ivshmem-plain'/>
+       <size unit='M'>64</size>
+     </shmem>
+   </devices>
 
 .. note::
   If you are using QEMU directly without libvirt the following arguments are

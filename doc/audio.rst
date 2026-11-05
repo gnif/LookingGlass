@@ -46,7 +46,9 @@ For libvirt, add a SPICE server:
 
 .. code:: xml
 
-   <graphics type='spice'/>
+   <devices>
+      <graphics type='spice'/>
+   </devices>
 
 and a USB redirection device:
 
