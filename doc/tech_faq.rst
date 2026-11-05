@@ -1,3 +1,5 @@
+.. _technical_faq:
+
 Technical notes
 ###############
 
@@ -53,6 +55,8 @@ Polling avoids the high overhead and batching behavior seen with virtual
 interrupts, especially for high-rate pointer updates. The polling intervals
 are configurable for diagnosis, but lowering them without evidence increases
 CPU usage and does not guarantee lower latency.
+
+.. _cadence_bandwidth:
 
 How does cadence reduce bandwidth?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
