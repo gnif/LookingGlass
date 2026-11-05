@@ -101,17 +101,21 @@ You should now also have the character device ``/dev/kvmfr0``
 .. warning::
 
    If you start the VM prior to loading the module, QEMU will create the file
-   ``/dev/kvmfr0`` as a regular file. You can confirm if this has happened by
-   running ``ls -l /dev/kvmfr0`` and checking if the file size is greater than
-   zero, or the permissions do not start with ``c``. If this has occurred, you
-   must stop the VM before deleting the regular file. Load the KVMFR module,
-   confirm that it recreated ``/dev/kvmfr0`` as a character device whose
-   permissions start with ``c``, then start the VM again.
+   ``/dev/kvmfr0`` as a regular file rather than as a character device. You can
+   see if this has happened by running ``ls -l /dev/kvmfr0`` and checking if the
+   file size is greater than zero, or the permissions do not start with ``c``.
+   If this has occurred:
+
+   1. stop the VM
+   2. delete ``/dev/kvmfr0``
+   3. load the KVMFR module
+   4. confirm that ``/dev/kvmfr0`` is character device
+   5. start the VM again
 
 .. _ivhsmem_kvmfr_permissions:
 
 Permissions
-~~~~~~~~~~~
+-----------
 
 The module will create the ``/dev/kvmfr0`` node, which represents the KVMFR
 interface. To use the interface, you need permission to access it by either
