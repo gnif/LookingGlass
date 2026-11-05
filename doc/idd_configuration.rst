@@ -7,6 +7,8 @@ Right-click the **Looking Glass (IDD)** icon in the Windows notification area
 and select **Open configuration**. The icon and its tooltip also show whether
 the driver is using GPU acceleration or software processing.
 
+.. _idd_display_modes:
+
 Display modes
 -------------
 
@@ -22,15 +24,37 @@ for the Looking Glass monitor.
 * Enable **prefer** on the mode that Windows should prefer. Only one mode can
   be preferred.
 
-Refresh rates may contain up to three decimal places. For example, enter
+Refresh rates may contain up to three decimal places. For example, you can enter
 ``119.970`` rather than rounding it to 120 Hz. Accepted values range from
 23.900 Hz to 1000.000 Hz. Width may range from 640 to 16384 pixels and height
 from 480 to 16384 pixels.
 
-Edits to the mode list are not applied immediately. Select **Save & reload
-driver** when the list is ready. This saves the list, removes and recreates the
-virtual monitor, and can make the display blink briefly. **Revert** discards
-unsaved mode and default-refresh changes.
+Edits to the mode list are not applied immediately, you must select **Save &
+reload driver** when the list is ready. This saves the list, then removes and
+recreates the virtual monitor, and can make the display blink briefly.
+**Revert** discards unsaved mode and default-refresh changes.
+
+.. _idd_mode_culling:
+
+Modes that do not fit in shared memory
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+At startup, the IDD removes modes that cannot fit in the configured IVSHMEM
+region. If every suitable mode is filtered, the monitor cannot start. A
+dynamic resolution request that is too large is refused and the helper reports
+the minimum power-of-two IVSHMEM size needed.
+
+To allow for modes that do not currently fit, increase the IVSHMEM size in the
+VM configuration and restart the VM. The IDD reads the new capacity when it
+starts; another helper reload is not normally required. Allocating more shared
+memory than required does not improve performance; it only reserves additional
+host RAM.
+
+.. seealso::
+
+   :ref:`libvirt_determining_memory`
+
+.. _idd_refresh:
 
 Default refresh
 ---------------
@@ -39,14 +63,16 @@ Default refresh
 resolution. It also supplies the refresh rate when **Load default** rebuilds
 the standard mode list.
 
-Changing this value does not rewrite refresh rates already saved in the normal
+Changing this value does not update refresh rates already saved in the normal
 mode list. On reload, an existing dynamic mode keeps its resolution and adopts
 the new default refresh rate.
 
 The client option ``win:setGuestRes`` enables automatic dynamic resolution
 requests when the client window changes size. The default is enabled when the
-server in the guest supports it. Press the client's escape key together with
-``=`` to request the current window resolution manually.
+server in the guest supports it. Press :kbd:`ScrLk` + :kbd:`=` to request the
+current window resolution manually.
+
+.. _idd_preferences:
 
 Preferences
 -----------
@@ -79,7 +105,9 @@ Force indirect copy
    a CPU copy and significantly reduces throughput. It takes precedence over
    the direct-copy preference and requests a driver reload when changed.
 
-Unlike mode-list edits, preference checkboxes are saved when clicked.
+Unlike mode-list edits, preference checkboxes are automatically saved.
+
+.. _idd_software_processing:
 
 Software processing
 -------------------
@@ -88,16 +116,3 @@ If no suitable Windows render adapter is available, the IDD can use software
 processing. This provides a display but is slower, cannot provide predictable
 high-rate cadence and is limited to SDR. Check the IDD log to see which render
 adapter was selected and whether software processing is active.
-
-Modes that do not fit in shared memory
---------------------------------------
-
-At startup the IDD removes modes that cannot fit in the configured IVSHMEM
-region. If every suitable mode is filtered, the monitor cannot start. A
-dynamic resolution request that is too large is refused and the helper reports
-the minimum power-of-two IVSHMEM size needed.
-
-Increase the IVSHMEM size in the VM configuration and restart the VM. The IDD
-reads the new capacity when it starts; another helper reload is not normally
-required. Allocating more shared memory than required does not improve
-performance; it only reserves additional host RAM.
