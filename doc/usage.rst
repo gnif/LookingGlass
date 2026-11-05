@@ -1,7 +1,7 @@
 .. _client_usage:
 
-Use the client
-##############
+Using the client
+################
 
 Start the client after the Windows guest and IDD are running:
 
@@ -17,18 +17,17 @@ with ``-f`` or the canonical ``lgmp:shmDevice`` option:
 
    looking-glass-client -f /dev/kvmfr1
 
-Use ``looking-glass-client --help`` to see the options supported by the
-installed build. Command-line options override configuration files.
+Use ``looking-glass-client --help`` to see the options supported by the client.
+Command-line options override configuration files.
 
 .. _client_key_bindings:
 
 Default key bindings
 --------------------
 
-Looking Glass uses :kbd:`ScrLk` as its escape key by default. Press it by
-itself to enter or leave capture mode. Hold it to display the available
-commands. Change it with ``input:escapeKey`` or ``-m`` if the keyboard does
-not have :kbd:`ScrLk`.
+Looking Glass uses :kbd:`ScrLk` as its escape key by default. Press it to enter
+or leave capture mode. Hold it to display the available commands. Change it with
+``input:escapeKey`` or ``-m`` if your keyboard does not have :kbd:`ScrLk`.
 
 .. list-table:: Default client commands
    :widths: 35 65
@@ -75,7 +74,7 @@ not have :kbd:`ScrLk`.
    * - :kbd:`ScrLk` + :kbd:`F1` through :kbd:`F12`
      - Send :kbd:`Ctrl` + :kbd:`Alt` + that function key to a Linux guest
 
-The microphone commands are registered only when the client was built with
+The microphone commands are registered only when the client is built with
 audio recording support. Night vision is an EGL feature. The virtual-console
 bindings are registered only when the selected guest type is Linux.
 
@@ -84,7 +83,7 @@ bindings are registered only when the selected guest type is Linux.
 Configuration files
 -------------------
 
-The client loads these files in order when they exist:
+The client loads these files in order if they exist:
 
 * ``/etc/looking-glass-client.ini``
 * ``~/.looking-glass-client.ini``
@@ -109,7 +108,10 @@ Later files override earlier files. The usual per-user path is
    [egl]
    preset=my-preset
 
-Boolean values accept ``yes`` or ``no``. Long command-line options use
+Boolean values accept ``yes`` or ``no``, as well as ``1`` or ``0``,
+``true`` or ``false``, and ``on`` or ``off``.
+
+Long command-line options use
 ``section:name=value``, for example:
 
 .. code:: bash
