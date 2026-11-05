@@ -13,7 +13,7 @@ recommended, but the IDD can start in software mode without one.
 Determining memory
 ^^^^^^^^^^^^^^^^^^
 
-Calculate the IVSHMEM requirement as:
+The IVSHMEM size is calculated as:
 
 .. math::
 
@@ -49,7 +49,7 @@ and reports the minimum power-of-two size to configure. The IDD will not serve a
 truncated frame.
 
 .. note::
-   Increasing this value beyond what you need does not improve performance. It
+   Increasing this value beyond what you need does not improve performance, it
    only reserves more host RAM for the VM.
 
 .. list-table:: Common IDD values (already rounded)
