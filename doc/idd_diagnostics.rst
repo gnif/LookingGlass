@@ -51,25 +51,3 @@ Frame schedule owner
 Input owner
    Identifies the client currently allowed to send direct input. Only one
    client can own it at a time.
-
-.. _client_help_information:
-
-Client information when asking for help
----------------------------------------
-
-The Looking Glass client outputs a lot of useful information during normal
-operation, which helps a lot with debugging and support when issues arise.
-
-This information is available when running the client in a terminal.
-
-When asking for help, it is important to include the following:
-
-* version information about the client, and IDD;
-* Linux distribution and kernel;
-* X11 or Wayland and the compositor name;
-* host and guest GPU models and drivers;
-* whether ``lgmp:allowDMA`` is enabled;
-* the guest resolution and refresh rate; and
-* accurate reproduction steps that lead to your issue.
-
-All of this information is helpful, and should not be excluded.
