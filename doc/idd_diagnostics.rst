@@ -39,11 +39,11 @@ Filtered mode
 
 IddCx capabilities
    Shows whether the runtime HDR and wide-color-gamut interfaces are
-   available. Their absence on Windows 10 is expected and does not prevent SDR
-   use.
+   available. This will not be visible on Windows 10, and SDR will be used
+   instead.
 
 Frame schedule owner
-   Reports the fastest active client's requested rate, guest acquisition rate
+   Reports the fastest active client's requested rate, guest acquisition rate,
    and how many frames were published or skipped. Skipping excess guest frames
    is expected; it saves memory bandwidth while preserving the newest frame
    needed by the client.
@@ -52,19 +52,24 @@ Input owner
    Identifies the client currently allowed to send direct input. Only one
    client can own it at a time.
 
-Client information
-------------------
+.. _client_help_information:
 
-Run the client from a terminal and retain its complete output. Include:
+Client information when asking for help
+---------------------------------------
 
-* the client, IDD and OBS versions;
+The Looking Glass client outputs a lot of useful information during normal
+operation, which helps a lot with debugging and support when issues arise.
+
+This information is available when running the client in a terminal.
+
+When asking for help, it is important to include the following:
+
+* version information about the client, and IDD;
 * Linux distribution and kernel;
 * X11 or Wayland and the compositor name;
 * host and guest GPU models and drivers;
 * whether ``lgmp:allowDMA`` is enabled;
 * the guest resolution and refresh rate; and
-* exact steps that reproduce the fault.
+* accurate reproduction steps that lead to your issue.
 
-Do not copy only the final error line. Startup output records the selected
-transport, renderer, display server, audio backend and import method, which are
-often needed to explain it.
+All of this information is helpful, and should not be excluded.
