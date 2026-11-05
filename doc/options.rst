@@ -127,7 +127,7 @@ Common options
      - Purpose
    * - ``input:escapeKey``
      - ``KEY_SCROLLLOCK``
-     - Set the capture/menu key; use ``help`` to list accepted names
+     - Set the capture/menu key; set to ``help`` to list accepted names
    * - ``input:autoCapture``
      - ``no``
      - Grab the keyboard inside the guest view and release it before exit
@@ -179,6 +179,5 @@ Advanced options
 
 Polling intervals, renderer damage handling, display-server protocol choices
 and audio-device selectors are intentionally omitted here. They are useful for
-diagnosis but can make latency or reliability worse when changed without a
-specific reason. Consult ``--help`` and record the original value before
-experimenting.
+diagnosis, but can make latency or reliability worse. Consult ``--help`` and
+record the original value before experimenting.
