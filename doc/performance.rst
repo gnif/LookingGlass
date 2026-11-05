@@ -3,8 +3,11 @@
 Measure performance and latency
 ###############################
 
-Press :kbd:`ScrLk` + :kbd:`D` for the compact FPS and UPS display. Press
-:kbd:`ScrLk` + :kbd:`T` for the timing graphs.
+Press :kbd:`ScrLk` + :kbd:`D` to show the FPS and UPS display.
+
+Press :kbd:`ScrLk` + :kbd:`T` for the timing graphs.
+
+.. _client_performance_fps:
 
 FPS and UPS
 -----------
@@ -15,12 +18,14 @@ FPS
 
 UPS
    How often this client consumed a new guest frame. It can be lower than the
-   guest render rate because cadence deliberately skips frames that were
-   superseded before the client's next deadline.
+   guest render rate, as frames will be skipped if they are not displayed before
+   a new frame is received.
 
-A higher number is not automatically lower latency. Use the stage graph to
+A higher number is not automatically lower latency. Use the **stage** graph to
 find where time is spent and confirm that the displayed rate meets the output
 you are actually using.
+
+.. _client_latency_graph:
 
 Frame latency graphs
 --------------------
@@ -101,6 +106,8 @@ for each band are calculated independently, so the top of a minimum or maximum
 stack can combine stages from different frames. Use those panels to locate
 stage spikes, not as the measured total of one specific frame.
 
+.. _client_clock_sync:
+
 Cadence and Hold
 ----------------
 
@@ -121,6 +128,8 @@ the display instead of rounding it to 120 Hz.
 Investigate when Hold repeatedly exceeds roughly one guest frame period, or
 when jumps occur with large Post, Copy or Ready spikes. Those patterns can
 indicate server work or scheduling delays rather than normal phase drift.
+
+.. _client_frame_graph:
 
 Frame and photon summaries
 --------------------------
