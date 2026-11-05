@@ -6,16 +6,13 @@ Legacy Host Application configuration
 .. warning::
 
    This page applies only to the legacy Windows Host Application. New
-   installations should use the IDD. B7 is the last recommended complete stack
-   when non-capture mouse input through the Host Application is required.
+   installations should use the IDD. B7 is the last recommended version when
+   non-capture mouse input through the Host Application is required.
 
 The legacy Host normally selects a compatible frame path automatically. Its
 persistent configuration file is:
 
 ``C:\Program Files\Looking Glass (host)\looking-glass-host.ini``
-
-Use options from the same release as the Host binary. Do not copy a current
-Host configuration into B7 or combine a B7 Host with a current client.
 
 .. _host_capture:
 
@@ -47,7 +44,6 @@ DXGI
 
 NvFBC
    An NVIDIA SDK path available only with supported hardware and licensing.
-   It is not required by the IDD or the normal legacy D12 path.
 
 The exact capture-interface options can change between releases. Consult the
 binary's help and the configuration comments supplied with that release.
@@ -57,7 +53,7 @@ binary's help and the configuration comments supplied with that release.
 Select an IVSHMEM device
 ------------------------
 
-The legacy Host selects the first IVSHMEM device by default. When the VM has
+The legacy host selects the first IVSHMEM device by default. When the VM has
 more than one, ``os:shmDevice`` selects by zero-based device order:
 
 .. code-block:: ini
@@ -66,14 +62,14 @@ more than one, ``os:shmDevice`` selects by zero-based device order:
    shmDevice=1
 
 Check the Host log after changing it; the selected device is marked with an
-asterisk. This option is for the legacy Host and is not an IDD helper setting.
+asterisk.
 
 .. _host_downsampling:
 
 Downsampling
 ------------
 
-The legacy Host can reduce a captured resolution before transport. Rules use
+The legacy host can reduce a captured resolution before transport. Rules use
 ``source:target`` syntax and may match resolutions greater than a threshold:
 
 .. code-block:: ini
@@ -85,5 +81,4 @@ The legacy Host can reduce a captured resolution before transport. Rules use
    downsample=>1920x1080:1920x1080
 
 This saves transport bandwidth but does not reduce the guest application's
-rendering work. IDD users should request the required virtual monitor
-resolution instead.
+rendering work.
