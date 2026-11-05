@@ -89,12 +89,3 @@ Command line users can run ``looking-glass-host-setup.exe /S`` to execute a
 silent install with default options selected. Further configuration from the
 command line can be done with flags. You can list all available flags by
 running ``looking-glass-host-setup.exe /?``.
-
-Legacy configuration
-~~~~~~~~~~~~~~~~~~~~
-
-.. toctree::
-   :maxdepth: 1
-
-   host_usage
-   build_host
