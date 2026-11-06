@@ -84,6 +84,22 @@ class CPipeServer : private IPipeEndpointHandler,
     CSRWLock         m_deviceContextLock;
     CDeviceContext * m_deviceContext = nullptr;
 
+    std::vector<LGPipeMsg> m_displayRects;
+
+    static constexpr size_t POINTER_QUEUE_LENGTH = 32;
+
+    struct PointerItem
+    {
+      LGPipeMsg msg;
+      bool      motion;
+    };
+
+    CSRWLock                 m_pointerLock;
+    std::vector<PointerItem> m_pointerQueue;
+    HANDLE                   m_pointerStop   = nullptr;
+    HANDLE                   m_pointerEvent  = nullptr;
+    HANDLE                   m_pointerThread = nullptr;
+
     CSRWLock        m_recoveryLock;
     RecoveryHandler m_recoveryHandler = nullptr;
     void *          m_recoveryOpaque  = nullptr;
@@ -106,7 +122,10 @@ class CPipeServer : private IPipeEndpointHandler,
     void QueueMsgLocked(const LGPipeMsg & msg);
 
     void HandleReloadSettings();
+    void HandleDisplayRect(const LGPipeMsg & msg);
     void HandleRecovery(const LGPipeMsg & msg);
+    static DWORD WINAPI PointerThreadProc(void * context);
+    void PointerThread();
     bool ClearClipboardAuthorityInternal(
       WDFFILEOBJECT owner, bool closing);
 
@@ -134,12 +153,14 @@ class CPipeServer : private IPipeEndpointHandler,
     bool ClearClipboardAuthority(WDFFILEOBJECT owner = nullptr);
     void CloseClipboardAuthorityFile(WDFFILEOBJECT owner);
 
-    bool SetCursorPos(int32_t x, int32_t y);
-    void SetDisplayMode(
+    bool SetCursorPos(uint32_t connector, int32_t x, int32_t y);
+    bool InjectPointer(uint32_t connector, uint16_t x, uint16_t y,
+      uint32_t buttons, int32_t wheel, bool motion);
+    void SetDisplayMode(uint32_t connector,
       uint32_t width, uint32_t height, uint32_t refresh100uHz);
     void SetGPUStatus(bool software);
-    void ResolutionRejected(uint32_t width, uint32_t height,
-      uint32_t requiredSizeMiB);
+    void ResolutionRejected(uint32_t connector, uint32_t width,
+      uint32_t height, uint32_t requiredSizeMiB);
     RecoveryDispatch SetRecovery(void * owner, uint64_t route,
       uint64_t session, uint32_t serial, bool active,
       bool replayIfUnavailable = true);

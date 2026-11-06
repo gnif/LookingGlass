@@ -300,6 +300,10 @@ int WINAPI WinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _
     return g_pipe.EnsureOnlyDisplay();
   });
 
+  window.onDisplayChange([]() {
+    g_pipe.SendDisplayRects();
+  });
+
   HandleT<EventTraits> lifetimeThreadStop(
     CreateEventW(nullptr, TRUE, FALSE, nullptr));
   if (!lifetimeThreadStop.IsValid())

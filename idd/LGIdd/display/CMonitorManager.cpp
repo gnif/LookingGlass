@@ -85,7 +85,7 @@ bool CMonitorManager::Create(UINT connectorIndex, IDDCX_ADAPTER adapter,
   const IDDCX_MONITOR monitor = createOut.MonitorObject;
 
   auto * wrapper = WdfObjectGet_CMonitorContextWrapper(monitor);
-  wrapper->context = new CMonitorContext(monitor, owner);
+  wrapper->context = new CMonitorContext(monitor, owner, connectorIndex);
 
   {
     CSRWExclusiveLock lock(m_lock);

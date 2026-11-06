@@ -44,14 +44,17 @@ struct LGPipeMsg
     CLIPBOARD_READY,
     CLIPBOARD_KICK,
     CLIPBOARD_RESET,
-    HELLO
+    HELLO,
+    DISPLAY_RECT,
+    INJECT_POINTER
   }
   type;
 
   enum : uint32_t
   {
     RECOVERY_ACTIVE  = 0x1U,
-    PROTOCOL_VERSION = 3U
+    PROTOCOL_VERSION = 4U,
+    DESKTOP_RECT     = 0xFFFFFFFFU
   };
 
   union
@@ -60,6 +63,7 @@ struct LGPipeMsg
     {
       int32_t x;
       int32_t y;
+      uint32_t connector;
     }
     curorPos;
 
@@ -68,6 +72,7 @@ struct LGPipeMsg
       uint32_t width;
       uint32_t height;
       uint32_t refresh100uHz;
+      uint32_t connector;
     }
     displayMode;
 
@@ -82,6 +87,7 @@ struct LGPipeMsg
       uint32_t width;
       uint32_t height;
       uint32_t requiredSizeMiB;
+      uint32_t connector;
     }
     resolutionRejected;
 
@@ -127,6 +133,27 @@ struct LGPipeMsg
       uint64_t authorityId[2];
     }
     hello;
+
+    struct
+    {
+      // DESKTOP_RECT for the virtual desktop, zero size if not displayed.
+      uint32_t connector;
+      int32_t x;
+      int32_t y;
+      uint32_t width;
+      uint32_t height;
+    }
+    displayRect;
+
+    struct
+    {
+      uint32_t connector;
+      uint16_t x;
+      uint16_t y;
+      uint32_t buttons;
+      int32_t wheel;
+    }
+    injectPointer;
   };
 };
 #pragma pack(pop)

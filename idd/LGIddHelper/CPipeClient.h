@@ -22,6 +22,7 @@
 
 #include <windows.h>
 #include <stdint.h>
+#include <vector>
 
 #include "CPipeEndpoint.h"
 #include "CClipboardChannel.h"
@@ -32,6 +33,28 @@ class CPipeClient : private IPipeEndpointHandler,
   public IClipboardChannelDoorbell
 {
 private:
+  struct DisplayModeRequest
+  {
+    LGPipeMsg msg;
+    uint64_t  serial;
+    bool      pending;
+  };
+
+  struct DisplayModeProgress
+  {
+    uint64_t     serial;
+    unsigned int attempts;
+    bool         applied;
+  };
+
+  struct PointerRect
+  {
+    int32_t  x;
+    int32_t  y;
+    uint32_t width;
+    uint32_t height;
+  };
+
   CPipeEndpoint      m_endpoint;
   CClipboardChannel  m_clipboard;
   CSRWLock           m_clipboardSetupLock;
@@ -43,17 +66,20 @@ private:
   bool               m_clipboardEnabled        = false;
   CSRWLock           m_displayLock;
 
-  CSRWLock  m_displayModeLock;
-  HANDLE    m_displayModeStop   = nullptr;
-  HANDLE    m_displayModeWake   = nullptr;
-  HANDLE    m_displayModeThread = nullptr;
-  LGPipeMsg m_displayMode       = {};
-  uint64_t  m_displayModeSerial = 0;
-  bool      m_hasDisplayMode    = false;
+  CSRWLock                        m_displayModeLock;
+  HANDLE                          m_displayModeStop   = nullptr;
+  HANDLE                          m_displayModeWake   = nullptr;
+  HANDLE                          m_displayModeThread = nullptr;
+  std::vector<DisplayModeRequest> m_displayModes;
+  uint64_t                        m_displayModeSerial = 0;
 
   bool      m_recoveryActive    = false;
   bool      m_hasRecoveryStatus = false;
   LGPipeMsg m_recoveryStatus    = {};
+
+  CSRWLock                 m_pointerLock;
+  std::vector<PointerRect> m_pointerRects;
+  uint32_t                 m_pointerButtons = 0;
 
   void WriteMsg(const LGPipeMsg& msg);
 
@@ -61,6 +87,7 @@ private:
 
   static DWORD WINAPI DisplayModeThreadProc(void * context);
   void DisplayModeThread();
+  bool RetryDisplayMode(uint32_t connector, DisplayModeProgress& progress);
   bool StartDisplayModeThread();
   void StopDisplayModeThread();
   bool ApplyDisplayMode(const LGPipeMsg& msg, LONG& result);
@@ -69,8 +96,10 @@ private:
     bool logResult = true);
   uint32_t RestoreSavedTopologyLocked() const;
   uint32_t RestoreLGTopologyLocked(bool logResult = true);
+  void SendDisplayRectsLocked();
 
   void HandleSetCursorPos(const LGPipeMsg& msg);
+  void HandleInjectPointer(const LGPipeMsg& msg);
   void HandleSetDisplayMode(const LGPipeMsg& msg);
   void HandleGPUStatus(const LGPipeMsg& msg);
   void HandleResolutionRejected(const LGPipeMsg& msg);
@@ -107,6 +136,7 @@ public:
 
   void ReloadSettings();
   bool EnsureOnlyDisplay();
+  void SendDisplayRects();
 };
 
 extern CPipeClient g_pipe;

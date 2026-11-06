@@ -31,14 +31,14 @@ CSettings::CSettings()
 {
 }
 
-CSettings::DisplayModes CSettings::LoadModes()
+CSettings::DisplayModes CSettings::LoadModes(UINT connector)
 {
   const unsigned defaultRefresh100uHz = GetDefaultRefresh100uHz();
   DisplayModes displayModes;
 
   bool hasPreferred = false;
   DisplayMode m;
-  if (GetExtraMode(m))
+  if (GetExtraMode(m, connector))
   {
     const std::wstring refresh = LGFormatRefreshRate(m.refresh100uHz);
     DEBUG_INFO("ExtraMode: %ux%u@%ls%s", m.width, m.height,
@@ -93,7 +93,14 @@ TransportInstances CSettings::LoadTransportInstances() const
   return instances;
 }
 
-bool CSettings::SetExtraMode(const DisplayMode& mode)
+std::wstring CSettings::ExtraModeValueName(UINT connector)
+{
+  if (connector == 0)
+    return L"ExtraMode";
+  return L"ExtraMode" + std::to_wstring(connector);
+}
+
+bool CSettings::SetExtraMode(const DisplayMode& mode, UINT connector)
 {
   WCHAR buf[64];
   const std::wstring refresh = LGFormatRefreshRate(mode.refresh100uHz);
@@ -116,10 +123,10 @@ bool CSettings::SetExtraMode(const DisplayMode& mode)
     return false;
   }
 
-  const WCHAR* valueName = L"ExtraMode";
-  const DWORD  cb = (DWORD)((wcslen(buf) + 1) * sizeof(WCHAR));
+  const std::wstring valueName = ExtraModeValueName(connector);
+  const DWORD        cb = (DWORD)((wcslen(buf) + 1) * sizeof(WCHAR));
 
-  ec = RegSetValueExW(hKey, valueName, 0, REG_SZ,
+  ec = RegSetValueExW(hKey, valueName.c_str(), 0, REG_SZ,
     (const BYTE*)buf, cb);
   RegCloseKey(hKey);
 
@@ -186,9 +193,10 @@ std::wstring CSettings::ReadStringValue(const wchar_t* name, const wchar_t* defa
   return std::wstring(buf.data());
 }
 
-bool CSettings::GetExtraMode(DisplayMode& mode)
+bool CSettings::GetExtraMode(DisplayMode& mode, UINT connector)
 {
-  std::wstring extraMode = ReadStringValue(L"ExtraMode", NULL);
+  std::wstring extraMode =
+    ReadStringValue(ExtraModeValueName(connector).c_str(), NULL);
   if (extraMode.empty())
     return false;
 

@@ -59,6 +59,7 @@ public:
 
 private:
   CSettings& m_settings;
+  const UINT m_connector;
 
   // Registry-backed changes are serialized before publishing a replacement
   // mode list. Readers only hold m_modeLock long enough to take a snapshot.
@@ -70,10 +71,9 @@ private:
   bool                    m_hdrEnabled = false;
 
   bool LoadModes(const FrameCaps& caps);
-  CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
 
 public:
-  explicit CDisplayConfiguration(CSettings& settings);
+  CDisplayConfiguration(CSettings& settings, UINT connector);
 
   CDisplayConfiguration(const CDisplayConfiguration&) = delete;
   CDisplayConfiguration& operator=(const CDisplayConfiguration&) = delete;
@@ -86,7 +86,12 @@ public:
   void InitializeEdid(bool hdr);
   void RebuildEdid(bool hdr);
   Description GetDescription() const;
+  CSettings::DisplayModes SnapshotModes(bool * hdrEnabled = nullptr) const;
 
+  static NTSTATUS ParseMonitorDescription(
+    const CSettings::DisplayModes& modes,
+    const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs);
   NTSTATUS ParseMonitorDescription(
     const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
     IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
@@ -98,6 +103,10 @@ public:
     IDARG_OUT_QUERYTARGETMODES * outArgs) const;
 
 #ifdef HAS_IDDCX_110
+  static NTSTATUS ParseMonitorDescription2(
+    const CSettings::DisplayModes& modes, bool hdrEnabled,
+    const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs);
   NTSTATUS ParseMonitorDescription2(
     const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
     IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;

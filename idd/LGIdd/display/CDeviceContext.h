@@ -31,9 +31,11 @@
 #include <mutex>
 #include <stddef.h>
 #include <stdint.h>
+#include <vector>
 
 #include "display/CDisplayConfiguration.h"
 #include "display/CMonitorManager.h"
+#include "input/IInputSink.h"
 #include "transport/CTransportManager.h"
 
 class CDeviceContext : private ITransportActions
@@ -46,13 +48,69 @@ private:
 
   // At boot the selected transport may not be available yet. The retry timer
   // and atomic gate keep adapter creation single-threaded until it is ready.
-  WDFTIMER          m_initTimer       = nullptr;
-  bool              m_transportOpened = false;
-  std::atomic<LONG> m_initInProgress  = 0;
+  WDFTIMER          m_initTimer      = nullptr;
+  std::atomic<LONG> m_initInProgress = 0;
 
-  std::unique_ptr<CTransportManager> m_transport;
-  CDisplayConfiguration       m_displayConfiguration;
-  CMonitorManager             m_monitorManager;
+  struct DisplayRect
+  {
+    int32_t  x      = 0;
+    int32_t  y      = 0;
+    uint32_t width  = 0;
+    uint32_t height = 0;
+  };
+
+  class HeadInputSink final : public IInputSink
+  {
+  private:
+    CDeviceContext& m_owner;
+    const UINT      m_connector;
+    bool            m_injecting     = false;
+    uint16_t        m_injectX       = 0;
+    uint16_t        m_injectY       = 0;
+    uint32_t        m_injectButtons = 0;
+
+    bool InjectAbsolute(uint16_t x, uint16_t y,
+      int32_t wheel, uint32_t buttons);
+
+  public:
+    HeadInputSink(CDeviceContext& owner, UINT connector) :
+      m_owner(owner),
+      m_connector(connector)
+    {
+    }
+
+    uint64_t GetState() const override;
+    bool GetKeyboardLEDs(uint8_t& leds) const override;
+    bool SendMouseRelative(int32_t deltaX, int32_t deltaY,
+      int32_t wheel, uint32_t buttons) override;
+    bool SendMouseAbsolute(uint16_t x, uint16_t y,
+      int32_t wheel, uint32_t buttons) override;
+    bool SendKeyboard(
+      uint8_t modifiers, const uint8_t * keys) override;
+    bool Reset() override;
+  };
+
+  CSRWLock    m_displayRectLock;
+  DisplayRect m_desktopRect;
+
+  struct Head
+  {
+    // Declared before transport so it outlives the input hub.
+    HeadInputSink                      inputSink;
+    std::unique_ptr<CTransportManager> transport;
+    CDisplayConfiguration              displayConfiguration;
+    CMonitorManager                    monitorManager;
+    const UINT                         index;
+    bool                               transportOpened = false;
+    DisplayRect                        displayRect;
+
+    Head(CDeviceContext& owner, UINT connectorIndex,
+      std::unique_ptr<CTransportManager> manager, CSettings& settings);
+    Head(const Head&) = delete;
+    Head& operator=(const Head&) = delete;
+  };
+
+  std::vector<std::unique_ptr<Head>> m_heads;
 
   WDFTIMER m_transportTimer     = nullptr;
   bool     m_recoveryHandlerSet = false;
@@ -75,6 +133,19 @@ private:
   bool m_canProcessFP16  = false;
   bool m_softwareMode    = true;
 
+  Head& PrimaryHead() { return *m_heads[0]; }
+
+  Head& HeadAt(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return *m_heads[head];
+  }
+
+  UINT HeadForBackend(BackendId backend) const;
+  bool MapAbsolute(UINT head, uint16_t& x, uint16_t& y);
+  CSettings::DisplayModes MonitorModes(bool * hdrEnabled) const;
+
   void QueryIddCxCapabilities();
 
   void ScheduleInitRetry();
@@ -93,7 +164,8 @@ private:
   InteractionResult OnSetResolution(const SourceKey& source,
     uint32_t width, uint32_t height) override;
   bool OnRecoveryAction(const RecoveryAction& action) override;
-  InteractionResult SetResolution(uint32_t width, uint32_t height);
+  InteractionResult SetResolution(
+    UINT head, uint32_t width, uint32_t height);
 
 public:
   explicit CDeviceContext(_In_ WDFDEVICE wdfDevice);
@@ -102,18 +174,29 @@ public:
   CDeviceContext(const CDeviceContext&) = delete;
   CDeviceContext& operator=(const CDeviceContext&) = delete;
 
-  bool SetupTransport(size_t alignSize);
+  bool SetupTransport(UINT head, size_t alignSize);
 
   void InitAdapter();
   void FinishAdapterInit(UINT connectorIndex);
   void FinishInit(UINT connectorIndex);
   void ReloadSettings();
-  void ReplugMonitor();
+  void ReplugMonitor(UINT head);
+  void SetDisplayRect(uint32_t connector, int32_t x, int32_t y,
+    uint32_t width, uint32_t height);
 
-  void OnMonitorDestroyed(IDDCX_MONITOR monitor);
-  void OnSwapChainAssigned();
-  void OnSwapChainReleased();
-  void OnSwapChainReady();
+  void OnMonitorDestroyed(UINT head, IDDCX_MONITOR monitor);
+  void OnSwapChainAssigned(UINT head);
+  void OnSwapChainReleased(UINT head);
+  void OnSwapChainReady(UINT head);
+
+  NTSTATUS ParseMonitorDescription(
+    const IDARG_IN_PARSEMONITORDESCRIPTION * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#ifdef HAS_IDDCX_110
+  NTSTATUS ParseMonitorDescription2(
+    const IDARG_IN_PARSEMONITORDESCRIPTION2 * inArgs,
+    IDARG_OUT_PARSEMONITORDESCRIPTION * outArgs) const;
+#endif
 
   bool HasIddCx110DDIs() const { return m_hasIddCx110DDIs; }
   bool CanProcessFP16 () const { return m_canProcessFP16;  }
@@ -121,12 +204,21 @@ public:
 
   CTransportManager& GetTransport()
   {
-    return *m_transport;
+    return *PrimaryHead().transport;
   }
 
-  CDisplayConfiguration& GetDisplayConfiguration()
+  CTransportManager& GetTransport(UINT head)
   {
-    return m_displayConfiguration;
+    if (head >= m_heads.size())
+      head = 0;
+    return *m_heads[head]->transport;
+  }
+
+  CDisplayConfiguration& GetDisplayConfiguration(UINT head)
+  {
+    if (head >= m_heads.size())
+      head = 0;
+    return m_heads[head]->displayConfiguration;
   }
 };
 

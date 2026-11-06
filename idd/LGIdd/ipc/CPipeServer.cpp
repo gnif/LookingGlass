@@ -24,6 +24,7 @@
 #include "CSRWLock.h"
 #include "display/CDeviceContext.h"
 
+#include <algorithm>
 #include <sddl.h>
 #include <vector>
 
@@ -37,6 +38,14 @@ namespace
 bool CPipeServer::Init()
 {
   DeInit();
+
+  m_pointerStop  = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+  m_pointerEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
+  if (m_pointerStop && m_pointerEvent)
+    m_pointerThread = CreateThread(nullptr, 0, PointerThreadProc, this, 0,
+      nullptr);
+  if (!m_pointerThread)
+    DEBUG_ERROR_HR(GetLastError(), "Failed to create the pointer sender");
 
   // Only the driver identities may create/manage the endpoint. Interactive
   // users receive client read/write access, then the first HELLO is matched
@@ -74,7 +83,29 @@ bool CPipeServer::Init()
 
 void CPipeServer::DeInit()
 {
+  if (m_pointerStop)
+    SetEvent(m_pointerStop);
+
   m_endpoint.Stop();
+
+  if (m_pointerThread)
+  {
+    WaitForSingleObject(m_pointerThread, INFINITE);
+    CloseHandle(m_pointerThread);
+    m_pointerThread = nullptr;
+  }
+  if (m_pointerEvent)
+  {
+    CloseHandle(m_pointerEvent);
+    m_pointerEvent = nullptr;
+  }
+  if (m_pointerStop)
+  {
+    CloseHandle(m_pointerStop);
+    m_pointerStop = nullptr;
+  }
+  m_pointerQueue.clear();
+
   ClearClipboardAuthority();
   if (m_pipeSecurityDescriptor)
   {
@@ -470,6 +501,10 @@ bool CPipeServer::OnPipeMessage(const void * message, size_t size)
         msg.clipboardReset.epoch, msg.clipboardReset.reason);
       return true;
 
+    case LGPipeMsg::DISPLAY_RECT:
+      HandleDisplayRect(msg);
+      return true;
+
     default:
       DEBUG_ERROR("Unknown message type %d", msg.type);
       return false;
@@ -522,6 +557,36 @@ void CPipeServer::HandleReloadSettings()
   CSRWSharedLock lock(m_deviceContextLock);
   if (m_deviceContext)
     m_deviceContext->ReloadSettings();
+}
+
+static void ApplyDisplayRect(CDeviceContext & context, const LGPipeMsg & msg)
+{
+  context.SetDisplayRect(msg.displayRect.connector,
+    msg.displayRect.x, msg.displayRect.y,
+    msg.displayRect.width, msg.displayRect.height);
+}
+
+void CPipeServer::HandleDisplayRect(const LGPipeMsg & msg)
+{
+  const uint32_t connector = msg.displayRect.connector;
+  if (connector != LGPipeMsg::DESKTOP_RECT &&
+      connector >= TRANSPORT_MAX_INSTANCES)
+    return;
+
+  CSRWExclusiveLock lock(m_deviceContextLock);
+  bool cached = false;
+  for (LGPipeMsg & rect : m_displayRects)
+    if (rect.displayRect.connector == connector)
+    {
+      rect   = msg;
+      cached = true;
+      break;
+    }
+  if (!cached)
+    m_displayRects.push_back(msg);
+
+  if (m_deviceContext)
+    ApplyDisplayRect(*m_deviceContext, msg);
 }
 
 void CPipeServer::HandleRecovery(const LGPipeMsg & msg)
@@ -581,6 +646,10 @@ void CPipeServer::SetDeviceContext(CDeviceContext * context)
 {
   CSRWExclusiveLock lock(m_deviceContextLock);
   m_deviceContext = context;
+
+  if (context)
+    for (const LGPipeMsg & rect : m_displayRects)
+      ApplyDisplayRect(*context, rect);
 }
 
 void CPipeServer::SetRecoveryHandler(
@@ -625,31 +694,118 @@ void CPipeServer::ClearRecoveryHandler(void * opaque)
   m_recoveryOpaque        = nullptr;
 }
 
-bool CPipeServer::SetCursorPos(int32_t x, int32_t y)
+bool CPipeServer::SetCursorPos(uint32_t connector, int32_t x, int32_t y)
 {
   // do not send cursor messages if we are not connected or they will end up queued
   if (!m_endpoint.IsConnected())
     return false;
 
   LGPipeMsg msg = {};
-  msg.size       = sizeof(msg);
-  msg.type       = LGPipeMsg::SETCURSORPOS;
-  msg.curorPos.x = x;
-  msg.curorPos.y = y;
+  msg.size               = sizeof(msg);
+  msg.type               = LGPipeMsg::SETCURSORPOS;
+  msg.curorPos.x         = x;
+  msg.curorPos.y         = y;
+  msg.curorPos.connector = connector;
   // Cursor position is transient. If the connection is lost during this
   // write, drop it instead of replaying stale coordinates after reconnect.
   return m_endpoint.Send(&msg, sizeof(msg));
 }
 
-void CPipeServer::SetDisplayMode(
+bool CPipeServer::InjectPointer(uint32_t connector, uint16_t x, uint16_t y,
+  uint32_t buttons, int32_t wheel, bool motion)
+{
+  if (!m_pointerThread || !m_endpoint.IsConnected())
+    return false;
+
+  PointerItem item = {};
+  item.msg.size                    = sizeof(item.msg);
+  item.msg.type                    = LGPipeMsg::INJECT_POINTER;
+  item.msg.injectPointer.connector = connector;
+  item.msg.injectPointer.x         = x;
+  item.msg.injectPointer.y         = y;
+  item.msg.injectPointer.buttons   = buttons;
+  item.msg.injectPointer.wheel     = wheel;
+  item.motion                      = motion;
+
+  {
+    CSRWExclusiveLock lock(m_pointerLock);
+
+    // Motion only replaces motion, buttons and the wheel stay in order.
+    auto last = std::find_if(m_pointerQueue.rbegin(), m_pointerQueue.rend(),
+      [connector](const PointerItem & queued)
+      { return queued.msg.injectPointer.connector == connector; });
+    if (motion && last != m_pointerQueue.rend() && last->motion)
+      *last = item;
+    else
+    {
+      if (m_pointerQueue.size() == POINTER_QUEUE_LENGTH)
+      {
+        auto drop = std::find_if(m_pointerQueue.begin(), m_pointerQueue.end(),
+          [](const PointerItem & queued) { return queued.motion; });
+        m_pointerQueue.erase(
+          drop != m_pointerQueue.end() ? drop : m_pointerQueue.begin());
+      }
+      m_pointerQueue.push_back(item);
+    }
+  }
+
+  SetEvent(m_pointerEvent);
+  return true;
+}
+
+DWORD WINAPI CPipeServer::PointerThreadProc(void * context)
+{
+  static_cast<CPipeServer *>(context)->PointerThread();
+  return 0;
+}
+
+void CPipeServer::PointerThread()
+{
+  const HANDLE handles[] = { m_pointerStop, m_pointerEvent };
+  for (;;)
+  {
+    const DWORD wait = WaitForMultipleObjects(
+      _countof(handles), handles, FALSE, INFINITE);
+    if (wait == WAIT_OBJECT_0)
+      break;
+    if (wait != WAIT_OBJECT_0 + 1)
+    {
+      DEBUG_ERROR_HR(GetLastError(), "Pointer sender wait failed");
+      break;
+    }
+
+    for (;;)
+    {
+      LGPipeMsg msg;
+      {
+        CSRWExclusiveLock lock(m_pointerLock);
+        if (m_pointerQueue.empty())
+          break;
+        msg = m_pointerQueue.front().msg;
+        m_pointerQueue.erase(m_pointerQueue.begin());
+      }
+
+      // Pointer input is transient, drop it with the connection.
+      if (!m_endpoint.Send(&msg, sizeof(msg)))
+      {
+        CSRWExclusiveLock lock(m_pointerLock);
+        m_pointerQueue.clear();
+        break;
+      }
+    }
+  }
+}
+
+void CPipeServer::SetDisplayMode(uint32_t connector,
   uint32_t width, uint32_t height, uint32_t refresh100uHz)
 {
   LGPipeMsg msg = {};
-  msg.size                       = sizeof(msg);
-  msg.type                       = LGPipeMsg::SETDISPLAYMODE;
-  msg.displayMode.width          = width;
-  msg.displayMode.height         = height;
+  msg.size                      = sizeof(msg);
+  msg.type                      = LGPipeMsg::SETDISPLAYMODE;
+  msg.displayMode.width         = width;
+  msg.displayMode.height        = height;
   msg.displayMode.refresh100uHz = refresh100uHz;
+  msg.displayMode.connector     = connector;
   WriteMsg(msg);
 }
 
@@ -662,8 +818,8 @@ void CPipeServer::SetGPUStatus(bool software)
   WriteMsg(msg);
 }
 
-void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
-  uint32_t requiredSizeMiB)
+void CPipeServer::ResolutionRejected(uint32_t connector, uint32_t width,
+  uint32_t height, uint32_t requiredSizeMiB)
 {
   LGPipeMsg msg = {};
   msg.size                               = sizeof(msg);
@@ -671,6 +827,7 @@ void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   msg.resolutionRejected.width           = width;
   msg.resolutionRejected.height          = height;
   msg.resolutionRejected.requiredSizeMiB = requiredSizeMiB;
+  msg.resolutionRejected.connector       = connector;
   WriteMsg(msg);
 }
 
