@@ -213,6 +213,7 @@ struct NetworkConnection
   uint16_t   port;
   char     * password;
   char     * endpoint;
+  bool       allowUnencrypted;
 
   NetworkKnownHosts        * knownHosts;
   NetworkTrustPromptFn       trustPrompt;
@@ -2922,8 +2923,28 @@ static QUIC_STATUS QUIC_API networkConnectionCallback(HQUIC handle,
         return QUIC_STATUS_SUCCESS;
       }
 
-      HQUIC       stream = NULL;
-      QUIC_STATUS status = this->api->StreamOpen(handle,
+      BOOLEAN     encryptionDisabled       = FALSE;
+      uint32_t    encryptionDisabledLength = sizeof(encryptionDisabled);
+      QUIC_STATUS status                   = this->api->GetParam(handle,
+          QUIC_PARAM_CONN_DISABLE_1RTT_ENCRYPTION,
+          &encryptionDisabledLength, &encryptionDisabled);
+      if (QUIC_FAILED(status))
+      {
+        DEBUG_ERROR("Failed to query 1-RTT encryption for %s: 0x%08x",
+            this->endpoint, (unsigned)status);
+        networkConnectionFail(this, LG_TRANSPORT_ERROR);
+        this->api->ConnectionShutdown(handle,
+            QUIC_CONNECTION_SHUTDOWN_FLAG_SILENT, 0);
+        return QUIC_STATUS_SUCCESS;
+      }
+
+      DEBUG_INFO("Network connection to %s established in %s mode "
+          "(%s 1-RTT payloads)", this->endpoint,
+          encryptionDisabled ? "insecure" : "secure",
+          encryptionDisabled ? "unencrypted" : "encrypted");
+
+      HQUIC stream = NULL;
+      status = this->api->StreamOpen(handle,
           QUIC_STREAM_OPEN_FLAG_NONE, networkStreamCallback, this, &stream);
       if (QUIC_FAILED(status))
       {
@@ -3585,15 +3606,16 @@ bool networkConnectionCreate(NetworkConnection ** result,
     goto fail;
   }
 
-  this->port         = params->port;
-  this->knownHosts   = params->knownHosts;
-  this->trustPrompt  = params->trustPrompt;
-  this->trustCancel  = params->trustCancel;
-  this->packet       = params->packet;
-  this->state        = params->state;
-  this->sendReady    = params->sendReady;
-  this->datagramLost = params->datagramLost;
-  this->opaque       = params->opaque;
+  this->port             = params->port;
+  this->allowUnencrypted = params->allowUnencrypted;
+  this->knownHosts       = params->knownHosts;
+  this->trustPrompt      = params->trustPrompt;
+  this->trustCancel      = params->trustCancel;
+  this->packet           = params->packet;
+  this->state            = params->state;
+  this->sendReady        = params->sendReady;
+  this->datagramLost     = params->datagramLost;
+  this->opaque           = params->opaque;
 
   this->connectEvent     = lgCreateEvent(false, 0);
   this->closeEvent       = lgCreateEvent(false, 0);
@@ -3861,6 +3883,26 @@ LG_TransportStatus networkConnectionConnect(NetworkConnection * this,
     LG_UNLOCK(this->lock);
     this->connection = NULL;
     return LG_TRANSPORT_ERROR;
+  }
+
+  if (this->allowUnencrypted)
+  {
+    const BOOLEAN disableEncryption = TRUE;
+    status = this->api->SetParam(this->connection,
+        QUIC_PARAM_CONN_DISABLE_1RTT_ENCRYPTION,
+        sizeof(disableEncryption), &disableEncryption);
+    if (QUIC_FAILED(status))
+    {
+      DEBUG_ERROR("Failed to allow unencrypted 1-RTT payloads for %s: "
+          "0x%08x", this->endpoint, (unsigned)status);
+      this->api->ConnectionClose(this->connection);
+      this->connection = NULL;
+      LG_LOCK(this->lock);
+      this->connecting    = false;
+      this->connectStatus = LG_TRANSPORT_ERROR;
+      LG_UNLOCK(this->lock);
+      return LG_TRANSPORT_ERROR;
+    }
   }
 
   status = this->api->ConnectionStart(this->connection, this->configuration,

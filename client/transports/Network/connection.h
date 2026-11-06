@@ -59,6 +59,7 @@ typedef struct NetworkConnectionParams
   const char               * address;
   uint16_t                   port;
   const char               * password;
+  bool                       allowUnencrypted;
   NetworkKnownHosts        * knownHosts;
   NetworkTrustPromptFn       trustPrompt;
   NetworkTrustCancelFn       trustCancel;

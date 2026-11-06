@@ -40,6 +40,7 @@ struct NetworkSettings
   uint16_t                      maxClients       = NETWORK_DEFAULT_MAX_CLIENTS;
   LGNetAuthMode                 auth             = LG_NET_AUTH_MODE_DEFAULT;
   std::wstring                  password;
+  bool                          allowUnencrypted = false;
   uint32_t                      videoBitrateMbps =
     NETWORK_DEFAULT_VIDEO_BITRATE_MBPS;
   LGNetVideoChromaSubsampling   videoChroma      =
@@ -47,10 +48,11 @@ struct NetworkSettings
 };
 
 // Settings use a semicolon-separated key=value list. Supported keys are
-// bind, port, maxClients, auth, password, videoBitrateMbps, and videoChroma.
-// videoBitrateMbps uses decimal Mbit/s and defaults to 200. videoChroma accepts
-// 420 or 444 and defaults to 444. Password authentication requires a non-empty
-// password. The default address requests a dual-stack wildcard listener from
-// the eventual QUIC provider.
+// bind, port, maxClients, auth, password, allowUnencrypted, videoBitrateMbps,
+// and videoChroma. allowUnencrypted accepts true, false, yes, no, 1, or 0 and
+// defaults to false. videoBitrateMbps uses decimal Mbit/s and defaults to 200.
+// videoChroma accepts 420 or 444 and defaults to 444. Password authentication
+// requires a non-empty password. The default address requests a dual-stack
+// wildcard listener from the eventual QUIC provider.
 bool ParseNetworkSettings(const std::wstring& source,
   NetworkSettings& settings, std::wstring * error = nullptr);

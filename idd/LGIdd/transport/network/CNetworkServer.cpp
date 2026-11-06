@@ -5695,10 +5695,26 @@ retry:
       ResetEvent(owner.drainedEvent);
     }
 
-    owner.api->SetCallbackHandler(event->NEW_CONNECTION.Connection,
-      reinterpret_cast<void *>(ConnectionCallback), connection);
-    const QUIC_STATUS status = owner.api->ConnectionSetConfiguration(
-      event->NEW_CONNECTION.Connection, owner.configuration);
+    QUIC_STATUS status = QUIC_STATUS_SUCCESS;
+    if (owner.settings.allowUnencrypted)
+    {
+      const BOOLEAN disableEncryption = TRUE;
+      status = owner.api->SetParam(event->NEW_CONNECTION.Connection,
+        QUIC_PARAM_CONN_DISABLE_1RTT_ENCRYPTION,
+        sizeof(disableEncryption), &disableEncryption);
+      if (QUIC_FAILED(status))
+        DEBUG_ERROR("Failed to allow unencrypted 1-RTT payloads for "
+          "network client %u: 0x%x", connection->client,
+          static_cast<unsigned>(status));
+    }
+
+    if (QUIC_SUCCEEDED(status))
+    {
+      owner.api->SetCallbackHandler(event->NEW_CONNECTION.Connection,
+        reinterpret_cast<void *>(ConnectionCallback), connection);
+      status = owner.api->ConnectionSetConfiguration(
+        event->NEW_CONNECTION.Connection, owner.configuration);
+    }
     if (QUIC_FAILED(status))
     {
       {
@@ -5723,8 +5739,28 @@ retry:
     switch (event->Type)
     {
       case QUIC_CONNECTION_EVENT_CONNECTED:
-        DEBUG_INFO("Network client %u connected", connection.client);
+      {
+        BOOLEAN           encryptionDisabled       = FALSE;
+        uint32_t          encryptionDisabledLength = sizeof(encryptionDisabled);
+        const QUIC_STATUS status                   = owner.api->GetParam(handle,
+          QUIC_PARAM_CONN_DISABLE_1RTT_ENCRYPTION,
+          &encryptionDisabledLength, &encryptionDisabled);
+        if (QUIC_FAILED(status))
+        {
+          DEBUG_ERROR("Failed to query 1-RTT encryption for network "
+            "client %u: 0x%x", connection.client,
+            static_cast<unsigned>(status));
+          owner.Shutdown(connection, NETWORK_ERROR_PROTOCOL);
+          return QUIC_STATUS_SUCCESS;
+        }
+
+        DEBUG_INFO("Network client %u connected in %s mode "
+          "(%s 1-RTT payloads)",
+          connection.client,
+          encryptionDisabled ? "insecure" : "secure",
+          encryptionDisabled ? "unencrypted" : "encrypted");
         return QUIC_STATUS_SUCCESS;
+      }
 
       case QUIC_CONNECTION_EVENT_PEER_STREAM_STARTED:
       {

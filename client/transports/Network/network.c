@@ -248,6 +248,13 @@ static void networkSetup(void)
     },
     {
       .module       = "network",
+      .name         = "allowUnencrypted",
+      .description  = "Allow unencrypted 1-RTT network payloads",
+      .type         = OPTION_TYPE_BOOL,
+      .value.x_bool = false,
+    },
+    {
+      .module       = "network",
       .name         = "forgetCertificate",
       .description  = "Forget the saved certificate for this server",
       .type         = OPTION_TYPE_BOOL,
@@ -555,20 +562,21 @@ static bool networkCreate(LG_Transport ** result)
 
   const NetworkConnectionParams params =
   {
-    .address         = address,
-    .port            = port,
-    .password        = option_get_string("network", "password"),
-    .knownHosts      = &this->knownHosts,
-    .trustPrompt     = networkTrustPrompt,
-    .trustCancel     = networkCancelTrustPrompt,
-    .packet          = networkPacket,
-    .state           = networkConnectionState,
-    .sendReady       = networkSendReady,
-    .datagramLost    = networkDatagramLost,
-    .capabilities    = NETWORK_CAPABILITIES,
-    .capabilityCount = sizeof(NETWORK_CAPABILITIES) /
+    .address          = address,
+    .port             = port,
+    .password         = option_get_string("network", "password"),
+    .allowUnencrypted = option_get_bool("network", "allowUnencrypted"),
+    .knownHosts       = &this->knownHosts,
+    .trustPrompt      = networkTrustPrompt,
+    .trustCancel      = networkCancelTrustPrompt,
+    .packet           = networkPacket,
+    .state            = networkConnectionState,
+    .sendReady        = networkSendReady,
+    .datagramLost     = networkDatagramLost,
+    .capabilities     = NETWORK_CAPABILITIES,
+    .capabilityCount  = sizeof(NETWORK_CAPABILITIES) /
       sizeof(NETWORK_CAPABILITIES[0]),
-    .opaque          = this,
+    .opaque           = this,
   };
   if (!networkConnectionCreate(&this->connection, &params))
   {

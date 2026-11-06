@@ -37,6 +37,10 @@ endif()
 
 add_library(transport_Network STATIC ${TRANSPORT_NETWORK_SOURCES})
 
+target_compile_definitions(transport_Network PRIVATE
+  QUIC_API_ENABLE_INSECURE_FEATURES=1
+)
+
 target_include_directories(transport_Network PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../src
 )

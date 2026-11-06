@@ -13,7 +13,7 @@
   <ItemDefinitionGroup>
     <ClCompile>
       <AdditionalIncludeDirectories>$(LGMsQuicSourceDir)src\inc;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>QUIC_BUILD_STATIC;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>QUIC_BUILD_STATIC;QUIC_API_ENABLE_INSECURE_FEATURES=1;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <AdditionalDependencies>$(LGMsQuicStaticLibrary);$(LGMsQuicCoreLibrary);$(LGMsQuicPlatformLibrary);ws2_32.lib;schannel.lib;secur32.lib;OneCore.lib;wbemuuid.lib;winmm.lib;ntdll.lib;bcrypt.lib;ncrypt.lib;crypt32.lib;iphlpapi.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
@@ -34,7 +34,7 @@
     <!-- NormalizeDirectory adds a trailing slash. The dot prevents that slash
          from escaping the closing quote in the command line. -->
     <Exec
-      Command="cmake -S &quot;$(LGMsQuicSourceDir).&quot; -B &quot;$(LGMsQuicBuildDir).&quot; -G &quot;Visual Studio 17 2022&quot; -A &quot;$(LGMsQuicArchitecture)&quot; -T v143 -DCMAKE_SYSTEM_VERSION=&quot;$(WindowsTargetPlatformVersion)&quot; -DQUIC_BUILD_SHARED=OFF -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF -DQUIC_BUILD_PERF=OFF -DQUIC_TLS_LIB=schannel -DQUIC_ENABLE_LOGGING=OFF -DQUIC_STATIC_LINK_CRT=OFF -DQUIC_STATIC_LINK_PARTIAL_CRT=OFF -DQUIC_SOURCE_LINK=OFF -DQUIC_PDBALTPATH=OFF -DQUIC_EMBED_GIT_HASH=OFF -DCMAKE_PROJECT_INCLUDE=&quot;$(MSBuildThisFileDirectory)MsQuic.cmake&quot; -DLG_MSQUIC_DISABLE_CODE_ANALYSIS=ON" />
+      Command="cmake -S &quot;$(LGMsQuicSourceDir).&quot; -B &quot;$(LGMsQuicBuildDir).&quot; -G &quot;Visual Studio 17 2022&quot; -A &quot;$(LGMsQuicArchitecture)&quot; -T v143 -DCMAKE_SYSTEM_VERSION=&quot;$(WindowsTargetPlatformVersion)&quot; -DQUIC_BUILD_SHARED=OFF -DQUIC_BUILD_TOOLS=OFF -DQUIC_BUILD_TEST=OFF -DQUIC_BUILD_PERF=OFF -DQUIC_TLS_LIB=schannel -DQUIC_ENABLE_LOGGING=OFF -DQUIC_STATIC_LINK_CRT=OFF -DQUIC_STATIC_LINK_PARTIAL_CRT=OFF -DQUIC_SOURCE_LINK=OFF -DQUIC_PDBALTPATH=OFF -DQUIC_EMBED_GIT_HASH=OFF -DCMAKE_PROJECT_INCLUDE=&quot;$(MSBuildThisFileDirectory)MsQuic.cmake&quot; -DLG_MSQUIC_DISABLE_CODE_ANALYSIS=ON -DLG_MSQUIC_ENABLE_INSECURE_FEATURES=ON" />
   </Target>
   <Target
     Name="BuildLGMsQuic"

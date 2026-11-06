@@ -29,13 +29,14 @@ namespace
 {
   enum Field : unsigned
   {
-    FIELD_BIND          = 1U << 0,
-    FIELD_PORT          = 1U << 1,
-    FIELD_MAX_CLIENTS   = 1U << 2,
-    FIELD_AUTH          = 1U << 3,
-    FIELD_PASSWORD      = 1U << 4,
-    FIELD_VIDEO_CHROMA  = 1U << 5,
-    FIELD_VIDEO_BITRATE = 1U << 6,
+    FIELD_BIND              = 1U << 0,
+    FIELD_PORT              = 1U << 1,
+    FIELD_MAX_CLIENTS       = 1U << 2,
+    FIELD_AUTH              = 1U << 3,
+    FIELD_PASSWORD          = 1U << 4,
+    FIELD_VIDEO_CHROMA      = 1U << 5,
+    FIELD_VIDEO_BITRATE     = 1U << 6,
+    FIELD_ALLOW_UNENCRYPTED = 1U << 7,
   };
 
   std::wstring Trim(const std::wstring& value)
@@ -93,6 +94,23 @@ namespace
     return true;
   }
 
+  bool ParseBoolean(const std::wstring& value, bool& result)
+  {
+    if (Equal(value, L"true") || Equal(value, L"yes") ||
+        Equal(value, L"1"))
+    {
+      result = true;
+      return true;
+    }
+    if (Equal(value, L"false") || Equal(value, L"no") ||
+        Equal(value, L"0"))
+    {
+      result = false;
+      return true;
+    }
+    return false;
+  }
+
   bool SetField(const std::wstring& key, const std::wstring& rawValue,
     NetworkSettings& settings, unsigned& fields,
     std::wstring * error)
@@ -138,6 +156,12 @@ namespace
       if (!ValidText(value, 255))
         return Fail(error, L"invalid password");
       settings.password = value;
+    }
+    else if (Equal(key, L"allowUnencrypted"))
+    {
+      field = FIELD_ALLOW_UNENCRYPTED;
+      if (!ParseBoolean(value, settings.allowUnencrypted))
+        return Fail(error, L"invalid allowUnencrypted value");
     }
     else if (Equal(key, L"videoChroma"))
     {
