@@ -950,7 +950,10 @@ add_executable(frame-timing-tests
 target_compile_definitions(frame-timing-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
 )
-target_compile_options(frame-timing-tests PRIVATE -O1)
+target_compile_options(frame-timing-tests PRIVATE
+  -O1
+  "$<$<C_COMPILER_ID:GNU>:-fwhole-program>"
+)
 target_include_directories(frame-timing-tests PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/../src"
   "${PROJECT_TOP}/repos/gui/cimgui"

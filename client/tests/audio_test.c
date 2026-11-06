@@ -421,7 +421,7 @@ static void setStatus(struct Provider * p, bool available,
   p->status(p->statusOpaque, &status);
 }
 
-static bool near(float a, float expected)
+static bool isNear(float a, float expected)
 {
   return fabsf(a - expected) < 0.000001f;
 }
@@ -476,9 +476,9 @@ static void testConvert(void)
   float out[4];
   const uint8_t u8[] = { 0, 128, 255 };
   CHECK(audioConvertToFloat(out, u8, ARRAY_LENGTH(u8), LG_AUDIO_FMT_U8));
-  CHECK(near(out[0], -1.0f));
-  CHECK(near(out[1], 0.0f));
-  CHECK(near(out[2], 127.0f / 128.0f));
+  CHECK(isNear(out[0], -1.0f));
+  CHECK(isNear(out[1], 0.0f));
+  CHECK(isNear(out[2], 127.0f / 128.0f));
 
   const uint8_t s16[] =
   {
@@ -488,10 +488,10 @@ static void testConvert(void)
     0xff, 0x7f,
   };
   CHECK(audioConvertToFloat(out, s16, 4, LG_AUDIO_FMT_S16_LE));
-  CHECK(near(out[0], -1.0f));
-  CHECK(near(out[1], -1.0f / 32768.0f));
-  CHECK(near(out[2], 0.0f));
-  CHECK(near(out[3], 32767.0f / 32768.0f));
+  CHECK(isNear(out[0], -1.0f));
+  CHECK(isNear(out[1], -1.0f / 32768.0f));
+  CHECK(isNear(out[2], 0.0f));
+  CHECK(isNear(out[3], 32767.0f / 32768.0f));
 
   const uint8_t s24[] =
   {
@@ -499,8 +499,8 @@ static void testConvert(void)
     0xff, 0xff, 0x7f,
   };
   CHECK(audioConvertToFloat(out, s24, 2, LG_AUDIO_FMT_S24_LE));
-  CHECK(near(out[0], -1.0f));
-  CHECK(near(out[1], 8388607.0f / 8388608.0f));
+  CHECK(isNear(out[0], -1.0f));
+  CHECK(isNear(out[1], 8388607.0f / 8388608.0f));
 
   const uint8_t s32[] =
   {
@@ -508,8 +508,8 @@ static void testConvert(void)
     0xff, 0xff, 0xff, 0x7f,
   };
   CHECK(audioConvertToFloat(out, s32, 2, LG_AUDIO_FMT_S32_LE));
-  CHECK(near(out[0], -1.0f));
-  CHECK(near(out[1], 1.0f));
+  CHECK(isNear(out[0], -1.0f));
+  CHECK(isNear(out[1], 1.0f));
 
   const uint8_t f32le[] =
   {
@@ -517,12 +517,12 @@ static void testConvert(void)
     0x00, 0x00, 0x40, 0x3f,
   };
   CHECK(audioConvertToFloat(out, f32le, 2, LG_AUDIO_FMT_F32_LE));
-  CHECK(near(out[0], -0.25f));
-  CHECK(near(out[1], 0.75f));
+  CHECK(isNear(out[0], -0.25f));
+  CHECK(isNear(out[1], 0.75f));
   const float f32ne[] = { -0.25f, 0.75f };
   CHECK(audioConvertToFloat(out, f32ne, 2, LG_AUDIO_FMT_F32_NE));
-  CHECK(near(out[0], -0.25f));
-  CHECK(near(out[1], 0.75f));
+  CHECK(isNear(out[0], -0.25f));
+  CHECK(isNear(out[1], 0.75f));
 
   const uint8_t f64le[] =
   {
@@ -530,8 +530,8 @@ static void testConvert(void)
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xc0, 0x3f,
   };
   CHECK(audioConvertToFloat(out, f64le, 2, LG_AUDIO_FMT_F64_LE));
-  CHECK(near(out[0], -0.5f));
-  CHECK(near(out[1], 0.125f));
+  CHECK(isNear(out[0], -0.5f));
+  CHECK(isNear(out[1], 0.125f));
   CHECK(!audioConvertToFloat(NULL, f32ne, 2, LG_AUDIO_FMT_F32_NE));
   CHECK(!audioConvertToFloat(out, NULL, 2, LG_AUDIO_FMT_F32_NE));
   CHECK(!audioConvertToFloat(out, f32ne, 2, (LG_AudioSampleFormat)-1));

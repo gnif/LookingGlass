@@ -356,10 +356,10 @@ static void testCfgValues(void)
   CHECK(!resampler->parser(resampler, "linear"));
 
   struct Option * renderer = opt("app", "renderer");
-  CHECK(renderer->parser(renderer, "OpenGL"));
+  CHECK(renderer->parser(renderer, "EGL"));
   CHECK(g_params.forceRenderer);
-  CHECK(g_params.forceRendererIndex == 1);
-  checkStr(renderer->toString(renderer), "OpenGL");
+  CHECK(g_params.forceRendererIndex == 0);
+  checkStr(renderer->toString(renderer), "EGL");
   CHECK(renderer->parser(renderer, "auto"));
   CHECK(!g_params.forceRenderer);
   checkStr(renderer->toString(renderer), "auto");
@@ -406,7 +406,7 @@ static void testCfgSize(void)
 
 static void loadCfg(const char * text)
 {
-  char path[] = "/tmp/lg-config-test-XXXXXX";
+  char path[] = "lg-config-test-XXXXXX";
   const int fd = mkstemp(path);
   CHECK(fd >= 0);
   const size_t size = strlen(text);

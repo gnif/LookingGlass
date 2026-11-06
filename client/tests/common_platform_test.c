@@ -20,6 +20,7 @@
 
 #include "test.h"
 
+#include "common/debug.h"
 #include "common/event.h"
 #include "common/filesystem.h"
 #include "common/random.h"
@@ -203,6 +204,7 @@ static void testFilesystem(void)
 
 int main(void)
 {
+  debug_init();
   lgTimeInit();
   testEventWaits();
   testManualReset();
