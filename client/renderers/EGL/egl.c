@@ -1005,9 +1005,10 @@ static bool egl_renderStartup(LG_Renderer * renderer, bool useDMA)
     return false;
   }
 
-  int maxSamples = 1;
+  int maxSamples = 0;
   if (option_get_bool("egl", "multisample"))
   {
+    maxSamples = 1;
     if (app_getProp(LG_DS_MAX_MULTISAMPLE, &maxSamples) && maxSamples > 1)
     {
       if (maxSamples > 4)
