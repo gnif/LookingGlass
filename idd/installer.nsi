@@ -25,6 +25,10 @@
 !include "FileFunc.nsh"
 !include "LogicLib.nsh"
 !include "Sections.nsh"
+!include "WinVer.nsh"
+
+!define LGIDD_MIN_WINDOWS_RELEASE 1903
+!define LGIDD_MIN_WINDOWS_BUILD   18362
 
 ;Settings
 Name "Looking Glass (IDD)"
@@ -34,6 +38,7 @@ RequestExecutionLevel admin
 ShowInstDetails "show"
 ShowUninstDetails "show"
 ManifestDPIAware true
+ManifestSupportedOS all
 
 !ifndef BUILD_32BIT
 Target AMD64-Unicode
@@ -103,6 +108,14 @@ Function .onInit
   Call ShowHelpMessage
 
   Pop $R0
+
+  ${IfNot} ${AtLeastBuild} ${LGIDD_MIN_WINDOWS_BUILD}
+    MessageBox MB_OK|MB_ICONSTOP \
+      "$(^Name) requires Windows 10 version ${LGIDD_MIN_WINDOWS_RELEASE} or newer." \
+      /SD IDOK
+    SetErrorLevel 1
+    Abort
+  ${EndIf}
 
 !ifdef IVSHMEM
   Var /GlOBAL option_ivshmem
