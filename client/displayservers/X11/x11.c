@@ -1495,8 +1495,11 @@ static void x11XInputEvent(XGenericEventCookie *cookie)
     {
       atomic_store(&x11.lastWMEvent, microtime());
       XIEnterEvent *xie = cookie->data;
+      /* a window raised under the pointer during a grab, such as by GNOME's
+       * Alt+Tab switcher, only receives its enter event when the grab ends */
       x11InputPointerEnter(&x11.input, xie->event == x11.window,
-          xie->mode == XINotifyNormal, xie->event_x, xie->event_y);
+          xie->mode == XINotifyNormal || xie->mode == XINotifyUngrab,
+          xie->event_x, xie->event_y);
       return;
     }
 
