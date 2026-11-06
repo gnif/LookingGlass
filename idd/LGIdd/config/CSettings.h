@@ -40,10 +40,10 @@ class CSettings
 
     CSettings();
 
-    DisplayModes LoadModes();
+    DisplayModes LoadModes(UINT connector);
     TransportInstances LoadTransportInstances() const;
-    bool SetExtraMode(const DisplayMode & mode);
-    bool GetExtraMode(DisplayMode & mode);
+    bool SetExtraMode(const DisplayMode & mode, UINT connector);
+    bool GetExtraMode(DisplayMode & mode, UINT connector);
     unsigned GetDefaultRefresh100uHz() const;
 
     std::wstring ReadStringValue(const wchar_t* name, const wchar_t* defaultValue = nullptr);
@@ -112,6 +112,7 @@ class CSettings
       return L"SOFTWARE\\LookingGlass\\IDD";
     }
 
+    static std::wstring ExtraModeValueName(UINT connector);
     bool ReadMultiStringValue(const wchar_t * name,
       std::vector<std::wstring>& out) const;
     bool ReadModesValue(std::vector<std::wstring> &out) const;

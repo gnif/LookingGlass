@@ -134,12 +134,12 @@ class CPipeServer : private IPipeEndpointHandler,
     bool ClearClipboardAuthority(WDFFILEOBJECT owner = nullptr);
     void CloseClipboardAuthorityFile(WDFFILEOBJECT owner);
 
-    bool SetCursorPos(int32_t x, int32_t y);
-    void SetDisplayMode(
+    bool SetCursorPos(uint32_t connector, int32_t x, int32_t y);
+    void SetDisplayMode(uint32_t connector,
       uint32_t width, uint32_t height, uint32_t refresh100uHz);
     void SetGPUStatus(bool software);
-    void ResolutionRejected(uint32_t width, uint32_t height,
-      uint32_t requiredSizeMiB);
+    void ResolutionRejected(uint32_t connector, uint32_t width,
+      uint32_t height, uint32_t requiredSizeMiB);
     RecoveryDispatch SetRecovery(void * owner, uint64_t route,
       uint64_t session, uint32_t serial, bool active,
       bool replayIfUnavailable = true);

@@ -49,6 +49,7 @@ private:
   UINT64                           m_assignmentGeneration;
   IDDCX_MONITOR                    m_monitor;
   CDeviceContext                 * m_devContext;
+  UINT                             m_head;
   IFrameTransport                & m_transport;
   IControlTransport              & m_control;
   IDDCX_SWAPCHAIN                  m_hSwapChain;
@@ -113,7 +114,7 @@ private:
 public:
   CSwapChainProcessor(CMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
-    CDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
+    CDeviceContext * devContext, UINT head, IDDCX_SWAPCHAIN hSwapChain,
     LUID renderAdapter, std::shared_ptr<CD3D11Device> dx11Device,
     HANDLE newFrameEvent);
   ~CSwapChainProcessor();

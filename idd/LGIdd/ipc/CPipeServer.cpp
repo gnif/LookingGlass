@@ -625,31 +625,33 @@ void CPipeServer::ClearRecoveryHandler(void * opaque)
   m_recoveryOpaque        = nullptr;
 }
 
-bool CPipeServer::SetCursorPos(int32_t x, int32_t y)
+bool CPipeServer::SetCursorPos(uint32_t connector, int32_t x, int32_t y)
 {
   // do not send cursor messages if we are not connected or they will end up queued
   if (!m_endpoint.IsConnected())
     return false;
 
   LGPipeMsg msg = {};
-  msg.size       = sizeof(msg);
-  msg.type       = LGPipeMsg::SETCURSORPOS;
-  msg.curorPos.x = x;
-  msg.curorPos.y = y;
+  msg.size               = sizeof(msg);
+  msg.type               = LGPipeMsg::SETCURSORPOS;
+  msg.curorPos.x         = x;
+  msg.curorPos.y         = y;
+  msg.curorPos.connector = connector;
   // Cursor position is transient. If the connection is lost during this
   // write, drop it instead of replaying stale coordinates after reconnect.
   return m_endpoint.Send(&msg, sizeof(msg));
 }
 
-void CPipeServer::SetDisplayMode(
+void CPipeServer::SetDisplayMode(uint32_t connector,
   uint32_t width, uint32_t height, uint32_t refresh100uHz)
 {
   LGPipeMsg msg = {};
-  msg.size                       = sizeof(msg);
-  msg.type                       = LGPipeMsg::SETDISPLAYMODE;
-  msg.displayMode.width          = width;
-  msg.displayMode.height         = height;
+  msg.size                      = sizeof(msg);
+  msg.type                      = LGPipeMsg::SETDISPLAYMODE;
+  msg.displayMode.width         = width;
+  msg.displayMode.height        = height;
   msg.displayMode.refresh100uHz = refresh100uHz;
+  msg.displayMode.connector     = connector;
   WriteMsg(msg);
 }
 
@@ -662,8 +664,8 @@ void CPipeServer::SetGPUStatus(bool software)
   WriteMsg(msg);
 }
 
-void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
-  uint32_t requiredSizeMiB)
+void CPipeServer::ResolutionRejected(uint32_t connector, uint32_t width,
+  uint32_t height, uint32_t requiredSizeMiB)
 {
   LGPipeMsg msg = {};
   msg.size                               = sizeof(msg);
@@ -671,6 +673,7 @@ void CPipeServer::ResolutionRejected(uint32_t width, uint32_t height,
   msg.resolutionRejected.width           = width;
   msg.resolutionRejected.height          = height;
   msg.resolutionRejected.requiredSizeMiB = requiredSizeMiB;
+  msg.resolutionRejected.connector       = connector;
   WriteMsg(msg);
 }
 

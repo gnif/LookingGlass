@@ -70,16 +70,28 @@ namespace
   }
 }
 
-std::unique_ptr<CTransportManager> CreateTransport()
+bool ResolveTransports(ResolvedTransportInstances& resolved)
 {
   TransportInstances instances = g_settings.LoadTransportInstances();
-  ResolvedTransportInstances resolved;
   bool usedDefaults = false;
   if (!ResolveTransportInstances(instances, KINDS, ARRAYSIZE(KINDS),
       resolved, usedDefaults))
-    return std::unique_ptr<CTransportManager>();
+    return false;
   if (usedDefaults)
     DEBUG_WARN("Unsupported transport instance configuration; using defaults");
 
-  return Build(resolved);
+  return true;
+}
+
+std::unique_ptr<CTransportManager> CreateTransport(
+  const ResolvedTransportInstances& resolved, unsigned connector)
+{
+  ResolvedTransportInstances instances;
+  for (const ResolvedTransportInstance& instance : resolved)
+    if (instance.config.connector == connector)
+      instances.push_back(instance);
+  if (instances.empty())
+    return std::unique_ptr<CTransportManager>();
+
+  return Build(instances);
 }

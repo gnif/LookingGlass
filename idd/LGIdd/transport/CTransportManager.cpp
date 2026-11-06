@@ -369,6 +369,15 @@ bool CTransportManager::Add(TransportInstance config, bool primary,
   return true;
 }
 
+bool CTransportManager::HasBackend(BackendId id) const
+{
+  CSRWSharedLock managerLock(m_lock);
+  for (unsigned i = 0; i < m_entryCount; ++i)
+    if (m_entries[i]->id == id)
+      return true;
+  return false;
+}
+
 ITransport::OpenResult CTransportManager::OpenEntry(Entry& entry)
 {
   std::shared_ptr<ITransport> transport;

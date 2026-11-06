@@ -72,15 +72,16 @@ static bool MakeGraphCfg(const D12FrameFormat& source,
 
 CSwapChainProcessor::CSwapChainProcessor(CMonitorContext * monitorContext,
     UINT64 assignmentGeneration, IDDCX_MONITOR monitor,
-    CDeviceContext * devContext, IDDCX_SWAPCHAIN hSwapChain,
+    CDeviceContext * devContext, UINT head, IDDCX_SWAPCHAIN hSwapChain,
     LUID renderAdapter, std::shared_ptr<CD3D11Device> dx11Device,
     HANDLE newFrameEvent) :
   m_monitorContext(monitorContext),
   m_assignmentGeneration(assignmentGeneration),
   m_monitor(monitor),
   m_devContext(devContext),
-  m_transport(devContext->GetTransport().Frames()),
-  m_control(devContext->GetTransport().Control()),
+  m_head(head),
+  m_transport(devContext->GetTransport(head).Frames()),
+  m_control(devContext->GetTransport(head).Control()),
   m_hSwapChain(hSwapChain),
   m_renderAdapter(renderAdapter),
   m_dx11Device(dx11Device),
@@ -129,7 +130,7 @@ bool CSwapChainProcessor::InitializePipeline()
     UINT64 alignSize = CPlatformInfo::GetPageSize();
     auto dx12Device = std::make_shared<CD3D12Device>(m_renderAdapter);
     const CD3D12Device::InitResult result = dx12Device->Init(
-      m_devContext->GetTransport().GetDirectMemory(), alignSize,
+      m_devContext->GetTransport(m_head).GetDirectMemory(), alignSize,
       !m_dx11Device->IsSoftware());
     if (result == CD3D12Device::RETRY)
     {
@@ -146,7 +147,7 @@ bool CSwapChainProcessor::InitializePipeline()
     if (result == CD3D12Device::FAILURE)
       return false;
 
-    if (!m_devContext->SetupTransport(alignSize))
+    if (!m_devContext->SetupTransport(m_head, alignSize))
     {
       DEBUG_ERROR("Transport setup failed");
       return false;
@@ -162,7 +163,7 @@ bool CSwapChainProcessor::InitializePipeline()
 
   m_resPool.Init(m_dx11Device, m_dx12Device);
   if (!m_exec.Init(m_dx11Device, m_dx12Device,
-      m_devContext->GetTransport().Tex()))
+      m_devContext->GetTransport(m_head).Tex()))
   {
     DEBUG_ERROR("Failed to initialize the frame graph executor");
     return false;
@@ -352,7 +353,7 @@ void CSwapChainProcessor::SwapChainThreadCore()
 
   // The replacement swap chain is fully initialized and no frame has been
   // acquired yet, so a coalesced follow-up replug may now proceed safely.
-  m_devContext->OnSwapChainReady();
+  m_devContext->OnSwapChainReady(m_head);
 
   // postpone sending this to ensure we dont spam messages if we end up in a
   // restart loop while waiting for a valid configuration
@@ -540,7 +541,7 @@ void CSwapChainProcessor::QueueGraph(const D12FrameFormat& source,
         source, checkpoint, m_dx11Device->IsSoftware(),
         m_renderAdapter, cfg))
     return;
-  CTransportManager& transport = m_devContext->GetTransport();
+  CTransportManager& transport = m_devContext->GetTransport(m_head);
   const uint64_t revision = transport.FrameRev();
   if (m_haveGraphCfg && m_graphRev == revision &&
       Frame::Same(m_graphCfg, cfg))
@@ -555,7 +556,7 @@ void CSwapChainProcessor::QueueGraph(const D12FrameFormat& source,
 
 void CSwapChainProcessor::CfgGraph()
 {
-  CTransportManager& transport = m_devContext->GetTransport();
+  CTransportManager& transport = m_devContext->GetTransport(m_head);
   const uint64_t revision = transport.FrameRev();
   if (m_haveGraphCfg && revision != m_graphRev)
   {

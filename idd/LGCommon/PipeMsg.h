@@ -60,6 +60,7 @@ struct LGPipeMsg
     {
       int32_t x;
       int32_t y;
+      uint32_t connector;
     }
     curorPos;
 
@@ -68,6 +69,7 @@ struct LGPipeMsg
       uint32_t width;
       uint32_t height;
       uint32_t refresh100uHz;
+      uint32_t connector;
     }
     displayMode;
 
@@ -82,6 +84,7 @@ struct LGPipeMsg
       uint32_t width;
       uint32_t height;
       uint32_t requiredSizeMiB;
+      uint32_t connector;
     }
     resolutionRejected;
 
