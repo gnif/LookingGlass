@@ -1129,7 +1129,7 @@ static int renderThread(void * unused)
           !g_state.resizeDone &&
           g_state.resizeTimeout < now))
     {
-      if (g_params.autoResize)
+      if (g_params.autoResize && !g_params.setGuestRes)
       {
         g_state.ds->setWindowSize(
           g_state.dstRect.w,
@@ -1687,9 +1687,8 @@ int main_frameThread(void * unused)
     if (formatChanged)
     {
       LG_UNLOCK(g_state.lgrLock);
-      if (g_params.autoResize)
-        g_state.ds->setWindowSize(rendererFormat.frameWidth,
-            rendererFormat.frameHeight);
+      core_resizeWindowToSource(rendererFormat.frameWidth,
+          rendererFormat.frameHeight);
     }
 
     if (g_state.jitRender)
@@ -2314,8 +2313,8 @@ static void swSurfaceConfigure(LG_VideoSource source,
   atomic_store_explicit(&state->ready, true, memory_order_release);
   LG_UNLOCK(g_state.videoSourceLock);
 
-  if (source == LG_VIDEO_SOURCE_PRIMARY && g_params.autoResize)
-    g_state.ds->setWindowSize(width, height);
+  if (source == LG_VIDEO_SOURCE_PRIMARY)
+    core_resizeWindowToSource(width, height);
 
   app_refreshVideoSource();
 }
@@ -4071,6 +4070,8 @@ restart:
     lgTransportFallback_clearPrimaryUUID(g_state.fallback);
   g_state.transportFeatures = session.features;
   frameScheduler_start(session.features);
+  if (!g_params.autoResize)
+    core_requestGuestRes();
 
   void              * inputOpaque = NULL;
   const LG_InputOps * inputOps    = g_state.transport.ops->getInputOps ?

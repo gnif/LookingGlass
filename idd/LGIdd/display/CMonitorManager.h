@@ -77,6 +77,11 @@ private:
   CSettings::DisplayMode m_setMode  = {};
   bool                   m_doSetMode = false;
 
+  // Frames of a mode Windows chose on its own are dropped until the
+  // requested one arrives or this expires.
+  static constexpr uint64_t MODE_TRANSITION_MS = 3000;
+  uint64_t m_modeDeadline = 0;
+
   std::atomic<LONG> m_createQueued = 0;
   std::atomic<LONG> m_replugQueued = 0;
 
@@ -87,6 +92,7 @@ public:
   void Enable();
   ReplugAction Replug();
   void RequestMode(const CSettings::DisplayMode& mode);
+  bool ModeTransitionActive(uint32_t width, uint32_t height);
 
   void OnDestroyed(IDDCX_MONITOR monitor);
   void OnSwapChainAssigned();

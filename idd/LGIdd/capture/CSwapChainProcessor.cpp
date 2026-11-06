@@ -657,6 +657,14 @@ bool CSwapChainProcessor::SwapChainNewFrame(ComPtr<IDXGIResource> acquiredBuffer
     srcRes->SetDirtyRects(dirtyRects, resolvedDirtyRectCount);
 
   D3D12_RESOURCE_DESC srcDesc = srcRes->GetRes()->GetDesc();
+  // Frames of the mode Windows picked on arrival are not published.
+  if (m_devContext->ModeTransitionActive((unsigned)srcDesc.Width,
+        srcDesc.Height))
+  {
+    m_frameProcessor->SetFullDamage();
+    return true;
+  }
+
   if (!noImageUpdate)
   {
     m_transport.ObserveFrame(postProcessStart);

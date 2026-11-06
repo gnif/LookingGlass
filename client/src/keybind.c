@@ -26,7 +26,6 @@
 #include "core.h"
 #include "input.h"
 #include "kb.h"
-#include "message.h"
 
 #include <stdio.h>
 
@@ -138,16 +137,7 @@ static void bind_setGuestRes(int sc, void * opaque)
     return;
   }
 
-  LGMsg msg =
-  {
-    .type = LG_MSG_WINDOWSIZE,
-    .windowSize =
-    {
-      .width  = g_state.windowW,
-      .height = g_state.windowH
-    }
-  };
-  lgMessage_post(&msg);
+  core_requestGuestRes();
 }
 
 void keybind_commonRegister(void)

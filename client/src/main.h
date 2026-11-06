@@ -183,6 +183,7 @@ struct AppState
 
   uint64_t resizeTimeout;
   bool     resizeDone;
+  bool     resizing;
 
   bool     autoIdleInhibitState;
 

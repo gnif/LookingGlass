@@ -210,7 +210,7 @@ static bool waylandInit(const LG_DSInitParams params)
   }
 
   app_handleResizeEvent(width, height, waylandScaleToDouble(wlWm.scale),
-      (struct Border) {0, 0, 0, 0});
+      (struct Border) {0, 0, 0, 0}, wlWm.desktop->resizing());
 
   waylandIconInit();
 

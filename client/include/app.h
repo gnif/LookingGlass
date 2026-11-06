@@ -76,7 +76,8 @@ void app_updateCursorPos(double x, double y);
 void app_updateMouseState(void);
 void app_getMouseState(LG_MouseState * state);
 void app_updateWindowPos(int x, int y);
-void app_handleResizeEvent(int w, int h, double scale, const struct Border border);
+void app_handleResizeEvent(int w, int h, double scale,
+    const struct Border border, bool resizing);
 void app_invalidateWindow(bool full);
 
 void app_handleMouseRelative(double normx, double normy,

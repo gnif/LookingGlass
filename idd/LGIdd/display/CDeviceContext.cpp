@@ -453,6 +453,11 @@ void CDeviceContext::OnSwapChainReleased()
   m_monitorManager.OnSwapChainReleased();
 }
 
+bool CDeviceContext::ModeTransitionActive(uint32_t width, uint32_t height)
+{
+  return m_monitorManager.ModeTransitionActive(width, height);
+}
+
 void CDeviceContext::OnSwapChainReady()
 {
   const CMonitorManager::ReadyAction action =

@@ -249,6 +249,7 @@ CMonitorManager::ReplugAction CMonitorManager::Replug()
       m_monitorDeparted         = false;
       m_waitForSwapChainRelease = false;
       m_monitor                 = monitor;
+      m_modeDeadline            = 0;
     }
     DEBUG_ERROR("IddCxMonitorDeparture Failed (0x%08x)", status);
     return ReplugAction::NONE;
@@ -272,8 +273,28 @@ CMonitorManager::ReplugAction CMonitorManager::Replug()
 void CMonitorManager::RequestMode(const CSettings::DisplayMode& mode)
 {
   CSRWExclusiveLock lock(m_lock);
-  m_setMode   = mode;
-  m_doSetMode = true;
+  m_setMode      = mode;
+  m_doSetMode    = true;
+  m_modeDeadline = GetTickCount64() + MODE_TRANSITION_MS;
+}
+
+bool CMonitorManager::ModeTransitionActive(uint32_t width, uint32_t height)
+{
+  uint64_t deadline;
+  {
+    CSRWSharedLock lock(m_lock);
+    deadline = m_modeDeadline;
+    if (deadline && GetTickCount64() < deadline &&
+        (m_setMode.width != width || m_setMode.height != height))
+      return true;
+  }
+  if (!deadline)
+    return false;
+
+  CSRWExclusiveLock lock(m_lock);
+  if (m_modeDeadline == deadline)
+    m_modeDeadline = 0;
+  return false;
 }
 
 void CMonitorManager::OnDestroyed(IDDCX_MONITOR monitor)
@@ -344,6 +365,7 @@ CMonitorManager::ReadyAction CMonitorManager::OnSwapChainReady()
       action.mode    = m_setMode;
       m_doSetMode    = false;
       action.setMode = true;
+      m_modeDeadline = GetTickCount64() + MODE_TRANSITION_MS;
     }
   }
 

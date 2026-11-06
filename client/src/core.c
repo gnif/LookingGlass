@@ -448,25 +448,46 @@ void core_onWindowSizeChanged(unsigned width, unsigned height)
     DEBUG_WARN("Window-size control failed with status %d", status);
 }
 
+void core_requestGuestRes(void)
+{
+  if (!g_params.setGuestRes ||
+      !(g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE))
+    return;
+
+  // A window that already shows the guest at this scale has nothing to ask.
+  if (round(g_state.srcSize.x / g_state.windowScale) == g_state.windowW &&
+      round(g_state.srcSize.y / g_state.windowScale) == g_state.windowH)
+    return;
+
+  LGMsg msg =
+  {
+    .type = LG_MSG_WINDOWSIZE,
+    .windowSize =
+    {
+      .width  = round(g_state.windowW * g_state.windowScale),
+      .height = round(g_state.windowH * g_state.windowScale)
+    }
+  };
+  lgMessage_post(&msg);
+}
+
+void core_resizeWindowToSource(int width, int height)
+{
+  if (!g_params.autoResize)
+    return;
+
+  const int w = round(width  / g_state.windowScale);
+  const int h = round(height / g_state.windowScale);
+  if (w == g_state.windowW && h == g_state.windowH)
+    return;
+
+  g_state.ds->setWindowSize(w, h);
+}
+
 void core_updatePositionInfo(void)
 {
   g_cursor.motionValid = false;
   cancelExit("geometry");
-
-  if (g_params.setGuestRes &&
-      g_state.transportFeatures & LG_TRANSPORT_FEATURE_WINDOW_SIZE)
-  {
-    LGMsg msg =
-    {
-      .type = LG_MSG_WINDOWSIZE,
-      .windowSize =
-      {
-        .width  = round(g_state.windowW * g_state.windowScale),
-        .height = round(g_state.windowH * g_state.windowScale)
-      }
-    };
-    lgMessage_post(&msg);
-  }
 
   if (!g_state.haveSrcSize)
     goto done;

@@ -1200,10 +1200,10 @@ static int x11EventThread(void * unused)
         if (x11.fullscreen)
         {
           struct Border border = {0};
-          app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, border);
+          app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, border, false);
         }
         else
-          app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, x11.border);
+          app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, x11.border, false);
         break;
       }
 
@@ -1260,12 +1260,16 @@ static int x11EventThread(void * unused)
             break;
 
           bool fullscreen = false;
+          bool maximized  = false;
           bool focused    = false;
           for(unsigned long i = 0; i < num; ++i)
           {
             Atom prop = ((Atom *)data)[i];
             if (prop == x11atoms._NET_WM_STATE_FULLSCREEN)
               fullscreen = true;
+            else if (prop == x11atoms._NET_WM_STATE_MAXIMIZED_HORZ ||
+                     prop == x11atoms._NET_WM_STATE_MAXIMIZED_VERT)
+              maximized = true;
             else if (prop == x11atoms._NET_WM_STATE_FOCUSED)
               focused = true;
           }
@@ -1274,6 +1278,7 @@ static int x11EventThread(void * unused)
             setFocus(focused);
 
           x11.fullscreen = fullscreen;
+          x11.maximized  = maximized;
           XFree(data);
           break;
         }
@@ -1299,7 +1304,7 @@ static int x11EventThread(void * unused)
             x11.border.right  = cardinal[1];
             x11.border.top    = cardinal[2];
             x11.border.bottom = cardinal[3];
-            app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, x11.border);
+            app_handleResizeEvent(x11.rect.w, x11.rect.h, 1, x11.border, false);
           }
 
           XFree(data);
@@ -2277,6 +2282,9 @@ static void x11Wait(unsigned int time)
 
 static void x11SetWindowSize(int w, int h)
 {
+  if (x11.fullscreen || x11.maximized)
+    return;
+
   XResizeWindow(x11.display, x11.window, w, h);
 }
 

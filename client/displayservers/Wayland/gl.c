@@ -327,7 +327,7 @@ bool waylandEGLSwapBuffers(EGLDisplay display, EGLSurface surface,
     wl_region_destroy(region);
 
     app_handleResizeEvent(width, height, waylandScaleToDouble(wlWm.scale),
-        (struct Border) {0, 0, 0, 0});
+        (struct Border) {0, 0, 0, 0}, wlWm.desktop->resizing());
     app_invalidateWindow(true);
     waylandStopWaitFrame();
     wlWm.needsResize = skipResize;

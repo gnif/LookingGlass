@@ -60,6 +60,8 @@ typedef struct WL_DesktopOps
   void (*pollWait)(struct wl_display * display, int epollFd, unsigned int time);
 
   bool (*configured)(void);
+
+  bool (*resizing)(void);
 }
 WL_DesktopOps;
 

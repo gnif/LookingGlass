@@ -217,8 +217,8 @@ static struct Option options[] =
   {
     .module         = "win",
     .name           = "setGuestRes",
-    .description    = "On window size change, request the guest to match"
-      " resolution (if supported by the guest, currently LG IDD only)",
+    .description    = "Request the guest to match the window size (if"
+      " supported by the guest, currently LG IDD only)",
     .type           = OPTION_TYPE_BOOL,
     .value.x_bool   = true,
   },
@@ -725,13 +725,6 @@ bool config_load(int argc, char * argv[])
 
   g_params.minimizeOnFocusLoss = option_get_bool("win", "minimizeOnFocusLoss");
   g_params.setGuestRes         = option_get_bool("win", "setGuestRes"        );
-
-  if (g_params.autoResize && g_params.setGuestRes)
-  {
-    DEBUG_WARN("win:autoResize (-a) and win:setGuestRes can't be used "
-      "simultaneously");
-    return false;
-  }
 
   g_params.clipboardToVM    = option_get_bool("clipboard", "toVM"   );
   g_params.clipboardToLocal = option_get_bool("clipboard", "toLocal");

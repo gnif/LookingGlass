@@ -695,25 +695,38 @@ void app_updateWindowPos(int x, int y)
   g_state.windowPos.y = y;
 }
 
-void app_handleResizeEvent(int w, int h, double scale, const struct Border border)
+void app_handleResizeEvent(int w, int h, double scale,
+    const struct Border border, bool resizing)
 {
-  MTRACE("resize win=%dx%d scale=%.3f border=%d,%d,%d,%d",
-      w, h, scale, border.left, border.top, border.right, border.bottom);
+  MTRACE("resize win=%dx%d scale=%.3f border=%d,%d,%d,%d resizing=%d",
+      w, h, scale, border.left, border.top, border.right, border.bottom,
+      resizing);
 
   memcpy(&g_state.border, &border, sizeof(border));
 
-  /* don't do anything else if the window dimensions have not changed */
-  if (g_state.windowW == w && g_state.windowH == h && g_state.windowScale == scale)
+  const bool changed = g_state.windowW != w || g_state.windowH != h ||
+    g_state.windowScale != scale;
+  if (!changed && g_state.resizing == resizing)
     return;
 
-  g_state.windowW     = w;
-  g_state.windowH     = h;
-  g_state.windowCX    = w / 2;
-  g_state.windowCY    = h / 2;
-  g_state.windowScale = scale;
-  core_updatePositionInfo();
+  const bool wasResizing = g_state.resizing;
+  g_state.resizing = resizing;
 
-  if (core_inputEnabled())
+  if (changed)
+  {
+    g_state.windowW     = w;
+    g_state.windowH     = h;
+    g_state.windowCX    = w / 2;
+    g_state.windowCY    = h / 2;
+    g_state.windowScale = scale;
+    core_updatePositionInfo();
+  }
+
+  /* the guest is asked for the new size once an interactive resize has ended */
+  if (!resizing && (changed || wasResizing))
+    core_requestGuestRes();
+
+  if (changed && core_inputEnabled())
   {
     /* if the window is moved/resized causing a loss of focus while grabbed, it
      * makes it impossible to re-focus the window, so we quietly re-enter

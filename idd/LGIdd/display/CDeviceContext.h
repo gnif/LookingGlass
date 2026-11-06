@@ -114,6 +114,7 @@ public:
   void OnSwapChainAssigned();
   void OnSwapChainReleased();
   void OnSwapChainReady();
+  bool ModeTransitionActive(uint32_t width, uint32_t height);
 
   bool HasIddCx110DDIs() const { return m_hasIddCx110DDIs; }
   bool CanProcessFP16 () const { return m_canProcessFP16;  }

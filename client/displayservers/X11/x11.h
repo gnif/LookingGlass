@@ -106,6 +106,7 @@ struct X11DSState
   LG_Lock           pointerLock;
   _Atomic(bool)     captureActive;
   bool              fullscreen;
+  bool              maximized;
 
   struct Rect   rect;
   struct Border border;
