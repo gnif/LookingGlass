@@ -498,6 +498,17 @@ add_executable(windows-input-tests
   ../displayservers/Windows/window_size.c
   ../src/kb.c
 )
+if(MSVC)
+  set_source_files_properties(
+    ../displayservers/Windows/input_event.c PROPERTIES
+    COMPILE_OPTIONS "/fp:precise"
+  )
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  set_source_files_properties(
+    ../displayservers/Windows/input_event.c PROPERTIES
+    COMPILE_OPTIONS "-fno-fast-math"
+  )
+endif()
 target_compile_definitions(windows-input-tests PRIVATE
   CIMGUI_DEFINE_ENUMS_AND_STRUCTS=1
 )
