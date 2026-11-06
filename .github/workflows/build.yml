@@ -218,7 +218,9 @@ jobs:
         sudo apt-get update
     - name: Install obs plugin dependencies
       run: |
-        sudo apt-get install libdw-dev libunwind-dev libobs-dev libgl1-mesa-dev
+        sudo apt-get install \
+          libdw-dev libunwind-dev libobs-dev libgl1-mesa-dev \
+          libsamplerate0-dev
     - name: Configure obs plugin
       run: |
         mkdir obs/build

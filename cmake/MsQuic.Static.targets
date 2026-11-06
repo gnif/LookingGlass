@@ -6,7 +6,7 @@
     <LGMsQuicArchitecture Condition="'$(Platform)'=='Win32'">Win32</LGMsQuicArchitecture>
     <LGMsQuicArchitecture Condition="'$(Platform)'=='x64'">x64</LGMsQuicArchitecture>
     <LGMsQuicLibraryDir>$(LGMsQuicBuildDir)obj\$(LGBaseConfiguration)\</LGMsQuicLibraryDir>
-    <LGMsQuicStaticLibrary>$(LGMsQuicLibraryDir)msquic_static.lib</LGMsQuicStaticLibrary>
+    <LGMsQuicStaticLibrary>$(LGMsQuicLibraryDir)msquic.lib</LGMsQuicStaticLibrary>
     <LGMsQuicCoreLibrary>$(LGMsQuicLibraryDir)core.lib</LGMsQuicCoreLibrary>
     <LGMsQuicPlatformLibrary>$(LGMsQuicLibraryDir)msquic_platform.lib</LGMsQuicPlatformLibrary>
   </PropertyGroup>

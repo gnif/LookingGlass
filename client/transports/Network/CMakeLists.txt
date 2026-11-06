@@ -20,6 +20,16 @@ set(TRANSPORT_NETWORK_SOURCES
   video/pyrowave.c
 )
 
+if(MSVC)
+  set_source_files_properties(audio.c PROPERTIES
+    COMPILE_OPTIONS "/fp:precise"
+  )
+elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+  set_source_files_properties(audio.c PROPERTIES
+    COMPILE_OPTIONS "-fno-fast-math"
+  )
+endif()
+
 if(WIN32)
   list(APPEND TRANSPORT_NETWORK_SOURCES
     platform/windows/auth_crypto.c

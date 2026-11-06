@@ -11,6 +11,10 @@ add_compile_definitions(WINVER=0x0601 _WIN32_WINNT=0x0601)
 if(MINGW)
   add_compile_definitions(__USE_MINGW_ANSI_STDIO=0)
 
+  set_property(SOURCE cpuinfo.c APPEND PROPERTY
+    COMPILE_OPTIONS -mxsave
+  )
+
   # Build our own ntdll.dll import library
   # This tricks MinGW into not linking stuff like memcpy from ntdll.dll instead of mscvrt.dll
   if(NOT CMAKE_DLLTOOL)

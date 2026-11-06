@@ -17,6 +17,16 @@ endif()
 
 if(ENABLE_AUDIO)
   list(APPEND TRANSPORT_LGMP_SOURCES audio.c)
+
+  if(MSVC)
+    set_source_files_properties(audio.c PROPERTIES
+      COMPILE_OPTIONS "/fp:precise"
+    )
+  elseif(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    set_source_files_properties(audio.c PROPERTIES
+      COMPILE_OPTIONS "-fno-fast-math"
+    )
+  endif()
 endif()
 
 add_library(transport_LGMP STATIC ${TRANSPORT_LGMP_SOURCES})
