@@ -23,7 +23,7 @@ dependencies used by the plugin:
 
 .. code:: bash
 
-   apt-get install cmake gcc libobs-dev libdw-dev libunwind-dev make pkg-config
+   apt-get install cmake gcc libdw-dev libobs-dev libsimde-dev libunwind-dev make pkg-config
 
 Use ``-DENABLE_BACKTRACE=no`` when configuring if ``libdw-dev`` and
 ``libunwind-dev`` are left out.
