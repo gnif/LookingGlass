@@ -46,9 +46,11 @@ typedef struct XDGState
   struct zxdg_toplevel_decoration_v1 * toplevelDecoration;
 
   int32_t width, height;
+  int32_t floatingWidth, floatingHeight;
   uint32_t resizeSerial;
   bool fullscreen;
   bool floating;
+  bool restoreFloatingSize;
   bool resizable;
   int displayFd;
 }
@@ -93,13 +95,6 @@ static const struct xdg_surface_listener xdgSurfaceListener = {
 static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
     int32_t width, int32_t height, struct wl_array * states)
 {
-  // A zero size means that the compositor is leaving the size up to us.
-  if (width > 0 && height > 0)
-  {
-    state.width  = width;
-    state.height = height;
-  }
-
   state.fullscreen = false;
   state.floating   = true;
 
@@ -121,6 +116,28 @@ static void xdgToplevelConfigure(void * data, struct xdg_toplevel * xdgToplevel,
 
       default:
         break;
+    }
+  }
+
+  if (state.restoreFloatingSize && state.floating)
+  {
+    state.width  = state.floatingWidth;
+    state.height = state.floatingHeight;
+    xdg_surface_set_window_geometry(
+        state.surface, 0, 0, state.width, state.height);
+    state.restoreFloatingSize = false;
+  }
+  // A zero size means that the compositor is leaving the size up to us.
+  else if (width > 0 && height > 0)
+  {
+    state.width  = width;
+    state.height = height;
+    xdg_surface_set_window_geometry(
+        state.surface, 0, 0, state.width, state.height);
+    if (state.floating)
+    {
+      state.floatingWidth  = width;
+      state.floatingHeight = height;
     }
   }
 }
@@ -197,9 +214,20 @@ static void xdg_shellAckConfigureIfNeeded(void)
 static void xdg_setFullscreen(bool fs)
 {
   if (fs)
+  {
+    if (!state.fullscreen && state.floating)
+    {
+      state.floatingWidth  = state.width;
+      state.floatingHeight = state.height;
+    }
     xdg_toplevel_set_fullscreen(state.toplevel, NULL);
+  }
   else
+  {
+    state.restoreFloatingSize =
+      state.floatingWidth > 0 && state.floatingHeight > 0;
     xdg_toplevel_unset_fullscreen(state.toplevel);
+  }
 }
 
 static bool xdg_getFullscreen(void)
@@ -217,8 +245,10 @@ static void xdg_shellResize(int w, int h)
   if (!state.floating || !state.resizable)
     return;
 
-  state.width  = w;
-  state.height = h;
+  state.width          = w;
+  state.height         = h;
+  state.floatingWidth  = w;
+  state.floatingHeight = h;
   xdg_surface_set_window_geometry(state.surface, 0, 0, w, h);
 
   waylandNeedsResize();
@@ -226,8 +256,10 @@ static void xdg_shellResize(int w, int h)
 
 static void xdg_setSize(int w, int h)
 {
-  state.width  = w;
-  state.height = h;
+  state.width          = w;
+  state.height         = h;
+  state.floatingWidth  = w;
+  state.floatingHeight = h;
 }
 
 static void xdg_getSize(int * w, int * h)
