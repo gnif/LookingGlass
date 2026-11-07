@@ -1,0 +1,7 @@
+modname='kvmfr'
+modver='0.0.12'
+built_modules='kvmfr.ko'
+
+build() {
+    make $MAKEFLAGS "KDIR=$kernel_srcdir"
+}
